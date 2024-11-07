@@ -546,7 +546,7 @@ def read_MD(dir):
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
 
-dir = "MD_kitaev_honeycomb_T_0.001K"
+dir = "MD_kitaev_honeycomb_T_0.001K_long_T"
 read_MD_tot(dir)
 parseDSSF(dir)
 

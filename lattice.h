@@ -182,17 +182,13 @@ class lattice
             float E_new = what_if_energy(new_spin, i);
             float dE = E_new - E;
             if(dE < 0){
-                for(int j = 0; j<N; j++){
-                    spins[i][j] = new_spin[j];
-                }
+                spins[i] = new_spin;
                 accept++;
             }
             else{
                 float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
                 if(r < exp(-dE/T)){
-                    for(int j = 0; j<N; j++){
-                        spins[i][j] = new_spin[j];
-                    }
+                    spins[i] = new_spin;
                     accept++;
                 }
             }
@@ -231,8 +227,11 @@ class lattice
             metropolis(T);
         }
         while(T > T_end){
-            float curr_accept = metropolis(T);
-            cout << "Temperature: " << T << " Acceptance rate: " << curr_accept << endl;
+            float curr_accept = 0;
+            for(int i = 0; i<n_anneal; i++){
+                curr_accept += metropolis(T);
+            }
+            cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
             T *= 0.9;
         }
         for(int i = 0; i<n_deterministics; i++){
@@ -274,7 +273,10 @@ class lattice
             metropolis(T);
         }
         while(T > Temp_end){
-            float curr_accept = metropolis(T);
+            float curr_accept = 0;
+            for(int i = 0; i<n_anneal; i++){
+                curr_accept += metropolis(T);
+            }
             cout << "Temperature: " << T << " Acceptance rate: " << curr_accept << endl;
             T *= 0.9;
         }
