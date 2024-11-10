@@ -155,7 +155,12 @@ def Spin_t_global(k, S, P):
 
 def SSSF_q(k, S, P, gb=False):
     A = Spin(k, S, P)
-    return np.real(contract('ia, ib -> iab', A, np.conj(A)))
+    zq = contract('ar, ir->ia', kitaevLocal, k)
+    if gb:
+        proj = contract('ar,br,i->iab', kitaevLocal,kitaevLocal, np.ones(len(k))) - contract('ia,ib,i->iab', zq,zq, 1/contract('ik,ik->i', k, k))    
+        return np.real(contract('ia, ib, iab -> iab', A, np.conj(A),proj))
+    else:
+        return np.real(contract('ia, ib -> iab', A, np.conj(A)))
 
 def DSSF(w, k, S, P, T, gb=False):
     A = Spin_t(k, S, P)
@@ -163,9 +168,8 @@ def DSSF(w, k, S, P, T, gb=False):
     Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
     zq = contract('ar, ir->ia', kitaevLocal, k)
     proj = contract('ar,br,i->iab', kitaevLocal,kitaevLocal, np.ones(len(k))) - contract('ia,ib,i->iab', zq,zq, 1/contract('ik,ik->i', k, k))
-    # proj[Gamma_ind] = contract('ar,br->ab', kitaevLocal,kitaevLocal)
     read = np.real(contract('wia, wib, iab-> wi', Somega, np.conj(Somega), proj))
-    return np.log(read)
+    return read
 
 def SSSFGraphHnHL(A,B,d1, filename):
     plt.pcolormesh(A,B, d1)
@@ -202,13 +206,13 @@ def hhztoK(H, K):
     return contract('ij,k->ijk',H, 2*np.array([np.pi,0,0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi,0]))
 
 def hk2d(H,K):
-    return contract('ij,k->ijk',H, 2*np.array([np.pi,0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi]))
+    return contract('ij,k->ijk',H, 2*np.array([np.pi,0, 0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi, 0]))
 
 def SSSF2D(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
     L = np.linspace(-2.5, 2.5, nK)
     A, B = np.meshgrid(H, L)
-    K = hk2d(A, B).reshape((nK*nK,2))
+    K = hk2d(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
     if gb:
         f1 = filename + "Sxx_global"
@@ -527,17 +531,16 @@ def read_MD(dir):
     num_t = len([name for name in os.listdir(directory)])-1
     print(num_t)
     P = np.loadtxt(dir + "/pos.txt")
-    S = np.zeros((num_t, len(P), 3))
-    T = np.zeros(num_t)
+    T_param = np.loadtxt(dir + "/T.txt")
+    
+    S = np.zeros((int(T_param[1])+1, len(P), 3))
+    T = np.linspace(0, T_param[0], int(T_param[1])+1, endpoint=True)
 
-    count = 0
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if filename.startswith("spin"):
-            temp_file = filename.split("_")
-            S[count] = np.loadtxt(dir + "/" + filename)
-            T[count] = float(temp_file[1][:-4])
-            count = count + 1
+            print(filename.split("_")[1][:-4])
+            S[int(filename.split("_")[1][:-4])] = np.loadtxt(dir + "/" + filename)
     
     w0 = 0
     wmax = 2.5
@@ -545,6 +548,25 @@ def read_MD(dir):
     A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
+    fig, ax = plt.subplots(figsize=(10,4))
+
+    C = ax.imshow(A, origin='lower', extent=[0, gM22D, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    ax.axvline(x=gK2D, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma12D, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gM2D, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma22D, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gK12D, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gM22D, color='b', label='axvline - full height', linestyle='dashed')
+
+    xlabpos = [gK2D, gGamma12D, gM2D, gGamma22D, gK12D, gM22D]
+    labels = [r'$K$', r'$\Gamma_0$', r'$M$', r'$\Gamma_1$', r'$K$', r'$M$']
+    ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, gM22D])
+    fig.colorbar(C)
+    plt.savefig(dir+"DSSF.pdf")
+    plt.clf()
+
+    SSSF2D(S[0], P, 100, dir, True)
 
 dir = "MD_kitaev_honeycomb_T_0.001K_long_T"
 read_MD_tot(dir)

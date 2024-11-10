@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <stdexcept>
-
+#include <random>
 template<size_t N>
 array<float, N> operator*(const array<float, N> &a,const float n) {
     // cout << "Begin s multiplication with " << i << " ";
@@ -38,6 +38,16 @@ array<float, N> operator+(const array<float, N> &a,const array<float, N>  &b) {
 }
 
 template<size_t N>
+array<float, N> operator-(const array<float, N> &a,const array<float, N>  &b) {
+    array<float, N> result;
+    for (int i = 0; i < N; ++i) {
+        result[i] = a[i] - b[i];
+    }
+    return result;
+}
+
+
+template<size_t N>
 float dot(const array<float, N>  &a, const array<float, N>  &b) {
     float result = 0;
     for (int i = 0; i < N; ++i) {
@@ -49,8 +59,8 @@ float dot(const array<float, N>  &a, const array<float, N>  &b) {
 template <size_t N>
 array<float, N>  multiply(const array<array<float, N>,N>  &M, const array<float, N>  &a){
     array<float, N>  result;
+    result = {0};
     for (int i = 0; i < N; ++i) {
-        result[i] = 0;
         for (int j = 0; j < N; ++j) {
             result[i] += M[i][j] * a[j];
         }
@@ -89,5 +99,13 @@ array<array<float, M>, N> array_add_2d_mult(const array<array<float, M>, N> &a,c
     return result;
 }
 
+float random_float(float min, float max, std::mt19937 &gen){
+    std::uniform_real_distribution<float> dis(min, max);
+    return dis(gen);
+}
 
+int random_int(int min, int max, std::mt19937 &gen){
+    std::uniform_int_distribution dis(min, max);
+    return dis(gen);
+}
 #endif // LIN_ALG_H

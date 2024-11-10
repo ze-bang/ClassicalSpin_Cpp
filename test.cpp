@@ -34,10 +34,11 @@ void MD_kitaev_honeycomb(int num_trials, float K, float h, string dir){
         atoms.set_field(field, 1);
 
         lattice<3, 2, 36, 36, 1, 3, 0> MC(&atoms);
-        MC.molecular_dynamics_SU2(1,0.001,1000000,1000000, 1000, 2000, dir+"/"+std::to_string(i));
+        MC.simulated_annealing(1, 0.001, 1000, 10000, 1000000, 0, dir+"/"+std::to_string(i));
+        // MC.molecular_dynamics_SU2(1,0.001, 1000, 10000, 0, 1000, 2000, dir+"/"+std::to_string(i));
     }
 }
 
 int main() {
-    MD_kitaev_honeycomb(2, 1, 0.06, "MD_kitaev_honeycomb_T_0.001K_long_T");
+    MD_kitaev_honeycomb(20, -1.0, 0.06, "simulated_annealing_kitaev_honeycomb_T_0.001K_long_T");
 }
