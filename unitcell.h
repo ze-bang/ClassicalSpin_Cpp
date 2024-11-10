@@ -2,8 +2,9 @@
 #define UNITCELL_H
 
 #include <iostream>
-#include <vector>
+#include <array>
 #include <map>
+#include <cmath>
 using namespace std;
 
 

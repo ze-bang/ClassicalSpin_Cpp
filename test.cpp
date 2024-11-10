@@ -41,4 +41,6 @@ void MD_kitaev_honeycomb(int num_trials, float K, float h, string dir){
 
 int main() {
     MD_kitaev_honeycomb(20, -1.0, 0.06, "simulated_annealing_kitaev_honeycomb_T_0.001K_long_T");
+    // std::cout << "finished" << std::endl;   
+    return 0;
 }

@@ -2,8 +2,6 @@
 #define LATTICE_H
 
 #define _USE_MATH_DEFINES
-
-
 #include "unitcell.h"
 #include "simple_linear_alg.h"
 #include <cmath>
@@ -14,6 +12,11 @@
 #include <cstdlib>
 #include <random>
 #include <chrono>
+#include <math.h>
+
+# define M_PI           3.14159265358979323846  /* pi */
+
+
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3, size_t num_bi, size_t num_tri>
 class lattice
 {   
