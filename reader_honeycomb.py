@@ -105,7 +105,7 @@ K2D = np.array([2/3, 1/3, 0])
 M2D = np.array([1/2, 0, 0])
 Gamma12D = 2*M2D
 
-LKitaev = 36
+LKitaev = 12
 
 K2D = contract('a, ak->k', K2D, kitaevBasis)
 M2D = contract('a, ak->k', M2D, kitaevBasis)
@@ -169,7 +169,7 @@ def DSSF(w, k, S, P, T, gb=False):
     zq = contract('ar, ir->ia', kitaevLocal, k)
     proj = contract('ar,br,i->iab', kitaevLocal,kitaevLocal, np.ones(len(k))) - contract('ia,ib,i->iab', zq,zq, 1/contract('ik,ik->i', k, k))
     read = np.real(contract('wia, wib, iab-> wi', Somega, np.conj(Somega), proj))
-    return read
+    return np.log(read)
 
 def SSSFGraphHnHL(A,B,d1, filename):
     plt.pcolormesh(A,B, d1)
@@ -568,7 +568,9 @@ def read_MD(dir):
 
     SSSF2D(S[0], P, 100, dir, True)
 
-dir = "MD_kitaev_honeycomb_T_0.001K_long_T"
+
+
+dir = "test_L=12"
 read_MD_tot(dir)
 parseDSSF(dir)
 

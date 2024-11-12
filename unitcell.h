@@ -85,17 +85,22 @@ struct trilinear{
     };
 };
 
-template<size_t N, size_t N_ATOMS>
+template<size_t N, size_t N_ATOMS, size_t num_bi, size_t num_tri>
 struct UnitCell{
 
     array<array<float,3>, N_ATOMS> lattice_pos;
     array<array<float,3>, 3> lattice_vectors;
 
     array<array<float, N>, N_ATOMS> field;
-    multimap<int, bilinear<N>> bilinear_interaction;
-    multimap<int, trilinear<N>> trilinear_interaction;
+    array<int, bilinear<N>, num_bi> bilinear_interaction;
+    array<int, trilinear<N>, num_tri> trilinear_interaction;
 
     UnitCell(const array<array<float,3>, N_ATOMS> &spos,const array<array<float,3>, 3> &svec) : lattice_pos(spos), lattice_vectors(svec) {
+        bilinear_interaction = {0};
+        trilinear_interaction = {0};
+        field = {0};
+        lattice_pos = {0};
+        lattice_vectors = {0};
     };
 
     void set_lattice_pos(array<float,N> &pos, int index){
@@ -111,12 +116,12 @@ struct UnitCell{
 
     void set_bilinear_interaction(array<array<float,N>, N> &bin, int source, int partner, int* offset){
         bilinear<N> b_set(bin, partner, offset);
-        bilinear_interaction.insert(make_pair(source, b_set));
+        bilinear_interaction[source] = b_set;
     };
     
     void set_trilinear_interaction(array<array<array<float,N>, N>,N> &tin, int source, int partner1, int partner2, int* offset1, int* offset2){
         trilinear<N> t_set(tin, partner1, partner2, offset1, offset2);
-        trilinear_interaction.insert(make_pair(source, t_set));
+        trilinear_interaction[source] = t_set;
     };
 
 };

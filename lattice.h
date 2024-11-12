@@ -14,37 +14,33 @@
 #include <chrono>
 #include <math.h>
 
-# define M_PI           3.14159265358979323846  /* pi */
-
-
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3, size_t num_bi, size_t num_tri>
 class lattice
 {   
     public:
-    UnitCell<N, N_ATOMS> UC;
+    UnitCell<N, N_ATOMS, num_bi, num_tri> UC;
     int lattice_size;
     array<array<float,N>, N_ATOMS*dim1*dim2*dim3>  spins;
     array<array<float,3>, N_ATOMS*dim1*dim2*dim3> site_pos;
     //Lookup table for the lattice
     array<array<float,N>, N_ATOMS*dim1*dim2*dim3> field;
 
-    bilinear<N> bilinear_interaction[N_ATOMS*dim1*dim2*dim3][num_bi];
-    trilinear<N> trilinear_interaction[N_ATOMS*dim1*dim2*dim3][num_tri];
+
+
+    array<array<array<float, N>, N>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
+    array<array<array<array<float, N>, N>, N>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
+
+    array<int, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
+    array<array<int, 2>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
 
     array<float,N> gen_random_spin(std::mt19937 &gen){
         array<float,N> temp_spin;
         array<float,N-1> euler_angles;
         float z = random_float(-1,1, gen);
-
-        for(int i = 0; i<N-2; i++){
-            euler_angles[i] = random_float(0, 2*M_PI, gen);
-        }
-
-        euler_angles[N-2] = z;
-
+        float phi = random_float(0, 2*M_PI, gen);
         if(N==3){
             float r = sqrt(1.0 - z*z);
-            temp_spin = {{r*cos(euler_angles[N-3]), r*sin(euler_angles[N-3]), z}};
+            temp_spin = {{r*cos(phi), r*sin(phi), z}};
         }
 
         return temp_spin;
@@ -73,24 +69,21 @@ class lattice
                         array<float,3> temp = unit_vector[0]*i;
                         spins[current_site_index] = gen_random_spin(gen);
                         field[current_site_index] = UC.field[l];
-                        auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
-                        
                         int count = 0;
-                        for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
-                            bilinear<N> J = m->second;
+                        for (size_t m = 0; m < num_bi; ++m){
+                            bilinear<N> J = UC.bilinear_interaction[l];
                             int partner = ((i+J.offset[0])%dim1)*dim2*dim3*N_ATOMS+ ((j+J.offset[1])%dim2)*dim3*N_ATOMS+ ((k+J.offset[2])%dim3)*N_ATOMS + J.partner;
-                            bilinear<N> J_flatten = bilinear<N>(J.bilinear_interaction, partner);
-                            bilinear_interaction[current_site_index][count] = J_flatten;
+                            bilinear_interaction[current_site_index][count] = J.bilinear_interaction;
+                            bilinear_partners[current_site_index][count] = partner;
                             count++;
                         }
-                        auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
                         count = 0;
-                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
-                            trilinear<N> J = m->second;
+                        for (size_t m = 0; m < num_tri; ++m){
+                            trilinear<N> J = UC.trilinear_interaction[l];
                             int partner1 = ((i+J.offset1[0])%dim1)*dim2*dim3*N_ATOMS+ ((j+J.offset1[1])%dim2)*dim3*N_ATOMS+ ((k+J.offset1[2])%dim3)*N_ATOMS + J.partner1;
                             int partner2 = ((i+J.offset2[0])%dim1)*dim2*dim3*N_ATOMS+ ((j+J.offset2[1])%dim2)*dim3*N_ATOMS+ ((k+J.offset2[2])%dim3)*N_ATOMS + J.partner2;
-                            trilinear<N> J_flatten = trilinear<N>(J.trilinear_interaction, partner1, partner2);
-                            trilinear_interaction[current_site_index][count] = J_flatten;
+                            trilinear_interaction[current_site_index][count] = J.trilinear_interaction;
+                            trilinear_partners[current_site_index][count] = {partner1, partner2};
                             count++;
                         }
                     }
@@ -113,8 +106,8 @@ class lattice
         int partner;
         array<float,N> partner_spin;
         array<float,N> curr_spin = spins[site_index];
-
-        energy -= dot(curr_spin, field[site_index]);
+        
+        energy += dot(curr_spin, field[site_index]);
 
         bilinear<N> *J = bilinear_interaction[site_index];
         for (int i=0; i<num_bi; i++) {
@@ -131,7 +124,8 @@ class lattice
         int partner;
         array<float,N> partner_spin;
 
-        energy -= dot(spin_here, field[site_index]);
+
+        energy += dot(spin_here, field[site_index]);
 
         bilinear<N> *J = bilinear_interaction[site_index];
         for (int i=0; i<num_bi; i++) {
@@ -150,13 +144,35 @@ class lattice
         local_field = {0};
 
         bilinear<N> *J = bilinear_interaction[site_index];
+
         for (int i=0; i<num_bi; i++) {
             partner = J[i].partner;
             partner_spin = spins[partner];
             local_field = local_field + multiply(J[i].bilinear_interaction, partner_spin);
         }
-        return local_field-field[site_index];
+
+        return local_field+field[site_index];
     }
+
+
+    array<float, N>  get_local_field_lattice(int site_index,const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+        array<float,N> local_field;
+        int partner;
+        array<float,N> partner_spin;
+
+        local_field = {0};
+
+        bilinear<N> *J = bilinear_interaction[site_index];
+
+        for (int i=0; i<num_bi; i++) {
+            partner = J[i].partner;
+            partner_spin = current_spin[partner];
+            local_field = local_field + multiply(J[i].bilinear_interaction, partner_spin);
+        }
+
+        return local_field+field[site_index];
+    }
+
 
     void deterministic_sweep(){
         for(int i = 0; i<lattice_size; i++){
@@ -167,7 +183,7 @@ class lattice
             }
             else{
                 for(int j=0; j < N; j++){
-                    spins[i][j] = local_field[j]/norm;
+                    spins[i][j] = -local_field[j]/norm;
                 }
             }
         }
@@ -226,12 +242,12 @@ class lattice
         return acceptance_rate;
     }
     
-    void write_to_file_spin(string filename){
+    void write_to_file_spin(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
         ofstream myfile;
         myfile.open(filename);
         for(int i = 0; i<lattice_size; i++){
             for(int j = 0; j<N; j++){
-                myfile << spins[i][j] << " ";
+                myfile << towrite[i][j] << " ";
             }
             myfile << endl;
         }
@@ -283,6 +299,11 @@ class lattice
                 cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
             }            
             T *= 0.9;
+            if(dir_name != ""){
+                filesystem::create_directory(dir_name);
+                write_to_file_spin(dir_name + "/spin.txt", spins);
+                write_to_file_pos(dir_name + "/pos.txt");
+            }
         }
         for(int i = 0; i<n_deterministics; i++){
             deterministic_sweep();
@@ -290,22 +311,30 @@ class lattice
 
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
-            write_to_file_spin(dir_name + "/spin.txt");
+            write_to_file_spin(dir_name + "/spin.txt", spins);
             write_to_file_pos(dir_name + "/pos.txt");
         }
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+    void landau_lifshitz_ode_int(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS, const double /* t */){
+        for(int i = 0; i<lattice_size; i++){
+            array<float,N> local_field = get_local_field_lattice(i, current_spin);
+            array<float,N> local_spin = current_spin[i];
+            dS[i] = cross_prod(local_field, local_spin);
+        }
+    }
+
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS;
         for(int i = 0; i<lattice_size; i++){
-            array<float,N> local_field = get_local_field(i);
+            array<float,N> local_field = get_local_field_lattice(i, current_spin);
             array<float,N> local_spin = current_spin[i];
             dS[i] = cross_prod(local_field, local_spin);
         }
         return dS;
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK4_step(float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK4_step(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k2 = array_add_2d(curr_spins, s_prod_2D(k1, 0.5*step_size));
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(lval_k2);
@@ -317,6 +346,16 @@ class lattice
         return new_spins;
     }
 
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> euler_step(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = landau_lifshitz(curr_spins);
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins = array_add_2d(curr_spins, s_prod_2D(dS, step_size));
+        return new_spins;
+    }
+
+    void euler_step_ode_int(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS){
+        landau_lifshitz_ode_int(curr_spins, dS, 0);
+        curr_spins = array_add_2d(curr_spins, s_prod_2D(dS, step_size));
+    }
 
 
     void molecular_dynamics_SU2(float Temp_start, float Temp_end, int n_therm, int n_anneal, int overrelaxation_rate, float T_end, int n_steps, string dir_name){
@@ -325,9 +364,6 @@ class lattice
         float curr_accept;
         filesystem::create_directory(dir_name);
         float T = Temp_start;
-        for(int i = 0; i<n_therm; i++){
-            metropolis(T, gen);
-        }
         while(T > Temp_end){
             curr_accept = 0;
             for(int i = 0; i<n_anneal; i++){
@@ -350,16 +386,14 @@ class lattice
         }
         float step_size = T_end/float(n_steps);
         write_to_file_pos(dir_name + "/pos.txt");
-        write_to_file_spin(dir_name + "/spin_0.txt");
+        write_to_file_spin(dir_name + "/spin_0.txt", spins);
         write_T_param(T_end, n_steps, dir_name + "/T.txt");
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = {0};
         for(int i = 0; i<n_steps; i++){
-            spins = RK4_step(step_size, spins);
-            write_to_file_spin(dir_name + "/spin_" + to_string(i+1) + ".txt");
+            euler_step_ode_int(step_size, spin_t, dS);
+            write_to_file_spin(dir_name + "/spin_" + to_string(i+1) + ".txt", spin_t);
         }
     }
 };
-
-
-
-
 #endif // LATTICE_H
