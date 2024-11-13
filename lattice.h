@@ -216,19 +216,12 @@ class lattice
         array<float,N> new_spin;
         int accept = 0;
         int count = 0;
-        // auto start = chrono::high_resolution_clock::now();
-        // auto end = chrono::high_resolution_clock::now();
-        // auto duration = duration_cast<chrono::microseconds>(end - start);
-
         while(count < lattice_size){
             i = random_int(0, lattice_size-1, gen);
             E = site_energy(i);
             new_spin = gen_random_spin(gen);
             E_new = what_if_energy(new_spin, i);
             dE = E_new - E;
-            
-            // cout << "Energy: " << E << " New Energy: " << E_new << " dE: " << dE << endl;
-
             if(dE < 0){
                 spins[i] = new_spin;
                 accept++;
