@@ -25,8 +25,6 @@ class lattice
     //Lookup table for the lattice
     array<array<float,N>, N_ATOMS*dim1*dim2*dim3> field;
 
-
-
     array<array<array<float, N>, N>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
     array<array<array<array<float, N>, N>, N>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
 
@@ -37,14 +35,27 @@ class lattice
         array<float,N> temp_spin;
         array<float,N-1> euler_angles;
         float z = random_float(-1,1, gen);
-        float phi = random_float(0, 2*M_PI, gen);
-        if(N==3){
-            float r = sqrt(1.0 - z*z);
-            temp_spin = {{r*cos(phi), r*sin(phi), z}};
+        float r = sqrt(1.0 - z*z);
+
+        for(int i = 0; i < N-1; ++i){
+            float phi = random_float(0, 2*M_PI, gen);
+            euler_angles[i] = r;
+            for(int j = 0; j < i; ++j){
+                euler_angles[i] *= sin(euler_angles[j]);
+            }
+            if (i == N-2){
+                euler_angles[i] *= sin(euler_angles[i]);
+            }
+            else{
+                euler_angles[i] *= cos(euler_angles[i]);
+            }
+
         }
+        temp_spin[N-1] = z;
 
         return temp_spin;
     }
+
 
     lattice(UnitCell<N, N_ATOMS> *atoms): UC(*atoms){
         array<array<float,3>, N_ATOMS> basis;

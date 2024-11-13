@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <array>
+#include <vector>
 #include <map>
 #include <cmath>
 using namespace std;
@@ -19,25 +20,25 @@ struct bilinear{
 
     bilinear(){
         partner = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
+        for(int i =0; i<N; ++i){
+            for (int j=0; j<N; ++j){
                 this->bilinear_interaction[i][j] = 0;
             }
         }
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset[i] = 0;
         }
     }
 
     bilinear(array<array<float,N>, N>  &b_set, int p_set) : bilinear_interaction(b_set), partner(p_set) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset[i] = 0;
         }
     };
 
 
     bilinear(array<array<float,N>, N>  &b_set, int p_set, int* o_set) : bilinear_interaction(b_set), partner(p_set) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset[i] = o_set[i];
         }
     };
@@ -57,28 +58,28 @@ struct trilinear{
     trilinear(){
         partner1 = -1;
         partner2 = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
+        for(int i =0; i<N; ++i){
+            for (int j=0; j<N; ++j){
                 for (int l =0; l<N; l++){
                     this->trilinear_interaction[i][j][l] = 0;
                 }
             }
         }
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     }
 
     trilinear(array<array<array<float,N>, N>,N> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     };
 
     trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
         }
@@ -99,9 +100,9 @@ struct mixed_trilinear{
     mixed_trilinear(){
         partner1 = -1;
         partner2 = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
-                for (int l =0; l<N; l++){
+        for(int i =0; i<N_SU3; i++){
+            for (int j=0; j<N_SU2; j++){
+                for (int l =0; l<N_SU2; l++){
                     this->trilinear_interaction[i][j][l] = 0;
                 }
             }
@@ -112,14 +113,14 @@ struct mixed_trilinear{
         }
     }
 
-    mixed_trilinear(array<array<array<float,N>, N>,N> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    mixed_trilinear(array<array<array<float,N_SU3>, N_SU2>,N_SU2> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
         for(int i=0; i<3; i++) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     };
 
-    mixed_trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    mixed_trilinear(array<array<array<float,N_SU3>, N_SU2>,N_SU2> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
         for(int i=0; i<3; i++) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
@@ -128,22 +129,20 @@ struct mixed_trilinear{
 };
 
 
-template<size_t N, size_t N_ATOMS, size_t num_bi, size_t num_tri>
+template<size_t N, size_t N_ATOMS>
 struct UnitCell{
 
     array<array<float,3>, N_ATOMS> lattice_pos;
     array<array<float,3>, 3> lattice_vectors;
 
     array<array<float, N>, N_ATOMS> field;
-    array<int, bilinear<N>, num_bi> bilinear_interaction;
-    array<int, trilinear<N>, num_tri> trilinear_interaction;
+    multimap<int, bilinear<N>> bilinear_interaction;
+    multimap<int, trilinear<N>> trilinear_interaction;
 
     UnitCell(const array<array<float,3>, N_ATOMS> &spos,const array<array<float,3>, 3> &svec) : lattice_pos(spos), lattice_vectors(svec) {
-        bilinear_interaction = {0};
-        trilinear_interaction = {0};
         field = {0};
-        lattice_pos = {0};
-        lattice_vectors = {0};
+        lattice_pos = spos;
+        lattice_vectors = svec;
     };
 
     void set_lattice_pos(array<float,N> &pos, int index){
@@ -159,31 +158,35 @@ struct UnitCell{
 
     void set_bilinear_interaction(array<array<float,N>, N> &bin, int source, int partner, int* offset){
         bilinear<N> b_set(bin, partner, offset);
-        bilinear_interaction[source] = b_set;
+        bilinear_interaction.insert(make_pair(source, b_set));
     };
     
     void set_trilinear_interaction(array<array<array<float,N>, N>,N> &tin, int source, int partner1, int partner2, int* offset1, int* offset2){
         trilinear<N> t_set(tin, partner1, partner2, offset1, offset2);
-        trilinear_interaction[source] = t_set;
+        trilinear_interaction.insert(make_pair(source, t_set));
     };
 
 };
 
-template<size_t N_SU2, size_t N_ATOMS_SU2, size_t num_bi_SU2, size_t num_tri_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t num_bi_SU3, size_t num_tri_SU3>
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3>
 struct mixed_UnitCell{
-    UnitCell<N_SU2, N_ATOMS_SU2, num_bi_SU2, num_tri_SU2> SU2;
-    UnitCell<N_SU3, N_ATOMS_SU3, num_bi_SU3, num_tri_SU3> SU3;
+    UnitCell<N_SU2, N_ATOMS_SU2> SU2;
+    UnitCell<N_SU3, N_ATOMS_SU3> SU3;
+    multimap<int, mixed_trilinear<N_SU2, N_SU3>> trilinear_SU2_SU3;
 
-    multimap<int, int> SU2_SU3_map;
-    mixed_UnitCell(UnitCell<N_SU2, N_ATOMS_SU2, num_bi_SU2, num_tri_SU2> *SU2, UnitCell<N_SU3, N_ATOMS_SU3, num_bi_SU3, num_tri_SU3> *SU3) : SU2(*SU2), SU3(*SU3) {
-        
+    mixed_UnitCell(UnitCell<N_SU2, N_ATOMS_SU2> *SU2, UnitCell<N_SU3, N_ATOMS_SU3> *SU3) : SU2(&SU2), SU3(&SU3) {
+    };
+
+    void set_mix_trilinear_interaction(array<array<array<float,N_SU3>, N_SU2>,N_SU2> &tin, int source, int partner1, int partner2, int* offset1, int* offset2){
+        mixed_trilinear<N_SU2, N_SU3> t_set(tin, partner1, partner2, offset1, offset2);
+        trilinear_SU2_SU3.insert(make_pair(source, t_set));
     };
 };
 
 
 template<size_t N>
-struct HoneyComb : UnitCell<N,2>{
-    HoneyComb() : UnitCell<N,2>({{{0,0,0},{0,1/float(sqrt(3)),0}}}, {{{1,0,0},{0.5,float(sqrt(3))/2,0},{0,0,1}}}) {
+struct HoneyComb : UnitCell<N, 2>{
+    HoneyComb() : UnitCell<N, 2>({{{0,0,0},{0,1/float(sqrt(3)),0}}}, {{{1,0,0},{0.5,float(sqrt(3))/2,0},{0,0,1}}}) {
         array<float,N> field0 = {0};
         this->set_field(field0, 0);
         this->set_field(field0, 1);
