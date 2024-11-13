@@ -137,29 +137,29 @@ class lattice
 
 
         energy += dot(spin_here, field[site_index]);
-
-        bilinear<N> *J = bilinear_interaction[site_index];
         for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = spins[partner];
-            energy += dot(spin_here, multiply(J[i].bilinear_interaction, partner_spin));
+            energy += dot(spin_here, multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]));
         }
         return energy;
     }
     
+    float site_energy(array<float, N> &spin_here, int site_index, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins){
+        float energy = 0.0;
+        energy += dot(spin_here, field[site_index]);
+        for (int i=0; i<num_bi; i++) {
+            energy += dot(spin_here, multiply(bilinear_interaction[site_index][i], current_spins[bilinear_partners[site_index][i]]));
+        }
+        return energy;
+    }
+
     array<float, N>  get_local_field(int site_index){
         array<float,N> local_field;
         int partner;
         array<float,N> partner_spin;
 
         local_field = {0};
-
-        bilinear<N> *J = bilinear_interaction[site_index];
-
         for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = spins[partner];
-            local_field = local_field + multiply(J[i].bilinear_interaction, partner_spin);
+            local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
 
         return local_field+field[site_index];
@@ -172,13 +172,8 @@ class lattice
         array<float,N> partner_spin;
 
         local_field = {0};
-
-        bilinear<N> *J = bilinear_interaction[site_index];
-
         for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = current_spin[partner];
-            local_field = local_field + multiply(J[i].bilinear_interaction, partner_spin);
+            local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
 
         return local_field+field[site_index];
@@ -265,6 +260,20 @@ class lattice
         myfile.close();
     }
 
+    void write_to_file(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
+        ofstream myfile;
+        myfile.open(filename, ios::app);
+        for(int i = 0; i<lattice_size; i++){
+            for(int j = 0; j<N; j++){
+                myfile << towrite[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
+
+
     void write_to_file_pos(string filename){
         ofstream myfile;
         myfile.open(filename);
@@ -329,18 +338,14 @@ class lattice
 
     void landau_lifshitz_ode_int(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS, const double /* t */){
         for(int i = 0; i<lattice_size; i++){
-            array<float,N> local_field = get_local_field_lattice(i, current_spin);
-            array<float,N> local_spin = current_spin[i];
-            dS[i] = cross_prod(local_field, local_spin);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS;
         for(int i = 0; i<lattice_size; i++){
-            array<float,N> local_field = get_local_field_lattice(i, current_spin);
-            array<float,N> local_spin = current_spin[i];
-            dS[i] = cross_prod(local_field, local_spin);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
         return dS;
     }
@@ -395,15 +400,15 @@ class lattice
             }
             T *= 0.9;
         }
-        float step_size = T_end/float(n_steps);
+        int n_steps = int(T_end/step_size);
         write_to_file_pos(dir_name + "/pos.txt");
-        write_to_file_spin(dir_name + "/spin_0.txt", spins);
-        write_T_param(T_end, n_steps, dir_name + "/T.txt");
+        write_T_param(T_end, n_steps+1, dir_name + "/MD_param.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = {0};
         for(int i = 0; i<n_steps; i++){
-            euler_step_ode_int(step_size, spin_t, dS);
-            write_to_file_spin(dir_name + "/spin_" + to_string(i+1) + ".txt", spin_t);
+            spin_t = RK4_step(step_size, spin_t);
+            write_to_file(dir_name + "/spin_t.txt", spin_t);
         }
     }
 };
