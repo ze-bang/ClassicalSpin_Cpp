@@ -27,11 +27,11 @@ class lattice
 
 
 
-    array<array<array<float, N>, N>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
-    array<array<array<array<float, N>, N>, N>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
+    array<array<array<array<float, N>, N>, num_bi>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
+    array<array<array<array<array<float, N>, N>, N>, num_tri>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
 
-    array<int, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
-    array<array<int, 2>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
+    array<array<int, num_bi>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
+    array<array<array<int, 2>, num_tri>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
 
     array<float,N> gen_random_spin(std::mt19937 &gen){
         array<float,N> temp_spin;
@@ -46,7 +46,24 @@ class lattice
         return temp_spin;
     }
 
-    lattice(UnitCell<N, N_ATOMS> *atoms): UC(*atoms){
+    int flatten_index(int i, int j, int k, int l){
+        return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
+    }
+    
+    int periodic_boundary(int i, int dim){
+        if(i < 0){
+            return (dim+i) % dim;
+        }
+        else{
+            return i % dim;
+        }
+    }
+
+    int flatten_index_periodic_boundary(int i, int j, int k, int l){
+        return periodic_boundary(i, dim1)*dim2*dim3*N_ATOMS+ periodic_boundary(j, dim2)*dim3*N_ATOMS+ periodic_boundary(k, dim3)*N_ATOMS + l;
+    }
+
+    lattice(UnitCell<N, N_ATOMS, num_bi, num_tri> *atoms): UC(*atoms){
         array<array<float,3>, N_ATOMS> basis;
         array<array<float,3>, 3> unit_vector;
 
@@ -63,25 +80,29 @@ class lattice
                 for(int k=0; k<dim3;k++){
                     for (int l=0; l<N_ATOMS;l++){
 
-                        int current_site_index = i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
+                        int current_site_index = flatten_index(i,j,k,l);
+
                         site_pos[current_site_index]  = unit_vector[0]*i + unit_vector[1]*j + unit_vector[2]*k + basis[l];
-                        
                         array<float,3> temp = unit_vector[0]*i;
                         spins[current_site_index] = gen_random_spin(gen);
                         field[current_site_index] = UC.field[l];
+                        
+                        auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
                         int count = 0;
-                        for (size_t m = 0; m < num_bi; ++m){
-                            bilinear<N> J = UC.bilinear_interaction[l];
-                            int partner = ((i+J.offset[0])%dim1)*dim2*dim3*N_ATOMS+ ((j+J.offset[1])%dim2)*dim3*N_ATOMS+ ((k+J.offset[2])%dim3)*N_ATOMS + J.partner;
+                        for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
+                            bilinear<N> J = m->second;
+                            int partner = flatten_index_periodic_boundary(i+J.offset[0], j+J.offset[1], k+J.offset[2], J.partner);
                             bilinear_interaction[current_site_index][count] = J.bilinear_interaction;
                             bilinear_partners[current_site_index][count] = partner;
                             count++;
                         }
+
+                        auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
                         count = 0;
-                        for (size_t m = 0; m < num_tri; ++m){
-                            trilinear<N> J = UC.trilinear_interaction[l];
-                            int partner1 = ((i+J.offset1[0])%dim1)*dim2*dim3*N_ATOMS+ ((j+J.offset1[1])%dim2)*dim3*N_ATOMS+ ((k+J.offset1[2])%dim3)*N_ATOMS + J.partner1;
-                            int partner2 = ((i+J.offset2[0])%dim1)*dim2*dim3*N_ATOMS+ ((j+J.offset2[1])%dim2)*dim3*N_ATOMS+ ((k+J.offset2[2])%dim3)*N_ATOMS + J.partner2;
+                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
+                            trilinear<N> J = m->second;
+                            int partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1);
+                            int partner2 = flatten_index_periodic_boundary(i+J.offset2[0], j+J.offset2[1], k+J.offset2[2], J.partner2);
                             trilinear_interaction[current_site_index][count] = J.trilinear_interaction;
                             trilinear_partners[current_site_index][count] = {partner1, partner2};
                             count++;
@@ -101,54 +122,29 @@ class lattice
         spins[site_index] = spin_in;
     }
 
-    float site_energy(int site_index) {
+    float site_energy(array<float, N> &spin_here, int site_index){
         float energy = 0.0;
-        int partner;
-        array<float,N> partner_spin;
-        array<float,N> curr_spin = spins[site_index];
-        
-        energy += dot(curr_spin, field[site_index]);
-
-        bilinear<N> *J = bilinear_interaction[site_index];
-        for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = spins[partner];
-            energy += dot(curr_spin, multiply(J[i].bilinear_interaction, partner_spin));
-        }
-
-        return energy;
-    }
-
-    float what_if_energy(array<float, N> &spin_here, int site_index){
-        float energy = 0.0;
-        int partner;
-        array<float,N> partner_spin;
-
-
         energy += dot(spin_here, field[site_index]);
-
-        bilinear<N> *J = bilinear_interaction[site_index];
         for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = spins[partner];
-            energy += dot(spin_here, multiply(J[i].bilinear_interaction, partner_spin));
+            energy += dot(spin_here, multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]));
         }
         return energy;
     }
     
+    float site_energy(array<float, N> &spin_here, int site_index, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins){
+        float energy = 0.0;
+        energy += dot(spin_here, field[site_index]);
+        for (int i=0; i<num_bi; i++) {
+            energy += dot(spin_here, multiply(bilinear_interaction[site_index][i], current_spins[bilinear_partners[site_index][i]]));
+        }
+        return energy;
+    }
+
     array<float, N>  get_local_field(int site_index){
         array<float,N> local_field;
-        int partner;
-        array<float,N> partner_spin;
-
         local_field = {0};
-
-        bilinear<N> *J = bilinear_interaction[site_index];
-
         for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = spins[partner];
-            local_field = local_field + multiply(J[i].bilinear_interaction, partner_spin);
+            local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
 
         return local_field+field[site_index];
@@ -157,19 +153,10 @@ class lattice
 
     array<float, N>  get_local_field_lattice(int site_index,const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<float,N> local_field;
-        int partner;
-        array<float,N> partner_spin;
-
         local_field = {0};
-
-        bilinear<N> *J = bilinear_interaction[site_index];
-
         for (int i=0; i<num_bi; i++) {
-            partner = J[i].partner;
-            partner_spin = current_spin[partner];
-            local_field = local_field + multiply(J[i].bilinear_interaction, partner_spin);
+            local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
-
         return local_field+field[site_index];
     }
 
@@ -210,24 +197,17 @@ class lattice
         array<float,N> new_spin;
         int accept = 0;
         int count = 0;
-        // auto start = chrono::high_resolution_clock::now();
-        // auto end = chrono::high_resolution_clock::now();
-        // auto duration = duration_cast<chrono::microseconds>(end - start);
-
         while(count < lattice_size){
             i = random_int(0, lattice_size-1, gen);
-            E = site_energy(i);
+            E = site_energy(spins[i], i);
             new_spin = gen_random_spin(gen);
-            E_new = what_if_energy(new_spin, i);
+            E_new = site_energy(new_spin, i);
             dE = E_new - E;
             
-            // cout << "Energy: " << E << " New Energy: " << E_new << " dE: " << dE << endl;
-
             if(dE < 0){
                 spins[i] = new_spin;
                 accept++;
             }
-
             else{
                 r = random_float(0,1, gen);
                 if(r < exp(-dE/T)){
@@ -254,6 +234,20 @@ class lattice
         myfile.close();
     }
 
+    void write_to_file(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
+        ofstream myfile;
+        myfile.open(filename, ios::app);
+        for(int i = 0; i<lattice_size; i++){
+            for(int j = 0; j<N; j++){
+                myfile << towrite[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
+
+
     void write_to_file_pos(string filename){
         ofstream myfile;
         myfile.open(filename);
@@ -269,7 +263,7 @@ class lattice
     void write_T_param(float T_end, int num_steps, string dir_name){
         ofstream myfile;
         myfile.open(dir_name);
-        myfile << T_end << " " << num_steps << endl;
+        myfile << T_end << " " << num_steps << " " << lattice_size << endl;
         myfile.close();
     }
 
@@ -318,18 +312,14 @@ class lattice
 
     void landau_lifshitz_ode_int(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS, const double /* t */){
         for(int i = 0; i<lattice_size; i++){
-            array<float,N> local_field = get_local_field_lattice(i, current_spin);
-            array<float,N> local_spin = current_spin[i];
-            dS[i] = cross_prod(local_field, local_spin);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS;
         for(int i = 0; i<lattice_size; i++){
-            array<float,N> local_field = get_local_field_lattice(i, current_spin);
-            array<float,N> local_spin = current_spin[i];
-            dS[i] = cross_prod(local_field, local_spin);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
         return dS;
     }
@@ -358,7 +348,7 @@ class lattice
     }
 
 
-    void molecular_dynamics_SU2(float Temp_start, float Temp_end, int n_therm, int n_anneal, int overrelaxation_rate, float T_end, int n_steps, string dir_name){
+    void molecular_dynamics_SU2(float Temp_start, float Temp_end, int n_therm, int n_anneal, int overrelaxation_rate, float T_end, float step_size, string dir_name){
         std::random_device rd;
         std::mt19937 gen(rd());
         float curr_accept;
@@ -384,15 +374,15 @@ class lattice
             }
             T *= 0.9;
         }
-        float step_size = T_end/float(n_steps);
+        int n_steps = int(T_end/step_size);
         write_to_file_pos(dir_name + "/pos.txt");
-        write_to_file_spin(dir_name + "/spin_0.txt", spins);
-        write_T_param(T_end, n_steps, dir_name + "/T.txt");
+        write_T_param(T_end, n_steps+1, dir_name + "/MD_param.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = {0};
         for(int i = 0; i<n_steps; i++){
-            euler_step_ode_int(step_size, spin_t, dS);
-            write_to_file_spin(dir_name + "/spin_" + to_string(i+1) + ".txt", spin_t);
+            spin_t = RK4_step(step_size, spin_t);
+            write_to_file(dir_name + "/spin_t.txt", spin_t);
         }
     }
 };

@@ -3,7 +3,7 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
-plt.rcParams['text.usetex'] = True
+# plt.rcParams['text.usetex'] = True
 
 
 def drawLine(A, B, stepN):
@@ -528,20 +528,11 @@ def read_MD_tot(dir):
 
 def read_MD(dir):
     directory = os.fsencode(dir)
-    num_t = len([name for name in os.listdir(directory)])-1
-    print(num_t)
     P = np.loadtxt(dir + "/pos.txt")
-    T_param = np.loadtxt(dir + "/T.txt")
-    
-    S = np.zeros((int(T_param[1])+1, len(P), 3))
-    T = np.linspace(0, T_param[0], int(T_param[1])+1, endpoint=True)
+    T_end, n_steps, lattice_size= np.loadtxt(dir + "/MC_param.txt")
+    T = np.linspace(0, T_end, n_steps)
+    S = np.loadtxt(dir + "/spin_t.txt").reshape((n_steps, lattice_size, 3))
 
-    for file in sorted(os.listdir(directory)):
-        filename = os.fsdecode(file)
-        if filename.startswith("spin"):
-            print(filename.split("_")[1][:-4])
-            S[int(filename.split("_")[1][:-4])] = np.loadtxt(dir + "/" + filename)
-    
     w0 = 0
     wmax = 2.5
     w = np.linspace(w0, wmax, 1000)[1:]

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <array>
+#include <vector>
 #include <map>
 #include <cmath>
 using namespace std;
@@ -92,15 +93,13 @@ struct UnitCell{
     array<array<float,3>, 3> lattice_vectors;
 
     array<array<float, N>, N_ATOMS> field;
-    array<int, bilinear<N>, num_bi> bilinear_interaction;
-    array<int, trilinear<N>, num_tri> trilinear_interaction;
+    multimap<int, bilinear<N>> bilinear_interaction;
+    multimap<int, trilinear<N>> trilinear_interaction;
 
     UnitCell(const array<array<float,3>, N_ATOMS> &spos,const array<array<float,3>, 3> &svec) : lattice_pos(spos), lattice_vectors(svec) {
-        bilinear_interaction = {0};
-        trilinear_interaction = {0};
         field = {0};
-        lattice_pos = {0};
-        lattice_vectors = {0};
+        lattice_pos = spos;
+        lattice_vectors = svec;
     };
 
     void set_lattice_pos(array<float,N> &pos, int index){
@@ -116,20 +115,20 @@ struct UnitCell{
 
     void set_bilinear_interaction(array<array<float,N>, N> &bin, int source, int partner, int* offset){
         bilinear<N> b_set(bin, partner, offset);
-        bilinear_interaction[source] = b_set;
+        bilinear_interaction.insert(make_pair(source, b_set));
     };
     
     void set_trilinear_interaction(array<array<array<float,N>, N>,N> &tin, int source, int partner1, int partner2, int* offset1, int* offset2){
         trilinear<N> t_set(tin, partner1, partner2, offset1, offset2);
-        trilinear_interaction[source] = t_set;
+        trilinear_interaction.insert(make_pair(source, t_set));
     };
 
 };
 
 
-template<size_t N>
-struct HoneyComb : UnitCell<N,2>{
-    HoneyComb() : UnitCell<N,2>({{{0,0,0},{0,1/float(sqrt(3)),0}}}, {{{1,0,0},{0.5,float(sqrt(3))/2,0},{0,0,1}}}) {
+template<size_t N, size_t num_bi, size_t num_tri>
+struct HoneyComb : UnitCell<N, 2, num_bi, num_tri>{
+    HoneyComb() : UnitCell<N, 2, num_bi, num_tri>({{{0,0,0},{0,1/float(sqrt(3)),0}}}, {{{1,0,0},{0.5,float(sqrt(3))/2,0},{0,0,1}}}) {
         array<float,N> field0 = {0};
         this->set_field(field0, 0);
         this->set_field(field0, 1);
