@@ -85,6 +85,49 @@ struct trilinear{
     };
 };
 
+
+template <size_t N_SU2, size_t N_SU3> 
+struct mixed_trilinear{
+    array<array<array<float,N_SU2>, N_SU2>,N_SU3>   trilinear_interaction;
+    int partner1;
+    int partner2;
+    int offset1[3];
+    int offset2[3];
+
+    // Constructor
+
+    mixed_trilinear(){
+        partner1 = -1;
+        partner2 = -1;
+        for(int i =0; i<N; i++){
+            for (int j=0; j<N; j++){
+                for (int l =0; l<N; l++){
+                    this->trilinear_interaction[i][j][l] = 0;
+                }
+            }
+        }
+        for(int i=0; i<3; i++) {
+            this->offset1[i] = 0;
+            this->offset2[i] = 0;
+        }
+    }
+
+    mixed_trilinear(array<array<array<float,N>, N>,N> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+        for(int i=0; i<3; i++) {
+            this->offset1[i] = 0;
+            this->offset2[i] = 0;
+        }
+    };
+
+    mixed_trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+        for(int i=0; i<3; i++) {
+            this->offset1[i] = offset1[i];
+            this->offset2[i] = offset2[i];
+        }
+    };
+};
+
+
 template<size_t N, size_t N_ATOMS, size_t num_bi, size_t num_tri>
 struct UnitCell{
 
@@ -124,6 +167,17 @@ struct UnitCell{
         trilinear_interaction[source] = t_set;
     };
 
+};
+
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t num_bi_SU2, size_t num_tri_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t num_bi_SU3, size_t num_tri_SU3>
+struct mixed_UnitCell{
+    UnitCell<N_SU2, N_ATOMS_SU2, num_bi_SU2, num_tri_SU2> SU2;
+    UnitCell<N_SU3, N_ATOMS_SU3, num_bi_SU3, num_tri_SU3> SU3;
+
+    multimap<int, int> SU2_SU3_map;
+    mixed_UnitCell(UnitCell<N_SU2, N_ATOMS_SU2, num_bi_SU2, num_tri_SU2> *SU2, UnitCell<N_SU3, N_ATOMS_SU3, num_bi_SU3, num_tri_SU3> *SU3) : SU2(*SU2), SU3(*SU3) {
+        
+    };
 };
 
 
