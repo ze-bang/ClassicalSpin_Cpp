@@ -20,25 +20,25 @@ struct bilinear{
 
     bilinear(){
         partner = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
+        for(int i =0; i<N; ++i){
+            for (int j=0; j<N; ++j){
                 this->bilinear_interaction[i][j] = 0;
             }
         }
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset[i] = 0;
         }
     }
 
     bilinear(array<array<float,N>, N>  &b_set, int p_set) : bilinear_interaction(b_set), partner(p_set) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset[i] = 0;
         }
     };
 
 
     bilinear(array<array<float,N>, N>  &b_set, int p_set, int* o_set) : bilinear_interaction(b_set), partner(p_set) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset[i] = o_set[i];
         }
     };
@@ -58,28 +58,28 @@ struct trilinear{
     trilinear(){
         partner1 = -1;
         partner2 = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
+        for(int i =0; i<N; ++i){
+            for (int j=0; j<N; ++j){
                 for (int l =0; l<N; l++){
                     this->trilinear_interaction[i][j][l] = 0;
                 }
             }
         }
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     }
 
     trilinear(array<array<array<float,N>, N>,N> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     };
 
     trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
-        for(int i=0; i<3; i++) {
+        for(int i=0; i<3; ++i) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
         }

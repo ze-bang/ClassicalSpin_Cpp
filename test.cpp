@@ -32,16 +32,16 @@ void MD_kitaev_honeycomb(int num_trials, float K, float h, string dir){
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
 
-    for(int i=0; i<num_trials;++i){
+    cout << "Finished setting up UC. Starting MD simulation" << endl;
 
-        lattice<3, 2, 12, 12, 1, 3, 0> MC(&atoms);
-        // MC.simulated_annealing(1, 0.001, 1000, 10000, 1000000, 0, dir+"/"+std::to_string(i));
-        MC.molecular_dynamics_SU2(1,0.001, 1000, 10000, 0, 1000, 1e-2, dir+"/"+std::to_string(i));
+    for(int i=0; i<num_trials;++i){
+        lattice<3, 2, 36, 36, 1, 3, 0> MC(&atoms);
+        cout << "Lattice initialized" << endl;
+        MC.molecular_dynamics_SU2(1,0.001, 1000, 10000, 0, 1000, 1, dir+"/"+std::to_string(i));
     }
 }
 
 int main() {
-    MD_kitaev_honeycomb(3, -1.0, -0.06, "test_L=12");
-    // std::cout << "finished" << std::endl;   
+    MD_kitaev_honeycomb(25, -1.0, -0.06, "test_L=24");
     return 0;
 }

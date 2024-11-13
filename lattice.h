@@ -75,10 +75,10 @@ class lattice
         unit_vector = UC.lattice_vectors;
 
 
-        for (int i=0; i<dim1; i++){
-            for (int j=0; j< dim2; j++){
-                for(int k=0; k<dim3;k++){
-                    for (int l=0; l<N_ATOMS;l++){
+        for (int i=0; i<dim1; ++i){
+            for (int j=0; j< dim2; ++j){
+                for(int k=0; k<dim3;++k){
+                    for (int l=0; l<N_ATOMS;++l){
 
                         int current_site_index = flatten_index(i,j,k,l);
 
@@ -125,25 +125,18 @@ class lattice
     float site_energy(array<float, N> &spin_here, int site_index){
         float energy = 0.0;
         energy += dot(spin_here, field[site_index]);
-        for (int i=0; i<num_bi; i++) {
-            energy += dot(spin_here, multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]));
+        #pragma omp simd
+        for (int i=0; i<num_bi; ++i) {
+            energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
         return energy;
     }
     
-    float site_energy(array<float, N> &spin_here, int site_index, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins){
-        float energy = 0.0;
-        energy += dot(spin_here, field[site_index]);
-        for (int i=0; i<num_bi; i++) {
-            energy += dot(spin_here, multiply(bilinear_interaction[site_index][i], current_spins[bilinear_partners[site_index][i]]));
-        }
-        return energy;
-    }
-
     array<float, N>  get_local_field(int site_index){
         array<float,N> local_field;
         local_field = {0};
-        for (int i=0; i<num_bi; i++) {
+        #pragma omp simd
+        for (int i=0; i<num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
 
@@ -154,7 +147,8 @@ class lattice
     array<float, N>  get_local_field_lattice(int site_index,const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<float,N> local_field;
         local_field = {0};
-        for (int i=0; i<num_bi; i++) {
+        #pragma omp simd
+        for (int i=0; i<num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
         return local_field+field[site_index];
@@ -162,14 +156,14 @@ class lattice
 
 
     void deterministic_sweep(){
-        for(int i = 0; i<lattice_size; i++){
+        for(int i = 0; i<lattice_size; ++i){
             array<float,N> local_field = get_local_field(i);
             float norm = sqrt(dot(local_field, local_field));
             if(norm == 0){
                 continue;
             }
             else{
-                for(int j=0; j < N; j++){
+                for(int j=0; j < N; ++j){
                     spins[i][j] = -local_field[j]/norm;
                 }
             }
@@ -179,7 +173,7 @@ class lattice
     void overrelaxation(){
         array<float,N> local_field;
         float proj;
-        for(int i = 0; i<lattice_size; i++){
+        for(int i = 0; i<lattice_size; ++i){
             local_field = get_local_field(i);
             float norm = dot(local_field, local_field);
             if(norm == 0){
@@ -225,8 +219,8 @@ class lattice
     void write_to_file_spin(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
         ofstream myfile;
         myfile.open(filename);
-        for(int i = 0; i<lattice_size; i++){
-            for(int j = 0; j<N; j++){
+        for(int i = 0; i<lattice_size; ++i){
+            for(int j = 0; j<N; ++j){
                 myfile << towrite[i][j] << " ";
             }
             myfile << endl;
@@ -237,8 +231,8 @@ class lattice
     void write_to_file(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
         ofstream myfile;
         myfile.open(filename, ios::app);
-        for(int i = 0; i<lattice_size; i++){
-            for(int j = 0; j<N; j++){
+        for(int i = 0; i<lattice_size; ++i){
+            for(int j = 0; j<N; ++j){
                 myfile << towrite[i][j] << " ";
             }
             myfile << endl;
@@ -247,12 +241,11 @@ class lattice
     }
 
 
-
     void write_to_file_pos(string filename){
         ofstream myfile;
         myfile.open(filename);
-        for(int i = 0; i<lattice_size; i++){
-            for(int j = 0; j<3; j++){
+        for(int i = 0; i<lattice_size; ++i){
+            for(int j = 0; j<3; ++j){
                 myfile << site_pos[i][j] << " ";
             }
             myfile << endl;
@@ -271,12 +264,9 @@ class lattice
         std::random_device rd;
         std::mt19937 gen(rd());
         float T = T_start;
-        for(int i = 0; i<n_therm; i++){
-            metropolis(T, gen);
-        }
         while(T > T_end){
             float curr_accept = 0;
-            for(int i = 0; i<n_anneal; i++){
+            for(int i = 0; i<n_anneal; ++i){
                 if(overrelaxation_rate > 0){
                     overrelaxation();
                     if (i%overrelaxation_rate == 0){
@@ -299,7 +289,7 @@ class lattice
                 write_to_file_pos(dir_name + "/pos.txt");
             }
         }
-        for(int i = 0; i<n_deterministics; i++){
+        for(int i = 0; i<n_deterministics; ++i){
             deterministic_sweep();
         }   
 
@@ -311,40 +301,74 @@ class lattice
     }
 
     void landau_lifshitz_ode_int(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS, const double /* t */){
-        for(int i = 0; i<lattice_size; i++){
-            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
+        for(int i = 0; i<lattice_size; ++i){
+            dS[i] = cross_prod_SU2(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS;
-        for(int i = 0; i<lattice_size; i++){
-            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
+        #pragma omp simd
+        for(int i = 0; i<lattice_size; ++i){
+            dS[i] = cross_prod_SU2(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
         return dS;
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK4_step(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK4_step(const float step_size, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k2 = array_add_2d(curr_spins, s_prod_2D(k1, 0.5*step_size));
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k2 = curr_spins + k1*(0.5*step_size);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(lval_k2);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k3 = array_add_2d(curr_spins, s_prod_2D(k2, 0.5*step_size));
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k3 = curr_spins + k2*(0.5*step_size);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k3 = landau_lifshitz(lval_k3);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k4 = array_add_2d(curr_spins, s_prod_2D(k3, step_size));
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k4 = curr_spins + k3*step_size;
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k4 = landau_lifshitz(lval_k4);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins  = array_add_2d(curr_spins, s_prod_2D(array_add_2d_mult(k1, s_prod_2D(k2, 2), s_prod_2D(k3, 2), k4), step_size/6));
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins  = curr_spins + (k1+ k2 * 2 + k3 * 2 + k4)*(step_size/6);
         return new_spins;
     }
 
+    void print_2D(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &a){
+        for(int i = 0; i<N_ATOMS*dim1*dim2*dim3; ++i){
+            for(int j = 0; j<N; ++j){
+                cout << a[i][j] << " ";
+            }
+            cout << endl;
+        }
+    }
+
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK45_step(float &step_size, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, const double tol){
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins)*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0))*step_size;
+
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
+
+        double error = norm_average_2D(z-y);
+        step_size *= 0.9*pow(tol/error, 0.2);
+        cout << "Step size: " << step_size << " Error: " << error << endl;
+        if (error < tol){
+            return z;
+        }
+        else{
+            return RK45_step(step_size, curr_spins, tol);
+        }
+        return z;
+    }
+
+
     array<array<float,N>,N_ATOMS*dim1*dim2*dim3> euler_step(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = landau_lifshitz(curr_spins);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins = array_add_2d(curr_spins, s_prod_2D(dS, step_size));
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins = curr_spins + dS*step_size;
         return new_spins;
     }
 
     void euler_step_ode_int(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS){
         landau_lifshitz_ode_int(curr_spins, dS, 0);
-        curr_spins = array_add_2d(curr_spins, s_prod_2D(dS, step_size));
+        curr_spins = curr_spins + dS*step_size;
     }
 
 
@@ -354,9 +378,10 @@ class lattice
         float curr_accept;
         filesystem::create_directory(dir_name);
         float T = Temp_start;
+
         while(T > Temp_end){
             curr_accept = 0;
-            for(int i = 0; i<n_anneal; i++){
+            for(int i = 0; i<n_anneal; ++i){
                 if(overrelaxation_rate > 0){
                     overrelaxation();
                     if (i%overrelaxation_rate == 0){
@@ -374,16 +399,34 @@ class lattice
             }
             T *= 0.9;
         }
-        int n_steps = int(T_end/step_size);
         write_to_file_pos(dir_name + "/pos.txt");
-        write_T_param(T_end, n_steps+1, dir_name + "/MD_param.txt");
         write_to_file_spin(dir_name + "/spin_t.txt", spins);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = {0};
-        for(int i = 0; i<n_steps; i++){
-            spin_t = RK4_step(step_size, spin_t);
+
+        double tol = 1e-8;
+
+        int check_frequency = 10;
+        float currT = 0;
+        int count = 1;
+        vector<float> time;
+
+        time.push_back(currT);
+
+        while(currT < T_end){
+            spin_t = RK45_step(step_size, spin_t, tol);
             write_to_file(dir_name + "/spin_t.txt", spin_t);
+            currT = currT + step_size;
+            cout << "Time: " << currT << endl;
+            time.push_back(currT);
+            count++;
         }
+
+        ofstream time_sections;
+        time_sections.open(dir_name + "/Time_steps.txt");
+        for(int i = 0; i<count; ++i){
+            time_sections << time[i] << endl;
+        }
+        time_sections.close();
     }
 };
 #endif // LATTICE_H
