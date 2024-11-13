@@ -86,10 +86,13 @@ struct trilinear{
     };
 };
 
+
+
+
 template<size_t N, size_t N_ATOMS, size_t num_bi, size_t num_tri>
 struct UnitCell{
 
-    array<array<float,3>, N_ATOMS> lattice_pos;
+    array<array<float,3>, N_ATOMS> lattice_posb;
     array<array<float,3>, 3> lattice_vectors;
 
     array<array<float, N>, N_ATOMS> field;
