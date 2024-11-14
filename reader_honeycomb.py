@@ -105,7 +105,7 @@ K2D = np.array([2/3, 1/3, 0])
 M2D = np.array([1/2, 0, 0])
 Gamma12D = 2*M2D
 
-LKitaev = 12
+LKitaev = 24
 
 K2D = contract('a, ak->k', K2D, kitaevBasis)
 M2D = contract('a, ak->k', M2D, kitaevBasis)
@@ -529,9 +529,9 @@ def read_MD_tot(dir):
 def read_MD(dir):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
-    T_end, n_steps, lattice_size= np.loadtxt(dir + "/MC_param.txt")
-    T = np.linspace(0, T_end, n_steps)
-    S = np.loadtxt(dir + "/spin_t.txt").reshape((n_steps, lattice_size, 3))
+    T = np.loadtxt(dir + "/Time_steps.txt")
+
+    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
     wmax = 2.5
