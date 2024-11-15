@@ -95,6 +95,35 @@ float contract(const array<float, N>  &a, const array<array<float, N>,N>  &M, co
     return result;
 }
 
+
+template<size_t N_1, size_t N_2, size_t N_3>
+float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_1>  &a, const array<float, N_2>  &b, const array<float, N_3>  &c) {
+    float result = 0;
+    for(int i = 0; i < N_1; i++){
+        for(int j = 0; j < N_2; j++){
+            for(int k = 0; k < N_3; k++){
+                result += M[i][j][k]*a[i]*b[j]*c[k];
+            }
+        }
+    }
+    return result;
+}
+
+
+template<size_t N_1, size_t N_2, size_t N_3>
+array<float, N_1> contract_trilinear_field(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_2>  &b, const array<float, N_3>  &c) {
+    array<float, N_1>  result = {0};    
+    for(int i = 0; i < N_1; i++){
+        for(int j = 0; j < N_2; j++){
+            for(int k = 0; k < N_3; k++){
+                result[i] += M[i][j][k]*b[j]*c[k];
+            }
+        }
+    }
+    return result;
+}
+
+
 template <size_t N>
 array<float, N>  multiply(const array<array<float, N>,N>  &M, const array<float, N>  &a){
     array<float, N>  result;
@@ -173,6 +202,37 @@ int random_int(int min, int max, std::mt19937 &gen){
     std::uniform_int_distribution dis(min, max);
     return dis(gen);
 }
+
+
+template<size_t N_1, size_t N_2, size_t N_3>
+array<array<array<float, N_1>, N_3>, N_2> transpose3D(const array<array<array<float, N_3>, N_2>, N_1>& matrix) {
+    array<array<array<float, N_1>, N_3>, N_2> transposed;
+    for (int i = 0; i < N_1; ++i) {
+        for (int j = 0; j < N_2; ++j) {
+            for (int k = 0; k < N_3; ++k) {
+                transposed[j][k][i] = matrix[i][j][k];
+            }
+        }
+    }
+    
+    return transposed; // Overwrite the original matrix with the transposed one
+}
+
+
+template<size_t N_1, size_t N_2, size_t N_3>
+array<array<array<float, N_3>, N_1>, N_2> swap_axis_3D(const array<array<array<float, N_3>, N_2>, N_1>& matrix) {
+    array<array<array<float, N_3>, N_1>, N_2> transposed;
+    for (int i = 0; i < N_1; ++i) {
+        for (int j = 0; j < N_2; ++j) {
+            for (int k = 0; k < N_3; ++k) {
+                transposed[j][i][k] = matrix[i][j][k];
+            }
+        }
+    }
+    
+    return transposed; // Overwrite the original matrix with the transposed one
+}
+
 
 
 

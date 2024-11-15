@@ -14,7 +14,7 @@
 #include <chrono>
 #include <math.h>
 
-template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3, size_t num_bi, size_t num_tri>
+template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
 {   
     public:
@@ -27,12 +27,14 @@ class lattice
 
 
 
-    array<array<array<array<float, N>, N>, num_bi>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
-    array<array<array<array<array<float, N>, N>, N>, num_tri>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
+    array<vector<array<array<float, N>, N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
+    array<vector<array<array<array<float, N>, N>, N>>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
 
-    array<array<int, num_bi>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
-    array<array<array<int, 2>, num_tri>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
+    array<vector<int>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
+    array<vector<array<int, 2>>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
 
+    int num_bi;
+    int num_tri;
 
     array<float,N> gen_random_spin(std::mt19937 &gen){
         array<float,N> temp_spin;
@@ -56,20 +58,6 @@ class lattice
 
         return temp_spin;
     }
-
-    // array<float,N> gen_random_spin(std::mt19937 &gen){
-    //     array<float,N> temp_spin;
-    //     array<float,N-1> euler_angles;
-    //     float z = random_float(-1,1, gen);
-    //     float phi = random_float(0, 2*M_PI, gen);
-    //     if(N==3){
-    //         float r = sqrt(1.0 - z*z);
-    //         temp_spin = {{r*cos(phi), r*sin(phi), z}};
-    //     }
-
-    //     return temp_spin;
-    // }
-
 
     int flatten_index(int i, int j, int k, int l){
         return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
@@ -108,7 +96,6 @@ class lattice
                         int current_site_index = flatten_index(i,j,k,l);
 
                         site_pos[current_site_index]  = unit_vector[0]*i + unit_vector[1]*j + unit_vector[2]*k + basis[l];
-                        array<float,3> temp = unit_vector[0]*i;
                         spins[current_site_index] = gen_random_spin(gen);
                         field[current_site_index] = UC.field[l];
                         
@@ -117,8 +104,10 @@ class lattice
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
                             bilinear<N> J = m->second;
                             int partner = flatten_index_periodic_boundary(i+J.offset[0], j+J.offset[1], k+J.offset[2], J.partner);
-                            bilinear_interaction[current_site_index][count] = J.bilinear_interaction;
-                            bilinear_partners[current_site_index][count] = partner;
+                            bilinear_interaction[current_site_index].push_back(J.bilinear_interaction);
+                            bilinear_partners[current_site_index].push_back(partner);
+                            bilinear_interaction[partner].push_back(J.bilinear_interaction);
+                            bilinear_partners[partner].push_back(current_site_index);
                             count++;
                         }
 
@@ -128,14 +117,24 @@ class lattice
                             trilinear<N> J = m->second;
                             int partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1);
                             int partner2 = flatten_index_periodic_boundary(i+J.offset2[0], j+J.offset2[1], k+J.offset2[2], J.partner2);
-                            trilinear_interaction[current_site_index][count] = J.trilinear_interaction;
-                            trilinear_partners[current_site_index][count] = {partner1, partner2};
+                            
+                            trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
+                            trilinear_partners[current_site_index].push_back({partner1, partner2});
+
+                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction));
+                            trilinear_partners[partner1].push_back({partner2, current_site_index});
+
+                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
+                            trilinear_partners[partner2].push_back({current_site_index, partner1});
                             count++;
                         }
                     }
                 }
             }
         }
+
+        num_bi = bilinear_partners[0].size();
+        num_tri = trilinear_partners[0].size();
     };
 
     void set_random_spin(int site_index){
@@ -154,6 +153,9 @@ class lattice
         for (int i=0; i<num_bi; ++i) {
             energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
+        for (int i=0; i < num_tri; ++i){
+            energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+        }
         return energy;
     }
     
@@ -164,7 +166,9 @@ class lattice
         for (int i=0; i<num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
-
+        for (int i=0; i < num_tri; ++i){
+            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+        }
         return local_field+field[site_index];
     }
 
@@ -175,6 +179,9 @@ class lattice
         #pragma omp simd
         for (int i=0; i<num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
+        }
+        for (int i=0; i < num_tri; ++i){
+            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
         return local_field+field[site_index];
     }
