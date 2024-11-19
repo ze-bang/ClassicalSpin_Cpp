@@ -12,6 +12,16 @@ array<float, N> operator*(const array<float, N> &a,const float n) {
     array<float, N> result;
     #pragma omp simd
     for (size_t i = 0; i < 3; ++i) {
+        result[i] = a[i]*n;
+    }
+    return result;
+}
+
+template<size_t N>
+array<float, N> operator*(const array<float, N> &a,const int n) {
+    array<float, N> result;
+    #pragma omp simd
+    for (size_t i = 0; i < 3; ++i) {
         result[i] = a[i]*float(n);
     }
     return result;
@@ -100,9 +110,9 @@ float contract(const array<float, N>  &a, const array<array<float, N>,N>  &M, co
 template<size_t N_1, size_t N_2, size_t N_3>
 float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_1>  &a, const array<float, N_2>  &b, const array<float, N_3>  &c) {
     float result = 0;
-    for(int i = 0; i < N_1; i++){
-        for(int j = 0; j < N_2; j++){
-            for(int k = 0; k < N_3; k++){
+    for(size_t i = 0; i < N_1; i++){
+        for(size_t j = 0; j < N_2; j++){
+            for(size_t k = 0; k < N_3; k++){
                 result += M[i][j][k]*a[i]*b[j]*c[k];
             }
         }
@@ -114,9 +124,9 @@ float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, con
 template<size_t N_1, size_t N_2, size_t N_3>
 array<float, N_1> contract_trilinear_field(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_2>  &b, const array<float, N_3>  &c) {
     array<float, N_1>  result = {0};    
-    for(int i = 0; i < N_1; i++){
-        for(int j = 0; j < N_2; j++){
-            for(int k = 0; k < N_3; k++){
+    for(size_t i = 0; i < N_1; i++){
+        for(size_t j = 0; j < N_2; j++){
+            for(size_t k = 0; k < N_3; k++){
                 result[i] += M[i][j][k]*b[j]*c[k];
             }
         }
@@ -208,9 +218,9 @@ int random_int(int min, int max, std::mt19937 &gen){
 template<size_t N_1, size_t N_2, size_t N_3>
 array<array<array<float, N_1>, N_3>, N_2> transpose3D(const array<array<array<float, N_3>, N_2>, N_1>& matrix) {
     array<array<array<float, N_1>, N_3>, N_2> transposed;
-    for (int i = 0; i < N_1; ++i) {
-        for (int j = 0; j < N_2; ++j) {
-            for (int k = 0; k < N_3; ++k) {
+    for (size_t i = 0; i < N_1; ++i) {
+        for (size_t j = 0; j < N_2; ++j) {
+            for (size_t k = 0; k < N_3; ++k) {
                 transposed[j][k][i] = matrix[i][j][k];
             }
         }
@@ -223,9 +233,9 @@ array<array<array<float, N_1>, N_3>, N_2> transpose3D(const array<array<array<fl
 template<size_t N_1, size_t N_2, size_t N_3>
 array<array<array<float, N_3>, N_1>, N_2> swap_axis_3D(const array<array<array<float, N_3>, N_2>, N_1>& matrix) {
     array<array<array<float, N_3>, N_1>, N_2> transposed;
-    for (int i = 0; i < N_1; ++i) {
-        for (int j = 0; j < N_2; ++j) {
-            for (int k = 0; k < N_3; ++k) {
+    for (size_t i = 0; i < N_1; ++i) {
+        for (size_t j = 0; j < N_2; ++j) {
+            for (size_t k = 0; k < N_3; ++k) {
                 transposed[j][i][k] = matrix[i][j][k];
             }
         }

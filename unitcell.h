@@ -13,7 +13,7 @@ using namespace std;
 template <size_t N> 
 struct bilinear{
     array<array<float,N>, N> bilinear_interaction;
-    int partner;
+    size_t partner;
     int offset[3];
 
     // Constructor
@@ -25,20 +25,20 @@ struct bilinear{
                 this->bilinear_interaction[i][j] = 0;
             }
         }
-        for(int i=0; i<3; i++) {
+        for(size_t i=0; i<3; i++) {
             this->offset[i] = 0;
         }
     }
 
     bilinear(array<array<float,N>, N>  &b_set, int p_set) : bilinear_interaction(b_set), partner(p_set) {
-        for(int i=0; i<3; i++) {
+        for(size_t i=0; i<3; i++) {
             this->offset[i] = 0;
         }
     };
 
 
     bilinear(array<array<float,N>, N>  &b_set, int p_set, int* o_set) : bilinear_interaction(b_set), partner(p_set) {
-        for(int i=0; i<3; i++) {
+        for(size_t i=0; i<3; i++) {
             this->offset[i] = o_set[i];
         }
     };
@@ -48,8 +48,8 @@ struct bilinear{
 template <size_t N> 
 struct trilinear{
     array<array<array<float,N>, N>,N>   trilinear_interaction;
-    int partner1;
-    int partner2;
+    size_t partner1;
+    size_t partner2;
     int offset1[3];
     int offset2[3];
 
@@ -65,21 +65,21 @@ struct trilinear{
                 }
             }
         }
-        for(int i=0; i<3; i++) {
+        for(size_t i=0; i<3; i++) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     }
 
     trilinear(array<array<array<float,N>, N>,N> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
-        for(int i=0; i<3; i++) {
+        for(size_t i=0; i<3; i++) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
     };
 
     trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
-        for(int i=0; i<3; i++) {
+        for(size_t i=0; i<3; i++) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
         }
@@ -90,8 +90,8 @@ struct trilinear{
 template <size_t N_SU2, size_t N_SU3> 
 struct mixed_trilinear{
     array<array<array<float,N_SU2>, N_SU2>,N_SU3>   trilinear_interaction;
-    int partner1;
-    int partner2;
+    size_t partner1;
+    size_t partner2;
     int offset1[3];
     int offset2[3];
 
