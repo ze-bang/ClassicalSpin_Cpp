@@ -174,7 +174,7 @@ class lattice
     }
 
 
-    array<float, N>  get_local_field_lattice(size_t site_index,const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+    array<float, N>  get_local_field_lattice(size_t site_index, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
         array<float,N> local_field;
         local_field = {0};
         #pragma omp simd

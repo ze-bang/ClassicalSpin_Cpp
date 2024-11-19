@@ -43,7 +43,8 @@ void MD_TmFeO3(int num_trials, float J, float xi, string dir){
 
 
 int main() {
-    MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
+    // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
+    MD_kitaev_honeycomb(3, -1.0, -0.06, "integrity_test");
     // std::cout << "finished" << std::endl;   
     return 0;
 }

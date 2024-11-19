@@ -561,7 +561,7 @@ def read_MD(dir):
 
 
 
-dir = "test_L=12"
+dir = "integrity_test"
 read_MD_tot(dir)
 parseDSSF(dir)
 

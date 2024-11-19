@@ -7,6 +7,34 @@
 #include <random>
 #include <omp.h>
 
+void set_permutation(array<array<array<float, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, float val){
+    A[a][b][c] = val;
+    A[a][c][b] = -val;
+    A[b][a][c] = -val;
+    A[b][c][a] = val;
+    A[c][a][b] = val;
+    A[c][b][a] = -val;
+}
+
+
+const array<array<array<float, 8>, 8>,8> SU3_structure_constant(){
+    array<array<array<float, 8>, 8>,8> result;
+    result = {{0}};
+    set_permutation(result, 0, 1, 2, 1);
+    set_permutation(result, 0, 3, 6, 0.5);
+    set_permutation(result, 0, 4, 5, -0.5);
+    set_permutation(result, 1, 3, 5, 0.5);
+    set_permutation(result, 1, 4, 6, 0.5);
+    set_permutation(result, 2, 3, 4, 0.5);
+    set_permutation(result, 2, 5, 6, -0.5);
+    set_permutation(result, 3, 4, 7, sqrt(3)/2);
+    set_permutation(result, 5, 6, 7, sqrt(3)/2);
+    return result;
+}
+
+const extern array<array<array<float, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+
+
 template<size_t N>
 array<float, N> operator*(const array<float, N> &a,const float n) {
     array<float, N> result;
@@ -148,14 +176,29 @@ array<float, N>  multiply(const array<array<float, N>,N>  &M, const array<float,
 
 
 
-template <size_t N>
-array<float, N> cross_prod_SU2(const array<float, N>  &a,const array<float, N> &b){
-    array<float, N> result;
+array<float, 3> cross_prod_SU2(const array<float, 3>  &a,const array<float, 3> &b){
+    array<float, 3> result;
     result[0] = a[1]*b[2] - a[2]*b[1];
     result[1] = a[2]*b[0] - a[0]*b[2];
     result[2] = a[0]*b[1] - a[1]*b[0];
     return result;
 }
+
+
+
+array<float, 8> cross_prod_SU3(const array<float, 8>  &a,const array<float, 8> &b){
+    array<float, 8> result;
+    for(size_t i=0; i<8; i++){
+        for(size_t j=0; j <8; j++){
+            for(size_t k=0; k <8; k++){
+                result[i] += SU3_structure[i][j][k]*a[j]*b[k];
+            }
+        }
+    }
+
+    return result;
+}
+
 
 template <size_t N, size_t M>
 array<array<float, M>, N> operator+(const array<array<float, M>, N> &a,const array<array<float, M>, N> &b) {

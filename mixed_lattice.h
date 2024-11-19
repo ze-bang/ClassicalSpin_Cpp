@@ -24,10 +24,16 @@ class mixed_lattice
     size_t lattice_size_SU3;
 
     //Spin and lattice position of SU2 and SU3
-    array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>  spins_SU2;
-    array<array<float,3>, N_ATOMS_SU2*dim1*dim2*dim3> site_pos_SU2;
-    array<array<float,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>  spins_SU3;
-    array<array<float,3>, N_ATOMS_SU3*dim1*dim2*dim3> site_pos_SU3;
+    // array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>  spins_SU2;
+    // array<array<float,3>, N_ATOMS_SU2*dim1*dim2*dim3> get<0>(site_pos);
+    // array<array<float,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>  spins_SU3;
+    // array<array<float,3>, N_ATOMS_SU3*dim1*dim2*dim3> get<1>(site_pos);
+
+    typedef tuple<array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>, array<array<float,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>> mixed_lattice_spin;
+    typedef tuple<array<array<float,3>, N_ATOMS_SU2*dim1*dim2*dim3>, array<array<float,3>, N_ATOMS_SU3*dim1*dim2*dim3>> mixed_lattice_pos;
+
+    mixed_lattice_spin spins;
+    mixed_lattice_pos site_pos;
 
     //Look up table for SU2
     array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> field_SU2;
@@ -51,7 +57,6 @@ class mixed_lattice
 
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_partners_SU3;
-
 
     size_t num_bi_SU2;
     size_t num_tri_SU2;
@@ -143,7 +148,7 @@ class mixed_lattice
                             trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction));
                             trilinear_partners[partner1].push_back({partner2, current_site_index});
 
-                            trilinear_interaction[partner2].push_back(transpose3D(J.trilinear_interaction));
+                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
                             count++;
                         }
@@ -162,8 +167,8 @@ class mixed_lattice
         std::random_device rd;
         std::mt19937 gen(rd());
 
-        set_up_sublattice(spins_SU2, site_pos_SU2, field_SU2, bilinear_interaction_SU2, trilinear_interaction_SU2, bilinear_partners_SU2, trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
-        set_up_sublattice(spins_SU3, site_pos_SU3, field_SU3, bilinear_interaction_SU3, trilinear_interaction_SU3, bilinear_partners_SU3, trilinear_partners_SU3, &(atoms->SU3), num_tri_SU2, num_tri_SU3);
+        set_up_sublattice(get<0>(spins), get<0>(site_pos), field_SU2, bilinear_interaction_SU2, trilinear_interaction_SU2, bilinear_partners_SU2, trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
+        set_up_sublattice(get<1>(spins), get<1>(site_pos), field_SU3, bilinear_interaction_SU3, trilinear_interaction_SU3, bilinear_partners_SU3, trilinear_partners_SU3, &(atoms->SU3), num_tri_SU2, num_tri_SU3);
         
         for (size_t i=0; i < dim1; ++i){
             for (size_t j=0; j < dim2; ++j){
@@ -200,13 +205,13 @@ class mixed_lattice
         energy += dot(spin_here, field_SU2[site_index]);
         #pragma omp simd
         for (size_t i=0; i<num_bi_SU2; ++i) {
-            energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], spins_SU2[bilinear_partners_SU2[site_index][i]]);
+            energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], get<0>(spins)[bilinear_partners_SU2[site_index][i]]);
         }
         for (size_t i=0; i < num_tri_SU3; ++i){
-            energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+            energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, get<0>(spins)[trilinear_partners_SU2[site_index][i][0]], get<0>(spins)[trilinear_partners_SU2[site_index][i][1]]);
         }
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], spin_here, spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], spin_here, get<0>(spins)[mixed_trilinear_partners_SU2[site_index][i][0]], get<1>(spins)[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
         return energy;
     }
@@ -216,28 +221,37 @@ class mixed_lattice
         energy += dot(spin_here, field_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i<num_bi_SU3; ++i) {
-            energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], spins_SU3[bilinear_partners_SU3[site_index][i]]);
+            energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], get<1>(spins)[bilinear_partners_SU3[site_index][i]]);
         }
         for (size_t i=0; i < num_tri_SU3; ++i){
-            energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], spin_here, spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+            energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], spin_here, get<1>(spins)[trilinear_partners_SU3[site_index][i][0]], get<1>(spins)[trilinear_partners_SU3[site_index][i][1]]);
         }
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], spin_here, spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+            energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], spin_here, get<0>(spins)[mixed_trilinear_partners_SU3[site_index][i][0]], get<0>(spins)[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
         return energy;
+    }
+
+    template<size_t N>
+    float site_energy(array<float,N> &spins, size_t site_index){
+        if constexpr (N == N_SU2){
+            return site_energy_SU2(spins, site_index);
+        }else{
+            return site_energy_SU3(spins, site_index);
+        }
     }
     
     array<float, N_SU2>  get_local_field_SU2(size_t site_index){
         array<float,N_SU2> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins_SU2[bilinear_partners_SU2[site_index][i]]);
+            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], get<0>(spins)[bilinear_partners_SU2[site_index][i]]);
         }
         for (size_t i=0; i < num_tri_SU2; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], get<0>(spins)[trilinear_partners_SU2[site_index][i][0]], get<0>(spins)[trilinear_partners_SU2[site_index][i][1]]);
         }
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], get<0>(spins)[mixed_trilinear_partners_SU2[site_index][i][0]], get<1>(spins)[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
         return local_field+field_SU2[site_index];
     }
@@ -246,13 +260,43 @@ class mixed_lattice
         array<float,N_SU3> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins_SU2[bilinear_partners_SU3[site_index][i]]);
+            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], get<0>(spins)[bilinear_partners_SU3[site_index][i]]);
         }
         for (size_t i=0; i < num_tri_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], get<1>(spins)[trilinear_partners_SU3[site_index][i][0]], get<1>(spins)[trilinear_partners_SU3[site_index][i][1]]);
         }
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], get<0>(spins)[mixed_trilinear_partners_SU3[site_index][i][0]], get<0>(spins)[mixed_trilinear_partners_SU3[site_index][i][1]]);
+        }
+        return local_field+field_SU3[site_index];
+    }
+
+    array<float, N_SU2>  get_local_field_SU2_lattice(size_t site_index, mixed_lattice_spin &current_spin){
+        array<float,N_SU2> local_field = {0};
+        #pragma omp simd
+        for (size_t i=0; i< num_bi_SU2; ++i) {
+            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], get<0>(current_spin)[bilinear_partners_SU2[site_index][i]]);
+        }
+        for (size_t i=0; i < num_tri_SU2; ++i){
+            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], get<0>(current_spin)[trilinear_partners_SU2[site_index][i][0]], get<0>(current_spin)[trilinear_partners_SU2[site_index][i][1]]);
+        }
+        for (size_t i=0; i < num_tri_SU2_SU3; ++i){
+            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], get<0>(current_spin)[mixed_trilinear_partners_SU2[site_index][i][0]], get<1>(current_spin)[mixed_trilinear_partners_SU2[site_index][i][1]]);
+        }
+        return local_field+field_SU2[site_index];
+    }
+
+    array<float, N_SU3>  get_local_field_SU3_lattice(size_t site_index, mixed_lattice_spin &current_spin){
+        array<float,N_SU3> local_field = {0};
+        #pragma omp simd
+        for (size_t i=0; i< num_bi_SU3; ++i) {
+            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], get<0>(current_spin)[bilinear_partners_SU3[site_index][i]]);
+        }
+        for (size_t i=0; i < num_tri_SU3; ++i){
+            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], get<1>(current_spin)[trilinear_partners_SU3[site_index][i][0]], get<1>(current_spin)[trilinear_partners_SU3[site_index][i][1]]);
+        }
+        for (size_t i=0; i < num_tri_SU2_SU3; ++i){
+            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], get<0>(current_spin)[mixed_trilinear_partners_SU3[site_index][i][0]], get<0>(current_spin)[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
         return local_field+field_SU3[site_index];
     }
@@ -264,41 +308,29 @@ class mixed_lattice
         size_t count = 0;
         while(count < lattice_size_SU2+lattice_size_SU3){
             int SU2_or_SU3 = random_int(0,1, gen);
+            size_t lattice_size;
             if (SU2_or_SU3 == 0){
-                i = random_int(0, lattice_size_SU2-1, gen);
-                E = site_energy_SU2(spins_SU2[i], i);
-                array<float,N_SU2> new_spin = gen_random_spin(gen, spins_SU2[i]);
-                E_new = site_energy_SU2(new_spin, i);
-                dE = E_new - E;
-                
-                if(dE < 0){
-                    spins_SU2[i] = new_spin;
-                    accept++;
-                }
-                else{
-                    r = random_float(0,1, gen);
-                    if(r < exp(-dE/T)){
-                        spins_SU2[i] = new_spin;
-                        accept++;
-                    }
-                }
+                lattice_size = lattice_size_SU2;
             }else{
-                i = random_int(0, lattice_size_SU3-1, gen);
-                E = site_energy_SU3(spins_SU3[i], i);
-                array<float,N_SU3> new_spin = gen_random_spin(gen, spins_SU3[i]);
-                E_new = site_energy_SU3(new_spin, i);
-                dE = E_new - E;
-                
-                if(dE < 0){
-                    spins_SU3[i] = new_spin;
+                lattice_size = lattice_size_SU3;
+            }
+            i = random_int(0, lattice_size-1, gen);
+            E = site_energy(spins[SU2_or_SU3][i], i);
+
+            constexpr auto new_spin = gen_random_spin(gen, spins[SU2_or_SU3][i]);
+
+            E_new = site_energy(new_spin, i);
+            dE = E_new - E;
+            
+            if(dE < 0){
+                spins[SU2_or_SU3][i] = new_spin;
+                accept++;
+            }
+            else{
+                r = random_float(0,1, gen);
+                if(r < exp(-dE/T)){
+                    get<0>(spins)[i] = new_spin;
                     accept++;
-                }
-                else{
-                    r = random_float(0,1, gen);
-                    if(r < exp(-dE/T)){
-                        spins_SU3[i] = new_spin;
-                        accept++;
-                    }
                 }
             }
             count++;
@@ -317,7 +349,7 @@ class mixed_lattice
                 continue;
             }
             else{
-                spins_SU2[i] = -local_field/norm;
+                get<0>(spins)[i] = -local_field/norm;
             }
         }
         for(size_t i = 0; i<lattice_size_SU3; ++i){
@@ -327,7 +359,7 @@ class mixed_lattice
                 continue;
             }
             else{
-                spins_SU3[i] = -local_field/norm;
+                get<1>(spins)[i] = -local_field/norm;
             }
         }
     }
@@ -337,13 +369,13 @@ class mixed_lattice
         myfile.open(filename);
         for(size_t i = 0; i<lattice_size_SU2; ++i){
             for(size_t j = 0; j<3; ++j){
-                myfile << spins_SU2[i][j] << " ";
+                myfile << get<0>(spins)[i][j] << " ";
             }
             myfile << endl;
         }
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             for(size_t j = 0; j<8; ++j){
-                myfile << spins_SU3[i][j] << " ";
+                myfile << get<1>(spins)[i][j] << " ";
             }
             myfile << endl;
         }
@@ -355,18 +387,37 @@ class mixed_lattice
         myfile.open(filename);
         for(size_t i = 0; i<lattice_size_SU2; ++i){
             for(size_t j = 0; j<3; ++j){
-                myfile << site_pos_SU2[i][j] << " ";
+                myfile << get<0>(site_pos)[i][j] << " ";
             }
             myfile << endl;
         }
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             for(size_t j = 0; j<3; ++j){
-                myfile << site_pos_SU3[i][j] << " ";
+                myfile << get<1>(site_pos)[i][j] << " ";
             }
             myfile << endl;
         }
         myfile.close();
     }
+
+    void write_to_file(string filename, mixed_lattice_spin towrite){
+        ofstream myfile;
+        myfile.open(filename, ios::app);
+        for(size_t i = 0; i<lattice_size_SU2; ++i){
+            for(size_t j = 0; j<3; ++j){
+                myfile << get<0>(spins)[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        for(size_t i = 0; i<lattice_size_SU3; ++i){
+            for(size_t j = 0; j<8; ++j){
+                myfile << get<1>(spins)[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
 
     void simulated_annealing(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
         std::random_device rd;
@@ -397,6 +448,100 @@ class mixed_lattice
         }
     }
 
+
+    mixed_lattice_spin landau_lifshitz(mixed_lattice_spin &current_spin){
+        mixed_lattice_spin dS;
+        #pragma omp simd
+        for(size_t i = 0; i<lattice_size_SU2; ++i){
+            get<0>(dS)[i] = cross_prod_SU2(get_local_field_SU2_lattice(i, current_spin), get<0>(current_spin)[i]);
+        }
+        #pragma omp simd
+        for(size_t i = 0; i<lattice_size_SU3; ++i){
+            get<1>(dS)[i] = cross_prod_SU3(get_local_field_SU3_lattice(i, current_spin), get<1>(current_spin)[i]);
+        }
+        return dS;
+    }
+
+    mixed_lattice_spin RK45_step(float &step_size, const mixed_lattice_spin &curr_spins, const double tol){
+        mixed_lattice_spin k1 = landau_lifshitz(curr_spins)*step_size;
+        mixed_lattice_spin k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
+        mixed_lattice_spin k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
+        mixed_lattice_spin k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0))*step_size;
+        mixed_lattice_spin k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0))*step_size;
+        mixed_lattice_spin k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0))*step_size;
+
+        mixed_lattice_spin y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
+        mixed_lattice_spin z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
+
+        double error = norm_average_2D(z-y);
+        step_size *= 0.9*pow(tol/error, 0.2);
+        cout << "Step size: " << step_size << " Error: " << error << endl;
+        if (error < tol){
+            return z;
+        }
+        else{
+            return RK45_step(step_size, curr_spins, tol);
+        }
+        return z;
+    }
+
+
+    void molecular_dynamics(float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        float curr_accept;
+        filesystem::create_directory(dir_name);
+        float T = Temp_start;
+
+        while(T > Temp_end){
+            curr_accept = 0;
+            for(size_t i = 0; i<n_anneal; ++i){
+                if(overrelaxation_rate > 0){
+                    // overrelaxation();
+                    if (i%overrelaxation_rate == 0){
+                        curr_accept += metropolis(T, gen);
+                    }
+                }
+                else{
+                    curr_accept += metropolis(T, gen);
+                }
+            }
+            if (overrelaxation_rate > 0){
+                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
+            }else{
+                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
+            }
+            T *= 0.9;
+        }
+        write_to_file_pos(dir_name + "/pos.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
+        mixed_lattice_spin spin_t = spins;
+
+        double tol = 1e-8;
+
+        int check_frequency = 10;
+        float currT = 0;
+        size_t count = 1;
+        vector<float> time;
+
+        time.push_back(currT);
+
+        while(currT < T_end){
+            spin_t = RK45_step(step_size, spin_t, tol);
+            write_to_file(dir_name + "/spin_t.txt", spin_t);
+            currT = currT + step_size;
+            cout << "Time: " << currT << endl;
+            time.push_back(currT);
+            count++;
+        }
+
+        ofstream time_sections;
+        time_sections.open(dir_name + "/Time_steps.txt");
+        for(size_t i = 0; i<count; ++i){
+            time_sections << time[i] << endl;
+        }
+        time_sections.close();
+    }
 
 };
 #endif // MIXED_LATTICE_H
