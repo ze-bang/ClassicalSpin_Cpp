@@ -20,8 +20,8 @@ struct bilinear{
 
     bilinear(){
         partner = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
+        for(size_t i =0; i<N; i++){
+            for (size_t j=0; j<N; j++){
                 this->bilinear_interaction[i][j] = 0;
             }
         }
@@ -58,9 +58,9 @@ struct trilinear{
     trilinear(){
         partner1 = -1;
         partner2 = -1;
-        for(int i =0; i<N; i++){
-            for (int j=0; j<N; j++){
-                for (int l =0; l<N; l++){
+        for(size_t i =0; i<N; i++){
+            for (size_t j=0; j<N; j++){
+                for (size_t l =0; l<N; l++){
                     this->trilinear_interaction[i][j][l] = 0;
                 }
             }
@@ -100,9 +100,9 @@ struct mixed_trilinear{
     mixed_trilinear(){
         partner1 = -1;
         partner2 = -1;
-        for(int i =0; i<N_SU3; i++){
-            for (int j=0; j<N_SU2; j++){
-                for (int l =0; l<N_SU2; l++){
+        for(size_t i =0; i<N_SU3; i++){
+            for (size_t j=0; j<N_SU2; j++){
+                for (size_t l =0; l<N_SU2; l++){
                     this->trilinear_interaction[i][j][l] = 0;
                 }
             }
@@ -140,7 +140,7 @@ struct UnitCell{
     multimap<int, trilinear<N>> trilinear_interaction;
 
     UnitCell(const array<array<float,3>, N_ATOMS> &spos,const array<array<float,3>, 3> &svec) : lattice_pos(spos), lattice_vectors(svec) {
-        field = {0};
+        field = {{0}};
         lattice_pos = spos;
         lattice_vectors = svec;
     };

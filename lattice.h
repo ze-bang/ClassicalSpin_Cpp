@@ -19,7 +19,7 @@ class lattice
 {   
     public:
     UnitCell<N, N_ATOMS> UC;
-    int lattice_size;
+    size_t lattice_size;
     array<array<float,N>, N_ATOMS*dim1*dim2*dim3>  spins;
     array<array<float,3>, N_ATOMS*dim1*dim2*dim3> site_pos;
     //Lookup table for the lattice
@@ -40,7 +40,7 @@ class lattice
         float z = random_float(-1,1, gen);
         float r = sqrt(1.0 - z*z);
 
-        for(int i = 0; i < N-2; ++i){
+        for(int i = 0; i < (int)N-2; ++i){
             euler_angles[i] = random_float(0, 2*M_PI, gen);
             temp_spin[i] = r;
             for(int j = 0; j < i; ++j){
@@ -57,27 +57,14 @@ class lattice
         return temp_spin;
     }
 
-    // array<float,N> gen_random_spin(std::mt19937 &gen){
-    //     array<float,N> temp_spin;
-    //     array<float,N-1> euler_angles;
-    //     float z = random_float(-1,1, gen);
-    //     float phi = random_float(0, 2*M_PI, gen);
-    //     if(N==3){
-    //         float r = sqrt(1.0 - z*z);
-    //         temp_spin = {{r*cos(phi), r*sin(phi), z}};
-    //     }
 
-    //     return temp_spin;
-    // }
-
-
-    int flatten_index(int i, int j, int k, int l){
+    int flatten_index(size_t i, size_t j, size_t k, size_t l){
         return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
     }
     
-    int periodic_boundary(int i, int dim){
-        if(i < 0){
-            return (dim+i) % dim;
+    size_t periodic_boundary(size_t i, size_t dim){
+        if((int)i < 0){
+            return (size_t)((int)dim+(int)i) % (int)dim;
         }
         else{
             return i % dim;
@@ -100,15 +87,14 @@ class lattice
         unit_vector = UC.lattice_vectors;
 
 
-        for (int i=0; i<dim1; ++i){
-            for (int j=0; j< dim2; ++j){
-                for(int k=0; k<dim3;++k){
-                    for (int l=0; l<N_ATOMS;++l){
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim3;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
 
-                        int current_site_index = flatten_index(i,j,k,l);
+                        size_t current_site_index = flatten_index(i,j,k,l);
 
                         site_pos[current_site_index]  = unit_vector[0]*i + unit_vector[1]*j + unit_vector[2]*k + basis[l];
-                        array<float,3> temp = unit_vector[0]*i;
                         spins[current_site_index] = gen_random_spin(gen);
                         field[current_site_index] = UC.field[l];
                         
@@ -151,7 +137,7 @@ class lattice
         float energy = 0.0;
         energy += dot(spin_here, field[site_index]);
         #pragma omp simd
-        for (int i=0; i<num_bi; ++i) {
+        for (int i=0; i<(int)num_bi; ++i) {
             energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
         return energy;
@@ -161,7 +147,7 @@ class lattice
         array<float,N> local_field;
         local_field = {0};
         #pragma omp simd
-        for (int i=0; i<num_bi; ++i) {
+        for (int i=0; i<(int)num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
 
@@ -173,7 +159,7 @@ class lattice
         array<float,N> local_field;
         local_field = {0};
         #pragma omp simd
-        for (int i=0; i<num_bi; ++i) {
+        for (int i=0; i<(int)num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
         return local_field+field[site_index];
@@ -188,7 +174,7 @@ class lattice
                 continue;
             }
             else{
-                for(int j=0; j < N; ++j){
+                for(int j=0; j < (int)N; ++j){
                     spins[i][j] = -local_field[j]/norm;
                 }
             }

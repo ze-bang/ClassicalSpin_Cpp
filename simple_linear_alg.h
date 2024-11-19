@@ -6,11 +6,12 @@
 #include <stdexcept>
 #include <random>
 #include <omp.h>
+
 template<size_t N>
 array<float, N> operator*(const array<float, N> &a,const float n) {
     array<float, N> result;
     #pragma omp simd
-    for (int i = 0; i < 3; ++i) {
+    for (size_t i = 0; i < 3; ++i) {
         result[i] = a[i]*float(n);
     }
     return result;
@@ -20,7 +21,7 @@ template<size_t N>
 array<float, N> operator+(const array<float, N> &a,const array<float, N>  &b) {
     array<float, N> result;
     #pragma omp simd
-    for (int i = 0; i < N; ++i) {
+    for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] + b[i];
     }
     return result;
@@ -30,7 +31,7 @@ template<size_t N>
 array<float, N> operator-(const array<float, N> &a,const array<float, N>  &b) {
     array<float, N> result;
     #pragma omp simd
-    for (int i = 0; i < N; ++i) {
+    for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] - b[i];
     }
     return result;
@@ -40,7 +41,7 @@ array<float, N> operator-(const array<float, N> &a,const array<float, N>  &b) {
 template<size_t N>
 float dot(const array<float, N>  &a, const array<float, N>  &b) {
     float result = 0;
-    for (int i = 0; i < N; ++i) {
+    for (size_t i = 0; i < N; ++i) {
         result += a[i] * b[i];
     }
     return result;
@@ -121,8 +122,8 @@ template <size_t N, size_t M>
 array<array<float, M>, N> operator+(const array<array<float, M>, N> &a,const array<array<float, M>, N> &b) {
     array<array<float, M>, N> result;
     #pragma omp simd
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < M; ++j) {
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < M; ++j) {
             result[i][j] = a[i][j] + b[i][j];
         }
     }
@@ -133,8 +134,8 @@ template <size_t N, size_t M>
 array<array<float, M>, N> operator*(const array<array<float, M>, N> &a,const float &b) {
     array<array<float, M>, N> result;
     #pragma omp simd
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < M; ++j) {
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < M; ++j) {
             result[i][j] = a[i][j]*b;
         }
     }
@@ -144,8 +145,8 @@ array<array<float, M>, N> operator*(const array<array<float, M>, N> &a,const flo
 template <size_t N, size_t M>
 float norm_average_2D(const array<array<float, M>, N> &a) {
     float result = 0;
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < M; ++j) {
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < M; ++j) {
             result += a[i][j]*a[i][j];
         }
     }
@@ -156,8 +157,8 @@ template <size_t N, size_t M>
 array<array<float, M>, N> operator-(const array<array<float, M>, N> &a,const array<array<float, M>, N>  &b) {
     array<array<float, M>, N> result;
     #pragma omp simd
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < M; ++j) {
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < M; ++j) {
             result[i][j] = a[i][j] - b[i][j];
         }
     }
@@ -173,8 +174,4 @@ int random_int(int min, int max, std::mt19937 &gen){
     std::uniform_int_distribution dis(min, max);
     return dis(gen);
 }
-
-
-
-
 #endif // LIN_ALG_H
