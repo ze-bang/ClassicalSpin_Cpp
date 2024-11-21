@@ -19,7 +19,7 @@ void set_permutation(array<array<array<float, 8>, 8>,8> &A, const size_t a, cons
 
 const array<array<array<float, 8>, 8>,8> SU3_structure_constant(){
     array<array<array<float, 8>, 8>,8> result;
-    result = {{0}};
+    result = {{{{{0}}}}};
     set_permutation(result, 0, 1, 2, 1);
     set_permutation(result, 0, 3, 6, 0.5);
     set_permutation(result, 0, 4, 5, -0.5);

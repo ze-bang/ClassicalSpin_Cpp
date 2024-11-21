@@ -124,7 +124,6 @@ class mixed_lattice
                         
                         auto bilinear_matched = atoms->bilinear_interaction.equal_range(l);
 
-                        size_t count = 0;
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
                             bilinear<N> J = m->second;
                             size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner,N_ATOMS);
@@ -132,11 +131,9 @@ class mixed_lattice
                             bilinear_partners[current_site_index].push_back(partner);
                             bilinear_interaction[partner].push_back(J.bilinear_interaction);
                             bilinear_partners[partner].push_back(current_site_index);
-                            count++;
                         }
 
                         auto trilinear_matched = atoms->trilinear_interaction.equal_range(l);
-                        count = 0;
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
                             trilinear<N> J = m->second;
                             size_t partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1,N_ATOMS);
@@ -150,7 +147,6 @@ class mixed_lattice
 
                             trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
-                            count++;
                         }
                     }
                 }
@@ -405,13 +401,13 @@ class mixed_lattice
         myfile.open(filename, ios::app);
         for(size_t i = 0; i<lattice_size_SU2; ++i){
             for(size_t j = 0; j<3; ++j){
-                myfile << get<0>(spins)[i][j] << " ";
+                myfile << get<0>(towrite)[i][j] << " ";
             }
             myfile << endl;
         }
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             for(size_t j = 0; j<8; ++j){
-                myfile << get<1>(spins)[i][j] << " ";
+                myfile << get<1>(towrite)[i][j] << " ";
             }
             myfile << endl;
         }
