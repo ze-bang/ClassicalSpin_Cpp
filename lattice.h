@@ -293,7 +293,7 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
+    void simulated_annealing(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate){
         std::random_device rd;
         std::mt19937 gen(rd());
         float T = T_start;
@@ -316,12 +316,11 @@ class lattice
                 cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
             }            
             T *= 0.9;
-            if(dir_name != ""){
-                filesystem::create_directory(dir_name);
-                write_to_file_spin(dir_name + "/spin.txt", spins);
-                write_to_file_pos(dir_name + "/pos.txt");
-            }
         }
+    }
+
+    void simulated_annealing_deterministic(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
+        simulated_annealing(T_start, T_end, n_therm, n_anneal, overrelaxation_rate);
         for(size_t i = 0; i<n_deterministics; ++i){
             deterministic_sweep();
         }   
@@ -406,32 +405,7 @@ class lattice
 
 
     void molecular_dynamics(float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        float curr_accept;
-        filesystem::create_directory(dir_name);
-        float T = Temp_start;
-
-        while(T > Temp_end){
-            curr_accept = 0;
-            for(size_t i = 0; i<n_anneal; ++i){
-                if(overrelaxation_rate > 0){
-                    overrelaxation();
-                    if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(T, gen);
-                    }
-                }
-                else{
-                    curr_accept += metropolis(T, gen);
-                }
-            }
-            if (overrelaxation_rate > 0){
-                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
-            }else{
-                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
-            }
-            T *= 0.9;
-        }
+        simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
         write_to_file_pos(dir_name + "/pos.txt");
         write_to_file_spin(dir_name + "/spin_t.txt", spins);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
@@ -460,6 +434,130 @@ class lattice
             time_sections << time[i] << endl;
         }
         time_sections.close();
+    }
+
+    void set_field(const array<array<float,N>, N_ATOMS> &field_in){
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim3;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
+                        size_t current_site_index = flatten_index(i,j,k,l);
+                        field[current_site_index] = field_in[l];
+                    }
+                }
+            }
+        }
+    }
+
+    array<float, N> magnetization(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins){
+        array<float, N> mag = {0};
+        for(size_t i = 0; i<lattice_size; ++i){
+            mag = mag + current_spins[i];
+        }
+        return mag;
+    }
+
+    void M_B_t(array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_width, float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
+        simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
+        write_to_file_pos(dir_name + "/pos.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+
+        double tol = 1e-8;
+        bool pulse = false;
+        int check_frequency = 10;
+        float currT = 0;
+        size_t count = 1;
+        vector<float> time;
+
+        time.push_back(currT);
+        write_to_file(dir_name + "/M_t.txt", spin_t);
+
+        while(currT < T_end){
+            if ((abs(currT - t_B) < pulse_width) && !pulse){
+                set_field(field_in);
+                pulse = true;
+            }
+            else if ((currT - t_B > pulse_width) && pulse){
+                set_field({{0}});
+                pulse = false;
+            }
+            spin_t = RK45_step(step_size, spin_t, tol);
+            write_to_file(dir_name + "/M_t.txt", spin_t);
+            currT = currT + step_size;
+            cout << "Time: " << currT << endl;
+            time.push_back(currT);
+            count++;
+        }
+
+        ofstream time_sections;
+        time_sections.open(dir_name + "/Time_steps.txt");
+        for(size_t i = 0; i<count; ++i){
+            time_sections << time[i] << endl;
+        }
+        time_sections.close();        
+    };
+
+    void M_BA_BB_t(array<array<float,N>, N_ATOMS> &field_in_1, float t_B, array<array<float,N>, N_ATOMS> &field_in_2, float pulse_width, float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
+        simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
+        write_to_file_pos(dir_name + "/pos.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+
+        double tol = 1e-8;
+        bool pulse_first = false;
+        bool pulse_second = false;
+        int check_frequency = 10;
+        float currT = 0;
+        size_t count = 1;
+        vector<float> time;
+
+        time.push_back(currT);
+        write_to_file(dir_name + "/M_t.txt", spin_t);
+
+        while(currT < T_end){
+
+            if ((abs(currT) < pulse_width) && !pulse_first){
+                set_field(field_in_1);
+                pulse_first = true;
+            }
+            else if ((currT> pulse_width) && pulse_first){
+                set_field({{0}});
+                pulse_first = false;
+            }
+            if ((abs(currT - t_B) < pulse_width) && !pulse_second){
+                set_field(field_in_2);
+                pulse_second = true;
+            }
+            else if ((currT - t_B > pulse_width) && pulse_second){
+                set_field({{0}});
+                pulse_second = false;
+            }
+            spin_t = RK45_step(step_size, spin_t, tol);
+            write_to_file(dir_name + "/M_t.txt", spin_t);
+            currT = currT + step_size;
+            cout << "Time: " << currT << endl;
+            time.push_back(currT);
+            count++;
+        }   
+        ofstream time_sections;
+        time_sections.open(dir_name + "/Time_steps.txt");
+        for(size_t i = 0; i<count; ++i){
+            time_sections << time[i] << endl;
+        }
+        time_sections.close();     
+    };
+        
+
+    void nonlinear_M_B(array<array<float,N>, N_ATOMS> &field_in_A, float t_B, array<array<float,N>, N_ATOMS> &field_in_B, float pulse_width, float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
+        simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
+        write_to_file_pos(dir_name + "/pos.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
+
+        M_B_t(field_in_A, 0, pulse_width, Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate, T_end, step_size, dir_name+"/M0");
+        M_B_t(field_in_B, t_B, pulse_width, Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate, T_end, step_size, dir_name+"/M1");
+        M_BA_BB_t(field_in_A, t_B, field_in_B, pulse_width, Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate, T_end, step_size, dir_name+"/M01");
+
     }
 };
 #endif // LATTICE_H

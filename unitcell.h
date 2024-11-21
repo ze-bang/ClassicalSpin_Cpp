@@ -140,7 +140,7 @@ struct UnitCell{
     multimap<int, trilinear<N>> trilinear_interaction;
 
     UnitCell(const array<array<float,3>, N_ATOMS> &spos,const array<array<float,3>, 3> &svec) : lattice_pos(spos), lattice_vectors(svec) {
-        field = {{0}};
+        field = {{{0}}};
         lattice_pos = spos;
         lattice_vectors = svec;
     };
