@@ -461,5 +461,62 @@ class lattice
         }
         time_sections.close();
     }
+
+    void nonlinear_spectroscopy_tau(float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_pump, float T_end, float step_size, string dir_name){
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        float curr_accept;
+        filesystem::create_directory(dir_name);
+        float T = Temp_start;
+
+        while(T > Temp_end){
+            curr_accept = 0;
+            for(size_t i = 0; i<n_anneal; ++i){
+                if(overrelaxation_rate > 0){
+                    overrelaxation();
+                    if (i%overrelaxation_rate == 0){
+                        curr_accept += metropolis(T, gen);
+                    }
+                }
+                else{
+                    curr_accept += metropolis(T, gen);
+                }
+            }
+            if (overrelaxation_rate > 0){
+                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
+            }else{
+                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
+            }
+            T *= 0.9;
+        }
+        write_to_file_pos(dir_name + "/pos.txt");
+        write_to_file_spin(dir_name + "/spin_t.txt", spins);
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+
+        double tol = 1e-8;
+
+        int check_frequency = 10;
+        float currT = 0;
+        size_t count = 1;
+        vector<float> time;
+
+        time.push_back(currT);
+
+        while(currT < T_end){
+            spin_t = RK45_step(step_size, spin_t, tol);
+            write_to_file(dir_name + "/spin_t.txt", spin_t);
+            currT = currT + step_size;
+            cout << "Time: " << currT << endl;
+            time.push_back(currT);
+            count++;
+        }
+
+        ofstream time_sections;
+        time_sections.open(dir_name + "/Time_steps.txt");
+        for(size_t i = 0; i<count; ++i){
+            time_sections << time[i] << endl;
+        }
+        time_sections.close();
+    }
 };
 #endif // LATTICE_H
