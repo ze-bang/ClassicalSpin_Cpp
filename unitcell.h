@@ -14,7 +14,7 @@ template <size_t N>
 struct bilinear{
     array<array<float,N>, N> bilinear_interaction;
     size_t partner;
-    int offset[3];
+    array<int, 3> offset;
 
     // Constructor
 
@@ -37,7 +37,7 @@ struct bilinear{
     };
 
 
-    bilinear(array<array<float,N>, N>  &b_set, int p_set, int* o_set) : bilinear_interaction(b_set), partner(p_set) {
+    bilinear(array<array<float,N>, N>  &b_set, int p_set, const array<int, 3> &o_set) : bilinear_interaction(b_set), partner(p_set) {
         for(size_t i=0; i<3; i++) {
             this->offset[i] = o_set[i];
         }
@@ -50,8 +50,8 @@ struct trilinear{
     array<array<array<float,N>, N>,N>   trilinear_interaction;
     size_t partner1;
     size_t partner2;
-    int offset1[3];
-    int offset2[3];
+    array<int, 3> offset1;
+    array<int, 3> offset2;
 
     // Constructor
 
@@ -78,7 +78,7 @@ struct trilinear{
         }
     };
 
-    trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    trilinear(array<array<array<float,N>, N>,N> b_set, int partner1, int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
         for(size_t i=0; i<3; i++) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
@@ -92,8 +92,8 @@ struct mixed_trilinear{
     array<array<array<float,N_SU2>, N_SU2>,N_SU3>   trilinear_interaction;
     size_t partner1;
     size_t partner2;
-    int offset1[3];
-    int offset2[3];
+    array<int, 3> offset1;
+    array<int, 3> offset2;
 
     // Constructor
 
@@ -120,7 +120,7 @@ struct mixed_trilinear{
         }
     };
 
-    mixed_trilinear(array<array<array<float,N_SU3>, N_SU2>,N_SU2> b_set, int partner1, int partner2, int* offset1, int* offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    mixed_trilinear(array<array<array<float,N_SU3>, N_SU2>,N_SU2> b_set, int partner1, int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
         for(int i=0; i<3; i++) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
@@ -170,12 +170,12 @@ struct UnitCell{
         field[index] = f;
     };
 
-    void set_bilinear_interaction(array<array<float,N>, N> &bin, int source, int partner, int* offset){
+    void set_bilinear_interaction(array<array<float,N>, N> &bin, int source, int partner, const array<int, 3> &offset){
         bilinear<N> b_set(bin, partner, offset);
         bilinear_interaction.insert(make_pair(source, b_set));
     };
     
-    void set_trilinear_interaction(array<array<array<float,N>, N>,N> &tin, int source, int partner1, int partner2, int* offset1, int* offset2){
+    void set_trilinear_interaction(array<array<array<float,N>, N>,N> &tin, int source, int partner1, int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2){
         trilinear<N> t_set(tin, partner1, partner2, offset1, offset2);
         trilinear_interaction.insert(make_pair(source, t_set));
     };
@@ -191,7 +191,7 @@ struct mixed_UnitCell{
     mixed_UnitCell(UnitCell<N_SU2, N_ATOMS_SU2> *SU2, UnitCell<N_SU3, N_ATOMS_SU3> *SU3) : SU2(*SU2), SU3(*SU3) {
     };
 
-    void set_mix_trilinear_interaction(array<array<array<float,N_SU3>, N_SU2>,N_SU2> &tin, int source, int partner1, int partner2, int* offset1, int* offset2){
+    void set_mix_trilinear_interaction(array<array<array<float,N_SU3>, N_SU2>,N_SU2> &tin, int source, int partner1, int partner2, const array<int, 3> & offset1, const array<int, 3> & offset2){
         mixed_trilinear<N_SU2, N_SU3> t_set(tin, partner1, partner2, offset1, offset2);
         trilinear_SU2_SU3.insert(make_pair(source, t_set));
     };
@@ -206,5 +206,18 @@ struct HoneyComb : UnitCell<N, 2>{
         this->set_field(field0, 1);
     };
 };
+
+
+template<size_t N>
+struct Pyrochlore : UnitCell<N, 4>{
+    Pyrochlore() : UnitCell<N, 4>({{{0.125,0.125,0.125},{0.125,-0.125,-0.125},{-0.125,0.125,-0.125},{-0.125,-0.125,0.125}}}, {{{0,0.5,0.5},{0.5,0,0.5},{0.5,0.5,0}}}) {
+        array<float,N> field0 = {0};
+        this->set_field(field0, 0);
+        this->set_field(field0, 1);
+        this->set_field(field0, 2);
+        this->set_field(field0, 3);
+    };
+};
+
 
 #endif // UNITCELL_H    

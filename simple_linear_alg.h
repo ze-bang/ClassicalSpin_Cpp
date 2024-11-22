@@ -45,6 +45,18 @@ array<float, N> operator*(const array<float, N> &a,const float n) {
     return result;
 }
 
+
+template<size_t N>
+array<float, N> operator/(const array<float, N> &a,const float n) {
+    array<float, N> result;
+    #pragma omp simd
+    for (size_t i = 0; i < 3; ++i) {
+        result[i] = a[i]/n;
+    }
+    return result;
+}
+
+
 template<size_t N>
 array<float, N> operator*(const array<float, N> &a,const int n) {
     array<float, N> result;

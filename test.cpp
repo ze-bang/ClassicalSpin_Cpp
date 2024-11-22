@@ -3,7 +3,7 @@
 #include "mixed_lattice.h"
 #include <iostream>
 #include <mpi.h>
-
+#include "simple_linear_alg.h"
 
 void MD_kitaev_honeycomb(size_t num_trials, float K, float h, string dir){
     srand(time(NULL));
@@ -14,14 +14,10 @@ void MD_kitaev_honeycomb(size_t num_trials, float K, float h, string dir){
     array<array<float,3>, 3> Jz = {{{0,0,0},{0,0,0},{0,0,K}}};
 
     array<float, 3> field = {h/float(sqrt(3)),h/float(sqrt(3)),h/float(sqrt(3))};
-
-    int offsetx[3] = {0,-1,0};
-    int offsety[3] = {1,-1,0};
-    int offsetz[3] = {0,0,0};
     
-    atoms.set_bilinear_interaction(Jx, 0, 1, offsetx);
-    atoms.set_bilinear_interaction(Jy, 0, 1, offsety);
-    atoms.set_bilinear_interaction(Jz, 0, 1, offsetz);
+    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
 
@@ -44,13 +40,10 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
 
     array<float, 3> field = {h/float(sqrt(3)),h/float(sqrt(3)),h/float(sqrt(3))};
 
-    int offsetx[3] = {0,-1,0};
-    int offsety[3] = {1,-1,0};
-    int offsetz[3] = {0,0,0};
-    
-    atoms.set_bilinear_interaction(Jx, 0, 1, offsetx);
-    atoms.set_bilinear_interaction(Jy, 0, 1, offsety);
-    atoms.set_bilinear_interaction(Jz, 0, 1, offsetz);
+
+    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
 
@@ -97,11 +90,59 @@ void MD_TmFeO3(int num_trials, float J, float xi, string dir){
     mixed_lattice<3, 2, 8, 2, 16, 16, 1> MC(&atoms);
 }
 
+void MD_pyrochlore_QSI(size_t num_trials, float Jxx, float Jyy, float Jzz, float gxx, float gyy, float gzz, float h, array<float, 3> field_dir, string dir){
+    srand(time(NULL));
+    filesystem::create_directory(dir);
+    Pyrochlore<3> atoms;
+
+    array<float,3> z1 = {1, 1, 1};
+    array<float,3> z2 = {1,-1,-1};
+    array<float,3> z3 = {-1,1,-1};
+    array<float,3> z4 = {-1,-1,1};
+
+    z1 = z1/float(sqrt(3));
+    z2 = z2/float(sqrt(3));
+    z3 = z3/float(sqrt(3));
+    z4 = z4/float(sqrt(3));
+
+    array<array<float,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<float, 3> g = {gxx, gyy, gzz};
+    array<float, 3> field = field_dir*h;
+
+
+    atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
+
+    atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
+
+    atoms.set_field(g*dot(field, z1), 0);
+    atoms.set_field(g*dot(field, z2), 1);
+    atoms.set_field(g*dot(field, z3), 2);
+    atoms.set_field(g*dot(field, z4), 3);
+
+    for(size_t i=0; i<num_trials;++i){
+
+        lattice<3, 4, 8, 8, 8> MC(&atoms);
+        // MC.simulated_annealing(1, 0.001, 1000, 10000, 1000000, 0, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(14,0.06, 1000, 10000, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+    }
+}
+
 
 int main(int argc, char** argv) {
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, -0.06, "integrity_test");
-    nonlinearspectroscopy_kitaev_honeycomb(1000, 5000, -1.0, -0.06, "nonlinear_spec_test");
+    // nonlinearspectroscopy_kitaev_honeycomb(1000, 10000, -1.0, -0.06, "nonlinear_spec_test");
+    MD_pyrochlore_QSI(1, 0.2, 1, 0.2, 0, 0, 1, 1, {1, 1, 1}, "pyrochlore_test");
     // std::cout << "finished" << std::endl;   
     return 0;
 }
