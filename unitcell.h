@@ -145,6 +145,20 @@ struct UnitCell{
         lattice_vectors = svec;
     };
 
+    UnitCell(){
+        field = {{{0}}};
+        lattice_pos = {{{0}}};
+        lattice_vectors = {{{0}}};
+    };  
+
+    void set_UnitCell(const UnitCell<N, N_ATOMS> *atoms){
+        lattice_pos = atoms->lattice_pos;
+        lattice_vectors = atoms->lattice_vectors;
+        field = atoms->field;
+        bilinear_interaction = atoms->bilinear_interaction;
+        trilinear_interaction = atoms->trilinear_interaction;
+    };
+
     void set_lattice_pos(array<float,N> &pos, int index){
         lattice_pos[index] = pos;
     };
