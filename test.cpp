@@ -56,7 +56,7 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
 
     array<array<float, 3>,2> field_drive = {{{0,0,1},{0,0,1}}};
 
-    float pulse_width = 0.5;
+    float pulse_width = 0.01;
 
     lattice<3, 2, 24, 24, 1> MC(&atoms);
     MC.simulated_annealing(1.0, 0.001, 1000, 10000, 0);
