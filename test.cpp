@@ -90,7 +90,7 @@ void MD_TmFeO3(int num_trials, float J, float xi, string dir){
     mixed_lattice<3, 2, 8, 2, 16, 16, 1> MC(&atoms);
 }
 
-void MD_pyrochlore_QSI(size_t num_trials, float Jxx, float Jyy, float Jzz, float gxx, float gyy, float gzz, float h, array<float, 3> field_dir, string dir){
+void MD_pyrochlore(size_t num_trials, float Jxx, float Jyy, float Jzz, float gxx, float gyy, float gzz, float h, array<float, 3> field_dir, string dir){
     srand(time(NULL));
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
@@ -129,20 +129,34 @@ void MD_pyrochlore_QSI(size_t num_trials, float Jxx, float Jyy, float Jzz, float
     atoms.set_field(g*dot(field, z3), 2);
     atoms.set_field(g*dot(field, z4), 3);
 
-    for(size_t i=0; i<num_trials;++i){
+    MPI_Init(NULL, NULL);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-        lattice<3, 4, 8, 8, 8> MC(&atoms);
+    int start = rank*num_trials/size;
+    int end = (rank+1)*num_trials/size;
+
+    float k_B = 0.08620689655;
+    float hbar = 4.135667696e-12;
+    for(int i=start; i<end;++i){
+
+        lattice<3, 4, 12, 12, 12> MC(&atoms);
         // MC.simulated_annealing(1, 0.001, 1000, 10000, 1000000, 0, dir+"/"+std::to_string(i));
-        MC.molecular_dynamics(14,0.06, 1000, 10000, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(14,0.09, 1000, 10000, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
     }
 }
 
 
 int main(int argc, char** argv) {
+    float k_B = 0.08620689655;
+    float mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, -0.06, "integrity_test");
     // nonlinearspectroscopy_kitaev_honeycomb(1000, 10000, -1.0, -0.06, "nonlinear_spec_test");
-    MD_pyrochlore_QSI(1, 0.2, 1, 0.2, 0, 0, 1, 1, {1, 1, 1}, "pyrochlore_test");
+    // MD_pyrochlore(1, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {1/sqrt(2), 1/sqrt(2), 0}, "pyrochlore_test_110");
+    MD_pyrochlore(20, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {0,0,1}, "pyrochlore_test_001");
     // std::cout << "finished" << std::endl;   
     return 0;
 }

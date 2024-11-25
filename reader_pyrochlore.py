@@ -3,7 +3,7 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
-plt.rcParams['text.usetex'] = True
+# plt.rcParams['text.usetex'] = True
 
 
 def drawLine(A, B, stepN):
@@ -19,7 +19,7 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 50
+graphres = 12
 
 Gamma = np.array([0, 0, 0])
 K = 2 * np.pi * np.array([3/4, -3/4, 0])
@@ -62,7 +62,44 @@ gX1 = gW1 + magnitude_bi(W1, X1)
 gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
-DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
+Gamma = np.array([0, 0, 0])
+P1 = np.pi * np.array([1, 0, 0])
+P2 = np.pi * np.array([2, 0, 0])
+P3 = np.pi * np.array([2, 1, 0])
+P4 = np.pi * np.array([2, 2, 0])
+P5 = np.pi * np.array([1, 1, 0])
+
+# P1 = np.pi * np.array([1, 1, 0])
+# P2 = np.pi * np.array([2, 2, 0])
+# P3 = np.pi * np.array([2, 2, 1])
+# P4 = np.pi * np.array([2, 2, 2])
+# P5 = np.pi * np.array([1, 1, 1])
+
+stepN = np.linalg.norm(Gamma-P1)/graphres
+
+
+#Path to 1-10
+GammaP1 = drawLine(Gamma, P1, stepN)
+P12 = drawLine(P1, P2, stepN)
+P23 = drawLine(P2, P3, stepN)
+P34 = drawLine(P3, P4, stepN)
+P45 = drawLine(P4, P5, stepN)
+P5Gamma = drawLine(P5, Gamma, stepN)
+
+
+
+gGamma1 = 0
+g1 = magnitude_bi(Gamma, P1)
+g2 = g1 + magnitude_bi(P1, P2)
+g3 = g2 + magnitude_bi(P2, P3)
+g4 = g3 + magnitude_bi(P3, P4)
+g5 = g4 + magnitude_bi(P4, P5)
+gGamma4 = g5 + magnitude_bi(P5, Gamma)
+
+
+# DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
+
+DSSF_K = np.concatenate((GammaP1, P12, P23, P34, P45, P5Gamma))
 
 
 z = np.array([np.array([1,1,1])/np.sqrt(3), np.array([1,-1,-1])/np.sqrt(3), np.array([-1,1,-1])/np.sqrt(3), np.array([-1,-1,1])/np.sqrt(3)])
@@ -86,16 +123,16 @@ def Spin(k, S, P):
 
 def Spin_global_pyrochlore_t(k,S,P):
     size = int(len(P)/4)
-    tS = np.zeros((len(k),3), dtype=np.complex128)
+    tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
     for i in range(4):
         ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
-        tS = tS + contract('jst, ij, sp->tip', S[i*size:(i+1)*size], ffact, localframe[:,i,:])/np.sqrt(size)
+        tS[:,i,:,:] = contract('tjs, ij, sp->tip', S[:,i*size:(i+1)*size,:], ffact, localframe[:,i,:])/np.sqrt(size)
     return tS
 
 def Spin_t(k, S, P):
     ffact = np.exp(1j*contract('ik,jk->ij', k, P))
     N = len(S)
-    return contract('jst, ij->tis', S, ffact)/np.sqrt(N)
+    return contract('tjs, ij->tis', S, ffact)/np.sqrt(N)
 
 def SSSF_q(k, S, P, gb=False):
     if gb:
@@ -104,20 +141,29 @@ def SSSF_q(k, S, P, gb=False):
         A = Spin(k, S, P)
     return np.real(contract('ia, ib -> iab', A, np.conj(A)))
 
+def g(q):
+    M = np.zeros((len(q),4,4))
+    qnorm = contract('ik, ik->i', q, q)
+    qnorm = np.where(qnorm == 0, 1, qnorm)
+    for i in range(4):
+        for j in range(4):
+            M[:,i,j] = np.dot(z[i], z[j]) - contract('k, ik->i',z[i],q) * contract('k, ik->i', z[j],q) /qnorm
+    return M
+
 def DSSF(w, k, S, P, T, gb=False):
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
+        Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
+        read = np.real(contract('wni, wmi, inm->wi', Somega[:,:,:,2], np.conj(Somega[:,:,:,2]), g(k)))
+        return np.log(read)
+    
     else:
         A = Spin_t(k, S, P)
-    # temp = np.mod(contract('ij,jk->ik', k, BasisBZA_reverse_honeycomb), 2*np.pi)
-    # Gamma_ind = np.array([], dtype=int)
-    # for i in range(len(temp)):
-    #     if np.isclose(temp[i], np.zeros(temp.shape[1]), rtol=1e-1).all():
-    #         Gamma_ind = np.append(Gamma_ind, i)
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))
-    Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
-    read = np.real(contract('wia, wib-> wiab', Somega, np.conj(Somega)))
-    return read
+        Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
+        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
+        # read = contract('wiab, ab->wi', read, g(k))
+        return np.log(read[:,:,2,2])
 
 def SSSFGraphHnHL(A,B,d1, filename):
     plt.pcolormesh(A,B, d1)
@@ -409,8 +455,6 @@ def fullread(dir, gb=False, magi=""):
 
 def parseSSSF(dir):
     directory = os.fsencode(dir)
-
-
     def SSSFhelper(name):
         size = 0
         for file in os.listdir(directory):
@@ -442,61 +486,162 @@ def parseSSSF(dir):
     SSSFhelper("Syy_global")
     SSSFhelper("Szz_global")
 
+# def parseDSSF(dir):
+#     directory = os.fsencode(dir)
+    
+#     def DSSFHelper(name):
+#         size = 0
+#         for file in os.listdir(directory):
+#             filename = os.fsdecode(file)
+#             if filename.endswith("time_evolved_"+name+".txt"):
+#                 test = np.loadtxt(dir+filename)
+#                 size = test.shape
+#                 break
+#         A = np.zeros(size)
+
+#         for file in os.listdir(directory):
+#             filename = os.fsdecode(file)
+#             if filename.endswith("time_evolved_"+name+".txt"):
+#                 print(filename)
+#                 A = A + np.loadtxt(dir+filename)
+#         A = A / np.max(A)
+#         fig, ax = plt.subplots(figsize=(10,4))
+
+#         C = ax.imshow(A, origin='lower', extent=[0, gGamma3, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+#         ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gW, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gK, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gGamma2, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gL, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gU, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gW1, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gX1, color='b', label='axvline - full height', linestyle='dashed')
+#         ax.axvline(x=gGamma3, color='b', label='axvline - full height', linestyle='dashed')
+#         xlabpos = [gGamma1, gX, gW, gK, gGamma2, gL, gU, gW1, gX1, gGamma3]
+#         labels = [r'$\Gamma$', r'$X$', r'$W$', r'$K$', r'$\Gamma$', r'$L$', r'$U$', r'$W^\prime$', r'$X^\prime$',
+#                     r'$\Gamma$']
+#         ax.set_xticks(xlabpos, labels)
+#         ax.set_xlim([0, gGamma3])
+#         fig.colorbar(C)
+#         plt.savefig(dir+"DSSF.pdf")
+#         plt.clf()
+    
+#     DSSFHelper("Sxx_local")
+#     DSSFHelper("Syy_local")
+#     DSSFHelper("Szz_local")
+#     DSSFHelper("Sxx_global")
+#     DSSFHelper("Syy_global")
+#     DSSFHelper("Szz_global")
+
 def parseDSSF(dir):
+    size = 0
     directory = os.fsencode(dir)
-    
-    def DSSFHelper(name):
-        size = 0
-        for file in os.listdir(directory):
-            filename = os.fsdecode(file)
-            if filename.endswith("time_evolved_"+name+".txt"):
-                test = np.loadtxt(dir+filename)
-                size = test.shape
-                break
-        A = np.zeros(size)
 
-        for file in os.listdir(directory):
-            filename = os.fsdecode(file)
-            if filename.endswith("time_evolved_"+name+".txt"):
-                print(filename)
-                A = A + np.loadtxt(dir+filename)
-        A = A / np.max(A)
-        fig, ax = plt.subplots(figsize=(10,4))
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+        if filename.endswith("DSSF.txt"):
+            test = np.loadtxt(dir+"/"+filename)
+            size = test.shape
+            break
+    A = np.zeros(size)
 
-        C = ax.imshow(A, origin='lower', extent=[0, gGamma3, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-        ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gW, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gK, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gGamma2, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gL, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gU, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gW1, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gX1, color='b', label='axvline - full height', linestyle='dashed')
-        ax.axvline(x=gGamma3, color='b', label='axvline - full height', linestyle='dashed')
-        xlabpos = [gGamma1, gX, gW, gK, gGamma2, gL, gU, gW1, gX1, gGamma3]
-        labels = [r'$\Gamma$', r'$X$', r'$W$', r'$K$', r'$\Gamma$', r'$L$', r'$U$', r'$W^\prime$', r'$X^\prime$',
-                    r'$\Gamma$']
-        ax.set_xticks(xlabpos, labels)
-        ax.set_xlim([0, gGamma3])
-        fig.colorbar(C)
-        plt.savefig(dir+"DSSF.pdf")
-        plt.clf()
-    
-    DSSFHelper("Sxx_local")
-    DSSFHelper("Syy_local")
-    DSSFHelper("Szz_local")
-    DSSFHelper("Sxx_global")
-    DSSFHelper("Syy_global")
-    DSSFHelper("Szz_global")
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+        if filename.endswith("DSSF.txt"):
+            print(filename)
+            A = A + np.loadtxt(dir+"/"+filename)
+
+    A = A / np.max(A)
+    fig, ax = plt.subplots(figsize=(10,4))
+
+    C = ax.imshow(A, origin='lower', extent=[0, gGamma3, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gW, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gK, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gL, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gU, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gW1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gX1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma3, color='b', label='axvline - full height', linestyle='dashed')
+    xlabpos = [gGamma1, gX, gW, gK, gGamma2, gL, gU, gW1, gX1, gGamma3]
+    labels = [r'$\Gamma$', r'$X$', r'$W$', r'$K$', r'$\Gamma$', r'$L$', r'$U$', r'$W^\prime$', r'$X^\prime$',
+                r'$\Gamma$']
+    ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, gGamma3])
+    fig.colorbar(C)
+    plt.savefig(dir+"DSSF.pdf")
+    plt.clf()
+
+
+def read_MD_tot(dir):
+    directory = os.fsencode(dir)
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            read_MD(dir + "/" + filename)
+
+def read_MD(dir):
+    directory = os.fsencode(dir)
+    P = np.loadtxt(dir + "/pos.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
+
+    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
+
+    w0 = 0
+    wmax = 10
+    w = np.linspace(w0, wmax, 1000)[1:]
+    A = DSSF(w, DSSF_K, S, P, T, False)
+    A = A / np.max(A)
+    np.savetxt(dir + "_DSSF.txt", A)
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.imshow(A, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g5, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
+    xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
+    labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
+    ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, gGamma4])
+    fig.colorbar(C)
+    plt.savefig(dir+"DSSF.pdf")
+    plt.clf()
+    # C = ax.imshow(A, origin='lower', extent=[0, gGamma3, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gW, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gK, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gGamma2, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gL, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gU, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gW1, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gX1, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gGamma3, color='b', label='axvline - full height', linestyle='dashed')
+    # xlabpos = [gGamma1, gX, gW, gK, gGamma2, gL, gU, gW1, gX1, gGamma3]
+    # labels = [r'$\Gamma$', r'$X$', r'$W$', r'$K$', r'$\Gamma$', r'$L$', r'$U$', r'$W^\prime$', r'$X^\prime$',
+    #             r'$\Gamma$']
+    # ax.set_xticks(xlabpos, labels)
+    # ax.set_xlim([0, gGamma3])
+    # fig.colorbar(C)
+    # plt.savefig(dir+"DSSF.pdf")
+    # plt.clf()
+
 
 # obenton_to_xx_zz()
 #
-dir = "../code/pyrochlore_CZO_T=0.03_B110=0.0T_L=8/"
-fullread(dir, False, "110")
-fullread(dir, True, "110")
-parseSSSF(dir)
+dir = "./pyrochlore_test_110"
+read_MD_tot(dir)
 parseDSSF(dir)
+# fullread(dir, False, "111")
+# fullread(dir, True, "111")
+# parseSSSF(dir)
+# parseDSSF(dir)
 
 
 # dir = "./kitaev/"
