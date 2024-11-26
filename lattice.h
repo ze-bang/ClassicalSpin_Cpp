@@ -302,21 +302,17 @@ class lattice
         }
         myfile.close();
     }
-    void write_to_file_magnetization_init(string filename, array<float,N> towrite){
+    void write_to_file_magnetization_init(string filename, float towrite){
         ofstream myfile;
         myfile.open(filename);
-        for(size_t j = 0; j<N; ++j){
-            myfile << towrite[j] << " ";
-        }
+        myfile << towrite << " ";
         myfile << endl;
         myfile.close();
     }
-    void write_to_file_magnetization(string filename, array<float,N> towrite){
+    void write_to_file_magnetization(string filename, float towrite){
         ofstream myfile;
         myfile.open(filename, ios::app);
-        for(size_t j = 0; j<N; ++j){
-            myfile << towrite[j] << " ";
-        }
+        myfile << towrite << " ";
         myfile << endl;
         myfile.close();
     }
@@ -499,12 +495,12 @@ class lattice
         }
     }
 
-    array<float, N> magnetization(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins){
+    float magnetization(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins, array<float, N> &field){
         array<float, N> mag = {0};
         for(size_t i = 0; i<lattice_size; ++i){
             mag = mag + current_spins[i]*(1/float(lattice_size));
         }
-        return mag;
+        return dot(mag,field);
     }
 
     void M_B_t(array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_width, float T_end, float step_size, string dir_name){
@@ -522,7 +518,7 @@ class lattice
         float pulsed_time = 0;
 
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t));
+        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in[0]));
 
         while(currT < T_end){
             if (pulse && !pulsed){
@@ -535,7 +531,7 @@ class lattice
                 pulse = true;
             }
             spin_t = RK4_step(step_size, spin_t, tol);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t));
+            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in[0]));
             currT = currT + step_size;
             time.push_back(currT);
             count++;
@@ -574,7 +570,7 @@ class lattice
         vector<float> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t));
+        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1[0]));
 
         while(currT < T_end){
 
@@ -597,7 +593,7 @@ class lattice
             }
             
             spin_t = RK4_step(step_size, spin_t, tol);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t));
+            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1[0]));
             currT = currT + step_size;
             time.push_back(currT);
             count++;

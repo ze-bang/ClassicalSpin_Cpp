@@ -50,6 +50,9 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
     array<array<float, 3>,2> field_drive = {{{0,0,1},{0,0,1}}};
 
     float pulse_width = 0.01;
+    
+    float T_end = 250;
+    int T_steps = int(250/0.1)+1;
 
     lattice<3, 2, 24, 24, 1> MC(&atoms);
     MC.simulated_annealing(1.0, 0.001, 1000, 10000, 0);
@@ -57,8 +60,13 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
     MC.write_to_file_spin(dir+"/spin_0.txt", MC.spins);
 
     lattice<3, 2, 24, 24, 1> temp_lattice(&MC);
-    filesystem::create_directory(dir+"/M_time_0.000000");
-    temp_lattice.M_B_t(field_drive, 0.0, pulse_width, 1000, 1e-1, dir+"/M_time_0.000000/M0");
+    filesystem::create_directory(dir+"/M_time_0");
+    temp_lattice.M_B_t(field_drive, 0.0, pulse_width, T_end, 1e-1, dir+"/M_time_0/M0");
+
+    ofstream run_param;
+    run_param.open(dir + "/param.txt");
+    run_param << tau_end << " " << tau_steps + 1 << " " << T_steps << " " << K << " " << h << endl;
+    run_param.close();
 
     MPI_Init(NULL, NULL);
     int rank;
@@ -69,14 +77,14 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
     int start = rank*tau_steps/size;
     int end = (rank+1)*tau_steps/size;
 
-    for(int i=start; i< end;++i){
+    for(int i=start; i< end+1;++i){
         float current_time = i*tau_end/tau_steps;
         cout << "Time: " << current_time << " Rank: " << rank << endl;
-        filesystem::create_directory(dir+"/M_time_"+ std::to_string(current_time));
+        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i));
         temp_lattice.reset_lattice(&MC);
-        MC.M_B_t(field_drive, current_time, pulse_width, 1000, 1e-1, dir+"/M_time_"+ std::to_string(current_time) + "/M1");
+        MC.M_B_t(field_drive, current_time, pulse_width, T_end, 1e-1, dir+"/M_time_"+ std::to_string(i) + "/M1");
         temp_lattice.reset_lattice(&MC);
-        MC.M_BA_BB_t(field_drive, current_time, field_drive, pulse_width, 1000, 1e-1, dir+"/M_time_"+ std::to_string(current_time)+ "/M01");
+        MC.M_BA_BB_t(field_drive, current_time, field_drive, pulse_width, T_end, 1e-1, dir+"/M_time_"+ std::to_string(i)+ "/M01");
     }
 
     MPI_Finalize();
@@ -154,9 +162,11 @@ int main(int argc, char** argv) {
     float mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, -0.06, "integrity_test");
-    // nonlinearspectroscopy_kitaev_honeycomb(1000, 10000, -1.0, -0.06, "nonlinear_spec_test");
+    for(size_t i = 0; i < 10; ++i){
+        nonlinearspectroscopy_kitaev_honeycomb(250, 2500, -1.0, -0.00, "nonlinear_spec_test_"+std::to_string(i));
+    }
     // MD_pyrochlore(1, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {1/sqrt(2), 1/sqrt(2), 0}, "pyrochlore_test_110");
-    MD_pyrochlore(20, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {0,0,1}, "pyrochlore_test_001");
+    // MD_pyrochlore(20, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {0,0,1}, "pyrochlore_test_001");
     // std::cout << "finished" << std::endl;   
     return 0;
 }

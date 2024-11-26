@@ -560,11 +560,40 @@ def read_MD(dir):
     SSSF2D(S[0], P, 100, dir, True)
 
 
+def read_2D_nonlinear(dir):
+    directory = os.fsencode(dir)
+    tau_end, tau_step, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")
+    T = np.linspace(0, time_end, int(time_step))
+    tau = np.linspace(0, tau_end, tau_step)
+    M_NL = np.zeros((tau_end, int(time_step)))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            info = filename.split("_")
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")
+            try:
+                M_NL[int(info[2])] = M01 - M0 - M1
+            except:
+                M_NL[int(info[2])] = 0
 
-dir = "integrity_test"
-read_MD_tot(dir)
-parseDSSF(dir)
+    w = np.linspace(-2, 2, 1000)
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))
+    ffactau = np.exp(1j*contract('w,t->wt', w, tau))
+    gaussian_filter =  np.exp(-1e-6 * contract('t, u->tu', contract('i,i->i',T,T), contract('i,i->i',tau,tau)))    
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL, ffactau, ffactt))
 
+    plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.savefig(dir + "2D_nonlinear.pdf")
+    plt.clf()
+
+# dir = "integrity_test"
+# read_MD_tot(dir)
+# parseDSSF(dir)
+
+dir = "nonlinear_spec_test"
+read_2D_nonlinear(dir)
 
 # dir = "./kitaev/"
 # fullread(dir, True, "110")
