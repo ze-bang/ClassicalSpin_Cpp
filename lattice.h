@@ -434,6 +434,16 @@ class lattice
         return z;
     }
 
+    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK45_step_fixed(const float &step_size, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, const double tol){
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins)*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0))*step_size;
+        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
+        return z;
+    }
 
     array<array<float,N>,N_ATOMS*dim1*dim2*dim3> euler_step(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = landau_lifshitz(curr_spins);
@@ -456,7 +466,7 @@ class lattice
         write_to_file_spin(dir_name + "/spin_t.txt", spins);
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
 
-        double tol = 1e-8;
+        double tol = 1e-12;
 
         int check_frequency = 10;
         float currT = 0;
@@ -557,7 +567,7 @@ class lattice
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
         }
-        double tol = 1e-8;
+        double tol = 1e-12;
         bool pulse_first = false;
         bool pulse_second = false;
         bool pulsed_first = false;
@@ -592,7 +602,7 @@ class lattice
                 pulsed_second = true;
             }
             
-            spin_t = RK4_step(step_size, spin_t, tol);
+            spin_t = RK45_step_fixed(step_size, spin_t, tol);
             write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1[0]));
             currT = currT + step_size;
             time.push_back(currT);
