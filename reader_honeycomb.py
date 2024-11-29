@@ -585,7 +585,7 @@ def read_2D_nonlinear(dir):
     M_NL = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = np.abs(contract('it, wi, ut->uw', M_NL, ffactau, ffactt))
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(M_NL_FF.T, origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    plt.imshow(np.log(M_NL_FF.T), origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
 

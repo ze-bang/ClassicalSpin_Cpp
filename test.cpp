@@ -30,8 +30,8 @@ void MD_kitaev_honeycomb(size_t num_trials, float K, float Gamma, float Gammap, 
     }
 }
 
-
-void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, float K, float Gamma, float Gammap, float h, string dir, bool T_zero){
+// kitaev local xyz {1,-1,-1} / {-1, 1, -1} / {-1, -1, 1}
+void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, float tau_step_size, float T_end, float T_step_size, float K, float Gamma, float Gammap, float h, string dir, bool T_zero){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
     array<array<float,3>, 3> Jx = {{{K,Gammap,Gammap},{Gammap,0,Gamma},{Gammap,Gamma,0}}};
@@ -47,13 +47,14 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
 
-    array<array<float, 3>,2> field_drive = {{{0,0,1},{0,0,1}}};
+    array<array<float, 3>,2> field_drive = {{{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)},{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)}}};
 
-    float pulse_width = 0.01;
-    
-    float T_end = 250;
-    float T_step_size = 0.1;
+    float pulse_amp = 0.1;
+    float pulse_width = 0.38;
+    float pulse_freq = 0.33;
+
     int T_steps = int(T_end/T_step_size)+1;
+    int tau_steps = int(tau_end/tau_step_size)+1;
 
     lattice<3, 2, 24, 24, 1> MC(&atoms);
     MC.simulated_annealing(1.0, 0.001, 1000, 10000, 0);
@@ -67,25 +68,26 @@ void nonlinearspectroscopy_kitaev_honeycomb(float tau_end, size_t tau_steps, flo
 
     lattice<3, 2, 24, 24, 1> temp_lattice(&MC);
     filesystem::create_directory(dir+"/M_time_0");
-    temp_lattice.M_B_t(field_drive, 0.0, pulse_width, T_end, T_step_size, dir+"/M_time_0/M0");
+    temp_lattice.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_end, T_step_size, dir+"/M_time_0/M0");
 
     ofstream run_param;
     run_param.open(dir + "/param.txt");
-    run_param << tau_end << " " << tau_steps + 1 << " " << T_end << " " << T_steps << " " << K << " " << h << endl;
+    run_param << tau_end << " " << tau_steps << " " << T_end << " " << T_steps << " " << K << " " << h << endl;
     run_param.close();
 
     for(int i=0; i< tau_steps+1;++i){
-        float current_time = i*tau_end/tau_steps;
+        float current_time = i*tau_step_size;
         filesystem::create_directory(dir+"/M_time_"+ std::to_string(i));
+        cout << "Time: " << current_time << endl;
         temp_lattice.reset_lattice(&MC);
-        MC.M_B_t(field_drive, current_time, pulse_width, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) + "/M1");
+        MC.M_B_t(field_drive, current_time, pulse_amp, pulse_width, pulse_freq, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) + "/M1");
         temp_lattice.reset_lattice(&MC);
-        MC.M_BA_BB_t(field_drive, current_time, field_drive, pulse_width, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+ "/M01");
+        MC.M_BA_BB_t(field_drive, current_time, field_drive, pulse_amp, pulse_width, pulse_freq, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+ "/M01");
     }
 }
 
 
-void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, float tau_end, size_t tau_steps, float K, float Gamma, float Gammap, float h, string dir, bool T_zero){
+void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, float tau_end, float tau_step_size, float T_end, float T_step_size, float K, float Gamma, float Gammap, float h, string dir, bool T_zero){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -99,7 +101,7 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, float tau_en
     filesystem::create_directory(dir);
 
     for(size_t i = 0; i < num_trials; ++i){
-        nonlinearspectroscopy_kitaev_honeycomb(tau_end, tau_steps, K, Gamma, Gammap, h, dir+std::to_string(i), T_zero);
+        nonlinearspectroscopy_kitaev_honeycomb(tau_end, tau_step_size, T_end, T_step_size, K, Gamma, Gammap, h, dir+std::to_string(i), T_zero);
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -259,9 +261,9 @@ int main(int argc, char** argv) {
     float mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    // string dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7/";
-    // full_nonlinearspectroscopy_kitaev_honeycomb(50, 250, 2500, -1.0, 0.25, -0.02, 0.7, dir, true);
-    phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");
+    string dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.0/";
+    full_nonlinearspectroscopy_kitaev_honeycomb(5, 600, 0.25, 600, 0.25, -1.0, 0.25, -0.02, 0.0, dir, true);
+    // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,1}, "MC_phase_diagram_CZO_111");
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,0}, "MC_phase_diagram_CZO_110");
 

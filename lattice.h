@@ -505,6 +505,20 @@ class lattice
         }
     }
 
+    void set_pulse(float currT, const array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_amp, float pulse_width, float pulse_freq){
+        float factor = float(pulse_amp*exp(-pow((currT-t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B)));
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim3;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
+                        size_t current_site_index = flatten_index(i,j,k,l);
+                        field[current_site_index] = field_in[l]*factor;
+                    }
+                }
+            }
+        }
+    }
+
     float magnetization(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins, array<float, N> &field){
         array<float, N> mag = {0};
         for(size_t i = 0; i<lattice_size; ++i){
@@ -513,7 +527,7 @@ class lattice
         return dot(mag,field);
     }
 
-    void M_B_t(array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_width, float T_end, float step_size, string dir_name){
+    void M_B_t(array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_amp, float pulse_width, float pulse_freq, float T_end, float step_size, string dir_name){
         array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
@@ -531,15 +545,7 @@ class lattice
         write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in[0]));
 
         while(currT < T_end){
-            if (pulse && !pulsed){
-                set_field({{0}});
-                pulsed = true;
-            }
-            if ((abs(currT - t_B) < pulse_width) && !pulse){
-                set_field(field_in);
-                pulsed_time = currT;
-                pulse = true;
-            }
+            set_pulse(currT, field_in, t_B, pulse_amp, pulse_width, pulse_freq);
             spin_t = RK4_step(step_size, spin_t, tol);
             write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in[0]));
             currT = currT + step_size;
@@ -559,7 +565,7 @@ class lattice
         time_sections.close();               
     };
 
-    void M_BA_BB_t(array<array<float,N>, N_ATOMS> &field_in_1, float t_B, array<array<float,N>, N_ATOMS> &field_in_2, float pulse_width, float T_end, float step_size, string dir_name){
+    void M_BA_BB_t(array<array<float,N>, N_ATOMS> &field_in_1, float t_B, array<array<float,N>, N_ATOMS> &field_in_2, float pulse_amp, float pulse_width, float pulse_freq, float T_end, float step_size, string dir_name){
         // simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
         // write_to_file_pos(dir_name + "/pos.txt");
         // write_to_file_spin(dir_name + "/spin_t.txt", spins);
@@ -584,23 +590,9 @@ class lattice
 
         while(currT < T_end){
 
-            if ((abs(currT) < pulse_width) && !pulse_first){
-                set_field(field_in_1);
-                pulse_first = true;
-            }
-            else if (pulse_first && !pulsed_first){
-                set_field({{0}});
-                pulsed_first = true;
-            }
-            if ((abs(currT - t_B) < pulse_width) && !pulse_second){
-                set_field(field_in_2);
-                pulsed_time = currT;
-                pulse_second = true;
-            }
-            else if (pulse_second && !pulsed_second){
-                set_field({{0}});
-                pulsed_second = true;
-            }
+            set_pulse(currT, field_in_1, 0, pulse_amp, pulse_width, pulse_freq);
+            set_pulse(currT, field_in_2, t_B, pulse_amp, pulse_width, pulse_freq);
+
             
             spin_t = RK45_step_fixed(step_size, spin_t, tol);
             write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1[0]));
