@@ -17,8 +17,31 @@ void set_permutation(array<array<array<float, 8>, 8>,8> &A, const size_t a, cons
 }
 
 
+
 const array<array<array<float, 8>, 8>,8> SU3_structure_constant(){
     array<array<array<float, 8>, 8>,8> result;
+    result = {{{{{0}}}}};
+    set_permutation(result, 0, 1, 2, 1);
+    set_permutation(result, 0, 3, 6, 0.5);
+    set_permutation(result, 0, 4, 5, -0.5);
+    set_permutation(result, 1, 3, 5, 0.5);
+    set_permutation(result, 1, 4, 6, 0.5);
+    set_permutation(result, 2, 3, 4, 0.5);
+    set_permutation(result, 2, 5, 6, -0.5);
+    set_permutation(result, 3, 4, 7, sqrt(3)/2);
+    set_permutation(result, 5, 6, 7, sqrt(3)/2);
+    return result;
+}
+
+// Due to the number of different basis SU(3) can take, the structure constant is not always the same
+// Even though the Cartan algebra has Gell-mann matrices as the standard basis for SU(3),
+// typical systems obtain their SU(3) nature by promoting SU(2) spins to SU(3) spins via the construction of 
+// some quadropolar operators such as Q_{ij} = S_i S_j + S_j S_i - 2/3 \delta_{ij} where S is the spin of the SU(2) system
+// There is also further promotion by constructing another set of basis according to 
+// N. Papanicolaou, Unusual phases in quantum spin-1 systems, Nucl. Phys. B 305, 367 (1988).
+// the basis for this is (A^{xx}, A^{xy}, A^{xz}, A^{yx}, A^{yy}, A^{yz}, A^{zx}, A^{zy}, A^{zz})
+const array<array<array<float, 9>, 9>,9> cross_product_u3(const ){
+    array<array<array<float, 9>, 9>,9> result;
     result = {{{{{0}}}}};
     set_permutation(result, 0, 1, 2, 1);
     set_permutation(result, 0, 3, 6, 0.5);
@@ -150,6 +173,7 @@ float contract(const array<float, N>  &a, const array<array<float, N>,N>  &M, co
 template<size_t N_1, size_t N_2, size_t N_3>
 float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_1>  &a, const array<float, N_2>  &b, const array<float, N_3>  &c) {
     float result = 0;
+    #pragma omp simd  
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
             for(size_t k = 0; k < N_3; k++){
@@ -163,7 +187,8 @@ float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, con
 
 template<size_t N_1, size_t N_2, size_t N_3>
 array<float, N_1> contract_trilinear_field(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_2>  &b, const array<float, N_3>  &c) {
-    array<float, N_1>  result = {0};    
+    array<float, N_1>  result = {0};  
+    #pragma omp simd  
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
             for(size_t k = 0; k < N_3; k++){

@@ -562,31 +562,32 @@ def read_MD(dir):
 
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
-    tau_end, tau_step, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
+    tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
     M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")
-    T = np.linspace(0, time_end, int(time_step))
-    tau = np.linspace(0, tau_end, int(tau_step))
+    T = np.linspace(time_start, time_end, int(time_step))
+    tau = np.linspace(tau_start, tau_end, int(tau_step))
     M_NL = np.zeros((int(tau_step), int(time_step)))
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             info = filename.split("_")
-            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt") 
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")
-            try:
-                M_NL[int(info[2])] = M01 - M0 - M1
-            except:
-                M_NL[int(info[2])] = 0
+            M_NL[int(info[2])] = M01 - M0 - M1 
 
-    w = np.linspace(-2, 2, 1000)
+
+    w = np.linspace(-2, 2, int(time_step))
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
     gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
     M_NL = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = np.abs(contract('it, wi, ut->uw', M_NL, ffactau, ffactt))
+    M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(np.log(M_NL_FF.T), origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    plt.imshow(M_NL_FF.T, origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='log')
+    plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
+    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
     plt.clf()
 
 def read_2D_nonlinear_tot(dir):
@@ -597,17 +598,18 @@ def read_2D_nonlinear_tot(dir):
         if os.path.isdir(dir + "/" + filename):
             read_2D_nonlinear(dir + "/" + filename)
             A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
-    A = np.log(A)
+    # A = np.log(A)
     A = A/np.max(A)
-    plt.imshow(A.T, origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    plt.imshow(A.T, origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='log')
+    plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
 # dir = "integrity_test"
 # read_MD_tot(dir)
 # parseDSSF(dir)
 
-dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
-# dir = "nonlinear_spec_test"
+# dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
+dir = "test_short_K=-1"
 read_2D_nonlinear_tot(dir)
 
 # dir = "./kitaev/"

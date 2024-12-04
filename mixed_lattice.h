@@ -198,7 +198,7 @@ class mixed_lattice
 
     float site_energy_SU2(array<float, N_SU2> &spin_here, size_t site_index){
         float energy = 0.0;
-        energy += dot(spin_here, field_SU2[site_index]);
+        energy -= dot(spin_here, field_SU2[site_index]);
         #pragma omp simd
         for (size_t i=0; i<num_bi_SU2; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], get<0>(spins)[bilinear_partners_SU2[site_index][i]]);
@@ -214,7 +214,7 @@ class mixed_lattice
 
     float site_energy_SU3(array<float, N_SU3> &spin_here, size_t site_index){
         float energy = 0.0;
-        energy += dot(spin_here, field_SU3[site_index]);
+        energy -= dot(spin_here, field_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i<num_bi_SU3; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], get<1>(spins)[bilinear_partners_SU3[site_index][i]]);
@@ -249,7 +249,7 @@ class mixed_lattice
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], get<0>(spins)[mixed_trilinear_partners_SU2[site_index][i][0]], get<1>(spins)[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
-        return local_field+field_SU2[site_index];
+        return local_field-field_SU2[site_index];
     }
 
     array<float, N_SU3>  get_local_field_SU3(size_t site_index){
@@ -264,7 +264,7 @@ class mixed_lattice
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], get<0>(spins)[mixed_trilinear_partners_SU3[site_index][i][0]], get<0>(spins)[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
-        return local_field+field_SU3[site_index];
+        return local_field-field_SU3[site_index];
     }
 
     array<float, N_SU2>  get_local_field_SU2_lattice(size_t site_index, mixed_lattice_spin &current_spin){
@@ -279,7 +279,7 @@ class mixed_lattice
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], get<0>(current_spin)[mixed_trilinear_partners_SU2[site_index][i][0]], get<1>(current_spin)[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
-        return local_field+field_SU2[site_index];
+        return local_field-field_SU2[site_index];
     }
 
     array<float, N_SU3>  get_local_field_SU3_lattice(size_t site_index, mixed_lattice_spin &current_spin){
@@ -294,7 +294,7 @@ class mixed_lattice
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], get<0>(current_spin)[mixed_trilinear_partners_SU3[site_index][i][0]], get<0>(current_spin)[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
-        return local_field+field_SU3[site_index];
+        return local_field-field_SU3[site_index];
     }
 
     

@@ -18,14 +18,17 @@ template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
 {   
     public:
+
+    typedef array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_config;
+
     UnitCell<N, N_ATOMS> UC;
     size_t lattice_size;
-    array<array<float,N>, N_ATOMS*dim1*dim2*dim3>  spins;
+    spin_config  spins;
     array<array<float,3>, N_ATOMS*dim1*dim2*dim3> site_pos;
     //Lookup table for the lattice
-    array<array<float,N>, N_ATOMS*dim1*dim2*dim3> field;
-
-
+    spin_config field;
+    spin_config driving_field;
+    array<array<array<float, N>, N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
 
     array<vector<array<array<float, N>, N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
     array<vector<array<array<array<float, N>, N>, N>>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
@@ -58,6 +61,7 @@ class lattice
         temp_spin[N-1] = z;
         return temp_spin;
     }
+
 
     size_t flatten_index(size_t i, size_t j, size_t k, size_t l){
         return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
@@ -98,7 +102,8 @@ class lattice
                         site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j)  + unit_vector[2]*int(k)  + basis[l];
                         spins[current_site_index] = gen_random_spin(gen);
                         field[current_site_index] = UC.field[l];
-                        
+                        driving_field[current_site_index] = {0};
+                        onsite_interaction[current_site_index] = UC.onsite_interaction[l];
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
                         int count = 0;
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
@@ -144,6 +149,7 @@ class lattice
         spins = lattice_in->spins;
         site_pos = lattice_in->site_pos;
         field = lattice_in->field;
+        onsite_interaction = lattice_in->onsite_interaction;
         bilinear_interaction = lattice_in->bilinear_interaction;
         trilinear_interaction = lattice_in->trilinear_interaction;
         bilinear_partners = lattice_in->bilinear_partners;
@@ -159,6 +165,8 @@ class lattice
         spins = lattice_in->spins;
         site_pos = lattice_in->site_pos;
         field = lattice_in->field;
+        onsite_interaction = lattice_in->onsite_interaction;
+        driving_field = lattice_in->driving_field;
         bilinear_interaction = lattice_in->bilinear_interaction;
         trilinear_interaction = lattice_in->trilinear_interaction;
         bilinear_partners = lattice_in->bilinear_partners;
@@ -179,11 +187,14 @@ class lattice
 
     float site_energy(array<float, N> &spin_here, size_t site_index){
         float energy = 0.0;
-        energy += dot(spin_here, field[site_index]);
+        energy -= dot(spin_here, field[site_index]);
+        energy -= dot(spin_here, driving_field[site_index]);
+        energy += contract(spin_here, onsite_interaction[site_index], spin_here);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
             energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
@@ -192,7 +203,7 @@ class lattice
     
     array<float, N>  get_local_field(size_t site_index){
         array<float,N> local_field;
-        local_field = {0};
+        local_field = multiply(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
@@ -200,13 +211,13 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        return local_field+field[site_index];
+        return local_field-field[site_index]-driving_field[site_index];
     }
 
 
-    array<float, N>  get_local_field_lattice(size_t site_index, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
+    array<float, N>  get_local_field_lattice(size_t site_index, const spin_config &current_spin){
         array<float,N> local_field;
-        local_field = {0};
+        local_field =  multiply(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
@@ -214,12 +225,15 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
-        return local_field+field[site_index];
+        return local_field-field[site_index]-driving_field[site_index];
     }
 
 
-    void deterministic_sweep(){
-        for(size_t i = 0; i<lattice_size; ++i){
+    void deterministic_sweep(std::mt19937 &gen){
+        size_t count = 0;
+        int i;
+        while(count < lattice_size){
+            i = random_int(0, lattice_size-1, gen);
             array<float,N> local_field = get_local_field(i);
             float norm = sqrt(dot(local_field, local_field));
             if(norm == 0){
@@ -230,13 +244,23 @@ class lattice
                     spins[i][j] = -local_field[j]/norm;
                 }
             }
+            count++;
         }
     }
     
-    void overrelaxation(){
+    array<float,N> gaussian_move(const array<float,N> &current_spin, std::mt19937 &gen, float sigma=60){
+        array<float,N> new_spin;
+        new_spin = current_spin + gen_random_spin(gen)*sigma;
+        return new_spin/sqrt(dot(new_spin, new_spin));
+    }
+
+    void overrelaxation(std::mt19937 &gen){
         array<float,N> local_field;
+        int i;
         float proj;
-        for(size_t i = 0; i<lattice_size; ++i){
+        size_t count = 0;
+        while(count < lattice_size){
+            i = random_int(0, lattice_size-1, gen);
             local_field = get_local_field(i);
             float norm = dot(local_field, local_field);
             if(norm == 0){
@@ -246,18 +270,25 @@ class lattice
                 proj = 2* dot(spins[i], local_field)/norm;
                 spins[i] = local_field*proj - spins[i];
             }
+            count++;
         }
     }
 
-    float metropolis(float T, std::mt19937 &gen){
-        float E, E_new, dE, r, i;
+    float metropolis(float T, std::mt19937 &gen, bool gaussian=false, float sigma=60){
+        float E, E_new, dE, r;
+        int i;
         array<float,N> new_spin;
         int accept = 0;
         size_t count = 0;
         while(count < lattice_size){
             i = random_int(0, lattice_size-1, gen);
             E = site_energy(spins[i], i);
-            new_spin = gen_random_spin(gen);
+            if (gaussian){
+                new_spin = gaussian_move(spins[i], gen, sigma);
+            }
+            else{
+                new_spin = gen_random_spin(gen);
+            }
             E_new = site_energy(new_spin, i);
             dE = E_new - E;
             
@@ -278,8 +309,9 @@ class lattice
         float acceptance_rate = float(accept)/float(lattice_size);
         return acceptance_rate;
     }
+
     
-    void write_to_file_spin(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
+    void write_to_file_spin(string filename, spin_config towrite){
         ofstream myfile;
         myfile.open(filename);
         for(size_t i = 0; i<lattice_size; ++i){
@@ -291,7 +323,7 @@ class lattice
         myfile.close();
     }
 
-    void write_to_file(string filename, array<array<float,N>, N_ATOMS*dim1*dim2*dim3> towrite){
+    void write_to_file(string filename, spin_config towrite){
         ofstream myfile;
         myfile.open(filename, ios::app);
         for(size_t i = 0; i<lattice_size; ++i){
@@ -337,36 +369,47 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate){
+    void simulated_annealing(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false){
         std::random_device rd;
         std::mt19937 gen(rd());
         float T = T_start;
+        float acceptance_rate = 0;
+        float sigma = 40;
+        cout << "Gaussian Move: " << gaussian_move << endl;
         while(T > T_end){
             float curr_accept = 0;
             for(size_t i = 0; i<n_anneal; ++i){
                 if(overrelaxation_rate > 0){
-                    overrelaxation();
+                    overrelaxation(gen);
                     if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(T, gen);
+                        curr_accept += metropolis(T, gen, gaussian_move, sigma);
                     }
                 }
                 else{
-                    curr_accept += metropolis(T, gen);
+                    curr_accept += metropolis(T, gen, gaussian_move, sigma);
                 }
             }
             if (overrelaxation_rate > 0){
-                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
+                acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
+                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }else{
-                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
-            }            
+                acceptance_rate = curr_accept/n_anneal;
+                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
+            }
+            if (gaussian_move){
+                sigma = sigma * 0.5 / (1-acceptance_rate); 
+                cout << "Sigma is adjusted to: " << sigma << endl;   
+            }
             T *= 0.9;
         }
     }
 
-    void simulated_annealing_deterministic(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
-        simulated_annealing(T_start, T_end, n_therm, n_anneal, overrelaxation_rate);
+    void simulated_annealing_deterministic(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name, bool gaussian_move = false){
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        simulated_annealing(T_start, T_end, n_therm, n_anneal, overrelaxation_rate, gaussian_move);
         for(size_t i = 0; i<n_deterministics; ++i){
-            deterministic_sweep();
+            deterministic_sweep(gen);
         }   
 
         if(dir_name != ""){
@@ -376,34 +419,34 @@ class lattice
         }
     }
 
-    void landau_lifshitz_ode_int(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS, const double /* t */){
+    void landau_lifshitz_ode_int(spin_config &current_spin, spin_config &dS, array<float,N> (*cross_prod)(const array<float, N>, const array<float, N>), const double /* t */){
         for(size_t i = 0; i<lattice_size; ++i){
-            dS[i] = cross_prod_SU2(get_local_field_lattice(i, current_spin), current_spin[i]);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> landau_lifshitz(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spin){
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS;
+    spin_config landau_lifshitz(const spin_config &current_spin, array<float,N> (*cross_prod)(const array<float, N>, const array<float, N>)){
+        spin_config dS;
         #pragma omp simd
         for(size_t i = 0; i<lattice_size; ++i){
-            dS[i] = cross_prod_SU2(get_local_field_lattice(i, current_spin), current_spin[i]);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
         }
         return dS;
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK4_step(const float step_size, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, const double tol){
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k2 = curr_spins + k1*(0.5*step_size);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(lval_k2);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k3 = curr_spins + k2*(0.5*step_size);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k3 = landau_lifshitz(lval_k3);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> lval_k4 = curr_spins + k3*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k4 = landau_lifshitz(lval_k4);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins  = curr_spins + (k1+ k2 * 2 + k3 * 2 + k4)*(step_size/6);
+    spin_config RK4_step(const float step_size, const spin_config &curr_spins, const double tol, array<float,N> (*cross_prod)(const array<float, N>, const array<float, N>)){
+        spin_config k1 = landau_lifshitz(curr_spins,cross_prod);
+        spin_config lval_k2 = curr_spins + k1*(0.5*step_size);
+        spin_config k2 = landau_lifshitz(lval_k2,cross_prod));
+        spin_config lval_k3 = curr_spins + k2*(0.5*step_size);
+        spin_config k3 = landau_lifshitz(lval_k3,cross_prod));
+        spin_config lval_k4 = curr_spins + k3*step_size;
+        spin_config k4 = landau_lifshitz(lval_k4,cross_prod));
+        spin_config new_spins  = curr_spins + (k1+ k2 * 2 + k3 * 2 + k4)*(step_size/6);
         return new_spins;
     }
 
-    void print_2D(const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &a){
+    void print_2D(const spin_config &a){
         for(size_t i = 0; i<N_ATOMS*dim1*dim2*dim3; ++i){
             for(size_t j = 0; j<N; ++j){
                 cout << a[i][j] << " ";
@@ -412,16 +455,16 @@ class lattice
         }
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK45_step(float &step_size, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, const double tol){
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins)*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0))*step_size;
+    spin_config RK45_step(float &step_size, const spin_config &curr_spins, const double tol, array<float,N> (*cross_prod)(const array<float, N>, const array<float, N>)){
+        spin_config k1 = landau_lifshitz(curr_spins)*step_size;
+        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
+        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
+        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0))*step_size;
+        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0))*step_size;
+        spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0))*step_size;
 
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
+        spin_config y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
+        spin_config z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
 
         double error = norm_average_2D(z-y);
         step_size *= 0.9*pow(tol/error, 0.2);
@@ -434,42 +477,37 @@ class lattice
         return z;
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> RK45_step_fixed(const float &step_size, const array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, const double tol){
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k1 = landau_lifshitz(curr_spins)*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0))*step_size;
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
+    spin_config RK45_step_fixed(const float &step_size, const spin_config &curr_spins, const double tol, array<float,N> (*cross_prod)(const array<float, N>, const array<float, N>)){
+        spin_config k1 = landau_lifshitz(curr_spins,cross_prod)*step_size;
+        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0),cross_prod)*step_size;
+        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0),cross_prod)*step_size;
+        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0),cross_prod)*step_size;
+        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0),cross_prod)*step_size;
+        spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0),cross_prod)*step_size;
+        spin_config z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
         return z;
     }
 
-    array<array<float,N>,N_ATOMS*dim1*dim2*dim3> euler_step(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins){
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> dS = landau_lifshitz(curr_spins);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> new_spins = curr_spins + dS*step_size;
+    spin_config euler_step(const float step_size, spin_config &curr_spins, const double tol, array<float,N> (*cross_prod)(const array<float, N>, const array<float, N>)){
+        spin_config dS = landau_lifshitz(curr_spins, cross_prod);
+        spin_config new_spins = curr_spins + dS*step_size;
         return new_spins;
     }
 
-    void euler_step_ode_int(const float step_size, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &curr_spins, array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &dS){
-        landau_lifshitz_ode_int(curr_spins, dS, 0);
-        curr_spins = curr_spins + dS*step_size;
-    }
 
-
-    void molecular_dynamics(float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
-        simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
+    void molecular_dynamics(float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_start, float T_end, float step_size, string dir_name, , bool gaussian_move = false){
+        // simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate, gaussian_move);
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
         }
         write_to_file_pos(dir_name + "/pos.txt");
         write_to_file_spin(dir_name + "/spin_t.txt", spins);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+        spin_config spin_t = spins;
 
         double tol = 1e-12;
 
         int check_frequency = 10;
-        float currT = 0;
+        float currT = T_start;
         size_t count = 1;
         vector<float> time;
 
@@ -492,19 +530,6 @@ class lattice
         time_sections.close();
     }
 
-    void set_field(const array<array<float,N>, N_ATOMS> &field_in){
-        for (size_t i=0; i< dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
-                    for (size_t l=0; l< N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l);
-                        field[current_site_index] = field_in[l];
-                    }
-                }
-            }
-        }
-    }
-
     void set_pulse(float currT, const array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_amp, float pulse_width, float pulse_freq){
         float factor = float(pulse_amp*exp(-pow((currT-t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B)));
         for (size_t i=0; i< dim1; ++i){
@@ -512,103 +537,126 @@ class lattice
                 for(size_t k=0; k< dim3;++k){
                     for (size_t l=0; l< N_ATOMS;++l){
                         size_t current_site_index = flatten_index(i,j,k,l);
-                        field[current_site_index] = field_in[l]*factor;
+                        driving_field[current_site_index] = field_in[l]*factor;
                     }
                 }
             }
         }
     }
 
-    float magnetization(array<array<float,N>,N_ATOMS*dim1*dim2*dim3> &current_spins, array<float, N> &field){
-        array<float, N> mag = {0};
-        for(size_t i = 0; i<lattice_size; ++i){
-            mag = mag + current_spins[i]*(1/float(lattice_size));
+    void reset_pulse(){
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim3;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
+                        size_t current_site_index = flatten_index(i,j,k,l);
+                        driving_field[current_site_index] = {0};
+                    }
+                }
+            }
         }
-        return dot(mag,field);
     }
 
-    void M_B_t(array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_amp, float pulse_width, float pulse_freq, float T_end, float step_size, string dir_name){
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+    void set_two_pulse(float currT, const array<array<float,N>, N_ATOMS> &field_in_1, float t_B_1, const array<array<float,N>, N_ATOMS> &field_in_2, float t_B_2, float pulse_amp, float pulse_width, float pulse_freq){
+        float factor1 = float(pulse_amp*exp(-pow((currT-t_B_1)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B_1)));
+        float factor2 = float(pulse_amp*exp(-pow((currT-t_B_2)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B_2)));
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim3;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
+                        size_t current_site_index = flatten_index(i,j,k,l);
+                        driving_field[current_site_index] = field_in_1[l]*factor1 + field_in_2[l]*factor2;
+                    }
+                }
+            }
+        }
+    }
+
+    float magnetization(const spin_config &current_spins, array<array<float, N>, N_ATOMS> &field_current){
+        float mag = 0;
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim3;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
+                        size_t current_site_index = flatten_index(i,j,k,l);
+                        mag += dot(current_spins[current_site_index], field_current[l]);
+                    }
+                }
+            }
+        }
+        return mag/float(lattice_size);
+    }
+
+    void M_B_t(array<array<float,N>, N_ATOMS> &field_in, float t_B, float pulse_amp, float pulse_width, float pulse_freq, float T_start, float T_end, float step_size, string dir_name){
+        spin_config spin_t = spins;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
         }
         double tol = 1e-8;
-        bool pulse = false;
-        bool pulsed = false;
-        int check_frequency = 10;
-        float currT = 0;
+
+        float currT = T_start;
         size_t count = 1;
         vector<float> time;
-        float pulsed_time = 0;
-
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in[0]));
+        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in));
+        // write_to_file_spin(dir_name + "/spin_t.txt", spin_t);
+        // ofstream pulse_info;
+        // pulse_info.open(dir_name + "/pulse_t.txt");
+        
 
         while(currT < T_end){
             set_pulse(currT, field_in, t_B, pulse_amp, pulse_width, pulse_freq);
-            spin_t = RK4_step(step_size, spin_t, tol);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in[0]));
+            // float factor = float(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
+            // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
+            spin_t = RK45_step_fixed(step_size, spin_t, tol);
+            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in));
+            // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             time.push_back(currT);
             count++;
         }
-
+        reset_pulse();
+        // pulse_info.close();dfsbf
         ofstream time_sections;
         time_sections.open(dir_name + "/Time_steps.txt");
         for(size_t i = 0; i<count; ++i){
             time_sections << time[i] << endl;
         }
-        time_sections.close(); 
-        ofstream pulse_time;
-        time_sections.open(dir_name + "/pulse_time.txt");
-        time_sections << pulsed_time << endl;
-        time_sections.close();               
+        time_sections.close();      
     };
 
-    void M_BA_BB_t(array<array<float,N>, N_ATOMS> &field_in_1, float t_B, array<array<float,N>, N_ATOMS> &field_in_2, float pulse_amp, float pulse_width, float pulse_freq, float T_end, float step_size, string dir_name){
+    void M_BA_BB_t(array<array<float,N>, N_ATOMS> &field_in_1, float t_B_1, array<array<float,N>, N_ATOMS> &field_in_2, float t_B_2, float pulse_amp, float pulse_width, float pulse_freq, float T_start, float T_end, float step_size, string dir_name){
         // simulated_annealing(Temp_start, Temp_end, n_therm, n_anneal, overrelaxation_rate);
         // write_to_file_pos(dir_name + "/pos.txt");
         // write_to_file_spin(dir_name + "/spin_t.txt", spins);
-        array<array<float,N>,N_ATOMS*dim1*dim2*dim3> spin_t = spins;
+        spin_config spin_t = spins;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
         }
         double tol = 1e-12;
-        bool pulse_first = false;
-        bool pulse_second = false;
-        bool pulsed_first = false;
-        bool pulsed_second = false;
-        float pulsed_time = 0;
 
-        int check_frequency = 10;
-        float currT = 0;
+        float currT = T_start;
         size_t count = 1;
         vector<float> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1[0]));
+        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in_1));
 
         while(currT < T_end){
 
-            set_pulse(currT, field_in_1, 0, pulse_amp, pulse_width, pulse_freq);
-            set_pulse(currT, field_in_2, t_B, pulse_amp, pulse_width, pulse_freq);
-
-            
+            set_two_pulse(currT, field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
             spin_t = RK45_step_fixed(step_size, spin_t, tol);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1[0]));
+            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in_1));
             currT = currT + step_size;
             time.push_back(currT);
             count++;
-        }   
+        }  
+        reset_pulse();
         ofstream time_sections;
         time_sections.open(dir_name + "/Time_steps.txt");
         for(size_t i = 0; i<count; ++i){
             time_sections << time[i] << endl;
         }
-        time_sections.close();     
-        ofstream pulse_time;
-        time_sections.open(dir_name + "/pulse_time.txt");
-        time_sections << pulsed_time << endl;
         time_sections.close();     
     }
 };
