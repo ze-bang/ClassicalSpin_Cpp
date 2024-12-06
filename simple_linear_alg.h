@@ -7,7 +7,7 @@
 #include <random>
 #include <omp.h>
 
-void set_permutation(array<array<array<float, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, float val){
+void set_permutation(array<array<array<double, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, double val){
     A[a][b][c] = val;
     A[a][c][b] = -val;
     A[b][a][c] = -val;
@@ -18,8 +18,8 @@ void set_permutation(array<array<array<float, 8>, 8>,8> &A, const size_t a, cons
 
 
 
-const array<array<array<float, 8>, 8>,8> SU3_structure_constant(){
-    array<array<array<float, 8>, 8>,8> result;
+const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
+    array<array<array<double, 8>, 8>,8> result;
     result = {{{{{0}}}}};
     set_permutation(result, 0, 1, 2, 1);
     set_permutation(result, 0, 3, 6, 0.5);
@@ -40,27 +40,13 @@ const array<array<array<float, 8>, 8>,8> SU3_structure_constant(){
 // There is also further promotion by constructing another set of basis according to 
 // N. Papanicolaou, Unusual phases in quantum spin-1 systems, Nucl. Phys. B 305, 367 (1988).
 // the basis for this is (A^{xx}, A^{xy}, A^{xz}, A^{yx}, A^{yy}, A^{yz}, A^{zx}, A^{zy}, A^{zz})
-const array<array<array<float, 9>, 9>,9> cross_product_u3(const ){
-    array<array<array<float, 9>, 9>,9> result;
-    result = {{{{{0}}}}};
-    set_permutation(result, 0, 1, 2, 1);
-    set_permutation(result, 0, 3, 6, 0.5);
-    set_permutation(result, 0, 4, 5, -0.5);
-    set_permutation(result, 1, 3, 5, 0.5);
-    set_permutation(result, 1, 4, 6, 0.5);
-    set_permutation(result, 2, 3, 4, 0.5);
-    set_permutation(result, 2, 5, 6, -0.5);
-    set_permutation(result, 3, 4, 7, sqrt(3)/2);
-    set_permutation(result, 5, 6, 7, sqrt(3)/2);
-    return result;
-}
 
-const extern array<array<array<float, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
 
 
 template<size_t N>
-array<float, N> operator*(const array<float, N> &a,const float n) {
-    array<float, N> result;
+array<double, N> operator*(const array<double, N> &a,const double n) {
+    array<double, N> result;
     #pragma omp simd
     for (size_t i = 0; i < 3; ++i) {
         result[i] = a[i]*n;
@@ -70,8 +56,8 @@ array<float, N> operator*(const array<float, N> &a,const float n) {
 
 
 template<size_t N>
-array<float, N> operator/(const array<float, N> &a,const float n) {
-    array<float, N> result;
+array<double, N> operator/(const array<double, N> &a,const double n) {
+    array<double, N> result;
     #pragma omp simd
     for (size_t i = 0; i < 3; ++i) {
         result[i] = a[i]/n;
@@ -81,18 +67,18 @@ array<float, N> operator/(const array<float, N> &a,const float n) {
 
 
 template<size_t N>
-array<float, N> operator*(const array<float, N> &a,const int n) {
-    array<float, N> result;
+array<double, N> operator*(const array<double, N> &a,const int n) {
+    array<double, N> result;
     #pragma omp simd
     for (size_t i = 0; i < 3; ++i) {
-        result[i] = a[i]*float(n);
+        result[i] = a[i]*double(n);
     }
     return result;
 }
 
 template<size_t N>
-array<float, N> operator+(const array<float, N> &a,const array<float, N>  &b) {
-    array<float, N> result;
+array<double, N> operator+(const array<double, N> &a,const array<double, N>  &b) {
+    array<double, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] + b[i];
@@ -101,8 +87,8 @@ array<float, N> operator+(const array<float, N> &a,const array<float, N>  &b) {
 }
 
 template<size_t N>
-array<float, N> operator-(const array<float, N> &a,const array<float, N>  &b) {
-    array<float, N> result;
+array<double, N> operator-(const array<double, N> &a,const array<double, N>  &b) {
+    array<double, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] - b[i];
@@ -112,24 +98,24 @@ array<float, N> operator-(const array<float, N> &a,const array<float, N>  &b) {
 
 
 template<size_t N>
-float dot(const array<float, N>  &a, const array<float, N>  &b) {
-    float result = 0;
+double dot(const array<double, N>  &a, const array<double, N>  &b) {
+    double result = 0;
     for (size_t i = 0; i < N; ++i) {
         result += a[i] * b[i];
     }
     return result;
 }
 
-array<float, 3> multiply_SU2(const array<array<float, 3>,3>  &M, const array<float, 3>  &a){
-    array<float, 3>  result;
+array<double, 3> multiply_SU2(const array<array<double, 3>,3>  &M, const array<double, 3>  &a){
+    array<double, 3>  result;
     result[0] = M[0][0] * a[0] + M[0][1] * a[1] + M[0][2] * a[2];
     result[1] = M[1][0] * a[0] + M[1][1] * a[1] + M[1][2] * a[2];
     result[2] = M[2][0] * a[0] + M[2][1] * a[1] + M[2][2] * a[2];
     return result;
 }
 
-array<float, 8> multiply_SU3(const array<array<float, 8>,8>  &M, const array<float, 8>  &a){
-    array<float, 8>  result;
+array<double, 8> multiply_SU3(const array<array<double, 8>,8>  &M, const array<double, 8>  &a){
+    array<double, 8>  result;
     result[0] = M[0][0] * a[0] + M[0][1] * a[1] + M[0][2] * a[2];
     result[1] = M[1][0] * a[0] + M[1][1] * a[1] + M[1][2] * a[2];
     result[2] = M[2][0] * a[0] + M[2][1] * a[1] + M[2][2] * a[2];
@@ -142,11 +128,11 @@ array<float, 8> multiply_SU3(const array<array<float, 8>,8>  &M, const array<flo
 }
 
 
-float contract_SU2(const array<float, 3>  &a, const array<array<float, 3>,3>  &M, const array<float, 3>  &b){
+double contract_SU2(const array<double, 3>  &a, const array<array<double, 3>,3>  &M, const array<double, 3>  &b){
     return a[0] * (M[0][0] * b[0] + M[0][1] * b[1] + M[0][2] * b[2]) + a[1] * (M[1][0] * b[0] + M[1][1] * b[1] + M[1][2] * b[2]) + a[2] * (M[2][0] * b[0] + M[2][1] * b[1] + M[2][2] * b[2]);
 }
 
-float contract_SU3(const array<float, 8> &a, const array<array<float, 8>, 8> &M, const array<float, 8>  &b){
+double contract_SU3(const array<double, 8> &a, const array<array<double, 8>, 8> &M, const array<double, 8>  &b){
     return a[0] * (M[0][0] * b[0] + M[0][1] * b[1] + M[0][2] * b[2] + M[0][3] * b[3] + M[0][4] * b[4] + M[0][5] * b[5] + M[0][6] * b[6]+ M[0][7] * b[7]) 
     + a[1] * (M[1][0] * b[0] + M[1][1] * b[1] + M[1][2] * b[2] + M[1][3] * b[3] + M[1][4] * b[4] + M[1][5] * b[5] + M[1][6] * b[6]+ M[1][7] * b[7])
     + a[2] * (M[2][0] * b[0] + M[2][1] * b[1] + M[2][2] * b[2] + M[2][3] * b[3] + M[2][4] * b[4] + M[2][5] * b[5] + M[2][6] * b[6]+ M[2][7] * b[7])
@@ -158,8 +144,8 @@ float contract_SU3(const array<float, 8> &a, const array<array<float, 8>, 8> &M,
 }
 
 template<size_t N>
-float contract(const array<float, N>  &a, const array<array<float, N>,N>  &M, const array<float, N>  &b) {
-    float result = 0;
+double contract(const array<double, N>  &a, const array<array<double, N>,N>  &M, const array<double, N>  &b) {
+    double result = 0;
     if constexpr (N == 3){
         result = contract_SU2(a, M, b);
     }
@@ -171,8 +157,8 @@ float contract(const array<float, N>  &a, const array<array<float, N>,N>  &M, co
 
 
 template<size_t N_1, size_t N_2, size_t N_3>
-float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_1>  &a, const array<float, N_2>  &b, const array<float, N_3>  &c) {
-    float result = 0;
+double contract_trilinear(const array<array<array<double, N_3>,N_2>, N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+    double result = 0;
     #pragma omp simd  
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
@@ -186,8 +172,8 @@ float contract_trilinear(const array<array<array<float, N_3>,N_2>, N_1>  &M, con
 
 
 template<size_t N_1, size_t N_2, size_t N_3>
-array<float, N_1> contract_trilinear_field(const array<array<array<float, N_3>,N_2>, N_1>  &M, const array<float, N_2>  &b, const array<float, N_3>  &c) {
-    array<float, N_1>  result = {0};  
+array<double, N_1> contract_trilinear_field(const array<array<array<double, N_3>,N_2>, N_1>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+    array<double, N_1>  result = {0};  
     #pragma omp simd  
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
@@ -201,8 +187,8 @@ array<float, N_1> contract_trilinear_field(const array<array<array<float, N_3>,N
 
 
 template <size_t N>
-array<float, N>  multiply(const array<array<float, N>,N>  &M, const array<float, N>  &a){
-    array<float, N>  result;
+array<double, N>  multiply(const array<array<double, N>,N>  &M, const array<double, N>  &a){
+    array<double, N>  result;
     if constexpr (N == 3){
         result = multiply_SU2(M, a);
     }else if constexpr (N == 8){
@@ -213,8 +199,8 @@ array<float, N>  multiply(const array<array<float, N>,N>  &M, const array<float,
 
 
 
-array<float, 3> cross_prod_SU2(const array<float, 3>  &a,const array<float, 3> &b){
-    array<float, 3> result;
+array<double, 3> cross_prod_SU2(const array<double, 3>  &a,const array<double, 3> &b){
+    array<double, 3> result;
     result[0] = a[1]*b[2] - a[2]*b[1];
     result[1] = a[2]*b[0] - a[0]*b[2];
     result[2] = a[0]*b[1] - a[1]*b[0];
@@ -223,8 +209,8 @@ array<float, 3> cross_prod_SU2(const array<float, 3>  &a,const array<float, 3> &
 
 
 
-array<float, 8> cross_prod_SU3(const array<float, 8>  &a,const array<float, 8> &b){
-    array<float, 8> result;
+array<double, 8> cross_prod_SU3(const array<double, 8>  &a,const array<double, 8> &b){
+    array<double, 8> result;
     for(size_t i=0; i<8; i++){
         for(size_t j=0; j <8; j++){
             for(size_t k=0; k <8; k++){
@@ -237,9 +223,27 @@ array<float, 8> cross_prod_SU3(const array<float, 8>  &a,const array<float, 8> &
 }
 
 
+array<double, 9> cross_prod_U3(const array<double, 9>  &a,const array<double, 9> &b){
+    array<double, 9> result;
+    for(size_t i=0; i<9; i++){
+        for(size_t j=0; j<9; j++){
+
+            
+
+            for(size_t k=0; k <9; k++){
+                
+                result[i] += SU3_structure[i][j][k]*a[j]*b[k];
+            }
+        }
+    }
+
+    return result;
+}
+
+
 template <size_t N, size_t M>
-array<array<float, M>, N> operator+(const array<array<float, M>, N> &a,const array<array<float, M>, N> &b) {
-    array<array<float, M>, N> result;
+array<array<double, M>, N> operator+(const array<array<double, M>, N> &a,const array<array<double, M>, N> &b) {
+    array<array<double, M>, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
@@ -250,8 +254,8 @@ array<array<float, M>, N> operator+(const array<array<float, M>, N> &a,const arr
 }
 
 template <size_t N, size_t M>
-array<array<float, M>, N> operator*(const array<array<float, M>, N> &a,const float &b) {
-    array<array<float, M>, N> result;
+array<array<double, M>, N> operator*(const array<array<double, M>, N> &a,const double &b) {
+    array<array<double, M>, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
@@ -262,8 +266,8 @@ array<array<float, M>, N> operator*(const array<array<float, M>, N> &a,const flo
 }
 
 template <size_t N, size_t M>
-float norm_average_2D(const array<array<float, M>, N> &a) {
-    float result = 0;
+double norm_average_2D(const array<array<double, M>, N> &a) {
+    double result = 0;
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
             result += a[i][j]*a[i][j];
@@ -273,8 +277,8 @@ float norm_average_2D(const array<array<float, M>, N> &a) {
 }
 
 template <size_t N, size_t M>
-array<array<float, M>, N> operator-(const array<array<float, M>, N> &a,const array<array<float, M>, N>  &b) {
-    array<array<float, M>, N> result;
+array<array<double, M>, N> operator-(const array<array<double, M>, N> &a,const array<array<double, M>, N>  &b) {
+    array<array<double, M>, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
@@ -284,8 +288,8 @@ array<array<float, M>, N> operator-(const array<array<float, M>, N> &a,const arr
     return result;
 }
 
-float random_float(float min, float max, std::mt19937 &gen){
-    std::uniform_real_distribution<float> dis(min, max);
+double random_double(double min, double max, std::mt19937 &gen){
+    std::uniform_real_distribution<double> dis(min, max);
     return dis(gen);
 }
 
@@ -296,8 +300,8 @@ int random_int(int min, int max, std::mt19937 &gen){
 
 
 template<size_t N_1, size_t N_2, size_t N_3>
-array<array<array<float, N_1>, N_3>, N_2> transpose3D(const array<array<array<float, N_3>, N_2>, N_1>& matrix) {
-    array<array<array<float, N_1>, N_3>, N_2> transposed;
+array<array<array<double, N_1>, N_3>, N_2> transpose3D(const array<array<array<double, N_3>, N_2>, N_1>& matrix) {
+    array<array<array<double, N_1>, N_3>, N_2> transposed;
     for (size_t i = 0; i < N_1; ++i) {
         for (size_t j = 0; j < N_2; ++j) {
             for (size_t k = 0; k < N_3; ++k) {
@@ -311,8 +315,8 @@ array<array<array<float, N_1>, N_3>, N_2> transpose3D(const array<array<array<fl
 
 
 template<size_t N_1, size_t N_2, size_t N_3>
-array<array<array<float, N_3>, N_1>, N_2> swap_axis_3D(const array<array<array<float, N_3>, N_2>, N_1>& matrix) {
-    array<array<array<float, N_3>, N_1>, N_2> transposed;
+array<array<array<double, N_3>, N_1>, N_2> swap_axis_3D(const array<array<array<double, N_3>, N_2>, N_1>& matrix) {
+    array<array<array<double, N_3>, N_1>, N_2> transposed;
     for (size_t i = 0; i < N_1; ++i) {
         for (size_t j = 0; j < N_2; ++j) {
             for (size_t k = 0; k < N_3; ++k) {
@@ -324,8 +328,42 @@ array<array<array<float, N_3>, N_1>, N_2> swap_axis_3D(const array<array<array<f
     return transposed; // Overwrite the original matrix with the transposed one
 }
 
+template<typename T>
+std::vector<T> logspace(T start, T end, int num) {
+    std::vector<T> result;
+    if (num <= 0) return result; // Handle invalid input
+
+    if (num == 1) { // Special case: single value
+        result.push_back(std::pow(10, start));
+        return result;
+    }
+
+    // Step size for the exponent
+    T step = (end - start) / (num - 1);
+
+    // Generate the values
+    for (int i = 0; i < num; ++i) {
+        T exponent = start + i * step;
+        result.push_back(std::pow(10, exponent));
+    }
+
+    return result;
+}
 
 
-
+template<typename T>
+T variance(vector<T> &data){
+    T mean = 0;
+    T variance = 0;
+    for (size_t i = 0; i < data.size(); ++i){
+        mean += data[i];
+    }
+    mean /= data.size();
+    for (size_t i = 0; i < data.size(); ++i){
+        variance += (data[i] - mean)*(data[i] - mean);
+    }
+    variance /= data.size();
+    return variance;
+}
 
 #endif // LIN_ALG_H

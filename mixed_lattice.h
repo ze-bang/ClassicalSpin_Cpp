@@ -24,36 +24,36 @@ class mixed_lattice
     size_t lattice_size_SU3;
 
     //Spin and lattice position of SU2 and SU3
-    // array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>  spins_SU2;
-    // array<array<float,3>, N_ATOMS_SU2*dim1*dim2*dim3> get<0>(site_pos);
-    // array<array<float,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>  spins_SU3;
-    // array<array<float,3>, N_ATOMS_SU3*dim1*dim2*dim3> get<1>(site_pos);
+    // array<array<double,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>  spins_SU2;
+    // array<array<double,3>, N_ATOMS_SU2*dim1*dim2*dim3> get<0>(site_pos);
+    // array<array<double,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>  spins_SU3;
+    // array<array<double,3>, N_ATOMS_SU3*dim1*dim2*dim3> get<1>(site_pos);
 
-    typedef tuple<array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>, array<array<float,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>> mixed_lattice_spin;
-    typedef tuple<array<array<float,3>, N_ATOMS_SU2*dim1*dim2*dim3>, array<array<float,3>, N_ATOMS_SU3*dim1*dim2*dim3>> mixed_lattice_pos;
+    typedef tuple<array<array<double,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3>, array<array<double,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3>> mixed_lattice_spin;
+    typedef tuple<array<array<double,3>, N_ATOMS_SU2*dim1*dim2*dim3>, array<array<double,3>, N_ATOMS_SU3*dim1*dim2*dim3>> mixed_lattice_pos;
 
     mixed_lattice_spin spins;
     mixed_lattice_pos site_pos;
 
     //Look up table for SU2
-    array<array<float,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> field_SU2;
-    array<vector<array<array<float, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_interaction_SU2;
-    array<vector<array<array<array<float, N_SU2>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_interaction_SU2;
+    array<array<double,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> field_SU2;
+    array<vector<array<array<double, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_interaction_SU2;
+    array<vector<array<array<array<double, N_SU2>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_interaction_SU2;
 
     array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_partners_SU2;
 
     //Look up table for SU3
-    array<array<float,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3> field_SU3;
-    array<vector<array<array<float, N_SU3>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_interaction_SU3;
-    array<vector<array<array<array<float, N_SU3>, N_SU3>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_interaction_SU3;
+    array<array<double,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3> field_SU3;
+    array<vector<array<array<double, N_SU3>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_interaction_SU3;
+    array<vector<array<array<array<double, N_SU3>, N_SU3>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_interaction_SU3;
 
     array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_partners_SU3;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_partners_SU3;
 
     //Look up table for SU2 and SU3 mix
-    array<vector<array<array<array<float, N_SU3>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_interaction_SU2;
-    array<vector<array<array<array<float, N_SU2>, N_SU2>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_interaction_SU3;
+    array<vector<array<array<array<double, N_SU3>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_interaction_SU2;
+    array<vector<array<array<array<double, N_SU2>, N_SU2>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_interaction_SU3;
 
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_partners_SU3;
@@ -66,13 +66,13 @@ class mixed_lattice
 
 
     template<size_t N>
-    void gen_random_spin(std::mt19937 &gen, array<float,N> &temp_spin){
-        array<float,N-2> euler_angles;
-        float z = random_float(-1,1, gen);
-        float r = sqrt(1.0 - z*z);
+    void gen_random_spin(std::mt19937 &gen, array<double,N> &temp_spin){
+        array<double,N-2> euler_angles;
+        double z = random_double(-1,1, gen);
+        double r = sqrt(1.0 - z*z);
 
         for(size_t i = 0; i < N-2; ++i){
-            euler_angles[i] = random_float(0, 2*M_PI, gen);
+            euler_angles[i] = random_double(0, 2*M_PI, gen);
             temp_spin[i] = r;
             for(size_t j = 0; j < i; ++j){
                 temp_spin[i] *= sin(euler_angles[j]);
@@ -104,12 +104,12 @@ class mixed_lattice
     }
 
     template<size_t N, size_t lattice_size, size_t N_ATOMS>
-    void set_up_sublattice(array<array<float,N>, lattice_size>  &spins, array<array<float,3>, lattice_size> &site_pos, array<array<float,N>, lattice_size> &field, array<vector<array<array<float, N>, N>>, lattice_size> &bilinear_interaction, array<vector<array<array<array<float, N>, N>, N>>, lattice_size> &trilinear_interaction, array<vector<size_t>, lattice_size> &bilinear_partners, array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners, UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri){
+    void set_up_sublattice(array<array<double,N>, lattice_size>  &spins, array<array<double,3>, lattice_size> &site_pos, array<array<double,N>, lattice_size> &field, array<vector<array<array<double, N>, N>>, lattice_size> &bilinear_interaction, array<vector<array<array<array<double, N>, N>, N>>, lattice_size> &trilinear_interaction, array<vector<size_t>, lattice_size> &bilinear_partners, array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners, UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri){
         std::random_device rd;
         std::mt19937 gen(rd());
 
-        array<array<float,3>, N_ATOMS> basis = atoms->lattice_pos;
-        array<array<float,3>, 3> unit_vector = atoms->lattice_vectors;
+        array<array<double,3>, N_ATOMS> basis = atoms->lattice_pos;
+        array<array<double,3>, 3> unit_vector = atoms->lattice_vectors;
 
         for (size_t i=0; i<dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
@@ -196,8 +196,8 @@ class mixed_lattice
         lattice_size_SU3 = dim1*dim2*dim3*N_ATOMS_SU3;
     };
 
-    float site_energy_SU2(array<float, N_SU2> &spin_here, size_t site_index){
-        float energy = 0.0;
+    double site_energy_SU2(array<double, N_SU2> &spin_here, size_t site_index){
+        double energy = 0.0;
         energy -= dot(spin_here, field_SU2[site_index]);
         #pragma omp simd
         for (size_t i=0; i<num_bi_SU2; ++i) {
@@ -212,8 +212,8 @@ class mixed_lattice
         return energy;
     }
 
-    float site_energy_SU3(array<float, N_SU3> &spin_here, size_t site_index){
-        float energy = 0.0;
+    double site_energy_SU3(array<double, N_SU3> &spin_here, size_t site_index){
+        double energy = 0.0;
         energy -= dot(spin_here, field_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i<num_bi_SU3; ++i) {
@@ -229,7 +229,7 @@ class mixed_lattice
     }
 
     template<size_t N>
-    float site_energy(array<float,N> &spins, size_t site_index){
+    double site_energy(array<double,N> &spins, size_t site_index){
         if constexpr (N == N_SU2){
             return site_energy_SU2(spins, site_index);
         }else{
@@ -237,8 +237,8 @@ class mixed_lattice
         }
     }
     
-    array<float, N_SU2>  get_local_field_SU2(size_t site_index){
-        array<float,N_SU2> local_field = {0};
+    array<double, N_SU2>  get_local_field_SU2(size_t site_index){
+        array<double,N_SU2> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], get<0>(spins)[bilinear_partners_SU2[site_index][i]]);
@@ -252,8 +252,8 @@ class mixed_lattice
         return local_field-field_SU2[site_index];
     }
 
-    array<float, N_SU3>  get_local_field_SU3(size_t site_index){
-        array<float,N_SU3> local_field = {0};
+    array<double, N_SU3>  get_local_field_SU3(size_t site_index){
+        array<double,N_SU3> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], get<0>(spins)[bilinear_partners_SU3[site_index][i]]);
@@ -267,8 +267,8 @@ class mixed_lattice
         return local_field-field_SU3[site_index];
     }
 
-    array<float, N_SU2>  get_local_field_SU2_lattice(size_t site_index, mixed_lattice_spin &current_spin){
-        array<float,N_SU2> local_field = {0};
+    array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, mixed_lattice_spin &current_spin){
+        array<double,N_SU2> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], get<0>(current_spin)[bilinear_partners_SU2[site_index][i]]);
@@ -282,8 +282,8 @@ class mixed_lattice
         return local_field-field_SU2[site_index];
     }
 
-    array<float, N_SU3>  get_local_field_SU3_lattice(size_t site_index, mixed_lattice_spin &current_spin){
-        array<float,N_SU3> local_field = {0};
+    array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, mixed_lattice_spin &current_spin){
+        array<double,N_SU3> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], get<0>(current_spin)[bilinear_partners_SU3[site_index][i]]);
@@ -298,8 +298,8 @@ class mixed_lattice
     }
 
     
-    float metropolis(float T, std::mt19937 &gen){
-        float E, E_new, dE, r, i;
+    double metropolis(double T, std::mt19937 &gen){
+        double E, E_new, dE, r, i;
         int accept = 0;
         size_t count = 0;
         while(count < lattice_size_SU2+lattice_size_SU3){
@@ -323,7 +323,7 @@ class mixed_lattice
                 accept++;
             }
             else{
-                r = random_float(0,1, gen);
+                r = random_double(0,1, gen);
                 if(r < exp(-dE/T)){
                     get<0>(spins)[i] = new_spin;
                     accept++;
@@ -332,15 +332,15 @@ class mixed_lattice
             count++;
         }
 
-        float acceptance_rate = float(accept)/float(lattice_size_SU2+lattice_size_SU3);
+        double acceptance_rate = double(accept)/double(lattice_size_SU2+lattice_size_SU3);
         return acceptance_rate;
     }
 
     
     void deterministic_sweep(){
         for(size_t i = 0; i<lattice_size_SU2; ++i){
-            array<float,N_SU2> local_field = get_local_field_SU2(i);
-            float norm = sqrt(dot(local_field, local_field));
+            array<double,N_SU2> local_field = get_local_field_SU2(i);
+            double norm = sqrt(dot(local_field, local_field));
             if(norm == 0){
                 continue;
             }
@@ -349,8 +349,8 @@ class mixed_lattice
             }
         }
         for(size_t i = 0; i<lattice_size_SU3; ++i){
-            array<float,N_SU3> local_field = get_local_field_SU3(i);
-            float norm = sqrt(dot(local_field, local_field));
+            array<double,N_SU3> local_field = get_local_field_SU3(i);
+            double norm = sqrt(dot(local_field, local_field));
             if(norm == 0){
                 continue;
             }
@@ -415,12 +415,12 @@ class mixed_lattice
     }
 
 
-    void simulated_annealing(float T_start, float T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
+    void simulated_annealing(double T_start, double T_end, size_t n_therm, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
         std::random_device rd;
         std::mt19937 gen(rd());
-        float T = T_start;
+        double T = T_start;
         while(T > T_end){
-            float curr_accept = 0;
+            double curr_accept = 0;
             for(size_t i = 0; i<n_anneal; ++i){
                 curr_accept += metropolis(T, gen);
             }
@@ -458,7 +458,7 @@ class mixed_lattice
         return dS;
     }
 
-    mixed_lattice_spin RK45_step(float &step_size, const mixed_lattice_spin &curr_spins, const double tol){
+    mixed_lattice_spin RK45_step(double &step_size, const mixed_lattice_spin &curr_spins, const double tol){
         mixed_lattice_spin k1 = landau_lifshitz(curr_spins)*step_size;
         mixed_lattice_spin k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0))*step_size;
         mixed_lattice_spin k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0))*step_size;
@@ -482,12 +482,12 @@ class mixed_lattice
     }
 
 
-    void molecular_dynamics(float Temp_start, float Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, float T_end, float step_size, string dir_name){
+    void molecular_dynamics(double Temp_start, double Temp_end, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, double T_end, double step_size, string dir_name){
         std::random_device rd;
         std::mt19937 gen(rd());
-        float curr_accept;
+        double curr_accept;
         filesystem::create_directory(dir_name);
-        float T = Temp_start;
+        double T = Temp_start;
 
         while(T > Temp_end){
             curr_accept = 0;
@@ -516,9 +516,9 @@ class mixed_lattice
         double tol = 1e-8;
 
         int check_frequency = 10;
-        float currT = 0;
+        double currT = 0;
         size_t count = 1;
-        vector<float> time;
+        vector<double> time;
 
         time.push_back(currT);
 
