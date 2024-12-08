@@ -455,14 +455,13 @@ class lattice
             }
             if(out_dir != ""){
                 vector<double> energies;
-                for(size_t i = 0; i<100000; ++i){
+                for(size_t i = 0; i<10000; ++i){
                     metropolis(spins, T, gen, gaussian_move, sigma);
-                    if (i % 1000 == 0){
+                    if (i % 100 == 0){
                         energies.push_back(total_energy(spins));
                     }
                 }
                 double specific_heat = 1/(T*T)*variance(energies)/lattice_size;
-                cout << "Variance of energy: " << variance(energies) << endl;
                 ofstream myfile;
                 myfile.open(out_dir + "/specific_heat.txt", ios::app);
                 myfile << T << " " << specific_heat;
@@ -581,7 +580,6 @@ class lattice
                 }
             }
         }
-        
         double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*variance(energies)/lattice_size;        
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_therm)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_therm)*swap_rate*overrelaxation_flag << endl;

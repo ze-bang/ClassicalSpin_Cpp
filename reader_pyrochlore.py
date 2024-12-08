@@ -636,22 +636,14 @@ def read_MD(dir):
 # obenton_to_xx_zz()
 #
 dir = "./pyrochlore_test_110"
-read_MD_tot(dir)
-parseDSSF(dir)
+# read_MD_tot(dir)
+# parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-
-# dir = "./kitaev/"
-# fullread(dir, True, "110")
-# #
-# dir = "./Jxx_-0.2_Jyy_1.0_Jzz_-0.2_gxx_0_gyy_0_gzz_1/"
-# fullread(dir, True)
-#
-# dir = "./Jxx_0.2_Jyy_1.0_Jzz_0.2_gxx_0_gyy_0_gzz_1/"
-# fullread(dir, True)
-#
-# dir = "./Jxx_0.6_Jyy_1.0_Jzz_0.6_gxx_0_gyy_0_gzz_1/"
-# fullread(dir, True)
+A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
+plt.plot(A[0], A[1])
+plt.xscale('log')
+plt.savefig("test_Jpm=0.3/specific_heat.pdf")

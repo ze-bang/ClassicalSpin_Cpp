@@ -241,7 +241,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
 }
 
 
-void simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
+void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -280,7 +280,8 @@ void simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double g
     atoms.set_field(g*dot(field, z4), 3);
 
     lattice<3, 4, 8, 8, 8> MC(&atoms);
-    MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
+    // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
+    MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
 }
 
 void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write){
@@ -330,10 +331,10 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    lattice<3, 4, 8, 8, 8> MC(&atoms);
+    lattice<3, 4, 4, 4, 4> MC(&atoms);
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
-    MC.parallel_tempering(temps, 1e4, 1e6, 0, 50, 2e3, dir, rank_to_write);
+    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
     MPI_Finalized(&finalized);
@@ -393,11 +394,34 @@ int main(int argc, char** argv) {
     // MPI_Comm_size(MPI_COMM_WORLD, &size);
     // vector<int> rank_to_write = {size-1};
     // parallel_tempering_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_parallel", rank_to_write);
-    double Jpm = 0.3;
-    double Jpmpm = -0.2;
-    cout << "Jxx: " << -2*Jpm - 2*Jpmpm << " Jyy: " << 1 << " Jzz: " << -2*Jpm + 2*Jpmpm << endl;
-    parallel_tempering_pyrochlore(5, 1e-4, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, 0.8, {1/sqrt(3),1/sqrt(3),1/sqrt(3)}, "test_parallel", {7});
-    // simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, 0.0, {1/sqrt(3),1/sqrt(3),1/sqrt(3)}, "test");
+    double Jpm_start = argv[1] ? atof(argv[1]) : 0.0;
+    double Jpm_end = argv[2] ? atof(argv[2]) : 0.0;
+    int num_Jpm = argv[3] ? atoi(argv[3]) : 0;
+    double Jpmpm = argv[4] ? atof(argv[4]) : 0.0;
+    double h_min = argv[5] ? atof(argv[5]) : 0.0;
+    double h_max = argv[6] ? atof(argv[6]) : 0.0;
+    double num_H = argv[7] ? atoi(argv[7]) : 0;
+    string dir_string = argv[8] ? argv[8] : "001";
+    array<double, 3> field_dir;
+    if (dir_string == "001"){
+        field_dir = {0,0,1};
+    }else if(dir_string == "110"){
+        field_dir = {1/sqrt(2), 1/sqrt(2), 0};
+    }else{
+        field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
+    }
+    int SLURM_TASK_ID = argv[9] ? atoi(argv[9]) : 0;
+    int Jpm_ind = SLURM_TASK_ID % num_Jpm;
+    int h_ind = SLURM_TASK_ID / num_Jpm;
+    double Jpm = Jpm_start + Jpm_ind*(Jpm_end-Jpm_start)/num_Jpm;
+    double h = h_min + h_ind*(h_max-h_min)/num_H;
+    string dir_name = argv[10] ? argv[10] : "";
+    filesystem::create_directory(dir_name);
+    string sub_dir = dir_name + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
+    int MPI_n_tasks = argv[11] ? atoi(argv[11]) : 1;
+    parallel_tempering_pyrochlore(5, 1e-4, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
+    // simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir);
+
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,1}, "MC_phase_diagram_CZO_111");
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,0}, "MC_phase_diagram_CZO_110");
