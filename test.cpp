@@ -217,7 +217,7 @@ void simulated_annealing_pyrochlore(float Jxx, float Jyy, float Jzz, float gxx, 
     atoms.set_field(g*dot(field, z4), 3);
 
     lattice<3, 4, 8, 8, 8> MC(&atoms);
-    MC.simulated_annealing_deterministic(14, 0.06, 1000, 10000, 10000, 0, dir);
+    MC.simulated_annealing_deterministic(5, 1e-7, 1000, 10000, 10000, 0, dir);
 }
 
 void phase_diagram_pyrochlore(float Jpm_min, float Jpm_max, int num_Jpm, float h_min, float h_max, int num_h, float Jpmpm, array<float, 3> field_dir, string dir){
@@ -243,7 +243,7 @@ void phase_diagram_pyrochlore(float Jpm_min, float Jpm_max, int num_Jpm, float h
         float Jpm = Jpm_min + Jpm_ind*(Jpm_max-Jpm_min)/num_Jpm;
         float h = h_min + h_ind*(h_max-h_min)/num_h;
         cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
-        string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h);
+        string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
         simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, subdir);
     }
 
@@ -261,10 +261,12 @@ int main(int argc, char** argv) {
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
     // string dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7/";
     // full_nonlinearspectroscopy_kitaev_honeycomb(50, 250, 2500, -1.0, 0.25, -0.02, 0.7, dir, true);
-    phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");
-    // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,1}, "MC_phase_diagram_CZO_111");
-    // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,0}, "MC_phase_diagram_CZO_110");
-
+    // phase_diagram_pyrochlore(-0.3, 0.3, 200, 0.0, 8.0, 100, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001_XAIAO_T_zero");
+    // phase_diagram_pyrochlore(-0.3, 0.3, 200, 0.0, 8.0, 100, 0.2, {1/sqrt(3),1/sqrt(3),1/sqrt(3)}, "MC_phase_diagram_CZO_111_XAIAO_T_zero");
+    // phase_diagram_pyrochlore(-0.3, 0.3, 200, 0.0, 8.0, 100, 0.2, {1/sqrt(2),1/sqrt(2),0}, "MC_phase_diagram_CZO_110_XAIAO_T_zero");
+    // phase_diagram_pyrochlore(-0.3, 0.3, 200, 0.0, 8.0, 100, -0.2, {0,0,1}, "MC_phase_diagram_CZO_001_ZAIAO_T_zero");
+    // phase_diagram_pyrochlore(-0.3, 0.3, 200, 0.0, 8.0, 100, -0.2, {1/sqrt(3),1/sqrt(3),1/sqrt(3)}, "MC_phase_diagram_CZO_111_ZAIAO_T_zero");
+    phase_diagram_pyrochlore(-0.3, 0.3, 200, 0.0, 8.0, 100, -0.2, {1/sqrt(2),1/sqrt(2),0}, "MC_phase_diagram_CZO_110_ZAIAO_T_zero");
     // MD_pyrochlore(1, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {1/sqrt(2), 1/sqrt(2), 0}, "pyrochlore_test_110");
     // MD_pyrochlore(20, 0.062/0.063, 0.063/0.063, 0.011/0.063, 0, 0, 2.24, 1.5*mu_B/0.063, {0,0,1}, "pyrochlore_test_001");
     // std::cout << "finished" << std::endl;   
