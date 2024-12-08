@@ -352,7 +352,6 @@ def ordering_q(S,P):
 def magnetization(S):
     return np.mean(S,axis=0)
 
-
 r = np.array([[0,1/2,1/2],[1/2,0,1/2],[1/2,1/2,0]])
 NN = -np.array([[-1/4,-1/4,-1/4],[-1/4,1/4,1/4],[1/4,-1/4,1/4],[1/4,1/4,-1/4]])/2
 z = np.array([[1,1,1],[1,-1,-1],[-1,1,-1], [-1,-1,1]])/np.sqrt(3)
@@ -560,12 +559,34 @@ def read_MD(dir):
     SSSF2D(S[0], P, 100, dir, True)
 
 
+def plot_spin_config(P, S, field_dir, filename):
+    from matplotlib.animation import FuncAnimation
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.set_axis_off()
+    ax.scatter(P[:,0],P[:,1],P[:,2], color='w', edgecolors='b', s=60,alpha=1)
+    ax.quiver(P[:,0], P[:,1], P[:,2],S[:,0], S[:,1], S[:,2], color='red', length=0.3)
+    ax.plot_trisurf(P[:,0], P[:,1], P[:,2],triangles=[[0,1,2],[0,1,3],[0,2,3],[1,2,3]], edgecolor=[[0.1,0.1,0.1]], linewidth=1, shade=False, alpha=0)
+    
+    field_point = np.array([0.3, 0, 0])
+    ax.quiver(field_point[0], field_point[1], field_point[2], field_dir[0], field_dir[1], field_dir[2], color='black', length=0.3)
+    for i in range(4):
+        ax.text(P[i,0], P[i,1], P[i,2], str(i), color='black', fontsize=12)
+    ax.margins(0.2)
+    ax.set_aspect('equal')
+    def animate(i):
+        ax.view_init(elev=20., azim=i*0.05)
+
+    rot_animation = FuncAnimation(fig, animate, frames=np.arange(0, 362, 2), interval=100)
+    rot_animation.save(filename+'.gif', dpi=80, writer='imagemagick')
+    plt.clf()
+
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
-    tau_end, tau_step, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
+    tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
     M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")
-    T = np.linspace(0, time_end, int(time_step))
-    tau = np.linspace(0, tau_end, int(tau_step))
+    T = np.linspace(time_start, time_end, int(time_step))
+    tau = np.linspace(tau_start, tau_end, int(tau_step))
     M_NL = np.zeros((int(tau_step), int(time_step)))
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
@@ -573,20 +594,22 @@ def read_2D_nonlinear(dir):
             info = filename.split("_")
             M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")
-            try:
-                M_NL[int(info[2])] = M01 - M0 - M1
-            except:
-                M_NL[int(info[2])] = 0
+            M_NL[int(info[2])] = M01 - M0 - M1 
 
-    w = np.linspace(-2, 2, 1000)
+
+    w = np.linspace(-0.2, 0.2, int(time_step))
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
     gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
     M_NL = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = np.abs(contract('it, wi, ut->uw', M_NL, ffactau, ffactt))
+    M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(M_NL_FF.T, origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    plt.imshow(M_NL_FF.T, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
+    # plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
+    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
     plt.clf()
 
 def read_2D_nonlinear_tot(dir):
@@ -597,18 +620,30 @@ def read_2D_nonlinear_tot(dir):
         if os.path.isdir(dir + "/" + filename):
             read_2D_nonlinear(dir + "/" + filename)
             A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
-    A = np.log(A)
+    # A = np.log(A)
     A = A/np.max(A)
-    plt.imshow(A.T, origin='lower', extent=[-2, 2, -2, 2], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    time_step = len(A)
+    plt.imshow(A.T, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
+    # w = np.linspace(-0.2, -0.2, time_step)
+    # plt.pcolormesh(w, w, np.log(A))
+    plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
 # dir = "integrity_test"
 # read_MD_tot(dir)
 # parseDSSF(dir)
 
-dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
-# dir = "nonlinear_spec_test"
-read_2D_nonlinear_tot(dir)
+# dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
+# dir = "test_long_h=0.0"
+# read_2D_nonlinear_tot(dir)
+# dir = "test_long_h=0.7"
+# read_2D_nonlinear_tot(dir)
+P = np.loadtxt("pos.txt")
+S = np.loadtxt("spin.txt")
+S_global = np.zeros(S.shape)
+for i in range(4):
+    S_global[i::4] = contract('js, sp->jp', S[i::4], localframe[:,i,:])
+plot_spin_config(P[0:4], S_global[0:4],  -np.array([1,1,1])/np.sqrt(3), "spin_config.pdf")
 
 # dir = "./kitaev/"
 # fullread(dir, True, "110")
