@@ -334,6 +334,7 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
+
     MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
@@ -393,6 +394,7 @@ int main(int argc, char** argv) {
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     vector<int> rank_to_write = {size-1};
+    // parallel_tempering_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_parallel", rank_to_write);
     double Jpm_start = argv[1] ? atof(argv[1]) : 0.0;
     double Jpm_end = argv[2] ? atof(argv[2]) : 0.0;
     int num_Jpm = argv[3] ? atoi(argv[3]) : 0;
@@ -418,7 +420,8 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     string sub_dir = dir_name + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
     int MPI_n_tasks = argv[11] ? atoi(argv[11]) : 1;
-    parallel_tempering_pyrochlore(5, 1e-4, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
+    std::cout << "Initializing parallel tempering calculation with parameters: " << "T = " << 10 << "-" << 1e-3 << " Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " saving to: " << dir_name << endl;
+    parallel_tempering_pyrochlore(10, 1e-3, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
 
     // simulated_annealing_pyrochlore(-0.4, 1, 0.4, 0, 0, 1, 0, {0,0,1}, "test");
 
