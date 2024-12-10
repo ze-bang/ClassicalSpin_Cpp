@@ -297,7 +297,16 @@ int random_int(int min, int max, std::mt19937 &gen){
     std::uniform_int_distribution dis(min, max);
     return dis(gen);
 }
-
+template<size_t N, size_t M>
+array<array<double, M>, N> transpose2D(const array<array<double, M>, N>& matrix) {
+    array<array<double, N>, M> transposed;
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < M; ++j) {
+            transposed[j][i] = matrix[i][j];
+        }
+    }
+    return transposed;
+}
 
 template<size_t N_1, size_t N_2, size_t N_3>
 array<array<array<double, N_1>, N_3>, N_2> transpose3D(const array<array<array<double, N_3>, N_2>, N_1>& matrix) {

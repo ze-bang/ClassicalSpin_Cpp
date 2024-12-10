@@ -43,8 +43,9 @@ class lattice
     size_t num_bi;
     size_t num_tri;
     size_t num_gen;
+    float spin_length;
 
-    array<double,N> gen_random_spin(std::mt19937 &gen){
+    array<double,N> gen_random_spin(std::mt19937 &gen, float spin_l){
         array<double,N> temp_spin;
         array<double,N-2> euler_angles;
         double z = random_double(-1,1, gen);
@@ -63,7 +64,7 @@ class lattice
 
         }
         temp_spin[N-1] = z;
-        return temp_spin;
+        return temp_spin*spin_l;
     }
 
 
@@ -84,7 +85,7 @@ class lattice
         return periodic_boundary(i, dim1)*dim2*dim3*N_ATOMS+ periodic_boundary(j, dim2)*dim3*N_ATOMS+ periodic_boundary(k, dim3)*N_ATOMS + l;
     }
 
-    lattice(const UnitCell<N, N_ATOMS> *atoms): UC(*atoms){
+    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1): UC(*atoms){
         array<array<double,3>, N_ATOMS> basis;
         array<array<double,3>, 3> unit_vector;
 
@@ -94,7 +95,7 @@ class lattice
         lattice_size = dim1*dim2*dim3*N_ATOMS;
         basis = UC.lattice_pos;
         unit_vector = UC.lattice_vectors;
-
+        spin_length = spin_l;
 
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
@@ -104,7 +105,7 @@ class lattice
                         size_t current_site_index = flatten_index(i,j,k,l);
 
                         site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j)  + unit_vector[2]*int(k)  + basis[l];
-                        spins[current_site_index] = gen_random_spin(gen);
+                        spins[current_site_index] = gen_random_spin(gen, spin_length);
                         field[current_site_index] = UC.field[l];
                         driving_field[current_site_index] = {0};
                         onsite_interaction[current_site_index] = UC.onsite_interaction[l];
@@ -115,11 +116,11 @@ class lattice
                             size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner);
                             bilinear_interaction[current_site_index].push_back(J.bilinear_interaction);
                             bilinear_partners[current_site_index].push_back(partner);
-                            bilinear_interaction[partner].push_back(J.bilinear_interaction);
+                            bilinear_interaction[partner].push_back(transpose2D(J.bilinear_interaction));
                             bilinear_partners[partner].push_back(current_site_index);
                             count++;
                         }
-
+                        
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
                         count = 0;
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
@@ -141,10 +142,17 @@ class lattice
                 }
             }
         }
-
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
+        // for(size_t i = 0 ; i < lattice_size; ++i){
+        //     for(size_t j =0; j < num_bi; ++j){
+        //         int partner = bilinear_partners[i][j];
+        //         array<array<double,N>, N> J = bilinear_interaction[i][j];
+        //         cout << "Bilinear: " << i << " " << partner << " with interaction " << J[0][0] << " " << J[1][1] << " " << J[2][2] << endl;
+        //     }
+        // }
+
     };
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
@@ -180,10 +188,6 @@ class lattice
         num_gen = lattice_in->num_gen;
     };
 
-    void set_random_spin(size_t site_index){
-        array<double, N> rand_spin = gen_random_spin();
-        spins[site_index] = rand_spin;
-    }
 
     void set_spin(size_t site_index, array<double, N> &spin_in){
         spins[site_index] = spin_in;
@@ -282,7 +286,7 @@ class lattice
     
     array<double,N> gaussian_move(const array<double,N> &current_spin, std::mt19937 &gen, double sigma=60){
         array<double,N> new_spin;
-        new_spin = current_spin + gen_random_spin(gen)*sigma;
+        new_spin = current_spin + gen_random_spin(gen,spin_length)*sigma;
         return new_spin/sqrt(dot(new_spin, new_spin));
     }
 
@@ -319,7 +323,7 @@ class lattice
                 new_spin = gaussian_move(curr_spin[i], gen, sigma);
             }
             else{
-                new_spin = gen_random_spin(gen);
+                new_spin = gen_random_spin(gen,spin_length);
             }
             E_new = site_energy(new_spin, i);
             dE = E_new - E;
