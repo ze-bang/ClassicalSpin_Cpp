@@ -331,7 +331,7 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    lattice<3, 4, 4, 4, 4> MC(&atoms);
+    lattice<3, 4, 8, 8, 8> MC(&atoms);
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
     MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
