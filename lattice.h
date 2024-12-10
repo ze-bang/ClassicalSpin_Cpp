@@ -287,7 +287,7 @@ class lattice
     array<double,N> gaussian_move(const array<double,N> &current_spin, std::mt19937 &gen, double sigma=60){
         array<double,N> new_spin;
         new_spin = current_spin + gen_random_spin(gen,spin_length)*sigma;
-        return new_spin/sqrt(dot(new_spin, new_spin));
+        return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length;
     }
 
     void overrelaxation(std::mt19937 &gen){
