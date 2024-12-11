@@ -247,8 +247,10 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
 
     JPMS = np.linspace(Jpm_start, Jpm_end, nJpm)
     HS = np.linspace(H_start, H_end, nH)
+    Energies = np.zeros((nJpm. nH))
     phase_diagram = np.zeros((nJpm,nH))
     entropy_diagram = np.zeros((nJpm, nH))
+    mag_diagram = np.zeros((nJpm, nH))
     if field_dir == "110":
         n = np.array([1,1,0])/np.sqrt(2)
     elif field_dir == "111":
@@ -263,27 +265,34 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
             print(dir + "/" + filename)
             info = filename.split("_")
             try:
-                S = np.loadtxt(dir + "/" + filename + "/spin239.txt")
-                P = np.loadtxt(dir + "/" + filename + "/pos.txt")
+                S = np.loadtxt(dir + "/" + filename + "/spin199.txt")
+                E = np.loadtxt(dir + "/" + filename + "/energy199.txt")
+                # P = np.loadtxt(dir + "/" + filename + "/pos.txt")
                 mag = magnetization_local(S)
-                phase_diagram[int(info[4]), int(info[5])] = np.linalg.norm(mag)
+                phase_diagram[int(info[4]), int(info[5])] = np.abs(mag[0])
                 heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True)
                 heat_capacity = np.flip(heat_capacity, axis=1)
-                heat_capacity = heat_capacity[:,40:]
+                heat_capacity = heat_capacity[:,10:]
                 heat_capacity[1] = heat_capacity[1] * 8.6173303e-2
                 Cv_integrand = heat_capacity[1]/heat_capacity[0]
-                S = np.zeros(len(heat_capacity[1])-1)
+                entropy = np.zeros(len(heat_capacity[1])-1)
                 for i in range(1,len(heat_capacity[1])):
-                    S[i-1] = -np.trapz(Cv_integrand[i:], heat_capacity[0][i:]) + np.log(2)
-                np.savetxt(dir + "/" + filename + "/entropy.txt", S)
-                entropy_diagram[int(info[4]), int(info[5])] = S[0] if S[0] > 0 else 0
+                    entropy[i-1] = -np.trapz(Cv_integrand[i:], heat_capacity[0][i:]) + np.log(2)
+                np.savetxt(dir + "/" + filename + "/entropy.txt", entropy)
+                entropy_diagram[int(info[4]), int(info[5])] = entropy[0] if entropy[0] > 0 else 0
+                mag_diagram[int(info[4]), int(info[5])] = np.abs(magnetization(S, n)[2])
+                Energies[int(info[4]), int(info[5])] = np.mean(E)
             except:
                 phase_diagram[int(info[4]), int(info[5])] = np.nan
                 entropy_diagram[int(info[4]), int(info[5])] = np.nan
+                mag_diagram[int(info[4]), int(info[5])] = np.nan
+                Energies[int(info[4]), int(info[5])] = np.nan
             count = count + 1
 
     np.savetxt(dir+"_magnetization.txt", phase_diagram)
     np.savetxt(dir+"_entropy.txt", entropy_diagram)
+    np.savetxt(dir+"_global_mag.txt", mag_diagram)
+    np.savetxt(dir+"_energy.txt", Energies)
     # plt.imshow(phase_diagram.T, origin="lower", aspect="auto", extent=[Jpm_start, Jpm_end, H_start, H_end])
     # plt.scatter(JPMS, HS, c=phase_diagram)
     plt.imshow(phase_diagram.T, extent=[Jpm_start, Jpm_end, H_start, H_end], origin='lower', aspect='auto')
@@ -294,7 +303,14 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
     plt.colorbar()
     plt.savefig(dir+"_entropy.pdf")
     plt.clf()
-
+    plt.imshow(mag_diagram.T, extent=[Jpm_start, Jpm_end, H_start, H_end], origin='lower', aspect='auto')
+    plt.colorbar()
+    plt.savefig(dir+"_global_mag.pdf")
+    plt.clf()
+    plt.imshow(Energies.T, extent=[Jpm_start, Jpm_end, H_start, H_end], origin='lower', aspect='auto')
+    plt.colorbar()
+    plt.savefig(dir+"_energy.pdf")
+    plt.clf()
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
@@ -333,6 +349,9 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # fullread(-0.3, 0.3, 200, 0, 8.0, 100, "001", "/scratch/zhouzb79/MC_phase_diagram_CZO_001_XAIAO")
 # fullread(-0.3, 0.3, 200, 0, 8.0 , 100, "110", "/scratch/zhouzb79/MC_phase_diagram_CZO_110_XAIAO")
 # fullread(-0.3, 0.3, 200, 0, 8.0, 100, "111", "/scratch/zhouzb79/MC_phase_diagram_CZO_111_XAIAO")
-fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/zhouzb79/MC_phase_diagram_XYZ_001_XAIAO")
-fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/zhouzb79/MC_phase_diagram_XYZ_110_XAIAO")
-fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/zhouzb79/MC_phase_diagram_XYZ_111_XAIAO")
+fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_XAIAO")
+fullread(-0.3, 0.3, 50, 0, 15.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_XAIAO_High_field")
+fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_XAIAO")
+# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_ZAIAO")
+# fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_ZAIAO")
+# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_ZAIAO")

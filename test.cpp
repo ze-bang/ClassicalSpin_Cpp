@@ -335,7 +335,7 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
-    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
+    MC.parallel_tempering(temps, 1e5, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
     MPI_Finalized(&finalized);
@@ -421,7 +421,7 @@ int main(int argc, char** argv) {
     string sub_dir = dir_name + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
     int MPI_n_tasks = argv[11] ? atoi(argv[11]) : 1;
     std::cout << "Initializing parallel tempering calculation with parameters: " << "T = " << 10 << "-" << 1e-3 << " Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " saving to: " << dir_name << endl;
-    parallel_tempering_pyrochlore(10, 1e-3, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
+    parallel_tempering_pyrochlore(5, 1e-4, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
 
     // simulated_annealing_pyrochlore(-0.4, 1, 0.4, 0, 0, 1, 0, {0,0,1}, "test");
 
