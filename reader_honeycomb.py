@@ -620,7 +620,7 @@ def read_2D_nonlinear_tot(dir):
         if os.path.isdir(dir + "/" + filename):
             read_2D_nonlinear(dir + "/" + filename)
             A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
-    # A = np.log(A)
+    A = np.log(A)
     A = A/np.max(A)
     time_step = len(A)
     plt.imshow(A.T, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
@@ -636,14 +636,14 @@ def read_2D_nonlinear_tot(dir):
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
 # dir = "test_long_h=0.0"
 # read_2D_nonlinear_tot(dir)
-# dir = "test_long_h=0.7"
-# read_2D_nonlinear_tot(dir)
-P = np.loadtxt("pos.txt")
-S = np.loadtxt("spin.txt")
-S_global = np.zeros(S.shape)
-for i in range(4):
-    S_global[i::4] = contract('js, sp->jp', S[i::4], localframe[:,i,:])
-plot_spin_config(P[0:4], S_global[0:4],  -np.array([1,1,1])/np.sqrt(3), "spin_config.pdf")
+dir = "test_long_h=0.7"
+read_2D_nonlinear_tot(dir)
+# P = np.loadtxt("pos.txt")
+# S = np.loadtxt("spin.txt")
+# S_global = np.zeros(S.shape)
+# for i in range(4):
+#     S_global[i::4] = contract('js, sp->jp', S[i::4], localframe[:,i,:])
+# plot_spin_config(P[0:4], S_global[0:4],  -np.array([1,1,1])/np.sqrt(3), "spin_config.pdf")
 
 # dir = "./kitaev/"
 # fullread(dir, True, "110")

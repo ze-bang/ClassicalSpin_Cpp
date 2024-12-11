@@ -335,7 +335,7 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
-    MC.parallel_tempering(temps, 1e5, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
+    MC.parallel_tempering(temps, 1e5, 1e7, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
     MPI_Finalized(&finalized);
@@ -384,7 +384,7 @@ int main(int argc, char** argv) {
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
     // string dir = "test_long_h=0.7/";
-    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 200, 0.05, 0, 200, 0.05, -1.0, 0.25, -0.02, 0.7, dir, true);
+    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 600, 0.5, 0, 1200, 0.5, -1.0, 0.25, -0.02, 0.7, dir, true);
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
     int initialized;
     MPI_Initialized(&initialized);
@@ -422,7 +422,6 @@ int main(int argc, char** argv) {
     int MPI_n_tasks = argv[11] ? atoi(argv[11]) : 1;
     std::cout << "Initializing parallel tempering calculation with parameters: " << "T = " << 10 << "-" << 1e-3 << " Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " saving to: " << dir_name << endl;
     parallel_tempering_pyrochlore(5, 1e-4, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
-
     // simulated_annealing_pyrochlore(-0.4, 1, 0.4, 0, 0, 1, 0, {0,0,1}, "test");
 
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");

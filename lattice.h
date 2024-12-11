@@ -15,7 +15,7 @@
 #include <math.h>
 #include <functional>
 #include <mpi.h>
-
+#include "binning_analysis.h"
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
 {   
@@ -465,10 +465,12 @@ class lattice
                         energies.push_back(total_energy(spins));
                     }
                 }
-                double specific_heat = 1/(T*T)*variance(energies)/lattice_size;
+                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
+                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
                 ofstream myfile;
                 myfile.open(out_dir + "/specific_heat.txt", ios::app);
-                myfile << T << " " << specific_heat;
+                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
                 myfile << endl;
                 myfile.close();
             }
@@ -515,9 +517,10 @@ class lattice
         bool accept;        
         spin_config new_spins;
         double curr_Temp = temp[rank];
-        vector<double> heat_capacity;
+        vector<double> heat_capacity, dHeat;
         if (rank == 0){
             heat_capacity.resize(size);
+            dHeat.resize(size);
         }   
         vector<double> energies;
         vector<double> magnetizations;
@@ -584,8 +587,13 @@ class lattice
                 }
             }
         }
-        double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*variance(energies)/lattice_size;        
+        
+        // double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*variance(energies)/lattice_size;
+        std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+        double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
+        double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_therm)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_therm)*swap_rate*overrelaxation_flag << endl;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
@@ -601,7 +609,7 @@ class lattice
                 ofstream myfile;
                 myfile.open(dir_name + "/heat_capacity.txt", ios::app);
                 for(size_t j = 0; j<size; ++j){
-                    myfile << temp[j] << " " << heat_capacity[j] << endl;
+                    myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
                 }
                 myfile.close();
             }
@@ -776,15 +784,8 @@ class lattice
 
     double magnetization_local(const spin_config &current_spins){
         array<double,N> mag = {{0}};
-        for (size_t i=0; i< dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
-                    for (size_t l=0; l< N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l);
-                        mag = mag + current_spins[current_site_index];
-                    }
-                }
-            }
+        for (size_t i=0; i< lattice_size; ++i){
+            mag = mag + current_spins[i];
         }
         return sqrt(dot(mag, mag))/double(lattice_size);
     }
@@ -800,7 +801,7 @@ class lattice
         size_t count = 1;
         vector<double> time;
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in));
+        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in));
         // write_to_file_spin(dir_name + "/spin_t.txt", spin_t);
         // ofstream pulse_info;
         // pulse_info.open(dir_name + "/pulse_t.txt");
@@ -817,7 +818,7 @@ class lattice
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
             spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in));
+            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in));
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             time.push_back(currT);
@@ -853,13 +854,13 @@ class lattice
         vector<double> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in_1));
+        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1));
 
         while(currT < T_end){
 
             set_two_pulse(currT, field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
             spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t-spins, field_in_1));
+            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_2));
             currT = currT + step_size;
             time.push_back(currT);
             count++;
