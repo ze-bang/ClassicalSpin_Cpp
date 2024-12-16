@@ -173,27 +173,118 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     }
 }
 
-void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, string dir){
+void MD_TmFeO3_Fe(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir){
+    filesystem::create_directory(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
-    array<array<double, 3>3> Ja = {{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}};
-    array<array<double, 3>3> Jb = {{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}};
-    array<array<double, 3>3> Jc = {{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}};
+    array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
+    array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
+    array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
 
-    array<array<double, 3>3> J2a = {{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}};
-    array<array<double, 3>3> J2b = {{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}};
-    array<array<double, 3>3> J2c = {{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}};
+    array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
-    array<array<double, 3>,3> K = {{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}};
+    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
 
-    array<array<double, 3>,3> D = {{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}};
+    array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
+    //In plane interactions
+    //Nearest Neighbours
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+    //Next Nearest Neighbours
+    Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 1, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 1, 1, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 2, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+    //Out of plane interaction
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,1});
+
+    //single ion anisotropy
+    Fe_atoms.set_onsite_interaction(K, 0);
+    Fe_atoms.set_onsite_interaction(K, 1);
+    Fe_atoms.set_onsite_interaction(K, 2);
+    Fe_atoms.set_onsite_interaction(K, 3);
+
+    //Dzyaloshinskii-Moriya interaction
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
+
+    Fe_atoms.set_field(fielddir*h, 0);
+    Fe_atoms.set_field(fielddir*h, 1);
+    Fe_atoms.set_field(fielddir*h, 2);
+    Fe_atoms.set_field(fielddir*h, 3);
+
+    for(size_t i = 0; i < num_trials; ++i){
+        lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 0.5);
+        MC_FE.simulated_annealing(10, 1e-3, 10000, 0, false);
+        MC_FE.molecular_dynamics(10, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+    }
+}
+
+void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, string dir){
+    filesystem::create_directory(dir);
+    TmFeO3_Fe<3> Fe_atoms;
+    TmFeO3_Tm<8> Tm_atoms;
+
+    array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
+    array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
+    array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+
+    array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+
+    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
+
+    array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
 
-    Fe_atoms.set_bilinear_interaction(Ja, 0, 1, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 0, 1, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 0, 1, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(Ja, 0, 1, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {1,-1,0});
 
     Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
     Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
@@ -215,20 +306,30 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
 
     Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,1});
 
     Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
     Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
     Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
     Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
 
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,1});
+
     //single ion anisotropy
-    Fe_atom.set_onsite_interaction(K, 0);
-    Fe_atom.set_onsite_interaction(K, 1);
-    Fe_atom.set_onsite_interaction(K, 2);
-    Fe_atom.set_onsite_interaction(K, 3);
+    Fe_atoms.set_onsite_interaction(K, 0);
+    Fe_atoms.set_onsite_interaction(K, 1);
+    Fe_atoms.set_onsite_interaction(K, 2);
+    Fe_atoms.set_onsite_interaction(K, 3);
 
     //Dzyaloshinskii-Moriya interaction
     Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
@@ -240,8 +341,86 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
     Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
 
-    
+    Fe_atoms.set_field(fielddir*h, 0);
+    Fe_atoms.set_field(fielddir*h, 1);
+    Fe_atoms.set_field(fielddir*h, 2);
+    Fe_atoms.set_field(fielddir*h, 3);
+
+    TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
+
+    array<array<array<double,3>,3>,8> xi = {{{0}}};
+
+    xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+    xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+
+    ///////////////////
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {0,0,1}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {0,0,1}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
+
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {1,0,0}, {1,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,0,0}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
+    //////////////////
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
+
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,0,0}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {-1,1,0}, {-1,1,1});
+    //////////////////
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {1,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {1,0,0}, {0,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {1,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {1,0,0}, {0,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,1,0}, {0,1,0});
+    //////////////////
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {0,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {0,0,0}, {1,-1,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {0,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {0,0,0}, {1,-1,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
+
+    // for(size_t i = 0; i < num_trials; ++i){
+    //     lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 2.5);
+    //     MC_FE.simulated_annealing(15, 1e-3, 10000, 0, true);
+    //     MC_FE.molecular_dynamics(15, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+    // }
 }
+
 
 void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
     filesystem::create_directory(dir);
@@ -296,9 +475,9 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
 
     for(int i=start; i<end;++i){
 
-        lattice<3, 4, 12, 12, 12> MC(&atoms);
-        // MC.simulated_annealing(1, 0.001, 1000, 10000, 1000000, 0, dir+"/"+std::to_string(i));
-        MC.molecular_dynamics(14,0.09, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
+        MC.simulated_annealing(10, 1e-3, 10000, 0, true, dir);
+        MC.molecular_dynamics(10, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
     }
 }
 
@@ -445,8 +624,12 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    string dir = "test_long_h=0.7/";
-    full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-7, 0, -600, -0.25, -600, 600, 0.25, -1.0, 0.25, -0.02, 0.7, dir, true);
+    // string dir = "test_long_MD=0.7/";
+    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 600, 0.5, 0, 1200, 0.5, -1.0, 0.25, -0.02, 0.7, dir, true);
+
+    // MD_pyrochlore(1, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 1, 8, {1/sqrt(2),1/sqrt(2),0}, "CZO_h=4T");
+
+    MD_TmFeO3_Fe(1, 1.0, 1.0, 1.0, 0.158/4.675, 0.158/4.675, 0.158/4.675, 0, -0.023/4.675, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_data");
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
     // int initialized;
     // MPI_Initialized(&initialized);

@@ -585,9 +585,9 @@ def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
     M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")
-    T = np.linspace(time_start, time_end, int(time_step))
+    T = np.linspace(0, time_end, int(tau_step))
     tau = np.linspace(tau_start, tau_end, int(tau_step))
-    M_NL = np.zeros((int(tau_step), int(time_step)))
+    M_NL = np.zeros((int(tau_step), int(tau_step)))
     w = np.linspace(-0.2, 0.2, int(time_step))
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
@@ -598,7 +598,7 @@ def read_2D_nonlinear(dir):
             info = filename.split("_")
             M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")
-            M_NL[int(info[2])] = M01
+            M_NL[int(info[2])] = M01[2400:2400+int(tau_step)] - M0[2400:2400+int(tau_step)] - M1[2400:2400+int(tau_step)]
 
     gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
     M_NL = contract('it, ti->it', M_NL, gaussian_filter)

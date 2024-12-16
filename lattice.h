@@ -120,7 +120,6 @@ class lattice
                             bilinear_partners[partner].push_back(current_site_index);
                             count++;
                         }
-                        
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
                         count = 0;
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
@@ -142,6 +141,10 @@ class lattice
                 }
             }
         }
+        
+
+                
+    
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
@@ -149,7 +152,7 @@ class lattice
         //     for(size_t j =0; j < num_bi; ++j){
         //         int partner = bilinear_partners[i][j];
         //         array<array<double,N>, N> J = bilinear_interaction[i][j];
-        //         cout << "Bilinear: " << i << " " << partner << " with interaction " << J[0][0] << " " << J[1][1] << " " << J[2][2] << endl;
+        //         cout << "Bilinear: " << i << " at site " << site_pos[i][0] << " " << site_pos[i][1] << " " << site_pos[i][2] << " " << partner  << " on site " << site_pos[partner][0] << " " << site_pos[partner][1] << " " << site_pos[partner][2] << " with interaction " << J[0][0] << " " << J[1][1] << " " << J[2][2] << endl;
         //     }
         // }
 
@@ -699,7 +702,7 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-        double tol = 1e-12;
+        double tol = 1e-4;
 
         int check_frequency = 10;
         double currT = T_start;
@@ -709,7 +712,7 @@ class lattice
         time.push_back(currT);
 
         while(currT < T_end){
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
+            spin_t = RK45_step(step_size, spin_t, tol, cross_prod);
             write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             cout << "Time: " << currT << endl;
