@@ -276,6 +276,23 @@ double norm_average_2D(const array<array<double, M>, N> &a) {
     return result/(N*M);
 }
 
+template <size_t N1, size_t N2, size_t M1, size_t M2>
+double norm_average_2D(const tuple<array<array<double,N1>, M1>, array<array<double,N2>, M2>> &a) {
+    double result = 0;
+    for (size_t i = 0; i < N1; ++i) {
+        for (size_t j = 0; j < M1; ++j) {
+            result += get<0>(a)[i][j]*get<0>(a)[i][j];
+        }
+    }
+
+    for (size_t i = 0; i < N2; ++i) {
+        for (size_t j = 0; j < M2; ++j) {
+            result += get<1>(a)[i][j]*get<1>(a)[i][j];
+        }
+    }
+    return result/(N1*M1*N2*M2);
+}
+
 template <size_t N, size_t M>
 array<array<double, M>, N> operator-(const array<array<double, M>, N> &a,const array<array<double, M>, N>  &b) {
     array<array<double, M>, N> result;

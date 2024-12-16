@@ -92,7 +92,7 @@ void MD_kitaev_honeycomb(size_t num_trials, double K, double Gamma, double Gamma
 }
 
 // kitaev local xyz {1,-1,-1} / {-1, 1, -1} / {-1, -1, 1}
-void nonlinearspectroscopy_kitaev_honeycomb(double Temp, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double K, double Gamma, double Gammap, double h, string dir, bool T_zero){
+void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double K, double Gamma, double Gammap, double h, string dir, bool T_zero){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
     array<array<double,3>, 3> Jx = {{{K,Gammap,Gammap},{Gammap,0,Gamma},{Gammap,Gamma,0}}};
@@ -115,11 +115,11 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp, double tau_start, doubl
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
-    int T_steps = int((T_end-T_start)/T_step_size)+1;
-    int tau_steps = int((tau_end-tau_start)/tau_step_size)+1;
+    int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
+    int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
 
     lattice<3, 2, 20, 20, 1> MC(&atoms);
-    MC.simulated_annealing(2.0, Temp, 10000, 0, true);
+    MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
     std::random_device rd;
     std::mt19937 gen(rd());
     if (T_zero){
@@ -150,7 +150,7 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp, double tau_start, doubl
 }
 
 
-void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double K, double Gamma, double Gammap, double h, string dir, bool T_zero){
+void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double K, double Gamma, double Gammap, double h, string dir, bool T_zero){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -164,7 +164,7 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp,
     filesystem::create_directory(dir);
 
     for(size_t i = 0; i < num_trials; ++i){
-        nonlinearspectroscopy_kitaev_honeycomb(Temp, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, K, Gamma, Gammap, h, dir+std::to_string(i), T_zero);
+        nonlinearspectroscopy_kitaev_honeycomb(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, K, Gamma, Gammap, h, dir+std::to_string(i), T_zero);
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -173,12 +173,74 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp,
     }
 }
 
-void MD_TmFeO3(int num_trials, double J, double xi, string dir){
-    HoneyComb<3> atoms_SU2;
-    HoneyComb<8> atoms_SU3;
+void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, string dir){
+    TmFeO3_Fe<3> Fe_atoms;
+    TmFeO3_Tm<8> Tm_atoms;
+
+    array<array<double, 3>3> Ja = {{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}};
+    array<array<double, 3>3> Jb = {{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}};
+    array<array<double, 3>3> Jc = {{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}};
+
+    array<array<double, 3>3> J2a = {{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}};
+    array<array<double, 3>3> J2b = {{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}};
+    array<array<double, 3>3> J2c = {{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}};
+
+    array<array<double, 3>,3> K = {{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}};
+
+    array<array<double, 3>,3> D = {{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}};
+    //In plane interactions
+
+    Fe_atoms.set_bilinear_interaction(Ja, 0, 1, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 0, 1, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 0, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 0, 1, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+    //Next Nearest Neighbour
+    Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 1, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 1, 1, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 2, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+    //Out of plane interaction
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
+
+    //single ion anisotropy
+    Fe_atom.set_onsite_interaction(K, 0);
+    Fe_atom.set_onsite_interaction(K, 1);
+    Fe_atom.set_onsite_interaction(K, 2);
+    Fe_atom.set_onsite_interaction(K, 3);
+
+    //Dzyaloshinskii-Moriya interaction
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
+
     
-    mixed_UnitCell<3, 2, 8, 2> atoms(&atoms_SU2, &atoms_SU3);
-    mixed_lattice<3, 2, 8, 2, 16, 16, 1> MC(&atoms);
 }
 
 void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
@@ -281,7 +343,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 
     lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(10, 1e-3, 10000, 0, true, dir);
+    MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
 }
 
 void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write){
@@ -383,8 +445,8 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    // string dir = "test_long_h=0.7/";
-    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 600, 0.5, 0, 1200, 0.5, -1.0, 0.25, -0.02, 0.7, dir, true);
+    string dir = "test_long_h=0.7/";
+    full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-7, 0, -600, -0.25, -600, 600, 0.25, -1.0, 0.25, -0.02, 0.7, dir, true);
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
     // int initialized;
     // MPI_Initialized(&initialized);
@@ -423,7 +485,7 @@ int main(int argc, char** argv) {
     // std::cout << "Initializing parallel tempering calculation with parameters: " << "T = " << 10 << "-" << 1e-3 << " Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " saving to: " << dir_name << endl;
     // parallel_tempering_pyrochlore(10, 1e-3, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {MPI_n_tasks-1});
 
-    simulated_annealing_pyrochlore(-0.4, 1, 0.4, 0, 0, 1, 0, {0,0,1}, "test");
+    // simulated_annealing_pyrochlore(-0.4, 1, 0.4, 0, 0, 1, 0, {0,0,1}, "test");
 
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.0, {1,1,1}, "MC_phase_diagram_CZO_111");

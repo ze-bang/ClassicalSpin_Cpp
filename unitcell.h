@@ -215,6 +215,36 @@ struct HoneyComb : UnitCell<N, 2>{
 
 
 template<size_t N>
+struct TmFeO3_Fe : UnitCell<N, 4>{
+    TmFeO3_Fe() : UnitCell<N, 4>({{{0, 0.5, 0.5},{0.5, 0, 0.5},{0.5, 0, 0},{0, 0.5, 0}}}, {{{1,0,0},{0,1,0},{0,0,1}}}) {
+        array<double,N> field0 = {0};
+        this->set_field(field0, 0);
+        this->set_field(field0, 1);
+        this->set_field(field0, 2);
+        this->set_field(field0, 3);
+    };
+};
+template<size_t N>
+struct TmFeO3_Tm : UnitCell<N, 4>{
+    TmFeO3_Tm() : UnitCell<N, 4>({{{0.02111, 0.92839, 0.75},{0.52111, 0.57161, 0.25},{0.47889, 0.42839, 0.75},{0.97889, 0.07161, 0.25}}}, {{{1,0,0},{0,1,0},{0,0,1}}}) {
+        array<double,N> field0 = {0};
+        this->set_field(field0, 0);
+        this->set_field(field0, 1);
+        this->set_field(field0, 2);
+        this->set_field(field0, 3);
+    };
+};
+
+template<size_t N_SU2, size_t N_SU3>
+struct TmFeO3 : mixed_UnitCell<N_SU2, 4, N_SU3, 4>{
+    TmFeO3() : mixed_UnitCell<N_SU2, 4, N_SU3, 4>(new TmFeO3_Fe<N_SU2>, new TmFeO3_Tm<N_SU3>) {
+    };
+    TmFeO3(TmFeO3_Fe<N_SU2> *Fe, TmFeO3_Tm<N_SU3> *Tm) : mixed_UnitCell<N_SU2, 4, N_SU3, 4>(Fe, Tm) {
+    };
+};
+
+
+template<size_t N>
 struct Pyrochlore : UnitCell<N, 4>{
     Pyrochlore() : UnitCell<N, 4>({{{0.125,0.125,0.125},{0.125,-0.125,-0.125},{-0.125,0.125,-0.125},{-0.125,-0.125,0.125}}}, {{{0,0.5,0.5},{0.5,0,0.5},{0.5,0.5,0}}}) {
         array<double,N> field0 = {0};

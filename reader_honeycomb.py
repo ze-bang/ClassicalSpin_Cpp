@@ -588,18 +588,18 @@ def read_2D_nonlinear(dir):
     T = np.linspace(time_start, time_end, int(time_step))
     tau = np.linspace(tau_start, tau_end, int(tau_step))
     M_NL = np.zeros((int(tau_step), int(time_step)))
+    w = np.linspace(-0.2, 0.2, int(time_step))
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
+
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             info = filename.split("_")
             M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")
-            M_NL[int(info[2])] = M01 - M0 - M1 
+            M_NL[int(info[2])] = M01
 
-
-    w = np.linspace(-0.2, 0.2, int(time_step))
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))
-    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
     gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
     M_NL = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = np.abs(contract('it, wi, ut->uw', M_NL, ffactau, ffactt))
@@ -620,8 +620,8 @@ def read_2D_nonlinear_tot(dir):
         if os.path.isdir(dir + "/" + filename):
             read_2D_nonlinear(dir + "/" + filename)
             A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
-    A = np.log(A)
     A = A/np.max(A)
+    A = np.log(A)
     time_step = len(A)
     plt.imshow(A.T, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
     # w = np.linspace(-0.2, -0.2, time_step)
