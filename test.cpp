@@ -234,9 +234,9 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
 
     for(int i=start; i<end;++i){
 
-        lattice<3, 4, 12, 12, 12> MC(&atoms);
-        // MC.simulated_annealing(1, 0.001, 1000, 10000, 1000000, 0, dir+"/"+std::to_string(i));
-        MC.molecular_dynamics(14,0.09, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+        MC.simulated_annealing(10, 1e-3, 10000, 0, true, dir);
+        MC.molecular_dynamics(10, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
     }
 }
 
@@ -383,8 +383,11 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    string dir = "test_long_h=0.7/";
-    full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 600, 0.5, 0, 1200, 0.5, -1.0, 0.25, -0.02, 0.7, dir, true);
+    // string dir = "test_long_MD=0.7/";
+    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 600, 0.5, 0, 1200, 0.5, -1.0, 0.25, -0.02, 0.7, dir, true);
+
+    MD_pyrochlore(1, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 1, 8, {1/sqrt(2),1/sqrt(2),0}, "CZO_h=4T");
+
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
     // int initialized;
     // MPI_Initialized(&initialized);

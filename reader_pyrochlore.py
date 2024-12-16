@@ -63,17 +63,17 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-P1 = np.pi * np.array([1, 0, 0])
-P2 = np.pi * np.array([2, 0, 0])
-P3 = np.pi * np.array([2, 1, 0])
-P4 = np.pi * np.array([2, 2, 0])
-P5 = np.pi * np.array([1, 1, 0])
+# P1 = np.pi * np.array([1, 0, 0])
+# P2 = np.pi * np.array([2, 0, 0])
+# P3 = np.pi * np.array([2, 1, 0])
+# P4 = np.pi * np.array([2, 2, 0])
+# P5 = np.pi * np.array([1, 1, 0])
 
-# P1 = np.pi * np.array([1, 1, 0])
-# P2 = np.pi * np.array([2, 2, 0])
-# P3 = np.pi * np.array([2, 2, 1])
-# P4 = np.pi * np.array([2, 2, 2])
-# P5 = np.pi * np.array([1, 1, 1])
+P1 = np.pi * np.array([1, 1, 0])
+P2 = np.pi * np.array([2, 2, 0])
+P3 = np.pi * np.array([2, 2, 1])
+P4 = np.pi * np.array([2, 2, 2])
+P5 = np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
@@ -629,21 +629,21 @@ def read_MD(dir):
     # ax.set_xticks(xlabpos, labels)
     # ax.set_xlim([0, gGamma3])
     # fig.colorbar(C)
-    # plt.savefig(dir+"DSSF.pdf")
+    # plt.savefig(dir+"DSSF.pdf") 
     # plt.clf()
 
 
 # obenton_to_xx_zz()
 #
-dir = "./pyrochlore_test_110"
-# read_MD_tot(dir)
+dir = "CZO_h=4T"
+read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
-plt.plot(A[0], A[1])
-plt.xscale('log')
-plt.savefig("test_Jpm=0.3/specific_heat.pdf")
+# A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
+# plt.plot(A[0], A[1])
+# plt.xscale('log')
+# plt.savefig("test_Jpm=0.3/specific_heat.pdf")
