@@ -234,7 +234,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
 
     for(int i=start; i<end;++i){
 
-        lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+        lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
         MC.simulated_annealing(10, 1e-3, 10000, 0, true, dir);
         MC.molecular_dynamics(10, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
     }

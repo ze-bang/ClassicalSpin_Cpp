@@ -699,7 +699,7 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-        double tol = 1e-12;
+        double tol = 1e-8;
 
         int check_frequency = 10;
         double currT = T_start;
