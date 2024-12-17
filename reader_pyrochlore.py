@@ -63,17 +63,17 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-# P1 = np.pi * np.array([1, 0, 0])
-# P2 = np.pi * np.array([2, 0, 0])
-# P3 = np.pi * np.array([2, 1, 0])
-# P4 = np.pi * np.array([2, 2, 0])
-# P5 = np.pi * np.array([1, 1, 0])
+P1 = 2 * np.pi * np.array([1, 0, 0])
+P2 = 2 * np.pi * np.array([2, 0, 0])
+P3 = 2 * np.pi * np.array([2, 1, 0])
+P4 = 2 * np.pi * np.array([2, 2, 0])
+P5 = 2 * np.pi * np.array([1, 1, 0])
 
-P1 = np.pi * np.array([1, 1, 0])
-P2 = np.pi * np.array([2, 2, 0])
-P3 = np.pi * np.array([2, 2, 1])
-P4 = np.pi * np.array([2, 2, 2])
-P5 = np.pi * np.array([1, 1, 1])
+# P1 =  2 * np.pi * np.array([1, 1, 0])
+# P2 =  2 * np.pi * np.array([2, 2, 0])
+# P3 =  2 * np.pi * np.array([2, 2, 1])
+# P4 =  2 * np.pi * np.array([2, 2, 2])
+# P5 =  2 * np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
@@ -125,8 +125,8 @@ def Spin_global_pyrochlore_t(k,S,P):
     size = int(len(P)/4)
     tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
     for i in range(4):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
-        tS[:,i,:,:] = contract('tjs, ij, sp->tip', S[:,i*size:(i+1)*size,:], ffact, localframe[:,i,:])/np.sqrt(size)
+        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
+        tS[:,i,:,:] = contract('tjs, ij, sp->tip', S[:,i::4], ffact, localframe[:,i,:])/np.sqrt(size)
     return tS
 
 def Spin_t(k, S, P):
@@ -593,7 +593,7 @@ def read_MD(dir):
     w0 = 0
     wmax = 10
     w = np.linspace(w0, wmax, 1000)[1:]
-    A = DSSF(w, DSSF_K, S, P, T, False)
+    A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -607,6 +607,7 @@ def read_MD(dir):
     ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
     xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
     labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
+    # labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
     ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, gGamma4])
     fig.colorbar(C)
@@ -635,7 +636,8 @@ def read_MD(dir):
 
 # obenton_to_xx_zz()
 #
-dir = "CZO_h=4T"
+# dir = "CZO_h=4T"
+dir = "CZO_h=6T_001_theta=0.0"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")

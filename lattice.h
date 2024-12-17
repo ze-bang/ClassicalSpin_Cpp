@@ -398,6 +398,18 @@ class lattice
         myfile.close();
     }
 
+    void write_to_file_2d_vector_array(string filename, vector<array<double, N>> towrite){
+        ofstream myfile;
+        myfile.open(filename, ios::app);
+        for(size_t i = 0; i<towrite.size(); ++i){
+            for(size_t j = 0; j<N; ++j){
+                myfile << towrite[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
     void write_column_vector(string filename, vector<double> towrite){
         ofstream myfile;
         myfile.open(filename);
@@ -526,7 +538,7 @@ class lattice
             dHeat.resize(size);
         }   
         vector<double> energies;
-        vector<double> magnetizations;
+        vector<array<double,N>> magnetizations;
 
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
@@ -603,7 +615,7 @@ class lattice
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
                     write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
-                    write_column_vector(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                 }
             }
@@ -785,12 +797,13 @@ class lattice
         return mag/double(lattice_size);
     }
 
-    double magnetization_local(const spin_config &current_spins){
+    array<double,N> magnetization_local(const spin_config &current_spins){
         array<double,N> mag = {{0}};
         for (size_t i=0; i< lattice_size; ++i){
             mag = mag + current_spins[i];
         }
-        return sqrt(dot(mag, mag))/double(lattice_size);
+        array<double, N> dummy = {{1,1,1}};
+        return dummy*sqrt(dot(mag,mag));
     }
 
     void M_B_t(array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
@@ -804,7 +817,7 @@ class lattice
         size_t count = 1;
         vector<double> time;
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in));
+        write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
         // write_to_file_spin(dir_name + "/spin_t.txt", spin_t);
         // ofstream pulse_info;
         // pulse_info.open(dir_name + "/pulse_t.txt");
@@ -821,7 +834,7 @@ class lattice
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
             spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in));
+            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             time.push_back(currT);
@@ -857,13 +870,13 @@ class lattice
         vector<double> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1));
+        write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
 
         while(currT < T_end){
 
             set_two_pulse(currT, field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
             spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_2));
+            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
             currT = currT + step_size;
             time.push_back(currT);
             count++;
