@@ -698,6 +698,37 @@ class lattice
         return new_spins;
     }
 
+    spin_config SSPRK53_step(const double step_size, const spin_config &curr_spins, const double tol, cross_product_method cross_prod){
+        double a30 = 0.355909775063327;
+        double a32 = 0.644090224936674;
+        double a40 = 0.367933791638137;
+        double a43 = 0.632066208361863;
+        double a52 = 0.237593836598569;
+        double a54 = 0.762406163401431;
+        double b10 = 0.377268915331368;
+        double b21 = 0.377268915331368;
+        double b32 = 0.242995220537396;
+        double b43 = 0.238458932846290;
+        double b54 =0.287632146308408;
+        double c1 = 0.377268915331368;
+        double c2 = 0.754537830662736;
+        double c3 = 0.728985661612188;
+        double c4 = 0.699226135931670;
+
+        spin_config tmp = curr_spins + landau_lifshitz(curr_spins, cross_prod) * b10 * step_size;
+        spin_config k = landau_lifshitz(tmp, cross_prod);
+        spin_config u = tmp + k * step_size * b21;
+        //u3
+        k = landau_lifshitz(u, cross_prod);
+        tmp = curr_spins * a30 + u * a32 + k * step_size * b32;
+        k = landau_lifshitz(tmp, cross_prod);
+        //u4
+        tmp = curr_spins * a40 + tmp * a43 + k * step_size * b43;
+        k = landau_lifshitz(tmp, cross_prod);
+        u = u * a52 + tmp * a54 + k * step_size * b54;
+        return u;
+    }
+
 
     void molecular_dynamics(double Temp_start, double Temp_end, size_t n_anneal, size_t overrelaxation_rate, double T_start, double T_end, double step_size, string dir_name, bool gaussian_move = false){
         // simulated_annealing(Temp_start, Temp_end, n_anneal, overrelaxation_rate, gaussian_move);
@@ -755,21 +786,15 @@ class lattice
     }
 
     void reset_pulse(){
-        for (size_t i=0; i< dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
-                    for (size_t l=0; l< N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l);
-                        driving_field[current_site_index] = {0};
-                    }
-                }
-            }
+        for (size_t i=0; i< lattice_size; ++i){
+            driving_field[i] = {0};
         }
     }
 
     void set_two_pulse(double currT, const array<array<double,N>, N_ATOMS> &field_in_1, double t_B_1, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
         double factor1 = double(pulse_amp*exp(-pow((currT-t_B_1)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B_1)));
         double factor2 = double(pulse_amp*exp(-pow((currT-t_B_2)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B_2)));
+        // cout << "Current Time: " << currT << " Pulse Time 1: " << t_B_1 << " Pulse Time 2: " << t_B_2 << " Factor 1: " << factor1 << " Factor 2: " << factor2 << endl;
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim3;++k){
@@ -780,6 +805,10 @@ class lattice
                 }
             }
         }
+        ofstream pulse_info;
+        pulse_info.open("pulse_t.txt", ios::app);
+        pulse_info << "Current Time: " << currT << " Pulse Time 1: " << t_B_1 << " Pulse Time 2: " << t_B_2 << " " << driving_field[0][0] << " " << driving_field[0][1] << " " << driving_field[0][2] << endl;
+        pulse_info.close();
     }
 
     double magnetization(const spin_config &current_spins, array<array<double, N>, N_ATOMS> &field_current){
@@ -802,8 +831,7 @@ class lattice
         for (size_t i=0; i< lattice_size; ++i){
             mag = mag + current_spins[i];
         }
-        array<double, N> dummy = {{1,1,1}};
-        return dummy*sqrt(dot(mag,mag));
+        return mag/double(lattice_size);
     }
 
     void M_B_t(array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){

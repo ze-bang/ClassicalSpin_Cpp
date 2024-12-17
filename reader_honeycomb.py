@@ -584,37 +584,26 @@ def plot_spin_config(P, S, field_dir, filename):
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
-    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt") -0.57735
-    M_NL = np.zeros((int(tau_step), 400))
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,2]
+    M_NL = np.zeros((int(tau_step), int(time_step-2400)))
     w = np.linspace(-0.2, 0.2, 400)
     T = np.linspace(time_start, time_end, int(time_step)) 
+    T = T[2400:]
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
     tau = np.linspace(tau_start, tau_end, int(tau_step))
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
             info = filename.split("_")
-            ffactt = np.exp(1j*contract('w,t->wt', w, T[2400:]))
-            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt") -0.57735
-            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt") -0.57735
-            M_NL[int(info[2])] = np.abs(contract('i, wi->w',M01[2400:]- M0[2400:]- M1[2400:], ffactt))
-            # plt.plot(T, M01)
-            # plt.savefig(dir + "/" + filename + "/M01_tau.pdf")
-            # plt.clf()
-            # plt.plot(T, M0)
-            # plt.savefig(dir + "/" + filename + "/M0_tau.pdf")
-            # plt.clf()
-            # plt.plot(T, M1)
-            # plt.savefig(dir + "/" + filename + "/M1_tau.pdf")
-            # plt.clf()
-            # plt.plot(T, M01-M0-M1)
-            # plt.savefig(dir + "/" + filename + "/M_tau.pdf")
-            # plt.clf()
-
-    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
-    # M_NL = contract('it, ti->it', M_NL, gaussian_filter)
-    M_NL_FF = np.abs(contract('it, wi->wt', M_NL, ffactau))
-    M_NL_FF = np.log(M_NL_FF)
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,2]
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,2]
+            M_NL[int(info[2])] =  M01[2400:] - M0[2400:]- M1[2400:] + 0.57335
+    gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
+    M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
+    # M_NL_FF = M_NL
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    # M_NL_FF = np.log(M_NL_FF)
     M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
     plt.imshow(M_NL_FF, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
@@ -647,7 +636,7 @@ def read_2D_nonlinear_tot(dir):
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
 # dir = "test_long_h=0.0"
 # read_2D_nonlinear_tot(dir)
-dir = "test_long_MD=0.7"
+dir = "test_long_MD=0.7_finite_temp_SSPRK"
 read_2D_nonlinear_tot(dir)
 # P = np.loadtxt("pos.txt")
 # S = np.loadtxt("spin.txt")
