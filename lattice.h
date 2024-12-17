@@ -191,6 +191,27 @@ class lattice
         num_gen = lattice_in->num_gen;
     };
 
+    void read_set_spin_config(const string &filename){
+        ifstream file;
+        file.open(filename);
+        if (!file){
+            cout << "Unable to open file";
+            exit(1);
+        }
+        string line;
+        size_t count = 0;
+        while(getline(file, line)){
+            istringstream iss(line);
+            array<double, N> spin;
+            for(size_t i = 0; i < N; ++i){
+                iss >> spin[i];
+            }
+            spins[count] = spin;
+            count++;
+        }
+        file.close();
+    }
+
 
     void set_spin(size_t site_index, array<double, N> &spin_in){
         spins[site_index] = spin_in;
@@ -741,7 +762,7 @@ class lattice
     }
 
     void set_pulse(double currT, const array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq){
-        double factor = double(pulse_amp*exp(-pow((currT-t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B)));
+        double factor = double(pulse_amp*exp(-pow((currT-t_B)/pulse_width,2)/2)*cos(2*M_PI*pulse_freq*(currT-t_B)));
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim3;++k){
@@ -802,8 +823,7 @@ class lattice
         for (size_t i=0; i< lattice_size; ++i){
             mag = mag + current_spins[i];
         }
-        array<double, N> dummy = {{1,1,1}};
-        return dummy*sqrt(dot(mag,mag));
+        return mag/double(lattice_size);
     }
 
     void M_B_t(array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){

@@ -584,20 +584,25 @@ def plot_spin_config(P, S, field_dir, filename):
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
-    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt") -0.57735
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")
+    M0 = np.linalg.norm(contract('ix, xa->ia', M0, kitaevLocal),axis=1) - 0.57355
     M_NL = np.zeros((int(tau_step), 400))
     w = np.linspace(-0.2, 0.2, 400)
     T = np.linspace(time_start, time_end, int(time_step)) 
     tau = np.linspace(tau_start, tau_end, int(tau_step))
+    print(tau)
+    cutoff = 2400
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
             info = filename.split("_")
-            ffactt = np.exp(1j*contract('w,t->wt', w, T[2400:]))
-            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt") -0.57735
-            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt") -0.57735
-            M_NL[int(info[2])] = np.abs(contract('i, wi->w',M01[2400:]- M0[2400:]- M1[2400:], ffactt))
+            ffactt = np.exp(1j*contract('w,t->wt', w, T[cutoff:]))
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt") - 0.57355
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt") - 0.57355
+            M1 = np.linalg.norm(contract('ix, xa->ia', M1, kitaevLocal),axis=1)
+            M01 = np.linalg.norm(contract('ix, xa->ia', M01, kitaevLocal),axis=1)
+            M_NL[int(info[2])] = np.abs(contract('i, wi->w',M01[cutoff:]- M0[cutoff:]- M1[cutoff:], ffactt))
             # plt.plot(T, M01)
             # plt.savefig(dir + "/" + filename + "/M01_tau.pdf")
             # plt.clf()
@@ -640,6 +645,7 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
+
 # dir = "integrity_test"
 # read_MD_tot(dir)
 # parseDSSF(dir)
