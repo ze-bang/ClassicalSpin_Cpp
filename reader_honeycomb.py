@@ -585,24 +585,25 @@ def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
     M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")
-    T = np.linspace(0, time_end, int(tau_step))
+
+    M_NL = np.zeros((int(tau_step), 1000))
+    w = np.linspace(-0.2, 0.2, 1000)
+    T = np.linspace(time_start, time_end, int(tau_step)) 
     tau = np.linspace(tau_start, tau_end, int(tau_step))
-    M_NL = np.zeros((int(tau_step), int(tau_step)))
-    w = np.linspace(-0.2, 0.2, int(time_step))
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))
-    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
 
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
+            # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
             info = filename.split("_")
+            ffactt = np.exp(1j*contract('w,t->wt', w, T[int(info[2]):]))
             M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")
-            M_NL[int(info[2])] = M01[2400:2400+int(tau_step)] - M0[2400:2400+int(tau_step)] - M1[2400:2400+int(tau_step)]
+            M_NL[int(info[2])] = np.abs(contract('i, wi->w',M01[int(info[2]):] - M0[int(info[2]):] - M1[int(info[2]):], ffactt))
 
-    gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
-    M_NL = contract('it, ti->it', M_NL, gaussian_filter)
-    M_NL_FF = np.abs(contract('it, wi, ut->uw', M_NL, ffactau, ffactt))
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))
+    # M_NL = contract('it, ti->it', M_NL, gaussian_filter)
+    M_NL_FF = np.abs(contract('it, wi->wt', M_NL, ffactau))
     M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
     plt.imshow(M_NL_FF.T, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
@@ -636,7 +637,7 @@ def read_2D_nonlinear_tot(dir):
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
 # dir = "test_long_h=0.0"
 # read_2D_nonlinear_tot(dir)
-dir = "test_long_h=0.7"
+dir = "test_long_MD=0.7"
 read_2D_nonlinear_tot(dir)
 # P = np.loadtxt("pos.txt")
 # S = np.loadtxt("spin.txt")

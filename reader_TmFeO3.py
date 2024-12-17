@@ -19,12 +19,12 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-P1 = np.pi * np.array([1, 0, 3])
-P2 = np.pi * np.array([3, 0, 3])
-P3 = np.pi * np.array([3, 0, 1])
-P4 = np.pi * np.array([3, 2, 1])
+P1 = 2*np.pi * np.array([1, 0, 3])
+P2 = 2*np.pi * np.array([3, 0, 3])
+P3 = 2*np.pi * np.array([3, 0, 1])
+P4 = 2*np.pi * np.array([3, 2, 1])
 
-graphres = 12
+graphres = 16
 stepN = np.linalg.norm(P2-P1)/graphres
 
 
@@ -309,10 +309,10 @@ def read_MD(dir):
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
-    wmax = 14
-    w = np.linspace(w0, wmax, 1000)[1:]
+    wmax = 75
+    w = np.linspace(w0, wmax, 800)[1:]
     A = DSSF(w, DSSF_K, S, P, T, False)
-    # A = np.log(A)
+    A = np.log(A)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -351,7 +351,7 @@ def read_MD(dir):
 
 # obenton_to_xx_zz()
 #
-dir = "TmFeO3_Fe_Magnon_MD"
+dir = "TmFeO3_Fe_Magnon_MD_real_meV"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")

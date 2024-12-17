@@ -173,7 +173,7 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     }
 }
 
-void MD_TmFeO3_Fe(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir){
+void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir){
     filesystem::create_directory(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -257,9 +257,9 @@ void MD_TmFeO3_Fe(int num_trials, double Jai, double Jbi, double Jci, double J2a
     Fe_atoms.set_field(fielddir*h, 3);
 
     for(size_t i = 0; i < num_trials; ++i){
-        lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 0.5);
-        MC_FE.simulated_annealing(10, 1e-3, 10000, 0, false);
-        MC_FE.molecular_dynamics(10, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 16, 16, 16> MC_FE(&Fe_atoms, 2.5);
+        MC_FE.simulated_annealing(T_start, T_end, 10000, 0, false);
+        MC_FE.molecular_dynamics(T_start, T_end, 10000, 0, 0, 200/Jai, 5e-2/Jai, dir+"/"+std::to_string(i));
     }
 }
 
@@ -624,12 +624,12 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    // string dir = "test_long_MD=0.7/";
-    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1e-7, 0, 600, 0.5, 0, 1200, 0.5, -1.0, 0.25, -0.02, 0.7, dir, true);
+    string dir = "test_long_MD=0.7/";
+    full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-7, 0, -600, -0.25, -600, 600, 0.25, -1.0, 0.25, -0.02, 0.7, dir, true);
 
     // MD_pyrochlore(1, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 1, 8, {1/sqrt(2),1/sqrt(2),0}, "CZO_h=4T");
 
-    MD_TmFeO3_Fe(1, 1.0, 1.0, 1.0, 0.158/4.675, 0.158/4.675, 0.158/4.675, 0, -0.023/4.675, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_data");
+    // MD_TmFeO3_Fe(1, 1000*k_B, 2*k_B, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_meV");
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
     // int initialized;
     // MPI_Initialized(&initialized);
