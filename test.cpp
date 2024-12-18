@@ -117,7 +117,8 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
 
     int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
     int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
-
+    tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
+    T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 2, 20, 20, 1> MC(&atoms);
     MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
     std::random_device rd;
@@ -521,7 +522,8 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 
     int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
     int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
-
+    tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
+    T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 12, 12, 12> MC(&Fe_atoms, 2.5);
     MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
     std::random_device rd;
@@ -759,13 +761,13 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
     // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    // string dir = "test_long_MD=0.7/";
-    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-7, 0, -600, -0.25, -600, 600, 0.25, -1.0, 0.25, -0.02, 0.7, dir, true);
-    array<double, 3> field_in = {0,0,1};
-    // MD_pyrochlore(10, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 2.24, 6, field_in*mu_B/0.063, "CZO_h=6T_001_theta=0.0", 0.0);
-
+    string dir = "test_long_MD=0.7_RK4/";
+    full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-4, 0, -600, 0.25, -600, 600, 0.25, -1.0, 0.0, -0.0, 0.7, dir, true);
+    // array<double, 3> field_in = {0,0,1};
+    // MD_pyrochlore(1, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 2.24, 6, field_in*mu_B/0.063, "CZO_h=6T_001_theta=0.0", 0.0);
+    // MD_TmFeO3_2DCS(1000*k_B, 2*k_B, 0, -200/4.625, 0.2/4.625, -200, 200, 0.2/4.625, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0.0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_meV");
     // MD_TmFeO3_Fe(1, 1000*k_B, 2*k_B, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_meV");
-    MD_TmFeO3_2DCS(1000*k_B, 2*k_B, 0, -200/4.625, 0.2/4.625, -200/4.625, 200/4.625, 0.2/4.625, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_2DCS_real_meV");
+    // MD_TmFeO3_2DCS(1000*k_B, 2*k_B, 0, -200/4.625, 0.2/4.625, -200/4.625, 200/4.625, 0.2/4.625, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_2DCS_real_meV");
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
     // int initialized;
     // MPI_Initialized(&initialized);
