@@ -81,13 +81,13 @@ void MD_kitaev_honeycomb(size_t num_trials, double K, double Gamma, double Gamma
     for(size_t i=0; i<num_trials;++i){
 
         lattice<3, 2, 20, 20, 1> MC(&atoms);
-        MC.simulated_annealing(1, 1e-7, 10000, 0, true);
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        for (size_t i = 0; i<100000; ++i){
-            MC.deterministic_sweep(gen);
-        }
-        MC.molecular_dynamics(1,1e-7, 1000000, 100, -600, 600, 1e-1, dir+"/"+std::to_string(i));
+        MC.simulated_annealing(1, 1e-3, 10000, 0, true);
+        // std::random_device rd;
+        // std::mt19937 gen(rd());
+        // for (size_t i = 0; i<100000; ++i){
+        //     MC.deterministic_sweep(gen);
+        // }
+        MC.molecular_dynamics(1,1e-3, 1000000, 100, 0, 600, 0.25, dir+"/"+std::to_string(i));
     }
 }
 
@@ -111,7 +111,7 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
     // array<array<double, 3>,2> field_drive = {{{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)},{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)}}};
     array<array<double, 3>,2> field_drive = {{{0,0,1},{0,0,1}}};
 
-    double pulse_amp = 0.1;
+    double pulse_amp = 0.5;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -760,8 +760,8 @@ int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
-    // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    string dir = "test_long_MD=0.7_RK4/";
+    // MD_kitaev_honeycomb(1, -1.0, 0.0, -0.0, 0.06, "Pure_Kitaev_h=0.06");
+    string dir = "pure_kitaev_2DCS_h=0.7_strong_pulse/";
     full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-4, 0, -600, 0.25, -600, 600, 0.25, -1.0, 0.0, -0.0, 0.7, dir, true);
     // array<double, 3> field_in = {0,0,1};
     // MD_pyrochlore(1, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 2.24, 6, field_in*mu_B/0.063, "CZO_h=6T_001_theta=0.0", 0.0);

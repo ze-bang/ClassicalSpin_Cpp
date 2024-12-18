@@ -105,7 +105,7 @@ K2D = np.array([2/3, 1/3, 0])
 M2D = np.array([1/2, 0, 0])
 Gamma12D = 2*M2D
 
-LKitaev = 24
+LKitaev = 20
 
 K2D = contract('a, ak->k', K2D, kitaevBasis)
 M2D = contract('a, ak->k', M2D, kitaevBasis)
@@ -540,7 +540,7 @@ def read_MD(dir):
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
 
-    C = ax.imshow(A, origin='lower', extent=[0, gM22D, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    C = ax.imshow(A, origin='lower', extent=[0, gM22D, 0, 3], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     ax.axvline(x=gK2D, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=gGamma12D, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=gM2D, color='b', label='axvline - full height', linestyle='dashed')
@@ -585,10 +585,12 @@ def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
     M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,2]
-    M_NL = np.zeros((int(tau_step), int(time_step-2400)))
-    w = np.linspace(-0.2, 0.2, 400)
+    domain = 2401
+    omega_range = 5
+    M_NL = np.zeros((int(tau_step), domain))
+    w = np.linspace(-omega_range, omega_range, domain)
     T = np.linspace(time_start, time_end, int(time_step)) 
-    T = T[2400:]
+    T = T[-domain:]
     ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
     tau = np.linspace(tau_start, tau_end, int(tau_step))
     for file in sorted(os.listdir(directory)):
@@ -597,16 +599,16 @@ def read_2D_nonlinear(dir):
             info = filename.split("_")
             M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,2]
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,2]
-            M_NL[int(info[2])] =  M01[2400:] - M0[2400:]- M1[2400:] + 0.57335
-    gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
+            M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:] + 0.57735
+    # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
-    M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
-    # M_NL_FF = M_NL
+    # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
+    M_NL_FF = M_NL
     M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
-    # M_NL_FF = np.log(M_NL_FF)
+    M_NL_FF = np.log(M_NL_FF)
     M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(M_NL_FF, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
     # plt.pcolormesh(w, w, np.log(M_NL_FF))
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
@@ -623,20 +625,20 @@ def read_2D_nonlinear_tot(dir):
             A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
     A = A/np.max(A)
     time_step = len(A)
-    plt.imshow(A.T, origin='lower', extent=[-0.2, 0.2, -0.2, 0.2], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
+    plt.imshow(A.T, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
     # w = np.linspace(-0.2, -0.2, time_step)
     # plt.pcolormesh(w, w, np.log(A))
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-# dir = "integrity_test"
+# dir = "Pure_Kitaev_h=0.06"
 # read_MD_tot(dir)
 # parseDSSF(dir)
 
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
 # dir = "test_long_h=0.0"
 # read_2D_nonlinear_tot(dir)
-dir = "test_long_MD=0.7_finite_temp_SSPRK"
+dir = "pure_kitaev_2DCS_h=0.7"
 read_2D_nonlinear_tot(dir)
 # P = np.loadtxt("pos.txt")
 # S = np.loadtxt("spin.txt")
