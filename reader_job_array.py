@@ -247,7 +247,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
 
     JPMS = np.linspace(Jpm_start, Jpm_end, nJpm)
     HS = np.linspace(H_start, H_end, nH)
-    Energies = np.zeros((nJpm. nH))
+    Energies = np.zeros((nJpm, nH))
     phase_diagram = np.zeros((nJpm,nH))
     entropy_diagram = np.zeros((nJpm, nH))
     mag_diagram = np.zeros((nJpm, nH))
