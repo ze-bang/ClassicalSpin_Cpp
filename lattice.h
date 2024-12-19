@@ -191,7 +191,7 @@ class lattice
         num_gen = lattice_in->num_gen;
     };
 
-    void read_set_spin_config(const string &filename){
+    void read_from_file_spin(const string &filename){
         ifstream file;
         file.open(filename);
         if (!file){
@@ -215,6 +215,27 @@ class lattice
 
     void set_spin(size_t site_index, array<double, N> &spin_in){
         spins[site_index] = spin_in;
+    }
+
+    void read_spin_from_file(const string &filename){
+        ifstream file;
+        file.open(filename);
+        if (!file){
+            cout << "Unable to open file";
+            exit(1);
+        }
+        string line;
+        size_t count = 0;
+        while(getline(file, line)){
+            istringstream iss(line);
+            array<double, N> spin;
+            for(size_t i = 0; i < N; ++i){
+                iss >> spin[i];
+            }
+            spins[count] = spin;
+            count++;
+        }
+        file.close();
     }
 
     double site_energy(array<double, N> &spin_here, size_t site_index){
@@ -776,7 +797,7 @@ class lattice
         time.push_back(currT);
 
         while(currT < T_end){
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
+            spin_t = SSPRK53_step(step_size, spin_t, tol, cross_prod);
             write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             cout << "Time: " << currT << endl;
@@ -882,7 +903,7 @@ class lattice
             set_pulse(currT, field_in, t_B, pulse_amp, pulse_width, pulse_freq);
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
+            spin_t = RK45_step(step_size, spin_t, tol, cross_prod);
             write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
@@ -924,7 +945,7 @@ class lattice
         while(currT < T_end){
 
             set_two_pulse(currT, field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
+            spin_t = RK45_step(step_size, spin_t, tol, cross_prod);
             write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
             currT = currT + step_size;
             time.push_back(currT);

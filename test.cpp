@@ -81,13 +81,13 @@ void MD_kitaev_honeycomb(size_t num_trials, double K, double Gamma, double Gamma
     for(size_t i=0; i<num_trials;++i){
 
         lattice<3, 2, 20, 20, 1> MC(&atoms);
-        MC.simulated_annealing(1, 1e-7, 10000, 0, true);
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        for (size_t i = 0; i<100000; ++i){
-            MC.deterministic_sweep(gen);
-        }
-        MC.molecular_dynamics(1,1e-7, 1000000, 100, -600, 600, 1e-1, dir+"/"+std::to_string(i));
+        MC.simulated_annealing(1, 1e-3, 10000, 0, true);
+        // std::random_device rd;
+        // std::mt19937 gen(rd());
+        // for (size_t i = 0; i<100000; ++i){
+        //     MC.deterministic_sweep(gen);
+        // }
+        MC.molecular_dynamics(1,1e-3, 1000000, 100, 0, 600, 0.25, dir+"/"+std::to_string(i));
     }
 }
 
@@ -111,7 +111,7 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
     // array<array<double, 3>,2> field_drive = {{{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)},{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)}}};
     array<array<double, 3>,2> field_drive = {{{0,0,1},{0,0,1}}};
 
-    double pulse_amp = 0.1;
+    double pulse_amp = 0.01;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -431,7 +431,7 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
 }
 
 
-void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false){
+void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
     filesystem::create_directory(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -516,7 +516,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 0.1;
+    double pulse_amp = 0.5;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -525,12 +525,16 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 12, 12, 12> MC(&Fe_atoms, 2.5);
-    MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    if (T_zero){
-        for (size_t i = 0; i<100000; ++i){
-            MC.deterministic_sweep(gen);
+    if (spin_config != ""){
+        MC.read_from_file_spin(spin_config);
+    }else{
+        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        if (T_zero){
+            for (size_t i = 0; i<100000; ++i){
+                MC.deterministic_sweep(gen);
+            }
         }
     }
     MC.write_to_file_pos(dir+"/pos.txt");
@@ -552,6 +556,29 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
         MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) + "/M1");
         MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+ "/M01");
         current_tau += tau_step_size;
+    }
+}
+
+void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
+    int initialized;
+
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    filesystem::create_directory(dir);
+
+    for(size_t i = 0; i < num_trials; ++i){
+        MD_TmFeO3_2DCS(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, Jai, Jbi, Jci, J2ai, J2bi, J2ci, Ka, Kc, D1,  D2, h,fielddir, dir+"/"+std::to_string(i), T_zero, spin_config);
+    }
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
     }
 }
 
@@ -756,16 +783,17 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
     }
 
 }
+
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
     // MD_TmFeO3(1, -1.0, -0.06, "test_L=12");
-    // MD_kitaev_honeycomb(1, -1.0, 0.25, -0.02, 0.7, "integrity_test");
-    string dir = "test_long_MD=0.7_RK4/";
-    full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-4, 0, -600, 0.25, -600, 600, 0.25, -1.0, 0.0, -0.0, 0.7, dir, true);
+    // MD_kitaev_honeycomb(1, -1.0, 0.0, -0.0, 0.06, "Pure_Kitaev_h=0.06");
+    string dir = "pure_kitaev_2DCS_h=0.7_weakest_pulse/";
+    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 1, 1e-4, 0, -600, 0.25, -600, 600, 0.25, -1.0, 0.25, -0.02, 0.7, dir, true);
     // array<double, 3> field_in = {0,0,1};
     // MD_pyrochlore(1, 0.062/0.063, 1.0, 0.011/0.063, 0, 0, 2.24, 6, field_in*mu_B/0.063, "CZO_h=6T_001_theta=0.0", 0.0);
-    // MD_TmFeO3_2DCS(1000*k_B, 2*k_B, 0, -200/4.625, 0.2/4.625, -200, 200, 0.2/4.625, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0.0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_meV");
+    TmFeO3_2DCS(1,1000*k_B, 2*k_B, 0, -200/4.625, 0.05/4.625, -200/4.625, 200/4.625, 0.05/4.625, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0.0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_meV", true, "TmFeO3_spin_config.txt");
     // MD_TmFeO3_Fe(1, 1000*k_B, 2*k_B, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_MD_real_meV");
     // MD_TmFeO3_2DCS(1000*k_B, 2*k_B, 0, -200/4.625, 0.2/4.625, -200/4.625, 200/4.625, 0.2/4.625, 4.625, 4.625, 4.625, 0.158, 0.158, 0.158, 0, -0.023, 0.0, 0.0, 0, {0,0,1}, "TmFeO3_Fe_Magnon_2DCS_real_meV");
     // simulated_annealing_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_simulated_annealing");
