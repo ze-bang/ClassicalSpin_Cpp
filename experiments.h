@@ -585,6 +585,8 @@ void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double t
     }
 }
 
+//Pyrochlore stuff
+
 
 void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0){
     filesystem::create_directory(dir);
@@ -641,14 +643,97 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     int end = (rank+1)*num_trials/size;
 
     for(int i=start; i<end;++i){
-
-        lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, 1e-3, 10000, 0, true);
-        MC.molecular_dynamics(5, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+        MC.simulated_annealing(5, 1e-4, 10000, 0, true);
+        MC.molecular_dynamics(5, 1e-4, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
     }
 }
 
+void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, array<double, 3> field_extern, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, string spin_config=""){
+    filesystem::create_directory(dir);
+    Pyrochlore<3> atoms;
 
+    array<double,3> z1 = {1, 1, 1};
+    array<double,3> z2 = {1,-1,-1};
+    array<double,3> z3 = {-1,1,-1};
+    array<double,3> z4 = {-1,-1,1};
+
+    z1 = z1/double(sqrt(3));
+    z2 = z2/double(sqrt(3));
+    z3 = z3/double(sqrt(3));
+    z4 = z4/double(sqrt(3));
+
+    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<double, 3> g = {gxx, gyy, gzz};
+    array<double, 3> field = field_dir*h;
+
+
+    atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
+
+    atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
+
+    array<double, 3> rot_field = {sin(theta),0,cos(theta)};
+
+    atoms.set_field(rot_field*dot(field, z1)*gzz, 0);
+    atoms.set_field(rot_field*dot(field, z2)*gzz, 1);
+    atoms.set_field(rot_field*dot(field, z3)*gzz, 2);
+    atoms.set_field(rot_field*dot(field, z4)*gzz, 3);
+
+    array<array<double, 3>,4> field_drive = {{{0,0,dot(field, z1)},{0,0,dot(field, z2)},{0,0,dot(field, z3)},{0,0,dot(field, z4)}}};
+
+    double pulse_amp = 0.05;
+    double pulse_width = 0.38;
+    double pulse_freq = 0.33;
+
+    int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
+    int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
+    tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
+    T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
+    lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
+    if (spin_config != ""){
+        MC.read_from_file_spin(spin_config);
+    }else{
+        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        if (T_zero){
+            for (size_t i = 0; i<100000; ++i){
+                MC.deterministic_sweep(gen);
+            }
+        }
+    }
+    MC.write_to_file_pos(dir+"/pos.txt");
+    MC.write_to_file_spin(dir+"/spin_0.txt", MC.spins);
+
+    filesystem::create_directory(dir+"/M_time_0");
+    MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
+
+    ofstream run_param;
+    run_param.open(dir + "/param.txt");
+    run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
+    run_param.close();
+
+    double current_tau = tau_start;
+
+    for(int i=0; i< tau_steps;++i){
+        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i));
+        cout << "Time: " << current_tau << endl;
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) + "/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+ "/M01");
+        current_tau += tau_step_size;
+    }
+
+}
 void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
@@ -743,7 +828,7 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
-    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
+    MC.parallel_tempering(temps, 1e6, 1e7, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
     MPI_Finalized(&finalized);
