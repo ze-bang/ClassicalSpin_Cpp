@@ -31,7 +31,14 @@ class lattice
     array<array<double,3>, N_ATOMS*dim1*dim2*dim3> site_pos;
     //Lookup table for the lattice
     spin_config field;
-    spin_config driving_field;
+    array<array<double, N>, N_ATOMS> field_drive_1;
+    array<array<double, N>, N_ATOMS> field_drive_2;
+    double field_drive_freq;
+    double field_drive_amp;
+    double field_drive_width;
+    double t_B_1;
+    double t_B_2;
+
     array<array<array<double, N>, N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
 
     array<vector<array<array<double, N>, N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
@@ -97,6 +104,14 @@ class lattice
         unit_vector = UC.lattice_vectors;
         spin_length = spin_l;
 
+        field_drive_1 = {{0}};
+        field_drive_2 = {{0}};
+        field_drive_freq = 0;
+        field_drive_amp = 0;
+        field_drive_width = 0;
+        t_B_1 = 0;
+        t_B_2 = 0;
+
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim3;++k){
@@ -107,7 +122,6 @@ class lattice
                         site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j)  + unit_vector[2]*int(k)  + basis[l];
                         spins[current_site_index] = gen_random_spin(gen, spin_length);
                         field[current_site_index] = UC.field[l];
-                        driving_field[current_site_index] = {0};
                         onsite_interaction[current_site_index] = UC.onsite_interaction[l];
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
                         int count = 0;
@@ -120,7 +134,6 @@ class lattice
                             bilinear_partners[partner].push_back(current_site_index);
                             count++;
                         }
-                        
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
                         count = 0;
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
@@ -142,6 +155,10 @@ class lattice
                 }
             }
         }
+        
+
+                
+    
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
@@ -149,7 +166,7 @@ class lattice
         //     for(size_t j =0; j < num_bi; ++j){
         //         int partner = bilinear_partners[i][j];
         //         array<array<double,N>, N> J = bilinear_interaction[i][j];
-        //         cout << "Bilinear: " << i << " " << partner << " with interaction " << J[0][0] << " " << J[1][1] << " " << J[2][2] << endl;
+        //         cout << "Bilinear: " << i << " at site " << site_pos[i][0] << " " << site_pos[i][1] << " " << site_pos[i][2] << " " << partner  << " on site " << site_pos[partner][0] << " " << site_pos[partner][1] << " " << site_pos[partner][2] << " with interaction " << J[0][0] << " " << J[1][1] << " " << J[2][2] << endl;
         //     }
         // }
 
@@ -178,7 +195,6 @@ class lattice
         site_pos = lattice_in->site_pos;
         field = lattice_in->field;
         onsite_interaction = lattice_in->onsite_interaction;
-        driving_field = lattice_in->driving_field;
         bilinear_interaction = lattice_in->bilinear_interaction;
         trilinear_interaction = lattice_in->trilinear_interaction;
         bilinear_partners = lattice_in->bilinear_partners;
@@ -188,15 +204,56 @@ class lattice
         num_gen = lattice_in->num_gen;
     };
 
+    void read_from_file_spin(const string &filename){
+        ifstream file;
+        file.open(filename);
+        if (!file){
+            cout << "Unable to open file";
+            exit(1);
+        }
+        string line;
+        size_t count = 0;
+        while(getline(file, line)){
+            istringstream iss(line);
+            array<double, N> spin;
+            for(size_t i = 0; i < N; ++i){
+                iss >> spin[i];
+            }
+            spins[count] = spin;
+            count++;
+        }
+        file.close();
+    }
+
 
     void set_spin(size_t site_index, array<double, N> &spin_in){
         spins[site_index] = spin_in;
     }
 
+    void read_spin_from_file(const string &filename){
+        ifstream file;
+        file.open(filename);
+        if (!file){
+            cout << "Unable to open file";
+            exit(1);
+        }
+        string line;
+        size_t count = 0;
+        while(getline(file, line)){
+            istringstream iss(line);
+            array<double, N> spin;
+            for(size_t i = 0; i < N; ++i){
+                iss >> spin[i];
+            }
+            spins[count] = spin;
+            count++;
+        }
+        file.close();
+    }
+
     double site_energy(array<double, N> &spin_here, size_t site_index){
         double energy = 0.0;
         energy -= dot(spin_here, field[site_index]);
-        energy -= dot(spin_here, driving_field[site_index]);
         energy += contract(spin_here, onsite_interaction[site_index], spin_here);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
@@ -211,7 +268,6 @@ class lattice
 
     double total_energy(spin_config &curr_spins){
         double field_energy = 0.0;
-        double drive_energy = 0.0;
         double onsite_energy = 0.0;
         double bilinear_energy = 0.0;
         double trilinear_energy = 0.0;
@@ -219,7 +275,6 @@ class lattice
         #pragma omp simd
         for(size_t i = 0; i < lattice_size; ++i){
             field_energy -= dot(curr_spins[i], field[i]);
-            drive_energy -= dot(curr_spins[i], driving_field[i]);
             onsite_energy += contract(curr_spins[i], onsite_interaction[i], curr_spins[i]);
             #pragma omp simd
             for (size_t j=0; j< num_bi; ++j) {
@@ -230,7 +285,7 @@ class lattice
                 trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
-        return field_energy + drive_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
+        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
     }
 
     double energy_density(spin_config &curr_spins){
@@ -247,7 +302,7 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        return local_field-field[site_index]-driving_field[site_index];
+        return local_field-field[site_index];
     }
 
 
@@ -261,7 +316,7 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
-        return local_field-field[site_index]-driving_field[site_index];
+        return local_field-field[site_index];
     }
 
 
@@ -395,6 +450,18 @@ class lattice
         myfile.close();
     }
 
+    void write_to_file_2d_vector_array(string filename, vector<array<double, N>> towrite){
+        ofstream myfile;
+        myfile.open(filename, ios::app);
+        for(size_t i = 0; i<towrite.size(); ++i){
+            for(size_t j = 0; j<N; ++j){
+                myfile << towrite[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
     void write_column_vector(string filename, vector<double> towrite){
         ofstream myfile;
         myfile.open(filename);
@@ -523,7 +590,7 @@ class lattice
             dHeat.resize(size);
         }   
         vector<double> energies;
-        vector<double> magnetizations;
+        vector<array<double,N>> magnetizations;
 
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
@@ -600,7 +667,7 @@ class lattice
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
                     write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
-                    write_column_vector(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                 }
             }
@@ -625,34 +692,34 @@ class lattice
         }
     }
 
-    spin_config landau_lifshitz(const spin_config &current_spin, cross_product_method cross_prod){
+    spin_config landau_lifshitz(const spin_config &current_spin, const double &curr_time, cross_product_method cross_prod){
         spin_config dS;
         #pragma omp simd
         for(size_t i = 0; i<lattice_size; ++i){
-            dS[i] = cross_prod(get_local_field_lattice(i, current_spin), current_spin[i]);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin) - drive_field_T(curr_time, i % N_ATOMS), current_spin[i]);
         }
         return dS;
     }
 
-    spin_config RK4_step(double &step_size, const spin_config &curr_spins, const double tol, cross_product_method cross_prod){
-        spin_config k1 = landau_lifshitz(curr_spins,cross_prod);
+    spin_config RK4_step(double &step_size, const spin_config &curr_spins, const double &curr_time, const double tol, cross_product_method cross_prod){
+        spin_config k1 = landau_lifshitz(curr_spins, curr_time, cross_prod);
         spin_config lval_k2 = curr_spins + k1*(0.5*step_size);
-        spin_config k2 = landau_lifshitz(lval_k2,cross_prod);
+        spin_config k2 = landau_lifshitz(lval_k2, curr_time + step_size*0.5,cross_prod);
         spin_config lval_k3 = curr_spins + k2*(0.5*step_size);
-        spin_config k3 = landau_lifshitz(lval_k3,cross_prod);
+        spin_config k3 = landau_lifshitz(lval_k3, curr_time + step_size*0.5, cross_prod);
         spin_config lval_k4 = curr_spins + k3*step_size;
-        spin_config k4 = landau_lifshitz(lval_k4,cross_prod);
+        spin_config k4 = landau_lifshitz(lval_k4, curr_time + step_size, cross_prod);
         spin_config new_spins  = curr_spins + (k1+ k2 * 2 + k3 * 2 + k4)*(step_size/6);
         return new_spins;
     }
 
-    spin_config RK45_step(double &step_size, const spin_config &curr_spins, const double tol, cross_product_method cross_prod){
-        spin_config k1 = landau_lifshitz(curr_spins,cross_prod)*step_size;
-        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0),cross_prod)*step_size;
-        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0),cross_prod)*step_size;
-        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0),cross_prod)*step_size;
-        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0),cross_prod)*step_size;
-        spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0),cross_prod)*step_size;
+    spin_config RK45_step(double &step_size, const spin_config &curr_spins, const double &curr_time, const double tol, cross_product_method cross_prod){
+        spin_config k1 = landau_lifshitz(curr_spins, curr_time, cross_prod)*step_size;
+        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0), curr_time + step_size/4 ,cross_prod)*step_size;
+        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0), curr_time + step_size/8*3 ,cross_prod)*step_size;
+        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0), curr_time + step_size/13*12, cross_prod)*step_size;
+        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0), curr_time + step_size,cross_prod)*step_size;
+        spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0), curr_time + step_size/2,cross_prod)*step_size;
 
         spin_config y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
         spin_config z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
@@ -663,24 +730,55 @@ class lattice
             return z;
         }
         else{
-            return RK45_step(step_size, curr_spins, tol, cross_prod);
+            return RK45_step(step_size, curr_spins, curr_time, tol, cross_prod);
         }
         return z;
     }
-    spin_config RK45_step_fixed(double &step_size, const spin_config &curr_spins, const double tol, cross_product_method cross_prod){
-        spin_config k1 = landau_lifshitz(curr_spins,cross_prod)*step_size;
-        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0),cross_prod)*step_size;
-        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0),cross_prod)*step_size;
-        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0),cross_prod)*step_size;
-        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0),cross_prod)*step_size;
-        spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0),cross_prod)*step_size;
+    spin_config RK45_step_fixed(double &step_size, const spin_config &curr_spins, const double &curr_time, const double tol, cross_product_method cross_prod){
+        spin_config k1 = landau_lifshitz(curr_spins, curr_time, cross_prod)*step_size;
+        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0), curr_time + step_size/4 ,cross_prod)*step_size;
+        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0), curr_time + step_size/8*3 ,cross_prod)*step_size;
+        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0), curr_time + step_size/13*12, cross_prod)*step_size;
+        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0), curr_time + step_size,cross_prod)*step_size;
+        spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0), curr_time + step_size/2,cross_prod)*step_size;
         spin_config z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
         return z;
     }
-    spin_config euler_step(const double step_size, const spin_config &curr_spins, const double tol, cross_product_method cross_prod){
-        spin_config dS = landau_lifshitz(curr_spins, cross_prod);
+    spin_config euler_step(const double step_size, const spin_config &curr_spins, const double &curr_time, const double tol, cross_product_method cross_prod){
+        spin_config dS = landau_lifshitz(curr_spins, curr_time, cross_prod);
         spin_config new_spins = curr_spins + dS*step_size;
         return new_spins;
+    }
+
+    spin_config SSPRK53_step(const double step_size, const spin_config &curr_spins, const double &curr_time, const double tol, cross_product_method cross_prod){
+        double a30 = 0.355909775063327;
+        double a32 = 0.644090224936674;
+        double a40 = 0.367933791638137;
+        double a43 = 0.632066208361863;
+        double a52 = 0.237593836598569;
+        double a54 = 0.762406163401431;
+        double b10 = 0.377268915331368;
+        double b21 = 0.377268915331368;
+        double b32 = 0.242995220537396;
+        double b43 = 0.238458932846290;
+        double b54 =0.287632146308408;
+        double c1 = 0.377268915331368;
+        double c2 = 0.754537830662736;
+        double c3 = 0.728985661612188;
+        double c4 = 0.699226135931670;
+
+        spin_config tmp = curr_spins + landau_lifshitz(curr_spins, curr_time, cross_prod) * b10 * step_size;
+        spin_config k = landau_lifshitz(tmp, curr_time + c1*step_size, cross_prod);
+        spin_config u = tmp + k * step_size * b21;
+        //u3
+        k = landau_lifshitz(u, curr_time + c2*step_size, cross_prod);
+        tmp = curr_spins * a30 + u * a32 + k * step_size * b32;
+        k = landau_lifshitz(tmp, curr_time + c3*step_size, cross_prod);
+        //u4
+        tmp = curr_spins * a40 + tmp * a43 + k * step_size * b43;
+        k = landau_lifshitz(tmp, curr_time + c4*step_size, cross_prod);
+        u = u * a52 + tmp * a54 + k * step_size * b54;
+        return u;
     }
 
 
@@ -699,7 +797,7 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-        double tol = 1e-12;
+        double tol = 1e-4;
 
         int check_frequency = 10;
         double currT = T_start;
@@ -709,7 +807,7 @@ class lattice
         time.push_back(currT);
 
         while(currT < T_end){
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
+            spin_t = RK45_step(step_size, spin_t, currT, tol, cross_prod);
             write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             cout << "Time: " << currT << endl;
@@ -725,46 +823,29 @@ class lattice
         time_sections.close();
     }
 
-    void set_pulse(double currT, const array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq){
-        double factor = double(pulse_amp*exp(-pow((currT-t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B)));
-        for (size_t i=0; i< dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
-                    for (size_t l=0; l< N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l);
-                        driving_field[current_site_index] = field_in[l]*factor;
-                    }
-                }
-            }
-        }
+    void set_pulse(const array<array<double,N>, N_ATOMS> &field_in, double t_B, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
+        field_drive_1 = field_in;
+        field_drive_2 = field_in_2;
+        field_drive_amp = pulse_amp;
+        field_drive_freq = pulse_freq;
+        field_drive_width = pulse_width;
+        t_B_1 = t_B;
+        t_B_2 = t_B_2;
     }
-
     void reset_pulse(){
-        for (size_t i=0; i< dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
-                    for (size_t l=0; l< N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l);
-                        driving_field[current_site_index] = {0};
-                    }
-                }
-            }
-        }
+        field_drive_1 = {0};
+        field_drive_2 = {0};
+        field_drive_amp = 0;
+        field_drive_freq = 0;
+        field_drive_width = 0;
+        t_B_1 = 0;
+        t_B_2 = 0;
     }
 
-    void set_two_pulse(double currT, const array<array<double,N>, N_ATOMS> &field_in_1, double t_B_1, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
-        double factor1 = double(pulse_amp*exp(-pow((currT-t_B_1)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B_1)));
-        double factor2 = double(pulse_amp*exp(-pow((currT-t_B_2)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT-t_B_2)));
-        for (size_t i=0; i< dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
-                    for (size_t l=0; l< N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l);
-                        driving_field[current_site_index] = field_in_1[l]*factor1 + field_in_2[l]*factor2;
-                    }
-                }
-            }
-        }
+    const array<double,N> drive_field_T(double currT, size_t ind){
+        double factor1 = double(field_drive_amp*exp(-pow((currT-t_B_1)/(2*field_drive_width),2))*cos(2*M_PI*field_drive_freq*(currT-t_B_1)));
+        double factor2 = double(field_drive_amp*exp(-pow((currT-t_B_2)/(2*field_drive_width),2))*cos(2*M_PI*field_drive_freq*(currT-t_B_2)));
+        return field_drive_1[ind]*factor1 + field_drive_2[ind]*factor2;
     }
 
     double magnetization(const spin_config &current_spins, array<array<double, N>, N_ATOMS> &field_current){
@@ -782,12 +863,12 @@ class lattice
         return mag/double(lattice_size);
     }
 
-    double magnetization_local(const spin_config &current_spins){
+    array<double,N> magnetization_local(const spin_config &current_spins){
         array<double,N> mag = {{0}};
         for (size_t i=0; i< lattice_size; ++i){
             mag = mag + current_spins[i];
         }
-        return sqrt(dot(mag, mag))/double(lattice_size);
+        return mag/double(lattice_size);
     }
 
     void M_B_t(array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
@@ -795,13 +876,13 @@ class lattice
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
-        double tol = 1e-8;
+        double tol = 1e-6;
 
         double currT = T_start;
         size_t count = 1;
         vector<double> time;
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in));
+        write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
         // write_to_file_spin(dir_name + "/spin_t.txt", spin_t);
         // ofstream pulse_info;
         // pulse_info.open(dir_name + "/pulse_t.txt");
@@ -812,13 +893,12 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-
+        set_pulse(field_in, t_B_1, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
-            set_pulse(currT, field_in, t_B, pulse_amp, pulse_width, pulse_freq);
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in));
+            spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
+            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             time.push_back(currT);
@@ -848,19 +928,17 @@ class lattice
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
-        double tol = 1e-12;
+        double tol = 1e-6;
         double currT = T_start;
         size_t count = 1;
         vector<double> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_init(dir_name + "/M_t.txt", magnetization(spin_t, field_in_1));
-
+        write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
+        set_pulse(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
-
-            set_two_pulse(currT, field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
-            spin_t = RK45_step_fixed(step_size, spin_t, tol, cross_prod);
-            write_to_file_magnetization(dir_name + "/M_t.txt", magnetization(spin_t, field_in_2));
+            spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
+            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
             currT = currT + step_size;
             time.push_back(currT);
             count++;

@@ -19,7 +19,7 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 12
+graphres = 8
 
 Gamma = np.array([0, 0, 0])
 K = 2 * np.pi * np.array([3/4, -3/4, 0])
@@ -63,17 +63,17 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-P1 = np.pi * np.array([1, 0, 0])
-P2 = np.pi * np.array([2, 0, 0])
-P3 = np.pi * np.array([2, 1, 0])
-P4 = np.pi * np.array([2, 2, 0])
-P5 = np.pi * np.array([1, 1, 0])
+P1 = 2 * np.pi * np.array([1, 0, 0])
+P2 = 2 * np.pi * np.array([2, 0, 0])
+P3 = 2 * np.pi * np.array([2, 1, 0])
+P4 = 2 * np.pi * np.array([2, 2, 0])
+P5 = 2 * np.pi * np.array([1, 1, 0])
 
-# P1 = np.pi * np.array([1, 1, 0])
-# P2 = np.pi * np.array([2, 2, 0])
-# P3 = np.pi * np.array([2, 2, 1])
-# P4 = np.pi * np.array([2, 2, 2])
-# P5 = np.pi * np.array([1, 1, 1])
+# P1 =  2 * np.pi * np.array([1, 1, 0])
+# P2 =  2 * np.pi * np.array([2, 2, 0])
+# P3 =  2 * np.pi * np.array([2, 2, 1])
+# P4 =  2 * np.pi * np.array([2, 2, 2])
+# P5 =  2 * np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
@@ -125,8 +125,9 @@ def Spin_global_pyrochlore_t(k,S,P):
     size = int(len(P)/4)
     tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
     for i in range(4):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
-        tS[:,i,:,:] = contract('tjs, ij, sp->tip', S[:,i*size:(i+1)*size,:], ffact, localframe[:,i,:])/np.sqrt(size)
+        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
+        # tS[:,i,:,:] = contract('tjs, ij, sp->tip', S[:,i::4], ffact, localframe[:,i,:])/np.sqrt(size)
+        tS[:,i,:,:] = contract('tjs, ij->tis', S[:,i::4], ffact)/np.sqrt(size)
     return tS
 
 def Spin_t(k, S, P):
@@ -142,21 +143,34 @@ def SSSF_q(k, S, P, gb=False):
     return np.real(contract('ia, ib -> iab', A, np.conj(A)))
 
 def g(q):
-    M = np.zeros((len(q),4,4))
+    M = np.zeros((len(q),4,4,3,3))
     qnorm = contract('ik, ik->i', q, q)
     qnorm = np.where(qnorm == 0, 1, qnorm)
     for i in range(4):
         for j in range(4):
-            M[:,i,j] = np.dot(z[i], z[j]) - contract('k, ik->i',z[i],q) * contract('k, ik->i', z[j],q) /qnorm
+            for a in range(3):
+                for b in range(3):
+                    M[:,i,j,a,b] = np.dot(localframe[a][i], localframe[b][j]) - contract('k, ik->i',localframe[a][i],q) * contract('k, ik->i', localframe[b][j],q) /qnorm
     return M
+
+def projector(q):
+    M = np.zeros((len(q),3,3))
+    qnorm = contract('ik, ik->i', q, q)
+    qnorm = np.where(qnorm == 0, 1, qnorm)
+    for a in range(3):
+        for b in range(3):
+            M[:,a,b] = a == b - q[:,a]*q[:,b]/qnorm
+    return M
+
 
 def DSSF(w, k, S, P, T, gb=False):
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.real(contract('wni, wmi, inm->wi', Somega[:,:,:,2], np.conj(Somega[:,:,:,2]), g(k)))
-        return np.log(read)
+        read = np.real(contract('wnia, wmib, iab, w->wiab', Somega, np.conj(Somega), projector(k), w))
+        # read = np.real(contract('wnia, wmib->wiab', Somega, np.conj(Somega)))
+        return np.log(read[:,:,2,2])
     
     else:
         A = Spin_t(k, S, P)
@@ -593,7 +607,7 @@ def read_MD(dir):
     w0 = 0
     wmax = 10
     w = np.linspace(w0, wmax, 1000)[1:]
-    A = DSSF(w, DSSF_K, S, P, T, False)
+    A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -607,6 +621,7 @@ def read_MD(dir):
     ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
     xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
     labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
+    # labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
     ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, gGamma4])
     fig.colorbar(C)
@@ -629,21 +644,22 @@ def read_MD(dir):
     # ax.set_xticks(xlabpos, labels)
     # ax.set_xlim([0, gGamma3])
     # fig.colorbar(C)
-    # plt.savefig(dir+"DSSF.pdf")
+    # plt.savefig(dir+"DSSF.pdf") 
     # plt.clf()
 
 
 # obenton_to_xx_zz()
 #
-dir = "./pyrochlore_test_110"
-# read_MD_tot(dir)
+# dir = "CZO_h=4T"
+dir = "CZO_h=6T_001_theta=0.1"
+read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
-plt.plot(A[0], A[1])
-plt.xscale('log')
-plt.savefig("test_Jpm=0.3/specific_heat.pdf")
+# A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
+# plt.plot(A[0], A[1])
+# plt.xscale('log')
+# plt.savefig("test_Jpm=0.3/specific_heat.pdf")
