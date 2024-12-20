@@ -469,7 +469,7 @@ class mixed_lattice
         mixed_lattice_spin y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
         mixed_lattice_spin z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
 
-        double error = norm_average_2D(z-y);
+        double error = norm_average_2D_tuple(z-y);
         step_size *= 0.9*pow(tol/error, 0.2);
         cout << "Step size: " << step_size << " Error: " << error << endl;
         if (error < tol){

@@ -104,13 +104,8 @@ class lattice
         unit_vector = UC.lattice_vectors;
         spin_length = spin_l;
 
-        field_drive_1 = {{0}};
-        field_drive_2 = {{0}};
-        field_drive_freq = 0;
-        field_drive_amp = 0;
-        field_drive_width = 0;
-        t_B_1 = 0;
-        t_B_2 = 0;
+        set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
+
 
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
@@ -203,6 +198,31 @@ class lattice
         num_tri = lattice_in->num_tri;
         num_gen = lattice_in->num_gen;
     };
+
+    void set_pulse(const array<array<double,N>, N_ATOMS> &field_in, double t_B, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
+        field_drive_1 = field_in;
+        field_drive_2 = field_in_2;
+        field_drive_amp = pulse_amp;
+        field_drive_freq = pulse_freq;
+        field_drive_width = pulse_width;
+        t_B_1 = t_B;
+        t_B_2 = t_B_2;
+    }
+    void reset_pulse(){
+        field_drive_1 = {{0}};
+        field_drive_2 = {{0}};
+        field_drive_amp = 0;
+        field_drive_freq = 0;
+        field_drive_width = 0;
+        t_B_1 = 0;
+        t_B_2 = 0;
+    }
+
+    const array<double, N> drive_field_T(double currT, size_t ind){
+        double factor1 = double(field_drive_amp*exp(-pow((currT-t_B_1)/(2*field_drive_width),2))*cos(2*M_PI*field_drive_freq*(currT-t_B_1)));
+        double factor2 = double(field_drive_amp*exp(-pow((currT-t_B_2)/(2*field_drive_width),2))*cos(2*M_PI*field_drive_freq*(currT-t_B_2)));
+        return field_drive_1[ind]*factor1 + field_drive_2[ind]*factor2;
+    }
 
     void read_from_file_spin(const string &filename){
         ifstream file;
@@ -696,7 +716,7 @@ class lattice
         spin_config dS;
         #pragma omp simd
         for(size_t i = 0; i<lattice_size; ++i){
-            dS[i] = cross_prod(get_local_field_lattice(i, current_spin) - drive_field_T(curr_time, i % N_ATOMS), current_spin[i]);
+            dS[i] = cross_prod(get_local_field_lattice(i, current_spin)- drive_field_T(curr_time, i % N_ATOMS), current_spin[i]);
         }
         return dS;
     }
@@ -715,16 +735,16 @@ class lattice
 
     spin_config RK45_step(double &step_size, const spin_config &curr_spins, const double &curr_time, const double tol, cross_product_method cross_prod){
         spin_config k1 = landau_lifshitz(curr_spins, curr_time, cross_prod)*step_size;
-        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0), curr_time + step_size/4 ,cross_prod)*step_size;
-        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0), curr_time + step_size/8*3 ,cross_prod)*step_size;
-        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0), curr_time + step_size/13*12, cross_prod)*step_size;
-        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0), curr_time + step_size,cross_prod)*step_size;
+        spin_config k2 = landau_lifshitz(curr_spins + k1*(1.0/4.0), curr_time + step_size*(1/4) ,cross_prod)*step_size;
+        spin_config k3 = landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0), curr_time + step_size*(3/8) ,cross_prod)*step_size;
+        spin_config k4 = landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0), curr_time + step_size*(12/13), cross_prod)*step_size;
+        spin_config k5 = landau_lifshitz(curr_spins + k1*(439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0), curr_time + step_size, cross_prod)*step_size;
         spin_config k6 = landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0), curr_time + step_size/2,cross_prod)*step_size;
 
         spin_config y = curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0);
         spin_config z = curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0);
 
-        double error = norm_average_2D(z-y);
+        double error = norm_average_2D(y-z);
         step_size *= 0.9*pow(tol/error, 0.2);
         if (error < tol){
             return z;
@@ -797,7 +817,7 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-        double tol = 1e-4;
+        double tol = 1e-8;
 
         int check_frequency = 10;
         double currT = T_start;
@@ -807,7 +827,7 @@ class lattice
         time.push_back(currT);
 
         while(currT < T_end){
-            spin_t = RK45_step(step_size, spin_t, currT, tol, cross_prod);
+            spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
             write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             cout << "Time: " << currT << endl;
@@ -823,30 +843,7 @@ class lattice
         time_sections.close();
     }
 
-    void set_pulse(const array<array<double,N>, N_ATOMS> &field_in, double t_B, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
-        field_drive_1 = field_in;
-        field_drive_2 = field_in_2;
-        field_drive_amp = pulse_amp;
-        field_drive_freq = pulse_freq;
-        field_drive_width = pulse_width;
-        t_B_1 = t_B;
-        t_B_2 = t_B_2;
-    }
-    void reset_pulse(){
-        field_drive_1 = {0};
-        field_drive_2 = {0};
-        field_drive_amp = 0;
-        field_drive_freq = 0;
-        field_drive_width = 0;
-        t_B_1 = 0;
-        t_B_2 = 0;
-    }
 
-    const array<double,N> drive_field_T(double currT, size_t ind){
-        double factor1 = double(field_drive_amp*exp(-pow((currT-t_B_1)/(2*field_drive_width),2))*cos(2*M_PI*field_drive_freq*(currT-t_B_1)));
-        double factor2 = double(field_drive_amp*exp(-pow((currT-t_B_2)/(2*field_drive_width),2))*cos(2*M_PI*field_drive_freq*(currT-t_B_2)));
-        return field_drive_1[ind]*factor1 + field_drive_2[ind]*factor2;
-    }
 
     double magnetization(const spin_config &current_spins, array<array<double, N>, N_ATOMS> &field_current){
         double mag = 0;

@@ -277,7 +277,7 @@ double norm_average_2D(const array<array<double, M>, N> &a) {
 }
 
 template <size_t N1, size_t N2, size_t M1, size_t M2>
-double norm_average_2D(const tuple<array<array<double,N1>, M1>, array<array<double,N2>, M2>> &a) {
+double norm_average_2D_tuple(const tuple<array<array<double,N1>, M1>, array<array<double,N2>, M2>> &a) {
     double result = 0;
     for (size_t i = 0; i < N1; ++i) {
         for (size_t j = 0; j < M1; ++j) {

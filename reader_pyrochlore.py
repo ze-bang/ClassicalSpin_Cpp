@@ -168,10 +168,10 @@ def DSSF(w, k, S, P, T, gb=False):
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.real(contract('wnia, wmib, iab, w->wiab', Somega, np.conj(Somega), projector(k), w))
+        read = np.abs(contract('wnia, wmib, iab, w->wiab', Somega, np.conj(Somega), projector(k), w))
         # read = np.real(contract('wnia, wmib->wiab', Somega, np.conj(Somega)))
         return np.log(read[:,:,2,2])
-    
+
     else:
         A = Spin_t(k, S, P)
         Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
@@ -606,7 +606,7 @@ def read_MD(dir):
 
     w0 = 0
     wmax = 10
-    w = np.linspace(w0, wmax, 1000)[1:]
+    w = np.arange(w0, wmax, 1/600)[1:]
     A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
@@ -620,8 +620,8 @@ def read_MD(dir):
     ax.axvline(x=g5, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
     xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
-    labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
-    # labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
+    # labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
+    labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
     ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, gGamma4])
     fig.colorbar(C)
@@ -651,7 +651,7 @@ def read_MD(dir):
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-dir = "CZO_h=6T_001_theta=0.1"
+dir = "MD_test_001"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")

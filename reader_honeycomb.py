@@ -631,15 +631,15 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-# dir = "Pure_Kitaev_h=0.06"
-# read_MD_tot(dir)
+dir = "kitaev_honeycomb_test"
+read_MD_tot(dir)
 # parseDSSF(dir)
 
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
 # dir = "test_long_h=0.0"
 # read_2D_nonlinear_tot(dir)
-dir = "pure_kitaev_2DCS_h=0.7_weak_pulse"
-read_2D_nonlinear_tot(dir)
+# dir = "pure_kitaev_2DCS_h=0.7_weak_pulse"
+# read_2D_nonlinear_tot(dir)
 # P = np.loadtxt("pos.txt")
 # S = np.loadtxt("spin.txt")
 # S_global = np.zeros(S.shape)
