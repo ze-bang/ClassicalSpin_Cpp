@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     string dir_name = argv[16] ? argv[16] : "";
     filesystem::create_directory(dir_name);
     int num_trials = argv[17] ? atoi(argv[17]) : 1;
-    std::cout << "Initializing 2DCS calculation with parameters: Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " with angle:" << theta << << "driven by field in direction " << field_extern_string << " saving to: " << dir_name << endl;
+    std::cout << "Initializing 2DCS calculation with parameters: Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " with angle:" << theta << "driven by field in direction " << field_extern_string << " saving to: " << dir_name << endl;
     pyrochlore_2DCS(num_trials, T_zero, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, field_extern, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, dir_name, theta);
     return 0;
 }
