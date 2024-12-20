@@ -647,6 +647,11 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
         MC.simulated_annealing(5, 1e-4, 10000, 0, true);
         MC.molecular_dynamics(5, 1e-4, 10000, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
     }
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
 }
 
 void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, array<double, 3> field_extern, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, string spin_config=""){
