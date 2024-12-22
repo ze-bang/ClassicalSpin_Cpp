@@ -510,7 +510,7 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, string out_dir = ""){
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, string out_dir = "", bool save_observables = false){    
         if (out_dir != ""){
             filesystem::create_directory(out_dir);
         }
@@ -544,7 +544,7 @@ class lattice
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
-            if(out_dir != ""){
+            if(save_observables){
                 vector<double> energies;
                 for(size_t i = 0; i<10000; ++i){
                     metropolis(spins, T, gen, gaussian_move, sigma);

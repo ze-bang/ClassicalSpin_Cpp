@@ -877,5 +877,38 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
 
 }
 
+void phase_diagram_pyrochlore_0_field(size_t num_Jpm, string dir){
+    filesystem::create_directory(dir);
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    int totaljob_num = num_Jpm*num_Jpm;
+
+    int start = rank*totaljob_num/size;
+    int end = (rank+1)*totaljob_num/size;
+
+    for(int i=start; i<end; ++i){
+        int Jpm_ind = i % num_Jpm;
+        int h_ind = i / num_Jpm;
+        double Jxx = -1 + Jpm_ind*(2)/num_Jpm;
+        double Jzz = -1 + h_ind*(2)/num_Jpm;
+        cout << "Jxx: " << Jxx << " Jzz: " << Jzz << "i: " << i << endl;
+        string subdir = dir + "/Jxx_" + std::to_string(Jpm) + "_Jzz_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
+        simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0, 0, 1, 0, {0,0,1}, subdir);
+    }
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
+}
 
 #endif
