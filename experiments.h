@@ -877,7 +877,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
 
 }
 
-void phase_diagram_pyrochlore_0_field(size_t num_Jpm, string dir){
+void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
     filesystem::create_directory(dir);
     int initialized;
     MPI_Initialized(&initialized);
