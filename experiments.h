@@ -900,7 +900,7 @@ void phase_diagram_pyrochlore_0_field(size_t num_Jpm, string dir){
         double Jxx = -1 + Jpm_ind*(2)/num_Jpm;
         double Jzz = -1 + h_ind*(2)/num_Jpm;
         cout << "Jxx: " << Jxx << " Jzz: " << Jzz << "i: " << i << endl;
-        string subdir = dir + "/Jxx_" + std::to_string(Jpm) + "_Jzz_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
+        string subdir = dir + "/Jxx_" + std::to_string(Jxx) + "_Jzz_" + std::to_string(Jzz) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
         simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0, 0, 1, 0, {0,0,1}, subdir);
     }
 
