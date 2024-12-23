@@ -647,6 +647,22 @@ def read_MD(dir):
     # plt.savefig(dir+"DSSF.pdf") 
     # plt.clf()
 
+def read_0_field(numJpm, dir):
+    directory = os.fsencode(dir)
+    phase_diagram = np.zeros((numJpm, numJpm))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            info = filename.split("_")
+            S = np.loadtxt(dir + "/" + filename + "/spin.txt")
+            phase_diagram[int(info[5]), int(info[6])] = magnetization(S, False, np.array([0,0,1]))[2]
+
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.imshow(phase_diagram, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    fig.colorbar(C)
+    plt.savefig(dir+"phase_diagram.pdf")
+    plt.clf()
+
 
 # obenton_to_xx_zz()
 #
