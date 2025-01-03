@@ -213,7 +213,7 @@ class lattice
         field_drive_2 = {{0}};
         field_drive_amp = 0;
         field_drive_freq = 0;
-        field_drive_width = 0;
+        field_drive_width = 1;
         t_B_1 = 0;
         t_B_2 = 0;
     }

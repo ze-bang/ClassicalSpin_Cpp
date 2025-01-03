@@ -696,7 +696,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
 
     array<array<double, 3>,4> field_drive = {{{0,0,dot(field, z1)},{0,0,dot(field, z2)},{0,0,dot(field, z3)},{0,0,dot(field, z4)}}};
 
-    double pulse_amp = 0.05;
+    double pulse_amp = 0.1;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 

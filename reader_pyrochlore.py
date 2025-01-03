@@ -650,31 +650,89 @@ def read_MD(dir):
 def read_0_field(numJpm, dir):
     directory = os.fsencode(dir)
     phase_diagram = np.zeros((numJpm, numJpm))
+    Jpms = np.zeros(numJpm)
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             info = filename.split("_")
             S = np.loadtxt(dir + "/" + filename + "/spin.txt")
-            phase_diagram[int(info[5]), int(info[6])] = magnetization(S, False, np.array([0,0,1]))[2]
-
+            phase_diagram[int(info[5]), int(info[6])] = np.linalg.norm(magnetization(S, False, np.array([0,0,1])))
+            Jpm = -(float(info[1]) + float(info[3]))/4
+            Jpmpm = abs(float(info[1]) - float(info[3]))/4
+            plt.scatter(Jpm, Jpmpm, c=np.linalg.norm(phase_diagram[int(info[5]), int(info[6])]), vmin=0, vmax=0.5)
+    plt.savefig(dir+"phase_diagram_Jpmpm.pdf")
+    plt.clf()
     fig, ax = plt.subplots(figsize=(10,4))
     C = ax.imshow(phase_diagram, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     fig.colorbar(C)
     plt.savefig(dir+"phase_diagram.pdf")
     plt.clf()
 
+def read_2D_nonlinear(dir):
+    directory = os.fsencode(dir)
+    tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,2]
+    domain = int(len(M0)/2)
+    omega_range = 15
+    M_NL = np.zeros((int(tau_step), domain))
+    w = np.arange(-omega_range, omega_range, 1/abs(tau_end-tau_start))
+    T = np.linspace(time_start, time_end, int(time_step)) 
+    T = T[-domain:]
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
+    tau = np.linspace(tau_start, tau_end, int(tau_step))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            info = filename.split("_")
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,2]
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,2]
+            M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:] 
+    # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
+    # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
+    M_NL_FF = M_NL
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    M_NL_FF = np.log(M_NL_FF)
+    # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
+    np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
+    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    # plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
+    plt.clf()
+
+def read_2D_nonlinear_tot(dir):
+    directory = os.fsencode(dir)
+    A = 0
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            read_2D_nonlinear(dir + "/" + filename)
+            A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
+    A = A/np.max(A)
+    time_step = len(A)
+    plt.imshow(A.T, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
+    # w = np.linspace(-0.2, -0.2, time_step)
+    # plt.pcolormesh(w, w, np.log(A))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    plt.clf()
+
+
+read_2D_nonlinear("pyrochlore_h110=10_driven_001")
 
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-dir = "MD_test_001"
-read_MD_tot(dir)
+# dir = "MD_test_001"
+# read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
-
+# read_0_field(25, "PD_0_field_test")
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
 # plt.xscale('log')
