@@ -422,4 +422,7 @@ T variance(vector<T> &data){
     return variance;
 }
 
+
+
+
 #endif // LIN_ALG_H

@@ -208,7 +208,7 @@ class lattice
         field_drive_2 = {{0}};
         field_drive_amp = 0;
         field_drive_freq = 0;
-        field_drive_width = 0;
+        field_drive_width = 1;
         t_B_1 = 0;
         t_B_2 = 0;
     }
@@ -508,7 +508,7 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, string out_dir = ""){
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, string out_dir = "", bool save_observables = false){    
         if (out_dir != ""){
             filesystem::create_directory(out_dir);
         }
@@ -542,6 +542,26 @@ class lattice
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
+<<<<<<< HEAD
+=======
+            if(save_observables){
+                vector<double> energies;
+                for(size_t i = 0; i<10000; ++i){
+                    metropolis(spins, T, gen, gaussian_move, sigma);
+                    if (i % 100 == 0){
+                        energies.push_back(total_energy(spins));
+                    }
+                }
+                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
+                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
+                ofstream myfile;
+                myfile.open(out_dir + "/specific_heat.txt", ios::app);
+                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
+                myfile << endl;
+                myfile.close();
+            }
+>>>>>>> da293d05a383243370f30bd62ac8a1ec654dccad
             T *= 0.9;
         }
         if(out_dir != ""){
