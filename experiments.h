@@ -124,11 +124,10 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 2, 20, 20, 1> MC(&atoms);
     MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
-    std::random_device rd;
-    std::mt19937 gen(rd());
+
     if (T_zero){
         for (size_t i = 0; i<100000; ++i){
-            MC.deterministic_sweep(gen);
+            MC.deterministic_sweep();
         }
     }
     MC.write_to_file_pos(dir+"/pos.txt");
@@ -176,6 +175,105 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
         MPI_Finalize();
     }
 }
+
+void simulated_annealing_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false){
+    filesystem::create_directory(dir);
+    TmFeO3_Fe<3> Fe_atoms;
+    TmFeO3_Tm<8> Tm_atoms;
+
+    array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
+    array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
+    array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+
+    array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+
+    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
+
+    array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
+    //In plane interactions
+    //Nearest Neighbours
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+    //Next Nearest Neighbours
+    Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 1, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 1, 1, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 2, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+    //Out of plane interaction
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,1});
+
+    //single ion anisotropy
+    Fe_atoms.set_onsite_interaction(K, 0);
+    Fe_atoms.set_onsite_interaction(K, 1);
+    Fe_atoms.set_onsite_interaction(K, 2);
+    Fe_atoms.set_onsite_interaction(K, 3);
+
+    //Dzyaloshinskii-Moriya interaction
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
+
+    Fe_atoms.set_field(fielddir*h, 0);
+    Fe_atoms.set_field(fielddir*h, 1);
+    Fe_atoms.set_field(fielddir*h, 2);
+    Fe_atoms.set_field(fielddir*h, 3);
+
+    for(size_t i = 0; i < num_trials; ++i){
+        lattice<3, 4, 12, 12, 12> MC_FE(&Fe_atoms, 2.5);
+        MC_FE.simulated_annealing(T_start, T_end, 10000, 0, false);
+        if (T_zero){
+            // std::random_device rd;
+            // std::mt19937 gen(rd());
+            for(size_t i = 0; i<100000; ++i){
+                MC_FE.deterministic_sweep();
+            }   
+        }
+        MC_FE.write_to_file_pos(dir+"/pos.txt");
+        MC_FE.write_to_file_spin(dir+"/spin"+ to_string(i) +".txt", MC_FE.spins);
+    }
+}
+
 
 void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir){
     filesystem::create_directory(dir);
@@ -261,7 +359,7 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     Fe_atoms.set_field(fielddir*h, 3);
 
     for(size_t i = 0; i < num_trials; ++i){
-        lattice<3, 4, 12, 12, 12> MC_FE(&Fe_atoms, 2.5);
+        lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 2.5);
         MC_FE.simulated_annealing(T_start, T_end, 10000, 0, false);
         MC_FE.molecular_dynamics(T_start, T_end, 10000, 0, 0, 200/Jai, 5e-2/Jai, dir+"/"+std::to_string(i));
     }
@@ -527,7 +625,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
-    lattice<3, 4, 12, 12, 12> MC(&Fe_atoms, 2.5);
+    lattice<3, 4, 8, 8, 8> MC(&Fe_atoms, 2.5);
     if (spin_config != ""){
         MC.read_from_file_spin(spin_config);
     }else{
@@ -536,7 +634,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
         std::mt19937 gen(rd());
         if (T_zero){
             for (size_t i = 0; i<100000; ++i){
-                MC.deterministic_sweep(gen);
+                MC.deterministic_sweep();
             }
         }
     }
@@ -643,7 +741,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     int end = (rank+1)*num_trials/size;
 
     for(int i=start; i<end;++i){
-        lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
+        lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
         MC.simulated_annealing(5, 1e-4, 10000, 0, true);
         MC.molecular_dynamics(5, 1e-4, 10000, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
     }
@@ -709,11 +807,9 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
         MC.read_from_file_spin(spin_config);
     }else{
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
-        std::random_device rd;
-        std::mt19937 gen(rd());
         if (T_zero){
             for (size_t i = 0; i<100000; ++i){
-                MC.deterministic_sweep(gen);
+                MC.deterministic_sweep();
             }
         }
     }

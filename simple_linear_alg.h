@@ -305,6 +305,34 @@ array<array<double, M>, N> operator-(const array<array<double, M>, N> &a,const a
     return result;
 }
 
+static unsigned __int128 state;
+
+void seed_lehman(unsigned __int128 seed)
+{
+	state = seed << 1 | 1;
+}
+
+
+uint64_t lehman_next(void)
+{
+	uint64_t result = state >> 64;
+	// GCC cannot write 128-bit literals, so we use an expression
+	const unsigned __int128 mult =
+		(unsigned __int128)0x12e15e35b500f16e << 64 |
+		0x2e714eb2b37916a5;
+	state *= mult;
+	return result;
+}
+
+
+double random_double_lehman(double min, double max){
+    return min + (max - min) * (lehman_next()) / 18446744073709551615;
+}
+
+int random_int_lehman(int size){
+    return lehman_next() % size;
+}
+
 double random_double(double min, double max, std::mt19937 &gen){
     std::uniform_real_distribution<double> dis(min, max);
     return dis(gen);
@@ -314,6 +342,7 @@ int random_int(int min, int max, std::mt19937 &gen){
     std::uniform_int_distribution dis(min, max);
     return dis(gen);
 }
+
 template<size_t N, size_t M>
 array<array<double, M>, N> transpose2D(const array<array<double, M>, N>& matrix) {
     array<array<double, N>, M> transposed;
@@ -324,6 +353,7 @@ array<array<double, M>, N> transpose2D(const array<array<double, M>, N>& matrix)
     }
     return transposed;
 }
+
 
 template<size_t N_1, size_t N_2, size_t N_3>
 array<array<array<double, N_1>, N_3>, N_2> transpose3D(const array<array<array<double, N_3>, N_2>, N_1>& matrix) {

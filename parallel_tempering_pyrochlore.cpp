@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    vector<int> rank_to_write = {size-1};
+    vector<int> rank_to_write = {0};
     // parallel_tempering_honeycomb(1, 1e-6, -1, 0.25, -0.02, 0.7, "test_parallel", rank_to_write);
     double Jpm_start = argv[1] ? atof(argv[1]) : 0.0;
     double Jpm_end = argv[2] ? atof(argv[2]) : 0.0;
