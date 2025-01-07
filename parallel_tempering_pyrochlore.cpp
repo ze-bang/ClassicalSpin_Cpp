@@ -36,6 +36,8 @@ int main(int argc, char** argv) {
         field_dir = {0,0,1};
     }else if(dir_string == "110"){
         field_dir = {1/sqrt(2), 1/sqrt(2), 0};
+    }else if(dir_string == "1-10"){
+        field_dir = {1/sqrt(2), -1/sqrt(2), 0};
     }else{
         field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
     }
