@@ -19,7 +19,7 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 8
+graphres = 12
 
 Gamma = np.array([0, 0, 0])
 K = 2 * np.pi * np.array([3/4, -3/4, 0])
@@ -63,28 +63,28 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-P1 = 2 * np.pi * np.array([1, 0, 0])
-P2 = 2 * np.pi * np.array([2, 0, 0])
-P3 = 2 * np.pi * np.array([2, 1, 0])
-P4 = 2 * np.pi * np.array([2, 2, 0])
-P5 = 2 * np.pi * np.array([1, 1, 0])
+# P1 = 2 * np.pi * np.array([1, 0, 0])
+# P2 = 2 * np.pi * np.array([2, 0, 0])
+# P3 = 2 * np.pi * np.array([2, 1, 0])
+# P4 = 2 * np.pi * np.array([2, 2, 0])
+# P5 = 2 * np.pi * np.array([1, 1, 0])
 
-# P1 =  2 * np.pi * np.array([1, 1, 0])
-# P2 =  2 * np.pi * np.array([2, 2, 0])
-# P3 =  2 * np.pi * np.array([2, 2, 1])
-# P4 =  2 * np.pi * np.array([2, 2, 2])
-# P5 =  2 * np.pi * np.array([1, 1, 1])
+P1 =  2 * np.pi * np.array([1, 1, 0])
+P2 =  2 * np.pi * np.array([2, 2, 0])
+P3 =  2 * np.pi * np.array([2, 2, 1])
+P4 =  2 * np.pi * np.array([2, 2, 2])
+P5 =  2 * np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
 
 #Path to 1-10
-GammaP1 = drawLine(Gamma, P1, stepN)
-P12 = drawLine(P1, P2, stepN)
-P23 = drawLine(P2, P3, stepN)
-P34 = drawLine(P3, P4, stepN)
-P45 = drawLine(P4, P5, stepN)
-P5Gamma = drawLine(P5, Gamma, stepN)
+GammaP1 = drawLine(Gamma, P1, stepN)[1:]
+P12 = drawLine(P1, P2, stepN)[:-1]
+P23 = drawLine(P2, P3, stepN)[1:]
+P34 = drawLine(P3, P4, stepN)[:-1]
+P45 = drawLine(P4, P5, stepN)[1:-1]
+P5Gamma = drawLine(P5, Gamma, stepN)[1:-1]
 
 
 
@@ -107,13 +107,13 @@ x = np.array([[-2,1,1],[-2,-1,-1],[2,1,-1], [2,-1,1]])/np.sqrt(6)
 y = np.array([[0,-1,1],[0,1,-1],[0,-1,-1], [0,1,1]])/np.sqrt(2)
 localframe = np.array([x,y,z])
 
-def Spin_global_pyrochlore(k,S,P):
-    size = int(len(P)/4)
-    tS = np.zeros((len(k),3), dtype=np.complex128)
-    for i in range(4):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
-        tS = tS + contract('js, ij, sp->ip', S[i*size:(i+1)*size], ffact, localframe[:,i,:])/np.sqrt(size)
-    return tS
+# def Spin_global_pyrochlore(k,S,P):
+#     size = int(len(P)/4)
+#     tS = np.zeros((len(k),3), dtype=np.complex128)
+#     for i in range(4):
+#         ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
+#         tS = tS + contract('js, ij, sp->ip', S[i*size:(i+1)*size], ffact, localframe[:,i,:])/np.sqrt(size)
+#     return tS
 
 def Spin(k, S, P):
     ffact = np.exp(1j*contract('ik,jk->ij', k, P))
@@ -124,28 +124,32 @@ def Spin(k, S, P):
 def Spin_global_pyrochlore_t(k,S,P):
     size = int(len(P)/4)
     tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
+    # tS = np.zeros((len(S), len(k),3), dtype=np.complex128)
     for i in range(4):
         ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
-        # tS[:,i,:,:] = contract('tjs, ij, sp->tip', S[:,i::4], ffact, localframe[:,i,:])/np.sqrt(size)
+        # tS = tS + contract('tjs, ij, sp->tip', S[:,i::4], ffact, localframe[:,i,:])/np.sqrt(size)
         tS[:,i,:,:] = contract('tjs, ij->tis', S[:,i::4], ffact)/np.sqrt(size)
     return tS
+
+def Spin_global_pyrochlore(k,S,P):
+    size = int(len(P)/4)
+    tS = np.zeros((4, len(k),3), dtype=np.complex128)
+    for i in range(4):
+        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
+        tS[i,:,:] = contract('js, ij->is', S[i::4], ffact)/np.sqrt(size)
+    return tS
+
 
 def Spin_t(k, S, P):
     ffact = np.exp(1j*contract('ik,jk->ij', k, P))
     N = len(S)
     return contract('tjs, ij->tis', S, ffact)/np.sqrt(N)
 
-def SSSF_q(k, S, P, gb=False):
-    if gb:
-        A = Spin_global_pyrochlore(k, S, P)
-    else:
-        A = Spin(k, S, P)
-    return np.real(contract('ia, ib -> iab', A, np.conj(A)))
 
 def g(q):
     M = np.zeros((len(q),4,4,3,3))
     qnorm = contract('ik, ik->i', q, q)
-    qnorm = np.where(qnorm == 0, 1, qnorm)
+    qnorm = np.where(qnorm == 0, np.inf, qnorm)
     for i in range(4):
         for j in range(4):
             for a in range(3):
@@ -156,20 +160,43 @@ def g(q):
 def projector(q):
     M = np.zeros((len(q),3,3))
     qnorm = contract('ik, ik->i', q, q)
-    qnorm = np.where(qnorm == 0, 1, qnorm)
+    qnorm = np.where(qnorm == 0, np.inf, qnorm)
     for a in range(3):
         for b in range(3):
             M[:,a,b] = a == b - q[:,a]*q[:,b]/qnorm
     return M
 
+def gg(q):
+    M = np.zeros((len(q),4,4, 3, 3))
+    for k in range(len(q)):
+        for i in range(4):
+            for j in range(4):
+                for a in range(3):
+                    for b in range(3):
+                        if not np.dot(q[k],q[k]) == 0:
+                            M[k, i,j,a,b] = np.dot(localframe[a][i], localframe[b][j]) - np.dot(localframe[a][i],q[k]) * np.dot(localframe[b][j],q[k])/ np.dot(q[k],q[k])
+                        else:
+                            M[k, i, j,a,b] = 0
+    return M
+
+def SSSF_q(k, S, P, gb=False):
+    if gb:
+        A = Spin_global_pyrochlore(k, S, P)
+        read = np.abs(contract('nia, mib, inmab->iab', A, np.conj(A), gg(k)))
+        # read = np.real(contract('wnia, wmib->wiab', Somega, np.conj(Somega)))
+        read = np.where(read == 0, np.min(read), read)
+        return np.log(read)
+    else:
+        A = Spin(k, S, P)
+        return np.log(np.abs(contract('ia, ib -> iab', A, np.conj(A))))
 
 def DSSF(w, k, S, P, T, gb=False):
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.abs(contract('wnia, wmib, iab, w->wiab', Somega, np.conj(Somega), projector(k), w))
-        # read = np.real(contract('wnia, wmib->wiab', Somega, np.conj(Somega)))
+        read = np.abs(contract('wnia, wmib, inmab->wiab', Somega, np.conj(Somega), gg(k)))
+        read = np.where(read == 0, np.min(read), read)
         return np.log(read[:,:,2,2])
 
     else:
@@ -205,8 +232,8 @@ def SSSFGraph2D(A, B, d1, filename):
     plt.clf()
 
 
-def hnhltoK(H, L, K=0):
-    A = contract('ij,k->ijk',H, 2*np.array([np.pi,-np.pi,0])) \
+def hhltoK(H, L, K=0):
+    A = contract('ij,k->ijk',H, 2*np.array([np.pi,np.pi,0])) \
         + contract('ij,k->ijk',L, 2*np.array([0,0,np.pi]))
     return A
 
@@ -251,11 +278,11 @@ def SSSF2D(S, P, nK, filename, gb=False):
     SSSFGraph2D(A, B, S[:, :, 1, 2], f6)
 
 
-def SSSFHnHL(S, P, nK, filename, gb=False):
+def SSSFHHL(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
     L = np.linspace(-2.5, 2.5, nK)
     A, B = np.meshgrid(H, L)
-    K = hnhltoK(A, B).reshape((nK*nK,3))
+    K = hhltoK(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
     if gb:
         f1 = filename + "Sxx_global"
@@ -446,7 +473,7 @@ def fullread(dir, gb=False, magi=""):
             elif mag == "001":
                 SSSFHK0(S, P, 50, newdir, gb)
             else:
-                SSSFHnHL(S, P, 50, newdir, gb)
+                SSSFHHL(S, P, 50, newdir, gb)
         if filename.endswith(".h5") and filename.endswith("time_evolved.h5"):
             print(filename)
             f = h5py.File(dir + filename, 'r')
@@ -455,7 +482,7 @@ def fullread(dir, gb=False, magi=""):
             T = f['t'][:]
             w0 = 0
             wmax = 2.5
-            w = np.linspace(w0, wmax, 1000)[1:]
+            w = np.linspace(w0, wmax, 1000)
             A = DSSF(w, DSSF_K, S, P, T, gb)
             A = A/np.max(A)
             if not gb:
@@ -590,24 +617,31 @@ def parseDSSF(dir):
     plt.clf()
 
 
-def read_MD_tot(dir):
+def read_MD_tot(dir, mag):
     directory = os.fsencode(dir)
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            read_MD(dir + "/" + filename)
+            read_MD(dir + "/" + filename, mag)
 
-def read_MD(dir):
+def read_MD(dir, mag):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
 
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
+    if P.shape[1] == 2:
+        SSSF2D(S[0],P, 100, dir, False)
+    elif mag == "001":
+        SSSFHK0(S[0], P, 50, dir, False)
+    else:
+        SSSFHHL(S[0], P, 50, dir, False)
+
     w0 = 0
     wmax = 10
-    w = np.arange(w0, wmax, 1/600)[1:]
-    A = DSSF(w, DSSF_K, S, P, T, True)
+    w = np.arange(w0, wmax, 1/600)
+    A = DSSF(w, DSSF_K, S, P, T, False)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -650,19 +684,77 @@ def read_MD(dir):
 def read_0_field(numJpm, dir):
     directory = os.fsencode(dir)
     phase_diagram = np.zeros((numJpm, numJpm))
+    Jpms = np.zeros(numJpm)
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             info = filename.split("_")
             S = np.loadtxt(dir + "/" + filename + "/spin.txt")
-            phase_diagram[int(info[5]), int(info[6])] = magnetization(S, False, np.array([0,0,1]))[2]
-
+            phase_diagram[int(info[5]), int(info[6])] = np.linalg.norm(magnetization(S, False, np.array([0,0,1])))
+            Jpm = -(float(info[1]) + float(info[3]))/4
+            Jpmpm = abs(float(info[1]) - float(info[3]))/4
+            plt.scatter(Jpm, Jpmpm, c=np.linalg.norm(phase_diagram[int(info[5]), int(info[6])]), vmin=0, vmax=0.5)
+    plt.savefig(dir+"phase_diagram_Jpmpm.pdf")
+    plt.clf()
     fig, ax = plt.subplots(figsize=(10,4))
     C = ax.imshow(phase_diagram, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     fig.colorbar(C)
     plt.savefig(dir+"_phase_diagram.pdf")
     plt.clf()
 
+def read_2D_nonlinear(dir):
+    directory = os.fsencode(dir)
+    tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,2]
+    domain = int(len(M0)/2)
+    omega_range = 15
+    M_NL = np.zeros((int(tau_step), domain))
+    w = np.arange(-omega_range, omega_range, 1/abs(tau_end-tau_start))
+    T = np.linspace(time_start, time_end, int(time_step)) 
+    T = T[-domain:]
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
+    tau = np.linspace(tau_start, tau_end, int(tau_step))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            info = filename.split("_")
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,2]
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,2]
+            M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:] 
+    # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
+    # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
+    M_NL_FF = M_NL
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    M_NL_FF = np.log(M_NL_FF)
+    # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
+    np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
+    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    # plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
+    plt.clf()
+
+def read_2D_nonlinear_tot(dir):
+    directory = os.fsencode(dir)
+    A = 0
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            read_2D_nonlinear(dir + "/" + filename)
+            A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
+    A = A/np.max(A)
+    time_step = len(A)
+    plt.imshow(A.T, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
+    # w = np.linspace(-0.2, -0.2, time_step)
+    # plt.pcolormesh(w, w, np.log(A))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    plt.clf()
+
+
+read_2D_nonlinear("pyrochlore_h110=10_driven_001")
 
 # obenton_to_xx_zz()
 #

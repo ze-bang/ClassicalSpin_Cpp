@@ -3,14 +3,7 @@
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
-    int initialized;
-    MPI_Initialized(&initialized);
-    if (!initialized){
-        MPI_Init(NULL, NULL);
-    }
-    int size;
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    vector<int> rank_to_write = {size-1};
+
     bool T_zero = argv[1] ? atoi(argv[1]) : 0;
     double Temp_start = argv[2] ? atof(argv[2]) : 0.0;
     double Temp_end = argv[3] ? atof(argv[3]) : 0.0;
@@ -34,7 +27,8 @@ int main(int argc, char** argv) {
     string dir_name = argv[19] ? argv[19] : "";
     filesystem::create_directory(dir_name);
     int num_trials = argv[20] ? atoi(argv[20]) : 1;
-
-    TmFeO3_2DCS(num_trials, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero);
+    string spin_config_file = argv[21] ? argv[21] : "";
+    cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " saving to: " << dir_name << endl;
+    TmFeO3_2DCS(num_trials, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero, spin_config_file);
     return 0;
 }

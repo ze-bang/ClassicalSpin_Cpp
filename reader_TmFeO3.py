@@ -309,7 +309,7 @@ def read_MD(dir):
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
-    wmax = 75
+    wmax = 15
     w = np.linspace(w0, wmax, 800)[1:]
     A = DSSF(w, DSSF_K, S, P, T, False)
     A = np.log(A)
@@ -441,15 +441,15 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-# dir = "TmFeO3_Fe_Magnon_MD_real_meV"
-# read_MD_tot(dir)
+dir = "MD_TMFeO3_test"
+read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-read_2D_nonlinear_tot("TmFeO3_Fe_Magnon_2DCS_real_meV")
+# read_2D_nonlinear_tot("MD_TmFeO3_test")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])

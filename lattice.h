@@ -16,6 +16,8 @@
 #include <functional>
 #include <mpi.h>
 #include "binning_analysis.h"
+#include <sstream>
+
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
 {   
@@ -52,14 +54,16 @@ class lattice
     size_t num_gen;
     float spin_length;
 
-    array<double,N> gen_random_spin(std::mt19937 &gen, float spin_l){
+    array<double,N> gen_random_spin(float spin_l){
         array<double,N> temp_spin;
         array<double,N-2> euler_angles;
-        double z = random_double(-1,1, gen);
+        // double z = random_double(-1,1, gen);
+        double z = random_double_lehman(-1,1);
         double r = sqrt(1.0 - z*z);
 
         for(size_t i = 0; i < N-2; ++i){
-            euler_angles[i] = random_double(0, 2*M_PI, gen);
+            // euler_angles[i] = random_double(0, 2*M_PI, gen);
+            euler_angles[i] = random_double_lehman(0, 2*M_PI);
             temp_spin[i] = r;
             for(size_t j = 0; j < i; ++j){
                 temp_spin[i] *= sin(euler_angles[j]);
@@ -96,8 +100,6 @@ class lattice
         array<array<double,3>, N_ATOMS> basis;
         array<array<double,3>, 3> unit_vector;
 
-        std::random_device rd;
-        std::mt19937 gen(rd());
 
         lattice_size = dim1*dim2*dim3*N_ATOMS;
         basis = UC.lattice_pos;
@@ -105,7 +107,8 @@ class lattice
         spin_length = spin_l;
 
         set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
-
+        srand (time(NULL));
+        seed_lehman(rand()*2+1);
 
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
@@ -115,7 +118,7 @@ class lattice
                         size_t current_site_index = flatten_index(i,j,k,l);
 
                         site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j)  + unit_vector[2]*int(k)  + basis[l];
-                        spins[current_site_index] = gen_random_spin(gen, spin_length);
+                        spins[current_site_index] = gen_random_spin(spin_length);
                         field[current_site_index] = UC.field[l];
                         onsite_interaction[current_site_index] = UC.onsite_interaction[l];
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
@@ -157,14 +160,6 @@ class lattice
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
-        // for(size_t i = 0 ; i < lattice_size; ++i){
-        //     for(size_t j =0; j < num_bi; ++j){
-        //         int partner = bilinear_partners[i][j];
-        //         array<array<double,N>, N> J = bilinear_interaction[i][j];
-        //         cout << "Bilinear: " << i << " at site " << site_pos[i][0] << " " << site_pos[i][1] << " " << site_pos[i][2] << " " << partner  << " on site " << site_pos[partner][0] << " " << site_pos[partner][1] << " " << site_pos[partner][2] << " with interaction " << J[0][0] << " " << J[1][1] << " " << J[2][2] << endl;
-        //     }
-        // }
-
     };
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
@@ -213,7 +208,7 @@ class lattice
         field_drive_2 = {{0}};
         field_drive_amp = 0;
         field_drive_freq = 0;
-        field_drive_width = 0;
+        field_drive_width = 1;
         t_B_1 = 0;
         t_B_2 = 0;
     }
@@ -340,11 +335,12 @@ class lattice
     }
 
 
-    void deterministic_sweep(std::mt19937 &gen){
+    void deterministic_sweep(){
         size_t count = 0;
         int i;
         while(count < lattice_size){
-            i = random_int(0, lattice_size-1, gen);
+            // i = random_int(0, lattice_size-1, gen);
+            i = random_int_lehman(lattice_size);
             array<double,N> local_field = get_local_field(i);
             double norm = sqrt(dot(local_field, local_field));
             if(norm == 0){
@@ -359,19 +355,20 @@ class lattice
         }
     }
     
-    array<double,N> gaussian_move(const array<double,N> &current_spin, std::mt19937 &gen, double sigma=60){
+    array<double,N> gaussian_move(const array<double,N> &current_spin, double sigma=60){
         array<double,N> new_spin;
-        new_spin = current_spin + gen_random_spin(gen,spin_length)*sigma;
+        new_spin = current_spin + gen_random_spin(spin_length)*sigma;
         return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length;
     }
 
-    void overrelaxation(std::mt19937 &gen){
+    void overrelaxation(){
         array<double,N> local_field;
         int i;
         double proj;
         size_t count = 0;
         while(count < lattice_size){
-            i = random_int(0, lattice_size-1, gen);
+            // i = random_int(0, lattice_size-1, gen);
+            i = random_int_lehman(lattice_size);
             local_field = get_local_field(i);
             double norm = dot(local_field, local_field);
             if(norm == 0){
@@ -385,20 +382,21 @@ class lattice
         }
     }
 
-    double metropolis(spin_config &curr_spin, double T, std::mt19937 &gen, bool gaussian=false, double sigma=60){
+    double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
         double E, E_new, dE, r;
         int i;
         array<double,N> new_spin;
         int accept = 0;
         size_t count = 0;
         while(count < lattice_size){
-            i = random_int(0, lattice_size-1, gen);
+            // i = random_int(0, lattice_size-1, gen);
+            i = random_int_lehman(lattice_size);
             E = site_energy(curr_spin[i], i);
             if (gaussian){
-                new_spin = gaussian_move(curr_spin[i], gen, sigma);
+                new_spin = gaussian_move(curr_spin[i], sigma);
             }
             else{
-                new_spin = gen_random_spin(gen,spin_length);
+                new_spin = gen_random_spin(spin_length);
             }
             E_new = site_energy(new_spin, i);
             dE = E_new - E;
@@ -408,7 +406,7 @@ class lattice
                 accept++;
             }
             else{
-                r = random_double(0,1, gen);
+                r = random_double_lehman(0,1);
                 if(r < exp(-dE/T)){
                     curr_spin[i] = new_spin;
                     accept++;
@@ -514,23 +512,23 @@ class lattice
         if (out_dir != ""){
             filesystem::create_directory(out_dir);
         }
-        std::random_device rd;
-        std::mt19937 gen(rd());
         double T = T_start;
         double acceptance_rate = 0;
         double sigma = 40;
         cout << "Gaussian Move: " << gaussian_move << endl;
+        srand (time(NULL));
+        seed_lehman(rand()*2+1);
         while(T > T_end){
             double curr_accept = 0;
             for(size_t i = 0; i<n_anneal; ++i){
                 if(overrelaxation_rate > 0){
-                    overrelaxation(gen);
+                    overrelaxation();
                     if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(spins, T, gen, gaussian_move, sigma);
+                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
                     }
                 }
                 else{
-                    curr_accept += metropolis(spins, T, gen, gaussian_move, sigma);
+                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
                 }
             }
             if (overrelaxation_rate > 0){
@@ -544,6 +542,8 @@ class lattice
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
+<<<<<<< HEAD
+=======
             if(save_observables){
                 vector<double> energies;
                 for(size_t i = 0; i<10000; ++i){
@@ -561,6 +561,7 @@ class lattice
                 myfile << endl;
                 myfile.close();
             }
+>>>>>>> da293d05a383243370f30bd62ac8a1ec654dccad
             T *= 0.9;
         }
         if(out_dir != ""){
@@ -570,11 +571,9 @@ class lattice
     }
 
     void simulated_annealing_deterministic(double T_start, double T_end, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name, bool gaussian_move = false){
-        std::random_device rd;
-        std::mt19937 gen(rd());
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move);
         for(size_t i = 0; i<n_deterministics; ++i){
-            deterministic_sweep(gen);
+            deterministic_sweep();
         }   
 
         if(dir_name != ""){
@@ -585,8 +584,6 @@ class lattice
     }
 
     void parallel_tempering(vector<double> temp, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = false){
-        std::random_device rd;
-        std::mt19937 gen(rd());
 
         int initialized;
         int swap_accept = 0;
@@ -599,7 +596,8 @@ class lattice
         int rank, size, partner_rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &size);
-
+        srand (time(NULL));
+        seed_lehman(rand()*2+1);
         double E, T_partner, E_partner;
         bool accept;        
         spin_config new_spins;
@@ -618,13 +616,13 @@ class lattice
 
             // Metropolis
             if(overrelaxation_rate > 0){
-                overrelaxation(gen);
+                overrelaxation();
                 if (i%overrelaxation_rate == 0){
-                    curr_accept += metropolis(spins, curr_Temp, gen, gaussian_move);
+                    curr_accept += metropolis(spins, curr_Temp, gaussian_move);
                 }
             }
             else{
-                curr_accept += metropolis(spins, curr_Temp, gen, gaussian_move);
+                curr_accept += metropolis(spins, curr_Temp, gaussian_move);
             }
             E = total_energy(spins);
 
@@ -645,7 +643,7 @@ class lattice
                         MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
                     }
                     if (partner_rank % 2 == 0){
-                        accept = min(double(1.0), exp((1/curr_Temp-1/T_partner)*(E - E_partner))) > random_double(0,1, gen);
+                        accept = min(double(1.0), exp((1/curr_Temp-1/T_partner)*(E - E_partner))) > random_double_lehman(0,1);
                         MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
                     } else{
                         MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -700,6 +698,75 @@ class lattice
                 }
                 myfile.close();
             }
+        }
+        int finalized;
+        if (!MPI_Finalized(&finalized)){
+            MPI_Finalize();
+        }
+    }
+
+    void measurement(double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
+        vector<double> energies;
+        vector<array<double,N>> magnetizations;
+        vector<double> energy;
+        vector<double> magnetization;
+        int initialized;
+        MPI_Initialized(&initialized);
+        if (!initialized){
+            MPI_Init(NULL, NULL);
+        }
+        int rank, size, partner_rank;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        
+        energies.resize(int(n_measure/prob_rate*size));
+        magnetizations.resize(int(n_measure/prob_rate*size));
+
+        double curr_accept = 0;
+        for(size_t i=0; i < n_measure; ++i){
+            if(overrelaxation_rate > 0){
+                overrelaxation();
+                if (i%overrelaxation_rate == 0){
+                    curr_accept += metropolis(spins, T, gaussian_move);
+                }
+            }
+            else{
+                curr_accept += metropolis(spins, T, gaussian_move);
+            }
+            if (i % prob_rate == 0){
+                magnetization.push_back(magnetization_local(spins));
+                energy.push_back(total_energy(spins));
+            }
+        }
+
+
+        MPI_Gather(&energy, int(n_measure/prob_rate), MPI_DOUBLE, energies.data(), int(n_measure/prob_rate), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&magnetization, int(n_measure/prob_rate), MPI_DOUBLE, magnetizations.data(), int(n_measure/prob_rate), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+        if(dir_name != ""){
+            filesystem::create_directory(dir_name);
+            for(size_t i=0; i<rank_to_write.size(); ++i){
+                if (rank == rank_to_write[i]){
+                    write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                }
+            }
+            if (rank == 0){
+                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
+                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
+                write_to_file_pos(dir_name + "/pos.txt");
+                ofstream myfile;
+                myfile.open(dir_name + "/heat_capacity.txt", ios::app);
+                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat << endl;
+                myfile.close();
+            }
+        }
+
+        int finalized;
+        if (!MPI_Finalized(&finalized)){
+            MPI_Finalize();
         }
     }
 
