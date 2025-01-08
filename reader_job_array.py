@@ -243,7 +243,7 @@ def plot_spin_config(P, S, field_dir, filename):
 def convert_index(value, start, end, num):
     return int((value-start)/(end-start)*(num))
 
-def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
+def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz):
 
     JPMS = np.linspace(Jpm_start, Jpm_end, nJpm)
     HS = np.linspace(H_start, H_end, nH)
@@ -269,8 +269,19 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
                 E = np.loadtxt(dir + "/" + filename + "/energy199.txt")
                 # P = np.loadtxt(dir + "/" + filename + "/pos.txt")
                 mag = magnetization_local(S)
-                phase_diagram[int(info[4]), int(info[5])] = np.abs(mag[0])
-                heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True)
+                phase_diagram[int(info[4]), int(info[5])] = np.abs(mag[xorz])
+                num_lines = sum(1 for _ in open(dir + "/" + filename + "/heat_capacity.txt"))
+                if num_lines == 600:
+                    # heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=200,max_rows=200)
+                    heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=400,max_rows=200)
+                elif num_lines == 400:
+                    heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=200,max_rows=200)
+                else:
+                    heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)                   
+                     # heat_capacity_2 = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)
+                # print(num_lines)
+                # heat_capacity[1] = (heat_capacity_2[1]+heat_capacity[1])/2
+                # print(heat_capacity.shape)
                 heat_capacity = np.flip(heat_capacity, axis=1)
                 heat_capacity = heat_capacity[:,10:]
                 heat_capacity[1] = heat_capacity[1] * 8.6173303e-2
@@ -279,7 +290,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir):
                 for i in range(1,len(heat_capacity[1])):
                     entropy[i-1] = -np.trapz(Cv_integrand[i:], heat_capacity[0][i:]) + np.log(2)
                 np.savetxt(dir + "/" + filename + "/entropy.txt", entropy)
-                entropy_diagram[int(info[4]), int(info[5])] = entropy[0] if entropy[0] > 0 else 0
+                entropy_diagram[int(info[4]), int(info[5])] = entropy[0] 
                 mag_diagram[int(info[4]), int(info[5])] = np.abs(magnetization(S, n)[2])
                 Energies[int(info[4]), int(info[5])] = np.mean(E)
             except:
@@ -349,9 +360,9 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # fullread(-0.3, 0.3, 200, 0, 8.0, 100, "001", "/scratch/zhouzb79/MC_phase_diagram_CZO_001_XAIAO")
 # fullread(-0.3, 0.3, 200, 0, 8.0 , 100, "110", "/scratch/zhouzb79/MC_phase_diagram_CZO_110_XAIAO")
 # fullread(-0.3, 0.3, 200, 0, 8.0, 100, "111", "/scratch/zhouzb79/MC_phase_diagram_CZO_111_XAIAO")
-fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_XAIAO")
-fullread(-0.3, 0.3, 50, 0, 15.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_XAIAO_High_field")
-fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_XAIAO")
-# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_ZAIAO")
-# fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_ZAIAO")
-# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_ZAIAO")
+fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_XAIAO", 0)
+fullread(-0.3, 0.3, 50, 0, 15.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_XAIAO_High_field", 0)
+fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_XAIAO", 0)
+fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_ZAIAO", 2)
+fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_ZAIAO", 2)
+fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_ZAIAO", 2)

@@ -770,7 +770,7 @@ def read_0_field(numJpm, dir):
     fig, ax = plt.subplots(figsize=(10,4))
     C = ax.imshow(phase_diagram, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     fig.colorbar(C)
-    plt.savefig(dir+"phase_diagram.pdf")
+    plt.savefig(dir+"_phase_diagram.pdf")
     plt.clf()
 
 def read_2D_nonlinear(dir):
@@ -837,7 +837,7 @@ read_MD_tot(dir, "1-10")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
-# read_0_field(25, "PD_0_field_test")
+# read_0_field(70, "/scratch/y/ybkim/zhouzb79/MC_Phase_Diagram_0_field")
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
 # plt.xscale('log')
