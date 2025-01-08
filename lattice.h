@@ -521,23 +521,23 @@ class lattice
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
-            // if(save_observables){
-            //     vector<double> energies;
-            //     for(size_t i = 0; i<10000; ++i){
-            //         metropolis(spins, T, gen, gaussian_move, sigma);
-            //         if (i % 100 == 0){
-            //             energies.push_back(total_energy(spins));
-            //         }
-            //     }
-            //     std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-            //     double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
-            //     double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
-            //     ofstream myfile;
-            //     myfile.open(out_dir + "/specific_heat.txt", ios::app);
-            //     myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
-            //     myfile << endl;
-            //     myfile.close();
-            // }
+            if(save_observables){
+                vector<double> energies;
+                for(size_t i = 0; i<10000; ++i){
+                    metropolis(spins, T, gaussian_move, sigma);
+                    if (i % 100 == 0){
+                        energies.push_back(total_energy(spins));
+                    }
+                }
+                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
+                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
+                ofstream myfile;
+                myfile.open(out_dir + "/specific_heat.txt", ios::app);
+                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
+                myfile << endl;
+                myfile.close();
+            }
             T *= 0.9;
         }
         if(out_dir != ""){
