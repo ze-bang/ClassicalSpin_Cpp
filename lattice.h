@@ -219,27 +219,6 @@ class lattice
         return field_drive_1[ind]*factor1 + field_drive_2[ind]*factor2;
     }
 
-    void read_from_file_spin(const string &filename){
-        ifstream file;
-        file.open(filename);
-        if (!file){
-            cout << "Unable to open file";
-            exit(1);
-        }
-        string line;
-        size_t count = 0;
-        while(getline(file, line)){
-            istringstream iss(line);
-            array<double, N> spin;
-            for(size_t i = 0; i < N; ++i){
-                iss >> spin[i];
-            }
-            spins[count] = spin;
-            count++;
-        }
-        file.close();
-    }
-
 
     void set_spin(size_t site_index, array<double, N> &spin_in){
         spins[site_index] = spin_in;
@@ -542,26 +521,23 @@ class lattice
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
-<<<<<<< HEAD
-=======
-            if(save_observables){
-                vector<double> energies;
-                for(size_t i = 0; i<10000; ++i){
-                    metropolis(spins, T, gen, gaussian_move, sigma);
-                    if (i % 100 == 0){
-                        energies.push_back(total_energy(spins));
-                    }
-                }
-                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
-                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
-                ofstream myfile;
-                myfile.open(out_dir + "/specific_heat.txt", ios::app);
-                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
-                myfile << endl;
-                myfile.close();
-            }
->>>>>>> da293d05a383243370f30bd62ac8a1ec654dccad
+            // if(save_observables){
+            //     vector<double> energies;
+            //     for(size_t i = 0; i<10000; ++i){
+            //         metropolis(spins, T, gen, gaussian_move, sigma);
+            //         if (i % 100 == 0){
+            //             energies.push_back(total_energy(spins));
+            //         }
+            //     }
+            //     std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+            //     double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
+            //     double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
+            //     ofstream myfile;
+            //     myfile.open(out_dir + "/specific_heat.txt", ios::app);
+            //     myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
+            //     myfile << endl;
+            //     myfile.close();
+            // }
             T *= 0.9;
         }
         if(out_dir != ""){
@@ -583,7 +559,7 @@ class lattice
         }
     }
 
-    void parallel_tempering(vector<double> temp, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = false){
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
 
         int initialized;
         int swap_accept = 0;
@@ -612,7 +588,7 @@ class lattice
 
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
-        for(size_t i=0; i < n_anneal+n_therm; ++i){
+        for(size_t i=0; i < n_anneal+n_measure; ++i){
 
             // Metropolis
             if(overrelaxation_rate > 0){
@@ -663,7 +639,7 @@ class lattice
                 }
             }
 
-            if (i >= n_therm){
+            if (i >= n_anneal){
                 if (i % probe_rate == 0){
                     if(dir_name != ""){
                         magnetizations.push_back(magnetization_local(spins));
@@ -673,13 +649,12 @@ class lattice
             }
         }
         
-        // double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*variance(energies)/lattice_size;
         std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
         double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
         double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_therm)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_therm)*swap_rate*overrelaxation_flag << endl;
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
@@ -703,9 +678,10 @@ class lattice
         if (!MPI_Finalized(&finalized)){
             MPI_Finalize();
         }
+        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
     }
 
-    void measurement(double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
+    void measurement(string toread, double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
         vector<double> energies;
         vector<array<double,N>> magnetizations;
         vector<double> energy;
@@ -721,6 +697,8 @@ class lattice
         
         energies.resize(int(n_measure/prob_rate*size));
         magnetizations.resize(int(n_measure/prob_rate*size));
+
+        read_spin_from_file(toread);
 
         double curr_accept = 0;
         for(size_t i=0; i < n_measure; ++i){
@@ -747,7 +725,6 @@ class lattice
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
-                    write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                 }

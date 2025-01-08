@@ -627,7 +627,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 8, 8, 8> MC(&Fe_atoms, 2.5);
     if (spin_config != ""){
-        MC.read_from_file_spin(spin_config);
+        MC.read_spin_from_file(spin_config);
     }else{
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
         std::random_device rd;
@@ -804,7 +804,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
     if (spin_config != ""){
-        MC.read_from_file_spin(spin_config);
+        MC.read_spin_from_file(spin_config);
     }else{
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
         if (T_zero){

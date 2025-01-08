@@ -36,6 +36,8 @@ int main(int argc, char** argv) {
         field_dir = {0,0,1};
     }else if(dir_string == "110"){
         field_dir = {1/sqrt(2), 1/sqrt(2), 0};
+    }else if(dir_string == "1-10"){
+        field_dir = {1/sqrt(2), -1/sqrt(2), 0};
     }else{
         field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
     }
@@ -50,7 +52,6 @@ int main(int argc, char** argv) {
     int MPI_n_tasks = argv[11] ? atoi(argv[11]) : 1;
     std::cout << "Initializing parallel tempering calculation with parameters: " << "T = " << 10 << "-" << 1e-3 << " Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " saving to: " << dir_name << endl;
     parallel_tempering_pyrochlore(1e-3, 10, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, sub_dir, {0});
-
     // simulated_annealing_pyrochlore(-0.4, 1, 0.4, 0, 0, 1, 0, {0,0,1}, "test");
 
     // phase_diagram_pyrochlore(-0.3, 0.3, 70, 0.0, 3.0, 30, 0.2, {0,0,1}, "MC_phase_diagram_CZO_001");
