@@ -542,12 +542,10 @@ class lattice
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
-<<<<<<< HEAD
-=======
             if(save_observables){
                 vector<double> energies;
                 for(size_t i = 0; i<10000; ++i){
-                    metropolis(spins, T, gen, gaussian_move, sigma);
+                    metropolis(spins, T, gaussian_move, sigma);
                     if (i % 100 == 0){
                         energies.push_back(total_energy(spins));
                     }
@@ -561,7 +559,6 @@ class lattice
                 myfile << endl;
                 myfile.close();
             }
->>>>>>> da293d05a383243370f30bd62ac8a1ec654dccad
             T *= 0.9;
         }
         if(out_dir != ""){

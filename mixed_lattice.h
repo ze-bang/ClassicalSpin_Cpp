@@ -69,6 +69,10 @@ class mixed_lattice
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_partners_SU3;
 
     //Look up table for SU2 and SU3 mix
+    array<vector<array<array<double, N_SU2>, N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_bilinear_interaction_SU2;
+    array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_partners_SU2;
+    array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_partners_SU3;
+
     array<vector<array<array<array<double, N_SU3>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_interaction_SU2;
     array<vector<array<array<array<double, N_SU2>, N_SU2>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_interaction_SU3;
 
@@ -198,7 +202,10 @@ class mixed_lattice
             for (size_t j=0; j < dim2; ++j){
                 for(size_t k=0; k < dim3;++k){
                     for (size_t l=0; l < N_ATOMS_SU3;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l,N_ATOMS_SU3);                        
+                        size_t current_site_index = flatten_index(i,j,k,l,N_ATOMS_SU3);         
+
+                        auto bilinear_matched = atoms->bilinear_SU3.equal_range(l);
+
                         auto trilinear_matched = atoms->trilinear_SU2_SU3.equal_range(l);
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
                             mixed_trilinear<N_SU2, N_SU3> J = m->second;
