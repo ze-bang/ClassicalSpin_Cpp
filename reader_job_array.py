@@ -417,9 +417,10 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
         # plt.clf()
         for i in range (3):
             np.savetxt(dir+"_magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
-            plt.plot(HS, magnetostrictions[:,i])
-            plt.savefig(dir+"_magnetostriction_"+magnetostriction_string[i]+".pdf")
-            plt.clf()
+        plt.plot(HS, magnetostrictions[:,0],HS, magnetostrictions[:,1],HS, magnetostrictions[:,2])
+        plt.legend(["111", "110", "001"])
+        plt.savefig(dir+"_magnetostriction.pdf")
+        plt.clf()
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
