@@ -243,7 +243,7 @@ def magnetostriction(S, h, dir):
         return np.array([np.mean(L110_111), np.mean(L110_110), np.mean(L110_001)])
     else:
         L001_111 = 1/(9*np.sqrt(3)*C_B)*h*(2*g[2]+g[3])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0]) + (2*g[8]+g[9])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2])\
-                - 4/(27*C_44)*h*((np.sqrt(3)*g[2]-np.sqrt(3)*g[4])*(3*tau[0][0]+tau[1][0]+tau[2][0]-tau[3][0])-(2*np.sqrt(6)*g[0]-np.sqrt(3)*g[1])*(tau[1][0]+tau[2][0]+2*tau[3][0])\
+                - 4/(27*C_44)*h*((np.sqrt(3)*g[2]-np.sqrt(3)*g[3])*(3*tau[0][0]+tau[1][0]+tau[2][0]-tau[3][0])-(2*np.sqrt(6)*g[0]-np.sqrt(3)*g[1])*(tau[1][0]+tau[2][0]+2*tau[3][0])\
                 +(np.sqrt(3)*g[8]-np.sqrt(3)*g[9])*(3*tau[0][2]+tau[1][2]+tau[2][2]- tau[3][2])-(2*np.sqrt(6)*g[6]-np.sqrt(3)*g[7])*(tau[1][2]+tau[2][2]+2*tau[3][2])\
                 +(6*np.sqrt(2)*g[4]+3*g[5])*(tau[1][1]-tau[2][1]))
         
@@ -417,7 +417,9 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
         # plt.clf()
         for i in range (3):
             np.savetxt(dir+"_magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
-        plt.plot(HS, magnetostrictions[:,0],HS, magnetostrictions[:,1],HS, magnetostrictions[:,2])
+        plt.scatter(HS, magnetostrictions[:,0])
+        plt.scatter(HS, magnetostrictions[:,1])
+        plt.scatter(HS, magnetostrictions[:,2])
         plt.legend(["111", "110", "001"])
         plt.savefig(dir+"_magnetostriction.pdf")
         plt.clf()
@@ -465,6 +467,13 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_ZAIAO", 2)
 # fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_ZAIAO", 2)
 # fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_ZAIAO", 2)
-fullread(0.1375, 0.1375, 1, 0, 5, 20, "111", "line_scan_111_magneto", 0)
-
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "111", "line_scan_111_magneto", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "110", "line_scan_110_magneto", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "001", "line_scan_001_magneto", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "111", "CZO_octupolar_111", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "110", "CZO_octupolar_110", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "001", "CZO_octupolar_001", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "111", "CZO_dipolar_111", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "110", "CZO_dipolar_110", 0)
+fullread(0.1375, 0.1375, 1, 0, 10, 20, "001", "CZO_dipolar_001", 0)
 # 0.1375 0.1375 1 0.2375
