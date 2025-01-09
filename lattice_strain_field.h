@@ -1,5 +1,5 @@
-#ifndef LATTICE_H
-#define LATTICE_H
+#ifndef LATTICE_STRAIN_FIELD_H
+#define LATTICE_STRAIN_FIELD_H
 
 #define _USE_MATH_DEFINES
 #include "unitcell.h"
@@ -479,6 +479,18 @@ class lattice
         myfile.close();
     }
 
+    void write_to_file_strain(string filename, spin_config towrite){
+        ofstream myfile;
+        myfile.open(filename);
+        for(size_t i = 0; i<lattice_size; ++i){
+            for(size_t j = 0; j<6; ++j){
+                myfile << towrite[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
     void write_to_file(string filename, spin_config towrite){
         ofstream myfile;
         myfile.open(filename, ios::app);
@@ -610,6 +622,7 @@ class lattice
         }
         if(out_dir != ""){
             write_to_file_spin(out_dir + "/spin.txt", spins);
+            write_to_file_strain(out_dir + "/strain.txt", strain_field);
             write_to_file_pos(out_dir + "/pos.txt");
         }
     }
@@ -623,6 +636,7 @@ class lattice
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
             write_to_file_spin(dir_name + "/spin.txt", spins);
+            write_to_file_strain(out_dir + "/strain.txt", strain_field);
             write_to_file_pos(dir_name + "/pos.txt");
         }
     }
@@ -1060,4 +1074,4 @@ class lattice
         time_sections.close();     
     }
 };
-#endif // LATTICE_H
+#endif // LATTICE_STRAIN_FIELD_H
