@@ -19,7 +19,7 @@
 #include <sstream>
 
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
-class lattice
+class lattice_strain_field
 {   
     public:
 
@@ -109,7 +109,7 @@ class lattice
         return periodic_boundary(i, dim1)*dim2*dim3*N_ATOMS+ periodic_boundary(j, dim2)*dim3*N_ATOMS+ periodic_boundary(k, dim3)*N_ATOMS + l;
     }
 
-    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1, const array<double,10> strain_coupling): UC(*atoms){
+    lattice_strain_field(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1, const array<double,10> strain_coupling): UC(*atoms){
         array<array<double,3>, N_ATOMS> basis;
         array<array<double,3>, 3> unit_vector;
 
@@ -178,7 +178,7 @@ class lattice
         num_gen = spins[0].size();
     };
 
-    lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
+    lattice_strain_field(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
         UC = lattice_in->UC;
         lattice_size = lattice_in->lattice_size;
         spins = lattice_in->spins;

@@ -4,7 +4,7 @@
 #include "unitcell.h"
 #include "lattice.h"
 #include "mixed_lattice.h"
-#include "lattice_strain_field.h"
+// #include "lattice_strain_field.h"
 #include <iostream>
 #include <mpi.h>
 #include "simple_linear_alg.h"
@@ -879,50 +879,50 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
 }
 
-void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
-    filesystem::create_directory(dir);
-    Pyrochlore<3> atoms;
+// void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
+//     filesystem::create_directory(dir);
+//     Pyrochlore<3> atoms;
 
-    array<double,3> z1 = {1, 1, 1};
-    array<double,3> z2 = {1,-1,-1};
-    array<double,3> z3 = {-1,1,-1};
-    array<double,3> z4 = {-1,-1,1};
+//     array<double,3> z1 = {1, 1, 1};
+//     array<double,3> z2 = {1,-1,-1};
+//     array<double,3> z3 = {-1,1,-1};
+//     array<double,3> z4 = {-1,-1,1};
 
-    z1 = z1/double(sqrt(3));
-    z2 = z2/double(sqrt(3));
-    z3 = z3/double(sqrt(3));
-    z4 = z4/double(sqrt(3));
+//     z1 = z1/double(sqrt(3));
+//     z2 = z2/double(sqrt(3));
+//     z3 = z3/double(sqrt(3));
+//     z4 = z4/double(sqrt(3));
 
-    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
-    array<double, 3> g = {gxx, gyy, gzz};
-    array<double, 3> field = field_dir*h;
+//     array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+//     array<double, 3> g = {gxx, gyy, gzz};
+//     array<double, 3> field = field_dir*h;
 
 
-    atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
-    atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
-    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
-    atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
-    atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
-    atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
 
-    atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
-    atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
-    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
-    atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
-    atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
-    atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
+//     atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
+//     atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
+//     atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
+//     atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
+//     atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
+//     atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
 
-    atoms.set_field(g*dot(field, z1), 0);
-    atoms.set_field(g*dot(field, z2), 1);
-    atoms.set_field(g*dot(field, z3), 2);
-    atoms.set_field(g*dot(field, z4), 3);
+//     atoms.set_field(g*dot(field, z1), 0);
+//     atoms.set_field(g*dot(field, z2), 1);
+//     atoms.set_field(g*dot(field, z3), 2);
+//     atoms.set_field(g*dot(field, z4), 3);
 
-    array<double, 10> strain = {4e-7, -8e-7, 12e-7, -2.6e-7, 0.27e-7, -0.8e-7, 0.5e-7, -0.7e-7, 0.43e-7, 0.51e-7};
+//     array<double, 10> strain = {4e-7, -8e-7, 12e-7, -2.6e-7, 0.27e-7, -0.8e-7, 0.5e-7, -0.7e-7, 0.43e-7, 0.51e-7};
 
-    lattice_strain_field<3, 4, 8, 8, 8> MC(&atoms, 0.5, strain);
-    // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
-}
+//     lattice_strain_field<3, 4, 8, 8, 8> MC(&atoms, 0.5, strain);
+//     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
+//     MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
+// }
 
 void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write){
     filesystem::create_directory(dir);
@@ -971,11 +971,11 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
+    lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
-    MC.parallel_tempering(temps, 1e6, 1e8, 10, 50, 2e3, dir, rank_to_write, true);
+    MC.parallel_tempering(temps, 1e6, 0, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
     MPI_Finalized(&finalized);

@@ -199,10 +199,10 @@ def SSSF_collect(S, P, nK, filename, field_dir, g=False):
 
 
 def magnetostriction(S, h, dir):
-    tau = np.zeros(4,3,int(len(S)/4))
+    tau = np.zeros((4,3,int(len(S)/4)))
     for i in range(4):
         for j in range(3):
-            tau[i,j] = S[i::4][j]
+            tau[i,j] = S[i::4][:,j]
     C_B = 1
     C_11 = 1
     C_22 = 0
@@ -309,7 +309,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
     phase_diagram = np.zeros((nJpm,nH))
     entropy_diagram = np.zeros((nJpm, nH))
     mag_diagram = np.zeros((nJpm, nH))
-    magnetostriction = np.zeros((nJpm, nH, 3))
+    magnetostrictions = np.zeros((nJpm, nH, 3))
 
     magnetostriction_string = np.array(["111", "110", "001"])
 
@@ -326,14 +326,14 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
         if os.path.isdir(dir + "/" + filename):
             print(dir + "/" + filename)
             info = filename.split("_")
+            S = np.loadtxt(dir + "/" + filename + "/spin199.txt")
+            E = np.loadtxt(dir + "/" + filename + "/energy199.txt")
+            # P = np.loadtxt(dir + "/" + filename + "/pos.txt")
             try:
-                S = np.loadtxt(dir + "/" + filename + "/spin199.txt")
-                E = np.loadtxt(dir + "/" + filename + "/energy199.txt")
-                # P = np.loadtxt(dir + "/" + filename + "/pos.txt")
                 mag = magnetization_local(S)
                 phase_diagram[int(info[4]), int(info[5])] = np.abs(mag[xorz])
 
-                magnetostriction[int(info[4]), int(info[5])] = magnetostriction(S, HS[int(info[5])])
+                magnetostrictions[int(info[4]), int(info[5])] = magnetostriction(S, HS[int(info[5])], field_dir)
 
                 num_lines = sum(1 for _ in open(dir + "/" + filename + "/heat_capacity.txt"))
                 if num_lines == 600:
@@ -343,7 +343,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
                     heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=200,max_rows=200)
                 else:
                     heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)                   
-                     # heat_capacity_2 = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)
+                        # heat_capacity_2 = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)
                 # print(num_lines)
                 # heat_capacity[1] = (heat_capacity_2[1]+heat_capacity[1])/2
                 # print(heat_capacity.shape)
@@ -363,7 +363,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
                 entropy_diagram[int(info[4]), int(info[5])] = np.nan
                 mag_diagram[int(info[4]), int(info[5])] = np.nan
                 Energies[int(info[4]), int(info[5])] = np.nan
-                magnetostriction[int(info[4]), int(info[5])] = np.nan
+                magnetostrictions[int(info[4]), int(info[5])] = np.nan
             count = count + 1
 
     np.savetxt(dir+"_magnetization.txt", phase_diagram)
@@ -389,8 +389,8 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
     plt.savefig(dir+"_energy.pdf")
     plt.clf()
     for i in range (3):
-        np.savetxt(dir+"_magnetostriction_"+magnetostriction_string[i]+".txt", magnetostriction[:,:,i])
-        plt.imshow(magnetostriction[:,:,i].T, extent=[Jpm_start, Jpm_end, H_start, H_end], origin='lower', aspect='auto')
+        np.savetxt(dir+"_magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,:,i])
+        plt.imshow(magnetostrictions[:,:,i].T, extent=[Jpm_start, Jpm_end, H_start, H_end], origin='lower', aspect='auto')
         plt.colorbar()
         plt.savefig(dir+"_magnetostriction_"+magnetostriction_string[i]+".pdf")
         plt.clf()
