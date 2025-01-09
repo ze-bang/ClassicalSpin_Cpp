@@ -197,7 +197,65 @@ def SSSF_collect(S, P, nK, filename, field_dir, g=False):
     else:
         SSSFHnHKKn2K(S, P, nK, filename, g)
 
+
+def magnetostriction(S, h, dir):
+    tau = np.zeros(4,3,int(len(S)/4))
+    for i in range(4):
+        for j in range(3):
+            tau[i,j] = S[i::4][j]
+    C_B = 1
+    C_11 = 1
+    C_22 = 0
+    C_44 = 1
+    g = np.array([4e-7, -8e-7, 12e-7, -2.6e-7, 0.27e-7, -0.8e-7, 0.5e-7, -0.7e-7, 0.43e-7, 0.51e-7])
     
+    if dir == "111":
+        L111_111 = h/(27*C_B)*((g[9]+2*g[8])*(3*tau[0][2]-tau[1][2]-tau[2][2]-tau[3][2]) + (g[3]+2*g[2])* (3*tau[0][0]-tau[1][0]-tau[2][0]-tau[3][0]))\
+                +4/(27*C_44)*h*((8*np.sqrt(2)*g[0]-4*g[1])*(tau[1][0]+tau[2][0]+tau[3][0]) + (g[3]-g[2])* (9*tau[0][0]+tau[1][0]+tau[2][0]+tau[3][0])\
+                +(8*np.sqrt(2)*g[6]-4*g[7])*(tau[1][2]+tau[2][2]+tau[3][2]) + (g[9]-g[8])* (9*tau[0][2]+tau[1][2]+tau[2][2]+tau[3][2]))
+        
+        L111_110 = h/(27*C_B)*((g[9]+2*g[8])*(3*tau[0][2]-tau[1][2]-tau[2][2]-tau[3][2]) + (g[3]+2*g[2])* (3*tau[0][0]-tau[1][0]-tau[2][0]-tau[3][0]))\
+                + 1/(18*np.sqrt(3)*(C_11-C_22))*h*((np.sqrt(6)*g[0]+np.sqrt(3)*g[1])*(tau[1][0]+tau[2][0]-2*tau[3][0]) +(np.sqrt(6)*g[6]+np.sqrt(3)*g[7])*(tau[1][2]+tau[2][2]-2*tau[3][2]))\
+                - 2/(9*C_44) * h * ((g[2]-g[3])*(3*tau[0][0]+tau[1][0]+tau[2][0]-tau[3][0]) + (g[1]-2*np.sqrt(2)*g[0])* (tau[1][0]+tau[2][0]+tau[3][0]) \
+                                    +(g[8]-g[9])*(3*tau[0][2]+tau[1][2]+tau[2][2]-tau[3][2]) + (g[7]-2*np.sqrt(2)*g[6])* (tau[1][2]+tau[2][2]+tau[3][2])) \
+                + ((np.sqrt(2)*g[4]-g[5])/(6*np.sqrt(3)*(C_11-C_22)) + 2*(2*np.sqrt(6)*g[4]+np.sqrt(3)*g[5])/(9*C_44))*h*(tau[1][1]-tau[2][1])
+        
+        L111_001 = h/(27*C_B)*((g[9]+2*g[8])*(3*tau[0][2]-tau[1][2]-tau[2][2]-tau[3][2]) + (g[3]+2*g[2])* (3*tau[0][0]-tau[1][0]-tau[2][0]-tau[3][0]))\
+                - 1/(9*np.sqrt(3))*h*((np.sqrt(6)*g[0]+np.sqrt(6)*g[1])*(tau[1][0]+tau[2][0]-2*tau[3][0]) +(np.sqrt(6)*g[6]+np.sqrt(6)*g[7])*(tau[1][2]+tau[2][2]-2*tau[3][2])\
+                + (3*np.sqrt(2)*g[4] - 3*g[5])*(tau[1][1]-tau[2][1]))
+        return np.array([np.mean(L111_111), np.mean(L111_110), np.mean(L111_001)])
+    elif dir == "110":
+        L110_111 = np.sqrt(2)/(9*np.sqrt(3)*C_B)*h*((g[9]+2*g[8])*(tau[0][2]-tau[3][2]) + (g[3]+2*g[2])* (tau[0][0]-tau[3][0]))\
+                + 2/(27*C_44)*h*(-2*np.sqrt(6)*(g[2]-g[3])*(3*tau[0][0]+tau[3][0]) + np.sqrt(3)*(4*g[0]-np.sqrt(2)*g[1])*(3*tau[1][0]+3*tau[2][0]+2*tau[3][0])\
+                - 2*np.sqrt(6)*(g[8]-g[9])*(3*tau[0][2]+tau[3][2]) + np.sqrt(3)*(4*g[6]-np.sqrt(2)*g[7])*(3*tau[1][2]+3*tau[2][2]+2*tau[3][2])\
+                + (12*g[4]+3*np.sqrt(2)*g[5])*(tau[1][1]-tau[2][1]))
+        
+        L110_110 = np.sqrt(2)/(9*np.sqrt(3)*C_B)*h*((g[9]+2*g[8])*(tau[0][2]-tau[3][2]) + (g[3]+2*g[2])* (tau[0][0]-tau[3][0]))\
+                + 1/(12*np.sqrt(3)*(C_11-C_22))*h*((2*g[0]+np.sqrt(2)*g[1])*(tau[1][0]-tau[3][0]) +(2*g[6]+np.sqrt(2)*g[7])*(tau[1][2]-tau[3][2])\
+                                                + (2*np.sqrt(3)*g[4]-np.sqrt(6)*g[5])*(tau[1][1]-tau[2][1]))\
+                + 1/(9*C_44) * h * (np.sqrt(3)*(-4*g[0]+np.sqrt(2)*g[1]-2*np.sqrt(2)*g[2]+2*np.sqrt(2)*g[3])*(tau[0][0]-tau[3][0])\
+                                    +np.sqrt(3)*(-4*g[6]+np.sqrt(2)*g[7]-2*np.sqrt(2)*g[8]+2*np.sqrt(2)*g[9])*(tau[0][2]-tau[3][2])\
+                                    +(12*g[4]+3*np.sqrt(2)*g[5])*(tau[1][1]-tau[2][1]))
+        
+        L110_001 = np.sqrt(2)/(9*np.sqrt(3)*C_B)*h*((g[9]+2*g[8])*(tau[0][2]-tau[3][2]) + (g[3]+2*g[2])* (tau[0][0]-tau[3][0]))\
+                - 1/(6*np.sqrt(3))*h*((2*g[0]+np.sqrt(2)*g[1])*(tau[1][0]-tau[3][0]) +(2*g[6]+np.sqrt(2)*g[7])*(tau[0][2]-tau[3][2])\
+                + (-2*np.sqrt(3)*g[4]+np.sqrt(6)*g[5])*(tau[1][1]-tau[2][1]))
+        return np.array([np.mean(L110_111), np.mean(L110_110), np.mean(L110_001)])
+    else:
+        L001_111 = 1/(9*np.sqrt(3)*C_B)*h*(2*g[2]+g[3])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0]) + (2*g[8]+g[9])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2])\
+                - 4/(27*C_44)*h*((np.sqrt(3)*g[2]-np.sqrt(3)*g[4])*(3*tau[0][0]+tau[1][0]+tau[2][0]+tau[3][0])-(2*np.sqrt(6)*g[0]-np.sqrt(3)*g[1])*(tau[1][0]+tau[2][0]+2*tau[3][0])\
+                +(np.sqrt(3)*g[8]-np.sqrt(3)*g[9])*(3*tau[0][2]+tau[1][2]+tau[2][2]- tau[3][2])-(2*np.sqrt(6)*g[6]-np.sqrt(3)*g[7])*(tau[1][2]+tau[2][2]+2*tau[3][2])\
+                +(6*np.sqrt(2)*g[4]+3*g[5])*(tau[1][1]-tau[2][1]))
+        
+        L001_110 = 1/(9*np.sqrt(3)*C_B)*h*(2*g[2]+g[3])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0]) + (2*g[8]+g[9])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2])\
+                + 1/(6*np.sqrt(3)*(C_11-C_22))*h*((-np.sqrt(2)*g[0]-g[1])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0])\
+                                            +(-np.sqrt(2)*g[6]-g[7])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2]))\
+                - 2/(3*np.sqrt(3)*C_44)*h*((-2*np.sqrt(2)*g[0]+g[1]+g[2]-g[3])*(tau[0][0]+tau[1][0]+tau[2][0]+tau[3][0])\
+                                        +(-2*np.sqrt(2)*g[6]+g[7]+g[8]-g[9])*(tau[0][2]+tau[1][2]+tau[2][2]+tau[3][2]))
+        
+        L001_001 = 1/(9*np.sqrt(3)*C_B)*h*(2*g[2]+g[3])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0]) + (2*g[8]+g[9])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2])\
+                + 1/(3*np.sqrt(3)*(C_11-C_22)) *h *((np.sqrt(2)*g[0]+g[1])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0]) + (np.sqrt(2)*g[6]+g[7])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2]))
+        return np.array([np.mean(L001_111), np.mean(L001_110), np.mean(L001_001)])
 def magnetization(S, n):
     A = np.zeros((4,3))
     # print(S.shape, len(S),size)
@@ -251,6 +309,10 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
     phase_diagram = np.zeros((nJpm,nH))
     entropy_diagram = np.zeros((nJpm, nH))
     mag_diagram = np.zeros((nJpm, nH))
+    magnetostriction = np.zeros((nJpm, nH, 3))
+
+    magnetostriction_string = np.array(["111", "110", "001"])
+
     if field_dir == "110":
         n = np.array([1,1,0])/np.sqrt(2)
     elif field_dir == "111":
@@ -270,6 +332,9 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
                 # P = np.loadtxt(dir + "/" + filename + "/pos.txt")
                 mag = magnetization_local(S)
                 phase_diagram[int(info[4]), int(info[5])] = np.abs(mag[xorz])
+
+                magnetostriction[int(info[4]), int(info[5])] = magnetostriction(S, HS[int(info[5])])
+
                 num_lines = sum(1 for _ in open(dir + "/" + filename + "/heat_capacity.txt"))
                 if num_lines == 600:
                     # heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=200,max_rows=200)
@@ -298,6 +363,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
                 entropy_diagram[int(info[4]), int(info[5])] = np.nan
                 mag_diagram[int(info[4]), int(info[5])] = np.nan
                 Energies[int(info[4]), int(info[5])] = np.nan
+                magnetostriction[int(info[4]), int(info[5])] = np.nan
             count = count + 1
 
     np.savetxt(dir+"_magnetization.txt", phase_diagram)
@@ -322,6 +388,12 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
     plt.colorbar()
     plt.savefig(dir+"_energy.pdf")
     plt.clf()
+    for i in range (3):
+        np.savetxt(dir+"_magnetostriction_"+magnetostriction_string[i]+".txt", magnetostriction[:,:,i])
+        plt.imshow(magnetostriction[:,:,i].T, extent=[Jpm_start, Jpm_end, H_start, H_end], origin='lower', aspect='auto')
+        plt.colorbar()
+        plt.savefig(dir+"_magnetostriction_"+magnetostriction_string[i]+".pdf")
+        plt.clf()
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 

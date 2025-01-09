@@ -1,5 +1,5 @@
-#ifndef LATTICE_H
-#define LATTICE_H
+#ifndef LATTICE_STRAIN_FIELD_H
+#define LATTICE_STRAIN_FIELD_H
 
 #define _USE_MATH_DEFINES
 #include "unitcell.h"
@@ -33,6 +33,7 @@ class lattice
     array<array<double,3>, N_ATOMS*dim1*dim2*dim3> site_pos;
     //Lookup table for the lattice
     spin_config field;
+    array<array<double,6>,N_ATOMS*dim1*dim2*dim3> strain_field;
     array<array<double, N>, N_ATOMS> field_drive_1;
     array<array<double, N>, N_ATOMS> field_drive_2;
     double field_drive_freq;
@@ -53,6 +54,8 @@ class lattice
     size_t num_tri;
     size_t num_gen;
     float spin_length;
+
+    array<double, 10> g;
 
     array<double,N> gen_random_spin(float spin_l){
         array<double,N> temp_spin;
@@ -78,6 +81,16 @@ class lattice
         return temp_spin*spin_l;
     }
 
+    array<double,6> gen_strain_field(const float spin_l){
+        array<double,9> temp_field;
+
+        for(size_t i = 0; i < 6; ++i){
+            // euler_angles[i] = random_double(0, 2*M_PI, gen);
+            temp_field[i] = random_double_lehman(-1, 1);
+        }
+        return temp_spin*spin_l;
+    }
+
 
     size_t flatten_index(size_t i, size_t j, size_t k, size_t l){
         return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
@@ -96,7 +109,7 @@ class lattice
         return periodic_boundary(i, dim1)*dim2*dim3*N_ATOMS+ periodic_boundary(j, dim2)*dim3*N_ATOMS+ periodic_boundary(k, dim3)*N_ATOMS + l;
     }
 
-    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1): UC(*atoms){
+    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1, const array<double,10> strain_coupling): UC(*atoms){
         array<array<double,3>, N_ATOMS> basis;
         array<array<double,3>, 3> unit_vector;
 
@@ -109,7 +122,7 @@ class lattice
         set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
         srand (time(NULL));
         seed_lehman(rand()*2+1);
-
+        g = strain_coupling;
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim3;++k){
@@ -119,8 +132,11 @@ class lattice
 
                         site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j)  + unit_vector[2]*int(k)  + basis[l];
                         spins[current_site_index] = gen_random_spin(spin_length);
+                        strain_field[current_site_index] = gen_strain_field(1e-5);
+
                         field[current_site_index] = UC.field[l];
                         onsite_interaction[current_site_index] = UC.onsite_interaction[l];
+
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
                         int count = 0;
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
@@ -219,6 +235,27 @@ class lattice
         return field_drive_1[ind]*factor1 + field_drive_2[ind]*factor2;
     }
 
+    void read_from_file_spin(const string &filename){
+        ifstream file;
+        file.open(filename);
+        if (!file){
+            cout << "Unable to open file";
+            exit(1);
+        }
+        string line;
+        size_t count = 0;
+        while(getline(file, line)){
+            istringstream iss(line);
+            array<double, N> spin;
+            for(size_t i = 0; i < N; ++i){
+                iss >> spin[i];
+            }
+            spins[count] = spin;
+            count++;
+        }
+        file.close();
+    }
+
 
     void set_spin(size_t site_index, array<double, N> &spin_in){
         spins[site_index] = spin_in;
@@ -245,7 +282,37 @@ class lattice
         file.close();
     }
 
-    double site_energy(array<double, N> &spin_here, size_t site_index){
+    double strain_field_energy(array<double, N> &spin_here, array<double, 6> &strain_field, size_t site_index){
+        if constexpr(N == 3){
+            double x_mult = g[0]*(field[site_index][0]*(strain_field[1] - strain_field[0]) + 2*field[1]*strain_field[3]) +
+                            g[1]*(field[site_index][0]*strain_field[4] - field[1]*strain_field[5]) +
+                            g[2]*field[site_index][2]*(strain_field[0] + strain_field[1]) + g[3]*field[site_index][2]*strain_field[2];
+            double y_mult = g[4]*(2*field[site_index][0]*strain_field[3] + field[site_index][1]*(strain_field[0]-strain_field[1])) + 
+                            g[5]*(field[site_index][1]*strain_field[4]- field[site_index][0]*strain_field[5]);
+            double z_mult = g[6]*(field[site_index][0]*(strain_field[1]-strain_field[0]) + 2*field[site_index][1]*strain_field[3]);
+
+            return -x_mult*spin_here[0] - y_mult*spin_here[1] - z_mult*spin_here[2] + 
+                    g[7]*(field[site_index][0]*strain_field[site_index][4] + field[site_index][1]*strain_field[site_index][5])
+                    +g[8]*field[site_index][2]*(strain_field[site_index][0]+strain_field[site_index][1])
+                    +g[9]*field[site_index][2]*strain_field[site_index][2];
+
+        }
+    }
+
+    array<double,3> strain_field_eff_field(array<double, N> &spin_here, array<double, 6> &strain_field, size_t site_index){
+        if constexpr(N == 3){
+            double x_mult = g[0]*(field[site_index][0]*(strain_field[1] - strain_field[0]) + 2*field[1]*strain_field[3]) +
+                            g[1]*(field[site_index][0]*strain_field[4] - field[1]*strain_field[5]) +
+                            g[2]*field[site_index][2]*(strain_field[0] + strain_field[1]) + g[3]*field[site_index][2]*strain_field[2];
+            double y_mult = g[4]*(2*field[site_index][0]*strain_field[3] + field[site_index][1]*(strain_field[0]-strain_field[1])) + 
+                            g[5]*(field[site_index][1]*strain_field[4]- field[site_index][0]*strain_field[5]);
+            double z_mult = g[6]*(field[site_index][0]*(strain_field[1]-strain_field[0]) + 2*field[site_index][1]*strain_field[3]);
+
+            return {x_mult, y_mult, z_mult};
+        }
+    }
+
+    double site_energy(array<double, N> &spin_here, array<double, 6> &strain_here, size_t site_index){
         double energy = 0.0;
         energy -= dot(spin_here, field[site_index]);
         energy += contract(spin_here, onsite_interaction[site_index], spin_here);
@@ -257,6 +324,7 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
+        energy += strain_field_energy(spin_here, strain_here, site_index);
         return energy;
     }
 
@@ -265,7 +333,7 @@ class lattice
         double onsite_energy = 0.0;
         double bilinear_energy = 0.0;
         double trilinear_energy = 0.0;
-
+        double strain_energy = 0.0;
         #pragma omp simd
         for(size_t i = 0; i < lattice_size; ++i){
             field_energy -= dot(curr_spins[i], field[i]);
@@ -278,8 +346,9 @@ class lattice
             for (size_t j=0; j < num_tri; ++j){
                 trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
+            strain_energy += strain_field_energy(curr_spins[i], strain_field[i], i);
         }
-        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
+        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3 + strain_energy;
     }
 
     double energy_density(spin_config &curr_spins){
@@ -296,7 +365,7 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        return local_field-field[site_index];
+        return local_field-field[site_index] + strain_field_eff_field(spins[site_index], strain_field[site_index], site_index);
     }
 
 
@@ -310,7 +379,7 @@ class lattice
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
-        return local_field-field[site_index];
+        return local_field-field[site_index] + strain_field_eff_field(current_spin[site_index], strain_field[site_index], site_index);
     }
 
 
@@ -361,33 +430,32 @@ class lattice
         }
     }
 
-    double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
+    double metropolis(spin_config &curr_spin, double T){
         double E, E_new, dE, r;
         int i;
         array<double,N> new_spin;
+        array<double,6> new_strain_field;
         int accept = 0;
         size_t count = 0;
         while(count < lattice_size){
             // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size);
-            E = site_energy(curr_spin[i], i);
-            if (gaussian){
-                new_spin = gaussian_move(curr_spin[i], sigma);
-            }
-            else{
-                new_spin = gen_random_spin(spin_length);
-            }
-            E_new = site_energy(new_spin, i);
+            E = site_energy(curr_spin[i], strain_field[i], i);
+            new_spin = gen_random_spin(spin_length);
+            new_strain_field = gen_strain_field(1e-5);
+            E_new = site_energy(new_spin, new_strain_field, i);
             dE = E_new - E;
             
             if(dE < 0){
                 curr_spin[i] = new_spin;
+                strain_field[i] = new_strain_field;
                 accept++;
             }
             else{
                 r = random_double_lehman(0,1);
                 if(r < exp(-dE/T)){
                     curr_spin[i] = new_spin;
+                    strain_field[i] = new_strain_field;
                     accept++;
                 }
             }
@@ -404,6 +472,18 @@ class lattice
         myfile.open(filename);
         for(size_t i = 0; i<lattice_size; ++i){
             for(size_t j = 0; j<N; ++j){
+                myfile << towrite[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
+    void write_to_file_strain(string filename, spin_config towrite){
+        ofstream myfile;
+        myfile.open(filename);
+        for(size_t i = 0; i<lattice_size; ++i){
+            for(size_t j = 0; j<6; ++j){
                 myfile << towrite[i][j] << " ";
             }
             myfile << endl;
@@ -503,11 +583,11 @@ class lattice
                 if(overrelaxation_rate > 0){
                     overrelaxation();
                     if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                        curr_accept += metropolis(spins, T);
                     }
                 }
                 else{
-                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                    curr_accept += metropolis(spins, T);
                 }
             }
             if (overrelaxation_rate > 0){
@@ -524,7 +604,7 @@ class lattice
             if(save_observables){
                 vector<double> energies;
                 for(size_t i = 0; i<10000; ++i){
-                    metropolis(spins, T, gaussian_move, sigma);
+                    metropolis(spins, T);
                     if (i % 100 == 0){
                         energies.push_back(total_energy(spins));
                     }
@@ -542,6 +622,7 @@ class lattice
         }
         if(out_dir != ""){
             write_to_file_spin(out_dir + "/spin.txt", spins);
+            write_to_file_strain(out_dir + "/strain.txt", strain_field);
             write_to_file_pos(out_dir + "/pos.txt");
         }
     }
@@ -555,11 +636,12 @@ class lattice
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
             write_to_file_spin(dir_name + "/spin.txt", spins);
+            write_to_file_strain(out_dir + "/strain.txt", strain_field);
             write_to_file_pos(dir_name + "/pos.txt");
         }
     }
 
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
+    void parallel_tempering(vector<double> temp, size_t n_therm, size_t n_anneal, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = false){
 
         int initialized;
         int swap_accept = 0;
@@ -588,17 +670,17 @@ class lattice
 
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
-        for(size_t i=0; i < n_anneal+n_measure; ++i){
+        for(size_t i=0; i < n_anneal+n_therm; ++i){
 
-            // Metropolisfh
+            // Metropolis
             if(overrelaxation_rate > 0){
                 overrelaxation();
                 if (i%overrelaxation_rate == 0){
-                    curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+                    curr_accept += metropolis(spins, curr_Temp);
                 }
             }
             else{
-                curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+                curr_accept += metropolis(spins, curr_Temp);
             }
             E = total_energy(spins);
 
@@ -639,7 +721,7 @@ class lattice
                 }
             }
 
-            if (i >= n_anneal){
+            if (i >= n_therm){
                 if (i % probe_rate == 0){
                     if(dir_name != ""){
                         magnetizations.push_back(magnetization_local(spins));
@@ -649,12 +731,13 @@ class lattice
             }
         }
         
+        // double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*variance(energies)/lattice_size;
         std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
         double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
         double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_therm)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_therm)*swap_rate*overrelaxation_flag << endl;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
@@ -678,10 +761,9 @@ class lattice
         if (!MPI_Finalized(&finalized)){
             MPI_Finalize();
         }
-        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
     }
 
-    void measurement(string toread, double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
+    void measurement(double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
         vector<double> energies;
         vector<array<double,N>> magnetizations;
         vector<double> energy;
@@ -698,18 +780,16 @@ class lattice
         energies.resize(int(n_measure/prob_rate*size));
         magnetizations.resize(int(n_measure/prob_rate*size));
 
-        read_spin_from_file(toread);
-
         double curr_accept = 0;
         for(size_t i=0; i < n_measure; ++i){
             if(overrelaxation_rate > 0){
                 overrelaxation();
                 if (i%overrelaxation_rate == 0){
-                    curr_accept += metropolis(spins, T, gaussian_move);
+                    curr_accept += metropolis(spins, T);
                 }
             }
             else{
-                curr_accept += metropolis(spins, T, gaussian_move);
+                curr_accept += metropolis(spins, T);
             }
             if (i % prob_rate == 0){
                 magnetization.push_back(magnetization_local(spins));
@@ -725,6 +805,7 @@ class lattice
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
+                    write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                 }
@@ -993,4 +1074,4 @@ class lattice
         time_sections.close();     
     }
 };
-#endif // LATTICE_H
+#endif // LATTICE_STRAIN_FIELD_H

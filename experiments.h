@@ -4,6 +4,7 @@
 #include "unitcell.h"
 #include "lattice.h"
 #include "mixed_lattice.h"
+#include "lattice_strain_field.h"
 #include <iostream>
 #include <mpi.h>
 #include "simple_linear_alg.h"
@@ -627,7 +628,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 8, 8, 8> MC(&Fe_atoms, 2.5);
     if (spin_config != ""){
-        MC.read_from_file_spin(spin_config);
+        MC.read_spin_from_file(spin_config);
     }else{
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
         std::random_device rd;
@@ -741,7 +742,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     int end = (rank+1)*num_trials/size;
 
     for(int i=start; i<end;++i){
-        lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+        lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
         MC.simulated_annealing(5, 1e-4, 10000, 0, true);
         MC.molecular_dynamics(5, 1e-4, 10000, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
     }
@@ -804,7 +805,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
     if (spin_config != ""){
-        MC.read_from_file_spin(spin_config);
+        MC.read_spin_from_file(spin_config);
     }else{
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
         if (T_zero){
@@ -874,6 +875,51 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     atoms.set_field(g*dot(field, z4), 3);
 
     lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
+    // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
+    MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
+}
+
+void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
+    filesystem::create_directory(dir);
+    Pyrochlore<3> atoms;
+
+    array<double,3> z1 = {1, 1, 1};
+    array<double,3> z2 = {1,-1,-1};
+    array<double,3> z3 = {-1,1,-1};
+    array<double,3> z4 = {-1,-1,1};
+
+    z1 = z1/double(sqrt(3));
+    z2 = z2/double(sqrt(3));
+    z3 = z3/double(sqrt(3));
+    z4 = z4/double(sqrt(3));
+
+    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<double, 3> g = {gxx, gyy, gzz};
+    array<double, 3> field = field_dir*h;
+
+
+    atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
+
+    atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
+
+    atoms.set_field(g*dot(field, z1), 0);
+    atoms.set_field(g*dot(field, z2), 1);
+    atoms.set_field(g*dot(field, z3), 2);
+    atoms.set_field(g*dot(field, z4), 3);
+
+    array<double, 10> strain = {4e-7, -8e-7, 12e-7, -2.6e-7, 0.27e-7, -0.8e-7, 0.5e-7, -0.7e-7, 0.43e-7, 0.51e-7};
+
+    lattice_strain_field<3, 4, 8, 8, 8> MC(&atoms, 0.5, strain);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
     MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
 }

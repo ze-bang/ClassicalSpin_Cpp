@@ -284,33 +284,34 @@ def SSSFHHL(S, P, nK, filename, gb=False):
     A, B = np.meshgrid(H, L)
     K = hhltoK(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
-    if gb:
-        f1 = filename + "Sxx_global"
-        f2 = filename + "Syy_global"
-        f3 = filename + "Szz_global"
-        f4 = filename + "Sxy_global"
-        f5 = filename + "Sxz_global"
-        f6 = filename + "Syz_global"
-    else:
-        f1 = filename + "Sxx_local"
-        f2 = filename + "Syy_local"
-        f3 = filename + "Szz_local"
-        f4 = filename + "Sxy_local"
-        f5 = filename + "Sxz_local"
-        f6 = filename + "Syz_local"
+    # if gb:
+    #     f1 = filename + "Sxx_global"
+    #     f2 = filename + "Syy_global"
+    #     f3 = filename + "Szz_global"
+    #     f4 = filename + "Sxy_global"
+    #     f5 = filename + "Sxz_global"
+    #     f6 = filename + "Syz_global"
+    # else:
+    #     f1 = filename + "Sxx_local"
+    #     f2 = filename + "Syy_local"
+    #     f3 = filename + "Szz_local"
+    #     f4 = filename + "Sxy_local"
+    #     f5 = filename + "Sxz_local"
+    #     f6 = filename + "Syz_local"
     S = S.reshape((nK, nK, 3, 3))
-    np.savetxt(f1 + '.txt', S[:,:,0,0])
-    np.savetxt(f2 + '.txt', S[:,:,1,1])
-    np.savetxt(f3 + '.txt', S[:,:,2,2])
-    np.savetxt(f4 + '.txt', S[:,:,0,1])
-    np.savetxt(f5 + '.txt', S[:,:,0,2])
-    np.savetxt(f6 + '.txt', S[:,:,1,2])
-    SSSFGraphHnHL(A, B, S[:,:,0,0], f1)
-    SSSFGraphHnHL(A, B, S[:,:,1,1], f2)
-    SSSFGraphHnHL(A, B, S[:,:,2,2], f3)
-    SSSFGraphHnHL(A, B, S[:, :, 0, 1], f4)
-    SSSFGraphHnHL(A, B, S[:, :, 0, 2], f5)
-    SSSFGraphHnHL(A, B, S[:, :, 1, 2], f6)
+    # np.savetxt(f1 + '.txt', S[:,:,0,0])
+    # np.savetxt(f2 + '.txt', S[:,:,1,1])
+    # np.savetxt(f3 + '.txt', S[:,:,2,2])
+    # np.savetxt(f4 + '.txt', S[:,:,0,1])
+    # np.savetxt(f5 + '.txt', S[:,:,0,2])
+    # np.savetxt(f6 + '.txt', S[:,:,1,2])
+    # SSSFGraphHnHL(A, B, S[:,:,0,0], f1)
+    # SSSFGraphHnHL(A, B, S[:,:,1,1], f2)
+    # SSSFGraphHnHL(A, B, S[:,:,2,2], f3)
+    # SSSFGraphHnHL(A, B, S[:, :, 0, 1], f4)
+    # SSSFGraphHnHL(A, B, S[:, :, 0, 2], f5)
+    # SSSFGraphHnHL(A, B, S[:, :, 1, 2], f6)
+    return S
 
 def SSSFHK0(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
@@ -619,33 +620,41 @@ def parseDSSF(dir):
 
 def read_MD_tot(dir, mag):
     directory = os.fsencode(dir)
-    for file in sorted(os.listdir(directory)):
-        filename = os.fsdecode(file)
-        if os.path.isdir(dir + "/" + filename):
-            read_MD(dir + "/" + filename, mag)
-
-def read_MD(dir, mag):
-    directory = os.fsencode(dir)
-    P = np.loadtxt(dir + "/pos.txt")
-    T = np.loadtxt(dir + "/Time_steps.txt")
-
-    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
-
-    if P.shape[1] == 2:
-        SSSF2D(S[0],P, 100, dir, False)
-    elif mag == "001":
-        SSSFHK0(S[0], P, 50, dir, False)
-    else:
-        SSSFHHL(S[0], P, 50, dir, False)
-
+    nK = 50
+    S_local = np.zeros((nK,nK,3,3))
+    S_global = np.zeros((nK,nK,3,3))
     w0 = 0
     wmax = 10
     w = np.arange(w0, wmax, 1/600)
-    A = DSSF(w, DSSF_K, S, P, T, False)
-    A = A / np.max(A)
-    np.savetxt(dir + "_DSSF.txt", A)
+    DSSF_local = np.zeros((len(w), len(DSSF_K)))
+    DSSF_global = np.zeros((len(w), len(DSSF_K)))
+    H = np.linspace(-2.5, 2.5, nK)
+    L = np.linspace(-2.5, 2.5, nK)
+    A, B = np.meshgrid(H, L)
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            Sl, Sg, Dl, Dg = read_MD(dir + "/" + filename, mag)
+            S_local = S_local + Sl
+            S_global = S_global + Sg
+            DSSF_local = DSSF_local + Dl
+            DSSF_global = DSSF_global + Dg
+    SSSFGraphHnHL(A, B, S_local[:,:,0,0], dir + "/Sxx_local")
+    SSSFGraphHnHL(A, B, S_local[:,:,1,1], dir + "/Syy_local")
+    SSSFGraphHnHL(A, B, S_local[:,:,2,2], dir + "/Szz_local")
+    SSSFGraphHnHL(A, B, S_local[:, :, 0, 1], dir + "/Sxy_local")
+    SSSFGraphHnHL(A, B, S_local[:, :, 0, 2], dir + "/Sxz_local")
+    SSSFGraphHnHL(A, B, S_local[:, :, 1, 2], dir + "/Syz_local")
+    SSSFGraphHnHL(A, B, S_global[:,:,0,0], dir + "/Sxx_global")
+    SSSFGraphHnHL(A, B, S_global[:,:,1,1], dir + "/Syy_global")
+    SSSFGraphHnHL(A, B, S_global[:,:,2,2], dir + "/Szz_global")
+    SSSFGraphHnHL(A, B, S_global[:, :, 0, 1], dir + "/Sxy_global")
+    SSSFGraphHnHL(A, B, S_global[:, :, 0, 2], dir + "/Sxz_global")
+    SSSFGraphHnHL(A, B, S_global[:, :, 1, 2], dir + "/Syz_global")
+    DSSF_local = DSSF_local / np.max(DSSF_local)
+    np.savetxt(dir + "/DSSF_local.txt", DSSF_local)
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    C = ax.imshow(DSSF_local, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
@@ -659,8 +668,69 @@ def read_MD(dir, mag):
     ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, gGamma4])
     fig.colorbar(C)
-    plt.savefig(dir+"DSSF.pdf")
+    plt.savefig(dir+"/DSSF_local.pdf")
     plt.clf()
+
+    DSSF_global = DSSF_global / np.max(DSSF_global)
+    np.savetxt(dir + "/DSSF_global.txt", DSSF_global)
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.imshow(DSSF_global, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g5, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
+    xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
+    # labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
+    labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
+    ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, gGamma4])
+    fig.colorbar(C)
+    plt.savefig(dir+"/DSSF_global.pdf")
+    plt.clf()
+
+def read_MD(dir, mag):
+    directory = os.fsencode(dir)
+    P = np.loadtxt(dir + "/pos.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
+
+    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
+    S_local = np.zeros((50,50,3,3))
+    S_global = np.zeros((50,50,3,3))
+    if P.shape[1] == 2:
+        SSSF2D(S[0],P, 100, dir, True)
+    elif mag == "001":
+        SSSFHK0(S[0], P, 50, dir, True)
+    else:
+        S_global = SSSFHHL(S[0], P, 50, dir, True)
+        S_local = SSSFHHL(S[0], P, 50, dir, False)
+
+    w0 = 0
+    wmax = 10
+    w = np.arange(w0, wmax, 1/600)
+    DSSF_local = DSSF(w, DSSF_K, S, P, T, False)
+    DSSF_global = DSSF(w, DSSF_K, S, P, T, True)
+    # A = A / np.max(A)
+    # np.savetxt(dir + "_DSSF.txt", A)
+    # fig, ax = plt.subplots(figsize=(10,4))
+    # C = ax.imshow(A, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=g5, color='b', label='axvline - full height', linestyle='dashed')
+    # ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
+    # xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
+    # # labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
+    # labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
+    # ax.set_xticks(xlabpos, labels)
+    # ax.set_xlim([0, gGamma4])
+    # fig.colorbar(C)
+    # plt.savefig(dir+"DSSF.pdf")
+    # plt.clf()
     # C = ax.imshow(A, origin='lower', extent=[0, gGamma3, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
     # ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
@@ -680,6 +750,7 @@ def read_MD(dir, mag):
     # fig.colorbar(C)
     # plt.savefig(dir+"DSSF.pdf") 
     # plt.clf()
+    return S_local, S_global, DSSF_local, DSSF_global
 
 def read_0_field(numJpm, dir):
     directory = os.fsencode(dir)
@@ -754,19 +825,19 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 
 
-read_2D_nonlinear("pyrochlore_h110=10_driven_001")
+# read_2D_nonlinear("pyrochlore_h110=10_driven_001")
 
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-# dir = "MD_test_001"
-# read_MD_tot(dir)
+dir = "lehman_test_110_strong"
+read_MD_tot(dir, "1-10")
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
-read_0_field(70, "/scratch/y/ybkim/zhouzb79/MC_Phase_Diagram_0_field")
+# read_0_field(70, "/scratch/y/ybkim/zhouzb79/MC_Phase_Diagram_0_field")
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
 # plt.xscale('log')

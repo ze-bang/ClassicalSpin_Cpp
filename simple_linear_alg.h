@@ -326,7 +326,7 @@ uint64_t lehman_next(void)
 
 
 double random_double_lehman(double min, double max){
-    return min + (max - min) * (lehman_next()) / 18446744073709551615;
+    return min + (max - min) * (lehman_next()) / ((uint64_t)-1);
 }
 
 int random_int_lehman(int size){
