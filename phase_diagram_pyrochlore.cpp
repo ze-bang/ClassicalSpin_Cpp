@@ -23,6 +23,6 @@ int main(int argc, char** argv) {
         field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
     }
     string dir = argv[9] ? argv[9] : "";
-    phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, double h_min, double h_max, int num_h, double Jpmpm, array<double, 3> field_dir, string dir){
+    phase_diagram_pyrochlore(Jpm_min, Jpm_max, num_Jpm, h_min, h_max, num_h, Jpmpm, field_dir, dir);
     return 0;
 }
