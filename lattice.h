@@ -869,7 +869,6 @@ class lattice
         vector<double> time;
 
         time.push_back(currT);
-
         while(currT < T_end){
             spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
             write_to_file(dir_name + "/spin_t.txt", spin_t);

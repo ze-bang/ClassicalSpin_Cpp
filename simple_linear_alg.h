@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <random>
 #include <omp.h>
+#include "cblas.h"
 
 void set_permutation(array<array<array<double, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, double val){
     A[a][b][c] = val;
@@ -48,10 +49,7 @@ template<typename T, typename T1, size_t N>
 array<T, N> operator*(const array<T, N> &a,const T1 n) {
     array<T, N> result;
     #pragma omp simd
-    for (size_t i = 0; i < 3; ++i) {
-        result[i] = a[i]*T(n);
-    }
-    return result;
+    cblas_dscal(N, n, a.data(), 1);
 }
 
 

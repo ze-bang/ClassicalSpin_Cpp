@@ -767,9 +767,9 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     int end = (rank+1)*num_trials/size;
 
     for(int i=start; i<end;++i){
-        lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, 1e-4, 10000, 0, true);
-        MC.molecular_dynamics(5, 1e-4, 10000, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
+        MC.simulated_annealing(5, 1e-4, 1e4, 0, true);
+        MC.molecular_dynamics(5, 1e-4, 1e4, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -885,7 +885,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     }
 
 }
-void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
+void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -950,7 +950,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
     atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
 
-    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
+    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
     MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir);
 }
@@ -1000,7 +1000,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 //     MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
 // }
 
-void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write){
+void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write, double theta=0){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -1111,7 +1111,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
         double h = h_min + h_ind*(h_max-h_min)/num_h;
         cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
         string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 1e-4, 1, h, field_dir, subdir);
+        simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 4e-4, 1, h, field_dir, subdir);
     }
 
     int finalized;
@@ -1134,19 +1134,16 @@ void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, doub
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    int totaljob_num = num_Jpm*num_h;
+    int totaljob_num = num_h;
 
     int start = rank*totaljob_num/size;
     int end = (rank+1)*totaljob_num/size;
 
     for(int i=start; i<end; ++i){
-        int Jpm_ind = i % num_Jpm;
-        int h_ind = i / num_Jpm;
-        double Jpm = Jpm_min + Jpm_ind*(Jpm_max-Jpm_min)/num_Jpm;
-        double h = h_min + h_ind*(h_max-h_min)/num_h;
-        cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
-        string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 1e-4, 1, h, field_dir, subdir);
+        double h = h_min + i*(h_max-h_min)/num_h;
+        cout << "h: " << h << "i: " << i << endl;
+        string subdir = dir + "/h_" + std::to_string(h) + "_index_" + std::to_string(i);
+        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir);
     }
 
     int finalized;
@@ -1182,7 +1179,7 @@ void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
         double Jzz = -1 + double(h_ind*2)/double(num_Jpm);
         cout << "Jxx: " << Jxx << " Jzz: " << Jzz << "i: " << i << endl;
         string subdir = dir + "/Jxx_" + std::to_string(Jxx) + "_Jzz_" + std::to_string(Jzz) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0.01, 1e-4, 1, 0, {0,0,1}, subdir);
+        simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0.01, 4e-4, 1, 0, {0,0,1}, subdir);
     }
 
     int finalized;

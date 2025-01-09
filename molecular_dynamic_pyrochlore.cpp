@@ -25,6 +25,6 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[7] ? atoi(argv[7]) : 1;
     std::cout << "Initializing molecular dynamic calculation with parameters: Jpm: " << Jpm << " Jpmpm: " << Jpmpm << " H: " << h << " field direction : " << dir_string << " with angle:" << theta << " saving to: " << dir_name << endl;
-    MD_pyrochlore(num_trials, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, dir_name, theta);
+    MD_pyrochlore(num_trials, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 4e-4, 1, h, field_dir, dir_name, theta);
     return 0;
 }

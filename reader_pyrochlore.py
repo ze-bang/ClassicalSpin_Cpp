@@ -63,17 +63,17 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-# P1 = 2 * np.pi * np.array([1, 0, 0])
-# P2 = 2 * np.pi * np.array([2, 0, 0])
-# P3 = 2 * np.pi * np.array([2, 1, 0])
-# P4 = 2 * np.pi * np.array([2, 2, 0])
-# P5 = 2 * np.pi * np.array([1, 1, 0])
+P1 = 2 * np.pi * np.array([1, 0, 0])
+P2 = 2 * np.pi * np.array([2, 0, 0])
+P3 = 2 * np.pi * np.array([2, 1, 0])
+P4 = 2 * np.pi * np.array([2, 2, 0])
+P5 = 2 * np.pi * np.array([1, 1, 0])
 
-P1 =  2 * np.pi * np.array([1, 1, 0])
-P2 =  2 * np.pi * np.array([2, 2, 0])
-P3 =  2 * np.pi * np.array([2, 2, 1])
-P4 =  2 * np.pi * np.array([2, 2, 2])
-P5 =  2 * np.pi * np.array([1, 1, 1])
+# P1 =  2 * np.pi * np.array([1, 1, 0])
+# P2 =  2 * np.pi * np.array([2, 2, 0])
+# P3 =  2 * np.pi * np.array([2, 2, 1])
+# P4 =  2 * np.pi * np.array([2, 2, 2])
+# P5 =  2 * np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
@@ -618,7 +618,7 @@ def parseDSSF(dir):
     plt.clf()
 
 
-def read_MD_tot(dir, mag):
+def read_MD_tot(dir, mag, SSSFGraph):
     directory = os.fsencode(dir)
     nK = 50
     S_local = np.zeros((nK,nK,3,3))
@@ -639,18 +639,18 @@ def read_MD_tot(dir, mag):
             S_global = S_global + Sg
             DSSF_local = DSSF_local + Dl
             DSSF_global = DSSF_global + Dg
-    SSSFGraphHnHL(A, B, S_local[:,:,0,0], dir + "/Sxx_local")
-    SSSFGraphHnHL(A, B, S_local[:,:,1,1], dir + "/Syy_local")
-    SSSFGraphHnHL(A, B, S_local[:,:,2,2], dir + "/Szz_local")
-    SSSFGraphHnHL(A, B, S_local[:, :, 0, 1], dir + "/Sxy_local")
-    SSSFGraphHnHL(A, B, S_local[:, :, 0, 2], dir + "/Sxz_local")
-    SSSFGraphHnHL(A, B, S_local[:, :, 1, 2], dir + "/Syz_local")
-    SSSFGraphHnHL(A, B, S_global[:,:,0,0], dir + "/Sxx_global")
-    SSSFGraphHnHL(A, B, S_global[:,:,1,1], dir + "/Syy_global")
-    SSSFGraphHnHL(A, B, S_global[:,:,2,2], dir + "/Szz_global")
-    SSSFGraphHnHL(A, B, S_global[:, :, 0, 1], dir + "/Sxy_global")
-    SSSFGraphHnHL(A, B, S_global[:, :, 0, 2], dir + "/Sxz_global")
-    SSSFGraphHnHL(A, B, S_global[:, :, 1, 2], dir + "/Syz_global")
+    SSSFGraph(A, B, S_local[:,:,0,0], dir + "/Sxx_local")
+    SSSFGraph(A, B, S_local[:,:,1,1], dir + "/Syy_local")
+    SSSFGraph(A, B, S_local[:,:,2,2], dir + "/Szz_local")
+    SSSFGraph(A, B, S_local[:, :, 0, 1], dir + "/Sxy_local")
+    SSSFGraph(A, B, S_local[:, :, 0, 2], dir + "/Sxz_local")
+    SSSFGraph(A, B, S_local[:, :, 1, 2], dir + "/Syz_local")
+    SSSFGraph(A, B, S_global[:,:,0,0], dir + "/Sxx_global")
+    SSSFGraph(A, B, S_global[:,:,1,1], dir + "/Syy_global")
+    SSSFGraph(A, B, S_global[:,:,2,2], dir + "/Szz_global")
+    SSSFGraph(A, B, S_global[:, :, 0, 1], dir + "/Sxy_global")
+    SSSFGraph(A, B, S_global[:, :, 0, 2], dir + "/Sxz_global")
+    SSSFGraph(A, B, S_global[:, :, 1, 2], dir + "/Syz_global")
     DSSF_local = DSSF_local / np.max(DSSF_local)
     np.savetxt(dir + "/DSSF_local.txt", DSSF_local)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -831,7 +831,7 @@ def read_2D_nonlinear_tot(dir):
 #
 # dir = "CZO_h=4T"
 dir = "lehman_test_110_strong"
-read_MD_tot(dir, "1-10")
+read_MD_tot(dir, "001", SSSFGraphHK0)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")

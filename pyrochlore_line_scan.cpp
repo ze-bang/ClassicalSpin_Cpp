@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
     }else{
         field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
     }
-    string dir = argv[8] ? argv[9] : "";
+    string dir = argv[8] ? argv[8] : "";
     pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir);
     return 0;
 }
