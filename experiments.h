@@ -696,13 +696,33 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     array<double,3> z3 = {-1,1,-1};
     array<double,3> z4 = {-1,-1,1};
 
-    z1 = z1/double(sqrt(3));
-    z2 = z2/double(sqrt(3));
-    z3 = z3/double(sqrt(3));
-    z4 = z4/double(sqrt(3));
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+
+
 
     array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
-    array<double, 3> g = {gxx, gyy, gzz};
     array<double, 3> field = field_dir*h;
 
 
@@ -720,12 +740,17 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
     atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
 
-    array<double, 3> rot_field = {sin(theta),0,cos(theta)};
+    array<double, 3> rot_field = {gzz*sin(theta)+gxx*cos(theta),0,gzz*cos(theta)-gxx*sin(theta)};
+    array<double, 3> By1 = {0, gyy*(pow(dot(field,y1),3) - 3*pow(dot(field,x1),2)*dot(field,y1)),0};
+    array<double, 3> By2 = {0, gyy*(pow(dot(field,y2),3) - 3*pow(dot(field,x2),2)*dot(field,y2)),0};
+    array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
+    array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
 
-    atoms.set_field(rot_field*dot(field, z1)*gzz, 0);
-    atoms.set_field(rot_field*dot(field, z2)*gzz, 1);
-    atoms.set_field(rot_field*dot(field, z3)*gzz, 2);
-    atoms.set_field(rot_field*dot(field, z4)*gzz, 3);
+
+    atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
+    atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
+    atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
+    atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
 
     int initialized;
 
@@ -742,9 +767,9 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     int end = (rank+1)*num_trials/size;
 
     for(int i=start; i<end;++i){
-        lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, 1e-4, 10000, 0, true);
-        MC.molecular_dynamics(5, 1e-4, 10000, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
+        MC.simulated_annealing(5, 1e-4, 1e4, 0, true);
+        MC.molecular_dynamics(5, 1e-4, 1e4, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -756,19 +781,38 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
 void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, array<double, 3> field_extern, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, string spin_config=""){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
-
     array<double,3> z1 = {1, 1, 1};
     array<double,3> z2 = {1,-1,-1};
     array<double,3> z3 = {-1,1,-1};
     array<double,3> z4 = {-1,-1,1};
 
-    z1 = z1/double(sqrt(3));
-    z2 = z2/double(sqrt(3));
-    z3 = z3/double(sqrt(3));
-    z4 = z4/double(sqrt(3));
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+
+
 
     array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
-    array<double, 3> g = {gxx, gyy, gzz};
     array<double, 3> field = field_dir*h;
 
 
@@ -786,12 +830,17 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
     atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
 
-    array<double, 3> rot_field = {sin(theta),0,cos(theta)};
+    array<double, 3> rot_field = {gzz*sin(theta)+gxx*cos(theta),0,gzz*cos(theta)-gxx*sin(theta)};
+    array<double, 3> By1 = {0, gyy*(pow(dot(field,y1),3) - 3*pow(dot(field,x1),2)*dot(field,y1)),0};
+    array<double, 3> By2 = {0, gyy*(pow(dot(field,y2),3) - 3*pow(dot(field,x2),2)*dot(field,y2)),0};
+    array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
+    array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
 
-    atoms.set_field(rot_field*dot(field, z1)*gzz, 0);
-    atoms.set_field(rot_field*dot(field, z2)*gzz, 1);
-    atoms.set_field(rot_field*dot(field, z3)*gzz, 2);
-    atoms.set_field(rot_field*dot(field, z4)*gzz, 3);
+
+    atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
+    atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
+    atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
+    atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
 
     array<array<double, 3>,4> field_drive = {{{0,0,dot(field, z1)},{0,0,dot(field, z2)},{0,0,dot(field, z3)},{0,0,dot(field, z4)}}};
 
@@ -836,7 +885,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     }
 
 }
-void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
+void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -845,13 +894,33 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     array<double,3> z3 = {-1,1,-1};
     array<double,3> z4 = {-1,-1,1};
 
-    z1 = z1/double(sqrt(3));
-    z2 = z2/double(sqrt(3));
-    z3 = z3/double(sqrt(3));
-    z4 = z4/double(sqrt(3));
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+
+
 
     array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
-    array<double, 3> g = {gxx, gyy, gzz};
     array<double, 3> field = field_dir*h;
 
 
@@ -869,12 +938,19 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
     atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
 
-    atoms.set_field(g*dot(field, z1), 0);
-    atoms.set_field(g*dot(field, z2), 1);
-    atoms.set_field(g*dot(field, z3), 2);
-    atoms.set_field(g*dot(field, z4), 3);
+    array<double, 3> rot_field = {gzz*sin(theta)+gxx*cos(theta),0,gzz*cos(theta)-gxx*sin(theta)};
+    array<double, 3> By1 = {0, gyy*(pow(dot(field,y1),3) - 3*pow(dot(field,x1),2)*dot(field,y1)),0};
+    array<double, 3> By2 = {0, gyy*(pow(dot(field,y2),3) - 3*pow(dot(field,x2),2)*dot(field,y2)),0};
+    array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
+    array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
 
-    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
+
+    atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
+    atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
+    atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
+    atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
+
+    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
     MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir);
 }
@@ -924,7 +1000,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 //     MC.simulated_annealing(5, 1e-4, 10000, 0, true, dir);
 // }
 
-void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write){
+void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write, double theta=0){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -933,13 +1009,33 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     array<double,3> z3 = {-1,1,-1};
     array<double,3> z4 = {-1,-1,1};
 
-    z1 = z1/double(sqrt(3));
-    z2 = z2/double(sqrt(3));
-    z3 = z3/double(sqrt(3));
-    z4 = z4/double(sqrt(3));
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+
+
 
     array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
-    array<double, 3> g = {gxx, gyy, gzz};
     array<double, 3> field = field_dir*h;
 
 
@@ -957,10 +1053,17 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
     atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
 
-    atoms.set_field(g*dot(field, z1), 0);
-    atoms.set_field(g*dot(field, z2), 1);
-    atoms.set_field(g*dot(field, z3), 2);
-    atoms.set_field(g*dot(field, z4), 3);
+    array<double, 3> rot_field = {gzz*sin(theta)+gxx*cos(theta),0,gzz*cos(theta)-gxx*sin(theta)};
+    array<double, 3> By1 = {0, gyy*(pow(dot(field,y1),3) - 3*pow(dot(field,x1),2)*dot(field,y1)),0};
+    array<double, 3> By2 = {0, gyy*(pow(dot(field,y2),3) - 3*pow(dot(field,x2),2)*dot(field,y2)),0};
+    array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
+    array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
+
+
+    atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
+    atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
+    atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
+    atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
 
     int initialized;
     MPI_Initialized(&initialized);
@@ -1008,7 +1111,11 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
         double h = h_min + h_ind*(h_max-h_min)/num_h;
         cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
         string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
+<<<<<<< HEAD
         simulated_annealing_pyrochlore(0.062/0.063, 1, 0.011/0.063, 0, 0, 1, h, field_dir, subdir);
+=======
+        simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 4e-4, 1, h, field_dir, subdir);
+>>>>>>> 2d113b4644eb4536f7c5e30b794eff3dc46040f8
     }
 
     int finalized;
@@ -1018,6 +1125,39 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
     }
 
 }
+
+void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir){
+    filesystem::create_directory(dir);
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    int totaljob_num = num_h;
+
+    int start = rank*totaljob_num/size;
+    int end = (rank+1)*totaljob_num/size;
+
+    for(int i=start; i<end; ++i){
+        double h = h_min + i*(h_max-h_min)/num_h;
+        cout << "h: " << h << "i: " << i << endl;
+        string subdir = dir + "/h_" + std::to_string(h) + "_index_" + std::to_string(i);
+        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir);
+    }
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
+
+}
+
 
 void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
     filesystem::create_directory(dir);
@@ -1043,7 +1183,7 @@ void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
         double Jzz = -1 + double(h_ind*2)/double(num_Jpm);
         cout << "Jxx: " << Jxx << " Jzz: " << Jzz << "i: " << i << endl;
         string subdir = dir + "/Jxx_" + std::to_string(Jxx) + "_Jzz_" + std::to_string(Jzz) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0, 0, 1, 0, {0,0,1}, subdir);
+        simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0.01, 4e-4, 1, 0, {0,0,1}, subdir);
     }
 
     int finalized;

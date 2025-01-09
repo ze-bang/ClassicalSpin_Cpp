@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <random>
 #include <omp.h>
+#include "cblas.h"
 
 void set_permutation(array<array<array<double, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, double val){
     A[a][b][c] = val;
@@ -44,41 +45,27 @@ const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
 const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
 
 
-template<size_t N>
-array<double, N> operator*(const array<double, N> &a,const double n) {
-    array<double, N> result;
+template<typename T, typename T1, size_t N>
+array<T, N> operator*(const array<T, N> &a,const T1 n) {
+    array<T, N> result;
+    #pragma omp simd
+    cblas_dscal(N, n, a.data(), 1);
+}
+
+
+template<typename T, typename T1, size_t N>
+array<T, N> operator/(const array<T, N> &a,const T1 n) {
+    array<T, N> result;
     #pragma omp simd
     for (size_t i = 0; i < 3; ++i) {
-        result[i] = a[i]*n;
+        result[i] = a[i]/T(n);
     }
     return result;
 }
 
-
-template<size_t N>
-array<double, N> operator/(const array<double, N> &a,const double n) {
-    array<double, N> result;
-    #pragma omp simd
-    for (size_t i = 0; i < 3; ++i) {
-        result[i] = a[i]/n;
-    }
-    return result;
-}
-
-
-template<size_t N>
-array<double, N> operator*(const array<double, N> &a,const int n) {
-    array<double, N> result;
-    #pragma omp simd
-    for (size_t i = 0; i < 3; ++i) {
-        result[i] = a[i]*double(n);
-    }
-    return result;
-}
-
-template<size_t N>
-array<double, N> operator+(const array<double, N> &a,const array<double, N>  &b) {
-    array<double, N> result;
+template<typename T, size_t N>
+array<T, N> operator+(const array<T, N> &a,const array<T, N>  &b) {
+    array<T, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] + b[i];
@@ -86,9 +73,9 @@ array<double, N> operator+(const array<double, N> &a,const array<double, N>  &b)
     return result;
 }
 
-template<size_t N>
-array<double, N> operator-(const array<double, N> &a,const array<double, N>  &b) {
-    array<double, N> result;
+template<typename T, size_t N>
+array<T, N> operator-(const array<T, N> &a,const array<T, N>  &b) {
+    array<T, N> result;
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] - b[i];
@@ -97,9 +84,9 @@ array<double, N> operator-(const array<double, N> &a,const array<double, N>  &b)
 }
 
 
-template<size_t N>
-double dot(const array<double, N>  &a, const array<double, N>  &b) {
-    double result = 0;
+template<typename T, size_t N>
+T dot(const array<T, N>  &a, const array<T, N>  &b) {
+    T result = 0;
     for (size_t i = 0; i < N; ++i) {
         result += a[i] * b[i];
     }
@@ -422,7 +409,12 @@ T variance(vector<T> &data){
     return variance;
 }
 
-
-
+template<typename T, size_t N>
+array<T, N> operator/= (array<T, N> &a, const T &b){
+    for (size_t i = 0; i < N; ++i){
+        a[i] /= b;
+    }
+    return a;
+}
 
 #endif // LIN_ALG_H
