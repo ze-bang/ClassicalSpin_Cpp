@@ -874,9 +874,9 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     atoms.set_field(g*dot(field, z3), 2);
     atoms.set_field(g*dot(field, z4), 3);
 
-    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(5, 1e-3, 1e5, 0, true, dir);
+    MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir);
 }
 
 // void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
@@ -1008,7 +1008,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
         double h = h_min + h_ind*(h_max-h_min)/num_h;
         cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
         string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(0.063/0.063, 0.062/0.063, 0.011/0.063, 0, 0, 1, h, field_dir, subdir);
+        simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0, 0, 1, h, field_dir, subdir);
     }
 
     int finalized;
