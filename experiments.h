@@ -1122,7 +1122,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
 
 }
 
-void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir){
+void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double theta){
     filesystem::create_directory(dir);
     int initialized;
     MPI_Initialized(&initialized);
@@ -1143,7 +1143,7 @@ void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, doub
         double h = h_min + i*(h_max-h_min)/num_h;
         cout << "h: " << h << "i: " << i << endl;
         string subdir = dir + "/h_" + std::to_string(h) + "_index_" + std::to_string(i);
-        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir);
+        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, theta);
     }
 
     int finalized;

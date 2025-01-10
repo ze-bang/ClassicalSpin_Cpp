@@ -425,9 +425,8 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
         plt.savefig(dir+"_magnetostriction.pdf")
         plt.clf()
 
-def lineread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz):
+def lineread(H_start, H_end, nH, field_dir, dir, xorz):
 
-    JPMS = np.linspace(Jpm_start, Jpm_end, nJpm)
     HS = np.linspace(H_start, H_end, nH)
     Energies = np.zeros(nH)
     phase_diagram = np.zeros(nH)
@@ -458,42 +457,12 @@ def lineread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
             phase_diagram[int(info[3])] = np.abs(mag[xorz])
 
             magnetostrictions[int(info[3])] = magnetostriction(S, HS[int(info[3])], field_dir)
-
-                # num_lines = sum(1 for _ in open(dir + "/" + filename + "/heat_capacity.txt"))
-                # if num_lines == 600:
-                #     # heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=200,max_rows=200)
-                #     heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=400,max_rows=200)
-                # elif num_lines == 400:
-                #     heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,skiprows=200,max_rows=200)
-                # else:
-                #     heat_capacity = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)                   
-                #         # heat_capacity_2 = np.loadtxt(dir + "/" + filename + "/heat_capacity.txt", unpack=True,max_rows=200)
-                # # print(num_lines)
-                # # heat_capacity[1] = (heat_capacity_2[1]+heat_capacity[1])/2
-                # # print(heat_capacity.shape)
-                # heat_capacity = np.flip(heat_capacity, axis=1)
-                # heat_capacity = heat_capacity[:,10:]
-                # heat_capacity[1] = heat_capacity[1] * 8.6173303e-2
-                # Cv_integrand = heat_capacity[1]/heat_capacity[0]
-                # entropy = np.zeros(len(heat_capacity[1])-1)
-                # for i in range(1,len(heat_capacity[1])):
-                #     entropy[i-1] = -np.trapz(Cv_integrand[i:], heat_capacity[0][i:]) + np.log(2)
-                # np.savetxt(dir + "/" + filename + "/entropy.txt", entropy)
-                # entropy_diagram[int(info[4]), int(info[5])] = entropy[0] 
-                # mag_diagram[int(info[4]), int(info[5])] = np.abs(magnetization(S, n)[2])
-                # Energies[int(info[4]), int(info[5])] = np.mean(E)
-            # except:
-            #     phase_diagram[int(info[5]), int(info[6])] = np.nan
-            #     # entropy_diagram[int(info[4]), int(info[5])] = np.nan
-            #     # mag_diagram[int(info[4]), int(info[5])] = np.nan
-            #     # Energies[int(info[4]), int(info[5])] = np.nan
-            #     magnetostrictions[int(info[5]), int(info[6])] = np.nan
             count = count + 1
 
-    np.savetxt(dir+"_magnetization.txt", phase_diagram)
-    np.savetxt(dir+"_entropy.txt", entropy_diagram)
-    np.savetxt(dir+"_global_mag.txt", mag_diagram)
-    np.savetxt(dir+"_energy.txt", Energies)
+    np.savetxt(dir+"/magnetization.txt", phase_diagram)
+    np.savetxt(dir+"/entropy.txt", entropy_diagram)
+    np.savetxt(dir+"/global_mag.txt", mag_diagram)
+    np.savetxt(dir+"/energy.txt", Energies)
     
     phase_diagram = phase_diagram.flatten()
     # entropy_diagram = entropy_diagram.flatten()
@@ -501,24 +470,15 @@ def lineread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
     # Energies = Energies.flatten()
     magnetostrictions = magnetostrictions.reshape((nH,3))
     plt.plot(HS, phase_diagram)
-    plt.savefig(dir+"_magnetization.pdf")
+    plt.savefig(dir+"/magnetization.pdf")
     plt.clf()
-    # plt.plot(HS, entropy_diagram)
-    # plt.savefig(dir+"_entropy.pdf")
-    # plt.clf()
-    # plt.plot(HS, mag_diagram)
-    # plt.savefig(dir+"_global_mag.pdf")
-    # plt.clf()
-    # plt.plot(HS, Energies)
-    # plt.savefig(dir+"_energy.pdf")
-    # plt.clf()
     for i in range (3):
-        np.savetxt(dir+"_magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
+        np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
     plt.scatter(HS, magnetostrictions[:,0])
     plt.scatter(HS, magnetostrictions[:,1])
     plt.scatter(HS, magnetostrictions[:,2])
     plt.legend(["111", "110", "001"])
-    plt.savefig(dir+"_magnetostriction.pdf")
+    plt.savefig(dir+"/magnetostriction.pdf")
     plt.clf()
 
 
@@ -565,6 +525,11 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_ZAIAO", 2)
 # fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_ZAIAO", 2)
 # fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_ZAIAO", 2)
-fullread(0.1375, 0.1375, 1, 0, 5, 20, "111", "line_scan_111_magneto", 0)
+lineread(0, 5, 20, "111", "CHO_Octupolar_111", 0)
+lineread(0, 5, 20, "110", "CHO_Octupolar_110", 0)
+lineread(0, 5, 20, "001", "CHO_Octupolar_001", 0)
+lineread(0, 5, 20, "111", "CHO_Dipolar_111", 0)
+lineread(0, 5, 20, "110", "CHO_Dipolar_110", 0)
+lineread(0, 5, 20, "001", "CHO_Dipolar_001", 0)
 
 # 0.1375 0.1375 1 0.2375

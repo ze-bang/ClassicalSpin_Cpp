@@ -11,6 +11,7 @@ int main(int argc, char** argv) {
     double h_max = argv[5] ? atof(argv[5]) : 0.0;
     int num_h = argv[6] ? atoi(argv[6]) : 0;
     string dir_string = argv[7] ? argv[7] : "001";
+    double theta = argv[8] ? atof(argv[8]) : 0.0;
     array<double, 3> field_dir;
     if (dir_string == "001"){
         field_dir = {0,0,1};
@@ -21,7 +22,7 @@ int main(int argc, char** argv) {
     }else{
         field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
     }
-    string dir = argv[8] ? argv[8] : "";
-    pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir);
+    string dir = argv[9] ? argv[9] : "";
+    pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, theta);
     return 0;
 }
