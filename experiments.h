@@ -190,7 +190,7 @@ void simulated_annealing_TmFeO3_Fe(int num_trials, double T_start, double T_end,
     array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
     array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
-    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
+    array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
 
     array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
@@ -289,7 +289,7 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
     array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
-    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
+    array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
 
     array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
@@ -379,7 +379,7 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
     array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
-    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
+    array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
 
     array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
@@ -546,7 +546,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
     array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
-    array<array<double, 3>,3> K = {{{Ka, 0, 0}, {0, 0, 0}, {0, 0, Kc}}};
+    array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
 
     array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
@@ -1111,11 +1111,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
         double h = h_min + h_ind*(h_max-h_min)/num_h;
         cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
         string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-<<<<<<< HEAD
-        simulated_annealing_pyrochlore(0.062/0.063, 1, 0.011/0.063, 0, 0, 1, h, field_dir, subdir);
-=======
         simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 4e-4, 1, h, field_dir, subdir);
->>>>>>> 2d113b4644eb4536f7c5e30b794eff3dc46040f8
     }
 
     int finalized;

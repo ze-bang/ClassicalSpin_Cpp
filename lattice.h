@@ -17,6 +17,9 @@
 #include <mpi.h>
 #include "binning_analysis.h"
 #include <sstream>
+#include <cblas.h>
+
+using namespace std;
 
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
@@ -41,9 +44,9 @@ class lattice
     double t_B_1;
     double t_B_2;
 
-    array<array<array<double, N>, N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
+    array<array<double, N * N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
 
-    array<vector<array<array<double, N>, N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
+    array<vector<array<double, N * N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
     array<vector<array<array<array<double, N>, N>, N>>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
 
     array<vector<size_t>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
@@ -337,7 +340,8 @@ class lattice
     array<double,N> gaussian_move(const array<double,N> &current_spin, double sigma=60){
         array<double,N> new_spin;
         new_spin = current_spin + gen_random_spin(spin_length)*sigma;
-        return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length;
+        double norm = dot(new_spin, new_spin);
+        return new_spin/sqrt(norm) * spin_length;
     }
 
     void overrelaxation(){

@@ -6,7 +6,9 @@
 #include <stdexcept>
 #include <random>
 #include <omp.h>
-#include "cblas.h"
+#include <array>
+
+using namespace std;
 
 void set_permutation(array<array<array<double, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, double val){
     A[a][b][c] = val;
@@ -45,19 +47,76 @@ const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
 const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
 
 
+// Somehow BLAS is slower, shelving for now until figured out a better implementation
+// template<typename T, size_t N>
+// array<double, N> operator*(const array<double, N> &a, const T n) {
+//     array<double, N> result;
+//     cblas_dcopy(N, a.data(), 1, result.data(), 1);
+//     cblas_dscal(N, double(n), result.data(), 1);
+//     return result;
+// }
+
+
+// template<typename T, size_t N>
+// array<double, N> operator/(const array<double, N> &a, const T n) {
+//     array<T, N> result;
+//     cblas_dcopy(N, a.data(), 1, result.data(), 1);
+//     cblas_dscal(N, 1/double(n), result.data(), 1);
+//     return result;
+// }
+
+// template<size_t N>
+// array<double, N> operator+(const array<double, N> &a, const array<double, N>  &b) {
+//     array<double, N> result;
+//     cblas_dcopy(N, a.data(), 1, result.data(), 1);
+//     cblas_daxpy(N, 1.0, b.data(), 1, result.data(), 1);
+//     return result;
+// }
+
+// template<size_t N>
+// array<double, N> operator-(const array<double, N> &a,const array<double, N>  &b) {
+//     array<double, N> result;
+//     cblas_dcopy(N, a.data(), 1, result.data(), 1);
+//     cblas_daxpy(N, -1.0, b.data(), 1, result.data(), 1);
+//     return result;
+// }
+
+
+// template<size_t N>
+// double dot(const array<double, N>  &a, const array<double, N>  &b) {
+//     return cblas_ddot(N, a.data(), 1, b.data(), 1);
+// }
+
+// template<size_t N>
+// array<double, N> multiply(const array<double, N*N>  &M, const array<double, N>  &a){
+//     array<double, N>  result;
+//     cblas_dgemv(CblasRowMajor, CblasNoTrans, N, N, 1.0, M.data(), N, a.data(), 1, 0.0, result.data(), 1);
+//     return result;
+// }
+
+
+// template<size_t N>
+// double contract(const array<double, N>  &a, const array<double, N*N>  &M, const array<double, N>  &b) {
+//     array<double, N> temp = multiply(M, b);
+//     return dot(a, temp);
+// }
+
 template<typename T, typename T1, size_t N>
-array<T, N> operator*(const array<T, N> &a,const T1 n) {
+array<T, N> operator*(const array<T, N> &a, const T1 n) {
     array<T, N> result;
     #pragma omp simd
-    cblas_dscal(N, n, a.data(), 1);
+    for (size_t i = 0; i < N; ++i) {
+        result[i] = a[i]*T(n);
+    }
+    return result;
 }
 
 
 template<typename T, typename T1, size_t N>
-array<T, N> operator/(const array<T, N> &a,const T1 n) {
+array<T, N> operator/(const array<T, N> &a, const T1 n) {
     array<T, N> result;
     #pragma omp simd
-    for (size_t i = 0; i < 3; ++i) {
+    for (size_t i = 0; i < N; ++i) {
         result[i] = a[i]/T(n);
     }
     return result;
@@ -93,45 +152,46 @@ T dot(const array<T, N>  &a, const array<T, N>  &b) {
     return result;
 }
 
-array<double, 3> multiply_SU2(const array<array<double, 3>,3>  &M, const array<double, 3>  &a){
+
+array<double, 3> multiply_SU2(const array<double, 9>  &M, const array<double, 3>  &a){
     array<double, 3>  result;
-    result[0] = M[0][0] * a[0] + M[0][1] * a[1] + M[0][2] * a[2];
-    result[1] = M[1][0] * a[0] + M[1][1] * a[1] + M[1][2] * a[2];
-    result[2] = M[2][0] * a[0] + M[2][1] * a[1] + M[2][2] * a[2];
+    result[0] = M[0] * a[0] + M[1] * a[1] + M[2] * a[2];
+    result[1] = M[3] * a[0] + M[4] * a[1] + M[5] * a[2];
+    result[2] = M[6] * a[0] + M[7] * a[1] + M[8] * a[2];
     return result;
 }
 
-array<double, 8> multiply_SU3(const array<array<double, 8>,8>  &M, const array<double, 8>  &a){
+array<double, 8> multiply_SU3(const array<double, 64>  &M, const array<double, 8>  &a){
     array<double, 8>  result;
-    result[0] = M[0][0] * a[0] + M[0][1] * a[1] + M[0][2] * a[2];
-    result[1] = M[1][0] * a[0] + M[1][1] * a[1] + M[1][2] * a[2];
-    result[2] = M[2][0] * a[0] + M[2][1] * a[1] + M[2][2] * a[2];
-    result[3] = M[3][0] * a[0] + M[3][1] * a[1] + M[3][2] * a[2];
-    result[4] = M[4][0] * a[0] + M[4][1] * a[1] + M[4][2] * a[2];
-    result[5] = M[5][0] * a[0] + M[5][1] * a[1] + M[5][2] * a[2];
-    result[6] = M[6][0] * a[0] + M[6][1] * a[1] + M[6][2] * a[2];
-    result[7] = M[7][0] * a[0] + M[7][1] * a[1] + M[7][2] * a[2];
+    result[0] = M[0] * a[0] + M[1] * a[1] + M[2] * a[2] + M[3] * a[3] + M[4] * a[4] + M[5] * a[5] + M[6] * a[6]+ M[7] * a[7];
+    result[1] = M[8] * a[0] + M[9] * a[1] + M[10] * a[2] + M[11] * a[3] + M[12] * a[4] + M[13] * a[5] + M[14] * a[6]+ M[15] * a[7];
+    result[2] = M[16] * a[0] + M[17] * a[1] + M[18] * a[2] + M[19] * a[3] + M[20] * a[4] + M[21] * a[5] + M[22] * a[6]+ M[23] * a[7];
+    result[3] = M[24] * a[0] + M[25] * a[1] + M[26] * a[2] + M[27] * a[3] + M[28] * a[4] + M[29] * a[5] + M[30] * a[6]+ M[31] * a[7];
+    result[4] = M[32] * a[0] + M[33] * a[1] + M[34] * a[2] + M[35] * a[3] + M[36] * a[4] + M[37] * a[5] + M[38] * a[6]+ M[39] * a[7];
+    result[5] = M[40] * a[0] + M[41] * a[1] + M[42] * a[2] + M[43] * a[3] + M[44] * a[4] + M[45] * a[5] + M[46] * a[6]+ M[47] * a[7];
+    result[6] = M[48] * a[0] + M[49] * a[1] + M[50] * a[2] + M[51] * a[3] + M[52] * a[4] + M[53] * a[5] + M[54] * a[6]+ M[55] * a[7];
+    result[7] = M[56] * a[0] + M[57] * a[1] + M[58] * a[2] + M[59] * a[3] + M[60] * a[4] + M[61] * a[5] + M[62] * a[6]+ M[63] * a[7];
     return result;
 }
 
 
-double contract_SU2(const array<double, 3>  &a, const array<array<double, 3>,3>  &M, const array<double, 3>  &b){
-    return a[0] * (M[0][0] * b[0] + M[0][1] * b[1] + M[0][2] * b[2]) + a[1] * (M[1][0] * b[0] + M[1][1] * b[1] + M[1][2] * b[2]) + a[2] * (M[2][0] * b[0] + M[2][1] * b[1] + M[2][2] * b[2]);
+double contract_SU2(const array<double, 3>  &a, const array<double, 9>  &M, const array<double, 3>  &b){
+    return a[0] * (M[0] * b[0] + M[1] * b[1] + M[2] * b[2]) + a[1] * (M[3] * b[0] + M[4] * b[1] + M[5] * b[2]) + a[2] * (M[6] * b[0] + M[7] * b[1] + M[8] * b[2]);
 }
 
-double contract_SU3(const array<double, 8> &a, const array<array<double, 8>, 8> &M, const array<double, 8>  &b){
-    return a[0] * (M[0][0] * b[0] + M[0][1] * b[1] + M[0][2] * b[2] + M[0][3] * b[3] + M[0][4] * b[4] + M[0][5] * b[5] + M[0][6] * b[6]+ M[0][7] * b[7]) 
-    + a[1] * (M[1][0] * b[0] + M[1][1] * b[1] + M[1][2] * b[2] + M[1][3] * b[3] + M[1][4] * b[4] + M[1][5] * b[5] + M[1][6] * b[6]+ M[1][7] * b[7])
-    + a[2] * (M[2][0] * b[0] + M[2][1] * b[1] + M[2][2] * b[2] + M[2][3] * b[3] + M[2][4] * b[4] + M[2][5] * b[5] + M[2][6] * b[6]+ M[2][7] * b[7])
-    + a[3] * (M[3][0] * b[0] + M[3][1] * b[1] + M[3][2] * b[2] + M[3][3] * b[3] + M[3][4] * b[4] + M[3][5] * b[5] + M[3][6] * b[6]+ M[3][7] * b[7])
-    + a[4] * (M[4][0] * b[0] + M[4][1] * b[1] + M[4][2] * b[2] + M[4][3] * b[3] + M[4][4] * b[4] + M[4][5] * b[5] + M[4][6] * b[6]+ M[4][7] * b[7])
-    + a[5] * (M[5][0] * b[0] + M[5][1] * b[1] + M[5][2] * b[2] + M[5][3] * b[3] + M[5][4] * b[4] + M[5][5] * b[5] + M[5][6] * b[6]+ M[5][7] * b[7])
-    + a[6] * (M[6][0] * b[0] + M[6][1] * b[1] + M[6][2] * b[2] + M[6][3] * b[3] + M[6][4] * b[4] + M[6][5] * b[5] + M[6][6] * b[6]+ M[6][7] * b[7])
-    + a[7] * (M[7][0] * b[0] + M[7][1] * b[1] + M[7][2] * b[2] + M[7][3] * b[3] + M[7][4] * b[4] + M[7][5] * b[5] + M[7][6] * b[6]+ M[7][7] * b[7]);
+double contract_SU3(const array<double, 8> &a, const array<double, 64> &M, const array<double, 8>  &b){
+    return a[0] * (M[0] * b[0] + M[1] * b[1] + M[2] * b[2] + M[3] * b[3] + M[4] * b[4] + M[5] * b[5] + M[6] * b[6]+ M[7] * b[7])
+    + a[1] * (M[8] * b[0] + M[9] * b[1] + M[10] * b[2] + M[11] * b[3] + M[12] * b[4] + M[13] * b[5] + M[14] * b[6]+ M[15] * b[7])
+    + a[2] * (M[16] * b[0] + M[17] * b[1] + M[18] * b[2] + M[19] * b[3] + M[20] * b[4] + M[21] * b[5] + M[22] * b[6]+ M[23] * b[7])
+    + a[3] * (M[24] * b[0] + M[25] * b[1] + M[26] * b[2] + M[27] * b[3] + M[28] * b[4] + M[29] * b[5] + M[30] * b[6]+ M[31] * b[7])
+    + a[4] * (M[32] * b[0] + M[33] * b[1] + M[34] * b[2] + M[35] * b[3] + M[36] * b[4] + M[37] * b[5] + M[38] * b[6]+ M[39] * b[7])
+    + a[5] * (M[40] * b[0] + M[41] * b[1] + M[42] * b[2] + M[43] * b[3] + M[44] * b[4] + M[45] * b[5] + M[46] * b[6]+ M[47] * b[7])
+    + a[6] * (M[48] * b[0] + M[49] * b[1] + M[50] * b[2] + M[51] * b[3] + M[52] * b[4] + M[53] * b[5] + M[54] * b[6]+ M[55] * b[7])
+    + a[7] * (M[56] * b[0] + M[57] * b[1] + M[58] * b[2] + M[59] * b[3] + M[60] * b[4] + M[61] * b[5] + M[62] * b[6]+ M[63] * b[7]);
 }
 
 template<size_t N>
-double contract(const array<double, N>  &a, const array<array<double, N>,N>  &M, const array<double, N>  &b) {
+double contract(const array<double, N>  &a, const array<double, N*N>  &M, const array<double, N>  &b) {
     double result = 0;
     if constexpr (N == 3){
         result = contract_SU2(a, M, b);
@@ -174,7 +234,7 @@ array<double, N_1> contract_trilinear_field(const array<array<array<double, N_3>
 
 
 template <size_t N>
-array<double, N>  multiply(const array<array<double, N>,N>  &M, const array<double, N>  &a){
+array<double, N>  multiply(const array<double, N*N>  &M, const array<double, N>  &a){
     array<double, N>  result;
     if constexpr (N == 3){
         result = multiply_SU2(M, a);
@@ -330,12 +390,13 @@ int random_int(int min, int max, std::mt19937 &gen){
     return dis(gen);
 }
 
-template<size_t N, size_t M>
-array<array<double, M>, N> transpose2D(const array<array<double, M>, N>& matrix) {
-    array<array<double, N>, M> transposed;
+template<size_t N>
+array<double, N> transpose2D(const array<double, N>& matrix) {
+    array<double, N> transposed;
+    int size = int(sqrt(N));
     for (size_t i = 0; i < N; ++i) {
-        for (size_t j = 0; j < M; ++j) {
-            transposed[j][i] = matrix[i][j];
+        for (size_t j = 0; j < N; ++j) {
+            transposed[j*size + i] = matrix[i*size + j];
         }
     }
     return transposed;
