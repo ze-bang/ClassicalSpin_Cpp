@@ -19,7 +19,7 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 12
+graphres = 8
 
 Gamma = np.array([0, 0, 0])
 K = 2 * np.pi * np.array([3/4, -3/4, 0])
@@ -301,33 +301,34 @@ def SSSFHK0(S, P, nK, filename, gb=False):
     A, B = np.meshgrid(H, L)
     K = hhztoK(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
-    if gb:
-        f1 = filename + "Sxx_global"
-        f2 = filename + "Syy_global"
-        f3 = filename + "Szz_global"
-        f4 = filename + "Sxy_global"
-        f5 = filename + "Sxz_global"
-        f6 = filename + "Syz_global"
-    else:
-        f1 = filename + "Sxx_local"
-        f2 = filename + "Syy_local"
-        f3 = filename + "Szz_local"
-        f4 = filename + "Sxy_local"
-        f5 = filename + "Sxz_local"
-        f6 = filename + "Syz_local"
+    # if gb:
+    #     f1 = filename + "Sxx_global"
+    #     f2 = filename + "Syy_global"
+    #     f3 = filename + "Szz_global"
+    #     f4 = filename + "Sxy_global"
+    #     f5 = filename + "Sxz_global"
+    #     f6 = filename + "Syz_global"
+    # else:
+    #     f1 = filename + "Sxx_local"
+    #     f2 = filename + "Syy_local"
+    #     f3 = filename + "Szz_local"
+    #     f4 = filename + "Sxy_local"
+    #     f5 = filename + "Sxz_local"
+    #     f6 = filename + "Syz_local"
     S = S.reshape((nK, nK, 3, 3))
-    np.savetxt(f1 + '.txt', S[:,:,0,0])
-    np.savetxt(f2 + '.txt', S[:,:,1,1])
-    np.savetxt(f3 + '.txt', S[:,:,2,2])
-    np.savetxt(f4 + '.txt', S[:,:,0,1])
-    np.savetxt(f5 + '.txt', S[:,:,0,2])
-    np.savetxt(f6 + '.txt', S[:,:,1,2])
+    # np.savetxt(f1 + '.txt', S[:,:,0,0])
+    # np.savetxt(f2 + '.txt', S[:,:,1,1])
+    # np.savetxt(f3 + '.txt', S[:,:,2,2])
+    # np.savetxt(f4 + '.txt', S[:,:,0,1])
+    # np.savetxt(f5 + '.txt', S[:,:,0,2])
+    # np.savetxt(f6 + '.txt', S[:,:,1,2])
     # SSSFGraphHK0(A, B, S[:,:,0,0], f1)
     # SSSFGraphHK0(A, B, S[:,:,1,1], f2)
     # SSSFGraphHK0(A, B, S[:,:,2,2], f3)
     # SSSFGraphHK0(A, B, S[:, :, 0, 1], f4)
     # SSSFGraphHK0(A, B, S[:, :, 0, 2], f5)
     # SSSFGraphHK0(A, B, S[:, :, 1, 2], f6)
+    return S
 
 def genALLSymPointsBare():
     d = 9 * 1j
@@ -680,11 +681,11 @@ def read_MD(dir, mag):
     if P.shape[1] == 2:
         SSSF2D(S[0],P, 100, dir, True)
     elif mag == "001":
-        SSSFHK0(S[0], P, 50, dir, True)
+        S_global = SSSFHK0(S[0], P, 50, dir, True)
+        S_local = SSSFHK0(S[0], P, 50, dir, False)
     else:
         S_global = SSSFHHL(S[0], P, 50, dir, True)
         S_local = SSSFHHL(S[0], P, 50, dir, False)
-
     w0 = 0
     wmax = 10
     w = np.arange(w0, wmax, 1/600)
