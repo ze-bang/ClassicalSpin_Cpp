@@ -17,7 +17,6 @@
 #include <mpi.h>
 #include "binning_analysis.h"
 #include <sstream>
-#include <cblas.h>
 
 using namespace std;
 

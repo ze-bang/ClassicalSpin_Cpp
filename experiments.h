@@ -687,7 +687,7 @@ void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double t
 //Pyrochlore stuff
 
 
-void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0){
+void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double Jxz=0){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -720,9 +720,12 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     x3 /= sqrt(6);
     x4 /= sqrt(6);
 
+    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jy = Jyy;
+    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double theta = atan(2*Jxz/(Jzz-Jxx));
 
-
-    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
 
@@ -765,11 +768,11 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
 
     int start = rank*num_trials/size;
     int end = (rank+1)*num_trials/size;
-
+    double k_B = 0.08620689655;
     for(int i=start; i<end;++i){
         lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
         MC.simulated_annealing(5, 1e-4, 1e4, 0, true);
-        MC.molecular_dynamics(5, 1e-4, 1e4, 0, 0, 600, 1e-1, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(5, 1e-4, 1e4, 0, 0, 600/max({Jxx,Jyy,Jzz}), 1e-1/max({Jxx,Jyy,Jzz}), dir+"/"+std::to_string(i));
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -778,7 +781,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     }
 }
 
-void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, array<double, 3> field_extern, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, string spin_config=""){
+void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, array<double, 3> field_extern, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double Jxz=0, string spin_config=""){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
     array<double,3> z1 = {1, 1, 1};
@@ -810,9 +813,12 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     x3 /= sqrt(6);
     x4 /= sqrt(6);
 
+    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jy = Jyy;
+    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double theta = atan(2*Jxz/(Jzz-Jxx));
 
-
-    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
 
@@ -918,9 +924,12 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     x3 /= sqrt(6);
     x4 /= sqrt(6);
 
+    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jy = Jyy;
+    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double theta = atan(2*Jxz/(Jzz-Jxx));
 
-
-    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
 
@@ -1034,8 +1043,12 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     x4 /= sqrt(6);
 
 
+    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jy = Jyy;
+    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double theta = atan(2*Jxz/(Jzz-Jxx));
 
-    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
+    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
 

@@ -19,7 +19,7 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 8
+graphres = 12
 
 Gamma = np.array([0, 0, 0])
 K = 2 * np.pi * np.array([3/4, -3/4, 0])
@@ -63,17 +63,17 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-P1 = 2 * np.pi * np.array([1, 0, 0])
-P2 = 2 * np.pi * np.array([2, 0, 0])
-P3 = 2 * np.pi * np.array([2, 1, 0])
-P4 = 2 * np.pi * np.array([2, 2, 0])
-P5 = 2 * np.pi * np.array([1, 1, 0])
+# P1 = 2 * np.pi * np.array([1, 0, 0])
+# P2 = 2 * np.pi * np.array([2, 0, 0])
+# P3 = 2 * np.pi * np.array([2, 1, 0])
+# P4 = 2 * np.pi * np.array([2, 2, 0])
+# P5 = 2 * np.pi * np.array([1, 1, 0])
 
-# P1 =  2 * np.pi * np.array([1, 1, 0])
-# P2 =  2 * np.pi * np.array([2, 2, 0])
-# P3 =  2 * np.pi * np.array([2, 2, 1])
-# P4 =  2 * np.pi * np.array([2, 2, 2])
-# P5 =  2 * np.pi * np.array([1, 1, 1])
+P1 =  2 * np.pi * np.array([1, 1, 0])
+P2 =  2 * np.pi * np.array([2, 2, 0])
+P3 =  2 * np.pi * np.array([2, 2, 1])
+P4 =  2 * np.pi * np.array([2, 2, 2])
+P5 =  2 * np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
@@ -176,20 +176,18 @@ def gg(q):
                         if not np.dot(q[k],q[k]) == 0:
                             M[k, i,j,a,b] = np.dot(localframe[a][i], localframe[b][j]) - np.dot(localframe[a][i],q[k]) * np.dot(localframe[b][j],q[k])/ np.dot(q[k],q[k])
                         else:
-                            M[k, i, j,a,b] = 0
+                            M[k, i, j,a,b] = np.dot(localframe[a][i], localframe[b][j])
     return M
 
 def SSSF_q(k, S, P, gb=False):
     if gb:
         A = Spin_global_pyrochlore(k, S, P)
         read = np.abs(contract('nia, mib, inmab->inmab', A, np.conj(A), gg(k)))
-        # read = np.real(contract('wnia, wmib->wiab', Somega, np.conj(Somega)))
-        read = np.where(read == 0, np.min(read), read)
+        read = np.where(read <= 1e-8, 1e-8, read)
         return np.log(read)
     else:
         A = Spin_global_pyrochlore(k, S, P)
         read = np.abs(contract('nia, mib->inmab', A, np.conj(A)))
-        # read = np.real(contract('wnia, wmib->wiab', Somega, np.conj(Somega)))
         read = np.where(read == 0, np.min(read), read)
         return np.log(read)
 
@@ -199,7 +197,7 @@ def DSSF(w, k, S, P, T, gb=False):
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
         read = np.abs(contract('wnia, wmib, inmab->winmab', Somega, np.conj(Somega), gg(k)))
-        read = np.where(read == 0, np.min(read), read)
+        read = np.where(read <= 1e-8, 1e-8, read)
         return np.log(read)
 
     else:
@@ -214,22 +212,36 @@ def DSSF(w, k, S, P, T, gb=False):
         read = np.where(read == 0, np.min(read), read)
         return np.log(read)
 
+
+def SSSFGraphHHL(A,B,d1, filename):
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.pcolormesh(A,B, d1)
+    fig.colorbar(C)
+    ax.set_ylabel(r'$(0,0,L)$')
+    ax.set_xlabel(r'$(H,H,0)$')
+    fig.savefig(filename+".pdf")
+    fig.clf()
+    plt.close()
+
 def SSSFGraphHnHL(A,B,d1, filename):
-    plt.pcolormesh(A,B, d1)
-    plt.colorbar()
-    plt.ylabel(r'$(0,0,L)$')
-    plt.xlabel(r'$(H,-H,0)$')
-    plt.savefig(filename+".pdf")
-    plt.clf()
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.pcolormesh(A,B, d1)
+    fig.colorbar(C)
+    ax.set_ylabel(r'$(0,0,L)$')
+    ax.set_xlabel(r'$(H,-H,0)$')
+    fig.savefig(filename+".pdf")
+    fig.clf()
+    plt.close()
 
 def SSSFGraphHK0(A,B,d1, filename):
-    plt.pcolormesh(A,B, d1)
-    plt.colorbar()
-    plt.ylabel(r'$(0,K,0)$')
-    plt.xlabel(r'$(H,0,0)$')
-    plt.savefig(filename+".pdf")
-    plt.clf()
-
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.pcolormesh(A,B, d1)
+    fig.colorbar(C)
+    ax.set_ylabel(r'$(0,0,L)$')
+    ax.set_xlabel(r'$(H,-H,0)$')
+    fig.savefig(filename+".pdf")
+    fig.clf()
+    plt.close()
 
 def SSSFGraph2D(A, B, d1, filename):
     plt.pcolormesh(A, B, d1)
@@ -242,6 +254,11 @@ def SSSFGraph2D(A, B, d1, filename):
 
 def hhltoK(H, L, K=0):
     A = contract('ij,k->ijk',H, 2*np.array([np.pi,np.pi,0])) \
+        + contract('ij,k->ijk',L, 2*np.array([0,0,np.pi]))
+    return A
+
+def hnhltoK(H, L, K=0):
+    A = contract('ij,k->ijk',H, 2*np.array([np.pi,-np.pi,0])) \
         + contract('ij,k->ijk',L, 2*np.array([0,0,np.pi]))
     return A
 
@@ -292,7 +309,16 @@ def SSSFHHL(S, P, nK, filename, gb=False):
     A, B = np.meshgrid(H, L)
     K = hhltoK(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
-    S = S.reshape((nK, nK, 3, 3))
+    S = S.reshape((nK, nK, 4,4, 3, 3))
+    return S
+
+def SSSFHnHL(S, P, nK, filename, gb=False):
+    H = np.linspace(-2.5, 2.5, nK)
+    L = np.linspace(-2.5, 2.5, nK)
+    A, B = np.meshgrid(H, L)
+    K = hnhltoK(A, B).reshape((nK*nK,3))
+    S = SSSF_q(K, S, P, gb)
+    S = S.reshape((nK, nK, 4,4, 3, 3))
     return S
 
 def SSSFHK0(S, P, nK, filename, gb=False):
@@ -301,33 +327,7 @@ def SSSFHK0(S, P, nK, filename, gb=False):
     A, B = np.meshgrid(H, L)
     K = hhztoK(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
-    # if gb:
-    #     f1 = filename + "Sxx_global"
-    #     f2 = filename + "Syy_global"
-    #     f3 = filename + "Szz_global"
-    #     f4 = filename + "Sxy_global"
-    #     f5 = filename + "Sxz_global"
-    #     f6 = filename + "Syz_global"
-    # else:
-    #     f1 = filename + "Sxx_local"
-    #     f2 = filename + "Syy_local"
-    #     f3 = filename + "Szz_local"
-    #     f4 = filename + "Sxy_local"
-    #     f5 = filename + "Sxz_local"
-    #     f6 = filename + "Syz_local"
-    S = S.reshape((nK, nK, 3, 3))
-    # np.savetxt(f1 + '.txt', S[:,:,0,0])
-    # np.savetxt(f2 + '.txt', S[:,:,1,1])
-    # np.savetxt(f3 + '.txt', S[:,:,2,2])
-    # np.savetxt(f4 + '.txt', S[:,:,0,1])
-    # np.savetxt(f5 + '.txt', S[:,:,0,2])
-    # np.savetxt(f6 + '.txt', S[:,:,1,2])
-    # SSSFGraphHK0(A, B, S[:,:,0,0], f1)
-    # SSSFGraphHK0(A, B, S[:,:,1,1], f2)
-    # SSSFGraphHK0(A, B, S[:,:,2,2], f3)
-    # SSSFGraphHK0(A, B, S[:, :, 0, 1], f4)
-    # SSSFGraphHK0(A, B, S[:, :, 0, 2], f5)
-    # SSSFGraphHK0(A, B, S[:, :, 1, 2], f6)
+    S = S.reshape((nK, nK, 4,4, 3, 3))
     return S
 
 def genALLSymPointsBare():
@@ -604,8 +604,8 @@ def parseDSSF(dir):
 def read_MD_tot(dir, mag, SSSFGraph):
     directory = os.fsencode(dir)
     nK = 50
-    S_local = np.zeros((nK,nK,3,3))
-    S_global = np.zeros((nK,nK,3,3))
+    S_local = np.zeros((nK,nK,4,4,3,3))
+    S_global = np.zeros((nK,nK,4,4,3,3))
     w0 = 0
     wmax = 10
     w = np.arange(w0, wmax, 1/600)
@@ -616,7 +616,7 @@ def read_MD_tot(dir, mag, SSSFGraph):
     A, B = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
-        if os.path.isdir(dir + "/" + filename):
+        if os.path.isdir(dir + "/" + filename) and filename != "results":
             Sl, Sg, Dl, Dg = read_MD(dir + "/" + filename, mag)
             S_local = S_local + Sl
             S_global = S_global + Sg
@@ -638,7 +638,7 @@ def read_MD_tot(dir, mag, SSSFGraph):
 
     def DSSF_helper(DSSF, filename):
         DSSF = DSSF / np.max(DSSF)
-        np.savetxt(filename+".txt", DSSF)
+        # np.savetxt(filename+".txt", DSSF)
         fig, ax = plt.subplots(figsize=(10,4))
         C = ax.imshow(DSSF, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
         ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
@@ -656,6 +656,7 @@ def read_MD_tot(dir, mag, SSSFGraph):
         fig.colorbar(C)
         plt.savefig(filename+".pdf")
         plt.clf()
+        plt.close()
 
     def DSSF_all_spin_components(DSSF, filename):
         com_string = np.array(["x", "y", "z"])
@@ -663,12 +664,26 @@ def read_MD_tot(dir, mag, SSSFGraph):
             for j in range(3):
                 DSSF_helper(DSSF[:,:,i,j], filename + "_"+ com_string[i]+com_string[j])
 
-    
+    dir_to_save = dir + "/results"
+    if not os.path.isdir(dir_to_save):
+        os.mkdir(dir_to_save)
     for i in range(4):
         for j in range (4):
-            SSSF_helper(S_local[:,:,i,j], S_global[:,:,i,j], dir + "/"+str(i)+str(j))
-            DSSF_all_spin_components(DSSF_local[:,:,i,j], dir + "/"+str(i)+str(j)+"/DSSF_local")
-            DSSF_all_spin_components(DSSF_global[:,:,i,j], dir + "/"+str(i)+str(j)+"/DSSF_global")
+            if not os.path.isdir(dir_to_save + "/"+str(i)+str(j)):
+                os.mkdir(dir_to_save + "/"+str(i)+str(j))
+            SSSF_helper(S_local[:,:,i,j], S_global[:,:,i,j], dir_to_save + "/"+str(i)+str(j))
+            DSSF_all_spin_components(DSSF_local[:,:,i,j], dir_to_save + "/"+str(i)+str(j)+"/DSSF_local")
+            DSSF_all_spin_components(DSSF_global[:,:,i,j], dir_to_save + "/"+str(i)+str(j)+"/DSSF_global")
+    if not os.path.isdir(dir_to_save + "/SSSF"):
+        os.mkdir(dir_to_save + "/SSSF")
+    if not os.path.isdir(dir_to_save + "/DSSF_local"):
+        os.mkdir(dir_to_save + "/DSSF_local")
+    if not os.path.isdir(dir_to_save + "/DSSF_global"):
+        os.mkdir(dir_to_save + "/DSSF_global")
+    SSSF_helper(contract('ijxyab->ijab', S_local), contract('ijxyab->ijab', S_global), dir_to_save + "/SSSF")
+    DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_local), dir_to_save + "/DSSF_local/")
+    DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_global), dir_to_save + "/DSSF_global/")
+
 
 def read_MD(dir, mag):
     directory = os.fsencode(dir)
@@ -683,9 +698,12 @@ def read_MD(dir, mag):
     elif mag == "001":
         S_global = SSSFHK0(S[0], P, 50, dir, True)
         S_local = SSSFHK0(S[0], P, 50, dir, False)
-    else:
+    elif mag == "1-10":
         S_global = SSSFHHL(S[0], P, 50, dir, True)
         S_local = SSSFHHL(S[0], P, 50, dir, False)
+    elif mag == "110":
+        S_global = SSSFHnHL(S[0], P, 50, dir, True)
+        S_local = SSSFHnHL(S[0], P, 50, dir, False)
     w0 = 0
     wmax = 10
     w = np.arange(w0, wmax, 1/600)
@@ -809,8 +827,8 @@ def read_2D_nonlinear_tot(dir):
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-dir = "lehman_test_110_strong"
-read_MD_tot(dir, "001", SSSFGraphHK0)
+dir = "MC_pyrochlore_110_h=2"
+read_MD_tot(dir, "110", SSSFGraphHnHL)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
