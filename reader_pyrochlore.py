@@ -63,17 +63,17 @@ gGamma3 = gX1 + magnitude_bi(X1, Gamma)
 
 
 Gamma = np.array([0, 0, 0])
-# P1 = 2 * np.pi * np.array([1, 0, 0])
-# P2 = 2 * np.pi * np.array([2, 0, 0])
-# P3 = 2 * np.pi * np.array([2, 1, 0])
-# P4 = 2 * np.pi * np.array([2, 2, 0])
-# P5 = 2 * np.pi * np.array([1, 1, 0])
+P1 = 2 * np.pi * np.array([1, 0, 0])
+P2 = 2 * np.pi * np.array([2, 0, 0])
+P3 = 2 * np.pi * np.array([2, 1, 0])
+P4 = 2 * np.pi * np.array([2, 2, 0])
+P5 = 2 * np.pi * np.array([1, 1, 0])
 
-P1 =  2 * np.pi * np.array([1, 1, 0])
-P2 =  2 * np.pi * np.array([2, 2, 0])
-P3 =  2 * np.pi * np.array([2, 2, 1])
-P4 =  2 * np.pi * np.array([2, 2, 2])
-P5 =  2 * np.pi * np.array([1, 1, 1])
+# P1 =  2 * np.pi * np.array([1, 1, 0])
+# P2 =  2 * np.pi * np.array([2, 2, 0])
+# P3 =  2 * np.pi * np.array([2, 2, 1])
+# P4 =  2 * np.pi * np.array([2, 2, 2])
+# P5 =  2 * np.pi * np.array([1, 1, 1])
 
 stepN = np.linalg.norm(Gamma-P1)/graphres
 
@@ -827,8 +827,8 @@ def read_2D_nonlinear_tot(dir):
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-dir = "MC_pyrochlore_110_h=2"
-read_MD_tot(dir, "110", SSSFGraphHnHL)
+dir = "CZO_MD_h001=12"
+read_MD_tot(dir, "001", SSSFGraphHK0)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
