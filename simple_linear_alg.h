@@ -394,8 +394,8 @@ template<size_t N>
 array<double, N> transpose2D(const array<double, N>& matrix) {
     array<double, N> transposed;
     int size = int(sqrt(N));
-    for (size_t i = 0; i < N; ++i) {
-        for (size_t j = 0; j < N; ++j) {
+    for (size_t i = 0; i < size; ++i) {
+        for (size_t j = 0; j < size; ++j) {
             transposed[j*size + i] = matrix[i*size + j];
         }
     }

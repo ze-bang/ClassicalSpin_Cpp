@@ -9,7 +9,7 @@
 #include <mpi.h>
 #include "simple_linear_alg.h"
 
-void simulated_annealing_honeycomb(double T_start, double T_end, double K, double Gamma, double Gammap, double h, string dir=""){
+void simulated_annealing_honeycomb(double T_start, double T_end, double K, double Gamma, double Gammap, double h, string dir="", bool deterministic=false){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
     array<array<double,3>, 3> Jx = {{{K,Gammap,Gammap},{Gammap,0,Gamma},{Gammap,Gamma,0}}};
@@ -18,6 +18,12 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
 
     array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
     
+    cout << "Setting up honeycomb lattice with parameters: " << endl;
+    cout << "Jx: " << Jx[0][0] << " " << Jx[0][1] << " " << Jx[0][2] << endl;
+    cout << "Jy: " << Jy[1][0] << " " << Jy[1][1] << " " << Jy[1][2] << endl;
+    cout << "Jz: " << Jz[2][0] << " " << Jz[2][1] << " " << Jz[2][2] << endl;
+    cout << "Field: " << field[0] << " " << field[1] << " " << field[2] << endl;
+
     atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
     atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
@@ -25,7 +31,12 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
     atoms.set_field(field, 1);
 
     lattice<3, 2, 20, 20, 1> MC(&atoms);
-    MC.simulated_annealing(T_start, T_end, 10000, 0, false, dir);
+    if (deterministic == false){
+        MC.simulated_annealing(T_start, T_end, 10000, 0, false, dir);
+    }
+    else{
+        MC.simulated_annealing_deterministic(T_start, T_end, 10000, 10000, 0, dir);
+    }
 }
 
 void parallel_tempering_honeycomb(double T_start, double T_end, double K, double Gamma, double Gammap, double h, string dir, const vector<int> &rank_to_write){
@@ -84,8 +95,8 @@ void MD_kitaev_honeycomb(size_t num_trials, double K, double Gamma, double Gamma
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 20, 20, 1> MC(&atoms);
-        MC.simulated_annealing(1, 1e-3, 10000, 0, true);
+        lattice<3, 2, 12, 12, 1> MC(&atoms);
+        MC.simulated_annealing(1, 1e-4, 100000, 0, true);
         // std::random_device rd;
         // std::mt19937 gen(rd());
         // for (size_t i = 0; i<100000; ++i){
@@ -720,10 +731,14 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     x3 /= sqrt(6);
     x4 /= sqrt(6);
 
-    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz_Jx = Jzz-Jxx;
+    double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
+    double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double Jy = Jyy;
-    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double theta = atan(2*Jxz/(Jzz-Jxx));
+
+    cout << Jx << " " << Jy << " " << Jz << " " << theta << endl;
 
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
@@ -749,6 +764,14 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
     array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
 
+    // array<double, 3> temp = rot_field*dot(field, z1)+ By1;
+    // cout << gxx << " " << gyy << " " << gzz << " " << temp[0] << " " << temp[1] << " " << temp[2] << endl;
+    // array<double, 3> temp1 = rot_field*dot(field, z2)+ By2;
+    // cout << gxx << " " << gyy << " " << gzz << " " << temp1[0] << " " << temp1[1] << " " << temp1[2] << endl;
+    // array<double, 3> temp2 = rot_field*dot(field, z3)+ By3;
+    // cout << gxx << " " << gyy << " " << gzz << " " << temp2[0] << " " << temp2[1] << " " << temp2[2] << endl;
+    // array<double, 3> temp3 = rot_field*dot(field, z4)+ By4;
+    // cout << gxx << " " << gyy << " " << gzz << " " << temp3[0] << " " << temp3[1] << " " << temp3[2] << endl;
 
     atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
     atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
@@ -772,7 +795,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     for(int i=start; i<end;++i){
         lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
         MC.simulated_annealing(5, 1e-4, 1e4, 0, true);
-        MC.molecular_dynamics(5, 1e-4, 1e4, 0, 0, 600/max({Jxx,Jyy,Jzz}), 1e-1/max({Jxx,Jyy,Jzz}), dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(5, 1e-4, 1e4, 0, 0, 200, 1e-1, dir+"/"+std::to_string(i));
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -813,9 +836,11 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     x3 /= sqrt(6);
     x4 /= sqrt(6);
 
-    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz_Jx = Jzz-Jxx;
+    double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
+    double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double Jy = Jyy;
-    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double theta = atan(2*Jxz/(Jzz-Jxx));
 
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
@@ -924,9 +949,11 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     x3 /= sqrt(6);
     x4 /= sqrt(6);
 
-    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz_Jx = Jzz-Jxx;
+    double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
+    double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double Jy = Jyy;
-    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double theta = atan(2*Jxz/(Jzz-Jxx));
 
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
@@ -1043,9 +1070,11 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     x4 /= sqrt(6);
 
 
-    double Jx = (Jxx+Jzz)/2 - sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz_Jx = Jzz-Jxx;
+    double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
+    double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double Jy = Jyy;
-    double Jz = (Jxx+Jzz)/2 + sqrt(pow(Jzz-Jxx,2)+4*Jxz*Jxz)/2; 
+    double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
     double theta = atan(2*Jxz/(Jzz-Jxx));
 
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};

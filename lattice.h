@@ -18,8 +18,6 @@
 #include "binning_analysis.h"
 #include <sstream>
 
-using namespace std;
-
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
 {   
@@ -339,8 +337,7 @@ class lattice
     array<double,N> gaussian_move(const array<double,N> &current_spin, double sigma=60){
         array<double,N> new_spin;
         new_spin = current_spin + gen_random_spin(spin_length)*sigma;
-        double norm = dot(new_spin, new_spin);
-        return new_spin/sqrt(norm) * spin_length;
+        return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length;
     }
 
     void overrelaxation(){

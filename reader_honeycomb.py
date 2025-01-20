@@ -631,7 +631,7 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-dir = "kitaev_honeycomb_test"
+dir = "kitaev_test"
 read_MD_tot(dir)
 # parseDSSF(dir)
 
