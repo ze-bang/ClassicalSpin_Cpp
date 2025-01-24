@@ -309,7 +309,7 @@ def read_MD(dir):
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
-    wmax = 75
+    wmax = 15
     w = np.linspace(w0, wmax, 800)[1:]
     A = DSSF(w, DSSF_K, S, P, T, False)
     A = np.log(A)
@@ -348,16 +348,108 @@ def read_MD(dir):
     # plt.savefig(dir+"DSSF.pdf") 
     # plt.clf()
 
+def read_2D_nonlinear(dir):
+    directory = os.fsencode(dir)
+    tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,0]
+    print(M0)
+    domain = 500
+    omega_range = 0.2
+    M_NL = np.zeros((int(tau_step), domain))
+    w = np.arange(-omega_range, omega_range, 1/600)
+    T = np.linspace(time_start, time_end, int(time_step)) 
+    T = T[-domain:]
+    ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
+    tau = np.linspace(tau_start, tau_end, int(tau_step))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            info = filename.split("_")
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,0]
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,0]
+            M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:]
+    # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
+    # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
+    M_NL_FF = M_NL
+    # M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    # M_NL_FF = np.log(M_NL_FF)
+    # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
+    np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
+    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    # plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
+    plt.clf()
 
+
+def read_2D_nonlinear_adaptive_time_step(dir):
+    directory = os.fsencode(dir)
+    tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,0]
+    M0_T = np.loadtxt(dir + "/M_time_0/M0/Time_steps.txt")
+    M0_cutoff = np.where(M0_T >= 0)[0][0]
+
+    omega_range = 0.2
+
+    w = np.arange(-omega_range, omega_range, 4.6/200)
+    M_NL = np.zeros((int(tau_step), len(w)))
+
+    M0_w = contract('t, wt->w', M0[M0_cutoff:], np.exp(1j*contract('w, t->wt', w, M0_T[M0_cutoff:])))
+    tau = np.linspace(tau_start, tau_end, int(tau_step))
+
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            info = filename.split("_")
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,0]
+            M1_T = np.loadtxt(dir + "/" + filename + "/M1/Time_steps.txt")
+            M1_cutoff = np.where(M1_T >= 0)[0][0]
+
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,0]
+            M01_T = np.loadtxt(dir + "/" + filename + "/M01/Time_steps.txt")
+            M01_cutoff = np.where(M01_T >= 0)[0][0]
+            M1_w = contract('t, wt->w', M1[M1_cutoff:], np.exp(1j*contract('w, t->wt', w, M1_T[M1_cutoff:])))
+            M01_w = contract('t, wt->w', M01[M01_cutoff:], np.exp(1j*contract('w, t->wt', w, M01_T[M01_cutoff:])))
+            M_NL[int(info[2])] = M01_w - M0_w - M1_w
+    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
+    M_NL_FF = contract('it, wi->wt', M_NL, ffactau)
+    np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
+    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    # plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
+    plt.clf()
+
+def read_2D_nonlinear_tot(dir):
+    directory = os.fsencode(dir)
+    A = 0
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            read_2D_nonlinear(dir + "/" + filename)
+            A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
+    A = A/np.max(A)
+    time_step = len(A)
+    plt.imshow(A.T, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
+    # w = np.linspace(-0.2, -0.2, time_step)
+    # plt.pcolormesh(w, w, np.log(A))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC.pdf")
+    plt.clf()
 # obenton_to_xx_zz()
 #
-dir = "TmFeO3_Fe_Magnon_MD_real_meV"
+dir = "MD_TMFeO3_test"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
+
+# read_2D_nonlinear_tot("MD_TmFeO3_test")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
