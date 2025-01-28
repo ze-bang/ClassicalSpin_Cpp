@@ -19,7 +19,7 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 50
+graphres = 12
 
 Gamma = np.array([0, 0, 0])
 K = 2 * np.pi * np.array([3/4, -3/4, 0])
@@ -534,7 +534,7 @@ def read_MD(dir):
 
     w0 = 0
     wmax = 3
-    w = np.linspace(w0, wmax, 1000)[1:]
+    w = np.arange(w0, wmax, 1/600)[1:]
     A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
@@ -631,7 +631,7 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-dir = "kitaev_test"
+dir = "kitaev_benchmark"
 read_MD_tot(dir)
 # parseDSSF(dir)
 

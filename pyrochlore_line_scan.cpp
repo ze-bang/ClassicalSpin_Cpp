@@ -6,7 +6,7 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     double Jxx = argv[1] ? atof(argv[1]) : 0.0;
     double Jyy = argv[2] ? atof(argv[2]) : 0.0;
-    int Jzz = argv[3] ? atof(argv[3]) : 0;
+    double Jzz = argv[3] ? atof(argv[3]) : 0;
     double h_min = argv[4] ? atof(argv[4]) : 0.0;
     double h_max = argv[5] ? atof(argv[5]) : 0.0;
     int num_h = argv[6] ? atoi(argv[6]) : 0;
