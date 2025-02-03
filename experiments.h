@@ -753,7 +753,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     }
     cout << Jx << " " << Jy << " " << Jz << " " << theta << endl;
 
-    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
+    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
     array<double, 3> field = field_dir*h;
 
 
@@ -806,9 +806,24 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     int end = (rank+1)*num_trials/size;
     double k_B = 0.08620689655;
     for(int i=start; i<end;++i){
-        lattice<3, 4, 12, 12, 12> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, 1e-4, 1e4, 10, true);
-        MC.molecular_dynamics(5, 1e-4, 1e4, 10, 0, 200, 1e-1, dir+"/"+std::to_string(i));
+        lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
+        MC.simulated_annealing(5, 1e-3, 1e4, 10, true);
+        MC.molecular_dynamics(5, 1e-3, 1e4, 0, 0, 600, 0.25, dir+"/"+std::to_string(i));
+        for(int i=0; i<1e6; ++i){
+            MC.deterministic_sweep();
+        }
+        if(dir != ""){
+            filesystem::create_directory(dir);
+            ofstream myfile;
+            myfile.open(dir+"/"+std::to_string(i)+"/spin_0.txt");
+            for(size_t i = 0; i<MC.lattice_size; ++i){
+                for(size_t j = 0; j<3; ++j){
+                    myfile << MC.spins[i][j] << " ";
+                }
+                myfile << endl;
+            }
+            myfile.close();
+        }
     }
     int finalized;
     MPI_Finalized(&finalized);
