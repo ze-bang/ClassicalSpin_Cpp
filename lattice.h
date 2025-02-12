@@ -593,6 +593,7 @@ class lattice
         }   
         vector<double> energies;
         vector<array<double,N>> magnetizations;
+        vector<spin_config> spin_configs_at_temp;
 
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
@@ -651,6 +652,7 @@ class lattice
                 if (i % probe_rate == 0){
                     if(dir_name != ""){
                         magnetizations.push_back(magnetization_local(spins));
+                        spin_configs_at_temp.push_back(spins);
                         energies.push_back(E);
                     }
                 }
@@ -667,9 +669,12 @@ class lattice
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
-                    write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
+                    // write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
+                        write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
+                    }
                 }
             }
             if (rank == 0){
