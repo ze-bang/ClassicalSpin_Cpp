@@ -23,6 +23,8 @@ int main(int argc, char** argv) {
         field_dir = {1/sqrt(3),1/sqrt(3),1/sqrt(3)};
     }
     string dir = argv[9] ? argv[9] : "";
-    pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, theta);
+    bool theta_or_Jxz = argv[10] ? atoi(argv[10]) : false;
+    bool save_observable = argv[11] ? atoi(argv[11]) : false;
+    pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, theta, theta_or_Jxz, save_observable);
     return 0;
 }

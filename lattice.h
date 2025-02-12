@@ -523,8 +523,16 @@ class lattice
             }
             if(save_observables){
                 vector<double> energies;
-                for(size_t i = 0; i<10000; ++i){
-                    metropolis(spins, T, gaussian_move, sigma);
+                for(size_t i = 0; i<1e8; ++i){
+                    if(overrelaxation_rate > 0){
+                        overrelaxation();
+                        if (i%overrelaxation_rate == 0){
+                            curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                        }
+                    }
+                    else{
+                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                    }
                     if (i % 100 == 0){
                         energies.push_back(total_energy(spins));
                     }
