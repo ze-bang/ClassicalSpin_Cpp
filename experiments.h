@@ -944,11 +944,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     }
 
 }
-<<<<<<< HEAD
-void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=0, bool save_observable=false){
-=======
 void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -982,31 +978,19 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     x4 /= sqrt(6);
     double Jx, Jy, Jz, theta_in;
 
-<<<<<<< HEAD
-=======
     double Jx, Jy, Jz, theta_in;
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
     if (theta_or_Jxz){
         Jx = Jxx;
         Jy = Jyy;
         Jz = Jzz;
         theta_in = theta;
-<<<<<<< HEAD
-    }else{
-=======
     }
     else{
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
         double Jz_Jx = Jzz-Jxx;
         double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
         Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*theta*theta)/2; 
         Jy = Jyy;
         Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*theta*theta)/2; 
-<<<<<<< HEAD
-        theta_in = atan(2*theta/(Jzz-Jxx));
-    }
-
-=======
         theta_in = atan(2*theta/(Jzz-Jxx))/2;
         double maxJ = max(Jx, max(Jy, Jz));
         Jx /= maxJ;
@@ -1014,7 +998,6 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
         Jz /= maxJ;
     }
     cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
@@ -1047,11 +1030,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 
     lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-<<<<<<< HEAD
-    MC.simulated_annealing(5, 1e-4, 1e4, 10, true, dir, save_observable);
-=======
     MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir, save);
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
 }
 
 // void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
@@ -1227,11 +1206,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
 
 }
 
-<<<<<<< HEAD
-void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double Jxz, bool Jxz_or_theta, bool to_save_observable){
-=======
 void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double theta, bool theta_or_Jxz, bool save){
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
     filesystem::create_directory(dir);
     int initialized;
     MPI_Initialized(&initialized);
@@ -1252,11 +1227,7 @@ void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, doub
         double h = h_min + i*(h_max-h_min)/num_h;
         cout << "h: " << h << "i: " << i << endl;
         string subdir = dir + "/h_" + std::to_string(h) + "_index_" + std::to_string(i);
-<<<<<<< HEAD
-        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, Jxz, Jxz_or_theta, to_save_observable);
-=======
         simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, theta, theta_or_Jxz, save);
->>>>>>> 63c7a163c39af242251563ab0d0f11794df65ed1
     }
 
     int finalized;
