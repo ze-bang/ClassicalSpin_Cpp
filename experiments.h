@@ -1161,7 +1161,7 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
-    MC.parallel_tempering(temps, 1e6, 0, 10, 50, 2e3, dir, rank_to_write, true);
+    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
 
     int finalized;
     MPI_Finalized(&finalized);
