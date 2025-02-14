@@ -841,13 +841,8 @@ def read_2D_nonlinear_tot(dir):
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-<<<<<<< HEAD
-# dir = "CZO_MD_h110=8"
-# read_MD_tot(dir, "1-10", SSSFGraphHHL)
-=======
 dir = "CZO_MD_h1-10=8"
 read_MD_tot(dir, "1-10", SSSFGraphHHL)
->>>>>>> aa74ba28c9f8da74e6b1f65a3407cd921aef453a
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")

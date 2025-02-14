@@ -984,7 +984,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
         theta_in = theta;
     }
     else{
-        theta_in = atan(-2*theta/(Jxx-Jzz))/2;
+        theta_in = atan(2*theta/(Jxx-Jzz))/2;
         Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz - sin(2*theta_in)*theta;
         Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz + sin(2*theta_in)*theta;
         Jy = Jyy;
