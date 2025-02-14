@@ -984,10 +984,14 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
         theta_in = theta;
     }
     else{
-        theta_in = atan(-2*theta/(Jxx-Jzz))/2;
-        Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz - sin(2*theta_in)*theta;
-        Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz + sin(2*theta_in)*theta;
         Jy = Jyy;
+        theta_in = atan(2*theta/(Jxx-Jzz))/2;
+        Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz + sin(2*theta_in)*theta;
+        Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz - sin(2*theta_in)*theta;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+        // Jx = (Jxx + Jzz)/2 - sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // Jz = (Jxx + Jzz)/2 + sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
         double maxJ = max(Jx, max(Jy, Jz));
         Jx /= maxJ;
         Jy /= maxJ;
