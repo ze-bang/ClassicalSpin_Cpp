@@ -7,7 +7,7 @@ import matplotlib.tri as mtri
 from numba import njit
 import matplotlib as mpl
 plt.rcParams['text.usetex'] = True
-os.environ['MPLCONFIGDIR'] = os.getcwd() + "/configs/"
+# os.environ['MPLCONFIGDIR'] = os.getcwd() + "/configs/"
 
 
 z = np.array([np.array([1,1,1])/np.sqrt(3), np.array([1,-1,-1])/np.sqrt(3), np.array([-1,1,-1])/np.sqrt(3), np.array([-1,-1,1])/np.sqrt(3)])
@@ -569,8 +569,8 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # ax[1,0].set_title("CHO Octupolar")
 # ax[1,1].set_title("CHO Dipolar")
 
-directory = "/Users/zhengbangzhou/Library/CloudStorage/OneDrive-UniversityofToronto/PhD Stuff/Projects/PSG_Pyrochlore/XYZ_project/magnetostriction"
-
+# directory = "/Users/zhengbangzhou/Library/CloudStorage/OneDrive-UniversityofToronto/PhD Stuff/Projects/PSG_Pyrochlore/XYZ_project/magnetostriction"
+directory = "/home/pc_linux/ClassicalSpin_Cpp"
 
 def graph_magnetostriction(filename):
     mpl.rcParams.update({'font.size': 20})
@@ -603,6 +603,8 @@ def graph_magnetostriction(filename):
     ax[1,1].set_xlabel(r"$h/J_{yy}$")
     ax[1,2].set_xlabel(r"$h/J_{yy}$")
     plt.savefig(filename+"_magnetostriction.pdf")
+    plt.clf()
+    
 mpl.rcParams.update({'font.size': 20})
 fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(8, 8), constrained_layout=True)
 ax[0,0].text(.01, .99, r"$(\mathrm{a})$", ha='left', va='top', transform=ax[0,0].transAxes,
@@ -628,26 +630,27 @@ ax[1,0].set_xlabel(r"$h/J_{yy}$")
 # lineread(0, 8, 20, "111", directory+"/CHO_dipolar_111", 0)
 # lineread(0, 8, 20, "110", directory+"/CHO_dipolar_110", 0)
 lineread(0, 8, 20, "001", directory+"/CHO_dipolar_001", 0, ax[1,1],True)
-ax[1,1].set_xlabel(r"$h/J_{yy}$")
+ax[1,1].set_xlabel(r"$h/J_{xx}$")
 
 plt.savefig("magnetostriction.pdf")
+plt.clf()
 
 # ax[0,0].text(0.1, 0.95, "(a)", transform=ax[0,0].transAxes, fontsize=12)
 # ax[0,1].text(0.1, 0.95, "(b)", transform=ax[0,1].transAxes, fontsize=12)
 # ax[1,0].text(0.1, 0.95, "(c)", transform=ax[1,0].transAxes, fontsize=12)
 # ax[1,1].text(0.1, 0.95, "(d)", transform=ax[1,1].transAxes, fontsize=12)
-lineread(0, 8, 20, "111", "CSO_octupolar_111", 0)
-lineread(0, 8, 20, "110", "CSO_octupolar_110", 0)
-lineread(0, 8, 20, "001", "CSO_octupolar_001", 0)
-lineread(0, 8, 20, "111", "CSO_dipolar_111", 0)
-lineread(0, 8, 20, "110", "CSO_dipolar_110", 0)
-lineread(0, 8, 20, "001", "CSO_dipolar_001", 0)
-lineread(0, 8, 20, "111", "CHO_octupolar_111", 0)
-lineread(0, 8, 20, "110", "CHO_octupolar_110_test", 0)
-lineread(0, 8, 20, "110", "CHO_octupolar_110", 0)
-lineread(0, 8, 20, "001", "CHO_octupolar_001", 0)
-lineread(0, 8, 20, "111", "CHO_dipolar_111", 0)
-lineread(0, 8, 20, "110", "CHO_dipolar_110", 0)
-lineread(0, 8, 20, "001", "CHO_dipolar_001", 0)
+# lineread(0, 8, 20, "111", "CSO_octupolar_111", 0)
+# lineread(0, 8, 20, "110", "CSO_octupolar_110", 0)
+# lineread(0, 8, 20, "001", "CSO_octupolar_001", 0)
+# lineread(0, 8, 20, "111", "CSO_dipolar_111", 0)
+# lineread(0, 8, 20, "110", "CSO_dipolar_110", 0)
+# lineread(0, 8, 20, "001", "CSO_dipolar_001", 0)
+# lineread(0, 8, 20, "111", "CHO_octupolar_111", 0)
+# lineread(0, 8, 20, "110", "CHO_octupolar_110_test", 0)
+# lineread(0, 8, 20, "110", "CHO_octupolar_110", 0)
+# lineread(0, 8, 20, "001", "CHO_octupolar_001", 0)
+# lineread(0, 8, 20, "111", "CHO_dipolar_111", 0)
+# lineread(0, 8, 20, "110", "CHO_dipolar_110", 0)
+# lineread(0, 8, 20, "001", "CHO_dipolar_001", 0)
 # plt.savefig("magnetostriction.pdf")
 # 0.1375 0.1375 1 0.2375

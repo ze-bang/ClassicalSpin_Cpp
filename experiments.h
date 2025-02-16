@@ -977,23 +977,29 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     x3 /= sqrt(6);
     x4 /= sqrt(6);
     double Jx, Jy, Jz, theta_in;
+    cout << "Begin simulated annealing with parameters: " << Jxx << " " << Jyy << " " << Jzz << " " << theta_in << endl;
     if (theta_or_Jxz){
+
         Jx = Jxx;
         Jy = Jyy;
         Jz = Jzz;
         theta_in = theta;
     }
     else{
-        theta_in = atan(2*theta/(Jxx-Jzz))/2;
-        Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz - sin(2*theta_in)*theta;
-        Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz + sin(2*theta_in)*theta;
         Jy = Jyy;
+        theta_in = atan(2*theta/(Jxx-Jzz))/2;
+        Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz + sin(2*theta_in)*theta;
+        Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz - sin(2*theta_in)*theta;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+        // Jx = (Jxx + Jzz)/2 - sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // Jz = (Jxx + Jzz)/2 + sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
         double maxJ = max(Jx, max(Jy, Jz));
         Jx /= maxJ;
         Jy /= maxJ;
         Jz /= maxJ;
     }
-    cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+    cout << "Renormalized parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
