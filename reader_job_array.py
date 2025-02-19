@@ -499,26 +499,32 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax,imp=False):
     mag_diagram = mag_diagram.flatten()
     Energies = Energies.flatten()
     magnetostrictions = magnetostrictions.reshape((nH,8))
-    plt.plot(HS, phase_diagram)
-    plt.savefig(dir+"/magnetization.pdf")
-    plt.clf()
-    for i in range (3):
-        np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
-    for i in range (5):
-        np.savetxt(dir+"/magnetostriction_"+str(3+i)+".txt", magnetostrictions[:,3+i])
-        plt.scatter(HS, magnetostrictions[:,3+i])
-        plt.colorbar()
-        plt.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
-        plt.clf()
-    plt.scatter(HS, magnetostrictions[:,0])
-    plt.scatter(HS, magnetostrictions[:,1])
-    plt.scatter(HS, magnetostrictions[:,2])
-    plt.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
-    # plt.set_ylabel(r"$\Delta L/L$")
-    # plt.set_xlabel(r"$h/J_{yy}$")
-    plt.savefig(dir+"/magnetostriction.pdf")
-    plt.clf()
-
+    # plt.plot(HS, phase_diagram)
+    # plt.savefig(dir+"/magnetization.pdf")
+    # plt.clf()
+    # for i in range (3):
+    #     np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
+    # for i in range (5):
+    #     np.savetxt(dir+"/magnetostriction_"+str(3+i)+".txt", magnetostrictions[:,3+i])
+    #     plt.scatter(HS, magnetostrictions[:,3+i])
+    #     plt.colorbar()
+    #     plt.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
+    #     plt.clf()
+    # plt.scatter(HS, magnetostrictions[:,0])
+    # plt.scatter(HS, magnetostrictions[:,1])
+    # plt.scatter(HS, magnetostrictions[:,2])
+    # plt.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
+    # # plt.set_ylabel(r"$\Delta L/L$")
+    # # plt.set_xlabel(r"$h/J_{yy}$")
+    # plt.savefig(dir+"/magnetostriction.pdf")
+    # plt.clf()
+    if not imp:
+        ax.scatter(HS, magnetostrictions[:,0])
+        ax.scatter(HS, magnetostrictions[:,1])
+        ax.scatter(HS, magnetostrictions[:,2])
+        ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
+    else:
+        ax.scatter(HS, magnetostrictions[:,3])
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
