@@ -7,7 +7,7 @@ import matplotlib.tri as mtri
 from numba import njit
 import matplotlib as mpl
 plt.rcParams['text.usetex'] = True
-os.environ['MPLCONFIGDIR'] = os.getcwd() + "/configs/"
+# os.environ['MPLCONFIGDIR'] = os.getcwd() + "/configs/"
 
 
 z = np.array([np.array([1,1,1])/np.sqrt(3), np.array([1,-1,-1])/np.sqrt(3), np.array([-1,1,-1])/np.sqrt(3), np.array([-1,-1,1])/np.sqrt(3)])
@@ -499,13 +499,20 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax,imp=False):
     mag_diagram = mag_diagram.flatten()
     Energies = Energies.flatten()
     magnetostrictions = magnetostrictions.reshape((nH,8))
+<<<<<<< HEAD
     # ax.plot(HS, phase_diagram)
     # ax.savefig(dir+"/magnetization.pdf")
     # ax.clf()
+=======
+    # plt.plot(HS, phase_diagram)
+    # plt.savefig(dir+"/magnetization.pdf")
+    # plt.clf()
+>>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
     # for i in range (3):
     #     np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
     # for i in range (5):
     #     np.savetxt(dir+"/magnetostriction_"+str(3+i)+".txt", magnetostrictions[:,3+i])
+<<<<<<< HEAD
     #     ax.scatter(HS, magnetostrictions[:,3+i])
     #     ax.colorbar()
     #     ax.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
@@ -522,6 +529,27 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax,imp=False):
     # plt.savefig(dir+"/magnetostriction.pdf")
     # plt.clf()
 
+=======
+    #     plt.scatter(HS, magnetostrictions[:,3+i])
+    #     plt.colorbar()
+    #     plt.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
+    #     plt.clf()
+    # plt.scatter(HS, magnetostrictions[:,0])
+    # plt.scatter(HS, magnetostrictions[:,1])
+    # plt.scatter(HS, magnetostrictions[:,2])
+    # plt.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
+    # # plt.set_ylabel(r"$\Delta L/L$")
+    # # plt.set_xlabel(r"$h/J_{yy}$")
+    # plt.savefig(dir+"/magnetostriction.pdf")
+    # plt.clf()
+    if not imp:
+        ax.scatter(HS, magnetostrictions[:,0])
+        ax.scatter(HS, magnetostrictions[:,1])
+        ax.scatter(HS, magnetostrictions[:,2])
+        ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
+    else:
+        ax.scatter(HS, magnetostrictions[:,3])
+>>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
@@ -572,8 +600,8 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # ax[1,0].set_title("CHO Octupolar")
 # ax[1,1].set_title("CHO Dipolar")
 
-directory = "/Users/zhengbangzhou/Library/CloudStorage/OneDrive-UniversityofToronto/PhD Stuff/Projects/PSG_Pyrochlore/XYZ_project/magnetostriction"
-
+# directory = "/Users/zhengbangzhou/Library/CloudStorage/OneDrive-UniversityofToronto/PhD Stuff/Projects/PSG_Pyrochlore/XYZ_project/magnetostriction"
+directory = "/home/pc_linux/ClassicalSpin_Cpp"
 
 def graph_magnetostriction(filename):
     mpl.rcParams.update({'font.size': 20})
@@ -606,10 +634,15 @@ def graph_magnetostriction(filename):
     ax[1,1].set_xlabel(r"$h/J_{yy}$")
     ax[1,2].set_xlabel(r"$h/J_{yy}$")
     plt.savefig(filename+"_magnetostriction.pdf")
+<<<<<<< HEAD
 # graph_magnetostriction(directory+"/CZO")
 # graph_magnetostriction(directory+"/CHO")
 graph_magnetostriction(directory+"/CSO")
 
+=======
+    plt.clf()
+    
+>>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
 mpl.rcParams.update({'font.size': 20})
 fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(8, 8), constrained_layout=True)
 ax[0,0].text(.01, .99, r"$(\mathrm{a})$", ha='left', va='top', transform=ax[0,0].transAxes,
@@ -635,9 +668,10 @@ ax[1,0].set_xlabel(r"$h/J_{yy}$")
 # lineread(0, 8, 20, "111", directory+"/CHO_dipolar_111", 0)
 # lineread(0, 8, 20, "110", directory+"/CHO_dipolar_110", 0)
 lineread(0, 8, 20, "001", directory+"/CHO_dipolar_001", 0, ax[1,1],True)
-ax[1,1].set_xlabel(r"$h/J_{yy}$")
+ax[1,1].set_xlabel(r"$h/J_{xx}$")
 
 plt.savefig("magnetostriction.pdf")
+plt.clf()
 
 # ax[0,0].text(0.1, 0.95, "(a)", transform=ax[0,0].transAxes, fontsize=12)
 # ax[0,1].text(0.1, 0.95, "(b)", transform=ax[0,1].transAxes, fontsize=12)

@@ -122,7 +122,6 @@ class lattice
                         field[current_site_index] = UC.field[l];
                         onsite_interaction[current_site_index] = UC.onsite_interaction[l];
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
-                        int count = 0;
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
                             bilinear<N> J = m->second;
                             size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner);
@@ -130,10 +129,8 @@ class lattice
                             bilinear_partners[current_site_index].push_back(partner);
                             bilinear_interaction[partner].push_back(transpose2D(J.bilinear_interaction));
                             bilinear_partners[partner].push_back(current_site_index);
-                            count++;
                         }
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
-                        count = 0;
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
                             trilinear<N> J = m->second;
                             size_t partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1);
@@ -147,7 +144,6 @@ class lattice
 
                             trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
-                            count++;
                         }
                     }
                 }

@@ -111,6 +111,15 @@ array<T, N> operator*(const array<T, N> &a, const T1 n) {
     return result;
 }
 
+template<typename T, typename T1, size_t N>
+array<T, N> operator*= (array<T, N> &a, const T1 n) {
+    #pragma omp simd
+    for (size_t i = 0; i < N; ++i) {
+        a[i] *= T(n);
+    }
+    return a;
+}
+
 
 template<typename T, typename T1, size_t N>
 array<T, N> operator/(const array<T, N> &a, const T1 n) {

@@ -23,12 +23,18 @@ int main(int argc, char** argv) {
     double Kc = argv[15] ? atof(argv[15]) : 0.0;
     double D1 = argv[16] ? atof(argv[16]) : 0.0;
     double D2 = argv[17] ? atof(argv[17]) : 0.0;
-    double h = argv[18] ? atof(argv[18]) : 0.0;
-    string dir_name = argv[19] ? argv[19] : "";
+    double e1 = argv[18] ? atof(argv[18]) : 0.0;
+    double e2 = argv[19] ? atof(argv[19]) : 0.0;
+    double xii = argv[20] ? atof(argv[20]) : 0.0;
+    double h = argv[21] ? atof(argv[21]) : 0.0;
+    string dir_name = argv[22] ? argv[22] : "";
     filesystem::create_directory(dir_name);
-    int num_trials = argv[20] ? atoi(argv[20]) : 1;
-    string spin_config_file = argv[21] ? argv[21] : "";
+    int num_trials = argv[23] ? atoi(argv[23]) : 1;
+    string spin_config_file = argv[24] ? argv[24] : "";
     cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " saving to: " << dir_name << endl;
-    TmFeO3_2DCS(num_trials, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero, spin_config_file);
+    MD_TmFeO3(num_trials, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {1,0,0}, e1, e2, dir_name);
+    // TmFeO3_2DCS(num_trials, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero, spin_config_file);
     return 0;
 }
+
+//J1ab=J1c=4.92meV J2ab=J2c=0.29meV Ka=0meV Kc=-0.09meV D1=D2=0 xii is the modeling param E1 = 1.94meV E2=7.71meV
