@@ -303,10 +303,10 @@ def read_MD_tot(dir):
 
 def read_MD(dir):
     directory = os.fsencode(dir)
-    P = np.loadtxt(dir + "/pos.txt")
+    P = np.loadtxt(dir + "/pos_SU2.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
 
-    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
+    S = np.loadtxt(dir + "/spin_t_SU2.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
     wmax = 15
@@ -441,7 +441,7 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-dir = "MD_TMFeO3_test"
+dir = "TmFeO3_MD_Test"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")

@@ -377,7 +377,7 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     }
 }
 
-void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
+void MD_TmFeO3(int num_trials, double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
     filesystem::create_directory(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -461,7 +461,7 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     Fe_atoms.set_field(fielddir*h, 3);
 
     //Tm atoms
-
+    cout << "E1: " << e1 << " E2: " << e2 << endl;
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
@@ -536,11 +536,11 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
-    // for(size_t i = 0; i < num_trials; ++i){
-    //     lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 2.5);
-    //     MC_FE.simulated_annealing(15, 1e-3, 10000, 0, true);
-    //     MC_FE.molecular_dynamics(15, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
-    // }
+    for(size_t i = 0; i < num_trials; ++i){
+        mixed_lattice<3, 4, 2.5, 8, 4, 1.0, 4, 4, 4> MC(&TFO);
+        // MC.simulated_annealing(T_start, T_end, 10000, 0, 0, dir);
+        MC.molecular_dynamics(T_start, T_end, 10000, 0, 100, 1e-3, dir+"/"+std::to_string(i));
+    }
 }
 
 
