@@ -537,9 +537,9 @@ void MD_TmFeO3(int num_trials, double T_start, double T_end, double Jai, double 
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
     for(size_t i = 0; i < num_trials; ++i){
-        mixed_lattice<3, 4, 2.5, 8, 4, 1.0, 4, 4, 4> MC(&TFO);
+        mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
         // MC.simulated_annealing(T_start, T_end, 10000, 0, 0, dir);
-        MC.molecular_dynamics(T_start, T_end, 10000, 0, 100, 1e-3, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(T_start, T_end, 10000, 0, 10, 1e-3, dir+"/"+std::to_string(i));
     }
 }
 

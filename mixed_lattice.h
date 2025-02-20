@@ -159,15 +159,18 @@ double dot(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size
     return result;
 }
 
-template<size_t N_SU2, size_t N_ATOMS_SU2, double spin_length_SU2, size_t N_SU3, size_t N_ATOMS_SU3, double spin_length_SU3, size_t dim1, size_t dim2, size_t dim3>
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim3>
 class mixed_lattice
 {   
     public:
 
+    typedef array<array<double,N_SU2>,N_ATOMS_SU2*dim1*dim2*dim3> spin_config_SU2;
+    typedef array<array<double,N_SU3>,N_ATOMS_SU3*dim1*dim2*dim3> spin_config_SU3;
+
     mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> UC;
     size_t lattice_size_SU2;
     size_t lattice_size_SU3;
-
+    double spin_length_SU2, spin_length_SU3;
     mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3> spins;
     mixed_lattice_pos<dim1*dim2*dim3*N_ATOMS_SU2, dim1*dim2*dim3*N_ATOMS_SU3>  site_pos;
 
@@ -266,9 +269,6 @@ class mixed_lattice
 
     template<size_t N, size_t lattice_size, size_t N_ATOMS>
     void set_up_sublattice(const double spin_length, array<array<double,N>, lattice_size>  &spins, array<array<double,3>, lattice_size> &site_pos, array<array<double,N>, lattice_size> &field, array<array<double, N * N>, lattice_size> &onsite_interaction, array<vector<array<double, N * N>>, lattice_size> &bilinear_interaction, array<vector<array<array<array<double, N>, N>, N>>, lattice_size> &trilinear_interaction, array<vector<size_t>, lattice_size> &bilinear_partners, array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners, UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri){
-        srand (time(NULL));
-        seed_lehman(rand()*2+1);
-
         array<array<double,3>, N_ATOMS> basis = atoms->lattice_pos;
         array<array<double,3>, 3> unit_vector = atoms->lattice_vectors;
 
@@ -319,8 +319,11 @@ class mixed_lattice
     }
     
 
-    mixed_lattice(mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> *atoms): UC(*atoms){
+    mixed_lattice(mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> *atoms, double spin_length_SU2_in, double spin_length_SU3_in): UC(*atoms){
 
+        srand(time(NULL));
+        seed_lehman(rand()*2+1);
+        lehman_next();
 
         field_drive_freq_SU2 = 0;
         field_drive_amp_SU2 = 0;
@@ -332,9 +335,11 @@ class mixed_lattice
         t_B_2_SU2 = 0;
         t_B_1_SU3 = 0;
         t_B_2_SU3 = 0;
+        spin_length_SU2 = spin_length_SU2_in;
+        spin_length_SU3 = spin_length_SU3_in;
 
         set_up_sublattice(spin_length_SU2, spins.spins_SU2, site_pos.pos_SU2, field_SU2, onsite_interaction_SU2, bilinear_interaction_SU2, trilinear_interaction_SU2, bilinear_partners_SU2, trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
-        set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, trilinear_interaction_SU3, bilinear_partners_SU3, trilinear_partners_SU3, &(atoms->SU3), num_tri_SU2, num_tri_SU3);
+        set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, trilinear_interaction_SU3, bilinear_partners_SU3, trilinear_partners_SU3, &(atoms->SU3), num_bi_SU3, num_tri_SU3);
         
         for (size_t i=0; i < dim1; ++i){
             for (size_t j=0; j < dim2; ++j){
@@ -365,6 +370,7 @@ class mixed_lattice
         num_tri_SU2_SU3 = mixed_trilinear_partners_SU3[0].size();
         lattice_size_SU2 = dim1*dim2*dim3*N_ATOMS_SU2;
         lattice_size_SU3 = dim1*dim2*dim3*N_ATOMS_SU3;
+        cout << "Finished setting up lattice" << endl;  
         // cout << num_bi_SU2 << " " << num_tri_SU2 << " " << num_bi_SU3 << " " << num_tri_SU3 << " " << num_tri_SU2_SU3 << endl;
     };
 
@@ -481,32 +487,32 @@ class mixed_lattice
         return local_field-field_SU3[site_index];
     }
 
-    array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3>  &current_spin){
+    array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         for (size_t i=0; i < num_tri_SU2; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin.spins_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], current_spin.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], current_spin.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
         return local_field-field_SU2[site_index];
     }
 
-    array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index,const mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &current_spin){
+    array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU3> local_field = {0};
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         for (size_t i=0; i < num_tri_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin.spins_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], current_spin.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], current_spin.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
         return local_field-field_SU3[site_index];
     }
@@ -657,6 +663,22 @@ class mixed_lattice
         myfile.close();
     }
 
+    void print_mixed_spin(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> toprint){
+        for (size_t i = 0; i < lattice_size_SU2; ++i){
+            cout << "SU2: ";
+            for (size_t j = 0; j < 3; ++j){
+                cout << toprint.spins_SU2[i][j] << " ";
+            }
+            cout << endl;
+        }
+        for (size_t i = 0; i < lattice_size_SU3; ++i){
+            cout << "SU3: ";
+            for (size_t j = 0; j < 8; ++j){
+                cout << toprint.spins_SU3[i][j] << " ";
+            }
+            cout << endl;
+        }
+    }
 
     void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name){
         double T = T_start;
@@ -712,6 +734,26 @@ class mixed_lattice
         return dS;
     }
 
+
+    spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
+        spin_config_SU2 dS;
+        #pragma omp simd
+        for(size_t i = 0; i<lattice_size_SU2; ++i){
+            dS[i] = cross_prod_SU2(get_local_field_SU2_lattice(i, current_spin_SU2, current_spin_SU3)- drive_field_T_SU2(curr_time, i % N_ATOMS_SU2), current_spin_SU2[i]);
+        }
+        return dS;
+    }
+
+    spin_config_SU3 landau_lifshitz_SU3(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
+        spin_config_SU3 dS;
+        #pragma omp simd
+        for(size_t i = 0; i<lattice_size_SU3; ++i){
+            dS[i] = cross_prod_SU3(get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3)- drive_field_T_SU3(curr_time, i % N_ATOMS_SU3), current_spin_SU3[i]);
+        }
+        return dS;
+    }
+
+
     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK4_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k1(landau_lifshitz(curr_spins, curr_time));
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> lval_k2(curr_spins + k1*(0.5*step_size));
@@ -726,20 +768,40 @@ class mixed_lattice
 
 
     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK45_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k1(landau_lifshitz(curr_spins, curr_time)*step_size);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k2(landau_lifshitz(curr_spins + k1*(1.0/4.0), curr_time + step_size*(1/4))*step_size);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k3(landau_lifshitz(curr_spins + k1*(3.0/32.0) + k2*(9.0/32.0), curr_time + step_size*(3/8))*step_size);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k4(landau_lifshitz(curr_spins + k1*(1932.0/2197.0) + k2*(-7200.0/2197.0) + k3*(7296.0/2197.0), curr_time + step_size*(12/13))*step_size);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k5(landau_lifshitz(curr_spins + k1* (439.0/216.0) + k2*(-8.0) + k3*(3680.0/513.0) + k4*(-845.0/4104.0), curr_time + step_size)*step_size);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k6(landau_lifshitz(curr_spins + k1*(-8.0/27.0) + k2*(2.0) + k3*(-3544.0/2565.0)+ k4*(1859.0/4104.0)+ k5*(-11.0/40.0), curr_time + step_size/2)*step_size);
+        
+        spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
+        spin_config_SU2 k2_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(1.0/4.0), curr_spins.spins_SU3, curr_time + step_size*(1/4))*step_size;
+        spin_config_SU2 k3_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(3.0/32.0)+ k2_SU2*(9.0/32.0), curr_spins.spins_SU3 , curr_time + step_size*(3/8))*step_size;
+        spin_config_SU2 k4_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(1932.0/2197.0)+ k2_SU2*(-7200.0/2197.0) + k3_SU2*(7296.0/2197.0), curr_spins.spins_SU3 , curr_time + step_size*(12/13))*step_size;
+        spin_config_SU2 k5_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3, curr_time + step_size)*step_size;
+        spin_config_SU2 k6_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 , curr_time + step_size/2)*step_size;
 
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> y(curr_spins + k1*(25.0/216.0) + k3*(1408.0/2565.0) + k4*(2197.0/4101.0) - k5*(1.0/5.0));
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> z(curr_spins + k1*(16.0/135.0) + k3*(6656.0/12825.0) + k4*(28561.0/56430.0) - k5*(9.0/50.0) + k6*(2.0/55.0));
+        spin_config_SU2 y_SU2 = curr_spins.spins_SU2 + k1_SU2*(25.0/216.0) + k3_SU2*(1408.0/2565.0) + k4_SU2*(2197.0/4101.0) - k5_SU2*(1.0/5.0);
+        spin_config_SU2 z_SU2 = curr_spins.spins_SU2 + k1_SU2*(16.0/135.0) + k3_SU2*(6656.0/12825.0) + k4_SU2*(28561.0/56430.0) - k5_SU2*(9.0/50.0) + k6_SU2*(2.0/55.0);
 
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> diff(y - z);
-        double error = diff.length();
-        cout << error << " " << step_size << endl;
+        double error_SU2 = norm_average_2D(y_SU2-z_SU2);
+
+        spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
+        spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(1.0/4.0), curr_time + step_size*(1/4))*step_size;
+        spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(3.0/32.0) + k2_SU3*(9.0/32.0), curr_time + step_size*(3/8))*step_size;
+        spin_config_SU3 k4_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(1932.0/2197.0) + k2_SU3*(-7200.0/2197.0) + k3_SU3*(7296.0/2197.0), curr_time + step_size*(12/13))*step_size;
+        spin_config_SU3 k5_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
+        spin_config_SU3 k6_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
+
+        spin_config_SU3 y_SU3 = curr_spins.spins_SU3 + k1_SU3*(25.0/216.0) + k3_SU3*(1408.0/2565.0) + k4_SU3*(2197.0/4101.0) - k5_SU3*(1.0/5.0);
+        spin_config_SU3 z_SU3 = curr_spins.spins_SU3 + k1_SU3*(16.0/135.0) + k3_SU3*(6656.0/12825.0) + k4_SU3*(28561.0/56430.0) - k5_SU3*(9.0/50.0) + k6_SU3*(2.0/55.0);
+
+        double error_SU3 = norm_average_2D(y_SU3-z_SU3);
+
+        double error = max(error_SU2, error_SU3);
+
+        // cout << "Error: " << error_SU2 << " " << error_SU3 << " Step size: " << step_size << endl;
+
         step_size *= 0.9*pow(tol/error, 0.2);
+
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> z;
+        z.spins_SU2 = z_SU2;
+        z.spins_SU3 = z_SU3;
         if (error < tol){
             return z;
         }
@@ -748,6 +810,7 @@ class mixed_lattice
         }
         return z;
     }
+    
     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK45_step_fixed(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
         const mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> temp_spin(curr_spins);
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> temp, k1, k2, k3, k4, k5, k6, z;
@@ -812,26 +875,26 @@ class mixed_lattice
         filesystem::create_directory(dir_name);
         double T = Temp_start;
 
-        // while(T > Temp_end){
-        //     curr_accept = 0;
-        //     for(size_t i = 0; i<n_anneal; ++i){
-        //         if(overrelaxation_rate > 0){
-        //             // overrelaxation();
-        //             if (i%overrelaxation_rate == 0){
-        //                 curr_accept += metropolis(T);
-        //             }
-        //         }
-        //         else{
-        //             curr_accept += metropolis(T);
-        //         }
-        //     }
-        //     if (overrelaxation_rate > 0){
-        //         cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
-        //     }else{
-        //         cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
-        //     }
-        //     T *= 0.9;
-        // }
+        while(T > Temp_end){
+            curr_accept = 0;
+            for(size_t i = 0; i<n_anneal; ++i){
+                if(overrelaxation_rate > 0){
+                    // overrelaxation();
+                    if (i%overrelaxation_rate == 0){
+                        curr_accept += metropolis(T);
+                    }
+                }
+                else{
+                    curr_accept += metropolis(T);
+                }
+            }
+            if (overrelaxation_rate > 0){
+                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
+            }else{
+                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
+            }
+            T *= 0.9;
+        }
         write_to_file_pos(dir_name + "/pos");
         write_to_file_spin(dir_name + "/spin_t");
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);

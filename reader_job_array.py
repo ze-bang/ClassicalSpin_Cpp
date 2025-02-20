@@ -634,15 +634,10 @@ def graph_magnetostriction(filename):
     ax[1,1].set_xlabel(r"$h/J_{yy}$")
     ax[1,2].set_xlabel(r"$h/J_{yy}$")
     plt.savefig(filename+"_magnetostriction.pdf")
-<<<<<<< HEAD
 # graph_magnetostriction(directory+"/CZO")
 # graph_magnetostriction(directory+"/CHO")
 graph_magnetostriction(directory+"/CSO")
 
-=======
-    plt.clf()
-    
->>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
 mpl.rcParams.update({'font.size': 20})
 fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(8, 8), constrained_layout=True)
 ax[0,0].text(.01, .99, r"$(\mathrm{a})$", ha='left', va='top', transform=ax[0,0].transAxes,
