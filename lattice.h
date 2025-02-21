@@ -855,7 +855,7 @@ class lattice
     }
 
 
-    void molecular_dynamics(double Temp_start, double Temp_end, size_t n_anneal, size_t overrelaxation_rate, double T_start, double T_end, double step_size, string dir_name, bool gaussian_move = false){
+    void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
         // simulated_annealing(Temp_start, Temp_end, n_anneal, overrelaxation_rate, gaussian_move);
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
@@ -942,7 +942,7 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-        set_pulse(field_in, t_B_1, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
+        set_pulse(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;

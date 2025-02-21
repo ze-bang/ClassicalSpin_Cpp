@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
     string spin_config_file = argv[24] ? argv[24] : "";
     cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " saving to: " << dir_name << endl;
     // MD_TmFeO3(num_trials, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {1,0,0}, e1, e2, dir_name);
-    TmFeO3_2DCS(num_trials, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero, spin_config_file);
+    TmFeO3_2DCS(num_trials, Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {1,0,0}, dir_name, T_zero, spin_config_file);
     return 0;
 }
 
