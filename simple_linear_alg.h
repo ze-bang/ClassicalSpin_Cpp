@@ -44,7 +44,9 @@ const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
 // N. Papanicolaou, Unusual phases in quantum spin-1 systems, Nucl. Phys. B 305, 367 (1988).
 // the basis for this is (A^{xx}, A^{xy}, A^{xz}, A^{yx}, A^{yy}, A^{yz}, A^{zx}, A^{zy}, A^{zz})
 
-const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+// const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+
+
 
 
 // Somehow BLAS is slower, shelving for now until figured out a better implementation
@@ -266,10 +268,11 @@ array<double, 3> cross_prod_SU2(const array<double, 3>  &a,const array<double, 3
 
 
 array<double, 8> cross_prod_SU3(const array<double, 8>  &a,const array<double, 8> &b){
-    array<double, 8> result;
-    for(size_t i=0; i<8; i++){
-        for(size_t j=0; j <8; j++){
-            for(size_t k=0; k <8; k++){
+    const array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+    array<double, 8> result = {{{0}}};
+    for(size_t i=0; i<8; ++i){
+        for(size_t j=0; j <8; ++j){
+            for(size_t k=0; k <8; ++k){
                 result[i] += SU3_structure[i][j][k]*a[j]*b[k];
             }
         }
@@ -279,22 +282,22 @@ array<double, 8> cross_prod_SU3(const array<double, 8>  &a,const array<double, 8
 }
 
 
-array<double, 9> cross_prod_U3(const array<double, 9>  &a,const array<double, 9> &b){
-    array<double, 9> result;
-    for(size_t i=0; i<9; i++){
-        for(size_t j=0; j<9; j++){
+// array<double, 9> cross_prod_U3(const array<double, 9>  &a,const array<double, 9> &b){
+//     array<double, 9> result;
+//     for(size_t i=0; i<9; i++){
+//         for(size_t j=0; j<9; j++){
 
             
 
-            for(size_t k=0; k <9; k++){
+//             for(size_t k=0; k <9; k++){
                 
-                result[i] += SU3_structure[i][j][k]*a[j]*b[k];
-            }
-        }
-    }
+//                 result[i] += SU3_structure[i][j][k]*a[j]*b[k];
+//             }
+//         }
+//     }
 
-    return result;
-}
+//     return result;
+// }
 
 
 template <size_t N, size_t M>

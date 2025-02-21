@@ -310,7 +310,7 @@ def read_MD(dir):
 
     w0 = 0
     wmax = 15
-    w = np.linspace(w0, wmax, 800)[1:]
+    w = np.arange(w0, wmax, 1/100)[1:]
     A = DSSF(w, DSSF_K, S, P, T, False)
     A = np.log(A)
     A = A / np.max(A)
@@ -441,7 +441,7 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-dir = "TmFeO3_MD_Test"
+dir = "TmFeO3_MD_Test_xii=0.05meV"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")

@@ -249,6 +249,56 @@ class mixed_lattice
         temp_spin *= spin_l;
     }
 
+    
+    array<double,N_SU2> gen_random_spin_SU2(){
+        array<double,N_SU2> temp_spin;
+        array<double,N_SU2-2> euler_angles;
+        // double z = random_double(-1,1, gen);
+        double z = random_double_lehman(-1,1);
+        double r = sqrt(1.0 - z*z);
+
+        for(size_t i = 0; i < N_SU2-2; ++i){
+            // euler_angles[i] = random_double(0, 2*M_PI, gen);
+            euler_angles[i] = random_double_lehman(0, 2*M_PI);
+            temp_spin[i] = r;
+            for(size_t j = 0; j < i; ++j){
+                temp_spin[i] *= sin(euler_angles[j]);
+            }
+            if (i == N_SU2-3){
+                temp_spin[i+1] = temp_spin[i]*sin(euler_angles[i]);
+            }
+            temp_spin[i] *= cos(euler_angles[i]);
+
+        }
+        temp_spin[N_SU2-1] = z;
+        return temp_spin*spin_length_SU2;
+    }
+
+    array<double,N_SU3> gen_random_spin_SU3(){
+        array<double,N_SU3> temp_spin;
+        array<double,N_SU3-2> euler_angles;
+        // double z = random_double(-1,1, gen);
+        double z = random_double_lehman(-1,1);
+        double r = sqrt(1.0 - z*z);
+
+        for(size_t i = 0; i < N_SU3-2; ++i){
+            // euler_angles[i] = random_double(0, 2*M_PI, gen);
+            euler_angles[i] = random_double_lehman(0, 2*M_PI);
+            temp_spin[i] = r;
+            for(size_t j = 0; j < i; ++j){
+                temp_spin[i] *= sin(euler_angles[j]);
+            }
+            if (i == N_SU3-3){
+                temp_spin[i+1] = temp_spin[i]*sin(euler_angles[i]);
+            }
+            temp_spin[i] *= cos(euler_angles[i]);
+
+        }
+        temp_spin[N_SU3-1] = z;
+        return temp_spin*spin_length_SU3;
+    }
+
+
 
     size_t flatten_index(size_t i, size_t j, size_t k, size_t l, size_t N_ATOMS){
         return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
@@ -517,7 +567,19 @@ class mixed_lattice
         return local_field-field_SU3[site_index];
     }
 
-    double metropolis(double T){
+    array<double,N_SU2> gaussian_move_SU2(const array<double,N_SU2> &current_spin, double sigma=60){
+        array<double,N_SU2> new_spin;
+        new_spin = current_spin + gen_random_spin_SU2()*sigma;
+        return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length_SU2;
+    }
+
+    array<double,N_SU3> gaussian_move_SU3(const array<double,N_SU3> &current_spin, double sigma=60){
+        array<double,N_SU3> new_spin;
+        new_spin = current_spin + gen_random_spin_SU3()*sigma;
+        return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length_SU3;
+    }
+
+    double metropolis(double T, bool gaussian=false, double sigma=60){
         double E, E_new, dE, r;
         float spinl;
         int i;
@@ -530,9 +592,12 @@ class mixed_lattice
                 i = random_int_lehman(lattice_size_SU2);
                 auto temp_spin = spins.spins_SU2[i];
                 E = site_energy_SU2(temp_spin, i);
-                gen_random_spin(spins.spins_SU2[i], spin_length_SU2);
+                if (gaussian){
+                    spins.spins_SU2[i] = gaussian_move_SU2(spins.spins_SU2[i], sigma);
+                }else{
+                    gen_random_spin(spins.spins_SU2[i], spin_length_SU2);
+                }
                 E_new = site_energy_SU2(spins.spins_SU2[i], i);
-
                 dE = E_new - E;
             
                 if(dE < 0){
@@ -553,9 +618,12 @@ class mixed_lattice
                 // cout << i << " " << lattice_size_SU3 << endl;
                 auto temp_spin = spins.spins_SU3[i];
                 E = site_energy_SU3(temp_spin, i);
-                gen_random_spin(spins.spins_SU3[i], spin_length_SU3);
+                if (gaussian){
+                    spins.spins_SU3[i] = gaussian_move_SU3(spins.spins_SU3[i], sigma);
+                }else{
+                    gen_random_spin(spins.spins_SU3[i], spin_length_SU3);
+                }                
                 E_new = site_energy_SU3(spins.spins_SU3[i], i);
-
                 dE = E_new - E;
             
                 if(dE < 0){
@@ -730,6 +798,7 @@ class mixed_lattice
         #pragma omp simd
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             dS.spins_SU3[i] = cross_prod_SU3(get_local_field_SU3_lattice(i, current_spin)- drive_field_T_SU3(curr_time, i % N_ATOMS_SU3), current_spin.spins_SU3[i]);
+            cout << dS.spins_SU3[i][0] << " " << dS.spins_SU3[i][1] << " " << dS.spins_SU3[i][2] << " " << dS.spins_SU3[i][3] << " " << dS.spins_SU3[i][4] << " " << dS.spins_SU3[i][5] << " " << dS.spins_SU3[i][6] << " " << dS.spins_SU3[i][7] << endl;
         }
         return dS;
     }
@@ -780,7 +849,7 @@ class mixed_lattice
         spin_config_SU2 z_SU2 = curr_spins.spins_SU2 + k1_SU2*(16.0/135.0) + k3_SU2*(6656.0/12825.0) + k4_SU2*(28561.0/56430.0) - k5_SU2*(9.0/50.0) + k6_SU2*(2.0/55.0);
 
         double error_SU2 = norm_average_2D(y_SU2-z_SU2);
-
+        
         spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
         spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(1.0/4.0), curr_time + step_size*(1/4))*step_size;
         spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(3.0/32.0) + k2_SU3*(9.0/32.0), curr_time + step_size*(3/8))*step_size;
@@ -852,17 +921,35 @@ class mixed_lattice
         double c3 = 0.728985661612188;
         double c4 = 0.699226135931670;
 
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> tmp(curr_spins + landau_lifshitz(curr_spins, curr_time) * b10 * step_size);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> k(landau_lifshitz(tmp, curr_time + c1*step_size));
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> u(tmp + k * step_size * b21);
+
+        spin_config_SU2 tmp_SU2 = curr_spins.spins_SU2 + landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * b10 * step_size;
+        spin_config_SU2 k_SU2 = landau_lifshitz_SU2(tmp_SU2, curr_spins.spins_SU3, curr_time + c1*step_size);
+        spin_config_SU2 u_SU2 = tmp_SU2 + k_SU2 * step_size * b21;
         //u3
-        k.set(landau_lifshitz(u, curr_time + c2*step_size));
-        tmp.set(curr_spins * a30 + u * a32 + k * step_size * b32);
-        k.set(landau_lifshitz(tmp, curr_time + c3*step_size));
+        k_SU2 = landau_lifshitz_SU2(u_SU2, curr_spins.spins_SU3, curr_time + c2*step_size);
+        tmp_SU2 = curr_spins.spins_SU2 * a30 + u_SU2 * a32 + k_SU2 * step_size * b32;
+        k_SU2 = landau_lifshitz_SU2(tmp_SU2, curr_spins.spins_SU3, curr_time + c3*step_size);
         //u4
-        tmp.set(curr_spins * a40 + tmp * a43 + k * step_size * b43);
-        k.set(landau_lifshitz(tmp, curr_time + c4*step_size));
-        u.set(u * a52 + tmp * a54 + k * step_size * b54);
+        tmp_SU2 = curr_spins.spins_SU2 * a40 + tmp_SU2 * a43 + k_SU2 * step_size * b43;
+        k_SU2 = landau_lifshitz_SU2(tmp_SU2, curr_spins.spins_SU3, curr_time + c4*step_size);
+        u_SU2 = u_SU2 * a52 + tmp_SU2 * a54 + k_SU2 * step_size * b54;
+
+
+        spin_config_SU3 tmp_SU3 = curr_spins.spins_SU3 + landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * b10 * step_size;
+        spin_config_SU3 k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, tmp_SU3, curr_time + c1*step_size);
+        spin_config_SU3 u_SU3 = tmp_SU3 + k_SU3 * step_size * b21;
+        //u3
+        k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, u_SU3, curr_time + c2*step_size);
+        tmp_SU3 = curr_spins.spins_SU3 * a30 + u_SU3 * a32 + k_SU3 * step_size * b32;
+        k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, tmp_SU3, curr_time + c3*step_size);
+        //u4
+        tmp_SU3 = curr_spins.spins_SU3 * a40 + tmp_SU3 * a43 + k_SU3 * step_size * b43;
+        k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, tmp_SU3, curr_time + c4*step_size);
+        u_SU3 = u_SU3 * a52 + tmp_SU3 * a54 + k_SU3 * step_size * b54;
+
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> u;
+        u.spins_SU2 = u_SU2;
+        u.spins_SU3 = u_SU3;
         return u;
     }
 
@@ -874,6 +961,10 @@ class mixed_lattice
         double curr_accept;
         filesystem::create_directory(dir_name);
         double T = Temp_start;
+        double sigma = 40;
+        bool gaussian_move = true;
+        double acceptance_rate = 0;
+
 
         while(T > Temp_end){
             curr_accept = 0;
@@ -881,25 +972,32 @@ class mixed_lattice
                 if(overrelaxation_rate > 0){
                     // overrelaxation();
                     if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(T);
+                        curr_accept += metropolis(T, gaussian_move,sigma);
                     }
                 }
                 else{
-                    curr_accept += metropolis(T);
+                    curr_accept += metropolis(T, gaussian_move,sigma);
                 }
             }
             if (overrelaxation_rate > 0){
-                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal*overrelaxation_rate << endl;
+                acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
+                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }else{
-                cout << "Temperature: " << T << " Acceptance rate: " << curr_accept/n_anneal << endl;
+                acceptance_rate = curr_accept/n_anneal;
+                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
+            }
+            if (gaussian_move){
+                sigma = sigma * 0.5 / (1-acceptance_rate); 
+                cout << "Sigma is adjusted to: " << sigma << endl;   
             }
             T *= 0.9;
         }
         write_to_file_pos(dir_name + "/pos");
+        write_to_file_spin(dir_name + "/spin");
         write_to_file_spin(dir_name + "/spin_t");
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
 
-        double tol = 1e-2;
+        double tol = 1e-6;
 
         int check_frequency = 10;
         double currT = 0;
@@ -909,7 +1007,7 @@ class mixed_lattice
         time.push_back(currT);
 
         while(currT < T_end){
-            spin_t.set(RK45_step(step_size, spin_t, currT, tol));
+            spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
             write_to_file(dir_name + "/spin_t", spin_t);
             currT = currT + step_size;
             cout << "Time: " << currT << endl;
