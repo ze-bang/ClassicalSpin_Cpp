@@ -977,8 +977,6 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     x3 /= sqrt(6);
     x4 /= sqrt(6);
     double Jx, Jy, Jz, theta_in;
-
-    double Jx, Jy, Jz, theta_in;
     if (theta_or_Jxz){
         Jx = Jxx;
         Jy = Jyy;
