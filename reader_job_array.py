@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import os
 import matplotlib.tri as mtri 
 from numba import njit
+import matplotlib as mpl
+plt.rcParams['text.usetex'] = True
+# os.environ['MPLCONFIGDIR'] = os.getcwd() + "/configs/"
+
+
 z = np.array([np.array([1,1,1])/np.sqrt(3), np.array([1,-1,-1])/np.sqrt(3), np.array([-1,1,-1])/np.sqrt(3), np.array([-1,-1,1])/np.sqrt(3)])
 x = np.array([[-2,1,1],[-2,-1,-1],[2,1,-1], [2,-1,1]])/np.sqrt(6)
 y = np.array([[0,-1,1],[0,1,-1],[0,-1,-1], [0,1,1]])/np.sqrt(2)
@@ -447,8 +452,8 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
         plt.savefig(dir+"_magnetostriction.pdf")
         plt.clf()
 
-def lineread(H_start, H_end, nH, field_dir, dir, xorz):
-    fig, ax = plt.subplots()
+def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax,imp=False):
+    # fig, ax = plt.subplots(constrained_layout="True")
     HS = np.linspace(H_start, H_end, nH)
     Energies = np.zeros(nH)
     phase_diagram = np.zeros(nH)
@@ -494,26 +499,57 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz):
     mag_diagram = mag_diagram.flatten()
     Energies = Energies.flatten()
     magnetostrictions = magnetostrictions.reshape((nH,8))
-    plt.plot(HS, phase_diagram)
-    plt.savefig(dir+"/magnetization.pdf")
-    plt.clf()
-    for i in range (3):
-        np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
-    for i in range (5):
-        np.savetxt(dir+"/magnetostriction_"+str(3+i)+".txt", magnetostrictions[:,3+i])
-        plt.scatter(HS, magnetostrictions[:,3+i])
-        plt.colorbar()
-        plt.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
-        plt.clf()
-    ax.scatter(HS, magnetostrictions[:,0])
-    ax.scatter(HS, magnetostrictions[:,1])
-    ax.scatter(HS, magnetostrictions[:,2])
-    ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
-    ax.set_ylabel(r"$\Delta L/L$")
-    ax.set_xlabel(r"$h/J_{yy}$")
-    plt.savefig(dir+"/magnetostriction.pdf")
-    plt.clf()
+<<<<<<< HEAD
+    # ax.plot(HS, phase_diagram)
+    # ax.savefig(dir+"/magnetization.pdf")
+    # ax.clf()
+=======
+    # plt.plot(HS, phase_diagram)
+    # plt.savefig(dir+"/magnetization.pdf")
+    # plt.clf()
+>>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
+    # for i in range (3):
+    #     np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
+    # for i in range (5):
+    #     np.savetxt(dir+"/magnetostriction_"+str(3+i)+".txt", magnetostrictions[:,3+i])
+<<<<<<< HEAD
+    #     ax.scatter(HS, magnetostrictions[:,3+i])
+    #     ax.colorbar()
+    #     ax.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
+    #     ax.clf()
+    if imp:
+        ax.scatter(HS, magnetostrictions[:,3])
+    else:
+        ax.scatter(HS, magnetostrictions[:,0])
+        ax.scatter(HS, magnetostrictions[:,1])
+        ax.scatter(HS, magnetostrictions[:,2])
+        ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"], fontsize="16")
+    # plt.set_ylabel(r"$\Delta L/L$")
+    # plt.set_xlabel(r"$h/J_{yy}$")
+    # plt.savefig(dir+"/magnetostriction.pdf")
+    # plt.clf()
 
+=======
+    #     plt.scatter(HS, magnetostrictions[:,3+i])
+    #     plt.colorbar()
+    #     plt.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
+    #     plt.clf()
+    # plt.scatter(HS, magnetostrictions[:,0])
+    # plt.scatter(HS, magnetostrictions[:,1])
+    # plt.scatter(HS, magnetostrictions[:,2])
+    # plt.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
+    # # plt.set_ylabel(r"$\Delta L/L$")
+    # # plt.set_xlabel(r"$h/J_{yy}$")
+    # plt.savefig(dir+"/magnetostriction.pdf")
+    # plt.clf()
+    if not imp:
+        ax.scatter(HS, magnetostrictions[:,0])
+        ax.scatter(HS, magnetostrictions[:,1])
+        ax.scatter(HS, magnetostrictions[:,2])
+        ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
+    else:
+        ax.scatter(HS, magnetostrictions[:,3])
+>>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
@@ -563,21 +599,91 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 # ax[0,1].set_title("CSO Dipolar")
 # ax[1,0].set_title("CHO Octupolar")
 # ax[1,1].set_title("CHO Dipolar")
+
+# directory = "/Users/zhengbangzhou/Library/CloudStorage/OneDrive-UniversityofToronto/PhD Stuff/Projects/PSG_Pyrochlore/XYZ_project/magnetostriction"
+directory = "/home/pc_linux/ClassicalSpin_Cpp"
+
+def graph_magnetostriction(filename):
+    mpl.rcParams.update({'font.size': 20})
+    fig, ax = plt.subplots(ncols=3, nrows=2,constrained_layout=True, figsize=(16,8))
+    ax[0,0].text(.01, .99, r"$(\mathrm{a})$", ha='left', va='top', transform=ax[0,0].transAxes,
+                zorder=10,color='black')
+    ax[0,1].text(.01, .99, r"$(\mathrm{b})$", ha='left', va='top', transform=ax[0,1].transAxes,
+                zorder=10,color='black')
+    ax[0,2].text(.01, .99, r"$(\mathrm{c})$", ha='left', va='top', transform=ax[0,2].transAxes,
+                zorder=10,color='black')
+    ax[1,0].text(.01, .99, r"$(\mathrm{d})$", ha='left', va='top', transform=ax[1,0].transAxes,
+                zorder=10,color='black')
+    ax[1,1].text(.01, .99, r"$(\mathrm{e})$", ha='left', va='top', transform=ax[1,1].transAxes,
+                zorder=10,color='black')
+    ax[1,2].text(.01, .99, r"$(\mathrm{f})$", ha='left', va='top', transform=ax[1,2].transAxes,
+                zorder=10,color='black')
+    
+    lineread(0, 8, 20, "111", filename+"_octupolar_111", 0, ax[0,0])
+    ax[0,0].set_title(r"$B\parallel (111)$")
+    ax[0,0].set_ylabel(r"$\Delta L/L$")
+    lineread(0, 8, 20, "110", filename+"_octupolar_110", 0, ax[0,1])
+    ax[0,1].set_title(r"$B\parallel (110)$")
+    lineread(0, 8, 20, "001", filename+"_octupolar_001", 0, ax[0,2])
+    ax[0,2].set_title(r"$B\parallel (001)$")
+    lineread(0, 8, 20, "111", filename+"_dipolar_111", 0, ax[1,0])
+    ax[1,0].set_ylabel(r"$\Delta L/L$")
+    lineread(0, 8, 20, "110", filename+"_dipolar_110", 0, ax[1,1])
+    lineread(0, 8, 20, "001", filename+"_dipolar_001", 0, ax[1,2])
+    ax[1,0].set_xlabel(r"$h/J_{yy}$")
+    ax[1,1].set_xlabel(r"$h/J_{yy}$")
+    ax[1,2].set_xlabel(r"$h/J_{yy}$")
+    plt.savefig(filename+"_magnetostriction.pdf")
+# graph_magnetostriction(directory+"/CZO")
+# graph_magnetostriction(directory+"/CHO")
+graph_magnetostriction(directory+"/CSO")
+
+mpl.rcParams.update({'font.size': 20})
+fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(8, 8), constrained_layout=True)
+ax[0,0].text(.01, .99, r"$(\mathrm{a})$", ha='left', va='top', transform=ax[0,0].transAxes,
+            zorder=10,color='black')
+ax[0,1].text(.01, .99, r"$(\mathrm{b})$", ha='left', va='top', transform=ax[0,1].transAxes,
+            zorder=10,color='black')
+ax[1,0].text(.1, .99, r"$(\mathrm{c})$", ha='left', va='top', transform=ax[1,0].transAxes,
+            zorder=10,color='black')
+ax[1,1].text(.01, .99, r"$(\mathrm{d})$", ha='left', va='top', transform=ax[1,1].transAxes,
+            zorder=10,color='black')
+# graph_magnetostriction(directory+"/CZO")
+ax[0,0].set_ylabel(r"$\Delta L/L$")
+# ax[0].set_xlabel(r"$h/J_{yy}$")
+lineread(0, 8, 20, "001", directory+"/CHO_octupolar_001", 0, ax[0,0])
+# lineread(0, 8, 20, "111", directory+"/CHO_dipolar_111", 0)
+# lineread(0, 8, 20, "110", directory+"/CHO_dipolar_110", 0)
+lineread(0, 8, 20, "001", directory+"/CHO_dipolar_001", 0, ax[0,1])
+# ax[1].set_ylabel(r"$\Delta L/L$")
+# ax[1].set_xlabel(r"$h/J_{yy}$")
+lineread(0, 8, 20, "001", directory+"/CHO_octupolar_001", 0, ax[1,0],True)
+ax[1,0].set_ylabel(r"$S_0^x-S_1^x-S_2^x+S_3^x$")
+ax[1,0].set_xlabel(r"$h/J_{yy}$")
+# lineread(0, 8, 20, "111", directory+"/CHO_dipolar_111", 0)
+# lineread(0, 8, 20, "110", directory+"/CHO_dipolar_110", 0)
+lineread(0, 8, 20, "001", directory+"/CHO_dipolar_001", 0, ax[1,1],True)
+ax[1,1].set_xlabel(r"$h/J_{xx}$")
+
+plt.savefig("magnetostriction.pdf")
+plt.clf()
+
 # ax[0,0].text(0.1, 0.95, "(a)", transform=ax[0,0].transAxes, fontsize=12)
 # ax[0,1].text(0.1, 0.95, "(b)", transform=ax[0,1].transAxes, fontsize=12)
 # ax[1,0].text(0.1, 0.95, "(c)", transform=ax[1,0].transAxes, fontsize=12)
 # ax[1,1].text(0.1, 0.95, "(d)", transform=ax[1,1].transAxes, fontsize=12)
-lineread(0, 8, 20, "111", "CSO_octupolar_111", 0)
-lineread(0, 8, 20, "110", "CSO_octupolar_110", 0)
-lineread(0, 8, 20, "001", "CSO_octupolar_001", 0)
-lineread(0, 8, 20, "111", "CSO_dipolar_111", 0)
-lineread(0, 8, 20, "110", "CSO_dipolar_110", 0)
-lineread(0, 8, 20, "001", "CSO_dipolar_001", 0)
-lineread(0, 8, 20, "111", "CHO_octupolar_111", 0)
-lineread(0, 8, 20, "110", "CHO_octupolar_110", 0)
-lineread(0, 8, 20, "001", "CHO_octupolar_001", 0)
-lineread(0, 8, 20, "111", "CHO_dipolar_111", 0)
-lineread(0, 8, 20, "110", "CHO_dipolar_110", 0)
-lineread(0, 8, 20, "001", "CHO_dipolar_001", 0)
+# lineread(0, 8, 20, "111", "CSO_octupolar_111", 0)
+# lineread(0, 8, 20, "110", "CSO_octupolar_110", 0)
+# lineread(0, 8, 20, "001", "CSO_octupolar_001", 0)
+# lineread(0, 8, 20, "111", "CSO_dipolar_111", 0)
+# lineread(0, 8, 20, "110", "CSO_dipolar_110", 0)
+# lineread(0, 8, 20, "001", "CSO_dipolar_001", 0)
+# lineread(0, 8, 20, "111", "CHO_octupolar_111", 0)
+# lineread(0, 8, 20, "110", "CHO_octupolar_110_test", 0)
+# lineread(0, 8, 20, "110", "CHO_octupolar_110", 0)
+# lineread(0, 8, 20, "001", "CHO_octupolar_001", 0)
+# lineread(0, 8, 20, "111", "CHO_dipolar_111", 0)
+# lineread(0, 8, 20, "110", "CHO_dipolar_110", 0)
+# lineread(0, 8, 20, "001", "CHO_dipolar_001", 0)
 # plt.savefig("magnetostriction.pdf")
 # 0.1375 0.1375 1 0.2375

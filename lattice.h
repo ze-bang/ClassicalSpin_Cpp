@@ -122,7 +122,6 @@ class lattice
                         field[current_site_index] = UC.field[l];
                         onsite_interaction[current_site_index] = UC.onsite_interaction[l];
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
-                        int count = 0;
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
                             bilinear<N> J = m->second;
                             size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner);
@@ -130,10 +129,8 @@ class lattice
                             bilinear_partners[current_site_index].push_back(partner);
                             bilinear_interaction[partner].push_back(transpose2D(J.bilinear_interaction));
                             bilinear_partners[partner].push_back(current_site_index);
-                            count++;
                         }
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
-                        count = 0;
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
                             trilinear<N> J = m->second;
                             size_t partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1);
@@ -147,7 +144,6 @@ class lattice
 
                             trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
-                            count++;
                         }
                     }
                 }
@@ -859,7 +855,7 @@ class lattice
     }
 
 
-    void molecular_dynamics(double Temp_start, double Temp_end, size_t n_anneal, size_t overrelaxation_rate, double T_start, double T_end, double step_size, string dir_name, bool gaussian_move = false){
+    void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
         // simulated_annealing(Temp_start, Temp_end, n_anneal, overrelaxation_rate, gaussian_move);
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
@@ -946,7 +942,7 @@ class lattice
             cross_prod = cross_prod_SU3;
         }
 
-        set_pulse(field_in, t_B_1, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
+        set_pulse(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;

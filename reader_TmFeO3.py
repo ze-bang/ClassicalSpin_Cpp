@@ -24,14 +24,14 @@ P2 = 2*np.pi * np.array([3, 0, 3])
 P3 = 2*np.pi * np.array([3, 0, 1])
 P4 = 2*np.pi * np.array([3, 2, 1])
 
-graphres = 16
+graphres = 12
 stepN = np.linalg.norm(P2-P1)/graphres
 
 
 #Path to 1-10
-P12 = drawLine(P1, P2, stepN)
-P23 = drawLine(P2, P3, stepN)
-P34 = drawLine(P3, P4, stepN)
+P12 = drawLine(P1, P2, stepN)[1:-1]
+P23 = drawLine(P2, P3, stepN)[1:-1]
+P34 = drawLine(P3, P4, stepN)[1:-1]
 
 
 
@@ -303,14 +303,14 @@ def read_MD_tot(dir):
 
 def read_MD(dir):
     directory = os.fsencode(dir)
-    P = np.loadtxt(dir + "/pos.txt")
+    P = np.loadtxt(dir + "/pos_SU2.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
 
-    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
+    S = np.loadtxt(dir + "/spin_t_SU2.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
     wmax = 15
-    w = np.linspace(w0, wmax, 800)[1:]
+    w = np.arange(w0, wmax, 1/50)[1:]
     A = DSSF(w, DSSF_K, S, P, T, False)
     A = np.log(A)
     A = A / np.max(A)
@@ -441,7 +441,7 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-dir = "MD_TMFeO3_test"
+dir = "MD_TFO_test"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")

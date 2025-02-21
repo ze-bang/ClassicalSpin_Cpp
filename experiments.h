@@ -102,7 +102,7 @@ void MD_kitaev_honeycomb(size_t num_trials, double K, double Gamma, double Gamma
         // for (size_t i = 0; i<100000; ++i){
         //     MC.deterministic_sweep(gen);
         // }
-        MC.molecular_dynamics(1,1e-3, 1000000, 100, 0, 600, 0.25, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
     }
 }
 
@@ -373,11 +373,11 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     for(size_t i = 0; i < num_trials; ++i){
         lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 2.5);
         MC_FE.simulated_annealing(T_start, T_end, 10000, 0, false);
-        MC_FE.molecular_dynamics(T_start, T_end, 10000, 0, 0, 200/Jai, 5e-2/Jai, dir+"/"+std::to_string(i));
+        MC_FE.molecular_dynamics(0, 200/Jai, 5e-2/Jai, dir+"/"+std::to_string(i));
     }
 }
 
-void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
+void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
     filesystem::create_directory(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -461,7 +461,6 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     Fe_atoms.set_field(fielddir*h, 3);
 
     //Tm atoms
-
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
@@ -536,15 +535,26 @@ void MD_TmFeO3(int num_trials, double Jai, double Jbi, double Jci, double J2ai, 
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
-    // for(size_t i = 0; i < num_trials; ++i){
-    //     lattice<3, 4, 8, 8, 8> MC_FE(&Fe_atoms, 2.5);
-    //     MC_FE.simulated_annealing(15, 1e-3, 10000, 0, true);
-    //     MC_FE.molecular_dynamics(15, 1e-3, 10000, 0, 0, 1000, 1e-1, dir+"/"+std::to_string(i));
-    // }
+    for(size_t i = 0; i < num_trials; ++i){
+        mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
+        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
+    }
 }
 
 
-void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
+void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
+    int initialized;
+
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
     filesystem::create_directory(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -653,26 +663,262 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     MC.write_to_file_pos(dir+"/pos.txt");
     MC.write_to_file_spin(dir+"/spin_0.txt", MC.spins);
 
-    filesystem::create_directory(dir+"/M_time_0");
-    MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
+    if (rank==0){
+        filesystem::create_directory(dir+"/M_time_0"+ "_rank_"+std::to_string(rank));
+        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "_rank_"+std::to_string(rank) + "/M0");
+    }
 
     ofstream run_param;
     run_param.open(dir + "/param.txt");
     run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
     run_param.close();
 
-    double current_tau = tau_start;
+    
+    int tau_length = int(tau_steps/size);
 
-    for(int i=0; i< tau_steps;++i){
-        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i));
+    double current_tau = tau_start+tau_steps*rank/size;
+
+    for(int i=0; i< tau_length;++i){
+        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
         cout << "Time: " << current_tau << endl;
-        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) + "/M1");
-        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+ "/M01");
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) +"_rank_"+std::to_string(rank) + "/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank) + "/M01");
         current_tau += tau_step_size;
+    }
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
     }
 }
 
-void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
+void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
+    int initialized;
+
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    filesystem::create_directory(dir);
+    TmFeO3_Fe<3> Fe_atoms;
+    TmFeO3_Tm<8> Tm_atoms;
+
+    array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
+    array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
+    array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+
+    array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+
+    array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
+
+    array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
+    //In plane interactions
+
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+    //Next Nearest Neighbour
+    Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 1, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 1, 1, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 2, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+    //Out of plane interaction
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,1});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
+
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,1});
+
+    //single ion anisotropy
+    Fe_atoms.set_onsite_interaction(K, 0);
+    Fe_atoms.set_onsite_interaction(K, 1);
+    Fe_atoms.set_onsite_interaction(K, 2);
+    Fe_atoms.set_onsite_interaction(K, 3);
+
+    //Dzyaloshinskii-Moriya interaction
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
+    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
+
+    Fe_atoms.set_field(fielddir*h, 0);
+    Fe_atoms.set_field(fielddir*h, 1);
+    Fe_atoms.set_field(fielddir*h, 2);
+    Fe_atoms.set_field(fielddir*h, 3);
+
+    //Tm atoms
+    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
+    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
+    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
+    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
+
+
+    TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
+
+    array<array<array<double,3>,3>,8> xi = {{{0}}};
+
+    xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+    xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+
+    ///////////////////
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {0,0,1}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {0,0,1}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
+
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {1,0,0}, {1,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,0,0}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
+    //////////////////
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
+
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,0,0}, {0,0,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
+    TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {-1,1,0}, {-1,1,1});
+    //////////////////
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {1,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {1,0,0}, {0,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {1,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {1,0,0}, {0,1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,1,0}, {0,1,0});
+    //////////////////
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {0,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {0,0,0}, {1,-1,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {0,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {0,0,0}, {1,-1,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
+    TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
+
+    array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
+
+    double pulse_amp = 0.05;
+    double pulse_width = 0.38;
+    double pulse_freq = 0.33;
+
+    int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
+    int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
+    tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
+    T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
+
+    mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+
+    if (spin_config != ""){
+        MC.read_spin_from_file(spin_config);
+    }else{
+        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        if (T_zero){
+            for (size_t i = 0; i<100000; ++i){
+                MC.deterministic_sweep();
+            }
+        }
+    }
+    MC.write_to_file_pos(dir+"/pos.txt");
+    MC.write_to_file_spin(dir+"/spin_0.txt");
+
+    if (rank==0){
+        filesystem::create_directory(dir+"/M_time_0"+ "_rank_"+std::to_string(rank));
+        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "_rank_"+std::to_string(rank) + "/M0");
+    }
+
+    ofstream run_param;
+    run_param.open(dir + "/param.txt");
+    run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
+    run_param.close();
+
+    
+    int tau_length = int(tau_steps/size);
+
+    double current_tau = tau_start+tau_steps*rank/size;
+
+    for(int i=0; i< tau_length;++i){
+        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
+        cout << "Time: " << current_tau << endl;
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) +"_rank_"+std::to_string(rank) + "/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank) + "/M01");
+        current_tau += tau_step_size;
+    }
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
+}
+
+void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -686,7 +932,7 @@ void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double t
     filesystem::create_directory(dir);
 
     for(size_t i = 0; i < num_trials; ++i){
-        MD_TmFeO3_2DCS(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, Jai, Jbi, Jci, J2ai, J2bi, J2ci, Ka, Kc, D1,  D2, h,fielddir, dir+"/"+std::to_string(i), T_zero, spin_config);
+        MD_TmFeO3_Fe_2DCS(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, Jai, Jbi, Jci, J2ai, J2bi, J2ci, Ka, Kc, D1,  D2, h,fielddir, dir+"/"+std::to_string(i), T_zero, spin_config);
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -808,7 +1054,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     for(int i=start; i<end;++i){
         lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
         MC.simulated_annealing(5, 1e-3, 1e4, 10, true);
-        MC.molecular_dynamics(5, 1e-3, 1e4, 0, 0, 600, 0.25, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
         for(int i=0; i<1e6; ++i){
             MC.deterministic_sweep();
         }
@@ -977,25 +1223,29 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
     x3 /= sqrt(6);
     x4 /= sqrt(6);
     double Jx, Jy, Jz, theta_in;
+    cout << "Begin simulated annealing with parameters: " << Jxx << " " << Jyy << " " << Jzz << " " << theta_in << endl;
     if (theta_or_Jxz){
+
         Jx = Jxx;
         Jy = Jyy;
         Jz = Jzz;
         theta_in = theta;
     }
     else{
-        double Jz_Jx = Jzz-Jxx;
-        double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
-        Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*theta*theta)/2; 
         Jy = Jyy;
-        Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*theta*theta)/2; 
-        theta_in = atan(2*theta/(Jzz-Jxx))/2;
+        theta_in = atan(2*theta/(Jxx-Jzz))/2;
+        Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz + sin(2*theta_in)*theta;
+        Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz - sin(2*theta_in)*theta;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+        // Jx = (Jxx + Jzz)/2 - sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // Jz = (Jxx + Jzz)/2 + sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
         double maxJ = max(Jx, max(Jy, Jz));
         Jx /= maxJ;
         Jy /= maxJ;
         Jz /= maxJ;
     }
-    cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+    cout << "Renormalized parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
     array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
     array<double, 3> field = field_dir*h;
 
