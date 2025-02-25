@@ -445,8 +445,15 @@ void simulated_annealing_TmFeO3(int num_trials, double Temp_start, double Temp_e
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
     for(size_t i = 0; i < num_trials; ++i){
-        mixed_lattice<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
-        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true, dir+to_string(i));
+        mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        if (T_zero){
+            for(size_t i = 0; i<100000; ++i){
+                MC.deterministic_sweep();
+            }
+        }
+        MC.write_to_file_pos(dir+"/pos");
+        MC.write_to_file_spin(dir+"/spin"+ to_string(i));
     }
 }
 
@@ -1028,7 +1035,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 0.05;
+    double pulse_amp = 0.5;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -1037,7 +1044,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
-    mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
+    mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
 
     if (spin_config != ""){
         MC.read_spin_from_file(spin_config);

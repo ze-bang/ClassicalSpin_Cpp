@@ -323,7 +323,7 @@ class lattice
             }
             else{
                 for(size_t j=0; j < N; ++j){
-                    spins[i][j] = -local_field[j]/norm;
+                    spins[i][j] = -local_field[j]/norm*spin_length;
                 }
             }
             count++;

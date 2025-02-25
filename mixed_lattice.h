@@ -730,7 +730,7 @@ class mixed_lattice
                 continue;
             }
             else{
-                spins.spins_SU2[i] = local_field/(-norm);
+                spins.spins_SU2[i] = local_field/(-norm)*spin_length_SU2;
             }
         }
         for(size_t i = 0; i<lattice_size_SU3; ++i){
@@ -740,7 +740,7 @@ class mixed_lattice
                 continue;
             }
             else{
-                spins.spins_SU3[i] = local_field/(-norm);
+                spins.spins_SU3[i] = local_field/(-norm)*spin_length_SU3;
             }
         }
     }

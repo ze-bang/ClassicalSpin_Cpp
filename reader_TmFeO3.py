@@ -356,7 +356,7 @@ def read_2D_nonlinear(dir):
     domain = 500
     omega_range = 0.2
     M_NL = np.zeros((int(tau_step), domain))
-    w = np.arange(-omega_range, omega_range, 1/600)
+    w = np.arange(-omega_range, omega_range, 1/100)
     T = np.linspace(time_start, time_end, int(time_step)) 
     T = T[-domain:]
     ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
@@ -449,7 +449,7 @@ read_MD_tot(dir)
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-# read_2D_nonlinear_tot("MD_TmFeO3_test")
+read_2D_nonlinear_tot("TmFeO3_2DCS_test)
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
