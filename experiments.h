@@ -1072,7 +1072,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     
     int tau_length = int(tau_steps/size);
 
-    double current_tau = tau_start+tau_steps*rank/size;
+    double current_tau = tau_start+tau_steps*rank/size*tau_step_size;
 
     for(int i=0; i< tau_length;++i){
         filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
