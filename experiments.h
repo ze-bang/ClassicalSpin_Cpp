@@ -1037,7 +1037,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
-    mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+    mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
 
     if (spin_config != ""){
         MC.read_spin_from_file(spin_config);
