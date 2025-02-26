@@ -355,7 +355,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
                 for i in range(1,len(heat_capacity[1])):
                     entropy[i-1] = -np.trapz(Cv_integrand[i:], heat_capacity[0][i:]) + np.log(2)
                 np.savetxt(dir + "/" + filename + "/entropy.txt", entropy)
-                entropy_diagram[int(info[4]), int(info[5])] = entropy[0] 
+                entropy_diagram[int(info[4]), int(info[5])] = entropy[0] if entropy[0]>0 else 0
                 mag_diagram[int(info[4]), int(info[5])] = np.abs(magnetization(S, n)[2])
                 Energies[int(info[4]), int(info[5])] = np.mean(E)
             except:
