@@ -12,7 +12,7 @@ using namespace std;
 
 template <size_t N> 
 struct bilinear{
-    array<array<double,N>, N> bilinear_interaction;
+    array<double, N*N> bilinear_interaction;
     size_t partner;
     array<int, 3> offset;
 
@@ -20,24 +20,32 @@ struct bilinear{
 
     bilinear(){
         partner = -1;
-        for(size_t i =0; i<N; i++){
-            for (size_t j=0; j<N; j++){
-                this->bilinear_interaction[i][j] = 0;
-            }
+        for(size_t i =0; i<N*N; i++){
+            this->bilinear_interaction[i] = 0;
         }
         for(size_t i=0; i<3; i++) {
             this->offset[i] = 0;
         }
     }
 
-    bilinear(const array<array<double,N>, N>  &b_set, const int p_set) : bilinear_interaction(b_set), partner(p_set) {
+    bilinear(const array<array<double,N>,N>  &b_set, const int p_set) : partner(p_set) {
+        for(size_t i=0; i<N; i++){
+            for (size_t j=0; j<N; j++){
+                this->bilinear_interaction[i*N+j] = b_set[i][j];
+            }
+        }
         for(size_t i=0; i<3; i++) {
             this->offset[i] = 0;
         }
     };
 
 
-    bilinear(const array<array<double,N>, N>  &b_set, int p_set, const array<int, 3> &o_set) : bilinear_interaction(b_set), partner(p_set) {
+    bilinear(const array<array<double,N>,N>  &b_set, int p_set, const array<int, 3> &o_set) : partner(p_set) {
+        for(size_t i=0; i<N; i++){
+            for (size_t j=0; j<N; j++){
+                this->bilinear_interaction[i*N+j] = b_set[i][j];
+            }
+        }
         for(size_t i=0; i<3; i++) {
             this->offset[i] = o_set[i];
         }
@@ -136,7 +144,7 @@ struct UnitCell{
     array<array<double,3>, 3> lattice_vectors;
 
     array<array<double, N>, N_ATOMS> field;
-    array<array<array<double, N>, N>, N_ATOMS> onsite_interaction;
+    array<array<double, N * N>, N_ATOMS> onsite_interaction;
     multimap<int, bilinear<N>> bilinear_interaction;
     multimap<int, trilinear<N>> trilinear_interaction;
 
@@ -182,7 +190,7 @@ struct UnitCell{
         trilinear_interaction.insert(make_pair(source, t_set));
     };
 
-    void set_onsite_interaction(const array<array<double,N>, N> &oin, size_t index){
+    void set_onsite_interaction(const array<double,N * N> &oin, size_t index){
         onsite_interaction[index] = oin;
     };
 
