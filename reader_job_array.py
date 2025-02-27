@@ -499,37 +499,13 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax,imp=False):
     mag_diagram = mag_diagram.flatten()
     Energies = Energies.flatten()
     magnetostrictions = magnetostrictions.reshape((nH,8))
-<<<<<<< HEAD
-    # ax.plot(HS, phase_diagram)
-    # ax.savefig(dir+"/magnetization.pdf")
-    # ax.clf()
-=======
     # plt.plot(HS, phase_diagram)
     # plt.savefig(dir+"/magnetization.pdf")
     # plt.clf()
->>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
     # for i in range (3):
     #     np.savetxt(dir+"/magnetostriction_"+magnetostriction_string[i]+".txt", magnetostrictions[:,i])
     # for i in range (5):
     #     np.savetxt(dir+"/magnetostriction_"+str(3+i)+".txt", magnetostrictions[:,3+i])
-<<<<<<< HEAD
-    #     ax.scatter(HS, magnetostrictions[:,3+i])
-    #     ax.colorbar()
-    #     ax.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
-    #     ax.clf()
-    if imp:
-        ax.scatter(HS, magnetostrictions[:,3])
-    else:
-        ax.scatter(HS, magnetostrictions[:,0])
-        ax.scatter(HS, magnetostrictions[:,1])
-        ax.scatter(HS, magnetostrictions[:,2])
-        ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"], fontsize="16")
-    # plt.set_ylabel(r"$\Delta L/L$")
-    # plt.set_xlabel(r"$h/J_{yy}$")
-    # plt.savefig(dir+"/magnetostriction.pdf")
-    # plt.clf()
-
-=======
     #     plt.scatter(HS, magnetostrictions[:,3+i])
     #     plt.colorbar()
     #     plt.savefig(dir+"/magnetostriction_"+str(3+i)+".pdf")
@@ -549,7 +525,6 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax,imp=False):
         ax.legend([r"$L^{(" + field_dir +")}_{[111]}$", r"$L^{(" + field_dir +")}_{[110]}$", r"$L^{(" + field_dir +")}_{[001]}$"])
     else:
         ax.scatter(HS, magnetostrictions[:,3])
->>>>>>> ec3a1db88f42daee5e8e0f965702cf8ac5ebc331
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
