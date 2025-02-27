@@ -1060,8 +1060,8 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     MC.write_to_file_spin(dir+"/spin_0.txt");
 
     if (rank==0){
-        filesystem::create_directory(dir+"/M_time_0"+ "_rank_"+std::to_string(rank));
-        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "_rank_"+std::to_string(rank) + "/M0");
+        filesystem::create_directory(dir+"/M_time_0");
+        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
     }
 
     ofstream run_param;
@@ -1075,10 +1075,10 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     double current_tau = tau_start+tau_steps*rank/size*tau_step_size;
 
     for(int i=0; i< tau_length;++i){
-        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
+        filesystem::create_directory(dir+"/M_time_"+ std::to_string(current_tau));
         cout << "Time: " << current_tau << endl;
-        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) +"_rank_"+std::to_string(rank) + "/M1");
-        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank) + "/M01");
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M01");
         current_tau += tau_step_size;
     }
 

@@ -1228,6 +1228,13 @@ class mixed_lattice
         return mag/double(lattice_size_SU2);
     }
 
+    array<double,N_SU2>  magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t){
+        array<double,N_SU2> mag = {{0}};
+        for (size_t i=0; i< lattice_size_SU2; ++i){
+            mag = mag + pow(-1,i)*spin_t.spins_SU2[i];
+        }
+        return mag/double(lattice_size_SU2);
+    }
 
     
     void M_B_t(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
