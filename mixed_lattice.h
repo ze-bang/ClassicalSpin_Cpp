@@ -1231,12 +1231,11 @@ class mixed_lattice
     array<double,N_SU2>  magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t){
         array<double,N_SU2> mag = {{0}};
         for (size_t i=0; i< lattice_size_SU2; ++i){
-            mag = mag + pow(-1,i)*spin_t.spins_SU2[i];
+            mag = mag + spin_t.spins_SU2[i]*pow(-1,i);
         }
         return mag/double(lattice_size_SU2);
     }
 
-    
     void M_B_t(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
         if (dir_name != ""){
@@ -1248,14 +1247,14 @@ class mixed_lattice
         size_t count = 1;
         vector<double> time;
         time.push_back(currT);
-        write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local(spin_t));
+        write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
 
         set_pulse_SU2(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
             spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
-            write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local(spin_t));
+            write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             time.push_back(currT);
@@ -1285,11 +1284,11 @@ class mixed_lattice
         vector<double> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local(spin_t));
+        write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
         set_pulse_SU2(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
             spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
-            write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local(spin_t));
+            write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
             currT = currT + step_size;
             time.push_back(currT);
             count++;
