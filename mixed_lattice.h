@@ -428,7 +428,7 @@ class mixed_lattice
         ifstream file;
         file.open(filename+"_SU2.txt");
         if (!file){
-            cout << "Unable to open file";
+            cout << "Unable to open file " + filename +"_SU2.txt";
             exit(1);
         }
         string line;
@@ -446,7 +446,7 @@ class mixed_lattice
 
         file.open(filename+"_SU3.txt");
         if (!file){
-            cout << "Unable to open file";
+            cout << "Unable to open file"+filename+"_SU3.txt";
             exit(1);
         }
         count = 0;
