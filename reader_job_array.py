@@ -856,11 +856,11 @@ def graph_magnetostriction_111_111(filename):
 # # plt.savefig("minoru_111_111_rough_estimate.pdf")
 # magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_octupolar_111", A[0]*2.325*0.0579/0.044, A[1])
 # magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_dipolar_111", A[0]*2.325*0.0579/0.046, A[1])
-A = np.loadtxt("TmFeO3_2DCS.txt", dtype=np.complex128)
-tograph = np.abs(A)
-tograph = np.log(tograph)
-# tograph = np.fft.fftshift(tograph)
-# tograph[int(len(tograph)/2)-5:int(len(tograph)/2)+5,:] = 0
-# tograph[:,int(len(tograph)/2)-5:int(len(tograph)/2)+5] = 0
-plt.imshow(tograph, origin="lower", aspect="auto", extent=[-10, 10, -10, 10])
-plt.savefig("TmFeO3_2DCS.pdf")
+# A = np.loadtxt("TmFeO3_2DCS.txt", dtype=np.complex128)
+# tograph = np.abs(A)
+# tograph = np.log(tograph)
+# # tograph = np.fft.fftshift(tograph)
+# # tograph[int(len(tograph)/2)-5:int(len(tograph)/2)+5,:] = 0
+# # tograph[:,int(len(tograph)/2)-5:int(len(tograph)/2)+5] = 0
+# plt.imshow(tograph, origin="lower", aspect="auto", extent=[-10, 10, -10, 10])
+# plt.savefig("TmFeO3_2DCS.pdf")
