@@ -372,7 +372,7 @@ def read_2D_nonlinear(dir):
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
     # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = M_NL
-    # M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
     # M_NL_FF = np.log(M_NL_FF)
     # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
@@ -392,7 +392,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     M0_cutoff = np.where(M0_T >= 0)[0][0]
 
 
-    omega_range = 0.2
+    omega_range = 10
 
     w = np.arange(-omega_range, omega_range, 1/50)
     M_NL_FF = np.zeros((len(w), len(w)))
@@ -422,7 +422,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
             except:
                 continue
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    plt.imshow(np.abs(M_NL_FF), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
     # plt.pcolormesh(w, w, np.log(M_NL_FF))
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
