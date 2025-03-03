@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     Jzz /= Jmax;
     double h_min = argv[4] ? atof(argv[4])/Jmax : 0.0;
     double h_max = argv[5] ? atof(argv[5])/Jmax : 0.0;
-    int num_h = argv[6] ? atoi(argv[6])/Jmax : 0;
+    int num_h = argv[6] ? atoi(argv[6]) : 0;
     string dir_string = argv[7] ? argv[7] : "001";
     double Jxz = argv[8] ? atof(argv[8]) : 0.0;
     bool theta_or_Jxz = argv[9] ? atoi(argv[9]) : false;
@@ -32,6 +32,8 @@ int main(int argc, char** argv) {
     }
     string dir = argv[10] ? argv[10] : "";
     bool save = argv[11] ? atoi(argv[11]) : false;
+    cout << "Initializing molecular dynamic calculation with parameters: Jxx: " << Jxx << " Jyy: " << Jyy << " Jzz: " << Jzz << 
+    " Jxz: " << Jxz << " H: " << h_min << " " << h_max << " " << num_h << " field direction : " << dir_string << " saving to: " << dir << endl;
     pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, Jxz, theta_or_Jxz, save);
     return 0;
 }

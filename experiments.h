@@ -548,7 +548,7 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     }
 }
 
-void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
+void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir, string spin_config_filename){
     filesystem::create_directory(dir);
     
     int initialized;
@@ -719,10 +719,14 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
 
     int trial_section = int(num_trials/size);
 
-
     for(size_t i = rank*trial_section; i < (rank+1)*trial_section; ++i){
-        mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
-        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+        if (spin_config_filename != ""){
+            MC.read_spin_from_file(spin_config_filename);
+        }
+        else{
+            MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        }
         MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
     }
 }
