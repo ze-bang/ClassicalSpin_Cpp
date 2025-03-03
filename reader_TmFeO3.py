@@ -27,7 +27,7 @@ P1 = 2*np.pi * np.array([0, 0, 0])
 P2 = 2*np.pi * np.array([0, 1, 0])
 P3 = 2*np.pi * np.array([0, 1, 1])
 P4 = 2*np.pi * np.array([0, 1, 2])
-graphres = 10
+graphres = 6
 stepN = np.linalg.norm(P2-P1)/graphres
 
 
