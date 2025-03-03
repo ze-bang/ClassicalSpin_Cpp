@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int slurm_ID = argv[23] ? atoi(argv[23]) : 1;
     int total_jobs = argv[24] ? atoi(argv[24]) : 1;
-    string spin_config_file = argv[24] ? argv[24] : "";
+    string spin_config_file = argv[25] ? argv[25] : "";
 
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;
