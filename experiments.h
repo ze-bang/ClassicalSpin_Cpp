@@ -550,6 +550,17 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
 
 void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
     filesystem::create_directory(dir);
+    
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
@@ -706,7 +717,10 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
-    for(size_t i = 0; i < num_trials; ++i){
+    int trial_section = int(num_trials/size);
+
+
+    for(size_t i = rank*trial_section; i < (rank+1)*trial_section; ++i){
         mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
         MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
@@ -1448,7 +1462,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 
     lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir, save);
+    MC.simulated_annealing(5, 1e-2, 1e4, 0, true, dir, save);
 }
 
 // void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){

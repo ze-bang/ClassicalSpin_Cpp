@@ -19,12 +19,15 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-P1 = 2*np.pi * np.array([1, 0, 3])
-P2 = 2*np.pi * np.array([3, 0, 3])
-P3 = 2*np.pi * np.array([3, 0, 1])
-P4 = 2*np.pi * np.array([3, 2, 1])
-
-graphres = 12
+# P1 = 2*np.pi * np.array([1, 0, 3])
+# P2 = 2*np.pi * np.array([3, 0, 3])
+# P3 = 2*np.pi * np.array([3, 0, 1])
+# P4 = 2*np.pi * np.array([3, 2, 1])
+P1 = 2*np.pi * np.array([0, 0, 0])
+P2 = 2*np.pi * np.array([0, 1, 0])
+P3 = 2*np.pi * np.array([0, 1, 1])
+P4 = 2*np.pi * np.array([0, 1, 2])
+graphres = 10
 stepN = np.linalg.norm(P2-P1)/graphres
 
 
@@ -394,7 +397,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
 
     omega_range = 10
 
-    w = np.arange(-omega_range, omega_range, 1/50)
+    w = np.arange(-omega_range, omega_range, 0.2)
     M_NL_FF = np.zeros((len(w), len(w)))
 
     M0_w = contract('t, wt->w', M0[M0_cutoff:], np.exp(1j*contract('w, t->wt', w, M0_T[M0_cutoff:])))
@@ -447,15 +450,17 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-# dir = "MD_TFO_test"
-# read_MD_tot(dir)
+dir = "TmFeO3_MD_Test"
+read_MD_tot(dir)
+dir = "TmFeO3_MD_Test_xii=0.05meV"
+read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
