@@ -450,17 +450,17 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-dir = "TmFeO3_MD_Test"
-read_MD_tot(dir)
-dir = "TmFeO3_MD_Test_xii=0.05meV"
-read_MD_tot(dir)
+# dir = "TmFeO3_MD_Test"
+# read_MD_tot(dir)
+# dir = "TmFeO3_MD_Test_xii=0.05meV"
+# read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
+read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])

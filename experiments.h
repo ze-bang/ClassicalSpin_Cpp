@@ -445,7 +445,7 @@ void simulated_annealing_TmFeO3(int num_trials, double Temp_start, double Temp_e
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
     for(size_t i = 0; i < num_trials; ++i){
-        mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+        mixed_lattice<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
         MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
         if (T_zero){
             for(size_t i = 0; i<100000; ++i){
@@ -828,7 +828,7 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
 
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 0.05;
+    double pulse_amp = 2.2;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -853,8 +853,8 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
     MC.write_to_file_spin(dir+"/spin_0.txt", MC.spins);
 
     if (rank==0){
-        filesystem::create_directory(dir+"/M_time_0"+ "_rank_"+std::to_string(rank));
-        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "_rank_"+std::to_string(rank) + "/M0");
+        filesystem::create_directory(dir+"/M_time_0");
+        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "/M0");
     }
 
     ofstream run_param;
@@ -862,16 +862,17 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
     run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
     run_param.close();
 
-    
+
     int tau_length = int(tau_steps/size);
 
-    double current_tau = tau_start+tau_steps*rank/size;
+    double current_tau = tau_start+tau_steps*rank/size*tau_step_size;
+
 
     for(int i=0; i< tau_length;++i){
-        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
+        filesystem::create_directory(dir+"/M_time_"+std::to_string(current_tau));
         cout << "Time: " << current_tau << endl;
-        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) +"_rank_"+std::to_string(rank) + "/M1");
-        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank) + "/M01");
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M01");
         current_tau += tau_step_size;
     }
 
