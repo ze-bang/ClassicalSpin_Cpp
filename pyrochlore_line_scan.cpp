@@ -32,9 +32,10 @@ int main(int argc, char** argv) {
     }
     string dir = argv[10] ? argv[10] : "";
     bool save = argv[11] ? atoi(argv[11]) : false;
+    double TargetT = argv[12] ? atof(argv[12]) : 0.0;
     cout << "Initializing molecular dynamic calculation with parameters: Jxx: " << Jxx << " Jyy: " << Jyy << " Jzz: " << Jzz << 
     " Jxz: " << Jxz << " H: " << h_min << " " << h_max << " " << num_h << " field direction : " << dir_string << " saving to: " << dir << endl;
-    pyrochlore_line_scan(Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, Jxz, theta_or_Jxz, save);
+    pyrochlore_line_scan(TargetT, Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, Jxz, theta_or_Jxz, save);
     return 0;
 }
 
