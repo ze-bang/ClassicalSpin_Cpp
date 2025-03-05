@@ -1361,7 +1361,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     }
 
 }
-void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
+void  simulated_annealing_pyrochlore(double TargetT, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -1449,7 +1449,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 
     lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir, save);
+    MC.simulated_annealing(5, TargetT, 1e4, 0, true, dir, save);
 }
 
 // void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
@@ -1625,7 +1625,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
 
 }
 
-void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double theta, bool theta_or_Jxz, bool save){
+void pyrochlore_line_scan(double TargetT, double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double theta, bool theta_or_Jxz, bool save){
     filesystem::create_directory(dir);
     int initialized;
     MPI_Initialized(&initialized);
@@ -1646,7 +1646,7 @@ void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, doub
         double h = h_min + i*(h_max-h_min)/num_h;
         cout << "h: " << h << "i: " << i << endl;
         string subdir = dir + "/h_" + std::to_string(h) + "_index_" + std::to_string(i);
-        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, theta, theta_or_Jxz, save);
+        simulated_annealing_pyrochlore(TargetT, Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, theta, theta_or_Jxz, save);
     }
 
     int finalized;
