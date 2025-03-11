@@ -920,6 +920,15 @@ class lattice
         return mag/double(lattice_size);
     }
 
+    array<double,N> magnetization_local_antiferro(const spin_config &current_spins){
+        array<double,N> mag = {{0}};
+        for (size_t i=0; i< lattice_size; ++i){
+            mag = mag + current_spins[i]*pow(-1,i);
+        }
+        return mag/double(lattice_size);
+    }
+
+
     void M_B_t(array<array<double,N>, N_ATOMS> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
         spin_config spin_t = spins;
         if (dir_name != ""){
@@ -947,7 +956,9 @@ class lattice
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
             spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
-            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
+            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local_antiferro(spin_t));
+            write_to_file_magnetization_local(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
+
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
             time.push_back(currT);
@@ -983,11 +994,15 @@ class lattice
         vector<double> time;
 
         time.push_back(currT);
-        write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
+        write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local_antiferro(spin_t));
+        write_to_file_magnetization_local(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
+
         set_pulse(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
             spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
-            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
+            write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local_antiferro(spin_t));
+            write_to_file_magnetization_local(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
+            
             currT = currT + step_size;
             time.push_back(currT);
             count++;

@@ -390,7 +390,7 @@ def read_2D_nonlinear(dir):
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
     # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = M_NL
-    # M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
     # M_NL_FF = np.log(M_NL_FF)
     # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
@@ -410,7 +410,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     M0_cutoff = np.where(M0_T >= 0)[0][0]
 
 
-    omega_range = 0.2
+    omega_range = 10
 
     w = np.arange(-omega_range, omega_range, 0.2)
     M_NL_FF = np.zeros((len(w), len(w)))
@@ -476,6 +476,7 @@ def read_2D_nonlinear_tot(dir):
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
+read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
