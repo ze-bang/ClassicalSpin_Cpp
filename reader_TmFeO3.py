@@ -19,10 +19,10 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-P1 = 2*np.pi * np.array([1, 0, 3])
-P2 = 2*np.pi * np.array([3, 0, 3])
-P3 = 2*np.pi * np.array([3, 0, 1])
-P4 = 2*np.pi * np.array([3, 2, 1])
+P1 = 2*np.pi * np.array([0, 0, 0])
+P2 = 2*np.pi * np.array([1, 0, 0])
+P3 = 2*np.pi * np.array([1, 0, 1])
+P4 = 2*np.pi * np.array([1, 1, 1])
 
 graphres = 12
 stepN = np.linalg.norm(P2-P1)/graphres
