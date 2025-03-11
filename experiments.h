@@ -446,7 +446,14 @@ void simulated_annealing_TmFeO3(int num_trials, double Temp_start, double Temp_e
 
     for(size_t i = 0; i < num_trials; ++i){
         mixed_lattice<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
-        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true, dir+to_string(i));
+        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        if (T_zero){
+            for(size_t i = 0; i<100000; ++i){
+                MC.deterministic_sweep();
+            }
+        }
+        MC.write_to_file_pos(dir+"/pos");
+        MC.write_to_file_spin(dir+"/spin"+ to_string(i));
     }
 }
 
@@ -541,8 +548,19 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     }
 }
 
-void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir){
+void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir, string spin_config_filename){
     filesystem::create_directory(dir);
+    
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
@@ -699,9 +717,16 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
-    for(size_t i = 0; i < num_trials; ++i){
-        mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
-        MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+    int trial_section = int(num_trials/size);
+
+    for(size_t i = rank*trial_section; i < (rank+1)*trial_section; ++i){
+        mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+        if (spin_config_filename != ""){
+            MC.read_spin_from_file(spin_config_filename);
+        }
+        else{
+            MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 0, true);
+        }
         MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
     }
 }
@@ -803,7 +828,7 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
 
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 0.05;
+    double pulse_amp = 2.2;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -828,8 +853,8 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
     MC.write_to_file_spin(dir+"/spin_0.txt", MC.spins);
 
     if (rank==0){
-        filesystem::create_directory(dir+"/M_time_0"+ "_rank_"+std::to_string(rank));
-        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "_rank_"+std::to_string(rank) + "/M0");
+        filesystem::create_directory(dir+"/M_time_0");
+        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "/M0");
     }
 
     ofstream run_param;
@@ -837,16 +862,17 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
     run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
     run_param.close();
 
-    
+
     int tau_length = int(tau_steps/size);
 
-    double current_tau = tau_start+tau_steps*rank/size;
+    double current_tau = tau_start+tau_steps*rank/size*tau_step_size;
+
 
     for(int i=0; i< tau_length;++i){
-        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
+        filesystem::create_directory(dir+"/M_time_"+std::to_string(current_tau));
         cout << "Time: " << current_tau << endl;
-        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) +"_rank_"+std::to_string(rank) + "/M1");
-        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank) + "/M01");
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M01");
         current_tau += tau_step_size;
     }
 
@@ -1028,7 +1054,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 0.05;
+    double pulse_amp = 2.2;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -1037,7 +1063,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
-    mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
+    mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
 
     if (spin_config != ""){
         MC.read_spin_from_file(spin_config);
@@ -1053,25 +1079,24 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     MC.write_to_file_spin(dir+"/spin_0.txt");
 
     if (rank==0){
-        filesystem::create_directory(dir+"/M_time_0"+ "_rank_"+std::to_string(rank));
-        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0"+ "_rank_"+std::to_string(rank) + "/M0");
+        filesystem::create_directory(dir+"/M_time_0");
+        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
+        ofstream run_param;
+        run_param.open(dir + "/param.txt");
+        run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
+        run_param.close();
     }
 
-    ofstream run_param;
-    run_param.open(dir + "/param.txt");
-    run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
-    run_param.close();
 
-    
     int tau_length = int(tau_steps/size);
 
-    double current_tau = tau_start+tau_steps*rank/size;
+    double current_tau = tau_start+tau_steps*rank/size*tau_step_size;
 
     for(int i=0; i< tau_length;++i){
-        filesystem::create_directory(dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank));
+        filesystem::create_directory(dir+"/M_time_"+ std::to_string(current_tau));
         cout << "Time: " << current_tau << endl;
-        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i) +"_rank_"+std::to_string(rank) + "/M1");
-        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+ std::to_string(i)+"_rank_"+std::to_string(rank) + "/M01");
+        MC.M_B_t(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M1");
+        MC.M_BA_BB_t(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M01");
         current_tau += tau_step_size;
     }
 
@@ -1354,7 +1379,7 @@ void pyrochlore_2DCS(size_t num_trials, bool T_zero, double Temp_start, double T
     }
 
 }
-void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
+void  simulated_annealing_pyrochlore(double TargetT, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -1442,7 +1467,7 @@ void  simulated_annealing_pyrochlore(double Jxx, double Jyy, double Jzz, double 
 
     lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir, save);
+    MC.simulated_annealing(5, TargetT, 1e4, 0, true, dir, save);
 }
 
 // void  magnetostriction_pyrochlore(double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir){
@@ -1618,7 +1643,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
 
 }
 
-void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double theta, bool theta_or_Jxz, bool save){
+void pyrochlore_line_scan(double TargetT, double Jxx, double Jyy, double Jzz, double h_min, double h_max, int num_h, array<double, 3> field_dir, string dir, double theta, bool theta_or_Jxz, bool save){
     filesystem::create_directory(dir);
     int initialized;
     MPI_Initialized(&initialized);
@@ -1639,7 +1664,7 @@ void pyrochlore_line_scan(double Jxx, double Jyy, double Jzz, double h_min, doub
         double h = h_min + i*(h_max-h_min)/num_h;
         cout << "h: " << h << "i: " << i << endl;
         string subdir = dir + "/h_" + std::to_string(h) + "_index_" + std::to_string(i);
-        simulated_annealing_pyrochlore(Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, theta, theta_or_Jxz, save);
+        simulated_annealing_pyrochlore(TargetT, Jxx, Jyy, Jzz, 0.01, 4e-4, 1, h, field_dir, subdir, theta, theta_or_Jxz, save);
     }
 
     int finalized;

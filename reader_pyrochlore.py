@@ -367,7 +367,7 @@ def ordering_q(S,P):
     temp = np.concatenate((ordering_q_slice(S, P, 0),ordering_q_slice(S, P, 1),ordering_q_slice(S, P, 2)))
     return temp
 
-def magnetization(S, glob, fielddir):
+def magnetization(S, glob, fielddir, theta=0):
     if not glob:
         return np.mean(S,axis=0)
     else:
@@ -375,7 +375,7 @@ def magnetization(S, glob, fielddir):
         zmag = contract('k,ik->i', fielddir, z)
         mag = np.zeros(3)
         for i in range(4):
-            mag = mag + np.mean(S[i*size:(i+1)*size], axis=0)*zmag[i]
+            mag = mag + np.mean(S[i*size:(i+1)*size, 2]*np.cos(theta)+S[i*size:(i+1)*size, 0]*np.cos(theta), axis=0)*zmag[i]
         return mag
             
 

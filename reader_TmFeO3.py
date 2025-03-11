@@ -19,12 +19,15 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
+# P1 = 2*np.pi * np.array([1, 0, 3])
+# P2 = 2*np.pi * np.array([3, 0, 3])
+# P3 = 2*np.pi * np.array([3, 0, 1])
+# P4 = 2*np.pi * np.array([3, 2, 1])
 P1 = 2*np.pi * np.array([0, 0, 0])
-P2 = 2*np.pi * np.array([1, 0, 0])
-P3 = 2*np.pi * np.array([1, 0, 1])
-P4 = 2*np.pi * np.array([1, 1, 1])
-
-graphres = 12
+P2 = 2*np.pi * np.array([0, 1, 0])
+P3 = 2*np.pi * np.array([0, 1, 1])
+P4 = 2*np.pi * np.array([0, 1, 2])
+graphres = 6
 stepN = np.linalg.norm(P2-P1)/graphres
 
 
@@ -356,7 +359,7 @@ def read_2D_nonlinear(dir):
     domain = 500
     omega_range = 0.2
     M_NL = np.zeros((int(tau_step), domain))
-    w = np.arange(-omega_range, omega_range, 1/600)
+    w = np.arange(-omega_range, omega_range, 1/100)
     T = np.linspace(time_start, time_end, int(time_step)) 
     T = T[-domain:]
     ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
@@ -372,7 +375,7 @@ def read_2D_nonlinear(dir):
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
     # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
     M_NL_FF = M_NL
-    # M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
+    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
     # M_NL_FF = np.log(M_NL_FF)
     # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
@@ -387,14 +390,15 @@ def read_2D_nonlinear(dir):
 def read_2D_nonlinear_adaptive_time_step(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
-    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,0]
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[-20001:,1]
     M0_T = np.loadtxt(dir + "/M_time_0/M0/Time_steps.txt")
     M0_cutoff = np.where(M0_T >= 0)[0][0]
 
-    omega_range = 0.2
 
-    w = np.arange(-omega_range, omega_range, 4.6/200)
-    M_NL = np.zeros((int(tau_step), len(w)))
+    omega_range = 10
+
+    w = np.arange(-omega_range, omega_range, 0.2)
+    M_NL_FF = np.zeros((len(w), len(w)))
 
     M0_w = contract('t, wt->w', M0[M0_cutoff:], np.exp(1j*contract('w, t->wt', w, M0_T[M0_cutoff:])))
     tau = np.linspace(tau_start, tau_end, int(tau_step))
@@ -402,21 +406,26 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            info = filename.split("_")
-            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,0]
-            M1_T = np.loadtxt(dir + "/" + filename + "/M1/Time_steps.txt")
-            M1_cutoff = np.where(M1_T >= 0)[0][0]
+            ph1, ph2, current_tau = filename.split("_")
+            current_tau = float(current_tau)
+            try:
+                M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[-20001:,1]
+                M1_T = np.loadtxt(dir + "/" + filename + "/M1/Time_steps.txt")
+                M1_cutoff = np.where(M1_T >= 0)[0][0]
 
-            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,0]
-            M01_T = np.loadtxt(dir + "/" + filename + "/M01/Time_steps.txt")
-            M01_cutoff = np.where(M01_T >= 0)[0][0]
-            M1_w = contract('t, wt->w', M1[M1_cutoff:], np.exp(1j*contract('w, t->wt', w, M1_T[M1_cutoff:])))
-            M01_w = contract('t, wt->w', M01[M01_cutoff:], np.exp(1j*contract('w, t->wt', w, M01_T[M01_cutoff:])))
-            M_NL[int(info[2])] = M01_w - M0_w - M1_w
-    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
-    M_NL_FF = contract('it, wi->wt', M_NL, ffactau)
+                M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[-20001:,1]
+                M01_T = np.loadtxt(dir + "/" + filename + "/M01/Time_steps.txt")
+                M01_cutoff = np.where(M01_T >= 0)[0][0]
+                M1_w = contract('t, wt->w', M1[M1_cutoff:], np.exp(1j*contract('w, t->wt', w, M1_T[M1_cutoff:])))
+                M01_w = contract('t, wt->w', M01[M01_cutoff:], np.exp(1j*contract('w, t->wt', w, M01_T[M01_cutoff:])))
+                
+                M_NL_here = M01_w - M0_w - M1_w
+                ffactau = np.exp(-1j*w*current_tau)/len(tau)
+                M_NL_FF = M_NL_FF + contract('w, t->wt', M_NL_here, ffactau)
+            except:
+                continue
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    plt.imshow(np.abs(M_NL_FF), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
     # plt.pcolormesh(w, w, np.log(M_NL_FF))
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
@@ -441,15 +450,17 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-dir = "MD_TFO_test"
-read_MD_tot(dir)
+# dir = "TmFeO3_MD_Test"
+# read_MD_tot(dir)
+# dir = "TmFeO3_MD_Test_xii=0.05meV"
+# read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-# read_2D_nonlinear_tot("MD_TmFeO3_test")
+read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
