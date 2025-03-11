@@ -212,13 +212,6 @@ def magnetostriction(S, h, dir, g=np.zeros(10)):
     C_11 = 1
     C_22 = 0
     C_44 = 1
-    # g = np.array([4e-7, -8e-7, 12e-7, -2.6e-7, 0.27e-7, -0.8e-7, 0.5e-7, -0.7e-7, 0.43e-7, 0.51e-7])
-    #dipolar fitting CHO
-    # g = np.array([148.76742274,   87.98334981, -150.02723932,  -12.97776782,   -6.92548135, 5.70395457,   -5.19418679,  -20.82365737,   -2.51788297,    4.64624007])*1e-6
-    #octupolar fitting CHO
-    # g = np.array([8.88066347,0.71342782,-24.92099774, -1.99041892, 2.62668654, -1.5317889 ,  -5.23658702,  -2.59638002  , 1.75073099 , -3.20850535])*1e-6
-
-
     if dir == "111":
         L111_111 = h/(27*C_B)*((g[9]+2*g[8])*(3*tau[0][2]-tau[1][2]-tau[2][2]-tau[3][2]) + (g[3]+2*g[2])* (3*tau[0][0]-tau[1][0]-tau[2][0]-tau[3][0]))\
                 +4/(27*C_44)*h*((8*np.sqrt(2)*g[0]-4*g[1])*(tau[1][0]+tau[2][0]+tau[3][0]) + (g[3]-g[2])* (9*tau[0][0]+tau[1][0]+tau[2][0]+tau[3][0])\
@@ -240,9 +233,9 @@ def magnetostriction(S, h, dir, g=np.zeros(10)):
         A_4 = np.mean(tau[1][2]+tau[2][2]+tau[3][2])
         # A_5 = np.mean(tau[1][1]-tau[2][1])
         A_5 = np.mean(9*tau[0][0]+tau[1][0]+tau[2][0]+tau[3][0])
-        A_6 = np.mean(9*tau[0][2]+tau[1][2]+tau[2][2]+tau[3][2])
+        # A_6 = np.mean(9*tau[0][2]+tau[1][2]+tau[2][2]+tau[3][2])
 
-        return np.array([np.mean(L111_111), np.mean(L111_110), np.mean(L111_001),A_1,A_2,A_3,A_4,A_5, A_6])
+        return np.array([np.mean(L111_111), np.mean(L111_110), np.mean(L111_001),A_1,A_2,A_3,A_4,A_5])
     elif dir == "110":
         L110_111 = np.sqrt(2)/(9*np.sqrt(3)*C_B)*h*((g[9]+2*g[8])*(tau[0][2]-tau[3][2]) + (g[3]+2*g[2])* (tau[0][0]-tau[3][0]))\
                 + 2/(27*C_44)*h*(-2*np.sqrt(6)*(g[2]-g[3])*(3*tau[0][0]+tau[3][0]) + np.sqrt(3)*(4*g[0]-np.sqrt(2)*g[1])*(3*tau[1][0]+3*tau[2][0]+2*tau[3][0])\
@@ -264,7 +257,7 @@ def magnetostriction(S, h, dir, g=np.zeros(10)):
         A_3 = np.mean(3*tau[0][0]+tau[3][0])
         A_4 = np.mean(3*tau[0][2]+tau[3][2])
         A_5 = np.mean(tau[1][1]-tau[2][1])
-        return np.array([np.mean(L110_111), np.mean(L110_110), np.mean(L110_001),A_1,A_2,A_3,A_4,A_5,0])
+        return np.array([np.mean(L110_111), np.mean(L110_110), np.mean(L110_001),A_1,A_2,A_3,A_4,A_5])
     else:
         L001_111 = 1/(9*np.sqrt(3)*C_B)*h*(2*g[2]+g[3])*(tau[0][0]-tau[1][0]-tau[2][0]+tau[3][0]) + (2*g[8]+g[9])*(tau[0][2]-tau[1][2]-tau[2][2]+tau[3][2])\
                 - 4/(27*C_44)*h*((np.sqrt(3)*g[2]-np.sqrt(3)*g[3])*(3*tau[0][0]+tau[1][0]+tau[2][0]-tau[3][0])-(2*np.sqrt(6)*g[0]-np.sqrt(3)*g[1])*(tau[1][0]+tau[2][0]+2*tau[3][0])\
@@ -284,7 +277,7 @@ def magnetostriction(S, h, dir, g=np.zeros(10)):
         A_3 = np.mean(tau[1][0]+tau[2][0]+2*tau[3][0])
         A_4 = np.mean(tau[1][2]+tau[2][2]+2*tau[3][2])
         A_5 = np.mean(tau[1][1]-tau[2][1])
-        return np.array([np.mean(L001_111), np.mean(L001_110), np.mean(L001_001),A_1,A_2,A_3,A_4,A_5,0])
+        return np.array([np.mean(L001_111), np.mean(L001_110), np.mean(L001_001),A_1,A_2,A_3,A_4,A_5])
 
 def error_function(g, S, h, tofit):
 
@@ -295,7 +288,7 @@ def error_function(g, S, h, tofit):
     error = 0
     hlinspace_list = np.linspace(0,8,21)[:-1]
     for i in range(len(tofit)):
-        A = np.where(np.abs(hlinspace_list-h[i])<0.5)[0]
+        A = np.where(np.abs(hlinspace_list-h[i])<0.05)[0]
         if not len(A) == 0:
             # print(hlinspace_list[A[0]], A, h[i], tofit[i])
             Sin = np.loadtxt(S+f"/h_{hlinspace_list[A[0]]:.6f}_index_"+str(A[0])+"/spin.txt")
@@ -317,7 +310,8 @@ def error_function(g, S, h, tofit):
 
 def magnetostriction_fit(S, h, tofit):
     from scipy.optimize import minimize
-    g_start = np.array([4e-7, -8e-7, 12e-7, -2.6e-7, 0.27e-7, -0.8e-7, 0.5e-7, -0.7e-7, 0.43e-7, 0.51e-7])*1e7
+    g_start = np.array([ 4.70152753,  6.19843942 , 8.02100717 ,-3.06317805,  0.17587011, -1.78198302,
+ -0.25899688, -0.50536314,  0.78414077 , 1.08629876])
     res = minimize(error_function, g_start, args=(S, h, tofit), method='Nelder-Mead')
     print(res.x)
     return res.x
@@ -507,7 +501,7 @@ def fullread(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, xorz)
         plt.savefig(dir+"_magnetostriction.pdf")
         plt.clf()
 
-def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax, g, imp=False):
+def lineread(H_start, H_end, nH, field_dir, dir, xorz, g,ax, imp=False):
     # fig, ax = plt.subplots(constrained_layout="True")
     HS = np.linspace(H_start, H_end, nH)
     Energies = np.zeros(nH)
@@ -581,26 +575,16 @@ def lineread(H_start, H_end, nH, field_dir, dir, xorz,ax, g, imp=False):
     else:
         ax.scatter(HS, magnetostrictions[:,3])
 
-def lineread_111(H_start, H_end, nH, field_dir, dir, xorz,ax, ax1=None, dipolar=False, imp=False):
+def lineread_111(H_start, H_end, nH, field_dir, dir, xorz, g, g_parallel, ax, ax1=None, dipolar=False, imp=False):
     # fig, ax = plt.subplots(constrained_layout="True")
     HS = np.linspace(H_start, H_end, nH)
     Energies = np.zeros(nH)
     phase_diagram = np.zeros(nH)
     entropy_diagram = np.zeros(nH)
     mag_diagram = np.zeros(nH)
-    magnetostrictions = np.zeros((nH, 9))
+    magnetostrictions = np.zeros((nH, 8))
 
     magnetostriction_string = np.array(["111", "110", "001"])
-    if dipolar:
-        g_parallel = 0.046
-        theta = -0.0285404
-        g = 1e-6*np.array([27.84629645, 32.09256233 , 3.62066688 ,-2.61473962,  0.78882233, -0.15829415,
-  0.36775492 , 0.32193649  ,0.50617118  ,0.80304453])
-    else:
-        g_parallel = 0.044
-        theta = 0.33737
-        g = 1e-6*np.array([-17.2140832,  -28.73273905, -36.90368454, -9.17997093 ,  0.19153606,
-  -4.71354663 ,  0.52354715 , -3.1749568   , 1.45677871  ,-4.57307547])
 
     if field_dir == "110":
         n = np.array([1,1,0])/np.sqrt(2)
@@ -638,25 +622,24 @@ def lineread_111(H_start, H_end, nH, field_dir, dir, xorz,ax, ax1=None, dipolar=
     entropy_diagram = entropy_diagram.flatten()
     mag_diagram = mag_diagram.flatten()
     Energies = Energies.flatten()
-    magnetostrictions = magnetostrictions.reshape((nH,9))
+    magnetostrictions = magnetostrictions.reshape((nH,8))
     if not imp:
-        ax.plot(HS/(2.328*0.0579)*g_parallel, magnetostrictions[:,0],color='red')
-        ax.plot(HS/(2.328*0.0579)*g_parallel, magnetostrictions[:,1],color='green')
-        ax.plot(HS/(2.328*0.0579)*g_parallel, magnetostrictions[:,2],color='purple')
-
-        # ax1.plot(HS/(2.328*0.0579)*g_parallel, np.gradient(phase_diagram, HS/(2.328*0.0579)*g_parallel),color='red')
-        # ax1.legend([r"$L^{(" + field_dir +")}_{[111]}$"])
+        ax.scatter(HS, magnetostrictions[:,0],color='red')
+        ax.scatter(HS, magnetostrictions[:,1],color='green')
+        ax.scatter(HS, magnetostrictions[:,2],color='purple')
+        if ax1 is not None:
+            ax1.plot(HS[:-16]/(2.11*0.0579)*g_parallel, np.gradient(phase_diagram, HS[:-16]/(2.11*0.0579)*g_parallel),color='red')
+            ax1.legend([r"$L^{(" + field_dir +")}_{[111]}$"])
     else:
         ax.scatter(HS, magnetostrictions[:,3])
         ax.scatter(HS, magnetostrictions[:,4])
         ax.scatter(HS, magnetostrictions[:,5])
         ax.scatter(HS, magnetostrictions[:,6])
         ax.scatter(HS, magnetostrictions[:,7])
-        ax.scatter(HS, magnetostrictions[:,8])
         ax.legend([r"$3S_0^x - S_1^x -S_2^x -S_3^x$",r"$3S_0^z - S_1^z -S_2^z -S_3^z$",r"$S_1^x +S_2^x +S_3^x$",r"$S_1^z +S_2^z +S_3^z$",r"$9S_0^x + S_1^x +S_2^x + S_3^x$",r"$9S_0^z + S_1^z + S_2^z + S_3^z$"])
-
-        ax1.scatter(HS, magnetostrictions[:,0])
-        ax1.legend([r"$L^{(" + field_dir +")}_{[111]}$"])
+        if ax1 is not None:
+            ax1.scatter(HS, magnetostrictions[:,0])
+            ax1.legend([r"$L^{(" + field_dir +")}_{[111]}$"])
 
 def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filename):
 
@@ -711,6 +694,17 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
 directory = "/home/pc_linux/ClassicalSpin_Cpp"
 
 def graph_magnetostriction(filename):
+#     g_octupolar = 1e-6*np.array([ 4.70150218,  6.19839193,  8.02090928, -3.06324302 , 0.17932257 ,-1.82062459,
+#  -0.25899684 ,-0.50536308 , 0.78414208 , 1.08629927])
+#     g_dipolar = 1e-6*np.array([ 6.39357964, 12.88561579 , 1.28390844 , 1.86354523 , 0.26315278, -3.11840076,
+#  -0.34303203, -0.73606307,  0.74445192 , 0.93399015])
+#     g_octupolar = 1e-7*np.array([ 4.70152753,  6.19843942 , 8.02100717 ,-3.06317805,  0.17587011, -1.78198302,
+# -0.25899688, -0.50536314,  0.78414077 , 1.08629876])
+#     g_dipolar = 1e-7*np.array([ 4.70152753,  6.19843942 , 8.02100717 ,-3.06317805,  0.17587011, -1.78198302,
+# -0.25899688, -0.50536314,  0.78414077 , 1.08629876])
+    g_octupolar = 1e-7*np.array([4, -8, 12, -2.6, 0.27, -0.8, 0.5, -0.7, 0.43, 0.51])
+    g_dipolar = 1e-7*np.array([4, -8, 12, -2.6, 0.27, -0.8, 0.5, -0.7, 0.43, 0.51])
+
     mpl.rcParams.update({'font.size': 20})
     fig, ax = plt.subplots(ncols=3, nrows=2,constrained_layout=True, figsize=(16,8))
     ax[0,0].text(.01, .99, r"$(\mathrm{a})$", ha='left', va='top', transform=ax[0,0].transAxes,
@@ -726,45 +720,57 @@ def graph_magnetostriction(filename):
     ax[1,2].text(.01, .99, r"$(\mathrm{f})$", ha='left', va='top', transform=ax[1,2].transAxes,
                 zorder=10,color='black')
     
-    lineread_111(0, 21, 50, "111", filename+"_octupolar_111_closeup", 0, ax[0,0], dipolar=False)
+    lineread(0, 14.7, 35, "111", filename+"_gaulin_A_octupolar_111", 0, g_octupolar, ax[0,0])
     ax[0,0].legend([r"$L^{(111)}_{[111]}$", r"$L^{(111)}_{[110]}$", r"$L^{(111)}_{[001]}$"])
     ax[0,0].set_title(r"$B\parallel (111)$")
     ax[0,0].set_ylabel(r"$\Delta L/L$")
-    lineread_111(0, 21, 50, "110", filename+"_octupolar_110_closeup", 0, ax[0,1], dipolar=False)
+    lineread(0, 14.7, 35, "110", filename+"_gaulin_A_octupolar_110", 0, g_octupolar, ax[0,1])
     ax[0,1].legend([r"$L^{(110)}_{[111]}$", r"$L^{(110)}_{[110]}$", r"$L^{(110)}_{[001]}$"])
     ax[0,1].set_title(r"$B\parallel (110)$")
-    lineread_111(0, 21, 50, "001", filename+"_octupolar_001_closeup", 0, ax[0,2], dipolar=False)
+    lineread(0, 14.7, 35, "001", filename+"_gaulin_A_octupolar_001", 0, g_octupolar, ax[0,2])
     ax[0,2].legend([r"$L^{(001)}_{[111]}$", r"$L^{(001)}_{[110]}$", r"$L^{(001)}_{[001]}$"])
     ax[0,2].set_title(r"$B\parallel (001)$")
-    lineread_111(0, 21, 50, "111", filename+"_dipolar_111_closeup", 0, ax[1,0], dipolar=True)
+    lineread(0, 14.7, 35, "111", filename+"_gaulin_A_dipolar_111", 0, g_dipolar, ax[1,0])
     ax[1,0].set_ylabel(r"$\Delta L/L$")
-    lineread_111(0, 21, 50, "110", filename+"_dipolar_110_closeup", 0, ax[1,1], dipolar=True)
-    lineread_111(0, 21, 50, "001", filename+"_dipolar_001_closeup", 0, ax[1,2], dipolar=True)
+    lineread(0, 14.7, 35, "110", filename+"_gaulin_A_dipolar_110", 0, g_dipolar, ax[1,1])
+    lineread(0, 14.7, 35, "001", filename+"_gaulin_A_dipolar_001", 0, g_dipolar, ax[1,2])
     ax[0,0].legend([r"$L^{(111)}_{[111]}$", r"$L^{(111)}_{[110]}$", r"$L^{(111)}_{[001]}$"])
     ax[0,1].legend([r"$L^{(110)}_{[111]}$", r"$L^{(110)}_{[110]}$", r"$L^{(110)}_{[001]}$"])
     ax[0,2].legend([r"$L^{(001)}_{[111]}$", r"$L^{(001)}_{[110]}$", r"$L^{(001)}_{[001]}$"])
 
-    ax[1,0].set_xlabel(r"$B/T$")
-    ax[1,1].set_xlabel(r"$B/T$")
-    ax[1,2].set_xlabel(r"$B/T$")
+    # ax[1,0].set_xlabel(r"$B/T$")
+    # ax[1,1].set_xlabel(r"$B/T$")
+    # ax[1,2].set_xlabel(r"$B/T$")
+
+    ax[1,0].set_xlabel(r"$h/J_\parallel$")
+    ax[1,1].set_xlabel(r"$h/J_\parallel$")
+    ax[1,2].set_xlabel(r"$h/J_\parallel$")
+
+    ax[0,2].text(1., 0.5, 'Octupolar',
+        horizontalalignment='left',
+        verticalalignment='center',
+        rotation=-90,
+        transform=ax[0,2].transAxes)
+    ax[1,2].text(1., 0.5, 'Dipolar',
+        horizontalalignment='left',
+        verticalalignment='center',
+        rotation=-90,
+        transform=ax[1,2].transAxes)
     plt.savefig(filename+"_magnetostriction.pdf")
 
 def graph_magnetostriction_111_111(filename):
-    g_octupolar = np.array([8.88066347,0.71342782,-24.92099774, -1.99041892, 2.62668654, -1.5317889 ,  -5.23658702,  -2.59638002  , 1.75073099 , -3.20850535])*1e-6
-    g_dipolar = np.array([148.76742274,   87.98334981, -150.02723932,  -12.97776782,   -6.92548135, 5.70395457,   -5.19418679,  -20.82365737,   -2.51788297,    4.64624007])*1e-6
-
-    g_octupolar = 1e-6*np.array([-0.91029405, -0.2943919,   0.99666286, -0.52954148,  0.02711544, -0.16134124,
-  0.04193917, -0.10034487,  0.06506096,  0.0860175])
-    g_dipolar = 1e-6*np.array([ 1.07721726, -0.68840088 , 1.11821447, -0.20885514,  0.05276128 ,-0.12871558,
- -0.1431938 , -0.04260414  ,0.06899104  ,0.09749067])
+    g_octupolar = 1e-6*np.array([ 4.70150218,  6.19839193,  8.02090928, -3.06324302 , 0.17932257 ,-1.82062459,
+ -0.25899684 ,-0.50536308 , 0.78414208 , 1.08629927])
+    g_dipolar = 1e-6*np.array([ 6.39357964, 12.88561579 , 1.28390844 , 1.86354523 , 0.26315278, -3.11840076,
+ -0.34303203, -0.73606307,  0.74445192 , 0.93399015])
     print(g_octupolar.shape, g_dipolar.shape)
     mpl.rcParams.update({'font.size': 20})
     fig, ax = plt.subplots(ncols=2, nrows=2,constrained_layout=True, figsize=(16,8))
-    A = np.loadtxt("minoru_111_111_rough_estimate.txt", unpack=True, dtype=np.float128, delimiter=",")
+    A = np.loadtxt("minoru_111_111_rough_estimate.txt", unpack=True, dtype=np.float128, delimiter=",")[:,:-50]
     ax[0,0].scatter(A[0],A[1]*1e-6)
     ax[0,1].scatter(A[0],A[1]*1e-6)
 
-    B = np.loadtxt("minoru_dMdB.txt", unpack=True, dtype=np.float128, delimiter=",")
+    B = np.loadtxt("minoru_dMdB.txt", unpack=True, dtype=np.float128, delimiter=",")[:]
     ax[1,0].scatter(B[0],B[1])
     ax[1,1].scatter(B[0],B[1])
 
@@ -776,19 +782,19 @@ def graph_magnetostriction_111_111(filename):
             zorder=10,color='black')
     ax[1,1].text(.01, .99, r"$(\mathrm{b})$", ha='left', va='top', transform=ax[1,1].transAxes,
                 zorder=10,color='black')
-    lineread_111(0, 21, 50, "111", filename+"_octupolar_111_closeup", 0, ax[0,0], ax[1,0], False)
+    lineread_111(0, 21, 50, "111", filename+"_gaulin_A_octupolar_111", 0, g_octupolar, 0.05, ax[0,0], ax[1,0], False, imp=True)
     ax[0,0].set_title(r"$Octupolar$")
     ax[0,0].set_ylabel(r"$\Delta L/L$")
     ax[1,0].set_ylabel(r"$\partial M/\partial B$")
-    lineread_111(0, 21, 50, "111", filename+"_dipolar_111_closeup", 0, ax[0,1], ax[1,1], True)
+    lineread_111(0, 21, 50, "111", filename+"_gaulin_A_dipolar_111", 0, g_dipolar, 0.05, ax[0,1], ax[1,1], True,    imp=True)
     ax[0,1].set_title(r"$Dipolar$")
     ax[1,1].set_ylabel(r"$\partial M/\partial B$")
 
     ax[0,0].set_xlabel(r"$B$/T")
     ax[0,1].set_xlabel(r"$B$/T")
 
-    ax[0,1].set_xlim(0,21/(2.328*0.0579)*0.046)
-    ax[0,0].set_xlim(0,21/(2.328*0.0579)*0.044)
+    ax[0,1].set_xlim(0,21/(2.11*0.0579)*0.050)
+    ax[0,0].set_xlim(0,21/(2.11*0.0579)*0.050)
 
     ax[0,0].legend(["Experimental data","fitted"])
     ax[0,1].legend(["Experimental data","fitted"])
@@ -797,7 +803,8 @@ def graph_magnetostriction_111_111(filename):
     # ax[1,1].set_xlim(0,8/(2.328*0.0579)*0.046)
     plt.savefig(filename+"_magnetostriction_111_111.pdf")
 
-# graph_magnetostriction(directory+"/CHO")
+# graph_magnetostriction(directory+"/CZO")
+graph_magnetostriction(directory+"/CHO")
 # graph_magnetostriction_111_111(directory+"/CHO")
 # graph_magnetostriction(directory+"/CSO")
 
@@ -851,11 +858,11 @@ def graph_magnetostriction_111_111(filename):
 # plt.savefig("magnetostriction.pdf")
 # 0.1375 0.1375 1 0.2375
 # plt.clf()
-# A = np.loadtxt("minoru_111_111_rough_estimate.txt", unpack=True, dtype=np.float128, delimiter=",")
+A = np.loadtxt("minoru_111_111_rough_estimate.txt", unpack=True, dtype=np.float128, delimiter=",")[:,:-50]
 # # plt.plot(A[0],A[1])
 # # plt.savefig("minoru_111_111_rough_estimate.pdf")
-# magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_octupolar_111", A[0]*2.325*0.0579/0.044, A[1])
-# magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_dipolar_111", A[0]*2.325*0.0579/0.046, A[1])
+magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_gaulin_A_octupolar_111", A[0]*2.11*0.0579/0.050, A[1])
+magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_gaulin_A_dipolar_111", A[0]*2.11*0.0579/0.050, A[1])
 # A = np.loadtxt("TmFeO3_2DCS.txt", dtype=np.complex128)
 # tograph = np.abs(A)
 # tograph = np.log(tograph)
