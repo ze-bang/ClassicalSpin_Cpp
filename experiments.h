@@ -729,6 +729,12 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
         }
         MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
     }
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
 }
 
 
@@ -1632,7 +1638,7 @@ void phase_diagram_pyrochlore(double Jpm_min, double Jpm_max, int num_Jpm, doubl
         double h = h_min + h_ind*(h_max-h_min)/num_h;
         cout << "Jpm: " << Jpm << " h: " << h << "i: " << i << endl;
         string subdir = dir + "/Jpm_" + std::to_string(Jpm) + "_h_" + std::to_string(h) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(-2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 4e-4, 1, h, field_dir, subdir);
+        simulated_annealing_pyrochlore(1e-4, -2*Jpm - 2*Jpmpm, 1, -2*Jpm + 2*Jpmpm, 0.01, 4e-4, 1, h, field_dir, subdir);
     }
 
     int finalized;
@@ -1700,7 +1706,7 @@ void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
         double Jzz = -1 + double(h_ind*2)/double(num_Jpm);
         cout << "Jxx: " << Jxx << " Jzz: " << Jzz << "i: " << i << endl;
         string subdir = dir + "/Jxx_" + std::to_string(Jxx) + "_Jzz_" + std::to_string(Jzz) + "_index_" + std::to_string(Jpm_ind) + "_" + std::to_string(h_ind);
-        simulated_annealing_pyrochlore(Jxx, 1, Jzz, 0.01, 4e-4, 1, 0, {0,0,1}, subdir);
+        simulated_annealing_pyrochlore(1e-4, Jxx, 1, Jzz, 0.01, 4e-4, 1, 0, {0,0,1}, subdir);
     }
 
     int finalized;

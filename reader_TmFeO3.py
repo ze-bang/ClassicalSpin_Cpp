@@ -307,9 +307,11 @@ def read_MD_tot(dir):
 def read_MD(dir):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos_SU2.txt")
-    T = np.loadtxt(dir + "/Time_steps.txt")
-
-    S = np.loadtxt(dir + "/spin_t_SU2.txt").reshape((len(T), len(P), 3))
+    # T = np.loadtxt(dir + "/Time_steps.txt")
+    S = np.loadtxt(dir + "/spin_t_SU2.txt")
+    Slength = int(len(S)/len(P))
+    S = S.reshape((Slength, len(P), 3))
+    T = np.loadtxt("/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0/Time_steps.txt")[:len(S)]
 
     w0 = 0
     wmax = 15
@@ -395,7 +397,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     M0_cutoff = np.where(M0_T >= 0)[0][0]
 
 
-    omega_range = 10
+    omega_range = 5
 
     w = np.arange(-omega_range, omega_range, 0.2)
     M_NL_FF = np.zeros((len(w), len(w)))
@@ -431,6 +433,12 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     plt.savefig(dir + "_NLSPEC.pdf")
     np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
     plt.clf()
+    plt.imshow(np.log(np.abs(M_NL_FF)), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    # plt.pcolormesh(w, w, np.log(M_NL_FF))
+    plt.colorbar()
+    plt.savefig(dir + "_NLSPEC_log.pdf")
+    np.savetxt(dir + "_M_NL_FF_log.txt", M_NL_FF)
+    plt.clf()
 
 def read_2D_nonlinear_tot(dir):
     directory = os.fsencode(dir)
@@ -452,15 +460,15 @@ def read_2D_nonlinear_tot(dir):
 #
 # dir = "TmFeO3_MD_Test"
 # read_MD_tot(dir)
-# dir = "TmFeO3_MD_Test_xii=0.05meV"
-# read_MD_tot(dir)
+dir = "/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0"
+read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_Fe_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
