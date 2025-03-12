@@ -516,35 +516,35 @@ class mixed_lattice
 
         #pragma omp simd
         for(size_t site_index = 0; site_index < lattice_size_SU2; ++site_index){
-            field_energy -= dot(curr_spins.spins_SU2, field_SU2[site_index]);
-            onsite_energy += contract(curr_spins.spins_SU2, onsite_interaction_SU2[site_index], curr_spins.spins_SU2);
+            field_energy -= dot(curr_spins.spins_SU2[site_index], field_SU2[site_index]);
+            onsite_energy += contract(curr_spins.spins_SU2[site_index], onsite_interaction_SU2[site_index], curr_spins.spins_SU2[site_index]);
 
             #pragma omp simd
             for (size_t i=0; i<num_bi_SU2; ++i) {
-                bilinear_energy += contract(curr_spins.spins_SU2, bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+                bilinear_energy += contract(curr_spins.spins_SU2[site_index], bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
             }
             for (size_t i=0; i < num_tri_SU3; ++i){
-                trilinear_energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2, spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+                trilinear_energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
             }
             for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2, spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
             }
         }
 
         #pragma omp simd
         for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index){
-            field_energy -= dot(curr_spins.spins_SU3, field_SU3[site_index]);
-            onsite_energy += contract(curr_spins.spins_SU3, onsite_interaction_SU3[site_index], curr_spins.spins_SU3);
+            field_energy -= dot(curr_spins.spins_SU3[site_index], field_SU3[site_index]);
+            onsite_energy += contract(curr_spins.spins_SU3[site_index], onsite_interaction_SU3[site_index], curr_spins.spins_SU3[site_index]);
 
             #pragma omp simd
             for (size_t i=0; i<num_bi_SU3; ++i) {
-                bilinear_energy += contract(curr_spins.spins_SU3, bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+                bilinear_energy += contract(curr_spins.spins_SU3[site_index], bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
             }
             for (size_t i=0; i < num_tri_SU3; ++i){
-                trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3, spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+                trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
             }
             for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3, spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
             }
         }
         return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;

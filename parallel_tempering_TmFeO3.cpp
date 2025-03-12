@@ -20,9 +20,9 @@ int main(int argc, char** argv) {
     double h = argv[12] ? atof(argv[12])/J1ab  : 0.0;
     J1ab = 1;
     string dir_name = argv[13] ? argv[13] : "";
-    double T_start = argv[15] ? atof(argv[15]) : 0.0;
-    double T_end = argv[16] ? atof(argv[16]) : 0.0;
-    cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
+    double T_start = argv[14] ? atof(argv[14]) : 0.0;
+    double T_end = argv[15] ? atof(argv[15]) : 0.0;
+    cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << endl;
     parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {1,0,0}, dir_name, rank_to_write);    
     return 0;
 }
