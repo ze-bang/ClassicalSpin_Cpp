@@ -1,5 +1,5 @@
 #include "experiments.h"
-
+#include <fstream>
 
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
@@ -11,8 +11,8 @@ int main(int argc, char** argv) {
     Jxx /= Jmax;
     Jyy /= Jmax;
     Jzz /= Jmax;
-    double h_min = argv[4] ? atof(argv[4])/Jmax : 0.0;
-    double h_max = argv[5] ? atof(argv[5])/Jmax : 0.0;
+    double h_min = argv[4] ? atof(argv[4]) : 0.0;
+    double h_max = argv[5] ? atof(argv[5]) : 0.0;
     int num_h = argv[6] ? atoi(argv[6]) : 0;
     string dir_string = argv[7] ? argv[7] : "001";
     double Jxz = argv[8] ? atof(argv[8]) : 0.0;
@@ -35,6 +35,24 @@ int main(int argc, char** argv) {
     double TargetT = argv[12] ? atof(argv[12]) : 0.0;
     cout << "Initializing molecular dynamic calculation with parameters: Jxx: " << Jxx << " Jyy: " << Jyy << " Jzz: " << Jzz << 
     " Jxz: " << Jxz << " H: " << h_min << " " << h_max << " " << num_h << " field direction : " << dir_string << " saving to: " << dir << endl;
+
+    if (dir != ""){
+        filesystem::create_directory(dir);
+        fstream myfile;
+        myfile.open(dir + "/parameters.txt", ios::out);
+        myfile << "Jxx: " << Jxx << endl;
+        myfile << "Jyy: " << Jyy << endl;
+        myfile << "Jzz: " << Jzz << endl;
+        if (!theta_or_Jxz){
+            myfile << "Jxz: " << Jxz << endl;
+        }else{  
+            myfile << "Theta: " << Jxz << endl;
+        }
+        myfile << "H: " << h_min << " " << h_max << " " << num_h << endl;
+        myfile << "Field direction: " << dir_string << endl;
+        myfile.close();
+    }
+
     pyrochlore_line_scan(TargetT, Jxx, Jyy, Jzz, h_min, h_max, num_h, field_dir, dir, Jxz, theta_or_Jxz, save);
     return 0;
 }

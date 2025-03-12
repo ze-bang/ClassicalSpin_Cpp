@@ -23,11 +23,21 @@ def magnitude_bi(vector1, vector2):
 # P2 = 2*np.pi * np.array([3, 0, 3])
 # P3 = 2*np.pi * np.array([3, 0, 1])
 # P4 = 2*np.pi * np.array([3, 2, 1])
-P1 = 2*np.pi * np.array([0, 0, 0])
-P2 = 2*np.pi * np.array([0, 1, 0])
-P3 = 2*np.pi * np.array([0, 1, 1])
-P4 = 2*np.pi * np.array([0, 1, 2])
-graphres = 6
+P1 = 2*np.pi * np.array([-1, 1, 1])
+P2 = 2*np.pi * np.array([0, 1, 1])
+P3 = 2*np.pi * np.array([1, 1, 1])
+P4 = 2*np.pi * np.array([0, 3, 1])
+
+
+# P1 = 2*np.pi * np.array([2, 0, 1])
+# P2 = 2*np.pi * np.array([2, 1, 1])
+# P3 = 2*np.pi * np.array([2, 2, 1])
+
+P1 = 2*np.pi * np.array([2, 1, 0])
+P2 = 2*np.pi * np.array([2, 1, 1])
+P3 = 2*np.pi * np.array([2, 1, 2])
+
+graphres = 8
 stepN = np.linalg.norm(P2-P1)/graphres
 
 
@@ -46,7 +56,8 @@ g4 = g3 + magnitude_bi(P3, P4)
 
 # DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
 
-DSSF_K = np.concatenate((P12, P23, P34))
+# DSSF_K = np.concatenate((P12, P23, P34))
+DSSF_K = np.concatenate((P12, P23))
 
 
 
@@ -99,7 +110,7 @@ def DSSF(w, k, S, P, T, gb=False):
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
         read = np.real(contract('wni, wmi, inm->wi', Somega[:,:,:,2], np.conj(Somega[:,:,:,2]), g(k)))
-        return np.log(read)
+        return read
     else:
         A = Spin_t(k, S, P)
         Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
@@ -315,21 +326,25 @@ def read_MD(dir):
 
     w0 = 0
     wmax = 15
-    w = np.arange(w0, wmax, 1/50)[1:]
+    w = np.arange(w0, wmax, 1/10)[3:]
     A = DSSF(w, DSSF_K, S, P, T, False)
     A = np.log(A)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    C = ax.imshow(A, origin='lower', extent=[0, g3, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
     ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-    xlabpos = [g1, g2, g3, g4]
-    labels = [r'$(1,0,3)$', r'$(3,0,3)$', r'$(3,0,1)$', r'$(3,2,1)$']
+    xlabpos = [g1, g2, g3]
+    # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
+    # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+    # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
+    labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
+
     ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, g4])
+    ax.set_xlim([0, g3])
     fig.colorbar(C)
     plt.savefig(dir+"DSSF.pdf")
     plt.clf()
@@ -427,7 +442,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
             except:
                 continue
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(np.abs(M_NL_FF), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
+    plt.imshow(np.log(M_NL_FF), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
     # plt.pcolormesh(w, w, np.log(M_NL_FF))
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
@@ -468,7 +483,8 @@ read_MD_tot(dir)
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_Fe_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
+read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
@@ -503,3 +519,7 @@ read_MD_tot(dir)
 # B = np.array([0.52111, 0.57161, 0.25])
 # D = np.array([0.97889, 0.07161, 0.25])
 # print(A + N - C)
+
+A = np.loadtxt("./TmFeO3_2DCS.txt", dtype=np.complex128)[25:-25, 25:-25]
+plt.imshow(np.log(np.abs(A)), origin='lower', extent=[-5, 5, -5, 5], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
+plt.savefig("TmFeO3_2DCS.pdf")
