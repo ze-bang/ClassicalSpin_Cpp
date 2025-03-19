@@ -23,19 +23,29 @@ def magnitude_bi(vector1, vector2):
 # P2 = 2*np.pi * np.array([3, 0, 3])
 # P3 = 2*np.pi * np.array([3, 0, 1])
 # P4 = 2*np.pi * np.array([3, 2, 1])
-P1 = 2*np.pi * np.array([-1, 1, 1])
-P2 = 2*np.pi * np.array([0, 1, 1])
-P3 = 2*np.pi * np.array([1, 1, 1])
-P4 = 2*np.pi * np.array([0, 3, 1])
+P1 = 2*np.pi * np.array([0, 0, 0])
+P2 = 2*np.pi * np.array([0, 0, 1])
+P3 = 2*np.pi * np.array([0, 1, 1])
+P4 = 2*np.pi * np.array([1, 1, 1])
 
 
 # P1 = 2*np.pi * np.array([2, 0, 1])
 # P2 = 2*np.pi * np.array([2, 1, 1])
 # P3 = 2*np.pi * np.array([2, 2, 1])
 
-P1 = 2*np.pi * np.array([2, 1, 0])
-P2 = 2*np.pi * np.array([2, 1, 1])
-P3 = 2*np.pi * np.array([2, 1, 2])
+# P1 = 2*np.pi * np.array([2, 1, 0])
+# P2 = 2*np.pi * np.array([2, 1, 1])
+# P3 = 2*np.pi * np.array([2, 1, 2])
+# P4 = 2*np.pi * np.array([2, 1, 2])
+
+
+# P1 = 2*np.pi * np.array([0, 1, -1])
+# P2 = 2*np.pi * np.array([0, 1, 0])
+# P3 = 2*np.pi * np.array([0, 1, 1])
+
+# P1 = 2*np.pi * np.array([0, -1, 1])
+# P2 = 2*np.pi * np.array([0, 0, 1])
+# P3 = 2*np.pi * np.array([0, 1, 1])
 
 graphres = 8
 stepN = np.linalg.norm(P2-P1)/graphres
@@ -56,8 +66,8 @@ g4 = g3 + magnitude_bi(P3, P4)
 
 # DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
 
-# DSSF_K = np.concatenate((P12, P23, P34))
-DSSF_K = np.concatenate((P12, P23))
+DSSF_K = np.concatenate((P12, P23, P34))
+# DSSF_K = np.concatenate((P12, P23))
 
 
 
@@ -318,11 +328,11 @@ def read_MD_tot(dir):
 def read_MD(dir):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos_SU2.txt")
-    # T = np.loadtxt(dir + "/Time_steps.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
     S = np.loadtxt(dir + "/spin_t_SU2.txt")
     Slength = int(len(S)/len(P))
     S = S.reshape((Slength, len(P), 3))
-    T = np.loadtxt("/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0/Time_steps.txt")[:len(S)]
+    # T = np.loadtxt("/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0/Time_steps.txt")[:len(S)]
 
     w0 = 0
     wmax = 15
@@ -332,19 +342,21 @@ def read_MD(dir):
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, g3, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
     ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-    xlabpos = [g1, g2, g3]
+    xlabpos = [g1, g2, g3, g4]
     # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
     # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
     # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
-    labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
-
-    ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, g3])
+    # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
+    # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
+    # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
+# 
+    # ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, g4])
     fig.colorbar(C)
     plt.savefig(dir+"DSSF.pdf")
     plt.clf()
@@ -473,9 +485,10 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-# dir = "TmFeO3_MD_Test"
+# dir = "MD_TmFeO3_CEF_E_Cali_0.5_20_test"
+dir = "MD_TmFeO3_CEF_E_Cali_-0.97_-3.89_test"
 # read_MD_tot(dir)
-dir = "/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0"
+# dir = "/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0"
 read_MD_tot(dir)
 # parseDSSF(dir)
 # fullread(dir, False, "111")
@@ -484,7 +497,7 @@ read_MD_tot(dir)
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
@@ -520,6 +533,6 @@ read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzer
 # D = np.array([0.97889, 0.07161, 0.25])
 # print(A + N - C)
 
-A = np.loadtxt("./TmFeO3_2DCS.txt", dtype=np.complex128)[25:-25, 25:-25]
-plt.imshow(np.log(np.abs(A)), origin='lower', extent=[-5, 5, -5, 5], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
-plt.savefig("TmFeO3_2DCS.pdf")
+# A = np.loadtxt("./TmFeO3_2DCS.txt", dtype=np.complex128)[25:-25, 25:-25]
+# plt.imshow(np.log(np.abs(A)), origin='lower', extent=[-5, 5, -5, 5], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
+# plt.savefig("TmFeO3_2DCS.pdf")

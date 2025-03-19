@@ -1358,7 +1358,7 @@ class mixed_lattice
     }
 
 
-    void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
+    void   molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
