@@ -821,12 +821,34 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
+
+
+    //Want energy levels to be 0, 1.94, 7.844
+
+    //Want an onsite interaction term to offset the Zeeman energy levels.
+    //ID = 3/2 \lambda3^2 - \sqrt(3/2) \lambda8
     //Tm atoms
+
+    double offset = -(e1 + e2/sqrt(3))*3/16;
+
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
 
+    array<double, 64> offset_on_site = {{0}};
+    offset_on_site[0] = offset;
+    offset_on_site[1*8+1] = offset;
+    offset_on_site[2*8+2] = offset;
+    offset_on_site[3*8+3] = offset;
+    offset_on_site[4*8+4] = offset;
+    offset_on_site[5*8+5] = offset;
+    offset_on_site[6*8+6] = offset;
+    offset_on_site[7*8+7] = offset;
+    Tm_atoms.set_onsite_interaction(offset_on_site, 0);
+    Tm_atoms.set_onsite_interaction(offset_on_site, 1);
+    Tm_atoms.set_onsite_interaction(offset_on_site, 2);
+    Tm_atoms.set_onsite_interaction(offset_on_site, 3);
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
