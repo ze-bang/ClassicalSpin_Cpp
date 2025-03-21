@@ -53,10 +53,10 @@ def magnitude_bi(vector1, vector2):
 # P2 = 2*np.pi * np.array([3, 0, 3])
 # P3 = 2*np.pi * np.array([3, 0, 1])
 # P4 = 2*np.pi * np.array([3, 2, 1])
-P1 = 2*np.pi * np.array([0, 0, 0])
-P2 = 2*np.pi * np.array([0, 0, 1])
-P3 = 2*np.pi * np.array([0, 1, 1])
-P4 = 2*np.pi * np.array([1, 1, 1])
+# P1 = 2*np.pi * np.array([0, 0, 0])
+# P2 = 2*np.pi * np.array([0, 0, 1])
+# P3 = 2*np.pi * np.array([0, 1, 1])
+# P4 = 2*np.pi * np.array([1, 1, 1])
 
 
 # P1 = 2*np.pi * np.array([2, 0, 1])
@@ -66,12 +66,12 @@ P4 = 2*np.pi * np.array([1, 1, 1])
 # P1 = 2*np.pi * np.array([2, 1, 0])
 # P2 = 2*np.pi * np.array([2, 1, 1])
 # P3 = 2*np.pi * np.array([2, 1, 2])
-# P4 = 2*np.pi * np.array([2, 1, 2])
+P4 = 2*np.pi * np.array([2, 1, 2])
 
 
-# P1 = 2*np.pi * np.array([0, 1, -1])
-# P2 = 2*np.pi * np.array([0, 1, 0])
-# P3 = 2*np.pi * np.array([0, 1, 1])
+P1 = 2*np.pi * np.array([0, 1, -1])
+P2 = 2*np.pi * np.array([0, 1, 0])
+P3 = 2*np.pi * np.array([0, 1, 1])
 
 # P1 = 2*np.pi * np.array([0, -1, 1])
 # P2 = 2*np.pi * np.array([0, 0, 1])
@@ -350,7 +350,7 @@ def read_MD_tot(dir):
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            w0 = -3
+            w0 = 0
             wmax = 15
             t_evolved = 50
             SU2 = read_MD_SU2(dir + "/" + filename, w0, wmax, t_evolved)
@@ -567,9 +567,12 @@ def read_2D_nonlinear_tot(dir):
 # dir = "MD_TmFeO3_CEF_E_Cali_-0.97_-3.89_test"
 dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("TmFeO3_MD_Test_xii=0.05meV")
-read_MD_tot("MD_TmFeO3_E_0_3.97")
-read_MD_tot("MD_TmFeO3_E_0.97_0")
+# read_MD_tot("MD_TmFeO3_E_0_3.97")
+# read_MD_tot("MD_TmFeO3_E_0.97_0")
+# read_MD_tot("MD_TmFeO3_E_1_5")
 read_MD_tot("MD_TmFeO3_E_0.97_3.97")
+# read_MD_tot("MD_TmFeO3_E_0.97_3.97_w_OS_5")
+
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")

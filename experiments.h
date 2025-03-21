@@ -727,7 +727,7 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     }
 }
 
-void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, string dir, string spin_config_filename){
+void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, double offset, string dir, string spin_config_filename){
     filesystem::create_directory(dir);
     
     int initialized;
@@ -829,26 +829,27 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     //ID = 3/2 \lambda3^2 - \sqrt(3/2) \lambda8
     //Tm atoms
 
-    double offset = -(e1 + e2/sqrt(3))*3/16;
+    // double offset = 2*3/16;
 
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
 
-    array<double, 64> offset_on_site = {{0}};
-    offset_on_site[0] = offset;
-    offset_on_site[1*8+1] = offset;
-    offset_on_site[2*8+2] = offset;
-    offset_on_site[3*8+3] = offset;
-    offset_on_site[4*8+4] = offset;
-    offset_on_site[5*8+5] = offset;
-    offset_on_site[6*8+6] = offset;
-    offset_on_site[7*8+7] = offset;
-    Tm_atoms.set_onsite_interaction(offset_on_site, 0);
-    Tm_atoms.set_onsite_interaction(offset_on_site, 1);
-    Tm_atoms.set_onsite_interaction(offset_on_site, 2);
-    Tm_atoms.set_onsite_interaction(offset_on_site, 3);
+    // array<double, 64> offset_on_site = {{0}};
+    // offset_on_site[0] = offset;
+    // offset_on_site[1*8+1] = offset;
+    // offset_on_site[2*8+2] = offset;
+    // offset_on_site[3*8+3] = offset;
+    // offset_on_site[4*8+4] = offset;
+    // offset_on_site[5*8+5] = offset;
+    // offset_on_site[6*8+6] = offset;
+    // offset_on_site[7*8+7] = offset;
+    // std::cout << "Need offset: " << offset << std::endl;
+    // Tm_atoms.set_onsite_interaction(offset_on_site, 0);
+    // Tm_atoms.set_onsite_interaction(offset_on_site, 1);
+    // Tm_atoms.set_onsite_interaction(offset_on_site, 2);
+    // Tm_atoms.set_onsite_interaction(offset_on_site, 3);
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
