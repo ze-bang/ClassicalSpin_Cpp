@@ -3,7 +3,37 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
+from math import gcd
+from functools import reduce
 # plt.rcParams['text.usetex'] = True
+
+
+def calcNumSites(A, B, N):
+    # Calculate how many grid points are on the path from A to B
+    # Convert A and B to grid coordinates
+    A_grid = A * N / (2*np.pi)
+    B_grid = B * N / (2*np.pi)
+    
+    # Calculate the displacement vector between grid points
+    delta = B_grid - A_grid
+    
+    # Find the greatest common divisor (GCD) of the absolute values of the components
+    # We need to handle potential floating point values by rounding them
+    rounded_delta = np.round(delta).astype(int)
+    # If all components are zero, return 1 (just the starting point)
+    if np.all(rounded_delta == 0):
+        return 1
+    
+    # Calculate GCD of all non-zero components
+    non_zero = [abs(x) for x in rounded_delta if x != 0]
+    if not non_zero:  # All components are zero
+        return 1
+        
+    # Find the GCD of all components
+    gcd_all = reduce(gcd, non_zero)
+    
+    # The number of integer points is GCD + 1 (including start and end points)
+    return gcd_all + 1
 
 
 def drawLine(A, B, stepN):
@@ -23,41 +53,46 @@ def magnitude_bi(vector1, vector2):
 # P2 = 2*np.pi * np.array([3, 0, 3])
 # P3 = 2*np.pi * np.array([3, 0, 1])
 # P4 = 2*np.pi * np.array([3, 2, 1])
-P1 = 2*np.pi * np.array([-1, 1, 1])
-P2 = 2*np.pi * np.array([0, 1, 1])
-P3 = 2*np.pi * np.array([1, 1, 1])
-P4 = 2*np.pi * np.array([0, 3, 1])
+P1 = 2*np.pi * np.array([0, 0, 0])
+P2 = 2*np.pi * np.array([0, 0, 1])
+P3 = 2*np.pi * np.array([0, 1, 1])
+P4 = 2*np.pi * np.array([1, 1, 1])
 
 
 # P1 = 2*np.pi * np.array([2, 0, 1])
 # P2 = 2*np.pi * np.array([2, 1, 1])
 # P3 = 2*np.pi * np.array([2, 2, 1])
 
-P1 = 2*np.pi * np.array([2, 1, 0])
-P2 = 2*np.pi * np.array([2, 1, 1])
-P3 = 2*np.pi * np.array([2, 1, 2])
+# P1 = 2*np.pi * np.array([2, 1, 0])
+# P2 = 2*np.pi * np.array([2, 1, 1])
+# P3 = 2*np.pi * np.array([2, 1, 2])
+# P4 = 2*np.pi * np.array([2, 1, 2])
+
+
+# P1 = 2*np.pi * np.array([0, 1, -1])
+# P2 = 2*np.pi * np.array([0, 1, 0])
+# P3 = 2*np.pi * np.array([0, 1, 1])
+
+# P1 = 2*np.pi * np.array([0, -1, 1])
+# P2 = 2*np.pi * np.array([0, 0, 1])
+# P3 = 2*np.pi * np.array([0, 1, 1])
 
 graphres = 8
-stepN = np.linalg.norm(P2-P1)/graphres
 
 
 #Path to 1-10
-P12 = drawLine(P1, P2, stepN)[1:-1]
-P23 = drawLine(P2, P3, stepN)[1:-1]
-P34 = drawLine(P3, P4, stepN)[1:-1]
-
-
-
+P12 = np.linspace(P1, P2, calcNumSites(P1, P2, graphres))[1:-1]
+P23 = np.linspace(P2, P3, calcNumSites(P2, P3, graphres))[1:-1]
+P34 = np.linspace(P3, P4, calcNumSites(P3, P4, graphres))[1:-1]
 g1 = 0
-g2 = g1 + magnitude_bi(P1, P2)
-g3 = g2 + magnitude_bi(P2, P3)
-g4 = g3 + magnitude_bi(P3, P4)
-
+g2 = g1 + len(P12)
+g3 = g2 + len(P23)
+g4 = g3 + len(P34)
 
 # DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
 
-# DSSF_K = np.concatenate((P12, P23, P34))
-DSSF_K = np.concatenate((P12, P23))
+DSSF_K = np.concatenate((P12, P23, P34))
+# DSSF_K = np.concatenate((P12, P23))
 
 
 
@@ -86,7 +121,10 @@ def Spin_global_pyrochlore_t(k,S,P):
 def Spin_t(k, S, P):
     ffact = np.exp(1j*contract('ik,jk->ij', k, P))
     N = len(S)
-    return contract('tjs, ij->tis', S, ffact)/np.sqrt(N)
+    results = np.zeros((len(S), len(k), S.shape[2]), dtype=np.complex128)
+    for i in range(len(S)):
+        results[i] = contract('js, ij->is', S[i], ffact)/np.sqrt(N)
+    return results
 
 def SSSF_q(k, S, P, gb=False):
     if gb:
@@ -114,9 +152,8 @@ def DSSF(w, k, S, P, T, gb=False):
     else:
         A = Spin_t(k, S, P)
         Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
-        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
-        # read = contract('wiab, ab->wi', read, g(k))
-        return read[:,:,0,0]
+        read = np.real(contract('wia, wib->wi', Somega, np.conj(Somega)))
+        return read
 
 def SSSFGraphHnHL(A,B,d1, filename):
     plt.pcolormesh(A,B, d1)
@@ -313,41 +350,59 @@ def read_MD_tot(dir):
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            read_MD(dir + "/" + filename)
-
-def read_MD(dir):
+            w0 = -3
+            wmax = 15
+            t_evolved = 50
+            SU2 = read_MD_SU2(dir + "/" + filename, w0, wmax, t_evolved)
+            SU3 = read_MD_SU3(dir + "/" + filename, w0, wmax, t_evolved)
+            A = SU2 + SU3
+            np.savetxt(dir + "/DSSF.txt", A)
+            fig, ax = plt.subplots(figsize=(10,4))
+            C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+            ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+            ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+            ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+            ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+            xlabpos = [g1, g2, g3, g4]
+            ax.set_xlim([0, g4])
+            fig.colorbar(C)
+            plt.savefig(dir+"/DSSF.pdf")
+            plt.clf()
+            
+def read_MD_SU2(dir, w0, wmax, t_evolved):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos_SU2.txt")
-    # T = np.loadtxt(dir + "/Time_steps.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
     S = np.loadtxt(dir + "/spin_t_SU2.txt")
     Slength = int(len(S)/len(P))
     S = S.reshape((Slength, len(P), 3))
-    T = np.loadtxt("/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0/Time_steps.txt")[:len(S)]
+    # T = np.loadtxt("/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0/Time_steps.txt")[:len(S)]
 
-    w0 = 0
-    wmax = 15
-    w = np.arange(w0, wmax, 1/10)[3:]
+    w = np.arange(w0, wmax, 1/t_evolved)
     A = DSSF(w, DSSF_K, S, P, T, False)
     A = np.log(A)
-    A = A / np.max(A)
-    np.savetxt(dir + "_DSSF.txt", A)
+    # A = A / np.max(A)
+    np.savetxt(dir + "_DSSF_SU2.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, g3, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
     ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-    xlabpos = [g1, g2, g3]
+    xlabpos = [g1, g2, g3, g4]
     # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
     # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
     # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
-    labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
-
-    ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, g3])
+    # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
+    # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
+    # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
+# 
+    # ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, g4])
     fig.colorbar(C)
-    plt.savefig(dir+"DSSF.pdf")
+    plt.savefig(dir+"DSSF_SU2.pdf")
     plt.clf()
+    return A
     # C = ax.imshow(A, origin='lower', extent=[0, gGamma3, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
     # ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
@@ -367,6 +422,41 @@ def read_MD(dir):
     # fig.colorbar(C)
     # plt.savefig(dir+"DSSF.pdf") 
     # plt.clf()
+
+def read_MD_SU3(dir, w0, wmax, t_evolved):
+    directory = os.fsencode(dir)
+    P = np.loadtxt(dir + "/pos_SU3.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
+    S = np.loadtxt(dir + "/spin_t_SU3.txt")
+    Slength = int(len(S)/len(P))
+    S = S.reshape((Slength, len(P), 8))
+
+    w = np.arange(w0, wmax, 1/t_evolved)
+    A = DSSF(w, DSSF_K, S, P, T, False)
+    A = np.log(A)
+    # A = A / np.max(A)
+    np.savetxt(dir + "_DSSF_SU3.txt", A)
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+    ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+    xlabpos = [g1, g2, g3, g4]
+    # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
+    # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+    # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
+    # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
+    # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
+    # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
+# 
+    # ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, g4])
+    fig.colorbar(C)
+    plt.savefig(dir+"DSSF_SU3.pdf")
+    plt.clf()
+    return A
+
 
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
@@ -473,10 +563,13 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 # obenton_to_xx_zz()
 #
-# dir = "TmFeO3_MD_Test"
-# read_MD_tot(dir)
-dir = "/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0"
-read_MD_tot(dir)
+# dir = "MD_TmFeO3_CEF_E_Cali_0.5_20_test"
+# dir = "MD_TmFeO3_CEF_E_Cali_-0.97_-3.89_test"
+dir = "TmFeO3_MD_Test_xii=0.05meV"
+# read_MD_tot("TmFeO3_MD_Test_xii=0.05meV")
+read_MD_tot("MD_TmFeO3_E_0_3.97")
+read_MD_tot("MD_TmFeO3_E_0.97_0")
+read_MD_tot("MD_TmFeO3_E_0.97_3.97")
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
@@ -484,7 +577,7 @@ read_MD_tot(dir)
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])
@@ -520,6 +613,6 @@ read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzer
 # D = np.array([0.97889, 0.07161, 0.25])
 # print(A + N - C)
 
-A = np.loadtxt("./TmFeO3_2DCS.txt", dtype=np.complex128)[25:-25, 25:-25]
-plt.imshow(np.log(np.abs(A)), origin='lower', extent=[-5, 5, -5, 5], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
-plt.savefig("TmFeO3_2DCS.pdf")
+# A = np.loadtxt("./TmFeO3_2DCS.txt", dtype=np.complex128)[25:-25, 25:-25]
+# plt.imshow(np.log(np.abs(A)), origin='lower', extent=[-5, 5, -5, 5], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
+# plt.savefig("TmFeO3_2DCS.pdf")

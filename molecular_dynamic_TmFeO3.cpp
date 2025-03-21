@@ -25,9 +25,32 @@ int main(int argc, char** argv) {
     double T_step_size = argv[17] ? atof(argv[17]) : 0.0;
     string spin_config_file = argv[18] ? argv[18] : "";
     cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
+    filesystem::create_directory(dir_name);
+
+    ofstream myfile;
+    myfile.open(dir_name + "/parameters.txt");
+    myfile << "J1ab: " << J1ab << endl;
+    myfile << "J1c: " << J1c << endl;
+    myfile << "J2ab: " << J2ab << endl;
+    myfile << "J2c: " << J2c << endl;
+    myfile << "Ka: " << Ka << endl;
+    myfile << "Kc: " << Kc << endl;
+    myfile << "D1: " << D1 << endl;
+    myfile << "D2: " << D2 << endl;
+    myfile << "xii: " << xii << endl;
+    myfile << "e1: " << e1 << endl;
+    myfile << "e2: " << e2 << endl;
+    myfile << "h: " << h << endl;
+    myfile << "dir_name: " << dir_name << endl;
+    myfile << "num_trials: " << num_trials << endl;
+    myfile << "T_start: " << T_start << endl;
+    myfile << "T_end: " << T_end << endl;
+    myfile << "T_step_size: " << T_step_size << endl;
+    myfile << "spin_config_file: " << spin_config_file << endl;
+    myfile.close();
     // MD_TmFeO3_Fe(num_trials, 20, 1e-2, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name);
     MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {1,0,0}, e1, e2, dir_name, spin_config_file);
     
     return 0;
 }
-//J1ab=J1c=4.92meV J2ab=J2c=0.29meV Ka=0meV Kc=-0.09meV D1=D2=0 xii is the modeling param E1 = 0.97meV E2=3.89134081434meV
+//J1ab=J1c=4.92meV J2ab=J2c=0.29meV Ka=0meV Kc=-0.09meV D1=D2=0 xii is the modeling param E1 = 0.97meV E2=3.9744792531meV
