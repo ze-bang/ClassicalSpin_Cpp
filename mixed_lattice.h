@@ -782,72 +782,51 @@ class mixed_lattice
         return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length_SU3;
     }
 
-    double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60){
-        double E, E_new, dE, r;
-        float spinl;
-        int i;
+    double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60) {
         int accept = 0;
-        size_t count = 0;
-
-        while(count < lattice_size_SU2+lattice_size_SU3){
-            int SU2_or_SU3 = random_int_lehman(2);
-            if (SU2_or_SU3 == 0){
-                i = random_int_lehman(lattice_size_SU2);
-                auto temp_spin = curr_spin.spins_SU2[i];
-                E = site_energy_SU2(temp_spin, i);
-                if (gaussian){
-                    curr_spin.spins_SU2[i] = gaussian_move_SU2(curr_spin.spins_SU2[i], sigma);
-                }else{
-                    gen_random_spin(curr_spin.spins_SU2[i], spin_length_SU2);
-                }
-                E_new = site_energy_SU2(curr_spin.spins_SU2[i], i);
-                dE = E_new - E;
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        
+        // Process SU2 sites
+        for (size_t count = 0; count < lattice_size_SU2; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU2);
+            auto temp_spin = curr_spin.spins_SU2[i];
+            double E = site_energy_SU2(temp_spin, i);
             
-                if(dE < 0){
-                    accept++;
-                }
-                else{
-                    r = random_double_lehman(0,1);
-                    if(r < exp(-dE/T)){
-                        accept++;
-                    }
-                    else{
-                        curr_spin.spins_SU2[i] = temp_spin;
-                    }
-                }
-                count++; 
-            }else{
-                i = random_int_lehman(lattice_size_SU3);
-                // cout << i << " " << lattice_size_SU3 << endl;
-                auto temp_spin = curr_spin.spins_SU3[i];
-                E = site_energy_SU3(temp_spin, i);
-                if (gaussian){
-                    curr_spin.spins_SU3[i] = gaussian_move_SU3(curr_spin.spins_SU3[i], sigma);
-                }else{
-                    gen_random_spin(curr_spin.spins_SU3[i], spin_length_SU3);
-                }                
-                E_new = site_energy_SU3(curr_spin.spins_SU3[i], i);
-                dE = E_new - E;
+            // Generate new spin configuration
+            curr_spin.spins_SU2[i] = gaussian ? gaussian_move_SU2(temp_spin, sigma) 
+                                             : gen_random_spin_SU2();
             
-                if(dE < 0){
-                    accept++;
-                }
-                else{
-                    r = random_double_lehman(0,1);
-                    if(r < exp(-dE/T)){
-                        accept++;
-                    }
-                    else{
-                        curr_spin.spins_SU3[i] = temp_spin;
-                    }
-                }
-                count++; 
+            double dE = site_energy_SU2(curr_spin.spins_SU2[i], i) - E;
+            
+            // Accept or reject based on Metropolis criterion
+            if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                accept++;
+            } else {
+                curr_spin.spins_SU2[i] = temp_spin;
             }
-
         }
-
-        double acceptance_rate = double(accept)/double(lattice_size_SU2+lattice_size_SU3);
-        return acceptance_rate;
+        
+        // Process SU3 sites
+        for (size_t count = 0; count < lattice_size_SU3; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU3);
+            auto temp_spin = curr_spin.spins_SU3[i];
+            double E = site_energy_SU3(temp_spin, i);
+            
+            // Generate new spin configuration
+            curr_spin.spins_SU3[i] = gaussian ? gaussian_move_SU3(temp_spin, sigma) 
+                                             : gen_random_spin_SU3();
+            
+            double dE = site_energy_SU3(curr_spin.spins_SU3[i], i) - E;
+            
+            // Accept or reject based on Metropolis criterion
+            if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                accept++;
+            } else {
+                curr_spin.spins_SU3[i] = temp_spin;
+            }
+        }
+        
+        return static_cast<double>(accept) / total_sites;
     }
 
     void overrelaxation(){
