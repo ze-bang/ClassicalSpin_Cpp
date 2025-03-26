@@ -17,6 +17,7 @@
 #include <mpi.h>
 #include "binning_analysis.h"
 #include <sstream>
+#include <atomic>
 
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
@@ -341,8 +342,8 @@ class lattice
         // Initialize local field with onsite interaction
         array<double, N> local_field = multiply(onsite_interaction[site_index], current_spin[site_index]);
         
-        // Process bilinear interactions with aligned memory access hint
-        #pragma omp simd aligned(local_field:sizeof(double))
+        // Process bilinear interactions with SIMD vectorization
+        #pragma omp simd
         for (size_t i = 0; i < num_bi; ++i) {
             const auto& partner_spin = current_spin[bilinear_partners[site_index][i]];
             const auto& interaction = bilinear_interaction[site_index][i];
@@ -385,7 +386,7 @@ class lattice
 
 
     void deterministic_sweep() {
-        std::atomic<size_t> count(0);
+        size_t count(0);
         
         #pragma omp parallel
         {
@@ -413,9 +414,9 @@ class lattice
                         spins[i][j] = -local_field[j]/norm*spin_length;
                     }
                     
-                    // Safely increment counter
+                    // Safely increment counter using atomic's built-in methods
                     #pragma omp atomic
-                    count++;
+                    count++;                
                 }
             }
         }
@@ -439,9 +440,10 @@ class lattice
             
             while (true) {
                 // Check if we've processed enough sites
-                bool done;
+                size_t local_count;
                 #pragma omp atomic read
-                done = (count >= lattice_size);
+                local_count = count;
+                bool done = (local_count >= lattice_size);
                 
                 if (done) break;
                 
