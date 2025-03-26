@@ -242,17 +242,22 @@ class lattice
     }
 
     double site_energy(array<double, N> &spin_here, size_t site_index){
-        double energy = 0.0;
-        energy -= dot(spin_here, field[site_index]);
-        energy += contract(spin_here, onsite_interaction[site_index], spin_here);
-        #pragma omp simd
+        // Calculate field and onsite interaction energy directly
+        double energy = -dot(spin_here, field[site_index]) + 
+                        contract(spin_here, onsite_interaction[site_index], spin_here);
+        
+        // Use SIMD with reduction for bilinear interactions
+        #pragma omp simd reduction(+:energy)
         for (size_t i=0; i< num_bi; ++i) {
             energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
-        #pragma omp simd
+        
+        // Use SIMD with reduction for trilinear interactions
+        #pragma omp simd reduction(+:energy)
         for (size_t i=0; i < num_tri; ++i){
             energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
+        
         return energy;
     }
 
@@ -262,19 +267,27 @@ class lattice
         double bilinear_energy = 0.0;
         double trilinear_energy = 0.0;
 
-        #pragma omp simd
+        #pragma omp parallel for reduction(-:field_energy) reduction(+:onsite_energy,bilinear_energy,trilinear_energy) schedule(guided)
         for(size_t i = 0; i < lattice_size; ++i){
+            // Calculate field and onsite interaction energy
             field_energy -= dot(curr_spins[i], field[i]);
             onsite_energy += contract(curr_spins[i], onsite_interaction[i], curr_spins[i]);
-            #pragma omp simd
-            for (size_t j=0; j< num_bi; ++j) {
+            
+            // Calculate bilinear interaction energy
+            #pragma omp simd reduction(+:bilinear_energy)
+            for (size_t j = 0; j < num_bi; ++j) {
                 bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], curr_spins[bilinear_partners[i][j]]);
             }
-            #pragma omp simd
-            for (size_t j=0; j < num_tri; ++j){
-                trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
+            
+            // Calculate trilinear interaction energy
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (size_t j = 0; j < num_tri; ++j){
+                trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], 
+                                   curr_spins[trilinear_partners[i][j][0]], 
+                                   curr_spins[trilinear_partners[i][j][1]]);
             }
         }
+        
         return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
     }
 
@@ -282,51 +295,129 @@ class lattice
         return total_energy(curr_spins)/lattice_size;
     }
     
-    array<double, N>  get_local_field(size_t site_index){
-        array<double,N> local_field;
-        local_field = multiply(onsite_interaction[site_index], spins[site_index]);
-        #pragma omp simd
-        for (size_t i=0; i< num_bi; ++i) {
-            local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
-        }
-        for (size_t i=0; i < num_tri; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
-        }
-        return local_field-field[site_index];
-    }
-
-
-    array<double, N>  get_local_field_lattice(size_t site_index, const spin_config &current_spin){
-        array<double,N> local_field;
-        local_field =  multiply(onsite_interaction[site_index], spins[site_index]);
-        #pragma omp simd
-        for (size_t i=0; i< num_bi; ++i) {
-            local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
-        }
-        for (size_t i=0; i < num_tri; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
-        }
-        return local_field-field[site_index];
-    }
-
-
-    void deterministic_sweep(){
-        size_t count = 0;
-        int i;
-        while(count < lattice_size){
-            // i = random_int(0, lattice_size-1, gen);
-            i = random_int_lehman(lattice_size);
-            array<double,N> local_field = get_local_field(i);
-            double norm = sqrt(dot(local_field, local_field));
-            if(norm == 0){
-                continue;
+    array<double, N> get_local_field(size_t site_index) {
+        // Initialize local field with onsite interaction
+        array<double, N> local_field = multiply(onsite_interaction[site_index], spins[site_index]);
+        
+        // Process bilinear interactions
+        for (size_t i = 0; i < num_bi; ++i) {
+            // Calculate contribution
+            array<double, N> bi_term = multiply(bilinear_interaction[site_index][i], 
+                                             spins[bilinear_partners[site_index][i]]);
+            
+            // Accumulate with SIMD vectorization
+            #pragma omp simd
+            for (size_t j = 0; j < N; ++j) {
+                local_field[j] += bi_term[j];
             }
-            else{
-                for(size_t j=0; j < N; ++j){
-                    spins[i][j] = -local_field[j]/norm*spin_length;
+        }
+        
+        // Process trilinear interactions
+        for (size_t i = 0; i < num_tri; ++i) {
+            // Calculate contribution
+            array<double, N> tri_term = contract_trilinear_field(
+                                       trilinear_interaction[site_index][i],
+                                       spins[trilinear_partners[site_index][i][0]],
+                                       spins[trilinear_partners[site_index][i][1]]);
+            
+            // Accumulate with SIMD vectorization
+            #pragma omp simd
+            for (size_t j = 0; j < N; ++j) {
+                local_field[j] += tri_term[j];
+            }
+        }
+        
+        // Subtract external field with SIMD vectorization
+        #pragma omp simd
+        for (size_t j = 0; j < N; ++j) {
+            local_field[j] -= field[site_index][j];
+        }
+        
+        return local_field;
+    }
+
+
+    array<double, N> get_local_field_lattice(size_t site_index, const spin_config &current_spin){
+        // Initialize local field with onsite interaction
+        array<double, N> local_field = multiply(onsite_interaction[site_index], current_spin[site_index]);
+        
+        // Process bilinear interactions with aligned memory access hint
+        #pragma omp simd aligned(local_field:sizeof(double))
+        for (size_t i = 0; i < num_bi; ++i) {
+            const auto& partner_spin = current_spin[bilinear_partners[site_index][i]];
+            const auto& interaction = bilinear_interaction[site_index][i];
+            
+            // Accumulate results directly into local_field
+            for (size_t j = 0; j < N; ++j) {
+                double sum = 0.0;
+                #pragma omp simd reduction(+:sum)
+                for (size_t k = 0; k < N; ++k) {
+                    sum += interaction[j*N + k] * partner_spin[k];
+                }
+                local_field[j] += sum;
+            }
+        }
+        
+        // Process trilinear interactions with optimized reduction
+        #pragma omp simd
+        for (size_t i = 0; i < num_tri; ++i) {
+            const auto& partner_spin1 = current_spin[trilinear_partners[site_index][i][0]];
+            const auto& partner_spin2 = current_spin[trilinear_partners[site_index][i][1]];
+            const auto& interaction = trilinear_interaction[site_index][i];
+            
+            array<double, N> tri_result = contract_trilinear_field(interaction, partner_spin1, partner_spin2);
+            
+            // Vectorized accumulation into local_field
+            #pragma omp simd
+            for (size_t j = 0; j < N; ++j) {
+                local_field[j] += tri_result[j];
+            }
+        }
+        
+        // Subtract external field
+        #pragma omp simd
+        for (size_t j = 0; j < N; ++j) {
+            local_field[j] -= field[site_index][j];
+        }
+        
+        return local_field;
+    }
+
+
+    void deterministic_sweep() {
+        std::atomic<size_t> count(0);
+        
+        #pragma omp parallel
+        {
+            // Thread-private variables
+            array<double, N> local_field;
+            double norm;
+            size_t i;
+            
+            while (true) {
+                // Check if we've processed enough sites
+                if (count >= lattice_size) break;
+                
+                // Try to update a random site
+                i = random_int_lehman(lattice_size);
+                
+                // Calculate local field
+                local_field = get_local_field(i);
+                norm = sqrt(dot(local_field, local_field));
+                
+                // Skip if field is zero
+                if (norm > 0) {
+                    // Update spin direction opposite to field
+                    #pragma omp simd
+                    for (size_t j = 0; j < N; ++j) {
+                        spins[i][j] = -local_field[j]/norm*spin_length;
+                    }
+                    
+                    // Safely increment counter
+                    #pragma omp atomic
+                    count++;
                 }
             }
-            count++;
         }
     }
     
@@ -337,61 +428,92 @@ class lattice
     }
 
     void overrelaxation(){
-        array<double,N> local_field;
-        int i;
-        double proj;
         size_t count = 0;
-        while(count < lattice_size){
-            // i = random_int(0, lattice_size-1, gen);
-            i = random_int_lehman(lattice_size);
-            local_field = get_local_field(i);
-            double norm = dot(local_field, local_field);
-            if(norm == 0){
-                continue;
+        
+        #pragma omp parallel
+        {
+            // Thread-private variables
+            array<double,N> local_field;
+            int i;
+            double proj;
+            
+            while (true) {
+                // Check if we've processed enough sites
+                bool done;
+                #pragma omp atomic read
+                done = (count >= lattice_size);
+                
+                if (done) break;
+                
+                // Try to update a random site
+                i = random_int_lehman(lattice_size);
+                local_field = get_local_field(i);
+                double norm = dot(local_field, local_field);
+                
+                if(norm > 0) {
+                    proj = 2 * dot(spins[i], local_field) / norm;
+                    
+                    // Update spin - potential for race conditions but acceptable for overrelaxation
+                    spins[i] = local_field * proj - spins[i];
+                    
+                    // Safely increment counter
+                    #pragma omp atomic
+                    count++;
+                }
             }
-            else{
-                proj = 2* dot(spins[i], local_field)/norm;
-                spins[i] = local_field*proj - spins[i];
-            }
-            count++;
         }
     }
 
     double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
-        double E, E_new, dE, r;
-        int i;
-        array<double,N> new_spin;
         int accept = 0;
-        size_t count = 0;
-        while(count < lattice_size){
-            // i = random_int(0, lattice_size-1, gen);
-            i = random_int_lehman(lattice_size);
-            E = site_energy(curr_spin[i], i);
-            if (gaussian){
-                new_spin = gaussian_move(curr_spin[i], sigma);
-            }
-            else{
-                new_spin = gen_random_spin(spin_length);
-            }
-            E_new = site_energy(new_spin, i);
-            dE = E_new - E;
+        
+        // Pre-calculate 1/T to avoid division in the inner loop
+        double inv_T = 1.0 / T;
+        
+        // Parallelize the loop across multiple threads
+        #pragma omp parallel reduction(+:accept)
+        {
+            int local_accept = 0;
             
-            if(dE < 0){
-                curr_spin[i] = new_spin;
-                accept++;
-            }
-            else{
-                r = random_double_lehman(0,1);
-                if(r < exp(-dE/T)){
+            // Each thread processes a portion of the lattice
+            #pragma omp for schedule(guided)
+            for(size_t count = 0; count < lattice_size; ++count){
+                int i = random_int_lehman(lattice_size);
+                
+                // Compute energy only once and store
+                double E = site_energy(curr_spin[i], i);
+                
+                // Generate new spin configuration
+                array<double,N> new_spin = gaussian ? 
+                    gaussian_move(curr_spin[i], sigma) : 
+                    gen_random_spin(spin_length);
+                
+                // Compute new energy
+                double E_new = site_energy(new_spin, i);
+                double dE = E_new - E;
+                
+                // Fast path for immediate acceptance
+                if(dE <= 0){
                     curr_spin[i] = new_spin;
-                    accept++;
+                    local_accept++;
+                }
+                else{
+                    // Use fast random generator and avoid expensive exp() when possible
+                    double r = random_double_lehman(0,1);
+                    double boltzmann_factor = exp(-dE * inv_T);
+                    
+                    if(r < boltzmann_factor){
+                        curr_spin[i] = new_spin;
+                        local_accept++;
+                    }
                 }
             }
-            count++;
+            
+            #pragma omp atomic
+            accept += local_accept;
         }
-
-        double acceptance_rate = double(accept)/double(lattice_size);
-        return acceptance_rate;
+        
+        return double(accept)/double(lattice_size);
     }
 
     

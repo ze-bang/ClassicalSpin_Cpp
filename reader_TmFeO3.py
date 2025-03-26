@@ -53,10 +53,10 @@ def magnitude_bi(vector1, vector2):
 # P2 = 2*np.pi * np.array([3, 0, 3])
 # P3 = 2*np.pi * np.array([3, 0, 1])
 # P4 = 2*np.pi * np.array([3, 2, 1])
-# P1 = 2*np.pi * np.array([0, 0, 0])
-# P2 = 2*np.pi * np.array([0, 0, 1])
-# P3 = 2*np.pi * np.array([0, 1, 1])
-# P4 = 2*np.pi * np.array([1, 1, 1])
+P1 = 2*np.pi * np.array([0, 0, 0])
+P2 = 2*np.pi * np.array([0, 0, 1])
+P3 = 2*np.pi * np.array([0, 1, 1])
+P4 = 2*np.pi * np.array([1, 1, 1])
 
 
 # P1 = 2*np.pi * np.array([2, 0, 1])
@@ -66,12 +66,12 @@ def magnitude_bi(vector1, vector2):
 # P1 = 2*np.pi * np.array([2, 1, 0])
 # P2 = 2*np.pi * np.array([2, 1, 1])
 # P3 = 2*np.pi * np.array([2, 1, 2])
-P4 = 2*np.pi * np.array([2, 1, 2])
+# P4 = 2*np.pi * np.array([2, 1, 2])
 
 
-P1 = 2*np.pi * np.array([0, 1, -1])
-P2 = 2*np.pi * np.array([0, 1, 0])
-P3 = 2*np.pi * np.array([0, 1, 1])
+# P1 = 2*np.pi * np.array([0, 1, -1])
+# P2 = 2*np.pi * np.array([0, 1, 0])
+# P3 = 2*np.pi * np.array([0, 1, 1])
 
 # P1 = 2*np.pi * np.array([0, -1, 1])
 # P2 = 2*np.pi * np.array([0, 0, 1])
@@ -351,8 +351,8 @@ def read_MD_tot(dir):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             w0 = 0
-            wmax = 15
-            t_evolved = 50
+            wmax = 2
+            t_evolved = 200
             SU2 = read_MD_SU2(dir + "/" + filename, w0, wmax, t_evolved)
             SU3 = read_MD_SU3(dir + "/" + filename, w0, wmax, t_evolved)
             A = SU2 + SU3
@@ -363,7 +363,10 @@ def read_MD_tot(dir):
             ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
             ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
             ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+            labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
             xlabpos = [g1, g2, g3, g4]
+            ax.set_xticks(xlabpos, labels)
+            ax.set_xlim([0, g4])
             ax.set_xlim([0, g4])
             fig.colorbar(C)
             plt.savefig(dir+"/DSSF.pdf")
@@ -391,13 +394,14 @@ def read_MD_SU2(dir, w0, wmax, t_evolved):
     ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
     xlabpos = [g1, g2, g3, g4]
     # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
+    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
     # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
     # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
     # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
     # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
     # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
 # 
-    # ax.set_xticks(xlabpos, labels)
+    ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, g4])
     fig.colorbar(C)
     plt.savefig(dir+"DSSF_SU2.pdf")
@@ -444,13 +448,14 @@ def read_MD_SU3(dir, w0, wmax, t_evolved):
     ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
     xlabpos = [g1, g2, g3, g4]
     # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
-    # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+    # labels = [r'$(1,0,3)', r'$(3,0,3)$', r'$(3,0,1)$', r'$(3,2,1)$']
+    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
     # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
     # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
     # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
     # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
 # 
-    # ax.set_xticks(xlabpos, labels)
+    ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, g4])
     fig.colorbar(C)
     plt.savefig(dir+"DSSF_SU3.pdf")
@@ -570,7 +575,7 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("MD_TmFeO3_E_0_3.97")
 # read_MD_tot("MD_TmFeO3_E_0.97_0")
 # read_MD_tot("MD_TmFeO3_E_1_5")
-read_MD_tot("MD_TmFeO3_E_0.97_3.97")
+read_MD_tot("MD_TmFeO3_E_0.97_3.97_longer_T")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_w_OS_5")
 
 # parseDSSF(dir)
