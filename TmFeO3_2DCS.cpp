@@ -344,7 +344,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
         }
     }
     MC.write_to_file_pos(dir+"/pos.txt");
-    MC.write_to_file_spin(dir+"/spin_0.txt", MC.spins);
+    MC.write_to_file_spin(dir+"/spin_0.txt");
 
     if (rank==0){
         filesystem::create_directory(dir+"/M_time_0");
