@@ -300,32 +300,22 @@ class lattice
         // Initialize local field with onsite interaction
         array<double, N> local_field = multiply(onsite_interaction[site_index], spins[site_index]);
         
-        // Process bilinear interactions
+        // Process bilinear interactions with SIMD vectorization
+        #pragma omp simd
         for (size_t i = 0; i < num_bi; ++i) {
-            // Calculate contribution
-            array<double, N> bi_term = multiply(bilinear_interaction[site_index][i], 
-                                             spins[bilinear_partners[site_index][i]]);
-            
-            // Accumulate with SIMD vectorization
-            #pragma omp simd
-            for (size_t j = 0; j < N; ++j) {
-                local_field[j] += bi_term[j];
-            }
+            const auto& partner_spin = spins[bilinear_partners[site_index][i]];
+            const auto& interaction = bilinear_interaction[site_index][i];
+            local_field += multiply(interaction, partner_spin);
         }
         
-        // Process trilinear interactions
+        // Process trilinear interactions with optimized reduction
+        #pragma omp simd
         for (size_t i = 0; i < num_tri; ++i) {
-            // Calculate contribution
-            array<double, N> tri_term = contract_trilinear_field(
-                                       trilinear_interaction[site_index][i],
-                                       spins[trilinear_partners[site_index][i][0]],
-                                       spins[trilinear_partners[site_index][i][1]]);
+            const auto& partner_spin1 = spins[trilinear_partners[site_index][i][0]];
+            const auto& partner_spin2 = spins[trilinear_partners[site_index][i][1]];
+            const auto& interaction = trilinear_interaction[site_index][i];
             
-            // Accumulate with SIMD vectorization
-            #pragma omp simd
-            for (size_t j = 0; j < N; ++j) {
-                local_field[j] += tri_term[j];
-            }
+            local_field += contract_trilinear_field(interaction, partner_spin1, partner_spin2);
         }
         
         // Subtract external field with SIMD vectorization
@@ -348,15 +338,7 @@ class lattice
             const auto& partner_spin = current_spin[bilinear_partners[site_index][i]];
             const auto& interaction = bilinear_interaction[site_index][i];
             
-            // Accumulate results directly into local_field
-            for (size_t j = 0; j < N; ++j) {
-                double sum = 0.0;
-                #pragma omp simd reduction(+:sum)
-                for (size_t k = 0; k < N; ++k) {
-                    sum += interaction[j*N + k] * partner_spin[k];
-                }
-                local_field[j] += sum;
-            }
+            local_field += multiply(interaction, partner_spin);
         }
         
         // Process trilinear interactions with optimized reduction
@@ -366,13 +348,7 @@ class lattice
             const auto& partner_spin2 = current_spin[trilinear_partners[site_index][i][1]];
             const auto& interaction = trilinear_interaction[site_index][i];
             
-            array<double, N> tri_result = contract_trilinear_field(interaction, partner_spin1, partner_spin2);
-            
-            // Vectorized accumulation into local_field
-            #pragma omp simd
-            for (size_t j = 0; j < N; ++j) {
-                local_field[j] += tri_result[j];
-            }
+            local_field += contract_trilinear_field(interaction, partner_spin1, partner_spin2);
         }
         
         // Subtract external field

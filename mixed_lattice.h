@@ -613,11 +613,16 @@ class mixed_lattice
 
     array<double, N_SU2> get_local_field_SU2(size_t site_index) {
         array<double, N_SU2> local_field = {0};
+<<<<<<< HEAD
 
+=======
+        
+>>>>>>> a5c803cb1fa8a344cb2ed52202156269f280d511
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU2[site_index][i], 
                 spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+<<<<<<< HEAD
         }
         
         for (size_t i = 0; i < num_tri_SU2; ++i) {
@@ -632,8 +637,24 @@ class mixed_lattice
                 mixed_trilinear_interaction_SU2[site_index][i],
                 spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
                 spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+=======
+>>>>>>> a5c803cb1fa8a344cb2ed52202156269f280d511
         }
         
+        for (size_t i = 0; i < num_tri_SU2; ++i) {
+            local_field +=  contract_trilinear_field(
+                trilinear_interaction_SU2[site_index][i],
+                spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]],
+                spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            local_field +=  contract_trilinear_field(
+                mixed_trilinear_interaction_SU2[site_index][i],
+                spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
+                spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+        }
+    
         return local_field - field_SU2[site_index];
     }
     array<double, N_SU3> get_local_field_SU3(size_t site_index) {
@@ -643,6 +664,23 @@ class mixed_lattice
             local_field += multiply(
                 bilinear_interaction_SU3[site_index][i], 
                 spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+<<<<<<< HEAD
+        }
+        
+        for (size_t i = 0; i < num_tri_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                trilinear_interaction_SU3[site_index][i],
+                spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]],
+                spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                mixed_trilinear_interaction_SU3[site_index][i],
+                spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
+                spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+=======
+>>>>>>> a5c803cb1fa8a344cb2ed52202156269f280d511
         }
         
         for (size_t i = 0; i < num_tri_SU3; ++i) {
@@ -658,6 +696,7 @@ class mixed_lattice
                 spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
                 spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
+ 
         
         return local_field - field_SU3[site_index];
     }
@@ -665,6 +704,10 @@ class mixed_lattice
     array<double, N_SU2> get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU2> local_field = {0};
         
+<<<<<<< HEAD
+=======
+    
+>>>>>>> a5c803cb1fa8a344cb2ed52202156269f280d511
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU2[site_index][i], 
@@ -684,13 +727,14 @@ class mixed_lattice
                 current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
                 current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
-
+            
+        
         return local_field - field_SU2[site_index];
     }
 
     array<double, N_SU3> get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU3> local_field = {0};
-
+                    
         for (size_t i = 0; i < num_bi_SU3; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU3[site_index][i], 
@@ -710,7 +754,7 @@ class mixed_lattice
                 current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
                 current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
-        
+
         return local_field - field_SU3[site_index];
     }
 
