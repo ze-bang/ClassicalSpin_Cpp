@@ -1,6 +1,190 @@
 #include "experiments.h"
 
 
+void  simulated_annealing_pyrochlore(double TargetT, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
+    filesystem::create_directory(dir);
+    Pyrochlore<3> atoms;
+
+    array<double,3> z1 = {1, 1, 1};
+    array<double,3> z2 = {1,-1,-1};
+    array<double,3> z3 = {-1,1,-1};
+    array<double,3> z4 = {-1,-1,1};
+
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+    double Jx, Jy, Jz, theta_in;
+    cout << "Begin simulated annealing with parameters: " << Jxx << " " << Jyy << " " << Jzz << " " << theta_in << endl;
+    if (theta_or_Jxz){
+
+        Jx = Jxx;
+        Jy = Jyy;
+        Jz = Jzz;
+        theta_in = theta;
+    }
+    else{
+        Jy = Jyy;
+        theta_in = atan(2*theta/(Jxx-Jzz))/2;
+        Jx = cos(theta_in)*cos(theta_in)*Jxx + sin(theta_in)*sin(theta_in)*Jzz + sin(2*theta_in)*theta;
+        Jz = sin(theta_in)*sin(theta_in)*Jxx + cos(theta_in)*cos(theta_in)*Jzz - sin(2*theta_in)*theta;
+        cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+        // Jx = (Jxx + Jzz)/2 - sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // Jz = (Jxx + Jzz)/2 + sqrt((Jxx-Jzz)*(Jxx-Jzz) + 4*theta*theta)/2;
+        // cout << "Begin simulated annealing with parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+        double maxJ = max(Jx, max(Jy, Jz));
+        Jx /= maxJ;
+        Jy /= maxJ;
+        Jz /= maxJ;
+    }
+    cout << "Renormalized parameters: " << Jx << " " << Jy << " " << Jz << " " << theta_in << endl;
+    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
+    array<double, 3> field = field_dir*h;
+
+
+    atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
+
+    atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
+
+    array<double, 3> rot_field = {gzz*sin(theta_in)+gxx*cos(theta_in),0,gzz*cos(theta_in)-gxx*sin(theta_in)};
+    array<double, 3> By1 = {0, gyy*(pow(dot(field,y1),3) - 3*pow(dot(field,x1),2)*dot(field,y1)),0};
+    array<double, 3> By2 = {0, gyy*(pow(dot(field,y2),3) - 3*pow(dot(field,x2),2)*dot(field,y2)),0};
+    array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
+    array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
+
+
+    atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
+    atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
+    atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
+    atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
+
+    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+    // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
+    MC.simulated_annealing(5, 1e-4, 1e4, 0, true, dir, save);
+}
+
+void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write, double Jxz=0){
+    filesystem::create_directory(dir);
+    Pyrochlore<3> atoms;
+
+    array<double,3> z1 = {1, 1, 1};
+    array<double,3> z2 = {1,-1,-1};
+    array<double,3> z3 = {-1,1,-1};
+    array<double,3> z4 = {-1,-1,1};
+
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+
+
+    double Jz_Jx = Jzz-Jxx;
+    double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
+    double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
+    double Jy = Jyy;
+    double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
+    double theta = atan(2*Jxz/(Jzz-Jxx));
+
+    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
+    array<double, 3> field = field_dir*h;
+
+
+    atoms.set_bilinear_interaction(J, 0, 1, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 0, 0}); 
+
+    atoms.set_bilinear_interaction(J, 0, 1, {1, 0, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 2, {0, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 0, 3, {0, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 1, 2, {-1, 1, 0}); 
+    atoms.set_bilinear_interaction(J, 1, 3, {-1, 0, 1}); 
+    atoms.set_bilinear_interaction(J, 2, 3, {0, 1, -1}); 
+
+    array<double, 3> rot_field = {gzz*sin(theta)+gxx*cos(theta),0,gzz*cos(theta)-gxx*sin(theta)};
+    array<double, 3> By1 = {0, gyy*(pow(dot(field,y1),3) - 3*pow(dot(field,x1),2)*dot(field,y1)),0};
+    array<double, 3> By2 = {0, gyy*(pow(dot(field,y2),3) - 3*pow(dot(field,x2),2)*dot(field,y2)),0};
+    array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
+    array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
+
+
+    atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
+    atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
+    atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
+    atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
+
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    lattice<3, 4, 16, 16, 16> MC(&atoms, 0.5);
+
+    vector<double> temps = logspace(log10(T_start), log10(T_end), size);
+
+    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write, true);
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
+}
+
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;

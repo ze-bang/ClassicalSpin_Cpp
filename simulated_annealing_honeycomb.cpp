@@ -1,5 +1,34 @@
 #include "experiments.h"
 
+void simulated_annealing_honeycomb(double T_start, double T_end, double K, double Gamma, double Gammap, double h, string dir="", bool deterministic=false){
+    filesystem::create_directory(dir);
+    HoneyComb<3> atoms;
+    array<array<double,3>, 3> Jx = {{{K,Gammap,Gammap},{Gammap,0,Gamma},{Gammap,Gamma,0}}};
+    array<array<double,3>, 3> Jy = {{{0,Gammap,Gamma},{Gammap,K,Gammap},{Gamma,Gammap,0}}};
+    array<array<double,3>, 3> Jz = {{{0,Gamma,Gammap},{Gamma,0,Gammap},{Gammap,Gammap,K}}};
+
+    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
+    
+    cout << "Setting up honeycomb lattice with parameters: " << endl;
+    cout << "Jx: " << Jx[0][0] << " " << Jx[0][1] << " " << Jx[0][2] << endl;
+    cout << "Jy: " << Jy[1][0] << " " << Jy[1][1] << " " << Jy[1][2] << endl;
+    cout << "Jz: " << Jz[2][0] << " " << Jz[2][1] << " " << Jz[2][2] << endl;
+    cout << "Field: " << field[0] << " " << field[1] << " " << field[2] << endl;
+
+    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
+    atoms.set_field(field, 0);
+    atoms.set_field(field, 1);
+
+    lattice<3, 2, 20, 20, 1> MC(&atoms);
+    if (deterministic == false){
+        MC.simulated_annealing(T_start, T_end, 10000, 0, false, dir);
+    }
+    else{
+        MC.simulated_annealing_deterministic(T_start, T_end, 10000, 10000, 0, dir);
+    }
+}
 
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
