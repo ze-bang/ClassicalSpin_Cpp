@@ -20,9 +20,9 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
 
     array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,Delta2*J2}}};
-    array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};, 
+    array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};
 
-    array<double, 3> field = {5*h*field_dir[0],5*h*field_dir[1],2.5*h*field_dir[2]};
+    array<double, 3> field = {{5*h*field_dir[0],5*h*field_dir[1],2.5*h*field_dir[2]}};
     
 
     //nearest neighbour
@@ -47,7 +47,7 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 24, 24, 1> MC(&atoms, );
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
         MC.simulated_annealing(1, 1e-4, 100000, 0, true);
         MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
     }
@@ -64,14 +64,11 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    vector<int> rank_to_write = {size-1};
-    double K = argv[1] ? atof(argv[1]) : 0.0;
-    double Gamma = argv[2] ? atof(argv[2]) : 0.0;
-    double Gammap = argv[3] ? atof(argv[3]) : 0.0;
-    double h = argv[4] ? atof(argv[4]) : 0.0;
-    string dir_name = argv[5] ? argv[5] : "";
-    filesystem::create_directory(dir_name);
-    int num_trials = argv[6] ? atoi(argv[6]) : 1;
-    MD_BCAO_honeycomb(num_trials, K, Gamma, Gammap, h, dir_name);
+    MD_BCAO_honeycomb(1, 0, {1,0,0}, "BCAO_test");
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
     return 0;
 }
