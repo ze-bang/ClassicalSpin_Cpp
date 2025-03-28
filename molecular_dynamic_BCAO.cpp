@@ -22,7 +22,8 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,Delta2*J2}}};
     array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};
 
-    array<double, 3> field = {{5*h*field_dir[0],5*h*field_dir[1],2.5*h*field_dir[2]}};
+    std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
+    array<double, 3> field = {5*h*field_dir[0],5*h*field_dir[1],2.5*h*field_dir[2]};
     
 
     //nearest neighbour
@@ -37,6 +38,13 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     atoms.set_bilinear_interaction(J2_, 0, 0, {-1,0,0});
     atoms.set_bilinear_interaction(J2_, 0, 0, {0,-1,0});
     atoms.set_bilinear_interaction(J2_, 0, 0, {-1,1,0});
+
+    atoms.set_bilinear_interaction(J2_, 1, 1, {1,0,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {0,1,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {-1,0,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {-1,1,0});
     //third nearest neighbour
     atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
     atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});
@@ -47,7 +55,7 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
+        lattice<3, 2, 2, 2, 1> MC(&atoms, 0.5);
         MC.simulated_annealing(1, 1e-4, 100000, 0, true);
         MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
     }

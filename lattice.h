@@ -151,11 +151,27 @@ class lattice
         }
         
 
-                
+        // Print out bilinear partners for debugging/inspection
+        std::cout << "Bilinear Partners:" << std::endl;
+        for (size_t i = 0; i < std::min(size_t(10), lattice_size); ++i) {
+        std::cout << "Site " << i << " is connected to: ";
+        for (size_t j = 0; j < bilinear_partners[i].size(); ++j) {
+            std::cout << bilinear_partners[i][j];
+            if (j < bilinear_partners[i].size() - 1) {
+            std::cout << ", ";
+            }
+        }
+        std::cout << std::endl;
+        }
+        if (lattice_size > 10) {
+        std::cout << "... (showing only first 10 sites)" << std::endl;
+        }
     
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
+
+        std::cout << "Finished setting up lattice" << std::endl;
     };
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
