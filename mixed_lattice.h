@@ -470,9 +470,11 @@ class mixed_lattice
         for (size_t i=0; i<num_bi_SU2; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -488,9 +490,11 @@ class mixed_lattice
         for (size_t i=0; i<num_bi_SU3; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -550,9 +554,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -565,9 +571,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -580,12 +588,15 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         return local_field-field_SU2[site_index];
     }
 
@@ -595,9 +606,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }

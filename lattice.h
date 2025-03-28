@@ -289,6 +289,7 @@ class lattice
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
@@ -303,6 +304,7 @@ class lattice
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
