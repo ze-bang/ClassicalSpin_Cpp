@@ -3,14 +3,87 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
+from math import gcd
+from functools import reduce
 # plt.rcParams['text.usetex'] = True
 
+def honeycomb_reciprocal_basis():
+    """
+    Calculate reciprocal lattice vectors for a honeycomb lattice.
+    
+    Real space basis vectors:
+    a1 = (1, 0, 0)
+    a2 = (1/2, sqrt(3)/2, 0)
+    
+    Returns:
+        numpy.ndarray: Reciprocal lattice vectors b1 and b2
+    """
+    a1 = np.array([1, 0, 0])
+    a2 = np.array([1/2, np.sqrt(3)/2, 0])
+    a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
+    
+    # Calculate reciprocal lattice vectors using the formula:
+    # b_i = 2π * (a_j × a_k) / (a_i · (a_j × a_k))
+    # where i,j,k are cyclic
+    
+    # Calculate cross products
+    a2_cross_a3 = np.cross(a2, a3)
+    a3_cross_a1 = np.cross(a3, a1)
+    a1_cross_a2 = np.cross(a1, a2)
+    
+    # Calculate dot products for normalization
+    vol = np.dot(a1, np.cross(a2, a3))
+    
+    # Calculate reciprocal lattice vectors
+    b1 = 2 * np.pi * a2_cross_a3 / vol
+    b2 = 2 * np.pi * a3_cross_a1 / vol
+    b3 = 2 * np.pi * a1_cross_a2 / vol
+    
+    # Return the in-plane reciprocal lattice vectors
+    return np.array([b1, b2, b3])
 
-def drawLine(A, B, stepN):
-    N = np.linalg.norm(A-B)
-    num = int(N/stepN)
-    temp = np.linspace(A, B, num)
+KBasis = honeycomb_reciprocal_basis()
+print(KBasis)
+def calcNumSites(A, B, N):
+    # Convert A and B to the reciprocal lattice basis
+    # KBasis contains the reciprocal lattice vectors
+    
+    # First we need to get the coordinates in terms of reciprocal lattice vectors
+    # We are solving the equation: A = a*b1 + b*b2 + c*b3 where b1,b2,b3 are the reciprocal lattice vectors
+    A_basis = np.linalg.solve(KBasis.T, A)
+    B_basis = np.linalg.solve(KBasis.T, B)
+    
+    # Scale the coordinates based on the resolution N
+    A_grid = A_basis * N
+    B_grid = B_basis * N
+
+    # Calculate the displacement vector between grid points
+    delta = B_grid - A_grid
+    
+    # Find the greatest common divisor (GCD) of the absolute values of the components
+    # We need to handle potential floating point values by rounding them
+    rounded_delta = np.round(delta).astype(int)
+    # If all components are zero, return 1 (just the starting point)
+    if np.all(rounded_delta == 0):
+        return 1
+    
+    # Calculate GCD of all non-zero components
+    non_zero = [abs(x) for x in rounded_delta if x != 0]
+    if not non_zero:  # All components are zero
+        return 1
+        
+    # Find the GCD of all components
+    gcd_all = reduce(gcd, non_zero)
+    
+    # The number of integer points is GCD + 1 (including start and end points)
+    return gcd_all + 1
+
+
+def drawLine(A, B, N):
+    temp = np.linspace(A, B, N, endpoint=False)[1:]
+    print("Number of points: ", len(temp))
     return temp
+
 def magnitude_bi(vector1, vector2):
     # temp1 = contract('i,ik->k', vector1, BasisBZA)
     # temp2 = contract('i,ik->k', vector2, BasisBZA)
@@ -19,113 +92,50 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-graphres = 12
-
-Gamma = np.array([0, 0, 0])
-K = 2 * np.pi * np.array([3/4, -3/4, 0])
-W = 2 * np.pi * np.array([1, -1/2, 0])
-X = 2 * np.pi * np.array([1, 0, 0])
-
-L = np.pi * np.array([1, 1, 1])
-U = 2 * np.pi * np.array([1/4, 1/4, 1])
-W1 = 2 * np.pi * np.array([0, 1/2, 1])
-X1 = 2 * np.pi * np.array([0, 0, 1])
-
-
-
-stepN = np.linalg.norm(U-W1)/graphres
-
-
-#Path to 1-10
-GammaX = drawLine(Gamma, X, stepN)
-XW = drawLine(X, W, stepN)
-WK = drawLine(W, K, stepN)
-KGamma = drawLine(K, Gamma, stepN)
-
-#Path to 111 and then 001
-GammaL = drawLine(Gamma, L, stepN)
-LU = drawLine(L, U, stepN)
-UW1 = drawLine(U, W1, stepN)
-W1X1 = drawLine(W1, X1, stepN)
-X1Gamma = drawLine(X1, Gamma, stepN)
-
-gGamma1 = 0
-gX = magnitude_bi(Gamma, X)
-gW = gX + magnitude_bi(X, W)
-gK = gW + magnitude_bi(W, K)
-
-gGamma2 = gK + magnitude_bi(K, Gamma)
-gL = gGamma2 + magnitude_bi(Gamma, L)
-gU = gL + magnitude_bi(L, U)
-gW1 = gU + magnitude_bi(U, W1)
-gX1 = gW1 + magnitude_bi(W1, X1)
-gGamma3 = gX1 + magnitude_bi(X1, Gamma)
-
-
-Gamma = np.array([0, 0, 0])
-P1 = 2 * np.pi * np.array([1, 0, 0])
-P2 = 2 * np.pi * np.array([2, 0, 0])
-P3 = 2 * np.pi * np.array([2, -1, 0])
-P4 = 2 * np.pi * np.array([2, -2, 0])
-P5 = np.pi * np.array([1, -1, 0])
-
-stepN = np.linalg.norm(Gamma-P1)/graphres
-
-
-#Path to 1-10
-GammaP1 = drawLine(Gamma, P1, stepN)
-P12 = drawLine(P1, P2, stepN)
-P23 = drawLine(P2, P3, stepN)
-P34 = drawLine(P3, P4, stepN)
-P45 = drawLine(P4, P5, stepN)
-P5Gamma = drawLine(P5, Gamma, stepN)
-
-
-
-gGamma1 = 0
-g1 = magnitude_bi(Gamma, P1)
-g2 = g1 + magnitude_bi(P1, P2)
-g3 = g2 + magnitude_bi(P2, P3)
-g4 = g3 + magnitude_bi(P3, P4)
-g5 = g4 + magnitude_bi(P4, P5)
-gGamma4 = g5 + magnitude_bi(P5, Gamma)
-
-
-# DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
-
-# DSSF_K = np.concatenate((GammaP1, P12, P23, P34, P45, P5Gamma))
+stepN = 8
 
 
 kitaevBasis = 4*np.pi/np.sqrt(3)*np.array([[np.sqrt(3)/2,-1/2,0],[0,1,0], [0,0,1]])
 
 kitaevLocal = np.array([[1,-1,-1],[-1,1,-1],[-1,-1,1]])/np.sqrt(3)
 
-Gamma2D = np.array([0, 0, 0])
-K2D = np.array([2/3, 1/3, 0])
-M2D = np.array([1/2, 0, 0])
-Gamma12D = 2*M2D
+Gamma = np.array([0, 0, 0])
+K1 = np.array([1/3, 2/3, 0])
+K2 = -np.array([2/3, 1/3, 0])
+M1 = np.array([0, 1/2, 0])
+M2 = np.array([1/2, 1/2, 0])
+Gamma2 = np.array([0,1,0])
+# LKitaev = 20
 
-LKitaev = 20
+Gamma = contract('ij, i->j', kitaevBasis, Gamma)
+K1 = contract('ij, i->j', kitaevBasis, K1)
+K2 = contract('ij, i->j', kitaevBasis, K2)
+M1 = contract('ij, i->j', kitaevBasis, M1)
+M2 = contract('ij, i->j', kitaevBasis, M2)
+Gamma2 = contract('ij, i->j', kitaevBasis, Gamma2)
 
-K2D = contract('a, ak->k', K2D, kitaevBasis)
-M2D = contract('a, ak->k', M2D, kitaevBasis)
-Gamma12D = contract('a, ak->k', Gamma12D, kitaevBasis)
+print(K1)
+print(K2)
+print(M1)
+print(M2)
 
+# print(K2D)
 
-P1_2D = np.linspace(K2D, Gamma2D, int(LKitaev/(2*np.sqrt(3))+1), endpoint=False)[1:]
-P2_2D = np.linspace(Gamma2D, M2D, int(LKitaev/2), endpoint=False)[1:]
-P3_2D = np.linspace(M2D, Gamma12D, int(LKitaev/2), endpoint=False)[1:]
-P4_2D = np.linspace(Gamma12D, K2D, int(LKitaev/(2*np.sqrt(3))+1), endpoint=False)[1:]
-P5_2D = np.linspace(K2D, M2D, int(LKitaev/(4*np.sqrt(3))+1), endpoint=False)[1:]
+P1_2D = drawLine(Gamma, M1, stepN)
+P2_2D = drawLine(M2, Gamma, stepN)
+P3_2D = drawLine(Gamma, K1, stepN)
+P4_2D = drawLine(K2, Gamma, stepN)
+P5_2D = drawLine(Gamma2, M1, stepN)
+P6_2D = drawLine(M1, K1, int(stepN/2))
 
-gK2D = 0
-gGamma12D = len(P1_2D)
-gM2D = gGamma12D + len(P2_2D)
-gGamma22D = gM2D + len(P3_2D)
-gK12D = gGamma22D + len(P4_2D)
-gM22D = gK12D + len(P5_2D)
-
-DSSF_K = np.concatenate((P1_2D, P2_2D, P3_2D, P4_2D, P5_2D))
+gGamma = 0
+gM1M2 = len(P1_2D)
+gGamma1 = gM1M2 + len(P2_2D)
+gK1K2 = gGamma1 + len(P3_2D)
+gGamma1Gamma2 = gK1K2 + len(P4_2D)
+gM1 = gGamma1Gamma2 + len(P5_2D)
+gK1 = gM1 + len(P6_2D)
+DSSF_K = np.concatenate((P1_2D, P2_2D, P3_2D, P4_2D, P5_2D, P6_2D))
 
 
 z = np.array([np.array([1,1,1])/np.sqrt(3), np.array([1,-1,-1])/np.sqrt(3), np.array([-1,1,-1])/np.sqrt(3), np.array([-1,-1,1])/np.sqrt(3)])
@@ -241,6 +251,7 @@ def SSSF2D(S, P, nK, filename, gb=False):
     SSSFGraph2D(A, B, S[:, :, 0, 1], f4)
     SSSFGraph2D(A, B, S[:, :, 0, 2], f5)
     SSSFGraph2D(A, B, S[:, :, 1, 2], f6)
+    SSSFGraph2D(A, B, contract('ijab->ij', S), filename + "S_total")
 
 
 def SSSFHnHL(S, P, nK, filename, gb=False):
@@ -502,18 +513,19 @@ def parseDSSF(dir):
     A = A / np.max(A)
     fig, ax = plt.subplots(figsize=(10,4))
 
-    C = ax.imshow(A, origin='lower', extent=[0, gM22D, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    ax.axvline(x=gK2D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gGamma12D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gM2D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gGamma22D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gK12D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gM22D, color='b', label='axvline - full height', linestyle='dashed')
 
-    xlabpos = [gK2D, gGamma12D, gM2D, gGamma22D, gK12D, gM22D]
+    C = ax.imshow(A, origin='lower', extent=[0, gK1, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    ax.axvline(x=gGamma, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gM1M2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gK1K2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gM1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gK1, color='b', label='axvline - full height', linestyle='dashed')
+
+    xlabpos = [gGamma, gM1M2, gGamma1, gK1K2, gGamma1Gamma2, gM1, gK1]
     labels = [r'$K$', r'$\Gamma_0$', r'$M$', r'$\Gamma_1$', r'$K$', r'$M$']
     ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, gM22D])
+    ax.set_xlim([0, gK1])
     fig.colorbar(C)
     plt.savefig(dir+"DSSF.pdf")
     plt.clf()
@@ -533,25 +545,25 @@ def read_MD(dir):
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
-    wmax = 3
-    w = np.arange(w0, wmax, 1/600)[1:]
+    wmax = 15
+    w = np.arange(w0, wmax, 1/100)[1:]
     A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
 
-    C = ax.imshow(A, origin='lower', extent=[0, gM22D, 0, 3], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    ax.axvline(x=gK2D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gGamma12D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gM2D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gGamma22D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gK12D, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=gM22D, color='b', label='axvline - full height', linestyle='dashed')
+    C = ax.imshow(A, origin='lower', extent=[0, gK1, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    ax.axvline(x=gGamma, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gM1M2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gK1K2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gM1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=gK1, color='b', label='axvline - full height', linestyle='dashed')
 
-    xlabpos = [gK2D, gGamma12D, gM2D, gGamma22D, gK12D, gM22D]
-    labels = [r'$K$', r'$\Gamma_0$', r'$M$', r'$\Gamma_1$', r'$K$', r'$M$']
+    xlabpos = [gGamma, gM1M2, gGamma1, gK1K2, gGamma1Gamma2, gM1, gK1]
+    labels = [r'$\Gamma_1$', r'$M_1\quad M_2$', r'$\Gamma_1$', r'$K_1\quad K_2$', r'$\Gamma_1\quad\Gamma_2$', r'$M_1$', r'$K_1$']
     ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, gM22D])
+    ax.set_xlim([0, gK1])
     fig.colorbar(C)
     plt.savefig(dir+"DSSF.pdf")
     plt.clf()
@@ -631,7 +643,7 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-dir = "kitaev_benchmark"
+dir = "BCAO_test"
 read_MD_tot(dir)
 # parseDSSF(dir)
 

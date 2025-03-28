@@ -17,7 +17,6 @@
 #include <mpi.h>
 #include "binning_analysis.h"
 #include <sstream>
-#include <atomic>
 
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
 class lattice
@@ -151,12 +150,11 @@ class lattice
             }
         }
         
-
-                
-    
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
+
+        std::cout << "Finished setting up lattice" << std::endl;
     };
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
@@ -243,22 +241,17 @@ class lattice
     }
 
     double site_energy(array<double, N> &spin_here, size_t site_index){
-        // Calculate field and onsite interaction energy directly
-        double energy = -dot(spin_here, field[site_index]) + 
-                        contract(spin_here, onsite_interaction[site_index], spin_here);
-        
-        // Use SIMD with reduction for bilinear interactions
-        #pragma omp simd reduction(+:energy)
+        double energy = 0.0;
+        energy -= dot(spin_here, field[site_index]);
+        energy += contract(spin_here, onsite_interaction[site_index], spin_here);
+        #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
             energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
-        
-        // Use SIMD with reduction for trilinear interactions
-        #pragma omp simd reduction(+:energy)
+        #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        
         return energy;
     }
 
@@ -268,27 +261,19 @@ class lattice
         double bilinear_energy = 0.0;
         double trilinear_energy = 0.0;
 
-        #pragma omp parallel for reduction(-:field_energy) reduction(+:onsite_energy,bilinear_energy,trilinear_energy) schedule(guided)
+        #pragma omp simd
         for(size_t i = 0; i < lattice_size; ++i){
-            // Calculate field and onsite interaction energy
             field_energy -= dot(curr_spins[i], field[i]);
             onsite_energy += contract(curr_spins[i], onsite_interaction[i], curr_spins[i]);
-            
-            // Calculate bilinear interaction energy
-            #pragma omp simd reduction(+:bilinear_energy)
-            for (size_t j = 0; j < num_bi; ++j) {
+            #pragma omp simd
+            for (size_t j=0; j< num_bi; ++j) {
                 bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], curr_spins[bilinear_partners[i][j]]);
             }
-            
-            // Calculate trilinear interaction energy
-            #pragma omp simd reduction(+:trilinear_energy)
-            for (size_t j = 0; j < num_tri; ++j){
-                trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], 
-                                   curr_spins[trilinear_partners[i][j][0]], 
-                                   curr_spins[trilinear_partners[i][j][1]]);
+            #pragma omp simd
+            for (size_t j=0; j < num_tri; ++j){
+                trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
-        
         return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
     }
 
@@ -296,98 +281,53 @@ class lattice
         return total_energy(curr_spins)/lattice_size;
     }
     
-    array<double, N> get_local_field(size_t site_index) {
-        // Initialize local field with onsite interaction
-        array<double, N> local_field = multiply(onsite_interaction[site_index], spins[site_index]);
-        
-        // Process bilinear interactions with SIMD vectorization
+    array<double, N>  get_local_field(size_t site_index){
+        array<double,N> local_field;
+        local_field = multiply(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
-        for (size_t i = 0; i < num_bi; ++i) {
-            const auto& partner_spin = spins[bilinear_partners[site_index][i]];
-            const auto& interaction = bilinear_interaction[site_index][i];
-            local_field += multiply(interaction, partner_spin);
+        for (size_t i=0; i< num_bi; ++i) {
+            local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
-        
-        // Process trilinear interactions with optimized reduction
         #pragma omp simd
-        for (size_t i = 0; i < num_tri; ++i) {
-            const auto& partner_spin1 = spins[trilinear_partners[site_index][i][0]];
-            const auto& partner_spin2 = spins[trilinear_partners[site_index][i][1]];
-            const auto& interaction = trilinear_interaction[site_index][i];
-            
-            local_field += contract_trilinear_field(interaction, partner_spin1, partner_spin2);
+        for (size_t i=0; i < num_tri; ++i){
+            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        
-        // Subtract external field with SIMD vectorization
-        #pragma omp simd
-        for (size_t j = 0; j < N; ++j) {
-            local_field[j] -= field[site_index][j];
-        }
-        
-        return local_field;
+        return local_field-field[site_index];
     }
 
 
-    array<double, N> get_local_field_lattice(size_t site_index, const spin_config &current_spin){
-        // Initialize local field with onsite interaction
-        array<double, N> local_field = multiply(onsite_interaction[site_index], current_spin[site_index]);
-        
-        // Process bilinear interactions with SIMD vectorization
+    array<double, N>  get_local_field_lattice(size_t site_index, const spin_config &current_spin){
+        array<double,N> local_field;
+        local_field =  multiply(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
-        for (size_t i = 0; i < num_bi; ++i) {
-            const auto& partner_spin = current_spin[bilinear_partners[site_index][i]];
-            const auto& interaction = bilinear_interaction[site_index][i];
-            
-            local_field += multiply(interaction, partner_spin);
+        for (size_t i=0; i< num_bi; ++i) {
+            local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
-        
-        // Process trilinear interactions with optimized reduction
         #pragma omp simd
-        for (size_t i = 0; i < num_tri; ++i) {
-            const auto& partner_spin1 = current_spin[trilinear_partners[site_index][i][0]];
-            const auto& partner_spin2 = current_spin[trilinear_partners[site_index][i][1]];
-            const auto& interaction = trilinear_interaction[site_index][i];
-            
-            local_field += contract_trilinear_field(interaction, partner_spin1, partner_spin2);
+        for (size_t i=0; i < num_tri; ++i){
+            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
-        
-        // Subtract external field
-        #pragma omp simd
-        for (size_t j = 0; j < N; ++j) {
-            local_field[j] -= field[site_index][j];
-        }
-        
-        return local_field;
+        return local_field-field[site_index];
     }
 
 
-    void deterministic_sweep() {
-        size_t count(0);
-        
-        #pragma omp parallel
-        {
-            // Thread-private variables
-            array<double, N> local_field;
-            double norm;
-            size_t i;
-            
-            for (size_t count = 0; count < lattice_size; ++count) {
-                // Try to update a random site
-                i = random_int_lehman(lattice_size);
-                
-                // Calculate local field
-                local_field = get_local_field(i);
-                norm = sqrt(dot(local_field, local_field));
-                
-                // Skip if field is zero
-                if (norm > 0) {
-                    // Update spin direction opposite to field
-                    #pragma omp simd
-                    for (size_t j = 0; j < N; ++j) {
-                        spins[i][j] = -local_field[j]/norm*spin_length;
-                    }          
+    void deterministic_sweep(){
+        size_t count = 0;
+        int i;
+        while(count < lattice_size){
+            // i = random_int(0, lattice_size-1, gen);
+            i = random_int_lehman(lattice_size);
+            array<double,N> local_field = get_local_field(i);
+            double norm = sqrt(dot(local_field, local_field));
+            if(norm == 0){
+                continue;
+            }
+            else{
+                for(size_t j=0; j < N; ++j){
+                    spins[i][j] = -local_field[j]/norm*spin_length;
                 }
             }
+            count++;
         }
     }
     
@@ -398,81 +338,61 @@ class lattice
     }
 
     void overrelaxation(){
+        array<double,N> local_field;
+        int i;
+        double proj;
         size_t count = 0;
-        
-        #pragma omp parallel
-        {
-            // Thread-private variables
-            array<double,N> local_field;
-            int i;
-            double proj;
-            
-            for (size_t count = 0; count < lattice_size; ++count) {       
-                // Try to update a random site
-                i = random_int_lehman(lattice_size);
-                local_field = get_local_field(i);
-                double norm = dot(local_field, local_field);
-                
-                if(norm > 0) {
-                    proj = 2 * dot(spins[i], local_field) / norm;
-                    
-                    // Update spin - potential for race conditions but acceptable for overrelaxation
-                    spins[i] = local_field * proj - spins[i];
-                }
+        while(count < lattice_size){
+            // i = random_int(0, lattice_size-1, gen);
+            i = random_int_lehman(lattice_size);
+            local_field = get_local_field(i);
+            double norm = dot(local_field, local_field);
+            if(norm == 0){
+                continue;
             }
+            else{
+                proj = 2* dot(spins[i], local_field)/norm;
+                spins[i] = local_field*proj - spins[i];
+            }
+            count++;
         }
     }
 
     double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
+        double E, E_new, dE, r;
+        int i;
+        array<double,N> new_spin;
         int accept = 0;
-        
-        // Pre-calculate 1/T to avoid division in the inner loop
-        double inv_T = 1.0 / T;
-        
-        // Parallelize the loop across multiple threads
-        #pragma omp parallel reduction(+:accept)
-        {
-            int local_accept = 0;
+        size_t count = 0;
+        while(count < lattice_size){
+            // i = random_int(0, lattice_size-1, gen);
+            i = random_int_lehman(lattice_size);
+            E = site_energy(curr_spin[i], i);
+            if (gaussian){
+                new_spin = gaussian_move(curr_spin[i], sigma);
+            }
+            else{
+                new_spin = gen_random_spin(spin_length);
+            }
+            E_new = site_energy(new_spin, i);
+            dE = E_new - E;
             
-            // Each thread processes a portion of the lattice
-            #pragma omp for schedule(guided)
-            for(size_t count = 0; count < lattice_size; ++count){
-                int i = random_int_lehman(lattice_size);
-                
-                // Compute energy only once and store
-                double E = site_energy(curr_spin[i], i);
-                
-                // Generate new spin configuration
-                array<double,N> new_spin = gaussian ? 
-                    gaussian_move(curr_spin[i], sigma) : 
-                    gen_random_spin(spin_length);
-                
-                // Compute new energy
-                double E_new = site_energy(new_spin, i);
-                double dE = E_new - E;
-                
-                // Fast path for immediate acceptance
-                if(dE <= 0){
+            if(dE < 0){
+                curr_spin[i] = new_spin;
+                accept++;
+            }
+            else{
+                r = random_double_lehman(0,1);
+                if(r < exp(-dE/T)){
                     curr_spin[i] = new_spin;
-                    local_accept++;
-                }
-                else{
-                    // Use fast random generator and avoid expensive exp() when possible
-                    double r = random_double_lehman(0,1);
-                    double boltzmann_factor = exp(-dE * inv_T);
-                    
-                    if(r < boltzmann_factor){
-                        curr_spin[i] = new_spin;
-                        local_accept++;
-                    }
+                    accept++;
                 }
             }
-            
-            #pragma omp atomic
-            accept += local_accept;
+            count++;
         }
-        
-        return double(accept)/double(lattice_size);
+
+        double acceptance_rate = double(accept)/double(lattice_size);
+        return acceptance_rate;
     }
 
     
@@ -570,7 +490,7 @@ class lattice
         }
         double T = T_start;
         double acceptance_rate = 0;
-        double sigma = 40;
+        double sigma = 1000;
         cout << "Gaussian Move: " << gaussian_move << endl;
         srand (time(NULL));
         seed_lehman(rand()*2+1);
@@ -594,7 +514,7 @@ class lattice
                 acceptance_rate = curr_accept/n_anneal;
                 cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }
-            if (gaussian_move){
+            if (gaussian_move && acceptance_rate < 0.5){
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
