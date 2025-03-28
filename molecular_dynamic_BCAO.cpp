@@ -58,7 +58,7 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
         lattice<3, 2, 12, 12, 1> MC(&atoms, 0.5);
         MC.simulated_annealing(100*k_B, k_B, 100000, 0, true);
-        MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
 

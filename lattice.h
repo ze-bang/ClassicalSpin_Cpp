@@ -490,7 +490,7 @@ class lattice
         }
         double T = T_start;
         double acceptance_rate = 0;
-        double sigma = 40;
+        double sigma = 1000;
         cout << "Gaussian Move: " << gaussian_move << endl;
         srand (time(NULL));
         seed_lehman(rand()*2+1);
@@ -514,7 +514,7 @@ class lattice
                 acceptance_rate = curr_accept/n_anneal;
                 cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }
-            if (gaussian_move){
+            if (gaussian_move && acceptance_rate < 0.5){
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
