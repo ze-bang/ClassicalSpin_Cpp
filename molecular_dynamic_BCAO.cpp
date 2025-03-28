@@ -57,7 +57,7 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     for(size_t i=0; i<num_trials;++i){
 
         lattice<3, 2, 12, 12, 1> MC(&atoms, 0.5);
-        MC.simulated_annealing(100*k_B, k_B, 100000, 0, true);
+        MC.simulated_annealing(100*k_B, 1.7*k_B, 100000, 0, true);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MD_BCAO_honeycomb(1, 3*mu_B, {0,1,0}, "BCAO_test");
+    MD_BCAO_honeycomb(1, 0*mu_B, {0,1,0}, "BCAO_zero_field_1.7K");
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){
