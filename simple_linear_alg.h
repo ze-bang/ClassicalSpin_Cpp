@@ -163,6 +163,14 @@ T dot(const array<T, N>  &a, const array<T, N>  &b) {
     return result;
 }
 
+template<typename T, size_t N>
+array<T, N> operator+= (array<T, N> &a, const array<T, N>  &b) {
+    #pragma omp simd
+    for (size_t i = 0; i < N; ++i) {
+        a[i] += b[i];
+    }
+    return a;
+}
 
 array<double, 3> multiply_SU2(const array<double, 9>  &M, const array<double, 3>  &a){
     array<double, 3>  result;

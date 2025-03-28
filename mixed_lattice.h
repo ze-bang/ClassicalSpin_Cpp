@@ -543,13 +543,15 @@ class mixed_lattice
             field_energy -= dot(curr_spins.spins_SU3[site_index], field_SU3[site_index]);
             onsite_energy += contract(curr_spins.spins_SU3[site_index], onsite_interaction_SU3[site_index], curr_spins.spins_SU3[site_index]);
 
-            #pragma omp simd
+            #pragma omp simd reduction(+:bilinear_energy)
             for (size_t i=0; i<num_bi_SU3; ++i) {
                 bilinear_energy += contract(curr_spins.spins_SU3[site_index], bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
             }
+            #pragma omp simd reduction(+:trilinear_energy)
             for (size_t i=0; i < num_tri_SU3; ++i){
                 trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
             }
+            #pragma omp simd reduction(+:trilinear_energy)
             for (size_t i=0; i < num_tri_SU2_SU3; ++i){
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
             }
@@ -611,39 +613,25 @@ class mixed_lattice
 
     array<double, N_SU2> get_local_field_SU2(size_t site_index) {
         array<double, N_SU2> local_field = {0};
-        
-        #pragma omp declare reduction(vec_add : array<double, N_SU2> : \
-                                    omp_out = vec_add_arrays(omp_out, omp_in)) \
-                        initializer(omp_priv = {0})
 
-        #pragma omp parallel reduction(vec_add:local_field)
-        {
-            array<double, N_SU2> private_field = {0};
-            
-            for (size_t i = 0; i < num_bi_SU2; ++i) {
-                private_field = private_field + multiply(
-                    bilinear_interaction_SU2[site_index][i], 
-                    spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU2; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    trilinear_interaction_SU2[site_index][i],
-                    spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]],
-                    spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    mixed_trilinear_interaction_SU2[site_index][i],
-                    spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
-                    spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
-            }
-            
-            #pragma omp critical
-            {
-                local_field = local_field + private_field;
-            }
+        for (size_t i = 0; i < num_bi_SU2; ++i) {
+            local_field += multiply(
+                bilinear_interaction_SU2[site_index][i], 
+                spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2; ++i) {
+            local_field += contract_trilinear_field(
+                trilinear_interaction_SU2[site_index][i],
+                spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]],
+                spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                mixed_trilinear_interaction_SU2[site_index][i],
+                spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
+                spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
         
         return local_field - field_SU2[site_index];
@@ -651,38 +639,24 @@ class mixed_lattice
     array<double, N_SU3> get_local_field_SU3(size_t site_index) {
         array<double, N_SU3> local_field = {0};
         
-        #pragma omp declare reduction(vec_add : array<double, N_SU3> : \
-                                    omp_out = vec_add_arrays(omp_out, omp_in)) \
-                        initializer(omp_priv = {0})
-
-        #pragma omp parallel reduction(vec_add:local_field)
-        {
-            array<double, N_SU3> private_field = {0};
-            
-            for (size_t i = 0; i < num_bi_SU3; ++i) {
-                private_field = private_field + multiply(
-                    bilinear_interaction_SU3[site_index][i], 
-                    spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU3; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    trilinear_interaction_SU3[site_index][i],
-                    spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]],
-                    spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    mixed_trilinear_interaction_SU3[site_index][i],
-                    spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
-                    spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
-            }
-            
-            #pragma omp critical
-            {
-                local_field = local_field + private_field;
-            }
+        for (size_t i = 0; i < num_bi_SU3; ++i) {
+            local_field += multiply(
+                bilinear_interaction_SU3[site_index][i], 
+                spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                trilinear_interaction_SU3[site_index][i],
+                spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]],
+                spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                mixed_trilinear_interaction_SU3[site_index][i],
+                spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
+                spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
         
         return local_field - field_SU3[site_index];
@@ -691,78 +665,50 @@ class mixed_lattice
     array<double, N_SU2> get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU2> local_field = {0};
         
-        #pragma omp declare reduction(vec_add : array<double, N_SU2> : \
-                                    omp_out = vec_add_arrays(omp_out, omp_in)) \
-                        initializer(omp_priv = {0})
-
-        #pragma omp parallel reduction(vec_add:local_field)
-        {
-            array<double, N_SU2> private_field = {0};
-            
-            for (size_t i = 0; i < num_bi_SU2; ++i) {
-                private_field = private_field + multiply(
-                    bilinear_interaction_SU2[site_index][i], 
-                    current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU2; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    trilinear_interaction_SU2[site_index][i],
-                    current_spin_SU2[trilinear_partners_SU2[site_index][i][0]],
-                    current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    mixed_trilinear_interaction_SU2[site_index][i],
-                    current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
-                    current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
-            }
-            
-            #pragma omp critical
-            {
-                local_field = local_field + private_field;
-            }
+        for (size_t i = 0; i < num_bi_SU2; ++i) {
+            local_field += multiply(
+                bilinear_interaction_SU2[site_index][i], 
+                current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         
+        for (size_t i = 0; i < num_tri_SU2; ++i) {
+            local_field += contract_trilinear_field(
+                trilinear_interaction_SU2[site_index][i],
+                current_spin_SU2[trilinear_partners_SU2[site_index][i][0]],
+                current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                mixed_trilinear_interaction_SU2[site_index][i],
+                current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
+                current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+        }
+
         return local_field - field_SU2[site_index];
     }
 
     array<double, N_SU3> get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU3> local_field = {0};
-        
-        #pragma omp declare reduction(vec_add : array<double, N_SU3> : \
-                                    omp_out = vec_add_arrays(omp_out, omp_in)) \
-                        initializer(omp_priv = {0})
 
-        #pragma omp parallel reduction(vec_add:local_field)
-        {
-            array<double, N_SU3> private_field = {0};
-            
-            for (size_t i = 0; i < num_bi_SU3; ++i) {
-                private_field = private_field + multiply(
-                    bilinear_interaction_SU3[site_index][i], 
-                    current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU3; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    trilinear_interaction_SU3[site_index][i],
-                    current_spin_SU3[trilinear_partners_SU3[site_index][i][0]],
-                    current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
-            }
-            
-            for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-                private_field = private_field + contract_trilinear_field(
-                    mixed_trilinear_interaction_SU3[site_index][i],
-                    current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
-                    current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
-            }
-            
-            #pragma omp critical
-            {
-                local_field = local_field + private_field;
-            }
+        for (size_t i = 0; i < num_bi_SU3; ++i) {
+            local_field += multiply(
+                bilinear_interaction_SU3[site_index][i], 
+                current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                trilinear_interaction_SU3[site_index][i],
+                current_spin_SU3[trilinear_partners_SU3[site_index][i][0]],
+                current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
+        }
+        
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            local_field += contract_trilinear_field(
+                mixed_trilinear_interaction_SU3[site_index][i],
+                current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
+                current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
         
         return local_field - field_SU3[site_index];
