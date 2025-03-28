@@ -371,10 +371,7 @@ class lattice
             double norm;
             size_t i;
             
-            while (true) {
-                // Check if we've processed enough sites
-                if (count >= lattice_size) break;
-                
+            for (size_t count = 0; count < lattice_size; ++count) {
                 // Try to update a random site
                 i = random_int_lehman(lattice_size);
                 
@@ -388,11 +385,7 @@ class lattice
                     #pragma omp simd
                     for (size_t j = 0; j < N; ++j) {
                         spins[i][j] = -local_field[j]/norm*spin_length;
-                    }
-                    
-                    // Safely increment counter using atomic's built-in methods
-                    #pragma omp atomic
-                    count++;                
+                    }          
                 }
             }
         }
@@ -414,15 +407,7 @@ class lattice
             int i;
             double proj;
             
-            while (true) {
-                // Check if we've processed enough sites
-                size_t local_count;
-                #pragma omp atomic read
-                local_count = count;
-                bool done = (local_count >= lattice_size);
-                
-                if (done) break;
-                
+            for (size_t count = 0; count < lattice_size; ++count) {       
                 // Try to update a random site
                 i = random_int_lehman(lattice_size);
                 local_field = get_local_field(i);
@@ -433,10 +418,6 @@ class lattice
                     
                     // Update spin - potential for race conditions but acceptable for overrelaxation
                     spins[i] = local_field * proj - spins[i];
-                    
-                    // Safely increment counter
-                    #pragma omp atomic
-                    count++;
                 }
             }
         }

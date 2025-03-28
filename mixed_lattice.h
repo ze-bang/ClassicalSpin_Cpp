@@ -600,24 +600,18 @@ class mixed_lattice
         t_B_2_SU3 = 0;
     }
 
-    template<size_t N>
-    array<double, N> vec_add_arrays(const array<double, N>& a, const array<double, N>& b) {
-        array<double, N> result;
-        for (size_t i = 0; i < N; ++i) {
-            result[i] = a[i] + b[i];
-        }
-        return result;
-    }
 
     array<double, N_SU2> get_local_field_SU2(size_t site_index) {
         array<double, N_SU2> local_field = {0};
         
+        #pragma omp simd
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU2[site_index][i], 
                 spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU2; ++i) {
             local_field +=  contract_trilinear_field(
                 trilinear_interaction_SU2[site_index][i],
@@ -625,6 +619,7 @@ class mixed_lattice
                 spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
             local_field +=  contract_trilinear_field(
                 mixed_trilinear_interaction_SU2[site_index][i],
@@ -637,12 +632,14 @@ class mixed_lattice
     array<double, N_SU3> get_local_field_SU3(size_t site_index) {
         array<double, N_SU3> local_field = {0};
         
+        #pragma omp simd
         for (size_t i = 0; i < num_bi_SU3; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU3[site_index][i], 
                 spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU3; ++i) {
             local_field += contract_trilinear_field(
                 trilinear_interaction_SU3[site_index][i],
@@ -650,6 +647,7 @@ class mixed_lattice
                 spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
             local_field += contract_trilinear_field(
                 mixed_trilinear_interaction_SU3[site_index][i],
@@ -664,13 +662,14 @@ class mixed_lattice
     array<double, N_SU2> get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU2> local_field = {0};
         
-    
+        #pragma omp simd
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU2[site_index][i], 
                 current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU2; ++i) {
             local_field += contract_trilinear_field(
                 trilinear_interaction_SU2[site_index][i],
@@ -678,6 +677,7 @@ class mixed_lattice
                 current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
             local_field += contract_trilinear_field(
                 mixed_trilinear_interaction_SU2[site_index][i],
@@ -692,12 +692,14 @@ class mixed_lattice
     array<double, N_SU3> get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU3> local_field = {0};
                     
+        #pragma omp simd
         for (size_t i = 0; i < num_bi_SU3; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU3[site_index][i], 
                 current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU3; ++i) {
             local_field += contract_trilinear_field(
                 trilinear_interaction_SU3[site_index][i],
@@ -705,6 +707,7 @@ class mixed_lattice
                 current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
         
+        #pragma omp simd
         for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
             local_field += contract_trilinear_field(
                 mixed_trilinear_interaction_SU3[site_index][i],
@@ -813,6 +816,8 @@ class mixed_lattice
 
 
     void deterministic_sweep(){
+
+        #pragma omp parallel for simd
         for(size_t i = 0; i<lattice_size_SU2; ++i){
             array<double,N_SU2> local_field = get_local_field_SU2(i);
             double norm = sqrt(dot(local_field, local_field));
@@ -823,6 +828,8 @@ class mixed_lattice
                 spins.spins_SU2[i] = local_field/(-norm)*spin_length_SU2;
             }
         }
+
+        #pragma omp parallel for simd
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             array<double,N_SU3> local_field = get_local_field_SU3(i);
             double norm = sqrt(dot(local_field, local_field));
