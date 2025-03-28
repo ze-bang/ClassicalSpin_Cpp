@@ -265,7 +265,7 @@ void simulated_annealing_TmFeO3(int num_trials, double Temp_start, double Temp_e
             }
         }
         MC.write_to_file_pos(dir+"/pos");
-        MC.write_to_file_spin(dir+"/spin"+ to_string(i), MC.spins);
+        MC.write_to_file_spin(dir+"/spin"+ to_string(i));
     }
 }
 
