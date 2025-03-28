@@ -1,6 +1,8 @@
 #include "experiments.h"
+#include <math.h>
 
-void MD_BCAO_honeycomb(size_t num_trials, double J1, double Jzp, double Jpmpm, double J2, double J3, double Delta1, double Delta2, double Delta3, double h, string dir){
+
+void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, double J2=-0.21, double J3=1.70, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
 
@@ -12,15 +14,15 @@ void MD_BCAO_honeycomb(size_t num_trials, double J1, double Jzp, double Jpmpm, d
     // array<array<double,3>, 3> J1y_ = {{{J1_,Gammap,Gamma},{Gammap,K+J1_,Gammap},{Gamma,Gammap,J1_}}};
     // array<array<double,3>, 3> J1z_ = {{{J1_,Gamma,Gammap},{Gamma,J1_,Gammap},{Gammap,Gammap,K+J1_}}};
 
-    array<array<double,3>, 3> J1x_ = {{{J1+2*Jpmpm*cos(alpha),-2*Jpmpm*sin(alpha),Jzp*sin(alpha)},{-2*Jpmpm*sin(alpha),J1-2*Jpmpm*cos(alpha),-Jzp*cos(alpha)},{Jzp*sin(alpha),-Jzp*cos(alpha),J1*Delta1}}};
-    array<array<double,3>, 3> J1y_ = {{{J1+2*Jpmpm*cos(alpha),-2*Jpmpm*sin(alpha),Jzp*sin(alpha)},{-2*Jpmpm*sin(alpha),J1-2*Jpmpm*cos(alpha),-Jzp*cos(alpha)},{Jzp*sin(alpha),-Jzp*cos(alpha),J1*Delta1}}};
+    array<array<double,3>, 3> J1x_ = {{{J1+2*Jpmpm*cos(2*M_PI/3),-2*Jpmpm*sin(2*M_PI/3),Jzp*sin(2*M_PI/3)},{-2*Jpmpm*sin(2*M_PI/3),J1-2*Jpmpm*cos(2*M_PI/3),-Jzp*cos(2*M_PI/3)},{Jzp*sin(2*M_PI/3),-Jzp*cos(2*M_PI/3),J1*Delta1}}};
+    array<array<double,3>, 3> J1y_ = {{{J1+2*Jpmpm*cos(-2*M_PI/3),-2*Jpmpm*sin(-2*M_PI/3),Jzp*sin(-2*M_PI/3)},{-2*Jpmpm*sin(-2*M_PI/3),J1-2*Jpmpm*cos(-2*M_PI/3),-Jzp*cos(-2*M_PI/3)},{Jzp*sin(-2*M_PI/3),-Jzp*cos(-2*M_PI/3),J1*Delta1}}};
     array<array<double,3>, 3> J1z_ = {{{J1+2*Jpmpm*cos(0),-2*Jpmpm*sin(0),Jzp*sin(0)},{-2*Jpmpm*sin(0),J1-2*Jpmpm*cos(0),-Jzp*cos(0)},{Jzp*sin(0),-Jzp*cos(0),J1*Delta1}}};
 
 
     array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,Delta2*J2}}};
     array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};, 
 
-    array<double, 3> field = {5*h/double(sqrt(3)),5*h/double(sqrt(3)),2.5*h/double(sqrt(3))};
+    array<double, 3> field = {5*h*field_dir[0],5*h*field_dir[1],2.5*h*field_dir[2]};
     
 
     //nearest neighbour
@@ -45,13 +47,8 @@ void MD_BCAO_honeycomb(size_t num_trials, double J1, double Jzp, double Jpmpm, d
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 12, 12, 1> MC(&atoms);
+        lattice<3, 2, 24, 24, 1> MC(&atoms, );
         MC.simulated_annealing(1, 1e-4, 100000, 0, true);
-        // std::random_device rd;
-        // std::mt19937 gen(rd());
-        // for (size_t i = 0; i<100000; ++i){
-        //     MC.deterministic_sweep(gen);
-        // }
         MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
     }
 }
@@ -75,6 +72,6 @@ int main(int argc, char** argv) {
     string dir_name = argv[5] ? argv[5] : "";
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
-    MD_kitaev_honeycomb(num_trials, K, Gamma, Gammap, h, dir_name);
+    MD_BCAO_honeycomb(num_trials, K, Gamma, Gammap, h, dir_name);
     return 0;
 }
