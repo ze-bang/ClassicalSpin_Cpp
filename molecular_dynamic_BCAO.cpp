@@ -23,7 +23,7 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};
 
     std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
-    array<double, 3> field = {5*h*field_dir[0],5*h*field_dir[1],2.5*h*field_dir[2]};
+    array<double, 3> field = {4.8*h*field_dir[0],4.85*h*field_dir[1],2.5*h*field_dir[2]};
     
 
     //nearest neighbour
@@ -52,11 +52,12 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
+    double k_B = 0.08620689655;
 
     for(size_t i=0; i<num_trials;++i){
 
         lattice<3, 2, 12, 12, 1> MC(&atoms, 0.5);
-        MC.simulated_annealing(1, 1e-4, 100000, 0, true);
+        MC.simulated_annealing(100*k_B, k_B, 100000, 0, true);
         MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
     }
 }
@@ -72,7 +73,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MD_BCAO_honeycomb(1, 0, {1,0,0}, "BCAO_test");
+    MD_BCAO_honeycomb(1, 3*mu_B, {0,1,0}, "BCAO_test");
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){
