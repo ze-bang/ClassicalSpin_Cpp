@@ -510,6 +510,59 @@ class mixed_lattice
         }
     }
 
+
+    double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3> &curr_spins){
+        double field_energy = 0.0;
+        double onsite_energy = 0.0;
+        double bilinear_energy = 0.0;
+        double trilinear_energy = 0.0;
+
+        size_t site_index, i;
+        #pragma omp parallel for simd
+        for(site_index = 0; site_index < lattice_size_SU2; ++site_index){
+            field_energy -= dot(curr_spins.spins_SU2[site_index], field_SU2[site_index]);
+            onsite_energy += contract(curr_spins.spins_SU2[site_index], onsite_interaction_SU2[site_index], curr_spins.spins_SU2[site_index]);
+
+            #pragma omp simd reduction(+:bilinear_energy)
+            for (i=0; i<num_bi_SU2; ++i) {
+                bilinear_energy += contract(curr_spins.spins_SU2[site_index], bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+            }
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (i=0; i < num_tri_SU3; ++i){
+                trilinear_energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+            }
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (i=0; i < num_tri_SU2_SU3; ++i){
+                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            }
+        }
+
+        #pragma omp parallel for simd
+        for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index){
+            field_energy -= dot(curr_spins.spins_SU3[site_index], field_SU3[site_index]);
+            onsite_energy += contract(curr_spins.spins_SU3[site_index], onsite_interaction_SU3[site_index], curr_spins.spins_SU3[site_index]);
+
+            #pragma omp simd reduction(+:bilinear_energy)
+            for (size_t i=0; i<num_bi_SU3; ++i) {
+                bilinear_energy += contract(curr_spins.spins_SU3[site_index], bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+            }
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (size_t i=0; i < num_tri_SU3; ++i){
+                trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+            }
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (size_t i=0; i < num_tri_SU2_SU3; ++i){
+                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+            }
+        }
+        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
+    }
+
+    double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>  &curr_spins){
+        return total_energy(curr_spins)/(lattice_size_SU2+lattice_size_SU3);
+    }
+    
+
     void set_pulse_SU2(const array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_SU2, double t_B, const array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_2_SU2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
         field_drive_1_SU2 = field_in_SU2;
         field_drive_2_SU2 = field_in_2_SU2;
@@ -860,7 +913,7 @@ class mixed_lattice
         }
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
-            write_to_file_spin(dir_name + "/spin", spins);
+            write_to_file_spin(dir_name + "/spin");
             write_to_file_pos(dir_name + "/pos");
         }
     }
@@ -973,7 +1026,7 @@ class mixed_lattice
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
-                    write_to_file_spin(dir_name + "/spin" + to_string(rank), spins);
+                    write_to_file_spin(dir_name + "/spin" + to_string(rank));
                     // write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     // write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                     // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
