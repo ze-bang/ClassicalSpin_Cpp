@@ -78,15 +78,6 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     array<double, 3> By3 = {0, gyy*(pow(dot(field,y3),3) - 3*pow(dot(field,x3),2)*dot(field,y3)),0};
     array<double, 3> By4 = {0, gyy*(pow(dot(field,y4),3) - 3*pow(dot(field,x4),2)*dot(field,y4)),0};
 
-    // array<double, 3> temp = rot_field*dot(field, z1)+ By1;
-    // cout << gxx << " " << gyy << " " << gzz << " " << temp[0] << " " << temp[1] << " " << temp[2] << endl;
-    // array<double, 3> temp1 = rot_field*dot(field, z2)+ By2;
-    // cout << gxx << " " << gyy << " " << gzz << " " << temp1[0] << " " << temp1[1] << " " << temp1[2] << endl;
-    // array<double, 3> temp2 = rot_field*dot(field, z3)+ By3;
-    // cout << gxx << " " << gyy << " " << gzz << " " << temp2[0] << " " << temp2[1] << " " << temp2[2] << endl;
-    // array<double, 3> temp3 = rot_field*dot(field, z4)+ By4;
-    // cout << gxx << " " << gyy << " " << gzz << " " << temp3[0] << " " << temp3[1] << " " << temp3[2] << endl;
-
     atoms.set_field(rot_field*dot(field, z1)+ By1, 0);
     atoms.set_field(rot_field*dot(field, z2)+ By2, 1);
     atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
