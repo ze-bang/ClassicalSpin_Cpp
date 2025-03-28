@@ -81,7 +81,6 @@ def calcNumSites(A, B, N):
 
 def drawLine(A, B, N):
     temp = np.linspace(A, B, N, endpoint=False)[1:]
-    print("Number of points: ", len(temp))
     return temp
 
 def magnitude_bi(vector1, vector2):
@@ -114,10 +113,6 @@ M1 = contract('ij, i->j', kitaevBasis, M1)
 M2 = contract('ij, i->j', kitaevBasis, M2)
 Gamma2 = contract('ij, i->j', kitaevBasis, Gamma2)
 
-print(K1)
-print(K2)
-print(M1)
-print(M2)
 
 # print(K2D)
 
@@ -217,6 +212,9 @@ def hhztoK(H, K):
 
 def hk2d(H,K):
     return contract('ij,k->ijk',H, 2*np.array([np.pi,0, 0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi, 0]))
+
+def hhknk(H,K):
+    return contract('ij,k->ijk',H, 2*np.array([np.pi,np.pi, 0])) + contract('ij,k->ijk',K, 2*np.array([np.pi,-np.pi, 0]))
 
 def SSSF2D(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
@@ -532,10 +530,23 @@ def parseDSSF(dir):
 
 def read_MD_tot(dir):
     directory = os.fsencode(dir)
+    nK = 50
+    A = np.zeros((8, nK, nK))
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            read_MD(dir + "/" + filename)
+            # read_MD(dir + "/" + filename)
+            A += read_MD_slice(dir + "/" + filename, nK)
+    for i in range(2):
+        fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(5,5))
+        C = ax[0,0].imshow(A[4*i][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1, 0, 0, 2], aspect='auto', cmap='gnuplot2')
+        C = ax[0,1].imshow(A[4*i+1][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1, 0, 2], aspect='auto', cmap='gnuplot2')
+        C = ax[1,1].imshow(A[4*i+2][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1, -2, 0], aspect='auto', cmap='gnuplot2')
+        C = ax[1,0].imshow(A[4*i+3][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1, 0, -2, 0], aspect='auto', cmap='gnuplot2')
+
+        plt.savefig(dir + "/DSSF_" + str(i) + ".pdf")
+        plt.clf()
+
 
 def read_MD(dir):
     directory = os.fsencode(dir)
@@ -546,7 +557,8 @@ def read_MD(dir):
 
     w0 = 0
     wmax = 15
-    w = np.arange(w0, wmax, 1/100)[1:]
+    w = np.arange(w0, wmax, 1/600)[1:]
+
     A = DSSF(w, DSSF_K, S, P, T, True)
     A = A / np.max(A)
     np.savetxt(dir + "_DSSF.txt", A)
@@ -569,6 +581,33 @@ def read_MD(dir):
     plt.clf()
 
     SSSF2D(S[0], P, 100, dir, True)
+
+
+def read_MD_slice(dir, nK):
+    directory = os.fsencode(dir)
+    P = np.loadtxt(dir + "/pos.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
+
+    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
+
+    w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
+
+    nK = 50
+    H = np.linspace(-2.5, 2.5, nK)
+    L = np.linspace(-2.5, 2.5, nK)
+    A, B = np.meshgrid(H, L)
+    K = hk2d(A, B).reshape((nK*nK,3))
+
+    A = DSSF(w, K, S, P, T, True)
+    np.savetxt(dir + "_DSSF.txt", A)
+    A = A.reshape((len(w), nK, nK))
+    for i in range(len(w)):
+        fig, ax = plt.subplots(figsize=(5,5))
+        C = ax.imshow(A[i], origin='lower', extent=[-1.5, 1.5, -2.5, 2.5], aspect='auto', cmap='gnuplot2')
+
+        plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
+        plt.clf()
+    return A
 
 
 def plot_spin_config(P, S, field_dir, filename):
@@ -643,7 +682,8 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-dir = "BCAO_test"
+dir = "BCAO_zero_field_1.7K"
+# dir = "Kitaev_BCAO"
 read_MD_tot(dir)
 # parseDSSF(dir)
 

@@ -150,6 +150,30 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     }
 }
 
+void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamma, double Gammap, double h, string dir){
+    filesystem::create_directory(dir);
+    HoneyComb<3> atoms;
+    array<array<double,3>, 3> Jx = {{{J+K,Gammap,Gammap},{Gammap,J,Gamma},{Gammap,Gamma,J}}};
+    array<array<double,3>, 3> Jy = {{{J,Gammap,Gamma},{Gammap,J+K,Gammap},{Gamma,Gammap,J}}};
+    array<array<double,3>, 3> Jz = {{{J,Gamma,Gammap},{Gamma,J,Gammap},{Gammap,Gammap,J+K}}};
+
+
+    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
+    
+    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
+    atoms.set_field(field, 0);
+    atoms.set_field(field, 1);
+    double k_B = 0.08620689655;
+
+    for(size_t i=0; i<num_trials;++i){
+
+        lattice<3, 2, 12, 12, 1> MC(&atoms);
+        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 0, true);
+        MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
+    }
+}
 
 
 int main(int argc, char** argv) {
@@ -170,6 +194,7 @@ int main(int argc, char** argv) {
     string dir_name = argv[5] ? argv[5] : "";
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
-    MD_kitaev_honeycomb(num_trials, K, Gamma, Gammap, h, dir_name);
+    double J = argv[7] ? atof(argv[7]) : 0.0;
+    MD_kitaev_honeycomb_real(num_trials, J, K, Gamma, Gammap, h, dir_name);
     return 0;
 }

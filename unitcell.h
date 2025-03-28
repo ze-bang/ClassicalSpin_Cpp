@@ -221,6 +221,14 @@ struct HoneyComb : UnitCell<N, 2>{
     };
 };
 
+template<size_t N>
+struct HoneyComb_standarx : UnitCell<N, 2>{
+    HoneyComb_standarx() : UnitCell<N, 2>({{{0,0,0},{1/double(sqrt(3)),0,0}}}, {{{0,1,0},{double(sqrt(3))/2,0.5,0},{0,0,1}}}) {
+        array<double,N> field0 = {0};
+        this->set_field(field0, 0);
+        this->set_field(field0, 1);
+    };
+};
 
 template<size_t N>
 struct TmFeO3_Fe : UnitCell<N, 4>{

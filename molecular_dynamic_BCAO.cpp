@@ -4,7 +4,7 @@
 
 void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, double J2=-0.21, double J3=1.70, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
     filesystem::create_directory(dir);
-    HoneyComb<3> atoms;
+    HoneyComb_standarx<3> atoms;
 
     // double J1_ = (2*J1 + Delta1*J1 + 2*Jpmpm - sqrt(2)*Jzp)/3;
     // double K = -2*Jpmpm + sqrt(2)*Jzp;
@@ -56,9 +56,9 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 12, 12, 1> MC(&atoms, 0.5);
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
         MC.simulated_annealing(100*k_B, 1.7*k_B, 100000, 0, true);
-        MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics(0, 200, 1e-2, dir+"/"+std::to_string(i));
     }
 }
 
