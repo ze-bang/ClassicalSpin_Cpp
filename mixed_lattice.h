@@ -704,10 +704,7 @@ class mixed_lattice
     array<double, N_SU2> get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3) {
         array<double, N_SU2> local_field = {0};
         
-<<<<<<< HEAD
-=======
     
->>>>>>> a5c803cb1fa8a344cb2ed52202156269f280d511
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             local_field += multiply(
                 bilinear_interaction_SU2[site_index][i], 
