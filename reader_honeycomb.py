@@ -18,8 +18,8 @@ def honeycomb_reciprocal_basis():
     Returns:
         numpy.ndarray: Reciprocal lattice vectors b1 and b2
     """
-    a1 = np.array([1, 0, 0])
-    a2 = np.array([1/2, np.sqrt(3)/2, 0])
+    a1 = np.array([0, 1, 0])
+    a2 = np.array([np.sqrt(3)/2, 1/2, 0])
     a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
     
     # Calculate reciprocal lattice vectors using the formula:
@@ -112,7 +112,7 @@ K2 = contract('ij, i->j', kitaevBasis, K2)
 M1 = contract('ij, i->j', kitaevBasis, M1)
 M2 = contract('ij, i->j', kitaevBasis, M2)
 Gamma2 = contract('ij, i->j', kitaevBasis, Gamma2)
-
+print(K1, K2)
 
 # print(K2D)
 
@@ -214,7 +214,8 @@ def hk2d(H,K):
     return contract('ij,k->ijk',H, 2*np.array([np.pi,0, 0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi, 0]))
 
 def hhknk(H,K):
-    return contract('ij,k->ijk',H, 2*np.array([np.pi,np.pi, 0])) + contract('ij,k->ijk',K, 2*np.array([np.pi,-np.pi, 0]))
+    A = contract('ij,k->ijk',H,  np.array([1,1, 0])) + contract('ij,k->ijk',K, np.array([1,-1, 0]))
+    return contract('ijk,ka->ija', A, KBasis)
 
 def SSSF2D(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
@@ -530,41 +531,28 @@ def parseDSSF(dir):
 
 def read_MD_tot(dir):
     directory = os.fsencode(dir)
-    nK = 50
+    nK = 100
     A = np.zeros((8, nK, nK))
-    for file in sorted(os.listdir(directory)):
-        filename = os.fsdecode(file)
-        if os.path.isdir(dir + "/" + filename):
-            # read_MD(dir + "/" + filename)
-            A += read_MD_slice(dir + "/" + filename, nK)
-    for i in range(2):
-        fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(5,5))
-        C = ax[0,0].imshow(A[4*i][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1, 0, 0, 2], aspect='auto', cmap='gnuplot2')
-        C = ax[0,1].imshow(A[4*i+1][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1, 0, 2], aspect='auto', cmap='gnuplot2')
-        C = ax[1,1].imshow(A[4*i+2][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1, -2, 0], aspect='auto', cmap='gnuplot2')
-        C = ax[1,0].imshow(A[4*i+3][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1, 0, -2, 0], aspect='auto', cmap='gnuplot2')
-
-        plt.savefig(dir + "/DSSF_" + str(i) + ".pdf")
-        plt.clf()
-
-
-def read_MD(dir):
-    directory = os.fsencode(dir)
-    P = np.loadtxt(dir + "/pos.txt")
-    T = np.loadtxt(dir + "/Time_steps.txt")
-
-    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
-
+    w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
     w0 = 0
     wmax = 15
-    w = np.arange(w0, wmax, 1/600)[1:]
-
-    A = DSSF(w, DSSF_K, S, P, T, True)
-    A = A / np.max(A)
-    np.savetxt(dir + "_DSSF.txt", A)
+    w_line = np.arange(w0, wmax, 1/100)[1:]
+    B = np.zeros((len(w_line), len(DSSF_K)))
+    for file in sorted(os.listdir(directory)):  
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            if not os.path.isfile(dir + "/" + filename + "_DSSF.txt"):
+                B += read_MD(dir + "/" + filename)
+            else:
+                B += np.loadtxt(dir + "/" + filename + "_DSSF.txt").reshape((len(w_line), len(DSSF_K)))
+            if not os.path.isfile(dir + "/" + filename + "_DSSF_sliced.txt"):
+                A += read_MD_slice(dir + "/" + filename, nK)
+            else:
+                A += np.loadtxt(dir + "/" + filename + "_DSSF_sliced.txt").reshape((8, nK, nK))
+    
     fig, ax = plt.subplots(figsize=(10,4))
 
-    C = ax.imshow(A, origin='lower', extent=[0, gK1, 0, 2.5], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    C = ax.imshow(B, origin='lower', extent=[0, gK1, 0, 15], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
     ax.axvline(x=gGamma, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=gM1M2, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
@@ -577,11 +565,80 @@ def read_MD(dir):
     ax.set_xticks(xlabpos, labels)
     ax.set_xlim([0, gK1])
     fig.colorbar(C)
-    plt.savefig(dir+"DSSF.pdf")
+    plt.savefig(dir+"/DSSF_line.pdf")
     plt.clf()
 
-    SSSF2D(S[0], P, 100, dir, True)
 
+    for i in range(2):
+        fig11 = plt.figure(figsize=(8, 8), constrained_layout=False)
+        grid = fig11.add_gridspec(2, 2, wspace=0, hspace=0)
+        ax = [fig11.add_subplot(grid[0, 0]), fig11.add_subplot(grid[0, 1]), fig11.add_subplot(grid[1, 1]), fig11.add_subplot(grid[1, 0])]
+        ax[0].set_title(str(w[4*i]) +'meV')
+        ax[1].set_title(str(w[4*i+1]) +'meV')
+        ax[2].set_title(str(w[4*i+2]) +'meV', y=-0.2)
+        ax[3].set_title(str(w[4*i+3]) +'meV', y=-0.2)
+
+        ax[0].set_xticks([])
+        ax[1].set_xticks([])
+        ax[1].set_yticks([])
+        ax[2].set_yticks([])
+
+
+        C = ax[0].imshow(A[4*i][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1.5, 0, 0, 2.5], aspect='auto', cmap='gnuplot2')
+        C = ax[1].imshow(A[4*i+1][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1.5, 0, 2.5], aspect='auto', cmap='gnuplot2')
+        C = ax[2].imshow(A[4*i+2][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1.5, -2.5, 0], aspect='auto', cmap='gnuplot2')
+        C = ax[3].imshow(A[4*i+3][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1.5, 0, -2.5, 0], aspect='auto', cmap='gnuplot2')
+
+        plt.savefig(dir + "/DSSF_" + str(i) + ".pdf")
+        plt.clf()
+        plt.close()
+
+    fig11 = plt.figure(figsize=(8, 8), constrained_layout=False)
+    grid = fig11.add_gridspec(2, 2, wspace=0, hspace=0)
+    ax = [fig11.add_subplot(grid[0, 0]), fig11.add_subplot(grid[0, 1]), fig11.add_subplot(grid[1, 1]), fig11.add_subplot(grid[1, 0])]
+    ax[0].set_title('0.1meV')
+    ax[1].set_title('2meV')
+    ax[2].set_title('4meV', y=-0.2)
+    ax[3].set_title('7meV', y=-0.2)
+
+    ax[0].set_xticks([])
+    ax[1].set_xticks([])
+    ax[1].set_yticks([])
+    ax[2].set_yticks([])
+
+    C = ax[0].imshow(A[0][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1.5, 0, 0, 2.5], aspect='auto', cmap='gnuplot2')
+    C = ax[1].imshow(A[2][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1.5, 0, 2.5], aspect='auto', cmap='gnuplot2')
+    C = ax[2].imshow(A[4][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1.5, -2.5, 0], aspect='auto', cmap='gnuplot2')
+    C = ax[3].imshow(A[7][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1.5, 0, -2.5, 0], aspect='auto', cmap='gnuplot2')
+
+    plt.savefig(dir + "/DSSF_exp.pdf")
+    plt.clf()
+    plt.close()
+
+
+    for i in range(len(w)):
+        fig, ax = plt.subplots(figsize=(5,5))
+        C = ax.imshow(A[i], origin='lower', extent=[-1.5, 1.5, -2.5, 2.5], aspect='auto', cmap='gnuplot2')
+
+        plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
+        plt.clf()
+        plt.close()
+
+        
+def read_MD(dir):
+    directory = os.fsencode(dir)
+    P = np.loadtxt(dir + "/pos.txt")
+    T = np.loadtxt(dir + "/Time_steps.txt")
+
+    S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
+
+    w0 = 0
+    wmax = 15
+    w = np.arange(w0, wmax, 1/100)[1:]
+
+    A = DSSF(w, DSSF_K, S, P, T, True)
+    np.savetxt(dir + "_DSSF.txt", A)
+    return A
 
 def read_MD_slice(dir, nK):
     directory = os.fsencode(dir)
@@ -592,14 +649,14 @@ def read_MD_slice(dir, nK):
 
     w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
 
-    nK = 50
-    H = np.linspace(-2.5, 2.5, nK)
+    nK = 100
+    H = np.linspace(-1.5, 1.5, nK)
     L = np.linspace(-2.5, 2.5, nK)
     A, B = np.meshgrid(H, L)
-    K = hk2d(A, B).reshape((nK*nK,3))
+    K = hhknk(A, B).reshape((nK*nK,3))
 
     A = DSSF(w, K, S, P, T, True)
-    np.savetxt(dir + "_DSSF.txt", A)
+    np.savetxt(dir + "_DSSF_sliced.txt", A)
     A = A.reshape((len(w), nK, nK))
     for i in range(len(w)):
         fig, ax = plt.subplots(figsize=(5,5))
@@ -607,6 +664,7 @@ def read_MD_slice(dir, nK):
 
         plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
         plt.clf()
+        plt.close()
     return A
 
 
@@ -684,7 +742,8 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 dir = "BCAO_zero_field_1.7K"
 # dir = "Kitaev_BCAO"
-read_MD_tot(dir)
+# read_MD_tot(dir)
+read_MD_tot("BCAO_zero_field_15K")
 # parseDSSF(dir)
 
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
