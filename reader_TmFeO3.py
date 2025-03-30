@@ -531,6 +531,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
                 M_NL_FF = M_NL_FF + contract('w, t->wt', M_NL_here, ffactau)
             except:
                 continue
+    M_NL_FF = np.abs(M_NL_FF)
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
     plt.imshow(np.log(M_NL_FF), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
     # plt.pcolormesh(w, w, np.log(M_NL_FF))
@@ -567,9 +568,9 @@ def read_2D_nonlinear_tot(dir):
 # dir = "MD_TmFeO3_CEF_E_Cali_-0.97_-3.89_test"
 dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("TmFeO3_MD_Test_xii=0.05meV")
-read_MD_tot("MD_TmFeO3_E_0_3.97")
-read_MD_tot("MD_TmFeO3_E_0.97_0")
-read_MD_tot("MD_TmFeO3_E_0.97_3.97")
+# read_MD_tot("MD_TmFeO3_E_0_3.97")
+# read_MD_tot("MD_TmFeO3_E_0.97_0")
+# read_MD_tot("MD_TmFeO3_E_0.97_3.97")
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")
@@ -577,7 +578,7 @@ read_MD_tot("MD_TmFeO3_E_0.97_3.97")
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0")
+read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_Fe_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])

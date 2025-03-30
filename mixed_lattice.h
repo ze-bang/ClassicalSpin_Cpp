@@ -1016,6 +1016,9 @@ class mixed_lattice
             //         }
             //     }
             // }
+            if (i % 10000 == 0){
+                std::cout << "Percentage sweep done: " << double(i)/double(n_anneal+n_measure) * 100 << " % on rank: " << rank << endl;
+            }
         }
         
         // std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));

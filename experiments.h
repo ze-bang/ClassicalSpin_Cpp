@@ -628,7 +628,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 
 
     mixed_lattice<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
-    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write);
+    MC.parallel_tempering(temps, 1e5, 1e5, 100, 50, 2e3, dir, rank_to_write);
 
     int finalized;
     MPI_Finalized(&finalized);
@@ -1035,7 +1035,7 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
 
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 1.2;
+    double pulse_amp = 0.5;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
