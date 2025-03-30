@@ -150,12 +150,11 @@ class lattice
             }
         }
         
-
-                
-    
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
+
+        std::cout << "Finished setting up lattice" << std::endl;
     };
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
@@ -289,6 +288,7 @@ class lattice
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
@@ -303,6 +303,7 @@ class lattice
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
         }
@@ -489,7 +490,7 @@ class lattice
         }
         double T = T_start;
         double acceptance_rate = 0;
-        double sigma = 40;
+        double sigma = 1000;
         cout << "Gaussian Move: " << gaussian_move << endl;
         srand (time(NULL));
         seed_lehman(rand()*2+1);
@@ -513,7 +514,7 @@ class lattice
                 acceptance_rate = curr_accept/n_anneal;
                 cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }
-            if (gaussian_move){
+            if (gaussian_move && acceptance_rate < 0.5){
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }

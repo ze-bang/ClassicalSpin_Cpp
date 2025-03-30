@@ -13,9 +13,7 @@
 #include <random>
 #include <chrono>
 #include <math.h>
-#include <functional>
-#include <mpi.h>
-#include <sstream>
+#include <tuple>
 
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 struct mixed_lattice_spin{
@@ -472,9 +470,11 @@ class mixed_lattice
         for (size_t i=0; i<num_bi_SU2; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -490,9 +490,11 @@ class mixed_lattice
         for (size_t i=0; i<num_bi_SU3; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -508,41 +510,47 @@ class mixed_lattice
         }
     }
 
+
     double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3> &curr_spins){
         double field_energy = 0.0;
         double onsite_energy = 0.0;
         double bilinear_energy = 0.0;
         double trilinear_energy = 0.0;
 
-        #pragma omp simd
-        for(size_t site_index = 0; site_index < lattice_size_SU2; ++site_index){
+        size_t site_index, i;
+        #pragma omp parallel for simd
+        for(site_index = 0; site_index < lattice_size_SU2; ++site_index){
             field_energy -= dot(curr_spins.spins_SU2[site_index], field_SU2[site_index]);
             onsite_energy += contract(curr_spins.spins_SU2[site_index], onsite_interaction_SU2[site_index], curr_spins.spins_SU2[site_index]);
 
-            #pragma omp simd
-            for (size_t i=0; i<num_bi_SU2; ++i) {
+            #pragma omp simd reduction(+:bilinear_energy)
+            for (i=0; i<num_bi_SU2; ++i) {
                 bilinear_energy += contract(curr_spins.spins_SU2[site_index], bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
             }
-            for (size_t i=0; i < num_tri_SU3; ++i){
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (i=0; i < num_tri_SU3; ++i){
                 trilinear_energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
             }
-            for (size_t i=0; i < num_tri_SU2_SU3; ++i){
+            #pragma omp simd reduction(+:trilinear_energy)
+            for (i=0; i < num_tri_SU2_SU3; ++i){
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
             }
         }
 
-        #pragma omp simd
+        #pragma omp parallel for simd
         for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index){
             field_energy -= dot(curr_spins.spins_SU3[site_index], field_SU3[site_index]);
             onsite_energy += contract(curr_spins.spins_SU3[site_index], onsite_interaction_SU3[site_index], curr_spins.spins_SU3[site_index]);
 
-            #pragma omp simd
+            #pragma omp simd reduction(+:bilinear_energy)
             for (size_t i=0; i<num_bi_SU3; ++i) {
                 bilinear_energy += contract(curr_spins.spins_SU3[site_index], bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
             }
+            #pragma omp simd reduction(+:trilinear_energy)
             for (size_t i=0; i < num_tri_SU3; ++i){
                 trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
             }
+            #pragma omp simd reduction(+:trilinear_energy)
             for (size_t i=0; i < num_tri_SU2_SU3; ++i){
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
             }
@@ -599,9 +607,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -614,9 +624,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -629,9 +641,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -644,9 +658,11 @@ class mixed_lattice
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -665,74 +681,52 @@ class mixed_lattice
         return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length_SU3;
     }
 
-    double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60){
-        double E, E_new, dE, r;
-        float spinl;
-        int i;
+    double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60) {
         int accept = 0;
-        size_t count = 0;
-
-        while(count < lattice_size_SU2+lattice_size_SU3){
-            int SU2_or_SU3 = random_int_lehman(2);
-            if (SU2_or_SU3 == 0){
-                i = random_int_lehman(lattice_size_SU2);
-                auto temp_spin = curr_spin.spins_SU2[i];
-                E = site_energy_SU2(temp_spin, i);
-                if (gaussian){
-                    curr_spin.spins_SU2[i] = gaussian_move_SU2(curr_spin.spins_SU2[i], sigma);
-                }else{
-                    gen_random_spin(curr_spin.spins_SU2[i], spin_length_SU2);
-                }
-                E_new = site_energy_SU2(curr_spin.spins_SU2[i], i);
-                dE = E_new - E;
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        
+        // Process SU2 sites
+        for (size_t count = 0; count < lattice_size_SU2; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU2);
+            auto temp_spin = curr_spin.spins_SU2[i];
+            double E = site_energy_SU2(temp_spin, i);
             
-                if(dE < 0){
-                    accept++;
-                }
-                else{
-                    r = random_double_lehman(0,1);
-                    if(r < exp(-dE/T)){
-                        accept++;
-                    }
-                    else{
-                        curr_spin.spins_SU2[i] = temp_spin;
-                    }
-                }
-                count++; 
-            }else{
-                i = random_int_lehman(lattice_size_SU3);
-                // cout << i << " " << lattice_size_SU3 << endl;
-                auto temp_spin = curr_spin.spins_SU3[i];
-                E = site_energy_SU3(temp_spin, i);
-                if (gaussian){
-                    curr_spin.spins_SU3[i] = gaussian_move_SU3(curr_spin.spins_SU3[i], sigma);
-                }else{
-                    gen_random_spin(curr_spin.spins_SU3[i], spin_length_SU3);
-                }                
-                E_new = site_energy_SU3(curr_spin.spins_SU3[i], i);
-                dE = E_new - E;
+            // Generate new spin configuration
+            curr_spin.spins_SU2[i] = gaussian ? gaussian_move_SU2(temp_spin, sigma) 
+                                             : gen_random_spin_SU2();
             
-                if(dE < 0){
-                    accept++;
-                }
-                else{
-                    r = random_double_lehman(0,1);
-                    if(r < exp(-dE/T)){
-                        accept++;
-                    }
-                    else{
-                        curr_spin.spins_SU3[i] = temp_spin;
-                    }
-                }
-                count++; 
+            double dE = site_energy_SU2(curr_spin.spins_SU2[i], i) - E;
+            
+            // Accept or reject based on Metropolis criterion
+            if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                accept++;
+            } else {
+                curr_spin.spins_SU2[i] = temp_spin;
             }
-
         }
-
-        double acceptance_rate = double(accept)/double(lattice_size_SU2+lattice_size_SU3);
-        return acceptance_rate;
+        
+        // Process SU3 sites
+        for (size_t count = 0; count < lattice_size_SU3; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU3);
+            auto temp_spin = curr_spin.spins_SU3[i];
+            double E = site_energy_SU3(temp_spin, i);
+            
+            // Generate new spin configuration
+            curr_spin.spins_SU3[i] = gaussian ? gaussian_move_SU3(temp_spin, sigma) 
+                                             : gen_random_spin_SU3();
+            
+            double dE = site_energy_SU3(curr_spin.spins_SU3[i], i) - E;
+            
+            // Accept or reject based on Metropolis criterion
+            if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                accept++;
+            } else {
+                curr_spin.spins_SU3[i] = temp_spin;
+            }
+        }
+        
+        return static_cast<double>(accept) / total_sites;
     }
-
     void overrelaxation(){
         array<double,N_SU2> local_field_SU2;
         array<double,N_SU3> local_field_SU3;
@@ -772,6 +766,8 @@ class mixed_lattice
 
 
     void deterministic_sweep(){
+
+        #pragma omp parallel for simd
         for(size_t i = 0; i<lattice_size_SU2; ++i){
             array<double,N_SU2> local_field = get_local_field_SU2(i);
             double norm = sqrt(dot(local_field, local_field));
@@ -782,6 +778,8 @@ class mixed_lattice
                 spins.spins_SU2[i] = local_field/(-norm)*spin_length_SU2;
             }
         }
+
+        #pragma omp parallel for simd
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             array<double,N_SU3> local_field = get_local_field_SU3(i);
             double norm = sqrt(dot(local_field, local_field));
@@ -794,12 +792,12 @@ class mixed_lattice
         }
     }
     
-    void write_to_file_spin(string filename, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> towrite){
+    void write_to_file_spin(string filename){
         ofstream myfile;
         myfile.open(filename+"_SU2.txt");
         for(size_t i = 0; i<lattice_size_SU2; ++i){
             for(size_t j = 0; j<3; ++j){
-                myfile << towrite.spins_SU2[i][j] << " ";
+                myfile << spins.spins_SU2[i][j] << " ";
             }
             myfile << endl;
         }
@@ -807,7 +805,7 @@ class mixed_lattice
         myfile.open(filename+"_SU3.txt");
         for(size_t i = 0; i<lattice_size_SU3; ++i){
             for(size_t j = 0; j<8; ++j){
-                myfile << towrite.spins_SU3[i][j] << " ";
+                myfile << spins.spins_SU3[i][j] << " ";
             }
             myfile << endl;
         }
@@ -880,7 +878,7 @@ class mixed_lattice
             filesystem::create_directory(dir_name);
         }
         double T = T_start;
-        double sigma = 40;
+        double sigma = 1000;
         double acceptance_rate = 0;
 
         while(T > T_end){
@@ -903,7 +901,7 @@ class mixed_lattice
                 acceptance_rate = curr_accept/n_anneal;
                 cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }
-            if (gaussian_move){
+            if (gaussian_move && acceptance_rate < 0.5){
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
                 cout << "Sigma is adjusted to: " << sigma << endl;   
             }
@@ -915,7 +913,7 @@ class mixed_lattice
         }
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
-            write_to_file_spin(dir_name + "/spin", spins);
+            write_to_file_spin(dir_name + "/spin");
             write_to_file_pos(dir_name + "/pos");
         }
     }
@@ -1031,7 +1029,7 @@ class mixed_lattice
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
-                    write_to_file_spin(dir_name + "/spin" + to_string(rank), spins);
+                    write_to_file_spin(dir_name + "/spin" + to_string(rank));
                     // write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     // write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                     // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
@@ -1361,13 +1359,13 @@ class mixed_lattice
     }
 
 
-    void   molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
+    void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
         write_to_file_pos(dir_name + "/pos");
-        write_to_file_spin(dir_name + "/spin", spins);
-        write_to_file_spin(dir_name + "/spin_t", spins);
+        write_to_file_spin(dir_name + "/spin");
+        write_to_file_spin(dir_name + "/spin_t");
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
 
         double tol = 1e-6;
