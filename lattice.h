@@ -359,7 +359,7 @@ class lattice
     }
 
     double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
-        double E, E_new, dE, r;
+        double E, dE, r;
         int i;
         array<double,N> new_spin;
         int accept = 0;
@@ -368,25 +368,13 @@ class lattice
             // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size);
             E = site_energy(curr_spin[i], i);
-            if (gaussian){
-                new_spin = gaussian_move(curr_spin[i], sigma);
-            }
-            else{
-                new_spin = gen_random_spin(spin_length);
-            }
-            E_new = site_energy(new_spin, i);
-            dE = E_new - E;
+            new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
+                                : gen_random_spin(spin_length);
+            dE = site_energy(new_spin, i) - E;
             
-            if(dE < 0){
+            if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
                 curr_spin[i] = new_spin;
                 accept++;
-            }
-            else{
-                r = random_double_lehman(0,1);
-                if(r < exp(-dE/T)){
-                    curr_spin[i] = new_spin;
-                    accept++;
-                }
             }
             count++;
         }

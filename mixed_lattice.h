@@ -512,7 +512,7 @@ class mixed_lattice
     }
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
-        array<double,N_SU2> local_field = {0};
+        array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
@@ -529,7 +529,7 @@ class mixed_lattice
     }
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
-        array<double,N_SU3> local_field = {0};
+        array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
@@ -546,7 +546,7 @@ class mixed_lattice
     }
 
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
-        array<double,N_SU2> local_field = {0};
+        array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
@@ -563,7 +563,7 @@ class mixed_lattice
     }
 
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
-        array<double,N_SU3> local_field = {0};
+        array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
@@ -594,45 +594,42 @@ class mixed_lattice
     double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60) {
         int accept = 0;
         size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
-        
+        array<double,N_SU2> new_spin_SU2;
+        array<double,N_SU3> new_spin_SU3;
         // Process SU2 sites
         for (size_t count = 0; count < lattice_size_SU2; ++count) {
             size_t i = random_int_lehman(lattice_size_SU2);
-            auto temp_spin = curr_spin.spins_SU2[i];
-            double E = site_energy_SU2(temp_spin, i);
+            double E = site_energy_SU2(curr_spin.spins_SU2[i], i);
             
             // Generate new spin configuration
-            curr_spin.spins_SU2[i] = gaussian ? gaussian_move_SU2(temp_spin, sigma) 
+            new_spin_SU2 = gaussian ? gaussian_move_SU2(curr_spin.spins_SU2[i], sigma) 
                                              : gen_random_spin_SU2();
             
-            double dE = site_energy_SU2(curr_spin.spins_SU2[i], i) - E;
+            double dE = site_energy_SU2(new_spin_SU2, i) - E;
             
             // Accept or reject based on Metropolis criterion
             if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                curr_spin.spins_SU2[i] = new_spin_SU2;
                 accept++;
-            } else {
-                curr_spin.spins_SU2[i] = temp_spin;
-            }
+            } 
         }
         
         // Process SU3 sites
         for (size_t count = 0; count < lattice_size_SU3; ++count) {
             size_t i = random_int_lehman(lattice_size_SU3);
-            auto temp_spin = curr_spin.spins_SU3[i];
-            double E = site_energy_SU3(temp_spin, i);
+            double E = site_energy_SU3(curr_spin.spins_SU3[i], i);
             
             // Generate new spin configuration
-            curr_spin.spins_SU3[i] = gaussian ? gaussian_move_SU3(temp_spin, sigma) 
+            new_spin_SU3 = gaussian ? gaussian_move_SU3(curr_spin.spins_SU3[i], sigma) 
                                              : gen_random_spin_SU3();
             
-            double dE = site_energy_SU3(curr_spin.spins_SU3[i], i) - E;
+            double dE = site_energy_SU3(new_spin_SU3, i) - E;
             
             // Accept or reject based on Metropolis criterion
             if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                curr_spin.spins_SU3[i] = new_spin_SU3;
                 accept++;
-            } else {
-                curr_spin.spins_SU3[i] = temp_spin;
-            }
+            } 
         }
         
         return static_cast<double>(accept) / total_sites;
@@ -1042,47 +1039,6 @@ class mixed_lattice
         return new_spins;
     }
 
-
-    // mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK45_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
-        
-    //     spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
-    //     spin_config_SU2 k2_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(1.0/4.0), curr_spins.spins_SU3, curr_time + step_size*(1/4))*step_size;
-    //     spin_config_SU2 k3_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(3.0/32.0)+ k2_SU2*(9.0/32.0), curr_spins.spins_SU3 , curr_time + step_size*(3/8))*step_size;
-    //     spin_config_SU2 k4_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(1932.0/2197.0)+ k2_SU2*(-7200.0/2197.0) + k3_SU2*(7296.0/2197.0), curr_spins.spins_SU3 , curr_time + step_size*(12/13))*step_size;
-    //     spin_config_SU2 k5_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3, curr_time + step_size)*step_size;
-    //     spin_config_SU2 k6_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 , curr_time + step_size/2)*step_size;
-
-    //     spin_config_SU2 y_SU2 = curr_spins.spins_SU2 + k1_SU2*(25.0/216.0) + k3_SU2*(1408.0/2565.0) + k4_SU2*(2197.0/4101.0) - k5_SU2*(1.0/5.0);
-    //     spin_config_SU2 z_SU2 = curr_spins.spins_SU2 + k1_SU2*(16.0/135.0) + k3_SU2*(6656.0/12825.0) + k4_SU2*(28561.0/56430.0) - k5_SU2*(9.0/50.0) + k6_SU2*(2.0/55.0);
-
-    //     double error_SU2 = norm_average_2D(y_SU2-z_SU2);
-        
-    //     spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
-    //     spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(1.0/4.0), curr_time + step_size*(1/4))*step_size;
-    //     spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(3.0/32.0) + k2_SU3*(9.0/32.0), curr_time + step_size*(3/8))*step_size;
-    //     spin_config_SU3 k4_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(1932.0/2197.0) + k2_SU3*(-7200.0/2197.0) + k3_SU3*(7296.0/2197.0), curr_time + step_size*(12/13))*step_size;
-    //     spin_config_SU3 k5_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
-    //     spin_config_SU3 k6_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
-
-    //     spin_config_SU3 y_SU3 = curr_spins.spins_SU3 + k1_SU3*(25.0/216.0) + k3_SU3*(1408.0/2565.0) + k4_SU3*(2197.0/4101.0) - k5_SU3*(1.0/5.0);
-    //     spin_config_SU3 z_SU3 = curr_spins.spins_SU3 + k1_SU3*(16.0/135.0) + k3_SU3*(6656.0/12825.0) + k4_SU3*(28561.0/56430.0) - k5_SU3*(9.0/50.0) + k6_SU3*(2.0/55.0);
-
-    //     double error_SU3 = norm_average_2D(y_SU3-z_SU3);
-    //     double error = max(error_SU2, error_SU3);
-    //     step_size *= 0.9*pow(tol/error, 0.2);
-
-    //     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> z;
-    //     z.spins_SU2 = z_SU2;
-    //     z.spins_SU3 = z_SU3;
-    //     if (error < tol){
-    //         return z;
-    //     }
-    //     else{
-    //         return RK45_step(step_size, curr_spins, curr_time, tol);
-    //     }
-    //     return z;
-    // }
-    
     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK45_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
         spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
         spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
@@ -1171,50 +1127,6 @@ class mixed_lattice
         new_spins.spins_SU3 = curr_spins.spins_SU3 + dS_SU3*step_size;
         return new_spins;
     }
-
-    // mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> SSPRK53_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
-    //     double a30 = 0.355909775063327;
-    //     double a32 = 0.644090224936674;
-    //     double a40 = 0.367933791638137;
-    //     double a43 = 0.632066208361863;
-    //     double a52 = 0.237593836598569;
-    //     double a54 = 0.762406163401431;
-    //     double b10 = 0.377268915331368;
-    //     double b21 = 0.377268915331368;
-    //     double b32 = 0.242995220537396;
-    //     double b43 = 0.238458932846290;
-    //     double b54 =0.287632146308408;
-    //     double c1 = 0.377268915331368;
-    //     double c2 = 0.754537830662736;
-    //     double c3 = 0.728985661612188;
-    //     double c4 = 0.699226135931670;
-    //     spin_config_SU2 tmp_SU2 = curr_spins.spins_SU2 + landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * b10 * step_size;
-    //     spin_config_SU2 k_SU2 = landau_lifshitz_SU2(tmp_SU2, curr_spins.spins_SU3, curr_time + c1*step_size);
-    //     spin_config_SU2 u_SU2 = tmp_SU2 + k_SU2 * step_size * b21;
-    //     //u3
-    //     k_SU2 = landau_lifshitz_SU2(u_SU2, curr_spins.spins_SU3, curr_time + c2*step_size);
-    //     tmp_SU2 = curr_spins.spins_SU2 * a30 + u_SU2 * a32 + k_SU2 * step_size * b32;
-    //     k_SU2 = landau_lifshitz_SU2(tmp_SU2, curr_spins.spins_SU3, curr_time + c3*step_size);
-    //     //u4
-    //     tmp_SU2 = curr_spins.spins_SU2 * a40 + tmp_SU2 * a43 + k_SU2 * step_size * b43;
-    //     k_SU2 = landau_lifshitz_SU2(tmp_SU2, curr_spins.spins_SU3, curr_time + c4*step_size);
-    //     u_SU2 = u_SU2 * a52 + tmp_SU2 * a54 + k_SU2 * step_size * b54;
-    //     spin_config_SU3 tmp_SU3 = curr_spins.spins_SU3 + landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * b10 * step_size;
-    //     spin_config_SU3 k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, tmp_SU3, curr_time + c1*step_size);
-    //     spin_config_SU3 u_SU3 = tmp_SU3 + k_SU3 * step_size * b21;
-    //     //u3
-    //     k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, u_SU3, curr_time + c2*step_size);
-    //     tmp_SU3 = curr_spins.spins_SU3 * a30 + u_SU3 * a32 + k_SU3 * step_size * b32;
-    //     k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, tmp_SU3, curr_time + c3*step_size);
-    //     //u4
-    //     tmp_SU3 = curr_spins.spins_SU3 * a40 + tmp_SU3 * a43 + k_SU3 * step_size * b43;
-    //     k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, tmp_SU3, curr_time + c4*step_size);
-    //     u_SU3 = u_SU3 * a52 + tmp_SU3 * a54 + k_SU3 * step_size * b54;
-    //     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> u;
-    //     u.spins_SU2 = u_SU2;
-    //     u.spins_SU3 = u_SU3;
-    //     return u;
-    // }
 
     mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> SSPRK53_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
         double a30 = 0.355909775063327;
@@ -1343,6 +1255,7 @@ class mixed_lattice
         size_t count = 1;
         vector<double> time;
         time.push_back(currT);
+        write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
         write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
 
         set_pulse_SU2(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
@@ -1350,6 +1263,7 @@ class mixed_lattice
             // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
             // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
             spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
+            write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
             write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
             // write_to_file(dir_name + "/spin_t.txt", spin_t);
             currT = currT + step_size;
@@ -1380,10 +1294,12 @@ class mixed_lattice
         vector<double> time;
 
         time.push_back(currT);
+        write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
         write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
         set_pulse_SU2(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
             spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
+            write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
             write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
             currT = currT + step_size;
             time.push_back(currT);

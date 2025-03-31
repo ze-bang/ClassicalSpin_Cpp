@@ -200,10 +200,6 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
 
 
     array<array<double, 8>, 8> Tm_Bilinear = {{{0}}};
-
-    Tm
-    Tm_atoms.set_bilinear_interaction(Tm_Bilinear, 0, 0, {0,0,0});
-
     // array<double, 64> offset_on_site = {{0}};
     // offset_on_site[0] = offset;
     // offset_on_site[1*8+1] = offset;
