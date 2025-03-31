@@ -44,7 +44,7 @@ class lattice
     array<array<double, N * N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
 
     array<vector<array<double, N * N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
-    array<vector<array<array<array<double, N>, N>, N>>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
+    array<vector<array<double, N * N * N>>, N_ATOMS*dim1*dim2*dim3>  trilinear_interaction;
 
     array<vector<size_t>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
     array<vector<array<size_t, 2>>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
@@ -139,10 +139,10 @@ class lattice
                             trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
                             trilinear_partners[current_site_index].push_back({partner1, partner2});
 
-                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction));
+                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
                             trilinear_partners[partner1].push_back({partner2, current_site_index});
 
-                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
+                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction, N, N, N), N, N, N));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
                         }
                     }

@@ -111,7 +111,7 @@ class mixed_lattice
 
     array<array<double, N_SU2 * N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> onsite_interaction_SU2;
     array<vector<array<double, N_SU2 * N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_interaction_SU2;    
-    array<vector<array<array<array<double, N_SU2>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_interaction_SU2;
+    array<vector<array<double, N_SU2 * N_SU2 * N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_interaction_SU2;
 
     array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_partners_SU2;
@@ -122,8 +122,8 @@ class mixed_lattice
     array<array<double,N_SU3>, N_ATOMS_SU3> field_drive_2_SU3;
 
     array<array<double, N_SU3 * N_SU3>, N_ATOMS_SU2*dim1*dim2*dim3> onsite_interaction_SU3;
-    array<vector<array<double, N_SU3* N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_interaction_SU3;
-    array<vector<array<array<array<double, N_SU3>, N_SU3>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_interaction_SU3;
+    array<vector<array<double, N_SU3 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_interaction_SU3;
+    array<vector<array<double, N_SU3 * N_SU3 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_interaction_SU3;
 
     array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_partners_SU3;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_partners_SU3;
@@ -133,8 +133,8 @@ class mixed_lattice
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_bilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_bilinear_partners_SU3;
 
-    array<vector<array<array<array<double, N_SU3>, N_SU2>, N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_interaction_SU2;
-    array<vector<array<array<array<double, N_SU2>, N_SU2>, N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_interaction_SU3;
+    array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_interaction_SU2;
+    array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_interaction_SU3;
 
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_partners_SU3;
@@ -238,7 +238,7 @@ class mixed_lattice
     }
 
     template<size_t N, size_t lattice_size, size_t N_ATOMS>
-    void set_up_sublattice(const double spin_length, array<array<double,N>, lattice_size>  &spins, array<array<double,3>, lattice_size> &site_pos, array<array<double,N>, lattice_size> &field, array<array<double, N * N>, lattice_size> &onsite_interaction, array<vector<array<double, N * N>>, lattice_size> &bilinear_interaction, array<vector<array<array<array<double, N>, N>, N>>, lattice_size> &trilinear_interaction, array<vector<size_t>, lattice_size> &bilinear_partners, array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners, UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri){
+    void set_up_sublattice(const double spin_length, array<array<double,N>, lattice_size>  &spins, array<array<double,3>, lattice_size> &site_pos, array<array<double,N>, lattice_size> &field, array<array<double, N * N>, lattice_size> &onsite_interaction, array<vector<array<double, N * N>>, lattice_size> &bilinear_interaction, array<vector<array<double, N*N*N>>, lattice_size> &trilinear_interaction, array<vector<size_t>, lattice_size> &bilinear_partners, array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners, UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri){
         array<array<double,3>, N_ATOMS> basis = atoms->lattice_pos;
         array<array<double,3>, 3> unit_vector = atoms->lattice_vectors;
 
@@ -273,10 +273,10 @@ class mixed_lattice
                             trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
                             trilinear_partners[current_site_index].push_back({partner1, partner2});
 
-                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction));
+                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
                             trilinear_partners[partner1].push_back({partner2, current_site_index});
 
-                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
+                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction, N, N, N), N, N, N));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
                         }
                     }
@@ -326,10 +326,10 @@ class mixed_lattice
                             mixed_trilinear_interaction_SU3[current_site_index].push_back(J.trilinear_interaction);
                             mixed_trilinear_partners_SU3[current_site_index].push_back({partner1, partner2});
 
-                            mixed_trilinear_interaction_SU2[partner1].push_back(transpose3D(J.trilinear_interaction));
+                            mixed_trilinear_interaction_SU2[partner1].push_back(transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2));
                             mixed_trilinear_partners_SU2[partner1].push_back({partner2, current_site_index});
 
-                            mixed_trilinear_interaction_SU2[partner2].push_back(swap_axis_3D(transpose3D(J.trilinear_interaction)));
+                            mixed_trilinear_interaction_SU2[partner2].push_back(swap_axis_3D(transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2), N_SU2, N_SU2, N_SU3));
                             mixed_trilinear_partners_SU2[partner2].push_back({partner1, current_site_index});
                         }
                     }
@@ -341,7 +341,7 @@ class mixed_lattice
         lattice_size_SU2 = dim1*dim2*dim3*N_ATOMS_SU2;
         lattice_size_SU3 = dim1*dim2*dim3*N_ATOMS_SU3;
         cout << "Finished setting up lattice" << endl;  
-        // cout << num_bi_SU2 << " " << num_tri_SU2 << " " << num_bi_SU3 << " " << num_tri_SU3 << " " << num_tri_SU2_SU3 << endl;
+        cout << num_bi_SU2 << " " << num_tri_SU2 << " " << num_bi_SU3 << " " << num_tri_SU3 << " " << num_tri_SU2_SU3 << endl;
     };
 
     void read_spin_from_file(const string &filename){

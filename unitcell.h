@@ -55,7 +55,7 @@ struct bilinear{
 
 template <size_t N> 
 struct trilinear{
-    array<array<array<double,N>, N>,N>   trilinear_interaction;
+    array<double,N*N*N>   trilinear_interaction;
     size_t partner1;
     size_t partner2;
     array<int, 3> offset1;
@@ -69,7 +69,7 @@ struct trilinear{
         for(size_t i =0; i<N; i++){
             for (size_t j=0; j<N; j++){
                 for (size_t l =0; l<N; l++){
-                    this->trilinear_interaction[i][j][l] = 0;
+                    this->trilinear_interaction[i*N*N+j*N+l] = 0;
                 }
             }
         }
@@ -79,17 +79,31 @@ struct trilinear{
         }
     }
 
-    trilinear(const array<array<array<double,N>, N>,N> &b_set, const int partner1, const int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    trilinear(const array<array<array<double,N>, N>,N> &b_set, const int partner1, const int partner2) : partner1(partner1), partner2(partner2) {
         for(size_t i=0; i<3; i++) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
+        for (size_t i=0; i<N; i++){
+            for (size_t j=0; j<N; j++){
+                for (size_t l =0; l<N; l++){
+                    this->trilinear_interaction[i*N*N+j*N+l] = b_set[i][j][l];
+                }
+            }
+        }
     };
 
-    trilinear(const array<array<array<double,N>, N>,N> b_set, const  int partner1, const int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    trilinear(const array<array<array<double,N>, N>,N> b_set, const  int partner1, const int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2) : partner1(partner1), partner2(partner2) {
         for(size_t i=0; i<3; i++) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
+        }
+        for (size_t i=0; i<N; i++){
+            for (size_t j=0; j<N; j++){
+                for (size_t l =0; l<N; l++){
+                    this->trilinear_interaction[i*N*N+j*N+l] = b_set[i][j][l];
+                }
+            }
         }
     };
 };
@@ -97,7 +111,7 @@ struct trilinear{
 
 template <size_t N_SU2, size_t N_SU3> 
 struct mixed_trilinear{
-    array<array<array<double,N_SU2>, N_SU2>,N_SU3>   trilinear_interaction;
+    array<double,N_SU2*N_SU2*N_SU3>   trilinear_interaction;
     size_t partner1;
     size_t partner2;
     array<int, 3> offset1;
@@ -111,7 +125,7 @@ struct mixed_trilinear{
         for(size_t i =0; i<N_SU3; i++){
             for (size_t j=0; j<N_SU2; j++){
                 for (size_t l =0; l<N_SU2; l++){
-                    this->trilinear_interaction[i][j][l] = 0;
+                    this->trilinear_interaction[i*N_SU2*N_SU2*+j*N_SU2+l] = 0;
                 }
             }
         }
@@ -121,17 +135,31 @@ struct mixed_trilinear{
         }
     }
 
-    mixed_trilinear(array<array<array<double,N_SU2>, N_SU2>,N_SU3> &b_set, int partner1, int partner2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    mixed_trilinear(array<array<array<double,N_SU2>, N_SU2>,N_SU3> &b_set, int partner1, int partner2) : partner1(partner1), partner2(partner2) {
         for(int i=0; i<3; i++) {
             this->offset1[i] = 0;
             this->offset2[i] = 0;
         }
+        for(size_t i =0; i<N_SU3; i++){
+            for (size_t j=0; j<N_SU2; j++){
+                for (size_t l =0; l<N_SU2; l++){
+                    this->trilinear_interaction[i*N_SU2*N_SU2*+j*N_SU2+l] = b_set[i][j][l];
+                }
+            }
+        }
     };
 
-    mixed_trilinear(array<array<array<double,N_SU2>, N_SU2>,N_SU3> b_set, int partner1, int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2) : trilinear_interaction(b_set), partner1(partner1), partner2(partner2) {
+    mixed_trilinear(array<array<array<double,N_SU2>, N_SU2>,N_SU3> b_set, int partner1, int partner2, const array<int, 3> &offset1, const array<int, 3> &offset2) : partner1(partner1), partner2(partner2) {
         for(int i=0; i<3; i++) {
             this->offset1[i] = offset1[i];
             this->offset2[i] = offset2[i];
+        }
+        for(size_t i =0; i<N_SU3; i++){
+            for (size_t j=0; j<N_SU2; j++){
+                for (size_t l =0; l<N_SU2; l++){
+                    this->trilinear_interaction[i*N_SU2*N_SU2*+j*N_SU2+l] = b_set[i][j][l];
+                }
+            }
         }
     };
 };
