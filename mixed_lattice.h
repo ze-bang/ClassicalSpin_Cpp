@@ -79,86 +79,6 @@ struct mixed_lattice_pos{
     };
 };
 
-template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> operator+(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &a, const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &b) {
-    mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> result;
-    for (size_t i = 0; i < lattice_size_SU2; ++i) {
-        for (size_t j = 0; j < N_SU2; ++j) {
-            result.spins_SU2[i][j] = a.spins_SU2[i][j] + b.spins_SU2[i][j];
-        }
-    }
-    for (size_t i = 0; i < lattice_size_SU3; ++i) {
-        for (size_t j = 0; j < N_SU3; ++j) {
-            result.spins_SU3[i][j] = a.spins_SU3[i][j] + b.spins_SU3[i][j];
-        }
-    }
-    return result;
-}
-
-template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> operator-(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &a, const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &b) {
-    mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> result;
-    for (size_t i = 0; i < lattice_size_SU2; ++i) {
-        for (size_t j = 0; j < N_SU2; ++j) {
-            result.spins_SU2[i][j] = a.spins_SU2[i][j] + b.spins_SU2[i][j];
-        }
-    }
-    for (size_t i = 0; i < lattice_size_SU3; ++i) {
-        for (size_t j = 0; j < N_SU3; ++j) {
-            result.spins_SU3[i][j] = a.spins_SU3[i][j] + b.spins_SU3[i][j];
-        }
-    }
-    return result;
-}
-
-template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> operator*(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &a, const double &b) {
-    mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> result;
-    for (size_t i = 0; i < lattice_size_SU2; ++i) {
-        for (size_t j = 0; j < N_SU2; ++j) {
-            result.spins_SU2[i][j] = a.spins_SU2[i][j]*b;
-        }
-    }
-    for (size_t i = 0; i < lattice_size_SU3; ++i) {
-        for (size_t j = 0; j < N_SU3; ++j) {
-            result.spins_SU3[i][j] = a.spins_SU3[i][j]*b;
-        }
-    }
-    return result;
-}
-
-template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> operator/(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &a, const double &b) {
-    mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> result;
-    for (size_t i = 0; i < lattice_size_SU2; ++i) {
-        for (size_t j = 0; j < N_SU2; ++j) {
-            result.spins_SU2[i][j] = a.spins_SU2[i][j]/b;
-        }
-    }
-    for (size_t i = 0; i < lattice_size_SU3; ++i) {
-        for (size_t j = 0; j < N_SU3; ++j) {
-            result.spins_SU3[i][j] = a.spins_SU3[i][j]/b;
-        }
-    }
-    return result;
-}
-
-template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-double dot(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &a, const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &b) {
-    double result = 0;
-    for (size_t i = 0; i < lattice_size_SU2; ++i) {
-        for (size_t j = 0; j < N_SU2; ++j) {
-            result += a.spins_SU2[i][j] * b.spins_SU2[i][j];
-        }
-    }
-    for (size_t i = 0; i < lattice_size_SU3; ++i) {
-        for (size_t j = 0; j < N_SU3; ++j) {
-            result += a.spins_SU3[i][j] * b.spins_SU3[i][j];
-        }
-    }
-    return result;
-}
-
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim3>
 class mixed_lattice
 {   
@@ -501,16 +421,6 @@ class mixed_lattice
         return energy;
     }
 
-    template<size_t N>
-    double site_energy(array<double,N> &spins, size_t site_index){
-        if (N == N_SU2){
-            return site_energy_SU2(spins, site_index);
-        }else{
-            return site_energy_SU3(spins, site_index);
-        }
-    }
-
-
     double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3> &curr_spins){
         double field_energy = 0.0;
         double onsite_energy = 0.0;
@@ -732,8 +642,7 @@ class mixed_lattice
         array<double,N_SU3> local_field_SU3;
         int i;
         double proj;
-        size_t count = 0;
-        while(count < lattice_size_SU2){
+        for(size_t count = 0; count < lattice_size_SU2; ++count){
             // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size_SU2);
             local_field_SU2 = get_local_field_SU2(i);
@@ -747,8 +656,7 @@ class mixed_lattice
             }
             count++;
         }
-        count = 0;
-        while(count < lattice_size_SU3){
+        for(size_t count = 0; count < lattice_size_SU3; ++count){
             // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size_SU3);
             local_field_SU3 = get_local_field_SU3(i);
@@ -870,7 +778,7 @@ class mixed_lattice
     }
 
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, bool gaussian_move=false, string dir_name=""){
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, bool gaussian_move=true, string dir_name=""){
         srand (time(NULL));
         seed_lehman(rand()*2+1);
         double curr_accept;
@@ -880,7 +788,11 @@ class mixed_lattice
         double T = T_start;
         double sigma = 1000;
         double acceptance_rate = 0;
-
+        std::cout << "Starting simulated annealing with T_start: " << T_start << " and T_end: " << T_end << std::endl;
+        std::cout << "Number of anneal steps: " << n_anneal << std::endl;
+        std::cout << "Number of deterministic steps: " << n_deterministics << std::endl;
+        std::cout << "Overrelaxation rate: " << overrelaxation_rate << std::endl;
+        std::cout << "Gaussian move: " << gaussian_move << std::endl;
         while(T > T_end){
             curr_accept = 0;
             for(size_t i = 0; i<n_anneal; ++i){

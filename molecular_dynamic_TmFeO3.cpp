@@ -189,7 +189,6 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     //Want energy levels to be 0, 1.94, 7.844
 
     //Want an onsite interaction term to offset the Zeeman energy levels.
-    //ID = 3/2 \lambda3^2 - \sqrt(3/2) \lambda8
     //Tm atoms
 
     // double offset = 2*3/16;
@@ -198,6 +197,12 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
+
+
+    array<array<double, 8>, 8> Tm_Bilinear = {{{0}}};
+
+    Tm
+    Tm_atoms.set_bilinear_interaction(Tm_Bilinear, 0, 0, {0,0,0});
 
     // array<double, 64> offset_on_site = {{0}};
     // offset_on_site[0] = offset;
