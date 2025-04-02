@@ -550,6 +550,7 @@ def read_MD_tot(dir):
             else:
                 A += np.loadtxt(dir + "/" + filename + "_DSSF_sliced.txt").reshape((8, nK, nK))
     
+    
     fig, ax = plt.subplots(figsize=(10,4))
 
     C = ax.imshow(B, origin='lower', extent=[0, gK1, 0, 15], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
@@ -584,10 +585,26 @@ def read_MD_tot(dir):
         ax[2].set_yticks([])
 
 
-        C = ax[0].imshow(A[4*i][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1.5, 0, 0, 2.5], aspect='auto', cmap='gnuplot2')
-        C = ax[1].imshow(A[4*i+1][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1.5, 0, 2.5], aspect='auto', cmap='gnuplot2')
-        C = ax[2].imshow(A[4*i+2][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1.5, -2.5, 0], aspect='auto', cmap='gnuplot2')
-        C = ax[3].imshow(A[4*i+3][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1.5, 0, -2.5, 0], aspect='auto', cmap='gnuplot2')
+        # Top-left quadrant
+        C = ax[0].imshow(A[4*i], origin='lower', extent=[-1.0, 1.0, -1.5, 1.5], aspect='auto', cmap='gnuplot2')
+        ax[0].set_xlim([-1.0, 0])
+        ax[0].set_ylim([0, 1.5])
+        
+        # Top-right quadrant
+        C = ax[1].imshow(A[4*i+1], origin='lower', extent=[-1.0, 1.0, -1.5, 1.5], aspect='auto', cmap='gnuplot2')
+        ax[1].set_xlim([0, 1.0])
+        ax[1].set_ylim([0, 1.5])
+        
+        # Bottom-right quadrant
+        C = ax[2].imshow(A[4*i+2], origin='lower', extent=[-1.0, 1.0, -1.5, 1.5], aspect='auto', cmap='gnuplot2')
+        ax[2].set_xlim([0, 1.0])
+        ax[2].set_ylim([-1.5, 0])
+        
+        # Bottom-left quadrant
+        C = ax[3].imshow(A[4*i+3], origin='lower', extent=[-1.0, 1.0, -1.5, 1.5], aspect='auto', cmap='gnuplot2')
+        ax[3].set_xlim([-1.0, 0])
+        ax[3].set_ylim([-1.5, 0])
+
 
         plt.savefig(dir + "/DSSF_" + str(i) + ".pdf")
         plt.clf()
@@ -606,10 +623,10 @@ def read_MD_tot(dir):
     ax[1].set_yticks([])
     ax[2].set_yticks([])
 
-    C = ax[0].imshow(A[0][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1.5, 0, 0, 2.5], aspect='auto', cmap='gnuplot2')
-    C = ax[1].imshow(A[2][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1.5, 0, 2.5], aspect='auto', cmap='gnuplot2')
-    C = ax[2].imshow(A[4][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1.5, -2.5, 0], aspect='auto', cmap='gnuplot2')
-    C = ax[3].imshow(A[7][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1.5, 0, -2.5, 0], aspect='auto', cmap='gnuplot2')
+    C = ax[0].imshow(A[0][0:int(nK/2), int(nK/2):nK], origin='lower', extent=[-1.0, 0, 0, 1.5], aspect='auto', cmap='gnuplot2')
+    C = ax[1].imshow(A[2][int(nK/2):nK, int(nK/2):nK], origin='lower', extent=[0, 1.0, 0, 1.5], aspect='auto', cmap='gnuplot2')
+    C = ax[2].imshow(A[4][int(nK/2):nK, 0:int(nK/2)], origin='lower', extent=[0, 1.0, -1.5, 0], aspect='auto', cmap='gnuplot2')
+    C = ax[3].imshow(A[7][0:int(nK/2), 0:int(nK/2)], origin='lower', extent=[-1.0, 0, -1.5, 0], aspect='auto', cmap='gnuplot2')
 
     plt.savefig(dir + "/DSSF_exp.pdf")
     plt.clf()
@@ -618,7 +635,7 @@ def read_MD_tot(dir):
 
     for i in range(len(w)):
         fig, ax = plt.subplots(figsize=(5,5))
-        C = ax.imshow(A[i], origin='lower', extent=[-1.5, 1.5, -2.5, 2.5], aspect='auto', cmap='gnuplot2')
+        C = ax.imshow(A[i], origin='lower', extent=[-1.0, 1.0, -1.5, 1.5], aspect='auto', cmap='gnuplot2')
 
         plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
         plt.clf()
@@ -650,21 +667,21 @@ def read_MD_slice(dir, nK):
     w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
 
     nK = 100
-    H = np.linspace(-1.5, 1.5, nK)
-    L = np.linspace(-2.5, 2.5, nK)
+    H = np.linspace(-1.0, 1.0, nK)
+    L = np.linspace(-1.5, 1.5, nK)
     A, B = np.meshgrid(H, L)
     K = hhknk(A, B).reshape((nK*nK,3))
 
     A = DSSF(w, K, S, P, T, True)
     np.savetxt(dir + "_DSSF_sliced.txt", A)
     A = A.reshape((len(w), nK, nK))
-    for i in range(len(w)):
-        fig, ax = plt.subplots(figsize=(5,5))
-        C = ax.imshow(A[i], origin='lower', extent=[-1.5, 1.5, -2.5, 2.5], aspect='auto', cmap='gnuplot2')
+    # for i in range(len(w)):
+    #     fig, ax = plt.subplots(figsize=(5,5))
+    #     C = ax.imshow(A[i], origin='lower', extent=[-1.5, 1.5, -2.5, 2.5], aspect='auto', cmap='gnuplot2')
 
-        plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
-        plt.clf()
-        plt.close()
+    #     plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
+    #     plt.clf()
+    #     plt.close()
     return A
 
 
@@ -742,7 +759,7 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 dir = "BCAO_zero_field_1.7K"
 # dir = "Kitaev_BCAO"
-# read_MD_tot(dir)
+read_MD_tot(dir)
 read_MD_tot("BCAO_zero_field_15K")
 # parseDSSF(dir)
 
