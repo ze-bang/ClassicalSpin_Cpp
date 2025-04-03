@@ -253,14 +253,14 @@ double contract(const array<double, N>  &a, const array<double, N*N>  &M, const 
 
 
 template<size_t N_1, size_t N_2, size_t N_3>
-double contract_trilinear(const array<array<array<double, N_3>,N_2>, N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
     double result = 0;
     
-    #pragma omp parallel for collapse(3) reduction(+:result)
+    #pragma omp parallel for collapse(3) reduction(+:result) schedule(dynamic, 1)
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
             for(size_t k = 0; k < N_3; k++){
-                result += M[i][j][k]*a[i]*b[j]*c[k];
+                result += M[i*N_2*N_3+j*N_3+k]*a[i]*b[j]*c[k];
             }
         }
     }
@@ -269,21 +269,18 @@ double contract_trilinear(const array<array<array<double, N_3>,N_2>, N_1>  &M, c
 }
 
 
-template<size_t N_1, size_t N_2, size_t N_3>
-array<double, N_1> contract_trilinear_field(const array<array<array<double, N_3>,N_2>, N_1>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+template<size_t N, size_t N_2, size_t N_3>
+array<double, N/(N_2*N_3)> contract_trilinear_field(const array<double, N>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+    constexpr size_t N_1 = N/(N_2*N_3);
     array<double, N_1> result = {0};
     
-    #pragma omp parallel for
+    #pragma omp parallel for collapse(3) schedule(dynamic, 1)
     for(size_t i = 0; i < N_1; i++) {
-        double sum_i = 0.0;
         for(size_t j = 0; j < N_2; j++) {
-            const double b_j = b[j];
-            #pragma omp simd reduction(+:sum_i)
             for(size_t k = 0; k < N_3; k++) {
-                sum_i += M[i][j][k] * b_j * c[k];
+                result[i]  += M[i*N_2*N_3+j*N_3+k] *  b[j] * c[k];
             }
         }
-        result[i] = sum_i;
     }
     
     return result;
@@ -317,7 +314,7 @@ array<double, 8> cross_prod_SU3(const array<double, 8> &a, const array<double, 8
     static const array<array<array<double, 8>, 8>, 8> SU3_structure = SU3_structure_constant();
     array<double, 8> result = {0};
     
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic, 1)
     for(size_t i = 0; i < 8; ++i) {
         double sum_i = 0.0;
         for(size_t j = 0; j < 8; ++j) {
@@ -356,7 +353,7 @@ template <size_t N, size_t M>
 array<array<double, M>, N> operator+(const array<array<double, M>, N> &a, const array<array<double, M>, N> &b) {
     array<array<double, M>, N> result;
     
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2) schedule(dynamic, 1)
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
             result[i][j] = a[i][j] + b[i][j];
@@ -369,7 +366,7 @@ template <size_t N, size_t M>
 array<array<double, M>, N> operator*(const array<array<double, M>, N> &a, const double &b) {
     array<array<double, M>, N> result;
     
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2) schedule(dynamic, 1)
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
             result[i][j] = a[i][j] * b;
@@ -382,7 +379,7 @@ template <size_t N, size_t M>
 double norm_average_2D(const array<array<double, M>, N> &a) {
     double result = 0;
     
-    #pragma omp parallel for collapse(2) reduction(+:result)
+    #pragma omp parallel for collapse(2) reduction(+:result) schedule(dynamic, 1)
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
             result += a[i][j] * a[i][j];
@@ -463,7 +460,7 @@ template<size_t N>
 array<double, N> transpose2D(const array<double, N>& matrix) {
     array<double, N> transposed;
     int size = int(sqrt(N));
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2) schedule(dynamic, 1)
     for (size_t i = 0; i < size; ++i) {
         for (size_t j = 0; j < size; ++j) {
             transposed[j*size + i] = matrix[i*size + j];
@@ -473,14 +470,14 @@ array<double, N> transpose2D(const array<double, N>& matrix) {
 }
 
 
-template<size_t N_1, size_t N_2, size_t N_3>
-array<array<array<double, N_1>, N_3>, N_2> transpose3D(const array<array<array<double, N_3>, N_2>, N_1>& matrix) {
-    array<array<array<double, N_1>, N_3>, N_2> transposed;
-    #pragma omp parallel for collapse(3)
+template<size_t N>
+array<double, N> transpose3D(const array<double, N>& matrix, size_t N_1, size_t N_2, size_t N_3) {
+    array<double, N> transposed;
+    #pragma omp parallel for collapse(3) schedule(dynamic, 1)
     for (size_t i = 0; i < N_1; ++i) {
         for (size_t j = 0; j < N_2; ++j) {
             for (size_t k = 0; k < N_3; ++k) {
-                transposed[j][k][i] = matrix[i][j][k];
+                transposed[j*N_1*N_3 + k*N_1 + i] = matrix[i*N_2*N_3 + j*N_3 + k];
             }
         }
     }
@@ -489,14 +486,14 @@ array<array<array<double, N_1>, N_3>, N_2> transpose3D(const array<array<array<d
 }
 
 
-template<size_t N_1, size_t N_2, size_t N_3>
-array<array<array<double, N_3>, N_1>, N_2> swap_axis_3D(const array<array<array<double, N_3>, N_2>, N_1>& matrix) {
-    array<array<array<double, N_3>, N_1>, N_2> transposed;
-    #pragma omp parallel for collapse(3)
+template<size_t N>
+array<double, N> swap_axis_3D(const array<double, N>& matrix, size_t N_1, size_t N_2, size_t N_3) {
+    array<double, N> transposed;
+    #pragma omp parallel for collapse(3) schedule(dynamic, 1)
     for (size_t i = 0; i < N_1; ++i) {
         for (size_t j = 0; j < N_2; ++j) {
             for (size_t k = 0; k < N_3; ++k) {
-                transposed[j][i][k] = matrix[i][j][k];
+                transposed[j*N_1*N_3 + i*N_3 + k] = matrix[i*N_2*N_3 + j*N_3 + k];
             }
         }
     }

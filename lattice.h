@@ -44,7 +44,7 @@ class lattice
     array<array<double, N * N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
 
     array<vector<array<double, N * N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
-    array<vector<array<array<array<double, N>, N>, N>>, N_ATOMS*dim1*dim2*dim3> trilinear_interaction;
+    array<vector<array<double, N * N * N>>, N_ATOMS*dim1*dim2*dim3>  trilinear_interaction;
 
     array<vector<size_t>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
     array<vector<array<size_t, 2>>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
@@ -139,10 +139,10 @@ class lattice
                             trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
                             trilinear_partners[current_site_index].push_back({partner1, partner2});
 
-                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction));
+                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
                             trilinear_partners[partner1].push_back({partner2, current_site_index});
 
-                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction)));
+                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction, N, N, N), N, N, N));
                             trilinear_partners[partner2].push_back({current_site_index, partner1});
                         }
                     }
@@ -359,7 +359,7 @@ class lattice
     }
 
     double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
-        double E, E_new, dE, r;
+        double E, dE, r;
         int i;
         array<double,N> new_spin;
         int accept = 0;
@@ -368,25 +368,13 @@ class lattice
             // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size);
             E = site_energy(curr_spin[i], i);
-            if (gaussian){
-                new_spin = gaussian_move(curr_spin[i], sigma);
-            }
-            else{
-                new_spin = gen_random_spin(spin_length);
-            }
-            E_new = site_energy(new_spin, i);
-            dE = E_new - E;
+            new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
+                                : gen_random_spin(spin_length);
+            dE = site_energy(new_spin, i) - E;
             
-            if(dE < 0){
+            if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
                 curr_spin[i] = new_spin;
                 accept++;
-            }
-            else{
-                r = random_double_lehman(0,1);
-                if(r < exp(-dE/T)){
-                    curr_spin[i] = new_spin;
-                    accept++;
-                }
             }
             count++;
         }
