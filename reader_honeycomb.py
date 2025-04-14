@@ -758,7 +758,7 @@ def read_2D_nonlinear_tot(dir):
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
 dir = "BCAO_zero_field_1.7K"
-# dir = "Kitaev_BCAO"
+dir = "Kitaev_BCAO"
 read_MD_tot(dir)
 read_MD_tot("BCAO_zero_field_15K")
 # parseDSSF(dir)
