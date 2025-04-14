@@ -176,6 +176,44 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 }
 
 
+#include <math.h>
+
+void MD_honeycomb_J1_J3(string dir, size_t num_trials=1, double J1xy=-7.6, double J1z=-1.2, double J3xy=2.5, double J3z=-0.85, double D=0.1, double E=-0.1, double h=0){
+    filesystem::create_directory(dir);
+    HoneyComb_standarx<3> atoms;
+    array<array<double,3>, 3> J1x_ = {{{J1xy+D,E,0},{E,J1xy-D,0},{0,0,J1z}}};
+
+    array<array<double,3>, 3> U120 = {{{cos(2*M_PI/3),-1*sin(2*M_PI/3),0},{sin(2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
+    array<array<double,3>, 3> U_120 = {{{cos(-2*M_PI/3),-1*sin(-2*M_PI/3),0},{sin(-2*M_PI/3),cos(-2*M_PI/3),0},{0,0,1}}};
+
+    array<array<double,3>, 3> J1y_ = U_120*J1x_*U120;
+    array<array<double,3>, 3> J1z_ = U120*J1x_*U_120;
+
+    array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
+
+    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
+    
+    atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(J1z_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
+
+    atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
+    atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});
+    atoms.set_bilinear_interaction(J3_, 0, 1, {1,-2,0});
+
+    atoms.set_field(field, 0);
+    atoms.set_field(field, 1);
+    double k_B = 0.08620689655;
+
+    for(size_t i=0; i<num_trials;++i){
+
+        lattice<3, 2, 12, 12, 1> MC(&atoms);
+        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 0, true);
+        MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
+    }
+}
+
+
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
@@ -195,6 +233,7 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
     double J = argv[7] ? atof(argv[7]) : 0.0;
-    MD_kitaev_honeycomb_real(num_trials, J, K, Gamma, Gammap, h, dir_name);
+    // MD_kitaev_honeycomb_real(num_trials, J, K, Gamma, Gammap, h, dir_name);
+    MD_honeycomb_J1_J3("BCAO_J1J3");
     return 0;
 }

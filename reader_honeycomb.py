@@ -757,10 +757,18 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
+<<<<<<< HEAD
 dir = "BCAO_zero_field_1.7K"
 dir = "Kitaev_BCAO"
 read_MD_tot("BCAO_zero_field_6K_sasha")
 read_MD_tot("BCAO_zero_field_10K_songvilay")
+=======
+# dir = "BCAO_zero_field_1.7K"
+# dir = "Kitaev_BCAO"
+# read_MD_tot(dir)
+# read_MD_tot("BCAO_zero_field_15K")
+read_MD_tot("BCAO_J1J3")
+>>>>>>> 2bd457cc1145046a6f220186f49ce6f08566ab0c
 # parseDSSF(dir)
 
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"

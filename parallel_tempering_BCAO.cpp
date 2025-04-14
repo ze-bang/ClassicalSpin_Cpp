@@ -77,11 +77,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-<<<<<<< HEAD
-    parallel_tempering_BCAO(0.01, 15, 0*mu_B, {0,1,0}, "BCAO_zero_field_15K");
-=======
     parallel_tempering_BCAO(1*k_B, 25*k_B, 0*mu_B, {0,1,0}, "/scratch/y/ybkim/zhouzb79/parallel_tempering_BCAO_zero_field_sasha");
->>>>>>> 1b3f103b575a1a5412874d181cfae8354e6b83de
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){
