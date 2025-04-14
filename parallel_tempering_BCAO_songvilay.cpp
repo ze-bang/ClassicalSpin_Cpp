@@ -10,9 +10,9 @@ void parallel_tempering_BCAO(double T_start, double T_end, double h, array<doubl
     array<array<double,3>, 3> J1z_ = {{{J1,Gamma,Gammap},{Gamma,J1,Gammap},{Gammap,Gammap,K+J1}}};
 
 
-    array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,J2}}};
-    array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,J3}}};
-    array<array<double,3>, 3> J4_ = {{{J4,0,0},{0,J4,0},{0,0,J4}}};
+    array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,0.5*J2}}};
+    array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,0.5*J3}}};
+    array<array<double,3>, 3> J4_ = {{{J4,0,0},{0,J4,0},{0,0,0.5*J4}}};
 
     std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
     array<double, 3> field = {4.8*h*field_dir[0],4.85*h*field_dir[1],2.5*h*field_dir[2]};
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MD_BCAO_honeycomb(0.01, 15, 0*mu_B, {0,1,0}, "parallel_tempering_BCAO_zero_field_sasha");
+    parallel_tempering_BCAO(0.01*k_B, 15*k_B, 0*mu_B, {0,1,0}, "/scratch/y/ybkim/zhouzb79/parallel_tempering_BCAO_zero_field_songivlay");
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){

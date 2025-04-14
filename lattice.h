@@ -657,9 +657,9 @@ class lattice
                     // write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
-                        write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
-                    }
+                    // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
+                    //     write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
+                    // }
                 }
             }
             if (rank == 0){
