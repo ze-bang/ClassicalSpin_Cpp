@@ -154,7 +154,7 @@ class lattice
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
 
-        std::cout << "Finished setting up lattice" << std::endl;
+        // std::cout << "Finished setting up lattice" << std::endl;
     };
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
@@ -479,7 +479,7 @@ class lattice
         double T = T_start;
         double acceptance_rate = 0;
         double sigma = 1000;
-        cout << "Gaussian Move: " << gaussian_move << endl;
+        // cout << "Gaussian Move: " << gaussian_move << endl;
         srand (time(NULL));
         seed_lehman(rand()*2+1);
         while(T > T_end){
@@ -508,23 +508,25 @@ class lattice
             }
             if(save_observables){
                 vector<double> energies;
-                for(size_t i = 0; i<1e8; ++i){
+                for(size_t i = 0; i<1e7; ++i){
                     if(overrelaxation_rate > 0){
                         overrelaxation();
                         if (i%overrelaxation_rate == 0){
-                            curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                            metropolis(spins, T, gaussian_move, sigma);
                         }
                     }
                     else{
-                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                        metropolis(spins, T, gaussian_move, sigma);
                     }
-                    if (i % 100 == 0){
+                    if (i % 1000 == 0){
                         energies.push_back(total_energy(spins));
                     }
                 }
+                double k_B = 1.380649e-23;
+                double N_A = 6.02214076e23;
                 std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size;
-                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size;
+                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size * 2 * k_B * N_A;
+                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size * 2 * k_B * N_A;
                 ofstream myfile;
                 myfile.open(out_dir + "/specific_heat.txt", ios::app);
                 myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
@@ -554,10 +556,10 @@ class lattice
 
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
 
-        int initialized;
         int swap_accept = 0;
         double curr_accept = 0;
         int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
+        int initialized;
         MPI_Initialized(&initialized);
         if (!initialized){
             MPI_Init(NULL, NULL);
@@ -654,12 +656,8 @@ class lattice
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
-                    // write_to_file_spin(dir_name + "/spin" + to_string(rank) + ".txt", spins);
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
-                        write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
-                    }
                 }
             }
             if (rank == 0){
@@ -671,10 +669,6 @@ class lattice
                 }
                 myfile.close();
             }
-        }
-        int finalized;
-        if (!MPI_Finalized(&finalized)){
-            MPI_Finalize();
         }
         // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
     }

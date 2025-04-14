@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MD_BCAO_honeycomb(50, 0*mu_B, {0,1,0}, "BCAO_zero_field_15K");
+    parallel_tempering_BCAO(0.01, 15, 0*mu_B, {0,1,0}, "BCAO_zero_field_15K");
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){

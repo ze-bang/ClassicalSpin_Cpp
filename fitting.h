@@ -102,7 +102,14 @@ public:
                     shrink(simplex, indices, func, values, std::forward<Args>(args)...);
                 }
             }
-            
+            // Print the best fitting parameters after each iteration
+            if (iteration % 1 == 0) {  // Print every 10 iterations to avoid too much output
+                std::cout << "Iteration " << iteration << ", Value: " << values[indices[0]] << ", Parameters: ";
+                for (double param : simplex[indices[0]]) {
+                    std::cout << param << " ";
+                }
+                std::cout << std::endl;
+            }
             ++iteration;
         }
         

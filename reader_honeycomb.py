@@ -759,8 +759,8 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 dir = "BCAO_zero_field_1.7K"
 dir = "Kitaev_BCAO"
-read_MD_tot(dir)
-read_MD_tot("BCAO_zero_field_15K")
+read_MD_tot("BCAO_zero_field_6K_sasha")
+read_MD_tot("BCAO_zero_field_10K_songvilay")
 # parseDSSF(dir)
 
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
