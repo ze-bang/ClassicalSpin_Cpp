@@ -181,6 +181,7 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     filesystem::create_directory(dir);
     HoneyComb_standarx<3> atoms;
+<<<<<<< HEAD
     double J1, K1, eta1, Gamma1, Gammap11, Gammap21;
     double J3, K3, eta3, Gamma3, Gammap13, Gammap23;
     double h = 0;
@@ -205,6 +206,28 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     array<array<double,3>, 3> J3x_ = {{{J3+K3,Gammap13,Gammap23},{Gammap13,J3+eta3,Gamma3},{Gammap23,Gamma3,J3-eta3}}};
     array<array<double,3>, 3> J3y_ = {{{J3-eta3,Gammap23,Gamma3},{Gammap23,J3+K3,Gammap13},{Gamma3,Gammap13,J3+eta3}}};
     array<array<double,3>, 3> J3z_ = {{{J3,Gamma3+eta3,Gammap13},{Gamma3,J3-eta3,Gammap23},{Gammap13,Gammap23,J3+K3}}};
+=======
+    array<array<double,3>, 3> J1z_ = {{{J1xy+D,E,0},{E,J1xy-D,0},{0,0,J1z}}};
+
+    array<array<double,3>, 3> U120 = {{{cos(2*M_PI/3),sin(-2*M_PI/3),0},{sin(2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
+    array<array<double,3>, 3> U_120 = {{{cos(2*M_PI/3),sin(2*M_PI/3),0},{sin(-2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
+
+    array<array<double,3>, 3> J1y_ = U_120*J1z_*U120;
+    array<array<double,3>, 3> J1x_ = U120*J1z_*U_120;
+
+
+    std::cout << J1x_[0][0] << " " << J1x_[0][1] << " " << J1x_[0][2] << std::endl;
+    std::cout << J1x_[1][0] << " " << J1x_[1][1] << " " << J1x_[1][2] << std::endl;
+    std::cout << J1x_[2][0] << " " << J1x_[2][1] << " " << J1x_[2][2] << std::endl;
+    
+    std::cout << J1y_[0][0] << " " << J1y_[0][1] << " " << J1y_[0][2] << std::endl;
+    std::cout << J1y_[1][0] << " " << J1y_[1][1] << " " << J1y_[1][2] << std::endl;
+    std::cout << J1y_[2][0] << " " << J1y_[2][1] << " " << J1y_[2][2] << std::endl;
+
+    std::cout << J1z_[0][0] << " " << J1z_[0][1] << " " << J1z_[0][2] << std::endl;
+    std::cout << J1z_[1][0] << " " << J1z_[1][1] << " " << J1z_[1][2] << std::endl;
+    std::cout << J1z_[2][0] << " " << J1z_[2][1] << " " << J1z_[2][2] << std::endl;
+>>>>>>> d7167323983c02b53f23e0be0aa7c68e69f5a4c7
 
 
     array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};

@@ -57,11 +57,69 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     for(size_t i=0; i<num_trials;++i){
 
         lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
-        MC.simulated_annealing(100*k_B, 15*k_B, 100000, 0, true);
+        MC.simulated_annealing(100*k_B, 6*k_B, 100000, 1e3, true);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
 
+void simulated_annealing_BCAO_honeycomb(string filename, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, double J2=-0.21, double J3=1.70, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
+    filesystem::create_directory(dir);
+    HoneyComb_standarx<3> atoms;
+
+    array<array<double,3>, 3> J1x_ = {{{J1+2*Jpmpm*cos(2*M_PI/3),-2*Jpmpm*sin(2*M_PI/3),Jzp*sin(2*M_PI/3)},{-2*Jpmpm*sin(2*M_PI/3),J1-2*Jpmpm*cos(2*M_PI/3),-Jzp*cos(2*M_PI/3)},{Jzp*sin(2*M_PI/3),-Jzp*cos(2*M_PI/3),J1*Delta1}}};
+    array<array<double,3>, 3> J1y_ = {{{J1+2*Jpmpm*cos(-2*M_PI/3),-2*Jpmpm*sin(-2*M_PI/3),Jzp*sin(-2*M_PI/3)},{-2*Jpmpm*sin(-2*M_PI/3),J1-2*Jpmpm*cos(-2*M_PI/3),-Jzp*cos(-2*M_PI/3)},{Jzp*sin(-2*M_PI/3),-Jzp*cos(-2*M_PI/3),J1*Delta1}}};
+    array<array<double,3>, 3> J1z_ = {{{J1+2*Jpmpm*cos(0),-2*Jpmpm*sin(0),Jzp*sin(0)},{-2*Jpmpm*sin(0),J1-2*Jpmpm*cos(0),-Jzp*cos(0)},{Jzp*sin(0),-Jzp*cos(0),J1*Delta1}}};
+
+
+    array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,Delta2*J2}}};
+    array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};
+
+    std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
+    array<double, 3> field = {4.8*h*field_dir[0],4.85*h*field_dir[1],2.5*h*field_dir[2]};
+    
+
+    //nearest neighbour
+    atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
+
+    //next nearest neighbour
+    atoms.set_bilinear_interaction(J2_, 0, 0, {1,0,0});
+    atoms.set_bilinear_interaction(J2_, 0, 0, {0,1,0});
+    atoms.set_bilinear_interaction(J2_, 0, 0, {1,-1,0});
+    atoms.set_bilinear_interaction(J2_, 0, 0, {-1,0,0});
+    atoms.set_bilinear_interaction(J2_, 0, 0, {0,-1,0});
+    atoms.set_bilinear_interaction(J2_, 0, 0, {-1,1,0});
+
+    atoms.set_bilinear_interaction(J2_, 1, 1, {1,0,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {0,1,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {-1,0,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(J2_, 1, 1, {-1,1,0});
+    //third nearest neighbour
+    atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
+    atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});
+    atoms.set_bilinear_interaction(J3_, 0, 1, {1,-2,0});
+
+    atoms.set_field(field, 0);
+    atoms.set_field(field, 1);
+    double k_B = 0.08620689655;
+
+
+    lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
+    MC.simulated_annealing(20*k_B, 1e-2*k_B, 100000, 0, true);
+    for (size_t i=0; i<1e6;++i){
+        MC.deterministic_sweep();
+    }
+    MC.write_to_file_pos(filename+"/pos.txt");
+    MC.write_to_file_spin(filename+"/spins.txt", MC.spins);
+}
+
+
+// int main(int argc, char** argv) {
+//     simulated_annealing_BCAO_honeycomb("BCAO_sasha_ground_state", 0, {0,1,0}, "BCAO_sasha_ground_state");
+// }
 
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
@@ -73,7 +131,7 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MD_BCAO_honeycomb(50, 0*mu_B, {0,1,0}, "BCAO_zero_field_15K");
+    MD_BCAO_honeycomb(20, 0*mu_B, {0,1,0}, "BCAO_zero_field_6K_sasha");
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){
