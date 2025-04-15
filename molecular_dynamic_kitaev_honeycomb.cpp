@@ -181,13 +181,26 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 void MD_honeycomb_J1_J3(string dir, size_t num_trials=1, double J1xy=-7.6, double J1z=-1.2, double J3xy=2.5, double J3z=-0.85, double D=0.1, double E=-0.1, double h=0){
     filesystem::create_directory(dir);
     HoneyComb_standarx<3> atoms;
-    array<array<double,3>, 3> J1x_ = {{{J1xy+D,E,0},{E,J1xy-D,0},{0,0,J1z}}};
+    array<array<double,3>, 3> J1z_ = {{{J1xy+D,E,0},{E,J1xy-D,0},{0,0,J1z}}};
 
-    array<array<double,3>, 3> U120 = {{{cos(2*M_PI/3),-1*sin(2*M_PI/3),0},{sin(2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
-    array<array<double,3>, 3> U_120 = {{{cos(-2*M_PI/3),-1*sin(-2*M_PI/3),0},{sin(-2*M_PI/3),cos(-2*M_PI/3),0},{0,0,1}}};
+    array<array<double,3>, 3> U120 = {{{cos(2*M_PI/3),sin(-2*M_PI/3),0},{sin(2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
+    array<array<double,3>, 3> U_120 = {{{cos(2*M_PI/3),sin(2*M_PI/3),0},{sin(-2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
 
-    array<array<double,3>, 3> J1y_ = U_120*J1x_*U120;
-    array<array<double,3>, 3> J1z_ = U120*J1x_*U_120;
+    array<array<double,3>, 3> J1y_ = U_120*J1z_*U120;
+    array<array<double,3>, 3> J1x_ = U120*J1z_*U_120;
+
+
+    std::cout << J1x_[0][0] << " " << J1x_[0][1] << " " << J1x_[0][2] << std::endl;
+    std::cout << J1x_[1][0] << " " << J1x_[1][1] << " " << J1x_[1][2] << std::endl;
+    std::cout << J1x_[2][0] << " " << J1x_[2][1] << " " << J1x_[2][2] << std::endl;
+    
+    std::cout << J1y_[0][0] << " " << J1y_[0][1] << " " << J1y_[0][2] << std::endl;
+    std::cout << J1y_[1][0] << " " << J1y_[1][1] << " " << J1y_[1][2] << std::endl;
+    std::cout << J1y_[2][0] << " " << J1y_[2][1] << " " << J1y_[2][2] << std::endl;
+
+    std::cout << J1z_[0][0] << " " << J1z_[0][1] << " " << J1z_[0][2] << std::endl;
+    std::cout << J1z_[1][0] << " " << J1z_[1][1] << " " << J1z_[1][2] << std::endl;
+    std::cout << J1z_[2][0] << " " << J1z_[2][1] << " " << J1z_[2][2] << std::endl;
 
     array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
 
