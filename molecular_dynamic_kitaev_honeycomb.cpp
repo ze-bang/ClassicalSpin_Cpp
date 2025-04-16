@@ -207,7 +207,7 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1, double J1xy=-7.6, doubl
     array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
     
     atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
-    atoms.set_bilinear_interaction(J1z_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
 
     atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
