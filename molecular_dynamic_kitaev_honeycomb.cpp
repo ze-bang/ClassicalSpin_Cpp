@@ -178,31 +178,34 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 
 #include <math.h>
 
-void MD_honeycomb_J1_J3(string dir, size_t num_trials=1, double J1xy=-7.6, double J1z=-1.2, double J3xy=2.5, double J3z=-0.85, double D=0.1, double E=-0.1, double h=0){
+void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     filesystem::create_directory(dir);
     HoneyComb_standarx<3> atoms;
-    array<array<double,3>, 3> J1z_ = {{{J1xy+D,E,0},{E,J1xy-D,0},{0,0,J1z}}};
+    double J1, K1, eta1, Gamma1, Gammap11, Gammap21;
+    double J3, K3, eta3, Gamma3, Gammap13, Gammap23;
+    double h = 0;
 
-    array<array<double,3>, 3> U120 = {{{cos(2*M_PI/3),sin(-2*M_PI/3),0},{sin(2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
-    array<array<double,3>, 3> U_120 = {{{cos(2*M_PI/3),sin(2*M_PI/3),0},{sin(-2*M_PI/3),cos(2*M_PI/3),0},{0,0,1}}};
+    J1 = -5.5;
+    K1 = 0.1;
+    eta1 = 0.06;
+    Gamma1 = 2.2;
+    Gammap11 = 2.0;
+    Gammap21 = 2.2;
+    J3 = 1.38;
+    K3 = 0.0;
+    eta3 = 0.0;
+    Gamma3 = -1.2;
+    Gammap13 = -1.2;
+    Gammap23 = -1.2;
 
-    array<array<double,3>, 3> J1y_ = U_120*J1z_*U120;
-    array<array<double,3>, 3> J1x_ = U120*J1z_*U_120;
+    array<array<double,3>, 3> J1x_ = {{{J1+K1,Gammap11,Gammap21},{Gammap11,J1+eta1,Gamma1},{Gammap21,Gamma1,J1-eta1}}};
+    array<array<double,3>, 3> J1y_ = {{{J1-eta1,Gammap21,Gamma1},{Gammap21,J1+K1,Gammap11},{Gamma1,Gammap11,J1+eta1}}};
+    array<array<double,3>, 3> J1z_ = {{{J1+eta1,Gamma1,Gammap11},{Gamma1,J1-eta1,Gammap21},{Gammap11,Gammap21,J1+K1}}};
 
+    array<array<double,3>, 3> J3x_ = {{{J3+K3,Gammap13,Gammap23},{Gammap13,J3+eta3,Gamma3},{Gammap23,Gamma3,J3-eta3}}};
+    array<array<double,3>, 3> J3y_ = {{{J3-eta3,Gammap23,Gamma3},{Gammap23,J3+K3,Gammap13},{Gamma3,Gammap13,J3+eta3}}};
+    array<array<double,3>, 3> J3z_ = {{{J3,Gamma3+eta3,Gammap13},{Gamma3,J3-eta3,Gammap23},{Gammap13,Gammap23,J3+K3}}};
 
-    std::cout << J1x_[0][0] << " " << J1x_[0][1] << " " << J1x_[0][2] << std::endl;
-    std::cout << J1x_[1][0] << " " << J1x_[1][1] << " " << J1x_[1][2] << std::endl;
-    std::cout << J1x_[2][0] << " " << J1x_[2][1] << " " << J1x_[2][2] << std::endl;
-    
-    std::cout << J1y_[0][0] << " " << J1y_[0][1] << " " << J1y_[0][2] << std::endl;
-    std::cout << J1y_[1][0] << " " << J1y_[1][1] << " " << J1y_[1][2] << std::endl;
-    std::cout << J1y_[2][0] << " " << J1y_[2][1] << " " << J1y_[2][2] << std::endl;
-
-    std::cout << J1z_[0][0] << " " << J1z_[0][1] << " " << J1z_[0][2] << std::endl;
-    std::cout << J1z_[1][0] << " " << J1z_[1][1] << " " << J1z_[1][2] << std::endl;
-    std::cout << J1z_[2][0] << " " << J1z_[2][1] << " " << J1z_[2][2] << std::endl;
-
-    array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
 
     array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
     
@@ -210,9 +213,9 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1, double J1xy=-7.6, doubl
     atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
 
-    atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
-    atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});
-    atoms.set_bilinear_interaction(J3_, 0, 1, {1,-2,0});
+    atoms.set_bilinear_interaction(J3x_, 0, 1, {1,0,0});
+    atoms.set_bilinear_interaction(J3y_, 0, 1, {-1,0,0});
+    atoms.set_bilinear_interaction(J3z_, 0, 1, {1,-2,0});
 
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
