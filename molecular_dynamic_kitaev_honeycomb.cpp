@@ -210,7 +210,7 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
     
     atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
-    atoms.set_bilinear_interaction(J1z_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
 
     atoms.set_bilinear_interaction(J3x_, 0, 1, {1,0,0});
@@ -223,8 +223,8 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 12, 12, 1> MC(&atoms);
-        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 0, true);
+        lattice<3, 2, 24, 24, 1> MC(&atoms);
+        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 100, true);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
