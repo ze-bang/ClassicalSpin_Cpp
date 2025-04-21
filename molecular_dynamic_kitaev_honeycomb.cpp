@@ -176,6 +176,60 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 }
 
 
+#include <math.h>
+
+void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
+    filesystem::create_directory(dir);
+    HoneyComb_standarx<3> atoms;
+    double J1, K1, eta1, Gamma1, Gammap11, Gammap21;
+    double J3, K3, eta3, Gamma3, Gammap13, Gammap23;
+    double h = 0;
+
+    J1 = -5.5;
+    K1 = 0.1;
+    eta1 = 0.06;
+    Gamma1 = 2.2;
+    Gammap11 = 2.0;
+    Gammap21 = 2.2;
+    J3 = 1.38;
+    K3 = 0.0;
+    eta3 = 0.0;
+    Gamma3 = -1.2;
+    Gammap13 = -1.2;
+    Gammap23 = -1.2;
+
+    array<array<double,3>, 3> J1x_ = {{{J1+K1,Gammap11,Gammap21},{Gammap11,J1+eta1,Gamma1},{Gammap21,Gamma1,J1-eta1}}};
+    array<array<double,3>, 3> J1y_ = {{{J1-eta1,Gammap21,Gamma1},{Gammap21,J1+K1,Gammap11},{Gamma1,Gammap11,J1+eta1}}};
+    array<array<double,3>, 3> J1z_ = {{{J1+eta1,Gamma1,Gammap11},{Gamma1,J1-eta1,Gammap21},{Gammap11,Gammap21,J1+K1}}};
+
+    array<array<double,3>, 3> J3x_ = {{{J3+K3,Gammap13,Gammap23},{Gammap13,J3+eta3,Gamma3},{Gammap23,Gamma3,J3-eta3}}};
+    array<array<double,3>, 3> J3y_ = {{{J3-eta3,Gammap23,Gamma3},{Gammap23,J3+K3,Gammap13},{Gamma3,Gammap13,J3+eta3}}};
+    array<array<double,3>, 3> J3z_ = {{{J3,Gamma3+eta3,Gammap13},{Gamma3,J3-eta3,Gammap23},{Gammap13,Gammap23,J3+K3}}};
+
+
+    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
+    
+    atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(J1z_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
+
+    atoms.set_bilinear_interaction(J3x_, 0, 1, {1,0,0});
+    atoms.set_bilinear_interaction(J3y_, 0, 1, {-1,0,0});
+    atoms.set_bilinear_interaction(J3z_, 0, 1, {1,-2,0});
+
+    atoms.set_field(field, 0);
+    atoms.set_field(field, 1);
+    double k_B = 0.08620689655;
+
+    for(size_t i=0; i<num_trials;++i){
+
+        lattice<3, 2, 12, 12, 1> MC(&atoms);
+        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 0, true);
+        MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
+    }
+}
+
+
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
@@ -195,6 +249,7 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
     double J = argv[7] ? atof(argv[7]) : 0.0;
-    MD_kitaev_honeycomb_real(num_trials, J, K, Gamma, Gammap, h, dir_name);
+    // MD_kitaev_honeycomb_real(num_trials, J, K, Gamma, Gammap, h, dir_name);
+    MD_honeycomb_J1_J3("BCAO_J1J3");
     return 0;
 }
