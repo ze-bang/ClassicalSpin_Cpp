@@ -5,6 +5,8 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
+    cout << "Beginning lattice setup" << endl;
+
     array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
     array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
     array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
@@ -83,12 +85,15 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
+    cout << "Finished setting up Fe atoms" << endl;
+
     //Tm atoms
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
 
+    cout << "Finished setting up Tm atoms" << endl;
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
@@ -178,7 +183,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
     TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
-
+    cout << "Finished setting up TmFeO3" << endl;
 
     int initialized;
     MPI_Initialized(&initialized);
@@ -192,7 +197,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 
 
     mixed_lattice<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
-    MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, rank_to_write);
+    MC.parallel_tempering(temps, 1e6, 1e6, 100, 50, 2e3, dir, rank_to_write);
 
     int finalized;
     MPI_Finalized(&finalized);
@@ -205,8 +210,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
-    vector<int> rank_to_write = {0};
-
+    std::vector<int> rank_to_write = {{0}};
     double J1ab = argv[1] ? atof(argv[1]) : 0.0;
     double J1c = argv[2] ? atof(argv[2])/J1ab : 0.0;
     double J2ab = argv[3] ? atof(argv[3])/J1ab  : 0.0;
@@ -224,6 +228,7 @@ int main(int argc, char** argv) {
     double T_start = argv[14] ? atof(argv[14]) : 0.0;
     double T_end = argv[15] ? atof(argv[15]) : 0.0;
     cout << "Begin parallel tempering on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << endl;
-    parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {1,0,0}, dir_name, rank_to_write);    
+    cout << "T_start: " << T_start << " T_end: " << T_end << endl;
+    parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0,1,0}, dir_name, rank_to_write);    
     return 0;
 }
