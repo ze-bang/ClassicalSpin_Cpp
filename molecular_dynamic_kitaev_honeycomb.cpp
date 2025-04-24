@@ -1,6 +1,6 @@
 #include "experiments.h"
 
-void MD_kitaev_honeycomb(size_t num_trials, double K, double Gamma, double Gammap, double h, string dir){
+void MD_kitaev_honeycomb(size_t num_trials, double J, double K, double Gamma, double Gammap, double h, string dir){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
     array<array<double,3>, 3> Jx = {{{K,Gammap,Gammap},{Gammap,0,Gamma},{Gammap,Gamma,0}}};
