@@ -22,6 +22,12 @@ def honeycomb_reciprocal_basis():
     a2 = np.array([np.sqrt(3)/2, 1/2, 0])
     a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
     
+    # a1 = np.array([1, 0, 0])
+    # a2 = np.array([1/2, np.sqrt(3)/2, 0])
+    # a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
+    
+
+
     # Calculate reciprocal lattice vectors using the formula:
     # b_i = 2π * (a_j × a_k) / (a_i · (a_j × a_k))
     # where i,j,k are cyclic
@@ -535,7 +541,7 @@ def read_MD_tot(dir):
     A = np.zeros((8, nK, nK))
     w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
     w0 = 0
-    wmax = 15
+    wmax = 20
     w_line = np.arange(w0, wmax, 1/100)[1:]
     B = np.zeros((len(w_line), len(DSSF_K)))
     for file in sorted(os.listdir(directory)):  
@@ -549,6 +555,8 @@ def read_MD_tot(dir):
                 A += read_MD_slice(dir + "/" + filename, nK)
             else:
                 A += np.loadtxt(dir + "/" + filename + "_DSSF_sliced.txt").reshape((8, nK, nK))
+    
+    A = np.transpose(A, (0, 2, 1))
     
     
     fig, ax = plt.subplots(figsize=(10,4))
@@ -650,7 +658,7 @@ def read_MD(dir):
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
 
     w0 = 0
-    wmax = 15
+    wmax = 20
     w = np.arange(w0, wmax, 1/100)[1:]
 
     A = DSSF(w, DSSF_K, S, P, T, True)
@@ -667,8 +675,8 @@ def read_MD_slice(dir, nK):
     w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
 
     nK = 100
-    H = np.linspace(-1.0, 1.0, nK)
-    L = np.linspace(-1.5, 1.5, nK)
+    H = np.linspace(-1.5, 1.5, nK)
+    L = np.linspace(-1.0, 1.0, nK)
     A, B = np.meshgrid(H, L)
     K = hhknk(A, B).reshape((nK*nK,3))
 
@@ -760,9 +768,22 @@ def read_2D_nonlinear_tot(dir):
 # dir = "BCAO_zero_field_1.7K"
 # dir = "Kitaev_BCAO"
 # read_MD_tot(dir)
-# read_MD_tot("BCAO_zero_field_15K")
-read_MD_tot("BCAO_J1J3")
+# read_MD_tot("BCAO_zero_field_5K_sasha")
+read_MD_tot("BCAO_zero_field_8K_songvilay")
+# read_MD_tot("BCAO_J1J3")
 # parseDSSF(dir)
+
+# A = np.loadtxt("BCAO_Sasha_Sweep_ab.txt")
+# plt.plot(A[:,0], A[:,1]/0.086)
+# plt.xlabel(r"$\theta$ (from a to b)")
+# plt.ylabel("B/T")
+# plt.savefig("BCAO_Sasha_Sweep_ab.pdf")
+# plt.clf()
+# A = np.loadtxt("BCAO_Sasha_Sweep_ac.txt")
+# plt.plot(A[:,0], A[:,1]/0.086)
+# plt.xlabel(r"$\theta$ (from a to c)")
+# plt.ylabel("B/T")
+# plt.savefig("BCAO_Sasha_Sweep_ac.pdf")
 
 # dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
 # dir = "test_long_h=0.0"
