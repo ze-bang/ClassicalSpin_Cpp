@@ -274,7 +274,7 @@ class lattice
                 trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
-        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
+        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/6;
     }
 
     double energy_density(spin_config &curr_spins){

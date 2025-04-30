@@ -465,7 +465,7 @@ class mixed_lattice
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
             }
         }
-        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
+        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/6;
     }
 
     double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>  &curr_spins){
