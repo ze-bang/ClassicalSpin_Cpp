@@ -226,7 +226,6 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-<<<<<<< HEAD:molecular_dynamic_kitaev_honeycomb.cpp
 
     int start = rank*num_trials/size;
     int end = (rank+1)*num_trials/size;
@@ -235,10 +234,6 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
 
         lattice<3, 2, 24, 24, 1> MC(&atoms);
         MC.simulated_annealing(150*k_B, 2*k_B, 100000, 100, true);
-=======
-        lattice<3, 2, 24, 24, 1> MC(&atoms);
-        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 100, true);
->>>>>>> c3900cb38d25ae35fcae19a641d9c2bd5951904b:src/molecular_dynamic_kitaev_honeycomb.cpp
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }

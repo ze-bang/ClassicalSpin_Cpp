@@ -578,6 +578,7 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("MD_TmFeO3_E_1_5")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_longer_T")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_w_OS_5")
+read_MD_tot("TmFeO3_MD_0_test")
 
 # parseDSSF(dir)
 # fullread(dir, False, "111")
@@ -586,8 +587,8 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0.0")
-read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_Fe_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0.0")
+# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_Fe_2DCS_Tzero_xii=0")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
 # plt.plot(A[0], A[1])

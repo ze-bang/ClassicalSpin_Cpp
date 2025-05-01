@@ -7,7 +7,6 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
     array<array<double,3>, 3> Jy = {{{0,Gammap,Gamma},{Gammap,K,Gammap},{Gamma,Gammap,0}}};
     array<array<double,3>, 3> Jz = {{{0,Gamma,Gammap},{Gamma,0,Gammap},{Gammap,Gammap,K}}};
 
-<<<<<<< HEAD:simulated_annealing_honeycomb.cpp
 
     array<double, 3> z = {1, 1, 1};
     array<double, 3> y = {1, 1, -2};
@@ -21,11 +20,6 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
     array<double, 3> field = y*cos(theta) + x*sin(theta);
     // array<double, 3> field = y*(-0.15) + x*0.06;
 
-=======
-    // array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
-    double theta = 150.0 * M_PI / 180.0;
-    array<double, 3> field = {h*(cos(theta)/sqrt(6) - sin(theta)/sqrt(3)), h*(cos(theta)/sqrt(6) + sin(theta)/sqrt(3)), -h*2*(cos(theta)/sqrt(6))};
->>>>>>> c3900cb38d25ae35fcae19a641d9c2bd5951904b:src/simulated_annealing_honeycomb.cpp
     
     cout << "Setting up honeycomb lattice with parameters: " << endl;
     cout << "Jx: " << Jx[0][0] << " " << Jx[0][1] << " " << Jx[0][2] << endl;

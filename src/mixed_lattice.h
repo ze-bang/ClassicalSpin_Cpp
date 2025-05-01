@@ -386,15 +386,15 @@ class mixed_lattice
         energy -= dot(spin_here, field_SU2[site_index]);
         energy += contract(spin_here, onsite_interaction_SU2[site_index], spin_here);
 
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i<num_bi_SU2; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -406,15 +406,15 @@ class mixed_lattice
         energy -= dot(spin_here, field_SU3[site_index]);
         energy += contract(spin_here, onsite_interaction_SU3[site_index], spin_here);
 
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i<num_bi_SU3; ++i) {
             energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -428,39 +428,39 @@ class mixed_lattice
         double trilinear_energy = 0.0;
 
         size_t site_index, i;
-        #pragma omp parallel for
+        #pragma omp simd
         for(site_index = 0; site_index < lattice_size_SU2; ++site_index){
             field_energy -= dot(curr_spins.spins_SU2[site_index], field_SU2[site_index]);
             onsite_energy += contract(curr_spins.spins_SU2[site_index], onsite_interaction_SU2[site_index], curr_spins.spins_SU2[site_index]);
 
-            #pragma omp simd reduction(+:bilinear_energy)
+            // #pragma omp simd reduction(+:bilinear_energy)
             for (i=0; i<num_bi_SU2; ++i) {
                 bilinear_energy += contract(curr_spins.spins_SU2[site_index], bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
             }
-            #pragma omp simd reduction(+:trilinear_energy)
+            // #pragma omp simd reduction(+:trilinear_energy)
             for (i=0; i < num_tri_SU3; ++i){
                 trilinear_energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
             }
-            #pragma omp simd reduction(+:trilinear_energy)
+            // #pragma omp simd reduction(+:trilinear_energy)
             for (i=0; i < num_tri_SU2_SU3; ++i){
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
             }
         }
 
-        #pragma omp parallel for
+        #pragma omp simd
         for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index){
             field_energy -= dot(curr_spins.spins_SU3[site_index], field_SU3[site_index]);
             onsite_energy += contract(curr_spins.spins_SU3[site_index], onsite_interaction_SU3[site_index], curr_spins.spins_SU3[site_index]);
 
-            #pragma omp simd reduction(+:bilinear_energy)
+            // #pragma omp simd reduction(+:bilinear_energy)
             for (size_t i=0; i<num_bi_SU3; ++i) {
                 bilinear_energy += contract(curr_spins.spins_SU3[site_index], bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
             }
-            #pragma omp simd reduction(+:trilinear_energy)
+            // #pragma omp simd reduction(+:trilinear_energy)
             for (size_t i=0; i < num_tri_SU3; ++i){
                 trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
             }
-            #pragma omp simd reduction(+:trilinear_energy)
+            // #pragma omp simd reduction(+:trilinear_energy)
             for (size_t i=0; i < num_tri_SU2_SU3; ++i){
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
             }
@@ -513,15 +513,15 @@ class mixed_lattice
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
         array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -530,15 +530,15 @@ class mixed_lattice
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
         array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
@@ -547,15 +547,15 @@ class mixed_lattice
 
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
         }
@@ -564,15 +564,17 @@ class mixed_lattice
 
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
-        #pragma omp parallel for schedule(dynamic, 1)
+        // #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        // #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
         }
-        #pragma omp parallel for schedule(dynamic, 1)
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
         }
