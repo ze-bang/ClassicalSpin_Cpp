@@ -196,7 +196,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
 
-    mixed_lattice<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
+    mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
     MC.parallel_tempering(temps, 1e6, 1e6, 100, 50, 2e3, dir, rank_to_write);
 
     int finalized;

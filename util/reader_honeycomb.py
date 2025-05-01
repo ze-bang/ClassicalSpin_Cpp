@@ -551,6 +551,7 @@ def read_MD_tot(dir):
                 B += read_MD(dir + "/" + filename)
             else:
                 B += np.loadtxt(dir + "/" + filename + "_DSSF.txt").reshape((len(w_line), len(DSSF_K)))
+<<<<<<< HEAD:reader_honeycomb.py
             if not os.path.isfile(dir + "/" + filename + "_DSSF_sliced.txt"):
                 A += read_MD_slice(dir + "/" + filename, nK)
             else:
@@ -558,6 +559,8 @@ def read_MD_tot(dir):
     
     A = np.transpose(A, (0, 2, 1))
     
+=======
+>>>>>>> c3900cb38d25ae35fcae19a641d9c2bd5951904b:util/reader_honeycomb.py
     
     fig, ax = plt.subplots(figsize=(10,4))
 
@@ -576,6 +579,15 @@ def read_MD_tot(dir):
     fig.colorbar(C)
     plt.savefig(dir+"/DSSF_line.pdf")
     plt.clf()
+
+    for file in sorted(os.listdir(directory)):  
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            if not os.path.isfile(dir + "/" + filename + "_DSSF_sliced.txt"):
+                A += read_MD_slice(dir + "/" + filename, nK)
+            else:
+                A += np.loadtxt(dir + "/" + filename + "_DSSF_sliced.txt").reshape((8, nK, nK))
+    
 
 
     for i in range(2):
