@@ -578,6 +578,7 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("MD_TmFeO3_E_1_5")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_longer_T")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_w_OS_5")
+read_MD_tot("TmFeO3_MD_0_test")
 
 # parseDSSF(dir)
 # fullread(dir, False, "111")
