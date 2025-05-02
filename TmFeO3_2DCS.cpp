@@ -94,9 +94,9 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
-    array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
+    array<array<double, 3>,4> field_drive = {{{0,1,0},{0,1,0},{0,1,0},{0,1,0}}};
 
-    double pulse_amp = 0.5;
+    double pulse_amp = 0.9;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -106,7 +106,7 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 4, 8, 8, 8> MC(&Fe_atoms, 2.5);
     if (spin_config != ""){
-        MC.read_spin_from_file(spin_config);
+        MC.read_spin_from_file(spin_config+"_SU2.txt");
     }else{
         MC.simulated_annealing(Temp_start, Temp_end, 100000, 1000, true);
         std::random_device rd;
@@ -420,10 +420,11 @@ int main(int argc, char** argv) {
     double tau_start_here = tau_start + (slurm_ID-1)*tau_section;
     double tau_end_here = tau_start + tau_section;
 
-    cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " saving to: " << dir_name << endl;
+    cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " xi::" << xii << " saving to: " << dir_name << endl;
+    cout << "Reading from " << spin_config_file << endl;
     // MD_TmFeO3(num_trials, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {1,0,0}, e1, e2, dir_name);
-    MD_TmFeO3_2DCS(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {1,0,0}, dir_name, T_zero, spin_config_file);
-    // MD_TmFeO3_Fe_2DCS(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero, spin_config_file);
+    // MD_TmFeO3_2DCS(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0,1,0}, dir_name, T_zero, spin_config_file);
+    MD_TmFeO3_Fe_2DCS(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name, T_zero, spin_config_file);
     return 0;
 }
 
