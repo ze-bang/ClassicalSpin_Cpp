@@ -350,9 +350,9 @@ def read_MD_tot(dir):
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            w0 = 0
-            wmax = 2
-            t_evolved = 200
+            w0 = -5
+            wmax = 5
+            t_evolved = 100
             SU2 = read_MD_SU2(dir + "/" + filename, w0, wmax, t_evolved)
             SU3 = read_MD_SU3(dir + "/" + filename, w0, wmax, t_evolved)
             A = SU2 + SU3
@@ -578,7 +578,7 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("MD_TmFeO3_E_1_5")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_longer_T")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_w_OS_5")
-read_MD_tot("TmFeO3_MD_0_test")
+read_MD_tot("TmFeO3_MD_2_test")
 
 # parseDSSF(dir)
 # fullread(dir, False, "111")

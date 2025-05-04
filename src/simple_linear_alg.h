@@ -271,7 +271,7 @@ template<size_t N_1, size_t N_2, size_t N_3>
 double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
     double result = 0;
     
-    #pragma omp parallel for collapse(3) reduction(+:result) schedule(dynamic, 1)
+    #pragma omp parallel for collapse(3)
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
             for(size_t k = 0; k < N_3; k++){
@@ -289,7 +289,7 @@ array<double, N/(N_2*N_3)> contract_trilinear_field(const array<double, N>  &M, 
     constexpr size_t N_1 = N/(N_2*N_3);
     array<double, N_1> result = {0};
     
-    #pragma omp parallel for collapse(3) schedule(dynamic, 1)
+    #pragma omp parallel for collapse(3) 
     for(size_t i = 0; i < N_1; i++) {
         for(size_t j = 0; j < N_2; j++) {
             for(size_t k = 0; k < N_3; k++) {
