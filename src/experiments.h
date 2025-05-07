@@ -11,6 +11,7 @@
 #include "fitting.h"
 #include <omp.h>
 
+
 void  simulated_annealing_pyrochlore(double Tstart, double TargetT, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
@@ -295,5 +296,9 @@ void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
         MPI_Finalize();
     }
 }
+
+
+
+
 
 #endif
