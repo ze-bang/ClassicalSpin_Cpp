@@ -150,9 +150,9 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     }
 }
 
-void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamma, double Gammap, double h, string dir){
+void MD_kitaev_honeycomb_real(size_t num_trials, string dir, double J=0, double K=-1, double Gamma=0.25, double Gammap=-0.02, double h=0){
     filesystem::create_directory(dir);
-    HoneyComb<3> atoms;
+    HoneyComb_standarx<3> atoms;
     array<array<double,3>, 3> Jx = {{{J+K,Gammap,Gammap},{Gammap,J,Gamma},{Gammap,Gamma,J}}};
     array<array<double,3>, 3> Jy = {{{J,Gammap,Gamma},{Gammap,J+K,Gammap},{Gamma,Gammap,J}}};
     array<array<double,3>, 3> Jz = {{{J,Gamma,Gammap},{Gamma,J,Gammap},{Gammap,Gammap,J+K}}};
@@ -169,8 +169,8 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 12, 12, 1> MC(&atoms);
-        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 0, true);
+        lattice<3, 2, 24, 24, 1> MC(&atoms);
+        MC.simulated_annealing(10, 1e-3, 100000, 0, true);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
@@ -180,7 +180,7 @@ void MD_kitaev_honeycomb_real(size_t num_trials, double J, double K, double Gamm
 
 void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     filesystem::create_directory(dir);
-    HoneyComb_standarx<3> atoms;
+    HoneyComb<3> atoms;
     double J1, K1, eta1, Gamma1, Gammap11, Gammap21;
     double J3, K3, eta3, Gamma3, Gammap13, Gammap23;
     double h = 0;
@@ -221,10 +221,19 @@ void MD_honeycomb_J1_J3(string dir, size_t num_trials=1){
     atoms.set_field(field, 1);
     double k_B = 0.08620689655;
 
-    for(size_t i=0; i<num_trials;++i){
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+
+    int start = rank*num_trials/size;
+    int end = (rank+1)*num_trials/size;
+
+    for(size_t i=start; i<end;++i){
 
         lattice<3, 2, 24, 24, 1> MC(&atoms);
-        MC.simulated_annealing(200*k_B, 2*k_B, 100000, 100, true);
+        MC.simulated_annealing(150*k_B, 2*k_B, 100000, 100, true);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
@@ -249,7 +258,7 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
     double J = argv[7] ? atof(argv[7]) : 0.0;
-    // MD_kitaev_honeycomb_real(num_trials, J, K, Gamma, Gammap, h, dir_name);
-    MD_honeycomb_J1_J3("BCAO_J1J3");
+    // MD_kitaev_honeycomb_real(20, "KITAEV");
+    MD_honeycomb_J1_J3("BCAO_J1J3",20);
     return 0;
 }

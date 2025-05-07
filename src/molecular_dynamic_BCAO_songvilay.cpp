@@ -4,7 +4,7 @@
 
 void MD_BCAO(int num_trials, double h, array<double, 3> field_dir, string dir, double J1=-3.3, double K=2.0, double Gamma=-0.9, double Gammap=3.3, double J2=-0.5, double J3=0.6, double J4=0.15){
     filesystem::create_directory(dir);
-    HoneyComb_standarx<3> atoms;
+    HoneyComb<3> atoms;
 
     array<array<double,3>, 3> J1x_ = {{{J1+K,Gammap,Gammap},{Gammap,J1,Gamma},{Gammap,Gamma,J1}}};
     array<array<double,3>, 3> J1y_ = {{{J1,Gammap,Gamma},{Gammap,K+J1,Gammap},{Gamma,Gammap,J1}}};
@@ -66,7 +66,7 @@ void MD_BCAO(int num_trials, double h, array<double, 3> field_dir, string dir, d
 
 void simulated_annealing_BCAO(double h, array<double, 3> field_dir, string dir, double J1=-3.3, double K=2.0, double Gamma=-0.9, double Gammap=3.3, double J2=-0.5, double J3=0.6, double J4=0.15){
     filesystem::create_directory(dir);
-    HoneyComb_standarx<3> atoms;
+    HoneyComb<3> atoms;
 
     array<array<double,3>, 3> J1x_ = {{{J1+K,Gammap,Gammap},{Gammap,J1,Gamma},{Gammap,Gamma,J1}}};
     array<array<double,3>, 3> J1y_ = {{{J1,Gammap,Gamma},{Gammap,K+J1,Gammap},{Gamma,Gammap,J1}}};
@@ -126,28 +126,31 @@ void simulated_annealing_BCAO(double h, array<double, 3> field_dir, string dir, 
     MC.write_to_file_spin(dir+"/spin.txt", MC.spins);
 }
 
-int main(int argc, char** argv) {
-    double k_B = 0.08620689655;
-    double mu_B = 5.7883818012e-2;
-    simulated_annealing_BCAO(0*mu_B, {0,1,0}, "BCAO_ground_state_songvilay");
-    return 0;
-}
+
+
 
 // int main(int argc, char** argv) {
 //     double k_B = 0.08620689655;
 //     double mu_B = 5.7883818012e-2;
-//     int initialized;
-//     MPI_Initialized(&initialized);
-//     if (!initialized){
-//         MPI_Init(NULL, NULL);
-//     }
-//     int size;
-//     MPI_Comm_size(MPI_COMM_WORLD, &size);
-//     MD_BCAO(20, 0*mu_B, {0,1,0}, "BCAO_zero_field_8K_songvilay");
-//     int finalized;
-//     MPI_Finalized(&finalized);
-//     if (!finalized){
-//         MPI_Finalize();
-//     }
+//     simulated_annealing_BCAO(0*mu_B, {0,1,0}, "BCAO_ground_state_songvilay");
 //     return 0;
 // }
+
+int main(int argc, char** argv) {
+    double k_B = 0.08620689655;
+    double mu_B = 5.7883818012e-2;
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized){
+        MPI_Init(NULL, NULL);
+    }
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MD_BCAO(20, 0*mu_B, {0,1,0}, "BCAO_zero_field_8K_songvilay");
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
+    return 0;
+}

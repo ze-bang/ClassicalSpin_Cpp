@@ -223,7 +223,7 @@ class lattice
         ifstream file;
         file.open(filename);
         if (!file){
-            cout << "Unable to open file";
+            cout << "Unable to open file " << filename << endl;
             exit(1);
         }
         string line;

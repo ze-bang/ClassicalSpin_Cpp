@@ -7,9 +7,19 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
     array<array<double,3>, 3> Jy = {{{0,Gammap,Gamma},{Gammap,K,Gammap},{Gamma,Gammap,0}}};
     array<array<double,3>, 3> Jz = {{{0,Gamma,Gammap},{Gamma,0,Gammap},{Gammap,Gammap,K}}};
 
-    // array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
-    double theta = 150.0 * M_PI / 180.0;
-    array<double, 3> field = {h*(cos(theta)/sqrt(6) - sin(theta)/sqrt(3)), h*(cos(theta)/sqrt(6) + sin(theta)/sqrt(3)), -h*2*(cos(theta)/sqrt(6))};
+
+    array<double, 3> z = {1, 1, 1};
+    array<double, 3> y = {1, 1, -2};
+    array<double, 3> x = {-1, 1, 0};
+
+    z /= double(sqrt(3));
+    y /= double(sqrt(6));
+    x /= double(sqrt(2));
+    double theta = 150 * M_PI / 180;
+
+    array<double, 3> field = y*cos(theta) + x*sin(theta);
+    // array<double, 3> field = y*(-0.15) + x*0.06;
+
     
     cout << "Setting up honeycomb lattice with parameters: " << endl;
     cout << "Jx: " << Jx[0][0] << " " << Jx[0][1] << " " << Jx[0][2] << endl;
@@ -23,7 +33,7 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
 
-    lattice<3, 2, 20, 20, 1> MC(&atoms);
+    lattice<3, 2, 36, 36, 1> MC(&atoms);
     if (deterministic == false){
         MC.simulated_annealing(T_start, T_end, 10000, 0, false, dir);
     }
@@ -50,6 +60,14 @@ int main(int argc, char** argv) {
     string dir_name = argv[5] ? argv[5] : "";
     filesystem::create_directory(dir_name);
     int deterministic = argv[6] ? atoi(argv[6]) : 1;
-    simulated_annealing_honeycomb(1, 1e-3, K, Gamma, Gammap, h, dir_name, deterministic);
+    simulated_annealing_honeycomb(5, 1e-3, K, Gamma, Gammap, h, dir_name, deterministic);
+
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
+    cout << "Finished!" << endl;
+
     return 0;
 }

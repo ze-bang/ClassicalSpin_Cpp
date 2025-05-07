@@ -1,3 +1,6 @@
+#ifndef BINNING_ANALYSIS_H
+#define BINNING_ANALYSIS_H
+
 #include <iostream>
 #include <vector>
 #include <random>
@@ -99,3 +102,5 @@ const std::tuple<double,double> binning_analysis(const std::vector<double>& data
     std_var = std::sqrt(std_var);
     return std::make_tuple(mean_var, std_var);
 }
+
+#endif // BINNING_ANALYSIS_H
