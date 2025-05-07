@@ -2,7 +2,7 @@
 #include <math.h>
 
 
-void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, double J2=-0.21, double J3=1.70, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
+void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, double J2=-0.21, double J3=1.7, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
 
@@ -56,13 +56,13 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
+        lattice<3, 2, 60, 60, 1> MC(&atoms, 0.5);
         MC.simulated_annealing(100*k_B, 5*k_B, 100000, 1e3, true);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
 
-void simulated_annealing_BCAO_honeycomb(string filename, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, double J2=-0.21, double J3=1.70, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
+void simulated_annealing_BCAO_honeycomb(string filename, double h, array<double, 3> field_dir, string dir, double J1=-6.54, double Jzp=-3.5, double Jpmpm=0.15, double J2=-0.21, double J3=2, double Delta1=0.36, double Delta2=0, double Delta3=0.03){
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
 
@@ -107,9 +107,9 @@ void simulated_annealing_BCAO_honeycomb(string filename, double h, array<double,
     double k_B = 0.08620689655;
 
 
-    lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
-    MC.simulated_annealing(100*k_B, 1e-2*k_B, 100000, 0, true);
-    for (size_t i=0; i<1e6;++i){
+    lattice<3, 2, 60, 60, 1> MC(&atoms, 0.5);
+    MC.simulated_annealing(100*k_B, 1e-2*k_B, 10000, 0, true);
+    for (size_t i=0; i<1e4;++i){
         MC.deterministic_sweep();
     }
     MC.write_to_file_pos(filename+"/pos.txt");
@@ -548,6 +548,306 @@ MPI_Send(energies.data(), count, MPI_DOUBLE, 0, 6, MPI_COMM_WORLD);
 }
 }
 
+
+void field_line_sweep_BCAO_honeycomb(double min_field, double max_field, size_t num_points, 
+                                     array<double, 3> field_dir, string output_dir,
+                                     double J1=-6.54, double Jzp=-3.76, double Jpmpm=0.15, 
+                                     double J2=-0.21, double J3=2.03, double Delta1=0.36, 
+                                     double Delta2=0, double Delta3=0.03) {
+    // Initialize MPI if needed
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized) {
+        MPI_Init(NULL, NULL);
+    }
+    
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    // Create output directory
+    if (rank == 0) {
+        filesystem::create_directory(output_dir);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Calculate points per process
+    size_t points_per_proc = num_points / size;
+    size_t remainder = num_points % size;
+    size_t start_idx = rank * points_per_proc + min(rank, (int)remainder);
+    size_t end_idx = start_idx + points_per_proc + (rank < remainder ? 1 : 0);
+    
+    double k_B = 0.08620689655;
+    
+    // Open magnetization file for this process
+    ofstream mag_file(output_dir + "/magnetization_" + to_string(rank) + ".txt");
+    mag_file << "# Field Mx My Mz Energy" << endl;
+    
+    // Process assigned field strengths
+    for (size_t i = start_idx; i < end_idx; ++i) {
+        double field_strength = min_field + (max_field - min_field) * i / (num_points - 1);
+        cout << "Rank " << rank << " processing field: " << field_strength << endl;
+        
+        // Setup simulation
+        HoneyComb<3> atoms;
+        
+        // Prepare interaction matrices
+        array<array<double,3>, 3> J1x_ = {{{J1+2*Jpmpm*cos(2*M_PI/3),-2*Jpmpm*sin(2*M_PI/3),Jzp*sin(2*M_PI/3)},
+                                         {-2*Jpmpm*sin(2*M_PI/3),J1-2*Jpmpm*cos(2*M_PI/3),-Jzp*cos(2*M_PI/3)},
+                                         {Jzp*sin(2*M_PI/3),-Jzp*cos(2*M_PI/3),J1*Delta1}}};
+        array<array<double,3>, 3> J1y_ = {{{J1+2*Jpmpm*cos(-2*M_PI/3),-2*Jpmpm*sin(-2*M_PI/3),Jzp*sin(-2*M_PI/3)},
+                                         {-2*Jpmpm*sin(-2*M_PI/3),J1-2*Jpmpm*cos(-2*M_PI/3),-Jzp*cos(-2*M_PI/3)},
+                                         {Jzp*sin(-2*M_PI/3),-Jzp*cos(-2*M_PI/3),J1*Delta1}}};
+        array<array<double,3>, 3> J1z_ = {{{J1+2*Jpmpm*cos(0),-2*Jpmpm*sin(0),Jzp*sin(0)},
+                                         {-2*Jpmpm*sin(0),J1-2*Jpmpm*cos(0),-Jzp*cos(0)},
+                                         {Jzp*sin(0),-Jzp*cos(0),J1*Delta1}}};
+        array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,Delta2*J2}}};
+        array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};
+        
+        // Set field with proper coefficients
+        array<double, 3> field = {4.8*field_strength*field_dir[0],
+                                 4.85*field_strength*field_dir[1],
+                                 2.5*field_strength*field_dir[2]};
+        
+        // Setup interactions
+        atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
+        atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
+        atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
+        
+        atoms.set_bilinear_interaction(J2_, 0, 0, {1,0,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {0,1,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {1,-1,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {-1,0,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {0,-1,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {-1,1,0});
+        
+        atoms.set_bilinear_interaction(J2_, 1, 1, {1,0,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {0,1,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {1,-1,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {-1,0,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {0,-1,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {-1,1,0});
+        
+        atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
+        atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});
+        atoms.set_bilinear_interaction(J3_, 0, 1, {1,-2,0});
+        
+        atoms.set_field(field, 0);
+        atoms.set_field(field, 1);
+        
+        // Run simulation
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
+        MC.simulated_annealing(100*k_B, 1e-2*k_B, 10000, 0, true);
+        
+        // Additional sweeps for convergence
+        for (size_t k = 0; k < 1e4; ++k) {
+            MC.deterministic_sweep();
+        }
+        
+        // Calculate and save results
+        double energy = MC.total_energy(MC.spins);
+        array<double, 3> magnetization = MC.magnetization_local(MC.spins);
+        
+        // Save to individual file with field strength as directory
+        string field_dir_path = output_dir + "/field_" + to_string(field_strength);
+        filesystem::create_directory(field_dir_path);
+        MC.write_to_file_spin(field_dir_path + "/spins.txt", MC.spins);
+        MC.write_to_file_pos(field_dir_path + "/pos.txt");
+        
+        // Write to combined magnetization file
+        mag_file << field_strength << " " 
+                 << magnetization[0] << " " 
+                 << magnetization[1] << " " 
+                 << magnetization[2] << " " 
+                 << energy << endl;
+    }
+    
+    mag_file.close();
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Combine results from all processes
+    if (rank == 0) {
+        ofstream combined_mag(output_dir + "/magnetization.txt");
+        combined_mag << "# Field Mx My Mz Energy" << endl;
+        
+        // Read and combine all magnetization files
+        for (int p = 0; p < size; p++) {
+            ifstream part_file(output_dir + "/magnetization_" + to_string(p) + ".txt");
+            string line;
+            
+            // Skip header
+            getline(part_file, line);
+            
+            // Copy data
+            while (getline(part_file, line)) {
+                if (!line.empty() && line[0] != '#') {
+                    combined_mag << line << endl;
+                }
+            }
+            part_file.close();
+        }
+        combined_mag.close();
+        
+        cout << "Field line sweep completed. Results saved to " << output_dir << "/magnetization.txt" << endl;
+    }
+}
+
+
+void parameter_sweep_BCAO_honeycomb(double min_J3, double max_J3, size_t num_J3_points,
+                                   double min_Jzp, double max_Jzp, size_t num_Jzp_points,
+                                   double field_strength, array<double, 3> field_dir,
+                                   string output_dir, double J1=-6.54, double Jpmpm=0.15,
+                                   double J2=-0.21, double Delta1=0.36,
+                                   double Delta2=0, double Delta3=0.03) {
+    // Initialize MPI if needed
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized) {
+        MPI_Init(NULL, NULL);
+    }
+    
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    // Create output directory
+    if (rank == 0) {
+        filesystem::create_directory(output_dir);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Calculate total number of parameter points
+    size_t total_points = num_J3_points * num_Jzp_points;
+    
+    // Distribute work among processes
+    size_t points_per_proc = total_points / size;
+    size_t remainder = total_points % size;
+    size_t start_idx = rank * points_per_proc + min(rank, (int)remainder);
+    size_t end_idx = start_idx + points_per_proc + (rank < remainder ? 1 : 0);
+    
+    double k_B = 0.08620689655;
+    
+    // Open output file for this process
+    ofstream data_file(output_dir + "/data_" + to_string(rank) + ".txt");
+    data_file << "# J3 Jzp Mx My Mz Energy" << endl;
+    
+    // Process assigned parameter combinations
+    for (size_t idx = start_idx; idx < end_idx; ++idx) {
+        // Convert linear index to J3 and Jzp indices
+        size_t j3_idx = idx / num_Jzp_points;
+        size_t jzp_idx = idx % num_Jzp_points;
+        
+        // Calculate parameter values
+        double J3 = min_J3 + (max_J3 - min_J3) * j3_idx / (num_J3_points - 1);
+        double Jzp = min_Jzp + (max_Jzp - min_Jzp) * jzp_idx / (num_Jzp_points - 1);
+        
+        cout << "Rank " << rank << " processing parameters: J3=" << J3 << ", Jzp=" << Jzp << endl;
+        
+        string param_dir = output_dir + "/J3_" + to_string(J3) + "_Jzp_" + to_string(Jzp);
+        filesystem::create_directory(param_dir);
+        
+        // Setup simulation
+        HoneyComb<3> atoms;
+        
+        // Setup interaction matrices with current parameter values
+        array<array<double,3>, 3> J1x_ = {{{J1+2*Jpmpm*cos(2*M_PI/3),-2*Jpmpm*sin(2*M_PI/3),Jzp*sin(2*M_PI/3)},
+                                         {-2*Jpmpm*sin(2*M_PI/3),J1-2*Jpmpm*cos(2*M_PI/3),-Jzp*cos(2*M_PI/3)},
+                                         {Jzp*sin(2*M_PI/3),-Jzp*cos(2*M_PI/3),J1*Delta1}}};
+        array<array<double,3>, 3> J1y_ = {{{J1+2*Jpmpm*cos(-2*M_PI/3),-2*Jpmpm*sin(-2*M_PI/3),Jzp*sin(-2*M_PI/3)},
+                                         {-2*Jpmpm*sin(-2*M_PI/3),J1-2*Jpmpm*cos(-2*M_PI/3),-Jzp*cos(-2*M_PI/3)},
+                                         {Jzp*sin(-2*M_PI/3),-Jzp*cos(-2*M_PI/3),J1*Delta1}}};
+        array<array<double,3>, 3> J1z_ = {{{J1+2*Jpmpm*cos(0),-2*Jpmpm*sin(0),Jzp*sin(0)},
+                                         {-2*Jpmpm*sin(0),J1-2*Jpmpm*cos(0),-Jzp*cos(0)},
+                                         {Jzp*sin(0),-Jzp*cos(0),J1*Delta1}}};
+        array<array<double,3>, 3> J2_ = {{{J2,0,0},{0,J2,0},{0,0,Delta2*J2}}};
+        array<array<double,3>, 3> J3_ = {{{J3,0,0},{0,J3,0},{0,0,Delta3*J3}}};
+        
+        // Set field with proper coefficients
+        array<double, 3> field = {4.8*field_strength*field_dir[0],
+                                4.85*field_strength*field_dir[1],
+                                2.5*field_strength*field_dir[2]};
+        
+        // Setup interactions
+        atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
+        atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
+        atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
+        
+        atoms.set_bilinear_interaction(J2_, 0, 0, {1,0,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {0,1,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {1,-1,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {-1,0,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {0,-1,0});
+        atoms.set_bilinear_interaction(J2_, 0, 0, {-1,1,0});
+        
+        atoms.set_bilinear_interaction(J2_, 1, 1, {1,0,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {0,1,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {1,-1,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {-1,0,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {0,-1,0});
+        atoms.set_bilinear_interaction(J2_, 1, 1, {-1,1,0});
+        
+        atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
+        atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});
+        atoms.set_bilinear_interaction(J3_, 0, 1, {1,-2,0});
+        
+        atoms.set_field(field, 0);
+        atoms.set_field(field, 1);
+        
+        // Run simulation
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
+        MC.simulated_annealing(100*k_B, 1e-2*k_B, 10000, 0, true);
+        
+        // Additional sweeps for convergence
+        for (size_t k = 0; k < 1e4; ++k) {
+            MC.deterministic_sweep();
+        }
+        
+        // Calculate and save results
+        double energy = MC.total_energy(MC.spins);
+        array<double, 3> magnetization = MC.magnetization_local(MC.spins);
+        
+        // Save spin configuration
+        MC.write_to_file_spin(param_dir + "/spins.txt", MC.spins);
+        MC.write_to_file_pos(param_dir + "/pos.txt");
+        
+        // Write to data file
+        data_file << J3 << " " << Jzp << " "
+                 << magnetization[0] << " " 
+                 << magnetization[1] << " " 
+                 << magnetization[2] << " " 
+                 << energy << endl;
+    }
+    
+    data_file.close();
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Combine results from all processes
+    if (rank == 0) {
+        ofstream combined_data(output_dir + "/phase_diagram.txt");
+        combined_data << "# J3 Jzp Mx My Mz Energy" << endl;
+        
+        // Read and combine all data files
+        for (int p = 0; p < size; p++) {
+            ifstream part_file(output_dir + "/data_" + to_string(p) + ".txt");
+            string line;
+            
+            // Skip header
+            getline(part_file, line);
+            
+            // Copy data
+            while (getline(part_file, line)) {
+                if (!line.empty() && line[0] != '#') {
+                    combined_data << line << endl;
+                }
+            }
+            part_file.close();
+        }
+        combined_data.close();
+        
+        cout << "Parameter sweep completed. Results saved to " << output_dir << "/phase_diagram.txt" << endl;
+    }
+}
+
 // int main(int argc, char** argv) {
 //     simulated_annealing_BCAO_honeycomb("BCAO_sasha_ground_state", 0, {0,1,0}, "BCAO_sasha_ground_state");
 // }
@@ -562,7 +862,7 @@ MPI_Send(energies.data(), count, MPI_DOUBLE, 0, 6, MPI_COMM_WORLD);
 //     }
 //     int size;
 //     MPI_Comm_size(MPI_COMM_WORLD, &size);
-//     MD_BCAO_honeycomb(30, 0*mu_B, {0,1,0}, "BCAO_zero_field_5K_sasha");
+//     MD_BCAO_honeycomb(1, 3*mu_B, {0,1,0}, "BCAO_sasha");
 //     int finalized;
 //     MPI_Finalized(&finalized);
 //     if (!finalized){
@@ -570,6 +870,8 @@ MPI_Send(energies.data(), count, MPI_DOUBLE, 0, 6, MPI_COMM_WORLD);
 //     }
 //     return 0;
 // }
+
+
 
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
@@ -581,7 +883,9 @@ int main(int argc, char** argv) {
     }
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    field_sweep_BCAO_honeycomb_ac(10, 10, 15*mu_B, "BCAO_field_sweep_ac");
+
+
+    parameter_sweep_BCAO_honeycomb(0.2*6.54, 0.5*6.54, 20, 0, -0.8*6.54, 20, 0, {0,1,0}, "BCAO_sasha_phase");
     int finalized;
     MPI_Finalized(&finalized);
     if (!finalized){
@@ -589,3 +893,34 @@ int main(int argc, char** argv) {
     }
     return 0;
 }
+
+// int main(int argc, char** argv) {
+//     double k_B = 0.08620689655;
+//     double mu_B = 5.7883818012e-2;
+//     int initialized;
+//     MPI_Initialized(&initialized);
+//     if (!initialized){
+//         MPI_Init(NULL, NULL);
+//     }
+//     int size;
+//     MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+//     // using command line inputs
+//     double min_field = std::stod(argv[1]);
+//     double max_field = std::stod(argv[2]);
+//     size_t num_points = std::stoi(argv[3]);
+//     string output_dir = argv[4];
+//     array<double, 3> field_dir = {std::stod(argv[5]), std::stod(argv[6]), std::stod(argv[7])};
+//     //normalize field_dir
+//     double norm = sqrt(field_dir[0]*field_dir[0] + field_dir[1]*field_dir[1] + field_dir[2]*field_dir[2]);
+//     field_dir[0] /= norm;
+
+
+//     field_line_sweep_BCAO_honeycomb(min_field*mu_B, max_field*mu_B, num_points, field_dir, output_dir);
+//     int finalized;
+//     MPI_Finalized(&finalized);
+//     if (!finalized){
+//         MPI_Finalize();
+//     }
+//     return 0;
+// }
