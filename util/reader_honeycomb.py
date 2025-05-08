@@ -18,13 +18,13 @@ def honeycomb_reciprocal_basis():
     Returns:
         numpy.ndarray: Reciprocal lattice vectors b1 and b2
     """
-    a1 = np.array([0, 1, 0])
-    a2 = np.array([np.sqrt(3)/2, 1/2, 0])
-    a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
-    
-    # a1 = np.array([1, 0, 0])
-    # a2 = np.array([1/2, np.sqrt(3)/2, 0])
+    # a1 = np.array([0, 1, 0])
+    # a2 = np.array([np.sqrt(3)/2, 1/2, 0])
     # a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
+    
+    a1 = np.array([1, 0, 0])
+    a2 = np.array([1/2, np.sqrt(3)/2, 0])
+    a3 = np.array([0, 0, 1])  # Third basis vector (perpendicular to plane)
     
 
 
@@ -118,7 +118,6 @@ K2 = contract('ij, i->j', kitaevBasis, K2)
 M1 = contract('ij, i->j', kitaevBasis, M1)
 M2 = contract('ij, i->j', kitaevBasis, M2)
 Gamma2 = contract('ij, i->j', kitaevBasis, Gamma2)
-print(K1, K2)
 
 # print(K2D)
 
@@ -223,9 +222,12 @@ def hhknk(H,K):
     A = contract('ij,k->ijk',H,  np.array([1,1, 0])) + contract('ij,k->ijk',K, np.array([1,-1, 0]))
     return contract('ijk,ka->ija', A, KBasis)
 
+def hhknk_2D(H,K):
+    return contract('ij,k->ijk', H, np.array([1,0])) + contract('ij,k->ijk',K, np.array([0,1]))
+
 def SSSF2D(S, P, nK, filename, gb=False):
-    H = np.linspace(-2.5, 2.5, nK)
-    L = np.linspace(-2.5, 2.5, nK)
+    H = np.linspace(-1, 1, nK)
+    L = np.linspace(-1, 1, nK)
     A, B = np.meshgrid(H, L)
     K = hhknk(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
@@ -256,8 +258,13 @@ def SSSF2D(S, P, nK, filename, gb=False):
     # SSSFGraph2D(A, B, S[:, :, 0, 1], f4)
     # SSSFGraph2D(A, B, S[:, :, 0, 2], f5)
     # SSSFGraph2D(A, B, S[:, :, 1, 2], f6)
-    SSSFGraph2D(A, B, np.log(contract('ijab->ij', S)), filename + "S_total")
+    SSSFGraph2D(A, B, contract('ijab->ij', S), filename + "S_total")
+    return contract('ijab->ij', S), hhknk_2D(A, B).reshape((nK*nK,2))
 
+def ordering_q_SSSF2D(SSSF, K):
+    maxindx = np.argmax(SSSF)
+
+    return K[maxindx]
 
 def SSSFHnHL(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
@@ -357,6 +364,22 @@ def ordering_q_slice(S, P, ind):
         indzz = np.concatenate((indzz, tempindzz))
         indzz = np.array(indzz.flatten(),dtype=int)
         qzz = K[indzz]
+    if qzz.shape == (3,):
+        qzz = qzz.reshape(1,3)
+    return qzz
+
+def ordering_q_SSSF(SSSF):
+    S = np.abs(SSSF)
+    Szz = S[:,0,0]
+    max = np.max(Szz)
+    if max < 1e-13:
+        qzz = np.array([np.NaN, np.NaN, np.NaN])
+    else:
+        indzz = np.array([])
+        tempindzz = np.where(np.abs(Szz-max)<1e-13)[0]
+        indzz = np.concatenate((indzz, tempindzz))
+        indzz = np.array(indzz.flatten(),dtype=int)
+        qzz = SSSF[indzz]
     if qzz.shape == (3,):
         qzz = qzz.reshape(1,3)
     return qzz

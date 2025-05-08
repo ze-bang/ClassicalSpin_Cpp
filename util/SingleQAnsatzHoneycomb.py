@@ -321,4 +321,4 @@ if __name__ == "__main__":
     
     # Generate and visualize the spin configuration
     spins = model.generate_spin_configuration()
-    # visualize_spins(model.positions, spins, L)
+    visualize_spins(model.positions, spins, L)

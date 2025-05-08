@@ -793,29 +793,42 @@ void parameter_sweep_BCAO_honeycomb(double min_J3, double max_J3, size_t num_J3_
         atoms.set_field(field, 0);
         atoms.set_field(field, 1);
         
-        // Run simulation
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
-        MC.simulated_annealing(100*k_B, 1e-2*k_B, 10000, 0, true);
-        
-        // Additional sweeps for convergence
-        for (size_t k = 0; k < 1e4; ++k) {
-            MC.deterministic_sweep();
+        double min_energy;
+        array<array<double,3>,2*24*24*1> minimal_spin_config;
+
+        for (size_t k = 0; k < 20; ++k){
+
+            // Run simulation
+            lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
+            MC.simulated_annealing(100*k_B, 1e-2*k_B, 100000, 100, true);
+            
+            // Additional sweeps for convergence
+            for (size_t k = 0; k < 1e4; ++k) {
+                MC.deterministic_sweep();
+            }
+            
+            if (k == 0) {
+                min_energy = MC.energy_density(MC.spins);
+                minimal_spin_config = MC.spins;
+            } else {
+                if (MC.energy_density(MC.spins) < min_energy) {
+                    min_energy = MC.energy_density(MC.spins);
+                    minimal_spin_config = MC.spins;
+                }
+            }
         }
-        
-        // Calculate and save results
-        double energy = MC.total_energy(MC.spins);
-        array<double, 3> magnetization = MC.magnetization_local(MC.spins);
-        
+
+
+        lattice<3, 2, 24, 24, 1> dummy_MC(&atoms, 1);
+
         // Save spin configuration
-        MC.write_to_file_spin(param_dir + "/spins.txt", MC.spins);
-        MC.write_to_file_pos(param_dir + "/pos.txt");
+        dummy_MC.write_to_file_spin(param_dir + "/spins.txt", minimal_spin_config);
+        dummy_MC.write_to_file_pos(param_dir + "/pos.txt");
         
         // Write to data file
-        data_file << J3 << " " << Jzp << " "
-                 << magnetization[0] << " " 
-                 << magnetization[1] << " " 
-                 << magnetization[2] << " " 
-                 << energy << endl;
+        data_file << J3 << " " << Jzp << " " << min_energy << endl;
+
+        
     }
     
     data_file.close();

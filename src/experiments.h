@@ -12,7 +12,7 @@
 #include <omp.h>
 
 
-void  simulated_annealing_pyrochlore(double Tstart, double TargetT, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
+void simulated_annealing_pyrochlore(double Tstart, double TargetT, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=true, bool save=false){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -298,6 +298,79 @@ void phase_diagram_pyrochlore_0_field(int num_Jpm, string dir){
 }
 
 
+void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, double Jpm, double Jpmpm, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, bool save=false){
+    filesystem::create_directory(dir);
+    Pyrochlore<3> atoms;
+
+    array<double,3> z1 = {1, 1, 1};
+    array<double,3> z2 = {1,-1,-1};
+    array<double,3> z3 = {-1,1,-1};
+    array<double,3> z4 = {-1,-1,1};
+
+    z1 /= double(sqrt(3));
+    z2 /= double(sqrt(3));
+    z3 /= double(sqrt(3));
+    z4 /= double(sqrt(3));
+
+
+    array<double, 3> y1 = {0,1,-1};
+    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y3 = {0,-1,-1};
+    array<double, 3> y4 = {0,1,1};
+    y1 /= sqrt(2);
+    y2 /= sqrt(2);
+    y3 /= sqrt(2);
+    y4 /= sqrt(2);
+
+    array<double, 3> x1 = {-2,1,1};
+    array<double, 3> x2 = {-2,-1,-1};
+    array<double, 3> x3 = {2,1,-1};
+    array<double, 3> x4 = {2,-1,1};
+    x1 /= sqrt(6);
+    x2 /= sqrt(6);
+    x3 /= sqrt(6);
+    x4 /= sqrt(6);
+    double Jx, Jy, Jz;
+
+
+    cout << "Begin simulated annealing with parameters: " << Jpm << " " << Jpmpm << " " << Jzz << endl;
+    
+
+
+    array<array<double,3>, 3> Jx_ = {{{-2*Jpm + 2*Jpmpm*cos(2*M_PI/3), -2*Jpmpm*sin(2*M_PI/3),0},{-2*Jpmpm*sin(2*M_PI/3),-2*Jpm -2*Jpmpm*cos(2*M_PI/3),0},{0,0,Jz}}};
+    array<array<double,3>, 3> Jy_ = {{{-2*Jpm + 2*Jpmpm*cos(4*M_PI/3), -2*Jpmpm*sin(4*M_PI/3),0},{-2*Jpmpm*sin(4*M_PI/3),-2*Jpm -2*Jpmpm*cos(4*M_PI/3),0},{0,0,Jz}}};
+    array<array<double,3>, 3> Jz_ = {{{-2*Jpm + 2*Jpmpm*cos(0), -2*Jpmpm*sin(0),0},{-2*Jpmpm*sin(0),-2*Jpm -2*Jpmpm*cos(0),0},{0,0,Jz}}};
+
+
+    array<double, 3> field = field_dir*h;
+
+
+
+    atoms.set_bilinear_interaction(Jz_, 0, 1, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(Jx_, 0, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(Jy_, 0, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(Jy_, 1, 2, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(Jx_, 1, 3, {0, 0, 0}); 
+    atoms.set_bilinear_interaction(Jz_, 2, 3, {0, 0, 0}); 
+
+    atoms.set_bilinear_interaction(Jz_, 0, 1, {1, 0, 0}); 
+    atoms.set_bilinear_interaction(Jx_, 0, 2, {0, 1, 0}); 
+    atoms.set_bilinear_interaction(Jy_, 0, 3, {0, 0, 1}); 
+    atoms.set_bilinear_interaction(Jy_, 1, 2, {-1, 1, 0}); 
+    atoms.set_bilinear_interaction(Jx_, 1, 3, {-1, 0, 1}); 
+    atoms.set_bilinear_interaction(Jz_, 2, 3, {0, 1, -1}); 
+
+    array<double, 3> rot_field = {0,0,gzz};
+
+    atoms.set_field(rot_field*dot(field, z1), 0);
+    atoms.set_field(rot_field*dot(field, z2), 1);
+    atoms.set_field(rot_field*dot(field, z3), 2);
+    atoms.set_field(rot_field*dot(field, z4), 3);
+
+    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+    // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
+    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, dir, save);
+}
 
 
 

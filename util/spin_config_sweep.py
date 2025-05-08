@@ -5,7 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import plot_spin_config_2d
-from util.reader_honeycomb import SSSF2D
+from reader_honeycomb import SSSF2D, ordering_q_SSSF2D
 
 def read_spin_configuration(filepath):
     """Read the spin configuration from a file."""
@@ -185,7 +185,7 @@ def extract_parameters(dirname):
     pattern = r'J3_([0-9.-]+)_Jzp_([0-9.-]+)'
     match = re.search(pattern, dirname)
     if match:
-        return np.abs(float(match.group(1))/6.54), np.abs(float(match.group(2))/6.54)
+        return float(match.group(1)), float(match.group(2))
     return None, None
 
 def scan_directories(root_dir, tolerance=1e-5):
@@ -213,7 +213,71 @@ def scan_directories(root_dir, tolerance=1e-5):
             j3, jzp = extract_parameters(dirpath.name)
             if j3 is not None and jzp is not None:
                 # Check if spins.txt exists in this directory
-                spin_file = dirpath / "spins.txt"
+                # Parse the lowest energy methods from file
+                def parse_lowest_energy_methods(file_path="/home/pc_linux/ClassicalSpin_Cpp/BCAO_sasha_phase/lowest_energy_methods.txt"):
+                    methods = {}
+                    try:
+                        with open(file_path, 'r') as f:
+                            for line in f:
+                                # Skip comments and empty lines
+                                line = line.strip()
+                                if not line or line.startswith('#'):
+                                    continue
+                                
+                                try:
+                                    # Parse the line
+                                    parts = line.split()
+                                    if len(parts) >= 4:
+                                        j3 = float(parts[0])
+                                        jzp = float(parts[1])
+                                        method = parts[2]
+                                        energy = float(parts[3])
+                                        
+                                        # Store the method and energy
+                                        methods[(j3, jzp)] = (method, energy)
+                                except ValueError:
+                                    continue
+                    except FileNotFoundError:
+                        print(f"Warning: Could not find {file_path}")
+                    
+                    return methods
+
+                # Find the closest key in the dictionary
+                def find_closest_key(j3, jzp, methods_dict):
+                    min_distance = float('inf')
+                    closest_key = None
+                    
+                    for key in methods_dict.keys():
+                        dict_j3, dict_jzp = key
+                        # Calculate Euclidean distance
+                        distance = ((dict_j3 - j3)**2 + (dict_jzp - jzp)**2)**0.5
+                        
+                        if distance < min_distance:
+                            min_distance = distance
+                            closest_key = key
+                    
+                    return closest_key
+
+                # Load the methods dictionary
+                lowest_energy_methods = parse_lowest_energy_methods()
+                
+                # Find the method for the given J3 and Jzp
+                closest_key = find_closest_key(j3, jzp, lowest_energy_methods)
+                lowest_method = lowest_energy_methods.get(closest_key, (None, None))[0]
+                
+                print(f"Processing directory: {dirpath} (J3={j3}, Jzp={jzp}, Method={lowest_method})")
+
+
+                if lowest_method == "Classical":
+                    spin_file = dirpath / "spins.txt"
+                elif lowest_method == "LT":
+                    spin_file = dirpath / "spins_LT.txt"
+                elif lowest_method == "Single-Q":
+                    spin_file = dirpath / "spins_single_q.txt"
+                else:
+                    # Default to spins.txt if method is unknown or None
+                    spin_file = dirpath / "spins.txt"
+
                 if spin_file.is_file():
                     # Read and check if ferromagnetic
                     spins = read_spin_configuration(spin_file)
@@ -241,7 +305,15 @@ def scan_directories(root_dir, tolerance=1e-5):
                         print(f"Ferromagnetic state found at J3={j3}, Jzp={jzp}")
                 
                 # Compute SSSF
-                sssf = SSSF2D(spins, pos, 100, str(dirpath) + "/")
+                sssf, K = SSSF2D(spins, pos, 100, str(dirpath) + "/")
+                tempQ = ordering_q_SSSF2D(sssf, K)
+                Q1, Q2 = tempQ[0], tempQ[1]   
+                
+                #Write out the Q values to the phase file
+                with open(dirpath / "phase.txt", 'a') as f:
+                    f.write(f" Q1={Q1} Q2={Q2}")
+                    # Also write the lowest method
+                    f.write(f" Method={lowest_method}")
 
                 # Plot the spin configuration
                 plot_file = dirpath / "spin_config.png"
