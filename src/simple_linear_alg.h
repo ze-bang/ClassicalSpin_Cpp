@@ -270,7 +270,7 @@ double contract(const array<double, N>  &a, const array<double, N*N>  &M, const 
 template<size_t N_1, size_t N_2, size_t N_3>
 double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
     double result = 0;
-    
+
     #pragma omp parallel for collapse(3)
     for(size_t i = 0; i < N_1; i++){
         for(size_t j = 0; j < N_2; j++){
@@ -488,7 +488,7 @@ array<double, N> transpose2D(const array<double, N>& matrix) {
 template<size_t N>
 array<double, N> transpose3D(const array<double, N>& matrix, size_t N_1, size_t N_2, size_t N_3) {
     array<double, N> transposed;
-    #pragma omp parallel for collapse(3) schedule(dynamic, 1)
+    #pragma omp parallel for 
     for (size_t i = 0; i < N_1; ++i) {
         for (size_t j = 0; j < N_2; ++j) {
             for (size_t k = 0; k < N_3; ++k) {
@@ -496,7 +496,6 @@ array<double, N> transpose3D(const array<double, N>& matrix, size_t N_1, size_t 
             }
         }
     }
-    
     return transposed; // Overwrite the original matrix with the transposed one
 }
 
@@ -504,7 +503,7 @@ array<double, N> transpose3D(const array<double, N>& matrix, size_t N_1, size_t 
 template<size_t N>
 array<double, N> swap_axis_3D(const array<double, N>& matrix, size_t N_1, size_t N_2, size_t N_3) {
     array<double, N> transposed;
-    #pragma omp parallel for collapse(3) schedule(dynamic, 1)
+    #pragma omp parallel for collapse(3)
     for (size_t i = 0; i < N_1; ++i) {
         for (size_t j = 0; j < N_2; ++j) {
             for (size_t k = 0; k < N_3; ++k) {

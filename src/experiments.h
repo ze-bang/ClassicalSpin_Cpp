@@ -330,6 +330,11 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     x2 /= sqrt(6);
     x3 /= sqrt(6);
     x4 /= sqrt(6);
+
+    array<array<double,3>, 4> x = {{{x1[0], x1[1], x1[2]}, {x2[0], x2[1], x2[2]}, {x3[0], x3[1], x3[2]}, {x4[0], x4[1], x4[2]}}};
+    array<array<double,3>, 4> y = {{{y1[0], y1[1], y1[2]}, {y2[0], y2[1], y2[2]}, {y3[0], y3[1], y3[2]}, {y4[0], y4[1], y4[2]}}};
+    array<array<double,3>, 4> z = {{{z1[0], z1[1], z1[2]}, {z2[0], z2[1], z2[2]}, {z3[0], z3[1], z3[2]}, {z4[0], z4[1], z4[2]}}};
+
     double Jx, Jy, Jz;
 
 
@@ -367,9 +372,18 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     atoms.set_field(rot_field*dot(field, z3), 2);
     atoms.set_field(rot_field*dot(field, z4), 3);
 
-    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
     MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, dir, save);
+
+    // for (size_t i = 0; i < 1e4; ++i){
+    //     MC.deterministic_sweep();
+    // }
+
+    MC.write_to_file_pos(dir + "/pos.txt");
+    MC.write_to_file_spin(dir + "/spin.txt", MC.spins);
+    MC.write_to_file_magnetization_local(dir + "/M_t_f.txt", MC.magnetization(MC.spins, x, y, z));
+    MC.write_to_file_magnetization_local(dir + "/M_t_f_local.txt", MC.magnetization_local(MC.spins));
 }
 
 

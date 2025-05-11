@@ -326,10 +326,13 @@ class mixed_lattice
                             mixed_trilinear_interaction_SU3[current_site_index].push_back(J.trilinear_interaction);
                             mixed_trilinear_partners_SU3[current_site_index].push_back({partner1, partner2});
 
-                            mixed_trilinear_interaction_SU2[partner1].push_back(transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2));
+                            const auto transposed = transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2);
+                            const auto swapped = swap_axis_3D(transposed, N_SU2, N_SU2, N_SU3);
+
+                            mixed_trilinear_interaction_SU2[partner1].push_back(transposed);
                             mixed_trilinear_partners_SU2[partner1].push_back({partner2, current_site_index});
 
-                            mixed_trilinear_interaction_SU2[partner2].push_back(swap_axis_3D(transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2), N_SU2, N_SU2, N_SU3));
+                            mixed_trilinear_interaction_SU2[partner2].push_back(swapped);
                             mixed_trilinear_partners_SU2[partner2].push_back({partner1, current_site_index});
                         }
                     }
@@ -391,7 +394,7 @@ class mixed_lattice
             energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
-        for (size_t i=0; i < num_tri_SU3; ++i){
+        for (size_t i=0; i < num_tri_SU2; ++i){
             energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
         }
         #pragma omp simd
@@ -465,7 +468,7 @@ class mixed_lattice
                 trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
             }
         }
-        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/6;
+        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/3;
     }
 
     double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>  &curr_spins){
@@ -599,42 +602,42 @@ class mixed_lattice
         array<double,N_SU2> new_spin_SU2;
         array<double,N_SU3> new_spin_SU3;
         // Process SU2 sites
-        for (size_t count = 0; count < lattice_size_SU2; ++count) {
-            size_t i = random_int_lehman(lattice_size_SU2);
-            double E = site_energy_SU2(curr_spin.spins_SU2[i], i);
-            
-            // Generate new spin configuration
-            new_spin_SU2 = gaussian ? gaussian_move_SU2(curr_spin.spins_SU2[i], sigma) 
-                                             : gen_random_spin_SU2();
-            
-            double dE = site_energy_SU2(new_spin_SU2, i) - E;
-            
-            // Accept or reject based on Metropolis criterion
-            if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
-                curr_spin.spins_SU2[i] = new_spin_SU2;
-                accept++;
-            } 
+        for (size_t count = 0; count < total_sites; ++count) {
+            size_t i = random_int_lehman(total_sites);
+
+            if (i < lattice_size_SU2) {
+                double E = site_energy_SU2(curr_spin.spins_SU2[i], i);
+                
+                // Generate new spin configuration
+                new_spin_SU2 = gaussian ? gaussian_move_SU2(curr_spin.spins_SU2[i], sigma) 
+                                                    : gen_random_spin_SU2();
+                
+                double dE = site_energy_SU2(new_spin_SU2, i) - E;
+                
+                // Accept or reject based on Metropolis criterion
+                if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                    curr_spin.spins_SU2[i] = new_spin_SU2;
+                    accept++;
+                }
+                 
+            } else {
+                int i_SU3 = i - lattice_size_SU2;
+                double E = site_energy_SU3(curr_spin.spins_SU3[i_SU3], i_SU3);
+                
+                // Generate new spin configuration
+                new_spin_SU3 = gaussian ? gaussian_move_SU3(curr_spin.spins_SU3[i_SU3], sigma) 
+                                                : gen_random_spin_SU3();
+                
+                double dE = site_energy_SU3(new_spin_SU3, i_SU3) - E;
+                
+                // Accept or reject based on Metropolis criterion
+                if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                    curr_spin.spins_SU3[i_SU3] = new_spin_SU3;
+                    accept++;
+                } 
+            }
         }
-        
-        // Process SU3 sites
-        for (size_t count = 0; count < lattice_size_SU3; ++count) {
-            size_t i = random_int_lehman(lattice_size_SU3);
-            double E = site_energy_SU3(curr_spin.spins_SU3[i], i);
-            
-            // Generate new spin configuration
-            new_spin_SU3 = gaussian ? gaussian_move_SU3(curr_spin.spins_SU3[i], sigma) 
-                                             : gen_random_spin_SU3();
-            
-            double dE = site_energy_SU3(new_spin_SU3, i) - E;
-            
-            // Accept or reject based on Metropolis criterion
-            if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
-                curr_spin.spins_SU3[i] = new_spin_SU3;
-                accept++;
-            } 
-        }
-        
-        return static_cast<double>(accept) / total_sites;
+        return static_cast<double>(accept) / double(total_sites);
     }
     void overrelaxation(){
         array<double,N_SU2> local_field_SU2;

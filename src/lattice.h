@@ -274,7 +274,7 @@ class lattice
                 trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
-        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/6;
+        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/3;
     }
 
     double energy_density(spin_config &curr_spins){
@@ -883,14 +883,18 @@ class lattice
 
 
 
-    double magnetization(const spin_config &current_spins, array<array<double, N>, N_ATOMS> &field_current){
-        double mag = 0;
+    array<double,N>  magnetization(const spin_config &current_spins, array<array<double, N>, N_ATOMS>  x, array<array<double, N>, N_ATOMS>  y, array<array<double, N>, N_ATOMS>  z){
+        array<double,N> mag = {{0}};
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim3;++k){
                     for (size_t l=0; l< N_ATOMS;++l){
                         size_t current_site_index = flatten_index(i,j,k,l);
-                        mag += dot(current_spins[current_site_index], field_current[l]);
+                        
+                        mag = x[l] * current_spins[current_site_index][0] 
+                            + y[l] * current_spins[current_site_index][1]
+                            + z[l] * current_spins[current_site_index][2];
+
                     }
                 }
             }
