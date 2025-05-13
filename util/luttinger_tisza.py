@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.linalg import eigh
 from itertools import product
+from scipy.optimize import minimize
 
 # filepath: /home/pc_linux/ClassicalSpin_Cpp/util/luttinger_tizsza.py
 import matplotlib.pyplot as plt
@@ -196,7 +197,7 @@ def fourier_transform_interactions(k, a1, a2, J=[-6.54, 0.15, -3.76, 0.36, -0.21
     
     return J_k
 
-def luttinger_tisza_method(L, J=[-6.54, 0.15, -3.76, 0.36, -0.21, 1.70, 0.03], k_mesh_density=20):
+def luttinger_tisza_method(L, J=[-6.54, 0.15, -3.76, 0.36, -0.21, 1.70, 0.03]):
     """
     Implement the Luttinger-Tisza method to find the ground state.
     
@@ -212,37 +213,35 @@ def luttinger_tisza_method(L, J=[-6.54, 0.15, -3.76, 0.36, -0.21, 1.70, 0.03], k
     # b2 · a1 = 0, b2 · a2 = 2π
     b1 = 2 * np.pi * np.array([1, -1/np.sqrt(3)])
     b2 = 2 * np.pi * np.array([0, 2/np.sqrt(3)])
-    
-    # Create a mesh of k-points in the first Brillouin zone
-    k_values = np.linspace(0, 1, k_mesh_density)
-    
-    min_eigenvalue = float('inf')
-    min_k = None
-    min_eigenvector = None
-    
-    # Loop over all k-points
-    for k1, k2 in product(k_values, k_values):
-        k = k1 * b1 + k2 * b2
-        
-        # Get interaction matrix in Fourier space
+    # Define an objective function that returns the minimum eigenvalue for a given k
+    def objective_function(k_params):
+        k = k_params[0] * b1 + k_params[1] * b2
         J_k = fourier_transform_interactions(k, a1, a2, J)
-        
-        # Find eigenvalues and eigenvectors
-        eigenvalues, eigenvectors = eigh(J_k)
-        
-        # Find the minimum eigenvalue
-        if eigenvalues[0] < min_eigenvalue:
-            min_eigenvalue = eigenvalues[0]
-            min_k = k
-            min_eigenvector = eigenvectors[:, 0]
+        eigenvalues = eigh(J_k, eigvals_only=True)
+        return eigenvalues[0]  # Return the smallest eigenvalue
+    
+    # Initial guess (center of Brillouin zone)
+    initial_guess = np.array([0.3, 0.3])
+    
+    # Use scipy's minimize function to find the minimum eigenvalue
+    result = minimize(objective_function, initial_guess, 
+                    method='L-BFGS-B', bounds=[(0, 1), (0, 1)])
+    
+    # Get the optimized k-point
+    opt_k_params = result.x
+    min_k = opt_k_params[0] * b1 + opt_k_params[1] * b2
+    
+    # Get the corresponding eigenvector
+    J_k = fourier_transform_interactions(min_k, a1, a2, J)
+    min_eigenvalue, eigenvectors = eigh(J_k)
+    min_eigenvector = eigenvectors[:, 0]
     
     # Ground state energy per site
-    ground_state_energy = min_eigenvalue / 2  # Factor of 1/2 from Hamiltonian definition
-    
+    ground_state_energy = min_eigenvalue[0] / 2  # Factor of 1/2 from Hamiltonian definition
     # Generate the real-space spin configuration
     spins = reconstruct_spin_configuration(min_k, min_eigenvector, positions)
     
-    return min_k, ground_state_energy, spins, positions
+    return np.array([opt_k_params[0], opt_k_params[1]]), ground_state_energy, spins, positions
 
 def reconstruct_spin_configuration(k, eigenvector, positions):
     """
@@ -286,20 +285,52 @@ def reconstruct_spin_configuration(k, eigenvector, positions):
     
     return spins
 
+def visualize_spins(positions, spins, L, save=False, filename=None):
+    """Visualize the spin configuration"""
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111)
+    
+    # Separate sublattice A and B
+    pos_A = positions[::2]
+    pos_B = positions[1::2]
+    spins_A = spins[::2]
+    spins_B = spins[1::2]
+    
+    # Plot lattice sites
+    ax.scatter(pos_A[:, 0], pos_A[:, 1], color='black', s=5)
+    ax.scatter(pos_B[:, 0], pos_B[:, 1], color='black', s=5)
+    
+    # Plot the spins
+    ax.quiver(pos_A[:, 0], pos_A[:, 1], spins_A[:, 0], spins_A[:, 1], color='red', pivot='mid')
+    ax.quiver(pos_B[:, 0], pos_B[:, 1], spins_B[:, 0], spins_B[:, 1], color='blue', pivot='mid')
+    
+    # Set axis properties
+    ax.set_aspect('equal')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(f"Spin Configuration for {L}x{L} Lattice")
+    
+    if save and filename:
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+    elif save:
+        plt.savefig('spin_configuration.png', dpi=300, bbox_inches='tight')
+    
+    plt.show()
+    return fig, ax
 
 if __name__ == "__main__":
     # Size of lattice (L x L unit cells)
-    L = 24  # Smaller for faster computation
+    L = 12  # Smaller for faster computation
     
     # J parameters: [J1, Jpmpm, Jzp, Delta1, J2, J3, Delta3]
-    J = [-6.54, 0.15, -3.76, 0.36, -0.21, 1.7, 0.03]
+    J = [-6.54, 0.15, -3.76, 0.36, -0.21, 1.9, 0.03]
     
     # Find ground state using Luttinger-Tisza method
-    k_opt, energy, spins, positions = luttinger_tisza_method(L, J, k_mesh_density=100)
+    k_opt, energy, spins, positions = luttinger_tisza_method(L, J)
     
     # Print results
     print(f"Optimal k-vector: ({k_opt[0]:.4f}, {k_opt[1]:.4f})")
     print(f"Ground state energy per site: {energy:.6f}")
     
     # Visualize the ground state
-    # visualize_spins(positions, spins, L)
+    visualize_spins(positions, spins, L)

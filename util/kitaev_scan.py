@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import re
-from single_q import SingleQAnsatz
+from single_q import SingleQ
 from luttinger_tisza import luttinger_tisza_method
 
 # Base directory containing all subdirectories
@@ -30,7 +30,7 @@ def compute_spin_configuration_single_q(J3, Jzp):
     J[2] = Jzp  # Jzp is at index 2
     
     # Create SingleQAnsatz model
-    model = SingleQAnsatz(lattice_size, J)
+    model = SingleQ(lattice_size, J)
     
     # Extract magnetization and energy
     spins = model.generate_spin_configuration()    
@@ -47,7 +47,7 @@ def compute_spin_configuration_luttinger_tisza(J3, Jzp):
     J[2] = Jzp  # Jzp is at index 2
     
     # Create Luttinger-Tisza model
-    k_opt, energy, spins, positions = luttinger_tisza_method(lattice_size, J)
+    k_opt, energy, spins, positions = luttinger_tisza_method(lattice_size, J, 100)
     
     
     return spins, energy, k_opt[0], k_opt[1]

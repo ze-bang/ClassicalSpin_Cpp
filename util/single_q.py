@@ -1,14 +1,15 @@
 import numpy as np
 from scipy.optimize import minimize
-from luttinger_tisza import create_honeycomb_lattice, construct_interaction_matrices, get_bond_vectors
+from luttinger_tisza import create_honeycomb_lattice, construct_interaction_matrices, get_bond_vectors, visualize_spins
 
 # filepath: /home/pc_linux/ClassicalSpin_Cpp/util/single_q.py
+
 import matplotlib.pyplot as plt
 
-class SingleQAnsatz:
+class SingleQ:
     """
-    Class to perform single-Q ansatz simulation on the honeycomb lattice
-    using the Hamiltonian from Luttinger-Tisza
+    Class to perform single-Q ansatz simulation on a honeycomb lattice
+    to determine ground state spin configuration and energy.
     """
     # Define parameter bounds
     eta_small = 10**-9
@@ -31,7 +32,7 @@ class SingleQAnsatz:
     
     def __init__(self, L=4, J=[-6.54, 0.15, -3.76, 0.36, -0.21, 1.70, 0.03], B_field=np.array([0, 0, 0])):
         """
-        Initialize the single-Q ansatz model
+        Initialize the single-Q model
         
         Args:
             L: Size of the lattice (L x L unit cells)
@@ -114,7 +115,7 @@ class SingleQAnsatz:
     
     def HBB(self, q):
         """Compute the Fourier transformed interaction matrix for B-B interactions"""
-        # Second-neighbor interactions for B sites
+        # Second-neighbor interactions for B sites are the same as for A sites
         return self.HAA(q)
     
     def E_per_UC(self, params):
@@ -155,8 +156,8 @@ class SingleQAnsatz:
         
         return np.real(E_q0 / 4 + E_q / 4 + E_zeeman / 2)
     
-    def find_Q(self, N_ITERATIONS=10, tol_first_opt=10**-8, tol_second_opt=10**-10, tol_alpha=10**-10):
-        """Find the optimal Q vector and spin orientations using multiple random starts"""
+    def find_minimum_energy(self, N_ITERATIONS=10, tol_first_opt=10**-8, tol_second_opt=10**-10):
+        """Find the optimal parameters that minimize the energy"""
         opt_params = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         opt_energy = 10**10
         
@@ -187,20 +188,16 @@ class SingleQAnsatz:
         
         # Final optimization run on best parameters
         res = minimize(self.E_per_UC, x0=opt_params, bounds=self.parameter_bounds, 
-                      method='Nelder-Mead', tol=tol_second_opt)
+                      method='L-BFGS-B', tol=tol_second_opt)
         opt_params = res.x
         opt_energy = res.fun
         
         # If we have uniform magnetization, set Q to zero
-        if np.abs(opt_params[2]-1) < tol_alpha and np.abs(opt_params[3]-1) < tol_alpha:
+        if np.abs(opt_params[2]-1) < 10**-10 and np.abs(opt_params[3]-1) < 10**-10:
             opt_params[0] = 0
             opt_params[1] = 0
         
         return opt_params, opt_energy
-    
-    def find_minimum_energy(self):
-        """Find the minimum energy configuration"""
-        return self.find_Q()
     
     def classify_phase(self, tol=10**-6):
         """Classify the magnetic ordering based on the optimal parameters"""
@@ -221,29 +218,13 @@ class SingleQAnsatz:
         
         # M point order
         elif (np.abs(Q1-0.5) < tol and np.abs(Q2) < tol) or (np.abs(Q2-0.5) < tol and np.abs(Q1) < tol):
-            exA, eyA, ezA = self.RotatedBasis(phiA, thetaA, psiA)
-            exB, eyB, ezB = self.RotatedBasis(phiB, thetaB, psiB)
-            spin_a_00 = ezA * alphaA + np.sqrt(1 - alphaA**2) * exA
-            spin_b_00 = ezB * alphaB + np.sqrt(1 - alphaB**2) * exB
-            dot_product = spin_a_00.dot(spin_b_00)
-            if dot_product > 0:
-                return "ZigZag"
-            else:
-                return "Stripy"
+            return "Zigzag/Stripy"
         
-        # 120 degree order
+        # K point order
         elif np.abs(Q1-1/3) < tol and np.abs(Q2-1/3) < tol:
-            return "120 degree"
+            return "120° order"
         
-        # Incommensurate Gamma to M
-        elif np.abs(Q2) < tol or np.abs(Q1) < tol:
-            return "Gamma to M spiral order"
-        
-        # Incommensurate Gamma to K
-        elif np.abs(Q2-Q1) < tol:
-            return "Gamma to K spiral order"
-        
-        # Otherwise
+        # Incommensurate order
         else:
             return "Incommensurate order"
     
@@ -270,48 +251,16 @@ class SingleQAnsatz:
         
         return spins
 
-def visualize_spins(positions, spins, L, save=False, filename=None):
-    """Visualize the spin configuration"""
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111)
-    
-    # Separate sublattice A and B
-    pos_A = positions[::2]
-    pos_B = positions[1::2]
-    spins_A = spins[::2]
-    spins_B = spins[1::2]
-    
-    # Plot lattice sites
-    ax.scatter(pos_A[:, 0], pos_A[:, 1], color='black', s=5)
-    ax.scatter(pos_B[:, 0], pos_B[:, 1], color='black', s=5)
-    
-    # Plot the spins
-    ax.quiver(pos_A[:, 0], pos_A[:, 1], spins_A[:, 0], spins_A[:, 1], color='red', pivot='mid')
-    ax.quiver(pos_B[:, 0], pos_B[:, 1], spins_B[:, 0], spins_B[:, 1], color='blue', pivot='mid')
-    
-    # Set axis properties
-    ax.set_aspect('equal')
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_title(f"Spin Configuration for {L}x{L} Lattice")
-    
-    if save and filename:
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
-    elif save:
-        plt.savefig('spin_configuration.png', dpi=300, bbox_inches='tight')
-    
-    plt.show()
-    return fig, ax
 
 if __name__ == "__main__":
     # Size of lattice (L x L unit cells)
-    L = 24
+    L = 12
     
     # J parameters: [J1, Jpmpm, Jzp, Delta1, J2, J3, Delta3]
-    J = [-6.54, 0.15, -3.76, 0.36, -0.21, 0.5, 0.03]
+    J = [-6.54, 0.15, -3.76, 0.36, -0.21, 2.5, 0.03]
     
-    # Create the single-Q ansatz model
-    model = SingleQAnsatz(L, J)
+    # Create single-Q model
+    model = SingleQ(L, J)
     
     # Print results
     Q1, Q2 = model.opt_params[0], model.opt_params[1]
@@ -321,4 +270,4 @@ if __name__ == "__main__":
     
     # Generate and visualize the spin configuration
     spins = model.generate_spin_configuration()
-    # visualize_spins(model.positions, spins, L)
+    visualize_spins(model.positions, spins, L)

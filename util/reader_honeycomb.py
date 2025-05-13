@@ -226,8 +226,8 @@ def hhknk_2D(H,K):
     return contract('ij,k->ijk', H, np.array([1,0])) + contract('ij,k->ijk',K, np.array([0,1]))
 
 def SSSF2D(S, P, nK, filename, gb=False):
-    H = np.linspace(-1, 1, nK)
-    L = np.linspace(-1, 1, nK)
+    H = np.linspace(0, 1, nK)
+    L = np.linspace(0, 1, nK)
     A, B = np.meshgrid(H, L)
     K = hhknk(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)

@@ -23,161 +23,65 @@ def read_spin_configuration(filepath):
                 continue
     return np.array(spins)
 
-def is_ferromagnetic(spins, tolerance=1e-3):
-    """Check if all spins are aligned (ferromagnetic state)."""
-    if len(spins) < 2:
-        return False
-    
-    # Get the first spin as reference
-    reference = spins[0]
-    
-    # average the spins
-    avg_spin = np.mean(spins, axis=0)
-    # Check if the average spin is close to the reference spin
-    if np.linalg.norm(avg_spin - reference) > tolerance:
-        return False
-    
-    return True
+def is_ferromagnetic(q1, q2, tolerance=0.02):
+    return np.mod(q1, 1) < tolerance and np.mod(q2, 1) < tolerance
 
 
+def is_zigzag(q1, q2, tolerance=0.02):
+    zz_order = [0.25, 0.75]
     
-def is_zigzag(spins, tolerance=0.1):
-    """Check if the spins are in a zigzag pattern."""
-    if len(spins) < 2:
-        return False
+    # Check if q1 is close to any rational fraction
+    q1_is = any(abs(np.mod(q1, 1) - frac) < tolerance for frac in zz_order)
     
-    # Normalize spins and filter out near-zero spins
-    normalized_spins = []
-    for spin in spins:
-        norm = np.linalg.norm(spin)
-        if norm > tolerance:
-            normalized_spins.append(spin / norm)
+    # Check if q2 is close to any rational fraction
+    q2_is = any(abs(np.mod(q2, 1) - frac) < tolerance for frac in zz_order)
     
-    if len(normalized_spins) < 2:
-        return False
-    
-    normalized_spins = np.array(normalized_spins)
-    
-    # Calculate average magnitude of individual spins
-    avg_spin_norm = np.mean(np.linalg.norm(spins, axis=1))
-    
-    # Calculate the average spin
-    avg_spin = np.mean(spins, axis=0)
-    avg_norm = np.linalg.norm(avg_spin)
-    
-    # For zigzag, average spin should be small but individual spins should have significant magnitude
-    if avg_norm < avg_spin_norm * 0.2:  # Average is much smaller than individual spins
-        # Find dominant axis using SVD
-        u, s, vh = np.linalg.svd(normalized_spins, full_matrices=False)
-        dominant_axis = vh[0]
-        
-        # Project spins onto the dominant axis
-        projections = np.dot(normalized_spins, dominant_axis)
-        
-        # Count positive and negative projections
-        positive = np.sum(projections > 0.5)
-        negative = np.sum(projections < -0.5)
-        
-        total_significant = positive + negative
-        
-        # Ensure most spins are captured by the dominant axis
-        if total_significant < len(normalized_spins) * 0.7:
-            return False
-        
-        # For a zigzag pattern, we expect significant numbers of spins pointing in both directions
-        threshold = 0.25
-        return (positive / total_significant >= threshold and 
-                negative / total_significant >= threshold)
+    # Return True if neither q1 nor q2 are close to rational fractions
+    return q1_is and q2_is
 
-def is_double_zigzag(spins, positions=None, tolerance=1e-3):
+
+def is_doublezigzag(q1, q2, tolerance=0.02):
+    # Common rational fractions to check against
+    dzz_order = [0.25, 0.75]
+    dzz_order1 = [0]
+    
+    # Check if q1 is close to any rational fraction
+    q1_is = any(abs(np.mod(q1, 1) - frac) < tolerance for frac in dzz_order)
+    
+    # Check if q2 is close to any rational fraction
+    q2_is = any(abs(np.mod(q2, 1) - frac) < tolerance for frac in dzz_order1)
+
+    is_dzz_1 = q1_is and q2_is
+
+    # Check if q1 is close to any rational fraction
+    q1_is = any(abs(np.mod(q1, 1) - frac) < tolerance for frac in dzz_order1)
+    
+    # Check if q2 is close to any rational fraction
+    q2_is = any(abs(np.mod(q2, 1) - frac) < tolerance for frac in dzz_order)
+
+    is_dzz_2 = q1_is and q2_is
+    
+    # Return True if neither q1 nor q2 are close to rational fractions
+    return is_dzz_1 or is_dzz_2
+
+
+def is_noncommensurate(q1, q2, tolerance=0.02):
+    """Check if the wave vectors represent a non-commensurate state.
+    
+    Returns True if q1 and q2 are not close to simple rational values.
     """
-    Check if the spins are in a double zigzag pattern typical of Kitaev models.
+    # Common rational fractions to check against
+    rational_fractions = [0, 0.25, 0.333, 0.5, 0.667, 0.75, 1.0]
     
-    Args:
-        spins: numpy array of spin vectors
-        positions: numpy array of lattice positions (optional)
-        tolerance: tolerance for comparison
-        
-    Returns:
-        bool: True if the spins form a double zigzag pattern, False otherwise
-    """
-    if len(spins) < 4:
-        return False
+    # Check if q1 is close to any rational fraction
+    q1_is_rational = any(abs(np.mod(q1, 1) - frac) < tolerance for frac in rational_fractions)
     
-    # Normalize spins and filter out near-zero spins
-    normalized_spins = []
-    valid_indices = []
+    # Check if q2 is close to any rational fraction
+    q2_is_rational = any(abs(np.mod(q2, 1) - frac) < tolerance for frac in rational_fractions)
     
-    for i, spin in enumerate(spins):
-        norm = np.linalg.norm(spin)
-        if norm > tolerance:
-            normalized_spins.append(spin / norm)
-            valid_indices.append(i)
-    
-    if len(normalized_spins) < 4:
-        return False
-    
-    normalized_spins = np.array(normalized_spins)
-    
-    # Use SVD to find the principal spin directions
-    u, s, vh = np.linalg.svd(normalized_spins, full_matrices=False)
-    
-    # Examine the singular values - double zigzag should have two significant components
-    if s[1] < 0.5 * s[0] or s[2] > 0.2 * s[0]:
-        return False
-    
-    # For double zigzag, spins should form two groups with opposite orientations
-    principal_axis = vh[0]
-    projections = np.dot(normalized_spins, principal_axis)
-    
-    # Count positive and negative projections
-    positive = np.sum(projections > 0.5)
-    negative = np.sum(projections < -0.5)
-    
-    # Check if significant portions of spins point in opposite directions
-    if positive < 0.25 * len(projections) or negative < 0.25 * len(projections):
-        return False
-    
-    # If positions are provided, check the spatial pattern
-    if positions is not None and len(positions) >= len(spins):
-        valid_positions = positions[valid_indices]
-        
-        # Group by y-coordinate to identify rows
-        y_coords = valid_positions[:, 1]
-        unique_y = np.sort(np.unique(np.round(y_coords, decimals=3)))
-        
-        if len(unique_y) >= 4:  # Need several rows for clear pattern
-            # Check if alternating rows have opposite spin orientations
-            row_patterns = []
-            for y in unique_y:
-                row_indices = np.where(np.abs(y_coords - y) < tolerance)[0]
-                if len(row_indices) >= 3:
-                    row_projections = projections[row_indices]
-                    avg_projection = np.mean(row_projections)
-                    row_patterns.append(1 if avg_projection > 0 else -1)
-            
-            # Look for alternating pattern
-            if len(row_patterns) >= 4:
-                alternating = True
-                for i in range(2, len(row_patterns)):
-                    if row_patterns[i] != row_patterns[i-2]:
-                        alternating = False
-                        break
-                
-                if alternating:
-                    return True
-    
-    # Without positions or if spatial check fails, use distribution of projections
-    projection_histogram, _ = np.histogram(projections, bins=20, range=(-1, 1))
-    peaks = 0
-    for i in range(1, len(projection_histogram)-1):
-        if (projection_histogram[i] > projection_histogram[i-1] and 
-            projection_histogram[i] > projection_histogram[i+1] and
-            projection_histogram[i] > len(projections)/20):
-            peaks += 1
-    
-    # Double zigzag typically shows two distinct peaks in projection distribution
-    return peaks == 2
+    # Return True if neither q1 nor q2 are close to rational fractions
+    return not (q1_is_rational or q2_is_rational)
+
 
 
 def extract_parameters(dirname):
@@ -188,11 +92,12 @@ def extract_parameters(dirname):
         return float(match.group(1)), float(match.group(2))
     return None, None
 
-def scan_directories(root_dir, tolerance=1e-5):
+def scan_directories(root_dir, tolerance=0.02):
     """Scan the directories and check for ferromagnetic states."""
     fm_points = []
     zz_points = []
     dzz_points = []
+    non_comm_points = []
     non_fm_points = []
     
     # Convert to Path object
@@ -277,37 +182,44 @@ def scan_directories(root_dir, tolerance=1e-5):
                 else:
                     # Default to spins.txt if method is unknown or None
                     spin_file = dirpath / "spins.txt"
-
-                if spin_file.is_file():
-                    # Read and check if ferromagnetic
-                    spins = read_spin_configuration(spin_file)
-                    pos = read_spin_configuration(dirpath / "pos.txt")
-                    if is_ferromagnetic(spins, tolerance):
-                        fm_points.append((j3, jzp))
-                        # Save the phase information to a file
-                        with open(dirpath / "phase.txt", 'w') as f:
-                            f.write("FM")
-                        print(f"Ferromagnetic state found at J3={j3}, Jzp={jzp}")
-                    # elif is_double_zigzag(spins, pos, tolerance):
-                    #     dzz_points.append((j3, jzp))
-                    #     with open(dirpath / "phase.txt", 'w') as f:
-                    #         f.write("DZZ")
-                    #     print(f"Double zigzag state found at J3={j3}, Jzp={jzp}")
-                    elif is_zigzag(spins, tolerance):
-                        zz_points.append((j3, jzp))
-                        with open(dirpath / "phase.txt", 'w') as f:
-                            f.write("ZZ")
-                        print(f"Zigzag state found at J3={j3}, Jzp={jzp}")
-                    else:
-                        non_fm_points.append((j3, jzp))
-                        with open(dirpath / "phase.txt", 'w') as f:
-                            f.write("UNKNOWN")
-                        print(f"Ferromagnetic state found at J3={j3}, Jzp={jzp}")
-                
                 # Compute SSSF
+
+
+
+                spins = read_spin_configuration(spin_file)
+                pos = read_spin_configuration(dirpath / "pos.txt")
                 sssf, K = SSSF2D(spins, pos, 100, str(dirpath) + "/")
                 tempQ = ordering_q_SSSF2D(sssf, K)
                 Q1, Q2 = tempQ[0], tempQ[1]   
+                if is_ferromagnetic(Q1, Q2, tolerance):
+                    fm_points.append((np.abs(j3/6.54), np.abs(jzp/6.54)))
+                    # Save the phase information to a file
+                    with open(dirpath / "phase.txt", 'w') as f:
+                        f.write("FM")
+                    print(f"Ferromagnetic state found at J3={j3}, Jzp={jzp}")
+
+                elif is_zigzag(Q1, Q2, tolerance):
+                    zz_points.append((np.abs(j3/6.54), np.abs(jzp/6.54)))
+                    with open(dirpath / "phase.txt", 'w') as f:
+                        f.write("ZZ")
+                    print(f"Zigzag state found at J3={j3}, Jzp={jzp}")
+                elif is_doublezigzag(Q1, Q2, tolerance):
+                    dzz_points.append((np.abs(j3/6.54), np.abs(jzp/6.54)))
+                    with open(dirpath / "phase.txt", 'w') as f:
+                        f.write("DZZ")
+                    print(f"Double zigzag state found at J3={j3}, Jzp={jzp}")
+                elif is_noncommensurate(Q1, Q2, tolerance):
+                    non_comm_points.append((np.abs(j3/6.54), np.abs(jzp/6.54)))
+                    with open(dirpath / "phase.txt", 'w') as f:
+                        f.write("Non-commensurate")
+                    print(f"Non-commensurate state found at J3={j3}, Jzp={jzp}")
+                else:
+                    non_fm_points.append((np.abs(j3/6.54), np.abs(jzp/6.54)))
+                    with open(dirpath / "phase.txt", 'w') as f:
+                        f.write("Non-FM")
+                    print(f"Non-ferromagnetic state found at J3={j3}, Jzp={jzp}")
+
+
                 
                 #Write out the Q values to the phase file
                 with open(dirpath / "phase.txt", 'a') as f:
@@ -326,9 +238,9 @@ def scan_directories(root_dir, tolerance=1e-5):
                     )
                     print(f"Spin configuration plotted for J3={j3}, Jzp={jzp}")
     
-    return fm_points, zz_points, dzz_points, non_fm_points
+    return fm_points, zz_points, dzz_points, non_comm_points, non_fm_points
 
-def plot_phase_diagram(fm_points, zz_points, dzz_points, non_fm_points):
+def plot_phase_diagram(fm_points, zz_points, dzz_points, non_comm_points, non_fm_points):
     """Plot the phase diagram based on ferromagnetic points."""
     plt.figure(figsize=(10, 8))
     
@@ -344,15 +256,19 @@ def plot_phase_diagram(fm_points, zz_points, dzz_points, non_fm_points):
 
     if dzz_points:
         j3_values_dzz, jzp_values_dzz = zip(*dzz_points)
-        plt.scatter(j3_values_dzz, jzp_values_dzz, color='orange', marker='s', alpha=0.5, label='DZZ')
+        plt.scatter(j3_values_dzz, jzp_values_dzz, color='orange', marker='s', alpha=0.5, label='Double ZZ')
+
+    if non_comm_points:
+        j3_values_non_comm, jzp_values_non_comm = zip(*non_comm_points)
+        plt.scatter(j3_values_non_comm, jzp_values_non_comm, color='purple', marker='*', alpha=0.5, label='Non-commensurate')
 
     # Plot non-ferromagnetic points
     if non_fm_points:
         j3_values_non, jzp_values_non = zip(*non_fm_points)
-        plt.scatter(j3_values_non, jzp_values_non, color='blue', marker='x', alpha=0.5, label='Non-FM')
+        plt.scatter(j3_values_non, jzp_values_non, color='blue', marker='x', alpha=0.5, label='Unknown')
     
-    plt.xlabel('J3')
-    plt.ylabel('Jzp')
+    plt.xlabel('J3/Jz')
+    plt.ylabel('|Jzp/Jz|')
     plt.title('Phase Diagram - Ferromagnetic States')
     plt.grid(True)
     plt.legend()
@@ -368,14 +284,14 @@ def main():
         root_dir = "."
     
     # Get the tolerance value
-    tolerance_str = input("Enter tolerance for FM detection (default 1e-5): ").strip()
-    tolerance = float(tolerance_str) if tolerance_str else 1e-5
+    tolerance_str = input("Enter tolerance for FM detection (default 0.02): ").strip()
+    tolerance = float(tolerance_str) if tolerance_str else 0.02
     
     print(f"Scanning directories in {root_dir}...")
-    fm_points, zz_points, dzz_points, non_fm_points = scan_directories(root_dir, tolerance)
+    fm_points, zz_points, dzz_points, non_comm_points, non_fm_points = scan_directories(root_dir, tolerance)
     
     print(f"Found {len(fm_points)} ferromagnetic states out of {len(fm_points) + len(non_fm_points)} total.")
-    plot_phase_diagram(fm_points, zz_points, dzz_points, non_fm_points)
+    plot_phase_diagram(fm_points, zz_points, dzz_points, non_comm_points, non_fm_points)
     print("Phase diagram saved as 'phase_diagram.png'.")
 
 if __name__ == "__main__":
