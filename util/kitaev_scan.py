@@ -47,7 +47,7 @@ def compute_spin_configuration_luttinger_tisza(J3, Jzp):
     J[2] = Jzp  # Jzp is at index 2
     
     # Create Luttinger-Tisza model
-    k_opt, energy, spins, positions = luttinger_tisza_method(lattice_size, J, 100)
+    k_opt, energy, spins, positions = luttinger_tisza_method(lattice_size, J)
     
     
     return spins, energy, k_opt[0], k_opt[1]
