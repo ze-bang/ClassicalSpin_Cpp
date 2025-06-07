@@ -156,7 +156,7 @@ class SingleQ:
         
         return np.real(E_q0 / 4 + E_q / 4 + E_zeeman / 2)
     
-    def find_minimum_energy(self, N_ITERATIONS=10, tol_first_opt=10**-8, tol_second_opt=10**-10):
+    def find_minimum_energy(self, N_ITERATIONS=20, tol_first_opt=10**-8, tol_second_opt=10**-10):
         """Find the optimal parameters that minimize the energy"""
         opt_params = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         opt_energy = 10**10
@@ -181,7 +181,7 @@ class SingleQ:
             # Minimize at that point
             res = minimize(self.E_per_UC, x0=initial_guess, bounds=self.parameter_bounds, 
                           method='Nelder-Mead', tol=tol_first_opt)
-            
+
             if res.fun < opt_energy:
                 opt_params = res.x
                 opt_energy = res.fun

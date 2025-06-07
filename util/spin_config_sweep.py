@@ -28,7 +28,7 @@ def is_ferromagnetic(q1, q2, tolerance=0.02):
 
 
 def is_zigzag(q1, q2, tolerance=0.02):
-    zz_order = [0.25, 0.75]
+    zz_order = [0.0, 0.5]
     
     # Check if q1 is close to any rational fraction
     q1_is = any(abs(np.mod(q1, 1) - frac) < tolerance for frac in zz_order)

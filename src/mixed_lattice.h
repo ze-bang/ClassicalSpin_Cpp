@@ -598,43 +598,67 @@ class mixed_lattice
 
     double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60) {
         int accept = 0;
-        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
-        array<double,N_SU2> new_spin_SU2;
-        array<double,N_SU3> new_spin_SU3;
-        // Process SU2 sites
+        const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        const double inv_T = 1.0 / T;  // Precompute inverse temperature
+        
+        // Process sites in a batch for better cache locality
+        #pragma omp parallel for reduction(+:accept)
         for (size_t count = 0; count < total_sites; ++count) {
             size_t i = random_int_lehman(total_sites);
 
             if (i < lattice_size_SU2) {
-                double E = site_energy_SU2(curr_spin.spins_SU2[i], i);
+                // SU2 case
+                array<double,N_SU2> new_spin_SU2;
+                const double E_old = site_energy_SU2(curr_spin.spins_SU2[i], i);
                 
                 // Generate new spin configuration
-                new_spin_SU2 = gaussian ? gaussian_move_SU2(curr_spin.spins_SU2[i], sigma) 
-                                                    : gen_random_spin_SU2();
+                if (gaussian) {
+                    new_spin_SU2 = gaussian_move_SU2(curr_spin.spins_SU2[i], sigma);
+                } else {
+                    new_spin_SU2 = gen_random_spin_SU2();
+                }
                 
-                double dE = site_energy_SU2(new_spin_SU2, i) - E;
+                const double E_new = site_energy_SU2(new_spin_SU2, i);
+                const double dE = E_new - E_old;
                 
-                // Accept or reject based on Metropolis criterion
-                if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                // Fast path for acceptance when dE <= 0
+                bool accepted = (dE <= 0);
+                if (!accepted) {
+                    // Only compute exp when needed
+                    accepted = (random_double_lehman(0,1) < exp(-dE * inv_T));
+                }
+                
+                if (accepted) {
                     curr_spin.spins_SU2[i] = new_spin_SU2;
                     accept++;
                 }
-                 
             } else {
-                int i_SU3 = i - lattice_size_SU2;
-                double E = site_energy_SU3(curr_spin.spins_SU3[i_SU3], i_SU3);
+                // SU3 case
+                const size_t i_SU3 = i - lattice_size_SU2;
+                array<double,N_SU3> new_spin_SU3;
+                const double E_old = site_energy_SU3(curr_spin.spins_SU3[i_SU3], i_SU3);
                 
                 // Generate new spin configuration
-                new_spin_SU3 = gaussian ? gaussian_move_SU3(curr_spin.spins_SU3[i_SU3], sigma) 
-                                                : gen_random_spin_SU3();
+                if (gaussian) {
+                    new_spin_SU3 = gaussian_move_SU3(curr_spin.spins_SU3[i_SU3], sigma);
+                } else {
+                    new_spin_SU3 = gen_random_spin_SU3();
+                }
                 
-                double dE = site_energy_SU3(new_spin_SU3, i_SU3) - E;
+                const double E_new = site_energy_SU3(new_spin_SU3, i_SU3);
+                const double dE = E_new - E_old;
                 
-                // Accept or reject based on Metropolis criterion
-                if (dE < 0 || random_double_lehman(0,1) < exp(-dE/T)) {
+                // Fast path for acceptance when dE <= 0
+                bool accepted = (dE <= 0);
+                if (!accepted) {
+                    // Only compute exp when needed
+                    accepted = (random_double_lehman(0,1) < exp(-dE * inv_T));
+                }
+                
+                if (accepted) {
                     curr_spin.spins_SU3[i_SU3] = new_spin_SU3;
                     accept++;
-                } 
+                }
             }
         }
         return static_cast<double>(accept) / double(total_sites);
@@ -1318,5 +1342,15 @@ class mixed_lattice
         }
         time_sections.close();     
     }
+
+    // CUDA function declarations
+    void molecular_dynamics_cuda(double T_start, double T_end, double step_size, string dir_name);
+    void M_B_t_cuda(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in, double t_B, 
+                    double pulse_amp, double pulse_width, double pulse_freq, 
+                    double T_start, double T_end, double step_size, string dir_name);
+    void M_BA_BB_t_cuda(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_1, double t_B_1,
+                       array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_2, double t_B_2,
+                       double pulse_amp, double pulse_width, double pulse_freq,
+                       double T_start, double T_end, double step_size, string dir_name);
 };
 #endif // MIXED_LATTICE_H

@@ -796,7 +796,7 @@ void parameter_sweep_BCAO_honeycomb(double min_J3, double max_J3, size_t num_J3_
         double min_energy;
         array<array<double,3>,2*24*24*1> minimal_spin_config;
 
-        for (size_t k = 0; k < 20; ++k){
+        for (size_t k = 0; k < 1; ++k){
 
             // Run simulation
             lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
