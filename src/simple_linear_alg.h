@@ -10,7 +10,15 @@
 
 using namespace std;
 
-void set_permutation(array<array<array<double, 8>, 8>,8> &A, const size_t a, const size_t b, const size_t c, double val){
+template<size_t N>
+void set_permutation(array<array<array<double, N>, N>,N> &A, const size_t a, const size_t b, const size_t c, double val){
+    if (a >= N || b >= N || c >= N) {
+        throw out_of_range("Index out of range in set_permutation");
+    }
+    if (a == b || b == c || a == c) {
+        throw invalid_argument("Indices must be distinct in set_permutation");
+    }
+    // Set the structure constant for the permutation
     A[a][b][c] = val;
     A[a][c][b] = -val;
     A[b][a][c] = -val;
@@ -19,7 +27,12 @@ void set_permutation(array<array<array<double, 8>, 8>,8> &A, const size_t a, con
     A[c][b][a] = -val;
 }
 
-
+const array<array<array<double, 3>, 3>,3> SU2_structure_constant(){
+    array<array<array<double, 3>, 3>,3> result;
+    result = {{{{{0}}}}};
+    set_permutation(result, 0, 1, 2, 1);
+    return result;
+}
 
 const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
     array<array<array<double, 8>, 8>,8> result;
@@ -36,6 +49,7 @@ const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
     return result;
 }
 
+
 // Due to the number of different basis SU(3) can take, the structure constant is not always the same
 // Even though the Cartan algebra has Gell-mann matrices as the standard basis for SU(3),
 // typical systems obtain their SU(3) nature by promoting SU(2) spins to SU(3) spins via the construction of 
@@ -44,8 +58,8 @@ const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
 // N. Papanicolaou, Unusual phases in quantum spin-1 systems, Nucl. Phys. B 305, 367 (1988).
 // the basis for this is (A^{xx}, A^{xy}, A^{xz}, A^{yx}, A^{yy}, A^{yz}, A^{zx}, A^{zy}, A^{zz})
 
-// const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
-
+const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+const extern array<array<array<double, 3>, 3>,3> SU2_structure = SU2_structure_constant();
 
 
 
@@ -326,7 +340,6 @@ array<double, 3> cross_prod_SU2(const array<double, 3>  &a,const array<double, 3
 
 
 array<double, 8> cross_prod_SU3(const array<double, 8> &a, const array<double, 8> &b) {
-    static const array<array<array<double, 8>, 8>, 8> SU3_structure = SU3_structure_constant();
     array<double, 8> result = {0};
     
     #pragma omp parallel for schedule(dynamic, 1)

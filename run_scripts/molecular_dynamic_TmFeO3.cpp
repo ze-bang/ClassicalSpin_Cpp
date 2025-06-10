@@ -184,42 +184,10 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
-
-
-    //Want energy levels to be 0, 1.94, 7.844
-
-    //Want an onsite interaction term to offset the Zeeman energy levels.
-    //Tm atoms
-
-    // double offset = 2*3/16;
-
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
     Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
-
-
-    // array<double, 64> offset_on_site = {{0}};
-    // offset_on_site[0] = offset;
-    // offset_on_site[1*8+1] = offset;
-    // offset_on_site[2*8+2] = offset;
-    // offset_on_site[3*8+3] = offset;
-    // offset_on_site[4*8+4] = offset;
-    // offset_on_site[5*8+5] = offset;
-    // offset_on_site[6*8+6] = offset;
-    // offset_on_site[7*8+7] = offset;
-    // std::cout << "Need offset: " << offset << std::endl;
-    // Tm_atoms.set_onsite_interaction(offset_on_site, 0);
-    // Tm_atoms.set_onsite_interaction(offset_on_site, 1);
-    // Tm_atoms.set_onsite_interaction(offset_on_site, 2);
-    // Tm_atoms.set_onsite_interaction(offset_on_site, 3);
-
-    // array<double, 8> offset_field = {{1,1,1,1,1,1,1,1}};
-    // offset_field = offset_field*offset;
-    // Tm_atoms.set_field(offset_field, 0);
-    // Tm_atoms.set_field(offset_field, 1);
-    // Tm_atoms.set_field(offset_field, 2);
-    // Tm_atoms.set_field(offset_field, 3);
 
 
 
