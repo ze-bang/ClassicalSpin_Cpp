@@ -1,14 +1,14 @@
 #ifndef EXPERIMENTS_H
 #define EXPERIMENTS_H
 
-#include "unitcell.h"
-#include "lattice.h"
-#include "mixed_lattice.h"
+#include "../src/unitcell.h"
+#include "../src/lattice.h"
+#include "../src/mixed_lattice.h"
 // #include "lattice_strain_field.h"
 #include <iostream>
 #include <mpi.h>
-#include "simple_linear_alg.h"
-#include "fitting.h"
+#include "../src/simple_linear_alg.h"
+#include "../src/fitting.h"
 #include <omp.h>
 
 
