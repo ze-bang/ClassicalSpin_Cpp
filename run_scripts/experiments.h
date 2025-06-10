@@ -4,11 +4,9 @@
 #include "../src/unitcell.h"
 #include "../src/lattice.h"
 #include "../src/mixed_lattice.h"
-// #include "lattice_strain_field.h"
 #include <iostream>
 #include <mpi.h>
 #include "../src/simple_linear_alg.h"
-#include "../src/fitting.h"
 #include <omp.h>
 
 
