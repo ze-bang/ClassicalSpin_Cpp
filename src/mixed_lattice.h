@@ -16,7 +16,6 @@
 #include <tuple>
 #include <mpi.h>
 #include "cuda_contractions_wrapper.cuh"
-#include "molecular_dynamics.cuh"
 
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 struct mixed_lattice_spin{
@@ -1171,6 +1170,7 @@ class mixed_lattice
 
         spin_config_SU2 k5_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
         spin_config_SU3 k5_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
+
         spin_config_SU2 k6_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
         spin_config_SU3 k6_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
 
