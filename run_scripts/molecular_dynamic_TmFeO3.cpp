@@ -320,8 +320,8 @@ int main(int argc, char** argv) {
     double D1 = (argc > 7) ? atof(argv[7]) : 0.0;
     double D2 = (argc > 8) ? atof(argv[8]) : 0.0;
     double xii = (argc > 9) ? atof(argv[9]) : 0.05;
-    double e1 = (argc > 10) ? atof(argv[10]) : 0.97;
-    double e2 = (argc > 11) ? atof(argv[11]) : 3.9744792531;
+    double e1 = (argc > 10) ? atof(argv[10]) : 4.0;
+    double e2 = (argc > 11) ? atof(argv[11]) : 0.0;
     double offset = (argc > 12) ? atof(argv[12]) : 0.0;
     double h = (argc > 13) ? atof(argv[13]) : 0.0;
 
@@ -343,7 +343,7 @@ int main(int argc, char** argv) {
     double T_start = (argc > 16) ? atof(argv[16]) : 0.0;
     double T_end = (argc > 17) ? atof(argv[17]) : 100.0;
     double T_step_size = (argc > 18) ? atof(argv[18]) : 1e-2;
-    string spin_config_file = (argc > 19) ? argv[19] : "";
+    string spin_config_file = (argc > 19) ? argv[19] : "TmFeO3_2DCS/0/spin";
     cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
     filesystem::create_directory(dir_name);
 

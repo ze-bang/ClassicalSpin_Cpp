@@ -15,6 +15,8 @@
 #include <math.h>
 #include <tuple>
 #include <mpi.h>
+#include "cuda_contractions_wrapper.cuh"
+#include "molecular_dynamics.cuh"
 
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 struct mixed_lattice_spin{
@@ -140,14 +142,16 @@ class mixed_lattice
     array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_partners_SU2;
     array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_partners_SU3;
 
-    array<array<array<array<double, N_SU2>, N_SU2>, N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> SU2_structure_tensor;
-    array<array<array<array<double, N_SU3>, N_SU3>, N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3> SU3_structure_tensor;
+    vector<double> SU2_structure_tensor;
+    vector<double> SU3_structure_tensor;
 
     size_t num_bi_SU2;
     size_t num_tri_SU2;
     size_t num_bi_SU3;
     size_t num_tri_SU3;
     size_t num_tri_SU2_SU3;
+
+    DeviceStructureTensorManager device_structure_tensor_manager;
 
     template<size_t N>
     void gen_random_spin(array<double, N> &temp_spin, const double spin_l){
@@ -314,6 +318,9 @@ class mixed_lattice
         set_up_sublattice(spin_length_SU2, spins.spins_SU2, site_pos.pos_SU2, field_SU2, onsite_interaction_SU2, bilinear_interaction_SU2, trilinear_interaction_SU2, bilinear_partners_SU2, trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
         set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, trilinear_interaction_SU3, bilinear_partners_SU3, trilinear_partners_SU3, &(atoms->SU3), num_bi_SU3, num_tri_SU3);
         
+        SU2_structure_tensor.resize(N_ATOMS_SU2 * dim1 * dim2 * dim3 * N_SU2 * N_SU2 * N_SU2);
+        SU3_structure_tensor.resize(N_ATOMS_SU3 * dim1 * dim2 * dim3 * N_SU3 * N_SU3 * N_SU3);
+
         for (size_t i=0; i < dim1; ++i){
             for (size_t j=0; j < dim2; ++j){
                 for(size_t k=0; k < dim3;++k){
@@ -338,9 +345,25 @@ class mixed_lattice
                             mixed_trilinear_interaction_SU2[partner2].push_back(swapped);
                             mixed_trilinear_partners_SU2[partner2].push_back({partner1, current_site_index});
                         }
+                        
+                        size_t SU2_struct_const_size = N_SU2 * N_SU2 * N_SU2;
+                        size_t SU3_struct_const_size = N_SU3 * N_SU3 * N_SU3;
 
-                        SU2_structure_tensor[current_site_index] = SU2_structure;
-                        SU3_structure_tensor[current_site_index] = SU3_structure;
+                        for (size_t a = 0; a < N_SU2; ++a){
+                            for (size_t b = 0; b < N_SU2; ++b){
+                                for (size_t c = 0; c < N_SU2; ++c){
+                                    SU2_structure_tensor[current_site_index*SU2_struct_const_size + a*N_SU2*N_SU2 + b*N_SU2 + c] = SU2_structure[a][b][c];
+                                }
+                            }
+                        }
+
+                        for (size_t a = 0; a < N_SU3; ++a){
+                            for (size_t b = 0; b < N_SU3; ++b){
+                                for (size_t c = 0; c < N_SU3; ++c){
+                                    SU3_structure_tensor[current_site_index*SU3_struct_const_size + a*N_SU3*N_SU3 + b*N_SU3 + c] = SU3_structure[a][b][c];
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -349,6 +372,10 @@ class mixed_lattice
         num_tri_SU2_SU3 = mixed_trilinear_partners_SU3[0].size();
         lattice_size_SU2 = dim1*dim2*dim3*N_ATOMS_SU2;
         lattice_size_SU3 = dim1*dim2*dim3*N_ATOMS_SU3;
+
+        device_structure_tensor_manager.initSU2(SU2_structure_tensor, N_SU2, N_ATOMS_SU2, dim1, dim2, dim3);
+        device_structure_tensor_manager.initSU3(SU3_structure_tensor, N_SU3, N_ATOMS_SU3, dim1, dim2, dim3);
+
         cout << "Finished setting up lattice" << endl;  
         cout << num_bi_SU2 << " " << num_tri_SU2 << " " << num_bi_SU3 << " " << num_tri_SU3 << " " << num_tri_SU2_SU3 << endl;
     };
@@ -1009,27 +1036,92 @@ class mixed_lattice
     }
 
     spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time) {
-        // First, compute all local fields for all sites
+        // Pre-compute all local fields with better cache locality
         spin_config_SU2 all_local_fields;
-        
-        #pragma omp parallel for
+
+        #pragma omp parallel for schedule(static)
         for(size_t i = 0; i < lattice_size_SU2; ++i) {
             all_local_fields[i] = get_local_field_SU2_lattice(i, current_spin_SU2, current_spin_SU3) - 
-                                  drive_field_T_SU2(curr_time, i % N_ATOMS_SU2);
+                                drive_field_T_SU2(curr_time, i % N_ATOMS_SU2);
+        }
+
+        // Use vector with reserve to avoid reallocations
+        static std::vector<double> fields_flat(lattice_size_SU2 * N_SU2);
+        static std::vector<double> spins_flat(lattice_size_SU2 * N_SU2);
+        static std::vector<double> result_flat(lattice_size_SU2 * N_SU2);
+
+        // Flatten structure tensor with better memory access pattern
+        #pragma omp parallel for schedule(static)
+        for(size_t site = 0; site < lattice_size_SU2; ++site) {
+            const size_t field_base = site * N_SU2;
+            #pragma omp simd
+            for(size_t comp = 0; comp < N_SU2; ++comp) {
+                fields_flat[field_base + comp] = all_local_fields[site][comp];
+                spins_flat[field_base + comp] = current_spin_SU2[site][comp];
+            }
         }
         
-        // Then compute all cross products at once
-        spin_config_SU2 dS;
-    
+        // Call CUDA wrapper
+        device_structure_tensor_manager.contractSU2<double, N_SU2, N_ATOMS_SU2*dim1*dim2*dim3>(
+            fields_flat,
+            spins_flat,
+            result_flat
+        );
         
+        // Convert back to spin_config_SU2
+        spin_config_SU2 dS;
+        #pragma omp parallel for schedule(static)
+        for(size_t site = 0; site < lattice_size_SU2; ++site) {
+            // Use omp simd for better vectorization
+            #pragma omp simd
+            for(size_t comp = 0; comp < N_SU2; ++comp) {
+                dS[site][comp] = result_flat[site * N_SU2 + comp];
+            }
+        }
         return dS;
     }
 
     spin_config_SU3 landau_lifshitz_SU3(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
+        spin_config_SU3 all_local_fields;
+
+        #pragma omp parallel for schedule(static)
+        for(size_t i = 0; i < lattice_size_SU3; ++i) {
+            all_local_fields[i] = get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3) - 
+                                drive_field_T_SU3(curr_time, i % N_ATOMS_SU3);
+        }
+
+        // Use vector with reserve to avoid reallocations
+        static std::vector<double> fields_flat(lattice_size_SU3 * N_SU3);
+        static std::vector<double> spins_flat(lattice_size_SU3 * N_SU3);
+        static std::vector<double> result_flat(lattice_size_SU3 * N_SU3);
+
+        // Flatten structure tensor with better memory access pattern
+        #pragma omp parallel for schedule(static)
+        for(size_t site = 0; site < lattice_size_SU3; ++site) {            
+            const size_t field_base = site * N_SU3;
+            #pragma omp simd
+            for(size_t comp = 0; comp < N_SU3; ++comp) {
+                fields_flat[field_base + comp] = all_local_fields[site][comp];
+                spins_flat[field_base + comp] = current_spin_SU3[site][comp];
+            }
+        }
+        
+        // Call CUDA wrapper
+        device_structure_tensor_manager.contractSU3<double, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3>(
+            fields_flat,
+            spins_flat,
+            result_flat
+        );
+        
+        // Convert back to spin_config_SU3
         spin_config_SU3 dS;
-        #pragma omp simd
-        for(size_t i = 0; i<lattice_size_SU3; ++i){
-            dS[i] = cross_prod_SU3(get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3)- drive_field_T_SU3(curr_time, i % N_ATOMS_SU3), current_spin_SU3[i]);
+        #pragma omp parallel for schedule(static)
+        for(size_t site = 0; site < lattice_size_SU3; ++site) {
+            // Use omp simd for better vectorization
+            #pragma omp simd
+            for(size_t comp = 0; comp < N_SU3; ++comp) {
+                dS[site][comp] = result_flat[site * N_SU3 + comp];
+            }
         }
         return dS;
     }
@@ -1079,7 +1171,6 @@ class mixed_lattice
 
         spin_config_SU2 k5_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
         spin_config_SU3 k5_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
-
         spin_config_SU2 k6_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
         spin_config_SU3 k6_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
 
@@ -1197,9 +1288,6 @@ class mixed_lattice
 
         u_SU2 = u_SU2 * a52 + tmp_SU2 * a54 + k_SU2 * step_size * b54;
         u_SU3 = u_SU3 * a52 + tmp_SU3 * a54 + k_SU3 * step_size * b54;
-
-        //u3
-        //u4
 
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> u;
         u.spins_SU2 = u_SU2;
