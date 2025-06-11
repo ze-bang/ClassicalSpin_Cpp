@@ -369,7 +369,7 @@ int main(int argc, char** argv) {
     myfile << "spin_config_file: " << spin_config_file << endl;
     myfile.close();
     // MD_TmFeO3_Fe(num_trials, 20, 1e-2, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name);
-    MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {1,0,0}, e1, e2, offset, dir_name, spin_config_file);
+    MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {0,1,0}, e1, e2, offset, dir_name, spin_config_file);
     
     return 0;
 }

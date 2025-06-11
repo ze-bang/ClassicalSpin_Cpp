@@ -500,56 +500,122 @@ def read_2D_nonlinear(dir):
 
 
 def read_2D_nonlinear_adaptive_time_step(dir):
-    directory = os.fsencode(dir)
-    tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
-    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[-20001:,1]
-    M0_T = np.loadtxt(dir + "/M_time_0/M0/Time_steps.txt")
-    M0_cutoff = np.where(M0_T >= 0)[0][0]
+    """
+    Process 2D nonlinear spectroscopy data with adaptive time steps.
+    
+    Args:
+        dir: Directory containing the spectroscopy data
+    """
+    directory = os.path.abspath(dir)  # Use absolute path for reliability
+    
+    # Load parameters once
+    params = np.loadtxt(os.path.join(directory, "param.txt"))
+    tau_start, tau_end, tau_step = params[:3]
+    
+    # Load M0 data once
+    m0_file = os.path.join(directory, "M_time_0/M0/M_t.txt")
+    m0_time_file = os.path.join(directory, "M_time_0/M0/Time_steps.txt")
+    
+    time_steps = len(np.loadtxt(m0_time_file))
 
-
+    try:
+        M0 = np.loadtxt(m0_file)[-time_steps:]
+        M0_T = np.loadtxt(m0_time_file)
+        M0_cutoff = np.where(M0_T >= 0)[0][0]
+    except (IOError, IndexError) as e:
+        print(f"Error loading M0 data: {e}")
+        return
+    
+    # Setup frequency range
     omega_range = 5
-
     w = np.arange(-omega_range, omega_range, 0.2)
-    M_NL_FF = np.zeros((len(w), len(w)))
-
-    M0_w = contract('t, wt->w', M0[M0_cutoff:], np.exp(1j*contract('w, t->wt', w, M0_T[M0_cutoff:])))
+    
+    # Precompute M0 frequency domain data
+    M0_phase = np.exp(1j * np.outer(w, M0_T[M0_cutoff:]))
+    M0_w = np.dot(M0[M0_cutoff:], M0_phase.T)
+    
+    # Initialize result array
+    M_NL_FF = np.zeros((len(w), len(w)), dtype=complex)
+    
+    # Calculate tau values
     tau = np.linspace(tau_start, tau_end, int(tau_step))
-
-    for file in sorted(os.listdir(directory)):
-        filename = os.fsdecode(file)
-        if os.path.isdir(dir + "/" + filename):
-            ph1, ph2, current_tau = filename.split("_")
-            current_tau = float(current_tau)
-            try:
-                M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[-20001:,1]
-                M1_T = np.loadtxt(dir + "/" + filename + "/M1/Time_steps.txt")
-                M1_cutoff = np.where(M1_T >= 0)[0][0]
-
-                M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[-20001:,1]
-                M01_T = np.loadtxt(dir + "/" + filename + "/M01/Time_steps.txt")
-                M01_cutoff = np.where(M01_T >= 0)[0][0]
-                M1_w = contract('t, wt->w', M1[M1_cutoff:], np.exp(1j*contract('w, t->wt', w, M1_T[M1_cutoff:])))
-                M01_w = contract('t, wt->w', M01[M01_cutoff:], np.exp(1j*contract('w, t->wt', w, M01_T[M01_cutoff:])))
-                
-                M_NL_here = M01_w - M0_w - M1_w
-                ffactau = np.exp(-1j*w*current_tau)/len(tau)
-                M_NL_FF = M_NL_FF + contract('w, t->wt', M_NL_here, ffactau)
-            except:
+    
+    # Process directories
+    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+    
+    for subdir in sorted(subdirs):
+        if subdir == "M_time_0":
+            continue
+            
+        try:
+            # Parse tau value from directory name
+            parts = subdir.split("_")
+            if len(parts) != 3:
                 continue
-    M_NL_FF = np.abs(M_NL_FF)
-    np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(np.log(M_NL_FF), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
-    # plt.pcolormesh(w, w, np.log(M_NL_FF))
-    plt.colorbar()
-    plt.savefig(dir + "_NLSPEC.pdf")
-    np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
+                
+            current_tau = float(parts[2])
+            base_path = os.path.join(directory, subdir)
+            
+            # Load M1 data
+            M1 = np.loadtxt(os.path.join(base_path, "M1/M_t.txt"))[-20001:, 1]
+            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
+            M1_cutoff = np.where(M1_T >= 0)[0][0]
+            
+            # Load M01 data
+            M01 = np.loadtxt(os.path.join(base_path, "M01/M_t.txt"))[-20001:, 1]
+            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
+            M01_cutoff = np.where(M01_T >= 0)[0][0]
+            
+            # Transform to frequency domain
+            M1_phase = np.exp(1j * np.outer(w, M1_T[M1_cutoff:]))
+            M01_phase = np.exp(1j * np.outer(w, M01_T[M01_cutoff:]))
+            
+            M1_w = np.dot(M1[M1_cutoff:], M1_phase.T)
+            M01_w = np.dot(M01[M01_cutoff:], M01_phase.T)
+            
+            # Calculate nonlinear response
+            M_NL_here = M01_w - M0_w - M1_w
+            
+            # Apply phase factor
+            ffactau = np.exp(-1j * w * current_tau) / len(tau)
+            M_NL_FF += np.outer(M_NL_here, ffactau)
+            
+        except Exception as e:
+            print(f"Error processing {subdir}: {e}")
+            continue
+    
+    # Take absolute value for plotting
+    M_NL_FF_abs = np.abs(M_NL_FF)
+    
+    # Save raw data
+    output_file = os.path.join(directory, "M_NL_FF.txt")
+    np.savetxt(output_file, M_NL_FF_abs)
+    
+    # Create plots with shared setup
+    plt.figure(figsize=(10, 8))
+    extent = [-omega_range, omega_range, -omega_range, omega_range]
+    
+    # Linear scale plot
+    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    plt.colorbar(label='Amplitude')
+    plt.xlabel('Frequency (THz)')
+    plt.ylabel('Frequency (THz)')
+    plt.title('2D Nonlinear Spectrum')
+    plt.savefig(f"{directory}_NLSPEC.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
-    plt.imshow(np.log(np.abs(M_NL_FF)), origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
-    # plt.pcolormesh(w, w, np.log(M_NL_FF))
-    plt.colorbar()
-    plt.savefig(dir + "_NLSPEC_log.pdf")
-    np.savetxt(dir + "_M_NL_FF_log.txt", M_NL_FF)
-    plt.clf()
+    
+    # Log scale plot
+    plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+    plt.colorbar(label='Log Amplitude')
+    plt.xlabel('Frequency (THz)')
+    plt.ylabel('Frequency (THz)')
+    plt.title('2D Nonlinear Spectrum (Log Scale)')
+    plt.savefig(f"{directory}_NLSPEC_log.pdf", dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    return M_NL_FF_abs
 
 def read_2D_nonlinear_tot(dir):
     directory = os.fsencode(dir)
@@ -578,7 +644,7 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # read_MD_tot("MD_TmFeO3_E_1_5")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_longer_T")
 # read_MD_tot("MD_TmFeO3_E_0.97_3.97_w_OS_5")
-read_MD_tot("TmFeO3_MD_xi=0.05")
+# read_MD_tot("TmFeO3_MD_xi=0.05")
 
 # parseDSSF(dir)
 # fullread(dir, False, "111")
@@ -586,7 +652,7 @@ read_MD_tot("TmFeO3_MD_xi=0.05")
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-# read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
+read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
 # read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0.0")
 # read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_xii=0.0_H_B")
 

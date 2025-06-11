@@ -40,11 +40,13 @@ struct mixed_lattice_spin{
         spins_SU3 = spins_in.spins_SU3;
     };
 
-    int set(const mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> &spins_in){
-        spins_SU2 = spins_in.spins_SU2;
-        spins_SU3 = spins_in.spins_SU3;
-        return 0;
-    };
+    void set(mixed_lattice_spin<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>& spins_in) noexcept {
+        using std::swap;
+        swap(spins_SU2, spins_in.spins_SU2);
+        swap(spins_SU3, spins_in.spins_SU3);
+    }
+
+
     double length(){
         double result = 0;
         for (size_t i = 0; i < lattice_size_SU2; ++i){
@@ -1034,93 +1036,54 @@ class mixed_lattice
         return field_drive_1_SU3[ind]*factor1_SU3 + field_drive_2_SU3[ind]*factor2_SU3;
     }
 
-    spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time) {
-        // Pre-compute all local fields with better cache locality
-        spin_config_SU2 all_local_fields;
-
-        #pragma omp parallel for schedule(static)
-        for(size_t i = 0; i < lattice_size_SU2; ++i) {
-            all_local_fields[i] = get_local_field_SU2_lattice(i, current_spin_SU2, current_spin_SU3) - 
-                                drive_field_T_SU2(curr_time, i % N_ATOMS_SU2);
-        }
-
-        // Use vector with reserve to avoid reallocations
-        static std::vector<double> fields_flat(lattice_size_SU2 * N_SU2);
-        static std::vector<double> spins_flat(lattice_size_SU2 * N_SU2);
-        static std::vector<double> result_flat(lattice_size_SU2 * N_SU2);
-
-        // Flatten structure tensor with better memory access pattern
-        #pragma omp parallel for schedule(static)
-        for(size_t site = 0; site < lattice_size_SU2; ++site) {
-            const size_t field_base = site * N_SU2;
-            #pragma omp simd
-            for(size_t comp = 0; comp < N_SU2; ++comp) {
-                fields_flat[field_base + comp] = all_local_fields[site][comp];
-                spins_flat[field_base + comp] = current_spin_SU2[site][comp];
-            }
-        }
-        
-        // Call CUDA wrapper
-        device_structure_tensor_manager.contractSU2<double, N_SU2, N_ATOMS_SU2*dim1*dim2*dim3>(
-            fields_flat,
-            spins_flat,
-            result_flat
-        );
-        
-        // Convert back to spin_config_SU2
+    spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
         spin_config_SU2 dS;
+        
+        // Pre-compute drive field factors once
+        const double factor1_SU2 = field_drive_amp_SU2 * exp(-pow((curr_time - t_B_1_SU2) / (2 * field_drive_width_SU2), 2)) * cos(2 * M_PI * field_drive_freq_SU2 * (curr_time - t_B_1_SU2));
+        const double factor2_SU2 = field_drive_amp_SU2 * exp(-pow((curr_time - t_B_2_SU2) / (2 * field_drive_width_SU2), 2)) * cos(2 * M_PI * field_drive_freq_SU2 * (curr_time - t_B_2_SU2));
+        
         #pragma omp parallel for schedule(static)
-        for(size_t site = 0; site < lattice_size_SU2; ++site) {
-            // Use omp simd for better vectorization
-            #pragma omp simd
-            for(size_t comp = 0; comp < N_SU2; ++comp) {
-                dS[site][comp] = result_flat[site * N_SU2 + comp];
-            }
+        for(size_t i = 0; i < lattice_size_SU2; ++i){
+            const size_t atom_index = i % N_ATOMS_SU2;
+            
+            // Compute drive field inline to avoid function call overhead
+            array<double, N_SU2> drive_field = field_drive_1_SU2[atom_index] * factor1_SU2 + field_drive_2_SU2[atom_index] * factor2_SU2;
+            
+            // Get local field
+            array<double, N_SU2> local_field = get_local_field_SU2_lattice(i, current_spin_SU2, current_spin_SU3);
+            
+            // Compute effective field
+            local_field = local_field - drive_field;
+            
+            // Compute cross product
+            dS[i] = cross_prod_SU2(local_field, current_spin_SU2[i]);
         }
         return dS;
     }
 
     spin_config_SU3 landau_lifshitz_SU3(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
-        spin_config_SU3 all_local_fields;
-
-        #pragma omp parallel for schedule(static)
-        for(size_t i = 0; i < lattice_size_SU3; ++i) {
-            all_local_fields[i] = get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3) - 
-                                drive_field_T_SU3(curr_time, i % N_ATOMS_SU3);
-        }
-
-        // Use vector with reserve to avoid reallocations
-        static std::vector<double> fields_flat(lattice_size_SU3 * N_SU3);
-        static std::vector<double> spins_flat(lattice_size_SU3 * N_SU3);
-        static std::vector<double> result_flat(lattice_size_SU3 * N_SU3);
-
-        // Flatten structure tensor with better memory access pattern
-        #pragma omp parallel for schedule(static)
-        for(size_t site = 0; site < lattice_size_SU3; ++site) {            
-            const size_t field_base = site * N_SU3;
-            #pragma omp simd
-            for(size_t comp = 0; comp < N_SU3; ++comp) {
-                fields_flat[field_base + comp] = all_local_fields[site][comp];
-                spins_flat[field_base + comp] = current_spin_SU3[site][comp];
-            }
-        }
-        
-        // Call CUDA wrapper
-        device_structure_tensor_manager.contractSU3<double, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3>(
-            fields_flat,
-            spins_flat,
-            result_flat
-        );
-        
-        // Convert back to spin_config_SU3
         spin_config_SU3 dS;
+        
+        // Pre-compute drive field factors once
+        const double factor1_SU3 = field_drive_amp_SU3 * exp(-pow((curr_time - t_B_1_SU3) / (2 * field_drive_width_SU3), 2)) * cos(2 * M_PI * field_drive_freq_SU3 * (curr_time - t_B_1_SU3));
+        const double factor2_SU3 = field_drive_amp_SU3 * exp(-pow((curr_time - t_B_2_SU3) / (2 * field_drive_width_SU3), 2)) * cos(2 * M_PI * field_drive_freq_SU3 * (curr_time - t_B_2_SU3));
+        
         #pragma omp parallel for schedule(static)
-        for(size_t site = 0; site < lattice_size_SU3; ++site) {
-            // Use omp simd for better vectorization
-            #pragma omp simd
-            for(size_t comp = 0; comp < N_SU3; ++comp) {
-                dS[site][comp] = result_flat[site * N_SU3 + comp];
-            }
+        for(size_t i = 0; i < lattice_size_SU3; ++i){
+            const size_t atom_index = i % N_ATOMS_SU3;
+            
+            // Compute drive field inline to avoid function call overhead
+            array<double, N_SU3> drive_field = field_drive_1_SU3[atom_index] * factor1_SU3 + field_drive_2_SU3[atom_index] * factor2_SU3;
+            
+            // Get local field
+            array<double, N_SU3> local_field = get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3);
+            
+            // Compute effective field
+            local_field = local_field - drive_field;
+            
+            // Compute cross product
+            dS[i] = cross_prod_SU3(local_field, current_spin_SU3[i]);
         }
         return dS;
     }
@@ -1244,89 +1207,202 @@ class mixed_lattice
         return new_spins;
     }
 
-    mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> SSPRK53_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
-        double a30 = 0.355909775063327;
-        double a32 = 0.644090224936674;
-        double a40 = 0.367933791638137;
-        double a43 = 0.632066208361863;
-        double a52 = 0.237593836598569;
-        double a54 = 0.762406163401431;
-        double b10 = 0.377268915331368;
-        double b21 = 0.377268915331368;
-        double b32 = 0.242995220537396;
-        double b43 = 0.238458932846290;
-        double b54 =0.287632146308408;
-        double c1 = 0.377268915331368;
-        double c2 = 0.754537830662736;
-        double c3 = 0.728985661612188;
-        double c4 = 0.699226135931670;
+    void SSPRK53_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
+        // Pre-compute all step size multiplications
+        constexpr double a30 = 0.355909775063327;
+        constexpr double a32 = 0.644090224936674;
+        constexpr double a40 = 0.367933791638137;
+        constexpr double a43 = 0.632066208361863;
+        constexpr double a52 = 0.237593836598569;
+        constexpr double a54 = 0.762406163401431;
+        constexpr double b10 = 0.377268915331368;
+        constexpr double b21 = 0.377268915331368;
+        constexpr double b32 = 0.242995220537396;
+        constexpr double b43 = 0.238458932846290;
+        constexpr double b54 = 0.287632146308408;
+        constexpr double c1 = 0.377268915331368;
+        constexpr double c2 = 0.754537830662736;
+        constexpr double c3 = 0.728985661612188;
+        constexpr double c4 = 0.699226135931670;
 
+        // Pre-compute step size multiplications
+        const double b10_h = b10 * step_size;
+        const double b21_h = b21 * step_size;
+        const double b32_h = b32 * step_size;
+        const double b43_h = b43 * step_size;
+        const double b54_h = b54 * step_size;
+        const double c1_h = c1 * step_size;
+        const double c2_h = c2 * step_size;
+        const double c3_h = c3 * step_size;
+        const double c4_h = c4 * step_size;
 
-        spin_config_SU2 tmp_SU2 = curr_spins.spins_SU2 + landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * b10 * step_size;
-        spin_config_SU3 tmp_SU3 = curr_spins.spins_SU3 + landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * b10 * step_size;
+        // Allocate all working arrays upfront
+        spin_config_SU2 tmp_SU2, k_SU2, u_SU2;
+        spin_config_SU3 tmp_SU3, k_SU3, u_SU3;
 
-        spin_config_SU2 k_SU2 = landau_lifshitz_SU2(tmp_SU2, tmp_SU3, curr_time + c1*step_size);
-        spin_config_SU3 k_SU3 = landau_lifshitz_SU3(tmp_SU2, tmp_SU3, curr_time + c1*step_size);
+        // Stage 1: Compute initial derivatives in parallel
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                k_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
+                tmp_SU2 = curr_spins.spins_SU2 + k_SU2 * b10_h;
+            }
+            #pragma omp section
+            {
+                k_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
+                tmp_SU3 = curr_spins.spins_SU3 + k_SU3 * b10_h;
+            }
+        }
 
-        spin_config_SU2 u_SU2 = tmp_SU2 + k_SU2 * step_size * b21;
-        spin_config_SU3 u_SU3 = tmp_SU3 + k_SU3 * step_size * b21;
-        //u3
-        k_SU2 = landau_lifshitz_SU2(u_SU2, u_SU3, curr_time + c2*step_size);
-        k_SU3 = landau_lifshitz_SU3(u_SU2, u_SU3, curr_time + c2*step_size);
+        // Stage 2
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                k_SU2 = landau_lifshitz_SU2(tmp_SU2, tmp_SU3, curr_time + c1_h);
+                u_SU2 = tmp_SU2 + k_SU2 * b21_h;
+            }
+            #pragma omp section
+            {
+                k_SU3 = landau_lifshitz_SU3(tmp_SU2, tmp_SU3, curr_time + c1_h);
+                u_SU3 = tmp_SU3 + k_SU3 * b21_h;
+            }
+        }
 
-        tmp_SU2 = curr_spins.spins_SU2 * a30 + u_SU2 * a32 + k_SU2 * step_size * b32;
-        tmp_SU3 = curr_spins.spins_SU3 * a30 + u_SU3 * a32 + k_SU3 * step_size * b32;
+        // Stage 3
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                k_SU2 = landau_lifshitz_SU2(u_SU2, u_SU3, curr_time + c2_h);
+                tmp_SU2 = curr_spins.spins_SU2 * a30 + u_SU2 * a32 + k_SU2 * b32_h;
+            }
+            #pragma omp section
+            {
+                k_SU3 = landau_lifshitz_SU3(u_SU2, u_SU3, curr_time + c2_h);
+                tmp_SU3 = curr_spins.spins_SU3 * a30 + u_SU3 * a32 + k_SU3 * b32_h;
+            }
+        }
 
-        k_SU2 = landau_lifshitz_SU2(tmp_SU2, tmp_SU3, curr_time + c3*step_size);
-        k_SU3 = landau_lifshitz_SU3(tmp_SU2, tmp_SU3, curr_time + c3*step_size);
-        //u4
-        tmp_SU2 = curr_spins.spins_SU2 * a40 + tmp_SU2 * a43 + k_SU2 * step_size * b43;
-        tmp_SU3 = curr_spins.spins_SU3 * a40 + tmp_SU3 * a43 + k_SU3 * step_size * b43;
+        // Stage 4
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                k_SU2 = landau_lifshitz_SU2(tmp_SU2, tmp_SU3, curr_time + c3_h);
+                // Fuse operations to reduce memory access
+                tmp_SU2 = curr_spins.spins_SU2 * a40 + tmp_SU2 * a43 + k_SU2 * b43_h;
+            }
+            #pragma omp section
+            {
+                k_SU3 = landau_lifshitz_SU3(tmp_SU2, tmp_SU3, curr_time + c3_h);
+                tmp_SU3 = curr_spins.spins_SU3 * a40 + tmp_SU3 * a43 + k_SU3 * b43_h;
+            }
+        }
 
-        k_SU2 = landau_lifshitz_SU2(tmp_SU2, tmp_SU3, curr_time + c4*step_size);
-        k_SU3 = landau_lifshitz_SU3(tmp_SU2, tmp_SU3, curr_time + c4*step_size);
+        // Stage 5 and final result
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> result;
+        
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                k_SU2 = landau_lifshitz_SU2(tmp_SU2, tmp_SU3, curr_time + c4_h);
+                result.spins_SU2 = u_SU2 * a52 + tmp_SU2 * a54 + k_SU2 * b54_h;
+            }
+            #pragma omp section
+            {
+                k_SU3 = landau_lifshitz_SU3(tmp_SU2, tmp_SU3, curr_time + c4_h);
+                result.spins_SU3 = u_SU3 * a52 + tmp_SU3 * a54 + k_SU3 * b54_h;
+            }
+        }
 
-        u_SU2 = u_SU2 * a52 + tmp_SU2 * a54 + k_SU2 * step_size * b54;
-        u_SU3 = u_SU3 * a52 + tmp_SU3 * a54 + k_SU3 * step_size * b54;
-
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> u;
-        u.spins_SU2 = u_SU2;
-        u.spins_SU3 = u_SU3;
-        return u;
+        // Update the current spins with the result using the set method
+        curr_spins.spins_SU2 = std::move(result.spins_SU2);
+        curr_spins.spins_SU3 = std::move(result.spins_SU3);
     }
-
 
     void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
+        
+        // Pre-allocate time vector with estimated size
+        const size_t estimated_steps = static_cast<size_t>((T_end - T_start) / step_size) + 1;
+        vector<double> time;
+        time.reserve(estimated_steps);
+        
+        // Write initial state once
         write_to_file_pos(dir_name + "/pos");
         write_to_file_spin(dir_name + "/spin");
-        write_to_file_spin(dir_name + "/spin_t");
+        
+        // Open file handles once instead of reopening for each write
+        ofstream spin_file_SU2(dir_name + "/spin_t_SU2.txt");
+        ofstream spin_file_SU3(dir_name + "/spin_t_SU3.txt");
+        
+        if (!spin_file_SU2.is_open() || !spin_file_SU3.is_open()) {
+            cerr << "Error opening output files" << endl;
+            return;
+        }
+        
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
-
+        
         double tol = 1e-6;
-
-        int check_frequency = 10;
         double currT = T_start;
-        size_t count = 1;
-        vector<double> time;
-
+        size_t count = 0;
+        
+        // Write initial state
         time.push_back(currT);
-
+        
+        // Pre-allocate buffers for file writing
+        constexpr size_t BUFFER_SIZE = 8192;
+        spin_file_SU2.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+        spin_file_SU3.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+        
+        // Main time evolution loop with buffered output
+        const int output_frequency = 10; // Write every N steps instead of every step
+        
         while(currT < T_end){
-            spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
-            write_to_file(dir_name + "/spin_t", spin_t);
-            currT = currT + step_size;
-            cout << "Time: " << currT << endl;
+            SSPRK53_step(step_size, spin_t, currT, tol);
+            
+            // Buffer writes - only write every output_frequency steps
+            if (count % output_frequency == 0) {
+                // Write SU2 spins
+                for(size_t i = 0; i < lattice_size_SU2; ++i){
+                    for(size_t j = 0; j < 3; ++j){
+                        spin_file_SU2 << spin_t.spins_SU2[i][j] << " ";
+                    }
+                    spin_file_SU2 << "\n";
+                }
+                
+                // Write SU3 spins
+                for(size_t i = 0; i < lattice_size_SU3; ++i){
+                    for(size_t j = 0; j < 8; ++j){
+                        spin_file_SU3 << spin_t.spins_SU3[i][j] << " ";
+                    }
+                    spin_file_SU3 << "\n";
+                }
+            }
+            
+            currT += step_size;
             time.push_back(currT);
             count++;
+            
+            // Progress reporting with less frequency
+            if (count % 1000 == 0) {
+                cout << "Time: " << currT << " (" << (100.0 * (currT - T_start) / (T_end - T_start)) << "%)" << endl;
+            }
         }
-
-        ofstream time_sections;
-        time_sections.open(dir_name + "/Time_steps.txt");
-        for(size_t i = 0; i<count; ++i){
-            time_sections << time[i] << endl;
+        
+        // Close file handles
+        spin_file_SU2.close();
+        spin_file_SU3.close();
+        
+        // Write time steps
+        ofstream time_sections(dir_name + "/Time_steps.txt");
+        for(const auto& t : time){
+            time_sections << t << "\n";
         }
         time_sections.close();
     }
@@ -1341,90 +1417,234 @@ class mixed_lattice
         myfile.close();
     }
 
-    array<double,N_SU2>  magnetization_local(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t){
+    array<double,N_SU2> magnetization_local(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t) {
         array<double,N_SU2> mag = {{0}};
-        for (size_t i=0; i< lattice_size_SU2; ++i){
-            mag = mag + spin_t.spins_SU2[i];
+        
+        #pragma omp parallel
+        {
+            array<double,N_SU2> local_mag = {{0}};
+            
+            #pragma omp for nowait
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    local_mag[j] += spin_t.spins_SU2[i][j];
+                }
+            }
+            
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    mag[j] += local_mag[j];
+                }
+            }
         }
-        return mag/double(lattice_size_SU2);
+        
+        const double inv_size = 1.0 / double(lattice_size_SU2);
+        for (size_t j = 0; j < N_SU2; ++j) {
+            mag[j] *= inv_size;
+        }
+        
+        return mag;
     }
 
-    array<double,N_SU2>  magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t){
+    array<double,N_SU2> magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t) {
         array<double,N_SU2> mag = {{0}};
-        for (size_t i=0; i< lattice_size_SU2; ++i){
-            mag = mag + spin_t.spins_SU2[i]*pow(-1,i);
+        
+        #pragma omp parallel
+        {
+            array<double,N_SU2> local_mag = {{0}};
+            
+            #pragma omp for nowait
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                const int sign = 1 - 2 * (i & 1); // Efficient (-1)^i calculation
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    local_mag[j] += spin_t.spins_SU2[i][j] * sign;
+                }
+            }
+            
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    mag[j] += local_mag[j];
+                }
+            }
         }
-        return mag/double(lattice_size_SU2);
+        
+        const double inv_size = 1.0 / double(lattice_size_SU2);
+        for (size_t j = 0; j < N_SU2; ++j) {
+            mag[j] *= inv_size;
+        }
+        
+        return mag;
     }
 
     void M_B_t(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
+        
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
-        double tol = 1e-6;
-
-        double currT = T_start;
-        size_t count = 1;
+        
+        const double tol = 1e-6;
+        const size_t estimated_steps = static_cast<size_t>((T_end - T_start) / step_size) + 1;
+        
+        // Pre-allocate vectors
         vector<double> time;
-        time.push_back(currT);
-        write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
-        write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
-
-        set_pulse_SU2(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
-        while(currT < T_end){
-            // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
-            // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
-            spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
-            write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
-            write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
-            // write_to_file(dir_name + "/spin_t.txt", spin_t);
-            currT = currT + step_size;
-            time.push_back(currT);
-            count++;
+        time.reserve(estimated_steps);
+        
+        // Open file handles once
+        ofstream mag_file_f(dir_name + "/M_t_f.txt");
+        ofstream mag_file(dir_name + "/M_t.txt");
+        
+        if (!mag_file_f.is_open() || !mag_file.is_open()) {
+            cerr << "Error opening magnetization files" << endl;
+            return;
         }
+        
+        // Set up buffering for better I/O performance
+        constexpr size_t BUFFER_SIZE = 8192;
+        mag_file_f.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+        mag_file.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+        
+        double currT = T_start;
+        time.push_back(currT);
+        
+        // Write initial magnetization
+        auto mag_f = magnetization_local(spin_t);
+        auto mag = magnetization_local_antiferromagnetic(spin_t);
+        
+        for(size_t j = 0; j < N_SU2; ++j){
+            mag_file_f << mag_f[j] << " ";
+            mag_file << mag[j] << " ";
+        }
+        mag_file_f << "\n";
+        mag_file << "\n";
+        
+        set_pulse_SU2(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
+        
+        // Main time evolution loop
+        while(currT < T_end){
+            SSPRK53_step(step_size, spin_t, currT, tol);
+            
+            // Calculate magnetizations in parallel
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                mag_f = magnetization_local(spin_t);
+                
+                #pragma omp section
+                mag = magnetization_local_antiferromagnetic(spin_t);
+            }
+            
+            // Write magnetizations
+            for(size_t j = 0; j < N_SU2; ++j){
+                mag_file_f << mag_f[j] << " ";
+                mag_file << mag[j] << " ";
+            }
+            mag_file_f << "\n";
+            mag_file << "\n";
+            
+            currT += step_size;
+            time.push_back(currT);
+        }
+        
         reset_pulse();
-        // pulse_info.close();dfsbf
-        ofstream time_sections;
-        time_sections.open(dir_name + "/Time_steps.txt");
-        for(size_t i = 0; i<count; ++i){
-            time_sections << time[i] << endl;
+        
+        // Close magnetization files
+        mag_file_f.close();
+        mag_file.close();
+        
+        // Write time steps
+        ofstream time_sections(dir_name + "/Time_steps.txt");
+        for(const auto& t : time){
+            time_sections << t << "\n";
         }
         time_sections.close();      
-    };
+    }
 
     void M_BA_BB_t(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_1, double t_B_1, array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
-        // simulated_annealing(Temp_start, Temp_end, n_anneal, overrelaxation_rate);
-        // write_to_file_pos(dir_name + "/pos.txt");
-        // write_to_file_spin(dir_name + "/spin_t.txt", spins);
         mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
+        
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }
-        double tol = 1e-6;
-        double currT = T_start;
-        size_t count = 1;
+        
+        const double tol = 1e-6;
+        const size_t estimated_steps = static_cast<size_t>((T_end - T_start) / step_size) + 1;
+        
+        // Pre-allocate vectors
         vector<double> time;
-
-        time.push_back(currT);
-        write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
-        write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
-        set_pulse_SU2(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
-        while(currT < T_end){
-            spin_t.set(SSPRK53_step(step_size, spin_t, currT, tol));
-            write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
-            write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", magnetization_local_antiferromagnetic(spin_t));
-            currT = currT + step_size;
-            time.push_back(currT);
-            count++;
-        }  
-        reset_pulse();
-        ofstream time_sections;
-        time_sections.open(dir_name + "/Time_steps.txt");
-        for(size_t i = 0; i<count; ++i){
-            time_sections << time[i] << endl;
+        time.reserve(estimated_steps);
+        
+        // Open file handles once
+        ofstream mag_file_f(dir_name + "/M_t_f.txt");
+        ofstream mag_file(dir_name + "/M_t.txt");
+        
+        if (!mag_file_f.is_open() || !mag_file.is_open()) {
+            cerr << "Error opening magnetization files" << endl;
+            return;
         }
-        time_sections.close();     
+        
+        // Set up buffering for better I/O performance
+        constexpr size_t BUFFER_SIZE = 8192;
+        mag_file_f.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+        mag_file.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+        
+        double currT = T_start;
+        time.push_back(currT);
+        
+        // Write initial magnetization
+        auto mag_f = magnetization_local(spin_t);
+        auto mag = magnetization_local_antiferromagnetic(spin_t);
+        
+        for(size_t j = 0; j < N_SU2; ++j){
+            mag_file_f << mag_f[j] << " ";
+            mag_file << mag[j] << " ";
+        }
+        mag_file_f << "\n";
+        mag_file << "\n";
+        
+        set_pulse_SU2(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
+        
+        // Main time evolution loop
+        while(currT < T_end){
+            SSPRK53_step(step_size, spin_t, currT, tol);
+            
+            // Calculate magnetizations in parallel
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                mag_f = magnetization_local(spin_t);
+                
+                #pragma omp section
+                mag = magnetization_local_antiferromagnetic(spin_t);
+            }
+            
+            // Write magnetizations
+            for(size_t j = 0; j < N_SU2; ++j){
+                mag_file_f << mag_f[j] << " ";
+                mag_file << mag[j] << " ";
+            }
+            mag_file_f << "\n";
+            mag_file << "\n";
+            
+            currT += step_size;
+            time.push_back(currT);
+        }
+        
+        reset_pulse();
+        
+        // Close magnetization files
+        mag_file_f.close();
+        mag_file.close();
+        
+        // Write time steps
+        ofstream time_sections(dir_name + "/Time_steps.txt");
+        for(const auto& t : time){
+            time_sections << t << "\n";
+        }
+        time_sections.close();
     }
+
 };
 #endif // MIXED_LATTICE_H
