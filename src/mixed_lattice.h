@@ -777,6 +777,27 @@ class mixed_lattice
         myfile.close();
     }
 
+
+    void write_to_file_spin_t(string filename){
+        ofstream myfile;
+        myfile.open(filename+"_SU2.txt", ios::app);
+        for(size_t i = 0; i<lattice_size_SU2; ++i){
+            for(size_t j = 0; j<3; ++j){
+                myfile << spins.spins_SU2[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+        myfile.open(filename+"_SU3.txt", ios::app);
+        for(size_t i = 0; i<lattice_size_SU3; ++i){
+            for(size_t j = 0; j<8; ++j){
+                myfile << spins.spins_SU3[i][j] << " ";
+            }
+            myfile << endl;
+        }
+        myfile.close();
+    }
+
     void write_to_file_pos(string filename){
         ofstream myfile;
         myfile.open(filename+"_SU2.txt");
@@ -1564,7 +1585,7 @@ class mixed_lattice
     }
 
 
-    void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name){
+    void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name, bool verbose= false) {
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
         }

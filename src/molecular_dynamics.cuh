@@ -787,26 +787,25 @@ public:
 
     __host__
     void molecular_dynamics_cuda(double T_start, double T_end, double step_size, string dir_name, 
-                                 size_t output_frequency = 1, bool use_adaptive_stepping = false) {
+                                 size_t output_frequency = 1, bool use_adaptive_stepping = false, bool verbose = false) {
         if (dir_name != "") {
             filesystem::create_directory(dir_name);
-            this->write_to_file_spin(dir_name + "/spin_initial");
-            this->write_to_file_pos(dir_name + "/spin_pos");
         }
-        
+        const size_t estimated_steps = static_cast<size_t>((T_end - T_start) / step_size) + 1;
+        vector<double> time;
+        time.reserve(estimated_steps);
         // Copy initial spins to device if not already there
         copy_spins_to_device();
         
         double current_time = T_start;
         size_t step_count = 0;
-        
         while (current_time < T_end) {
             // Perform SSPRK53 time step on GPU
             SSPRK53_step_cuda(step_size, current_time, 1e-6);
             
             current_time += step_size;
             step_count++;
-
+            time.push_back(current_time);
             // Print progress
             if (step_count % 100 == 0) {
                 std::cout << "Step: " << step_count << ", Time: " << current_time << std::endl;
@@ -816,24 +815,28 @@ public:
             if (step_count % output_frequency == 0 && dir_name != "") {
                 copy_spins_to_host();
                 
+                if (verbose) {
+                    this->write_to_file_spin_t(dir_name + "/spin_t");
+                }
+
                 // Write output
                 auto mag = this->magnetization_local(this->spins);
-                this->write_to_file_magnetization_local_SU2(dir_name + "/magnetization_evolution.txt", mag);
+                this->write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", mag);
                 auto mag_afm = this->magnetization_local_antiferromagnetic(this->spins);
-                this->write_to_file_magnetization_local_SU2(dir_name + "/magnetization_afm_evolution.txt", mag_afm);
+                this->write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", mag_afm);
                 auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-                this->write_to_file_magnetization_local_SU3(dir_name + "/magnetization_SU3_evolution.txt", mag_SU3);
+                this->write_to_file_magnetization_local_SU3(dir_name + "/M_t_f_SU3.txt", mag_SU3);
                 auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-                this->write_to_file_magnetization_local_SU3(dir_name + "/magnetization_afm_SU3_evolution.txt", mag_afm_SU3);
+                this->write_to_file_magnetization_local_SU3(dir_name + "/M_t_SU3.txt", mag_afm_SU3);
             }
         }
         
-        // Copy final state back to host
-        copy_spins_to_host();
-        
-        if (dir_name != "") {
-            this->write_to_file_spin(dir_name + "/spin_final");
+        // Write time steps
+        ofstream time_sections(dir_name + "/Time_steps.txt");
+        for(const auto& t : time){
+            time_sections << t << "\n";
         }
+        time_sections.close();
     }
     
     // CUDA implementation of M_B_t

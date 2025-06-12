@@ -510,7 +510,7 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
         else{
             MC.simulated_annealing(Temp_start, Temp_end , 10000, 0, 100, false);
         }
-        MC.molecular_dynamics_cuda(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
+        MC.molecular_dynamics_cuda(T_start, T_end, T_step_size, dir+"/"+std::to_string(i), 1, false, true);
     }
 
     int finalized;
