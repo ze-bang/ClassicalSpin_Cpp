@@ -49,14 +49,14 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-# P1 = 2*np.pi * np.array([1, 0, 3])
-# P2 = 2*np.pi * np.array([3, 0, 3])
-# P3 = 2*np.pi * np.array([3, 0, 1])
-# P4 = 2*np.pi * np.array([3, 2, 1])
-P1 = 2*np.pi * np.array([0, 0, 0])
-P2 = 2*np.pi * np.array([0, 0, 1])
-P3 = 2*np.pi * np.array([0, 1, 1])
-P4 = 2*np.pi * np.array([1, 1, 1])
+P1 = 2*np.pi * np.array([1, 0, 3])
+P2 = 2*np.pi * np.array([3, 0, 3])
+P3 = 2*np.pi * np.array([3, 0, 1])
+P4 = 2*np.pi * np.array([3, 2, 1])
+# P1 = 2*np.pi * np.array([-1, 1, 1])
+# P2 = 2*np.pi * np.array([0, 1, 1])
+# P3 = 2*np.pi * np.array([1, 1, 1])
+# P4 = 2*np.pi * np.array([1, 1, 1])
 
 
 # P1 = 2*np.pi * np.array([2, 0, 1])
@@ -346,8 +346,10 @@ def parseSSSF(dir):
 
 
 def read_MD_tot(dir):
+    print("Begin MD reading")
     directory = os.fsencode(dir)
     for file in sorted(os.listdir(directory)):
+        print(file)
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             w0 = 0
@@ -508,9 +510,6 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     """
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
-    # Load parameters once
-    params = np.loadtxt(os.path.join(directory, "param.txt"))
-    tau_start, tau_end, tau_step = params[:3]
     
     # Load M0 data once
     m0_file = os.path.join(directory, "M_time_0/M0/M_t.txt")
@@ -519,7 +518,7 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     time_steps = len(np.loadtxt(m0_time_file))
 
     try:
-        M0 = np.loadtxt(m0_file)[-time_steps:]
+        M0 = np.linalg.norm(np.loadtxt(m0_file)[-time_steps:], axis=1)
         M0_T = np.loadtxt(m0_time_file)
         M0_cutoff = np.where(M0_T >= 0)[0][0]
     except (IOError, IndexError) as e:
@@ -537,8 +536,21 @@ def read_2D_nonlinear_adaptive_time_step(dir):
     # Initialize result array
     M_NL_FF = np.zeros((len(w), len(w)), dtype=complex)
     
-    # Calculate tau values
-    tau = np.linspace(tau_start, tau_end, int(tau_step))
+    # Calculate tau values by extracting from directory names
+    tau_values = []
+    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+    
+    for subdir in subdirs:
+        if subdir.startswith("M_time_") and subdir != "M_time_0":
+            try:
+                parts = subdir.split("_")
+                if len(parts) >= 3:
+                    tau_val = float(parts[2])
+                    tau_values.append(tau_val)
+            except (ValueError, IndexError):
+                continue
+    
+    tau = np.array(sorted(tau_values))
     
     # Process directories
     subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
@@ -557,12 +569,11 @@ def read_2D_nonlinear_adaptive_time_step(dir):
             base_path = os.path.join(directory, subdir)
             
             # Load M1 data
-            M1 = np.loadtxt(os.path.join(base_path, "M1/M_t.txt"))[-20001:, 1]
+            M1 = np.linalg.norm(np.loadtxt(os.path.join(base_path, "M1/M_t.txt"))[-time_steps:], axis=1)
             M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
             M1_cutoff = np.where(M1_T >= 0)[0][0]
-            
             # Load M01 data
-            M01 = np.loadtxt(os.path.join(base_path, "M01/M_t.txt"))[-20001:, 1]
+            M01 = np.linalg.norm(np.loadtxt(os.path.join(base_path, "M01/M_t.txt"))[-time_steps:], axis=1)
             M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
             M01_cutoff = np.where(M01_T >= 0)[0][0]
             
@@ -633,12 +644,13 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
+
 # obenton_to_xx_zz()
 #
 # dir = "MD_TmFeO3_CEF_E_Cali_0.5_20_test"
 # dir = "MD_TmFeO3_CEF_E_Cali_-0.97_-3.89_test"
-dir = "TmFeO3_MD_Test_xii=0.05meV"
-# read_MD_tot("TmFeO3_MD_Test_xii=0.05meV")
+# dir = "TmFeO3_MD_Test_xii=0.05meV"
+read_MD_tot("TmFeO3_2DCS")
 # read_MD_tot("MD_TmFeO3_E_0_3.97")
 # read_MD_tot("MD_TmFeO3_E_0.97_0")
 # read_MD_tot("MD_TmFeO3_E_1_5")
@@ -652,8 +664,8 @@ dir = "TmFeO3_MD_Test_xii=0.05meV"
 # parseSSSF(dir)
 # parseDSSF(dir)
 
-read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-# read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_Tzero_xii=0.0")
+# read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
+# read_2D_nonlinear_adaptive_time_step("TFO_2DCS_H_B_xi=0.05/1")
 # read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_xii=0.0_H_B")
 
 # A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)

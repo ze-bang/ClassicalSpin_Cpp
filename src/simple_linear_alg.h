@@ -27,14 +27,14 @@ void set_permutation(array<array<array<double, N>, N>,N> &A, const size_t a, con
     A[c][b][a] = -val;
 }
 
-const array<array<array<double, 3>, 3>,3> SU2_structure_constant(){
+inline const array<array<array<double, 3>, 3>,3> SU2_structure_constant(){
     array<array<array<double, 3>, 3>,3> result;
     result = {{{{{0}}}}};
     set_permutation(result, 0, 1, 2, 1);
     return result;
 }
 
-const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
+inline const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
     array<array<array<double, 8>, 8>,8> result;
     result = {{{{{0}}}}};
     set_permutation(result, 0, 1, 2, 1);
@@ -58,8 +58,8 @@ const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
 // N. Papanicolaou, Unusual phases in quantum spin-1 systems, Nucl. Phys. B 305, 367 (1988).
 // the basis for this is (A^{xx}, A^{xy}, A^{xz}, A^{yx}, A^{yy}, A^{yz}, A^{zx}, A^{zy}, A^{zz})
 
-const extern array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
-const extern array<array<array<double, 3>, 3>,3> SU2_structure = SU2_structure_constant();
+inline const array<array<array<double, 8>, 8>,8> SU3_structure = SU3_structure_constant();
+inline const array<array<array<double, 3>, 3>,3> SU2_structure = SU2_structure_constant();
 
 
 
@@ -211,7 +211,7 @@ T dot(const array<T, N>  &a, const array<T, N>  &b) {
 }
 
 
-array<double, 3> multiply_SU2(const array<double, 9>  &M, const array<double, 3>  &a){
+inline array<double, 3> multiply_SU2(const array<double, 9>  &M, const array<double, 3>  &a){
     array<double, 3>  result;
     
     #pragma omp simd
@@ -222,7 +222,7 @@ array<double, 3> multiply_SU2(const array<double, 9>  &M, const array<double, 3>
     return result;
 }
 
-array<double, 8> multiply_SU3(const array<double, 64>  &M, const array<double, 8>  &a){
+inline array<double, 8> multiply_SU3(const array<double, 64>  &M, const array<double, 8>  &a){
     array<double, 8>  result;
     
     #pragma omp simd
@@ -237,7 +237,7 @@ array<double, 8> multiply_SU3(const array<double, 64>  &M, const array<double, 8
 }
 
 
-double contract_SU2(const array<double, 3>  &a, const array<double, 9>  &M, const array<double, 3>  &b){
+inline double contract_SU2(const array<double, 3>  &a, const array<double, 9>  &M, const array<double, 3>  &b){
     array<double, 3> temp;
     
     #pragma omp simd
@@ -248,7 +248,7 @@ double contract_SU2(const array<double, 3>  &a, const array<double, 9>  &M, cons
     return a[0] * temp[0] + a[1] * temp[1] + a[2] * temp[2];
 }
 
-double contract_SU3(const array<double, 8> &a, const array<double, 64> &M, const array<double, 8> &b) {
+inline double contract_SU3(const array<double, 8> &a, const array<double, 64> &M, const array<double, 8> &b) {
     array<double, 8> temp = {0};
     
     #pragma omp simd
@@ -269,7 +269,7 @@ double contract_SU3(const array<double, 8> &a, const array<double, 64> &M, const
 }
 
 template<size_t N>
-double contract(const array<double, N>  &a, const array<double, N*N>  &M, const array<double, N>  &b) {
+inline double contract(const array<double, N>  &a, const array<double, N*N>  &M, const array<double, N>  &b) {
     double result = 0;
     if constexpr (N == 3){
         result = contract_SU2(a, M, b);
@@ -282,7 +282,7 @@ double contract(const array<double, N>  &a, const array<double, N*N>  &M, const 
 
 
 template<size_t N_1, size_t N_2, size_t N_3>
-double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+inline double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const array<double, N_1>  &a, const array<double, N_2>  &b, const array<double, N_3>  &c) {
     double result = 0;
 
     #pragma omp parallel for collapse(3)
@@ -299,7 +299,7 @@ double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const array<doub
 
 
 template<size_t N, size_t N_2, size_t N_3>
-array<double, N/(N_2*N_3)> contract_trilinear_field(const array<double, N>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
+inline array<double, N/(N_2*N_3)> contract_trilinear_field(const array<double, N>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
     constexpr size_t N_1 = N/(N_2*N_3);
     array<double, N_1> result = {0};
     
@@ -317,7 +317,7 @@ array<double, N/(N_2*N_3)> contract_trilinear_field(const array<double, N>  &M, 
 
 
 template <size_t N>
-array<double, N>  multiply(const array<double, N*N>  &M, const array<double, N>  &a){
+inline array<double, N>  multiply(const array<double, N*N>  &M, const array<double, N>  &a){
     array<double, N>  result;
     if constexpr (N == 3){
         result = multiply_SU2(M, a);
@@ -329,7 +329,7 @@ array<double, N>  multiply(const array<double, N*N>  &M, const array<double, N> 
 
 
 
-array<double, 3> cross_prod_SU2(const array<double, 3>  &a,const array<double, 3> &b){
+inline array<double, 3> cross_prod_SU2(const array<double, 3>  &a,const array<double, 3> &b){
     array<double, 3> result;
     result[0] = a[1]*b[2] - a[2]*b[1];
     result[1] = a[2]*b[0] - a[0]*b[2];
@@ -339,7 +339,7 @@ array<double, 3> cross_prod_SU2(const array<double, 3>  &a,const array<double, 3
 
 
 
-array<double, 8> cross_prod_SU3(const array<double, 8> &a, const array<double, 8> &b) {
+inline array<double, 8> cross_prod_SU3(const array<double, 8> &a, const array<double, 8> &b) {
     array<double, 8> result = {0};
     
     #pragma omp parallel for schedule(dynamic, 1)
@@ -448,13 +448,13 @@ array<array<double, M>, N> operator-(const array<array<double, M>, N> &a,const a
 
 static unsigned __int128 state;
 
-void seed_lehman(unsigned __int128 seed)
+inline void seed_lehman(unsigned __int128 seed)
 {
 	state = seed << 1 | 1;
 }
 
 
-uint64_t lehman_next(void)
+inline uint64_t lehman_next(void)
 {
 	uint64_t result = state >> 64;
 	// GCC cannot write 128-bit literals, so we use an expression
@@ -466,20 +466,20 @@ uint64_t lehman_next(void)
 }
 
 
-double random_double_lehman(double min, double max){
+inline double random_double_lehman(double min, double max){
     return min + (max - min) * (lehman_next()) / ((uint64_t)-1);
 }
 
-int random_int_lehman(int size){
+inline int random_int_lehman(int size){
     return lehman_next() % size;
 }
 
-double random_double(double min, double max, std::mt19937 &gen){
+inline double random_double(double min, double max, std::mt19937 &gen){
     std::uniform_real_distribution<double> dis(min, max);
     return dis(gen);
 }
 
-int random_int(int min, int max, std::mt19937 &gen){
+inline int random_int(int min, int max, std::mt19937 &gen){
     std::uniform_int_distribution dis(min, max);
     return dis(gen);
 }
