@@ -381,7 +381,7 @@ def read_MD_SU2(dir, w0, wmax, t_evolved):
     S = np.loadtxt(dir + "/spin_t_SU2.txt")
     Slength = int(len(S)/len(P))
     S = S.reshape((Slength, len(P), 3))
-    # T = np.loadtxt("/scratch/y/ybkim/zhouzb79/MD_TmFeO3_xii=0/Time_steps.txt")[:len(S)]
+    S = S[-len(T):]  # Ensure S has the same length as T
 
     w = np.arange(w0, wmax, 1/t_evolved)
     A = DSSF(w, DSSF_K, S, P, T, False)
@@ -436,6 +436,7 @@ def read_MD_SU3(dir, w0, wmax, t_evolved):
     S = np.loadtxt(dir + "/spin_t_SU3.txt")
     Slength = int(len(S)/len(P))
     S = S.reshape((Slength, len(P), 8))
+    S = S[-len(T):]  # Ensure S has the same length as T
 
     w = np.arange(w0, wmax, 1/t_evolved)
     A = DSSF(w, DSSF_K, S, P, T, False)
@@ -463,7 +464,6 @@ def read_MD_SU3(dir, w0, wmax, t_evolved):
     plt.savefig(dir+"DSSF_SU3.pdf")
     plt.clf()
     return A
-
 
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)

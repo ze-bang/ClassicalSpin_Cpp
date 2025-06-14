@@ -15,7 +15,12 @@
 #include <math.h>
 #include <tuple>
 #include <mpi.h>
+#include <atomic>
+#include <mutex>
 #include "cuda_contractions_wrapper.cuh"
+// #include <boost>
+#include <boost/numeric/odeint.hpp>
+
 
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 struct mixed_lattice_spin{
@@ -83,20 +88,20 @@ struct mixed_lattice_pos{
     };
 };
 
-template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim3>
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
 class mixed_lattice
 {   
     public:
 
-    typedef array<array<double,N_SU2>,N_ATOMS_SU2*dim1*dim2*dim3> spin_config_SU2;
-    typedef array<array<double,N_SU3>,N_ATOMS_SU3*dim1*dim2*dim3> spin_config_SU3;
+    typedef array<array<double,N_SU2>,N_ATOMS_SU2*dim1*dim2*dim> spin_config_SU2;
+    typedef array<array<double,N_SU3>,N_ATOMS_SU3*dim1*dim2*dim> spin_config_SU3;
 
     mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> UC;
     size_t lattice_size_SU2;
     size_t lattice_size_SU3;
     double spin_length_SU2, spin_length_SU3;
-    mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3> spins;
-    mixed_lattice_pos<dim1*dim2*dim3*N_ATOMS_SU2, dim1*dim2*dim3*N_ATOMS_SU3>  site_pos;
+    mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> spins;
+    mixed_lattice_pos<dim1*dim2*dim*N_ATOMS_SU2, dim1*dim2*dim*N_ATOMS_SU3>  site_pos;
 
     double field_drive_freq_SU2;
     double field_drive_amp_SU2;
@@ -109,39 +114,39 @@ class mixed_lattice
     double t_B_1_SU3;
     double t_B_2_SU3;
     //Look up table for SU2
-    array<array<double,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> field_SU2;
+    array<array<double,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim> field_SU2;
     array<array<double,N_SU2>, N_ATOMS_SU2> field_drive_1_SU2;
     array<array<double,N_SU2>, N_ATOMS_SU2> field_drive_2_SU2;
 
-    array<array<double, N_SU2 * N_SU2>, N_ATOMS_SU2*dim1*dim2*dim3> onsite_interaction_SU2;
-    array<vector<array<double, N_SU2 * N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_interaction_SU2;    
-    array<vector<array<double, N_SU2 * N_SU2 * N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_interaction_SU2;
+    array<array<double, N_SU2 * N_SU2>, N_ATOMS_SU2*dim1*dim2*dim> onsite_interaction_SU2;
+    array<vector<array<double, N_SU2 * N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim> bilinear_interaction_SU2;    
+    array<vector<array<double, N_SU2 * N_SU2 * N_SU2>>, N_ATOMS_SU2*dim1*dim2*dim> trilinear_interaction_SU2;
 
-    array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim3> bilinear_partners_SU2;
-    array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> trilinear_partners_SU2;
+    array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim> bilinear_partners_SU2;
+    array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim> trilinear_partners_SU2;
 
     //Look up table for SU3
-    array<array<double,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim3> field_SU3;
+    array<array<double,N_SU3>, N_ATOMS_SU3*dim1*dim2*dim> field_SU3;
     array<array<double,N_SU3>, N_ATOMS_SU3> field_drive_1_SU3;
     array<array<double,N_SU3>, N_ATOMS_SU3> field_drive_2_SU3;
 
-    array<array<double, N_SU3 * N_SU3>, N_ATOMS_SU2*dim1*dim2*dim3> onsite_interaction_SU3;
-    array<vector<array<double, N_SU3 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_interaction_SU3;
-    array<vector<array<double, N_SU3 * N_SU3 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_interaction_SU3;
+    array<array<double, N_SU3 * N_SU3>, N_ATOMS_SU2*dim1*dim2*dim> onsite_interaction_SU3;
+    array<vector<array<double, N_SU3 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim> bilinear_interaction_SU3;
+    array<vector<array<double, N_SU3 * N_SU3 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim> trilinear_interaction_SU3;
 
-    array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim3> bilinear_partners_SU3;
-    array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> trilinear_partners_SU3;
+    array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim> bilinear_partners_SU3;
+    array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim> trilinear_partners_SU3;
 
     //Look up table for SU2 and SU3 mix
-    array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_bilinear_interaction_SU2;
-    array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_bilinear_partners_SU2;
-    array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_bilinear_partners_SU3;
+    array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_interaction_SU2;
+    array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_partners_SU2;
+    array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim> mixed_bilinear_partners_SU3;
 
-    array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_interaction_SU2;
-    array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_interaction_SU3;
+    array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_trilinear_interaction_SU2;
+    array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim> mixed_trilinear_interaction_SU3;
 
-    array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim3> mixed_trilinear_partners_SU2;
-    array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim3> mixed_trilinear_partners_SU3;
+    array<vector<array<size_t, 2>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_trilinear_partners_SU2;
+    array<vector<array<size_t, 2>>, N_ATOMS_SU3*dim1*dim2*dim> mixed_trilinear_partners_SU3;
 
     vector<double> SU2_structure_tensor;
     vector<double> SU3_structure_tensor;
@@ -227,159 +232,478 @@ class mixed_lattice
         return temp_spin*spin_length_SU3;
     }
 
-
-
     size_t flatten_index(size_t i, size_t j, size_t k, size_t l, size_t N_ATOMS){
-        return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
+        return i*dim2*dim*N_ATOMS+ j*dim*N_ATOMS+ k*N_ATOMS + l;
     }
     
-    size_t periodic_boundary(int i, size_t dim){
+    size_t periodic_boundary(int i, size_t D){
         if(i < 0){
-            return size_t((dim+i) % dim);
+            return size_t((D+i) % D);
         }
         else{
-            return size_t(i % dim);
+            return size_t(i % D);
         }
     }
 
     size_t flatten_index_periodic_boundary(int i, int j, int k, int l, size_t N_ATOMS){
-        return periodic_boundary(i, dim1)*dim2*dim3*N_ATOMS+ periodic_boundary(j, dim2)*dim3*N_ATOMS+ periodic_boundary(k, dim3)*N_ATOMS + l;
+        return periodic_boundary(i, dim1)*dim2*dim*N_ATOMS+ periodic_boundary(j, dim2)*dim*N_ATOMS+ periodic_boundary(k, dim)*N_ATOMS + l;
     }
 
     template<size_t N, size_t lattice_size, size_t N_ATOMS>
-    void set_up_sublattice(const double spin_length, array<array<double,N>, lattice_size>  &spins, array<array<double,3>, lattice_size> &site_pos, array<array<double,N>, lattice_size> &field, array<array<double, N * N>, lattice_size> &onsite_interaction, array<vector<array<double, N * N>>, lattice_size> &bilinear_interaction, array<vector<array<double, N*N*N>>, lattice_size> &trilinear_interaction, array<vector<size_t>, lattice_size> &bilinear_partners, array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners, UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri){
-        array<array<double,3>, N_ATOMS> basis = atoms->lattice_pos;
-        array<array<double,3>, 3> unit_vector = atoms->lattice_vectors;
+    void set_up_sublattice(const double spin_length, array<array<double,N>, lattice_size> &spins, 
+                            array<array<double,3>, lattice_size> &site_pos,
+                            array<array<double,N>, lattice_size> &field, 
+                            array<array<double, N * N>, lattice_size> &onsite_interaction,
+                            array<vector<array<double, N * N>>, lattice_size> &bilinear_interaction,
+                            array<vector<array<double, N*N*N>>, lattice_size> &trilinear_interaction,
+                            array<vector<size_t>, lattice_size> &bilinear_partners,
+                            array<vector<array<size_t, 2>>, lattice_size> &trilinear_partners,
+                            UnitCell<N, N_ATOMS> *atoms, size_t &num_bi, size_t &num_tri) {
+        
+        // Pre-compute and cache frequently used values
+        const array<array<double,3>, N_ATOMS> &basis = atoms->lattice_pos;
+        const array<array<double,3>, 3> &unit_vector = atoms->lattice_vectors;
 
-        for (size_t i=0; i<dim1; ++i){
-            for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k<dim3;++k){
-                    for (size_t l=0; l<N_ATOMS;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l,N_ATOMS);
-
-                        site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j) + unit_vector[2]*int(k) + basis[l];
-
+        // Main lattice setup with parallel processing across lattice sites
+        #pragma omp parallel for collapse(3) schedule(static)
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    // Thread-local temporary vectors to reduce mutex contention
+                    vector<vector<array<double, N * N>>> thread_bilinear_interaction(N_ATOMS);
+                    vector<vector<size_t>> thread_bilinear_partners(N_ATOMS);
+                    vector<vector<array<double, N*N*N>>> thread_trilinear_interaction(N_ATOMS);
+                    vector<vector<array<size_t, 2>>> thread_trilinear_partners(N_ATOMS);
+                    
+                    for (size_t l = 0; l < N_ATOMS; ++l) {
+                        size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS);
+                        
+                        // Calculate position (vectorizable)
+                        #pragma omp simd
+                        for (int d = 0; d < 3; d++) {
+                            site_pos[current_site_index][d] = 
+                                unit_vector[0][d] * int(i) + 
+                                unit_vector[1][d] * int(j) + 
+                                unit_vector[2][d] * int(k) + 
+                                basis[l][d];
+                        }
+                        
+                        // Generate random spin
                         gen_random_spin(spins[current_site_index], spin_length);
+                        
+                        // Copy field and onsite interaction (use std::copy for better optimization)
                         field[current_site_index] = atoms->field[l];
                         onsite_interaction[current_site_index] = atoms->onsite_interaction[l];
-
+                        
+                        // Handle bilinear interactions
                         auto bilinear_matched = atoms->bilinear_interaction.equal_range(l);
-                        for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
-                            bilinear<N> J = m->second;
-                            size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner,N_ATOMS);
-                            bilinear_interaction[current_site_index].push_back(J.bilinear_interaction);
-                            bilinear_partners[current_site_index].push_back(partner);
-                            bilinear_interaction[partner].push_back(J.bilinear_interaction);
-                            bilinear_partners[partner].push_back(current_site_index);
-                        }
-
-                        auto trilinear_matched = atoms->trilinear_interaction.equal_range(l);
-                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
-                            trilinear<N> J = m->second;
-                            size_t partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1,N_ATOMS);
-                            size_t partner2 = flatten_index_periodic_boundary(i+J.offset2[0], j+J.offset2[1], k+J.offset2[2], J.partner2,N_ATOMS);
+                        for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m) {
+                            const bilinear<N> &J = m->second;
+                            size_t partner = flatten_index_periodic_boundary(
+                                int(i) + J.offset[0], 
+                                int(j) + J.offset[1], 
+                                int(k) + J.offset[2], 
+                                J.partner, N_ATOMS);
                             
-                            trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
-                            trilinear_partners[current_site_index].push_back({partner1, partner2});
-
-                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
-                            trilinear_partners[partner1].push_back({partner2, current_site_index});
-
-                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction, N, N, N), N, N, N));
-                            trilinear_partners[partner2].push_back({current_site_index, partner1});
+                            // Store in thread-local vectors
+                            thread_bilinear_interaction[l].push_back(J.bilinear_interaction);
+                            thread_bilinear_partners[l].push_back(partner);
+                        }
+                        
+                        // Handle trilinear interactions
+                        auto trilinear_matched = atoms->trilinear_interaction.equal_range(l);
+                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m) {
+                            const trilinear<N> &J = m->second;
+                            size_t partner1 = flatten_index_periodic_boundary(
+                                i + J.offset1[0], 
+                                j + J.offset1[1], 
+                                k + J.offset1[2], 
+                                J.partner1, N_ATOMS);
+                            size_t partner2 = flatten_index_periodic_boundary(
+                                i + J.offset2[0], 
+                                j + J.offset2[1], 
+                                k + J.offset2[2], 
+                                J.partner2, N_ATOMS);
+                            
+                            // Store in thread-local vectors
+                            thread_trilinear_interaction[l].push_back(J.trilinear_interaction);
+                            thread_trilinear_partners[l].push_back({partner1, partner2});
+                        }
+                    }
+                    
+                    // Now merge thread-local data into global arrays using critical sections
+                    #pragma omp critical
+                    {
+                        for (size_t l = 0; l < N_ATOMS; ++l) {
+                            size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS);
+                            
+                            // Add bilinear interactions from this thread
+                            for (size_t idx = 0; idx < thread_bilinear_interaction[l].size(); ++idx) {
+                                const auto &J = thread_bilinear_interaction[l][idx];
+                                size_t partner = thread_bilinear_partners[l][idx];
+                                
+                                bilinear_interaction[current_site_index].push_back(J);
+                                bilinear_partners[current_site_index].push_back(partner);
+                                
+                                // Add symmetric interaction
+                                bilinear_interaction[partner].push_back(J);
+                                bilinear_partners[partner].push_back(current_site_index);
+                            }
+                            
+                            // Add trilinear interactions from this thread
+                            for (size_t idx = 0; idx < thread_trilinear_interaction[l].size(); ++idx) {
+                                const auto &J = thread_trilinear_interaction[l][idx];
+                                const auto &partners = thread_trilinear_partners[l][idx];
+                                size_t partner1 = partners[0];
+                                size_t partner2 = partners[1];
+                                
+                                trilinear_interaction[current_site_index].push_back(J);
+                                trilinear_partners[current_site_index].push_back({partner1, partner2});
+                                
+                                // Add symmetric interactions with proper tensor transposition
+                                auto J_transposed1 = transpose3D(J, N, N, N);
+                                trilinear_interaction[partner1].push_back(J_transposed1);
+                                trilinear_partners[partner1].push_back({partner2, current_site_index});
+                                
+                                auto J_transposed2 = transpose3D(transpose3D(J, N, N, N), N, N, N);
+                                trilinear_interaction[partner2].push_back(J_transposed2);
+                                trilinear_partners[partner2].push_back({current_site_index, partner1});
+                            }
                         }
                     }
                 }
             }
         }
 
+        // Only need to check one site to get interaction counts since all sites have the same structure
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
     }
     
-    mixed_lattice(mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> *atoms, double spin_length_SU2_in, double spin_length_SU3_in): UC(*atoms){
-
-        srand(time(NULL));
-        seed_lehman(rand()*2+1);
+    mixed_lattice(mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> *atoms, double spin_length_SU2_in, double spin_length_SU3_in): UC(*atoms) {
+        // Initialize random seed with better entropy source
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(1, std::numeric_limits<int>::max());
+        seed_lehman(dis(gen));
         lehman_next();
 
-        field_drive_freq_SU2 = 0;
-        field_drive_amp_SU2 = 0;
-        field_drive_width_SU2 = 1;
-        field_drive_freq_SU3 = 0;
-        field_drive_amp_SU3 = 0;
-        field_drive_width_SU3 = 1;
-        t_B_1_SU2 = 0;
-        t_B_2_SU2 = 0;
-        t_B_1_SU3 = 0;
-        t_B_2_SU3 = 0;
+        // Initialize member variables with direct initialization
         spin_length_SU2 = spin_length_SU2_in;
         spin_length_SU3 = spin_length_SU3_in;
+        field_drive_freq_SU2 = 0.0;
+        field_drive_amp_SU2 = 0.0;
+        field_drive_width_SU2 = 1.0;
+        field_drive_freq_SU3 = 0.0;
+        field_drive_amp_SU3 = 0.0;
+        field_drive_width_SU3 = 1.0;
+        t_B_1_SU2 = 0.0;
+        t_B_2_SU2 = 0.0;
+        t_B_1_SU3 = 0.0;
+        t_B_2_SU3 = 0.0;
 
-        set_up_sublattice(spin_length_SU2, spins.spins_SU2, site_pos.pos_SU2, field_SU2, onsite_interaction_SU2, bilinear_interaction_SU2, trilinear_interaction_SU2, bilinear_partners_SU2, trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
-        set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, trilinear_interaction_SU3, bilinear_partners_SU3, trilinear_partners_SU3, &(atoms->SU3), num_bi_SU3, num_tri_SU3);
+        // Set up sublattices in parallel
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                set_up_sublattice(spin_length_SU2, spins.spins_SU2, site_pos.pos_SU2, 
+                                field_SU2, onsite_interaction_SU2, bilinear_interaction_SU2, 
+                                trilinear_interaction_SU2, bilinear_partners_SU2, 
+                                trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
+            }
+            
+            #pragma omp section
+            {
+                set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, 
+                                field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, 
+                                trilinear_interaction_SU3, bilinear_partners_SU3, 
+                                trilinear_partners_SU3, &(atoms->SU3), num_bi_SU3, num_tri_SU3);
+            }
+        }
         
-        SU2_structure_tensor.resize(N_ATOMS_SU2 * dim1 * dim2 * dim3 * N_SU2 * N_SU2 * N_SU2);
-        SU3_structure_tensor.resize(N_ATOMS_SU3 * dim1 * dim2 * dim3 * N_SU3 * N_SU3 * N_SU3);
+        // Pre-allocate tensor storage with exact sizes
+        constexpr size_t SU2_struct_const_size = N_SU2 * N_SU2 * N_SU2;
+        constexpr size_t SU3_struct_const_size = N_SU3 * N_SU3 * N_SU3;
+        SU2_structure_tensor.resize(N_ATOMS_SU2 * dim1 * dim2 * dim * SU2_struct_const_size);
+        SU3_structure_tensor.resize(N_ATOMS_SU3 * dim1 * dim2 * dim * SU3_struct_const_size);
+        
+        // Pre-compute lattice sizes
+        lattice_size_SU2 = dim1 * dim2 * dim * N_ATOMS_SU2;
+        lattice_size_SU3 = dim1 * dim2 * dim * N_ATOMS_SU3;
 
-        for (size_t i=0; i < dim1; ++i){
-            for (size_t j=0; j < dim2; ++j){
-                for(size_t k=0; k < dim3;++k){
-                    for (size_t l=0; l < N_ATOMS_SU3;++l){
-                        size_t current_site_index = flatten_index(i,j,k,l,N_ATOMS_SU3);         
-
+        // Process trilinear mixed interactions in parallel across outer loop dimensions
+        #pragma omp parallel for collapse(3) schedule(static)
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    // Thread-local vectors to avoid synchronization overhead
+                    vector<vector<array<double, N_SU2 * N_SU2 * N_SU3>>> local_mixed_trilinear_interaction_SU2(N_ATOMS_SU2);
+                    vector<vector<array<size_t, 2>>> local_mixed_trilinear_partners_SU2(N_ATOMS_SU2);
+                    
+                    for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
+                        const size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU3);
+                        
+                        // Process mixed trilinear interactions
                         auto trilinear_matched = atoms->trilinear_SU2_SU3.equal_range(l);
-                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
-                            mixed_trilinear<N_SU2, N_SU3> J = m->second;
-                            size_t partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1, N_ATOMS_SU2);
-                            size_t partner2 = flatten_index_periodic_boundary(i+J.offset2[0], j+J.offset2[1], k+J.offset2[2], J.partner2, N_ATOMS_SU2);
+                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m) {
+                            const mixed_trilinear<N_SU2, N_SU3>& J = m->second;
+                            const size_t partner1 = flatten_index_periodic_boundary(
+                                i + J.offset1[0], j + J.offset1[1], k + J.offset1[2], J.partner1, N_ATOMS_SU2);
+                            const size_t partner2 = flatten_index_periodic_boundary(
+                                i + J.offset2[0], j + J.offset2[1], k + J.offset2[2], J.partner2, N_ATOMS_SU2);
                             
-                            mixed_trilinear_interaction_SU3[current_site_index].push_back(J.trilinear_interaction);
-                            mixed_trilinear_partners_SU3[current_site_index].push_back({partner1, partner2});
-
+                            // Add directly to site-specific array for SU3
+                            #pragma omp critical(SU3_update)
+                            {
+                                mixed_trilinear_interaction_SU3[current_site_index].push_back(J.trilinear_interaction);
+                                mixed_trilinear_partners_SU3[current_site_index].push_back({partner1, partner2});
+                            }
+                            
+                            // Precompute transposed tensors once
                             const auto transposed = transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2);
                             const auto swapped = swap_axis_3D(transposed, N_SU2, N_SU2, N_SU3);
-
-                            mixed_trilinear_interaction_SU2[partner1].push_back(transposed);
-                            mixed_trilinear_partners_SU2[partner1].push_back({partner2, current_site_index});
-
-                            mixed_trilinear_interaction_SU2[partner2].push_back(swapped);
-                            mixed_trilinear_partners_SU2[partner2].push_back({partner1, current_site_index});
-                        }
-                        
-                        size_t SU2_struct_const_size = N_SU2 * N_SU2 * N_SU2;
-                        size_t SU3_struct_const_size = N_SU3 * N_SU3 * N_SU3;
-
-                        for (size_t a = 0; a < N_SU2; ++a){
-                            for (size_t b = 0; b < N_SU2; ++b){
-                                for (size_t c = 0; c < N_SU2; ++c){
-                                    SU2_structure_tensor[current_site_index*SU2_struct_const_size + a*N_SU2*N_SU2 + b*N_SU2 + c] = SU2_structure[a][b][c];
-                                }
+                            
+                            // Store in thread-local vectors to avoid synchronization
+                            if (local_mixed_trilinear_interaction_SU2.size() <= partner1) {
+                                local_mixed_trilinear_interaction_SU2.resize(partner1 + 1);
+                                local_mixed_trilinear_partners_SU2.resize(partner1 + 1);
                             }
+                            if (local_mixed_trilinear_interaction_SU2.size() <= partner2) {
+                                local_mixed_trilinear_interaction_SU2.resize(partner2 + 1);
+                                local_mixed_trilinear_partners_SU2.resize(partner2 + 1);
+                            }
+                            
+                            local_mixed_trilinear_interaction_SU2[partner1].push_back(transposed);
+                            local_mixed_trilinear_partners_SU2[partner1].push_back({partner2, current_site_index});
+                            
+                            local_mixed_trilinear_interaction_SU2[partner2].push_back(swapped);
+                            local_mixed_trilinear_partners_SU2[partner2].push_back({partner1, current_site_index});
                         }
-
-                        for (size_t a = 0; a < N_SU3; ++a){
-                            for (size_t b = 0; b < N_SU3; ++b){
-                                for (size_t c = 0; c < N_SU3; ++c){
-                                    SU3_structure_tensor[current_site_index*SU3_struct_const_size + a*N_SU3*N_SU3 + b*N_SU3 + c] = SU3_structure[a][b][c];
-                                }
+                    }
+                    
+                    // Merge thread-local data into global arrays
+                    #pragma omp critical(SU2_update)
+                    {
+                        for (size_t idx = 0; idx < local_mixed_trilinear_interaction_SU2.size(); ++idx) {
+                            for (size_t v = 0; v < local_mixed_trilinear_interaction_SU2[idx].size(); ++v) {
+                                mixed_trilinear_interaction_SU2[idx].push_back(
+                                    local_mixed_trilinear_interaction_SU2[idx][v]);
+                                mixed_trilinear_partners_SU2[idx].push_back(
+                                    local_mixed_trilinear_partners_SU2[idx][v]);
                             }
                         }
                     }
                 }
             }
         }
-
+        
+        // Initialize structure tensors in parallel
+        // For SU2 structure tensor - these are constant across sites, so calculate once
+        array<array<array<double, N_SU2>, N_SU2>, N_SU2> SU2_structure_cache;
+        bool SU2_structure_initialized = false;
+        
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (size_t site_idx = 0; site_idx < lattice_size_SU2; ++site_idx) {
+            for (size_t a = 0; a < N_SU2; ++a) {
+                // Lazily initialize the structure tensor cache once per thread
+                if (!SU2_structure_initialized) {
+                    #pragma omp critical(SU2_struct_init)
+                    {
+                        if (!SU2_structure_initialized) {
+                            for (size_t i = 0; i < N_SU2; ++i)
+                                for (size_t j = 0; j < N_SU2; ++j)
+                                    for (size_t k = 0; k < N_SU2; ++k)
+                                        SU2_structure_cache[i][j][k] = SU2_structure[i][j][k];
+                            SU2_structure_initialized = true;
+                        }
+                    }
+                }
+                
+                const size_t base_idx = site_idx * SU2_struct_const_size + a * N_SU2 * N_SU2;
+                #pragma omp simd collapse(2)
+                for (size_t b = 0; b < N_SU2; ++b) {
+                    for (size_t c = 0; c < N_SU2; ++c) {
+                        SU2_structure_tensor[base_idx + b * N_SU2 + c] = SU2_structure_cache[a][b][c];
+                    }
+                }
+            }
+        }
+        
+        // For SU3 structure tensor
+        array<array<array<double, N_SU3>, N_SU3>, N_SU3> SU3_structure_cache;
+        bool SU3_structure_initialized = false;
+        
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (size_t site_idx = 0; site_idx < lattice_size_SU3; ++site_idx) {
+            for (size_t a = 0; a < N_SU3; ++a) {
+                // Lazily initialize the structure tensor cache once per thread
+                if (!SU3_structure_initialized) {
+                    #pragma omp critical(SU3_struct_init)
+                    {
+                        if (!SU3_structure_initialized) {
+                            for (size_t i = 0; i < N_SU3; ++i)
+                                for (size_t j = 0; j < N_SU3; ++j)
+                                    for (size_t k = 0; k < N_SU3; ++k)
+                                        SU3_structure_cache[i][j][k] = SU3_structure[i][j][k];
+                            SU3_structure_initialized = true;
+                        }
+                    }
+                }
+                
+                const size_t base_idx = site_idx * SU3_struct_const_size + a * N_SU3 * N_SU3;
+                #pragma omp simd collapse(2)
+                for (size_t b = 0; b < N_SU3; ++b) {
+                    for (size_t c = 0; c < N_SU3; ++c) {
+                        SU3_structure_tensor[base_idx + b * N_SU3 + c] = SU3_structure_cache[a][b][c];
+                    }
+                }
+            }
+        }
+        
+        // Get the number of trilinear SU2-SU3 interactions (should be same for all sites)
         num_tri_SU2_SU3 = mixed_trilinear_partners_SU3[0].size();
-        lattice_size_SU2 = dim1*dim2*dim3*N_ATOMS_SU2;
-        lattice_size_SU3 = dim1*dim2*dim3*N_ATOMS_SU3;
+        
+        // Initialize device structure tensor manager - can be done in parallel with above work
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            device_structure_tensor_manager.initSU2(SU2_structure_tensor, N_SU2, N_ATOMS_SU2, dim1, dim2, dim);
+            
+            #pragma omp section
+            device_structure_tensor_manager.initSU3(SU3_structure_tensor, N_SU3, N_ATOMS_SU3, dim1, dim2, dim);
+        }
 
-        device_structure_tensor_manager.initSU2(SU2_structure_tensor, N_SU2, N_ATOMS_SU2, dim1, dim2, dim3);
-        device_structure_tensor_manager.initSU3(SU3_structure_tensor, N_SU3, N_ATOMS_SU3, dim1, dim2, dim3);
-
-        cout << "Finished setting up lattice" << endl;  
+        cout << "Finished setting up lattice" << endl;
         cout << num_bi_SU2 << " " << num_tri_SU2 << " " << num_bi_SU3 << " " << num_tri_SU3 << " " << num_tri_SU2_SU3 << endl;
-    };
+    }
+
+    void print_lattice_info(const string& filename = "lattice_info_CPU.txt") const {
+        ofstream outfile(filename);
+        if (!outfile.is_open()) {
+            cerr << "Error: Could not open file " << filename << " for writing." << endl;
+            return;
+        }
+
+        outfile << "Lattice size SU2: " << lattice_size_SU2 << endl;
+        outfile << "Lattice size SU3: " << lattice_size_SU3 << endl;
+        outfile << "Number of bilinear interactions SU2: " << num_bi_SU2 << endl;
+        outfile << "Number of trilinear interactions SU2: " << num_tri_SU2 << endl;
+        outfile << "Number of bilinear interactions SU3: " << num_bi_SU3 << endl;
+        outfile << "Number of trilinear interactions SU3: " << num_tri_SU3 << endl;
+        outfile << "Number of mixed trilinear interactions SU2-SU3: " << num_tri_SU2_SU3 << endl;
+
+        // Print SU2 interactions
+        outfile << "\nSU2 Interactions:" << endl;
+        outfile << "-----------------" << endl;
+
+        // Print onsite interactions for first few sites
+        outfile << "Onsite interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+            outfile << "Site " << i << ": ";
+            for (size_t j = 0; j < N_SU2 * N_SU2; ++j) {
+                outfile << onsite_interaction_SU2[i][j] << " ";
+            }
+            outfile << endl;
+        }
+
+        // Print bilinear interactions and partners for first few sites
+        outfile << "\nBilinear interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+            outfile << "Site " << i << " has " << bilinear_partners_SU2[i].size() << " bilinear partners:" << endl;
+            for (size_t j = 0; j < bilinear_partners_SU2[i].size(); ++j) {
+                outfile << "  Partner: " << bilinear_partners_SU2[i][j] << ", Matrix: ";
+                for (size_t k = 0; k < N_SU2 * N_SU2; ++k) {
+                    outfile << bilinear_interaction_SU2[i][j][k] << " ";
+                }
+                outfile << endl;
+            }
+        }
+
+        // Print trilinear interactions and partners for first few sites
+        outfile << "\nTrilinear interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+            outfile << "Site " << i << " has " << trilinear_partners_SU2[i].size() << " trilinear partners:" << endl;
+            for (size_t j = 0; j < trilinear_partners_SU2[i].size(); ++j) {
+                outfile << "  Partners: (" << trilinear_partners_SU2[i][j][0] << ", " 
+                     << trilinear_partners_SU2[i][j][1] << ")" << endl;
+            }
+        }
+
+        // Print SU3 interactions
+        outfile << "\nSU3 Interactions:" << endl;
+        outfile << "-----------------" << endl;
+
+        // Print onsite interactions for first few sites
+        outfile << "Onsite interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+            outfile << "Site " << i << ": ";
+            for (size_t j = 0; j < N_SU3 * N_SU3; ++j) {
+                outfile << onsite_interaction_SU3[i][j] << " ";
+            }
+            outfile << endl;
+        }
+
+        // Print bilinear interactions and partners for first few sites
+        outfile << "\nBilinear interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+            outfile << "Site " << i << " has " << bilinear_partners_SU3[i].size() << " bilinear partners:" << endl;
+            for (size_t j = 0; j < bilinear_partners_SU3[i].size(); ++j) {
+                outfile << "  Partner: " << bilinear_partners_SU3[i][j] << ", Matrix: ";
+                for (size_t k = 0; k < N_SU3 * N_SU3; ++k) {
+                    outfile << bilinear_interaction_SU3[i][j][k] << " ";
+                }
+                outfile << endl;
+            }
+        }
+
+        // Print trilinear interactions and partners for first few sites
+        outfile << "\nTrilinear interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+            outfile << "Site " << i << " has " << trilinear_partners_SU3[i].size() << " trilinear partners:" << endl;
+            for (size_t j = 0; j < trilinear_partners_SU3[i].size(); ++j) {
+                outfile << "  Partners: (" << trilinear_partners_SU3[i][j][0] << ", " 
+                     << trilinear_partners_SU3[i][j][1] << ")" << endl;
+            }
+        }
+
+        // Print mixed SU2-SU3 interactions
+        outfile << "\nMixed SU2-SU3 Interactions:" << endl;
+        outfile << "---------------------------" << endl;
+
+        // Print mixed trilinear interactions from SU2 side
+        outfile << "Mixed trilinear interactions from SU2 sites (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+            outfile << "SU2 Site " << i << " has " << mixed_trilinear_partners_SU2[i].size() << " mixed partners:" << endl;
+            for (size_t j = 0; j < mixed_trilinear_partners_SU2[i].size(); ++j) {
+                outfile << "  Partners: (SU2 site " << mixed_trilinear_partners_SU2[i][j][0] 
+                     << ", SU3 site " << mixed_trilinear_partners_SU2[i][j][1] << "), Tensor: ";
+                // Print the trilinear interaction tensor (N_SU2 * N_SU2 * N_SU3 elements)
+                for (size_t k = 0; k < N_SU2 * N_SU2 * N_SU3; ++k) {
+                    outfile << mixed_trilinear_interaction_SU2[i][j][k] << " ";
+                }
+                outfile << endl;
+            }
+        }
+
+        // Print mixed trilinear interactions from SU3 side
+        outfile << "\nMixed trilinear interactions from SU3 sites (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+            outfile << "SU3 Site " << i << " has " << mixed_trilinear_partners_SU3[i].size() << " mixed partners:" << endl;
+            for (size_t j = 0; j < mixed_trilinear_partners_SU3[i].size(); ++j) {
+                outfile << "  Partners: (SU2 site " << mixed_trilinear_partners_SU3[i][j][0] 
+                     << ", SU2 site " << mixed_trilinear_partners_SU3[i][j][1] << "), Tensor: ";
+                // Print the trilinear interaction tensor (N_SU3 * N_SU2 * N_SU2 elements)
+                for (size_t k = 0; k < N_SU3 * N_SU2 * N_SU2; ++k) {
+                    outfile << mixed_trilinear_interaction_SU3[i][j][k] << " ";
+                }
+                outfile << endl;
+            }
+        }
+
+        outfile.close();
+        cout << "Lattice information written to " << filename << endl;
+    }
 
     void read_spin_from_file(const string &filename){
         ifstream file;
@@ -458,7 +782,7 @@ class mixed_lattice
         return energy;
     }
 
-    double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3> &curr_spins){
+    double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins){
         double field_energy = 0.0;
         double onsite_energy = 0.0;
         double bilinear_energy = 0.0;
@@ -505,7 +829,7 @@ class mixed_lattice
         return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/3;
     }
 
-    double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>  &curr_spins){
+    double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3>  &curr_spins){
         return total_energy(curr_spins)/(lattice_size_SU2+lattice_size_SU3);
     }
 
@@ -583,10 +907,10 @@ class mixed_lattice
 
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
-        #pragma omp simd
-        for (size_t i=0; i< num_bi_SU2; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
-        }
+        // #pragma omp simd
+        // for (size_t i=0; i< num_bi_SU2; ++i) {
+        //     local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
+        // }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
@@ -600,12 +924,10 @@ class mixed_lattice
 
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
-        // #pragma omp parallel for schedule(dynamic, 1)
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
-        // #pragma omp parallel for schedule(dynamic, 1)
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
@@ -629,7 +951,7 @@ class mixed_lattice
         return new_spin/sqrt(dot(new_spin, new_spin)) * spin_length_SU3;
     }
 
-    double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim3*N_ATOMS_SU2, N_SU3, dim1*dim2*dim3*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60) {
+    double metropolis(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3>& curr_spin, double T, bool gaussian=false, double sigma=60) {
         int accept = 0;
         const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
         const double inv_T = 1.0 / T;  // Precompute inverse temperature
@@ -818,7 +1140,7 @@ class mixed_lattice
         myfile.close();
     }
 
-    void write_to_file(string filename, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> towrite){
+    void write_to_file(string filename, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> towrite){
         ofstream myfile;
         myfile.open(filename+"_SU2.txt", ios::app);
         for(size_t i = 0; i<lattice_size_SU2; ++i){
@@ -838,7 +1160,7 @@ class mixed_lattice
         myfile.close();
     }
 
-    void print_mixed_spin(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> toprint){
+    void print_mixed_spin(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> toprint){
         for (size_t i = 0; i < lattice_size_SU2; ++i){
             cout << "SU2: ";
             for (size_t j = 0; j < 3; ++j){
@@ -1059,9 +1381,9 @@ class mixed_lattice
 
     spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time) {
         // Use thread-local static vectors to avoid repeated allocations
-        thread_local std::vector<double> fields_flat;
-        thread_local std::vector<double> spins_flat;
-        thread_local std::vector<double> result_flat;
+        std::vector<double> fields_flat;
+        std::vector<double> spins_flat;
+        std::vector<double> result_flat;
         
         const size_t total_elements = lattice_size_SU2 * N_SU2;
         
@@ -1095,7 +1417,7 @@ class mixed_lattice
         }
         
         // Call CUDA wrapper
-        device_structure_tensor_manager.contractSU2<double, N_ATOMS_SU2*dim1*dim2*dim3, N_SU2>(
+        device_structure_tensor_manager.contractSU2<double, N_ATOMS_SU2*dim1*dim2*dim, N_SU2>(
             fields_flat,
             spins_flat,
             result_flat
@@ -1114,9 +1436,9 @@ class mixed_lattice
 
     spin_config_SU3 landau_lifshitz_SU3(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
         // Use thread-local static vectors to avoid repeated allocations
-        thread_local std::vector<double> fields_flat;
-        thread_local std::vector<double> spins_flat;
-        thread_local std::vector<double> result_flat;
+        std::vector<double> fields_flat;
+        std::vector<double> spins_flat;
+        std::vector<double> result_flat;
         
         const size_t total_elements = lattice_size_SU3 * N_SU3;
         
@@ -1150,7 +1472,7 @@ class mixed_lattice
         }
         
         // Call CUDA wrapper
-        device_structure_tensor_manager.contractSU3<double, N_ATOMS_SU3*dim1*dim2*dim3, N_SU3>(
+        device_structure_tensor_manager.contractSU3<double, N_ATOMS_SU3*dim1*dim2*dim, N_SU3>(
             fields_flat,
             spins_flat,
             result_flat
@@ -1207,8 +1529,7 @@ class mixed_lattice
     //     return dS;
     // }
 
-
-    mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK4_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
+    void RK4_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
         spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
         spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
 
@@ -1230,14 +1551,15 @@ class mixed_lattice
         spin_config_SU2 k4_SU2 = landau_lifshitz_SU2(lval_k4_SU2, lval_k4_SU3, curr_time + step_size);
         spin_config_SU3 k4_SU3 = landau_lifshitz_SU3(lval_k4_SU2, lval_k4_SU3, curr_time + step_size);
 
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> new_spins;
-        new_spins.spins_SU2 = curr_spins.spins_SU2+ (k1_SU2+ k2_SU2 * 2 + k3_SU2 * 2 + k4_SU2)*(step_size/6);
-        new_spins.spins_SU3 = curr_spins.spins_SU3+ (k1_SU3+ k2_SU3 * 2 + k3_SU3 * 2 + k4_SU3)*(step_size/6);
+        spin_config_SU2 new_spins_SU2 = curr_spins.spins_SU2 + (k1_SU2+ k2_SU2 * 2 + k3_SU2 * 2 + k4_SU2)*(step_size/6);
+        spin_config_SU3 new_spins_SU3 = curr_spins.spins_SU3 + (k1_SU3+ k2_SU3 * 2 + k3_SU3 * 2 + k4_SU3)*(step_size/6);
 
-        return new_spins;
+        curr_spins.spins_SU2 = std::move(new_spins_SU2);
+        curr_spins.spins_SU3 = std::move(new_spins_SU3);
+
     }
 
-    mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK45_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
+    void RK45_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
         spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
         spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
 
@@ -1268,19 +1590,16 @@ class mixed_lattice
         double error = max(error_SU2, error_SU3);
         step_size *= 0.9*pow(tol/error, 0.2);
 
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> z;
-        z.spins_SU2 = z_SU2;
-        z.spins_SU3 = z_SU3;
         if (error < tol){
-            return z;
+            curr_spins.spins_SU2 = z_SU2;
+            curr_spins.spins_SU3 = z_SU3;
         }
         else{
-            return RK45_step(step_size, curr_spins, curr_time, tol);
+            RK45_step(step_size, curr_spins, curr_time, tol);
         }
-        return z;
     }
     
-    mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> RK45_step_fixed(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
+    void RK45_step_fixed(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
         spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
         spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
 
@@ -1311,22 +1630,43 @@ class mixed_lattice
         double error = max(error_SU2, error_SU3);
         step_size *= 0.9*pow(tol/error, 0.2);
 
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> z;
-        z.spins_SU2 = z_SU2;
-        z.spins_SU3 = z_SU3;
-        return z;
+        curr_spins.spins_SU2 = std::move(z_SU2);
+        curr_spins.spins_SU3 = std::move(z_SU3);
     }
     
-    mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> euler_step(const double step_size, const mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
-        spin_config_SU2 dS_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2,curr_spins.spins_SU3, curr_time);
+    void euler_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol) {
+        // First compute both derivatives
+        spin_config_SU2 dS_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
         spin_config_SU3 dS_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> new_spins;
-        new_spins.spins_SU2 = curr_spins.spins_SU2 + dS_SU2*step_size;
-        new_spins.spins_SU3 = curr_spins.spins_SU3 + dS_SU3*step_size;
-        return new_spins;
+        
+        // Then update the spins in parallel using OpenMP
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                // Update SU2 spins
+                #pragma omp parallel for simd collapse(2)
+                for(size_t i = 0; i < lattice_size_SU2; ++i) {
+                    for(size_t j = 0; j < N_SU2; ++j) {
+                        curr_spins.spins_SU2[i][j] += dS_SU2[i][j] * step_size;
+                    }
+                }
+            }
+            
+            #pragma omp section
+            {
+                // Update SU3 spins
+                #pragma omp parallel for simd collapse(2)
+                for(size_t i = 0; i < lattice_size_SU3; ++i) {
+                    for(size_t j = 0; j < N_SU3; ++j) {
+                        curr_spins.spins_SU3[i][j] += dS_SU3[i][j] * step_size;
+                    }
+                }
+            }
+        }
     }
 
-    void SSPRK53_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &curr_spins, const double &curr_time, const double tol){
+    void SSPRK53_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
         // Pre-compute all step size multiplications
         constexpr double a30 = 0.355909775063327;
         constexpr double a32 = 0.644090224936674;
@@ -1421,7 +1761,7 @@ class mixed_lattice
         }
 
         // Stage 5 and final result
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> result;
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> result;
         
         #pragma omp parallel sections
         {
@@ -1441,6 +1781,27 @@ class mixed_lattice
         curr_spins.spins_SU2 = std::move(result.spins_SU2);
         curr_spins.spins_SU3 = std::move(result.spins_SU3);
     }
+
+
+    void test_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
+        // Pre-compute all step size multiplications
+        // Update the current spins with the result using the set method
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> result;
+
+        for(size_t i = 0; i < lattice_size_SU2; ++i) {
+            array<double, N_SU2> local_field = get_local_field_SU2_lattice(i, curr_spins.spins_SU2, curr_spins.spins_SU3);
+            array<double, N_SU2> drive_field = drive_field_T_SU2(curr_time, i % N_ATOMS_SU2);
+            result.spins_SU2[i] = local_field - drive_field;
+        }
+        for(size_t i = 0; i < lattice_size_SU3; ++i) {
+            array<double, N_SU3> local_field = get_local_field_SU3_lattice(i, curr_spins.spins_SU2, curr_spins.spins_SU3);
+            result.spins_SU3[i] = local_field;
+        }
+
+        curr_spins.spins_SU2 = std::move(result.spins_SU2);
+        curr_spins.spins_SU3 = std::move(result.spins_SU3);
+    }
+
 
     void write_to_file_magnetization_local_SU2(string filename, array<double, N_SU2> towrite){
         ofstream myfile;
@@ -1462,7 +1823,7 @@ class mixed_lattice
         myfile.close();
     }
 
-    array<double,N_SU2> magnetization_local(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t) {
+    array<double,N_SU2> magnetization_local(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU2> mag = {{0}};
         
         #pragma omp parallel
@@ -1492,7 +1853,7 @@ class mixed_lattice
         return mag;
     }
 
-    array<double,N_SU2> magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t) {
+    array<double,N_SU2> magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU2> mag = {{0}};
         
         #pragma omp parallel
@@ -1523,7 +1884,7 @@ class mixed_lattice
         return mag;
     }
 
-    array<double,N_SU3> magnetization_local_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t) {
+    array<double,N_SU3> magnetization_local_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU3> mag = {{0}};
         
         #pragma omp parallel
@@ -1553,7 +1914,7 @@ class mixed_lattice
         return mag;
     }
 
-    array<double,N_SU3> magnetization_local_antiferromagnetic_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> &spin_t) {
+    array<double,N_SU3> magnetization_local_antiferromagnetic_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU3> mag = {{0}};
         
         #pragma omp parallel
@@ -1600,15 +1961,15 @@ class mixed_lattice
         write_to_file_spin(dir_name + "/spin");
         
         // Open file handles once instead of reopening for each write
-        ofstream spin_file_SU2(dir_name + "/spin_t_SU2.txt");
-        ofstream spin_file_SU3(dir_name + "/spin_t_SU3.txt");
+        ofstream spin_file_SU2(dir_name + "/spin_t_CPU_SU2.txt", ios::out | ios::trunc);
+        ofstream spin_file_SU3(dir_name + "/spin_t_CPU_SU3.txt", ios::out | ios::trunc);
         
         if (!spin_file_SU2.is_open() || !spin_file_SU3.is_open()) {
             cerr << "Error opening output files" << endl;
             return;
         }
         
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> spin_t(spins);
         
         double tol = 1e-6;
         double currT = T_start;
@@ -1625,7 +1986,7 @@ class mixed_lattice
         // Main time evolution loop with buffered output
         const int output_frequency = 1; // Write every N steps instead of every step
         
-        while(currT < T_end){
+        while(currT < T_end){             
             SSPRK53_step(step_size, spin_t, currT, tol);
             
             // Buffer writes - only write every output_frequency steps
@@ -1670,7 +2031,7 @@ class mixed_lattice
     }
 
     void M_B_t(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in, double t_B, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> spin_t(spins);
         
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
@@ -1684,8 +2045,8 @@ class mixed_lattice
         time.reserve(estimated_steps);
         
         // Open file handles once
-        ofstream mag_file_f(dir_name + "/M_t_f.txt");
-        ofstream mag_file(dir_name + "/M_t.txt");
+        ofstream mag_file_f(dir_name + "/M_t_f.txt", ios::out | ios::trunc);
+        ofstream mag_file(dir_name + "/M_t.txt", ios::out | ios::trunc);
         
         if (!mag_file_f.is_open() || !mag_file.is_open()) {
             cerr << "Error opening magnetization files" << endl;
@@ -1746,7 +2107,7 @@ class mixed_lattice
         mag_file.close();
         
         // Write time steps
-        ofstream time_sections(dir_name + "/Time_steps.txt");
+        ofstream time_sections(dir_name + "/Time_steps.txt", ios::out | ios::trunc);
         for(const auto& t : time){
             time_sections << t << "\n";
         }
@@ -1754,7 +2115,7 @@ class mixed_lattice
     }
 
     void M_BA_BB_t(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_1, double t_B_1, array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim3, N_SU3, N_ATOMS_SU3*dim1*dim2*dim3> spin_t(spins);
+        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> spin_t(spins);
         
         if (dir_name != ""){
             filesystem::create_directory(dir_name);
@@ -1768,8 +2129,8 @@ class mixed_lattice
         time.reserve(estimated_steps);
         
         // Open file handles once
-        ofstream mag_file_f(dir_name + "/M_t_f.txt");
-        ofstream mag_file(dir_name + "/M_t.txt");
+        ofstream mag_file_f(dir_name + "/M_t_f.txt", ios::out | ios::trunc);
+        ofstream mag_file(dir_name + "/M_t.txt", ios::out | ios::trunc);
         
         if (!mag_file_f.is_open() || !mag_file.is_open()) {
             cerr << "Error opening magnetization files" << endl;
@@ -1830,7 +2191,7 @@ class mixed_lattice
         mag_file.close();
         
         // Write time steps
-        ofstream time_sections(dir_name + "/Time_steps.txt");
+        ofstream time_sections(dir_name + "/Time_steps.txt", ios::out | ios::trunc);
         for(const auto& t : time){
             time_sections << t << "\n";
         }

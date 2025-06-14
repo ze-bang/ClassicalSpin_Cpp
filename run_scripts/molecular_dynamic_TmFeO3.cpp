@@ -298,11 +298,6 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
         MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i));
     }
 
-    int finalized;
-    MPI_Finalized(&finalized);
-    if (!finalized){
-        MPI_Finalize();
-    }
 }
 
 void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, double offset, string dir, string spin_config_filename){
@@ -458,44 +453,44 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
 
         ///////////// Trilinear Interaction - Nearest neighbours
 
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
 
-        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
-        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
+        // TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
+        // TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
 
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
-        TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
-
-        //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
-        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
-        TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
+        // TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
+        // TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
 
         //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
 
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
+        // TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
 
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
+        // TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
 
         //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
 
-        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
 
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
+        // TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
+
+        //////////////////
+        // TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+
+        // TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+
+        // TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
+        // TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
 
     }
 
@@ -510,13 +505,8 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
         else{
             MC.simulated_annealing(Temp_start, Temp_end , 10000, 0, 100, false);
         }
+        // MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i), true);
         MC.molecular_dynamics_cuda(T_start, T_end, T_step_size, dir+"/"+std::to_string(i), 1, false, true);
-    }
-
-    int finalized;
-    MPI_Finalized(&finalized);
-    if (!finalized){
-        MPI_Finalize();
     }
 }
 
@@ -555,7 +545,7 @@ int main(int argc, char** argv) {
     string dir_name = (argc > 14) ? argv[14] : "TmFeO3_2DCS";
     int num_trials = (argc > 15) ? atoi(argv[15]) : 1;
     double T_start = (argc > 16) ? atof(argv[16]) : 0.0;
-    double T_end = (argc > 17) ? atof(argv[17]) : 100.0;
+    double T_end = (argc > 17) ? atof(argv[17]) : 50;
     double T_step_size = (argc > 18) ? atof(argv[18]) : 1e-2;
     string spin_config_file = (argc > 19) ? argv[19] : "TmFeO3_2DCS/0/spin";
     cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
@@ -582,9 +572,14 @@ int main(int argc, char** argv) {
     myfile << "T_step_size: " << T_step_size << endl;
     myfile << "spin_config_file: " << spin_config_file << endl;
     myfile.close();
-    // MD_TmFeO3_Fe(num_trials, 20, 1e-2, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, h, {1,0,0}, dir_name);
     // MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {0,1,0}, e1, e2, offset, dir_name, spin_config_file);
     MD_TmFeO3_cuda(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {0,1,0}, e1, e2, offset, dir_name, spin_config_file);
+    
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (!finalized){
+        MPI_Finalize();
+    }
     return 0;
 }
 //J1ab=J1c=4.92meV J2ab=J2c=0.29meV Ka=0meV Kc=-0.09meV D1=D2=0 xii is the modeling param E1 = 0.97meV E2=3.9744792531meV

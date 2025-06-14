@@ -173,7 +173,7 @@ array<T, N> operator+(const array<T, N> &a,const array<T, N>  &b) {
 }
 
 template<typename T, size_t N>
-array<T, N> operator+=(array<T, N> &a,const array<T, N>  &b) {
+array<T, N> operator+=(array<T, N> &a, const array<T, N>  &b) {
     #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         a[i] += b[i];

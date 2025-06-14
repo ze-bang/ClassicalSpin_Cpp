@@ -6,14 +6,6 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     filesystem::create_directory(dir);
     HoneyComb<3> atoms;
 
-    // double J1_ = (2*J1 + Delta1*J1 + 2*Jpmpm - sqrt(2)*Jzp)/3;
-    // double K = -2*Jpmpm + sqrt(2)*Jzp;
-    // double Gamma = (-J1 + Delta1*J1 - 4*Jpmpm - sqrt(2)*Jzp)/3;
-    // double Gammap = (-2*J1 + 2*Delta1*J1 + 4*Jpmpm + sqrt(2)*Jzp)/6;
-    // array<array<double,3>, 3> J1x_ = {{{J1_+K,Gammap,Gammap},{Gammap,J1_,Gamma},{Gammap,Gamma,J1_}}};
-    // array<array<double,3>, 3> J1y_ = {{{J1_,Gammap,Gamma},{Gammap,K+J1_,Gammap},{Gamma,Gammap,J1_}}};
-    // array<array<double,3>, 3> J1z_ = {{{J1_,Gamma,Gammap},{Gamma,J1_,Gammap},{Gammap,Gammap,K+J1_}}};
-
     array<array<double,3>, 3> J1x_ = {{{J1+2*Jpmpm*cos(2*M_PI/3),-2*Jpmpm*sin(2*M_PI/3),Jzp*sin(2*M_PI/3)},{-2*Jpmpm*sin(2*M_PI/3),J1-2*Jpmpm*cos(2*M_PI/3),-Jzp*cos(2*M_PI/3)},{Jzp*sin(2*M_PI/3),-Jzp*cos(2*M_PI/3),J1*Delta1}}};
     array<array<double,3>, 3> J1y_ = {{{J1+2*Jpmpm*cos(-2*M_PI/3),-2*Jpmpm*sin(-2*M_PI/3),Jzp*sin(-2*M_PI/3)},{-2*Jpmpm*sin(-2*M_PI/3),J1-2*Jpmpm*cos(-2*M_PI/3),-Jzp*cos(-2*M_PI/3)},{Jzp*sin(-2*M_PI/3),-Jzp*cos(-2*M_PI/3),J1*Delta1}}};
     array<array<double,3>, 3> J1z_ = {{{J1+2*Jpmpm*cos(0),-2*Jpmpm*sin(0),Jzp*sin(0)},{-2*Jpmpm*sin(0),J1-2*Jpmpm*cos(0),-Jzp*cos(0)},{Jzp*sin(0),-Jzp*cos(0),J1*Delta1}}};

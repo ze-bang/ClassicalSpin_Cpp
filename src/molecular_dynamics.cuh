@@ -325,7 +325,7 @@ private:
             max_bilinear_neighbors_SU2 = std::max(max_bilinear_neighbors_SU2, this->bilinear_partners_SU2[i].size());
             max_trilinear_neighbors_SU2 = std::max(max_trilinear_neighbors_SU2, this->trilinear_partners_SU2[i].size());
             max_mixed_bilinear_neighbors_SU2 = std::max(max_mixed_bilinear_neighbors_SU2, this->mixed_bilinear_partners_SU2[i].size());
-            max_mixed_trilinear_neighbors_SU2 = std::max(max_mixed_trilinear_neighbors_SU2, this->mixed_trilinear_partners_SU2[i].size()/2);
+            max_mixed_trilinear_neighbors_SU2 = std::max(max_mixed_trilinear_neighbors_SU2, this->mixed_trilinear_partners_SU2[i].size());
         }
         
         // Calculate max bilinear neighbors for SU3
@@ -632,7 +632,7 @@ private:
                 const auto& interactions = this->mixed_trilinear_interaction_SU2[site];
                 const auto& partners = this->mixed_trilinear_partners_SU2[site];
 
-                for (size_t i = 0; i < interactions.size() && i < max_mixed_trilinear_neighbors_SU2; ++i) {
+                for (size_t i = 0; i < max_mixed_trilinear_neighbors_SU2; ++i) {
                     size_t base_idx = site * max_mixed_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3 + i * N_SU2 * N_SU2 * N_SU3;
                     for (size_t j = 0; j < N_SU2 * N_SU2 * N_SU3; ++j) {
                         temp_mixed_tri_SU2[base_idx + j] = interactions[i][j];
@@ -646,10 +646,10 @@ private:
                 const auto& interactions = this->mixed_trilinear_interaction_SU3[site];
                 const auto& partners = this->mixed_trilinear_partners_SU3[site];
 
-                for (size_t i = 0; i < interactions.size() && i < max_mixed_trilinear_neighbors_SU3; ++i) {
+                for (size_t i = 0; i < max_mixed_trilinear_neighbors_SU3; ++i) {
                     size_t base_idx = site * max_mixed_trilinear_neighbors_SU3 * N_SU3 * N_SU2 * N_SU2 + i * N_SU3 * N_SU2 * N_SU2;
                     for (size_t j = 0; j < N_SU2 * N_SU2 * N_SU3; ++j) {
-                        temp_mixed_tri_SU2[base_idx + j] = interactions[i][j];
+                        temp_mixed_tri_SU3[base_idx + j] = interactions[i][j];
                     }
                     temp_mixed_tri_partners_SU3[site * max_mixed_trilinear_neighbors_SU3 * 2 + i * 2] = partners[i][0];
                     temp_mixed_tri_partners_SU3[site * max_mixed_trilinear_neighbors_SU3 * 2 + i * 2 + 1] = partners[i][1];
@@ -772,6 +772,183 @@ private:
     }
 
 public:
+
+    // Print information about the device lattice and CUDA implementation
+    __host__
+    void print_lattice_info_cuda(const string& filename = "lattice_info_GPU.txt") const {
+        ofstream outfile(filename);
+        if (!outfile.is_open()) {
+            cerr << "Error: Could not open file " << filename << " for writing." << endl;
+            return;
+        }
+
+        outfile << "Lattice size SU2: " << lattice_size_SU2 << endl;
+        outfile << "Lattice size SU3: " << lattice_size_SU3 << endl;
+        outfile << "Number of bilinear interactions SU2: " << d_num_bi_SU2 << endl;
+        outfile << "Number of trilinear interactions SU2: " << d_num_tri_SU2 << endl;
+        outfile << "Number of bilinear interactions SU3: " << d_num_bi_SU3 << endl;
+        outfile << "Number of trilinear interactions SU3: " << d_num_tri_SU3 << endl;
+        outfile << "Number of mixed trilinear interactions SU2-SU3: " << d_num_tri_SU2_SU3 << endl;
+
+        // Get data from device for display
+        std::vector<double> h_onsite_SU2(lattice_size_SU2 * N_SU2 * N_SU2);
+        std::vector<double> h_onsite_SU3(lattice_size_SU3 * N_SU3 * N_SU3);
+        
+        // Copy onsite interactions from device to host
+        cudaMemcpy(h_onsite_SU2.data(), d_onsite_interaction_SU2, h_onsite_SU2.size() * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_onsite_SU3.data(), d_onsite_interaction_SU3, h_onsite_SU3.size() * sizeof(double), cudaMemcpyDeviceToHost);
+        
+        // Print SU2 interactions
+        outfile << "\nSU2 Interactions:" << endl;
+        outfile << "-----------------" << endl;
+
+        // Print onsite interactions for first few sites
+        outfile << "Onsite interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+            outfile << "Site " << i << ": ";
+            for (size_t j = 0; j < N_SU2 * N_SU2; ++j) {
+                outfile << h_onsite_SU2[i * N_SU2 * N_SU2 + j] << " ";
+            }
+            outfile << endl;
+        }
+
+        // For bilinear interactions, we need partner indices and interaction matrices
+        if (max_bilinear_neighbors_SU2 > 0 && d_bilinear_partners_SU2 != nullptr) {
+            std::vector<size_t> h_bi_partners_SU2(lattice_size_SU2 * max_bilinear_neighbors_SU2);
+            std::vector<double> h_bi_interaction_SU2(lattice_size_SU2 * max_bilinear_neighbors_SU2 * N_SU2 * N_SU2);
+            
+            cudaMemcpy(h_bi_partners_SU2.data(), d_bilinear_partners_SU2, h_bi_partners_SU2.size() * sizeof(size_t), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_bi_interaction_SU2.data(), d_bilinear_interaction_SU2, h_bi_interaction_SU2.size() * sizeof(double), cudaMemcpyDeviceToHost);
+
+            // Print bilinear interactions for first few sites
+            outfile << "\nBilinear interactions (first 3 sites):" << endl;
+            for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+                outfile << "Site " << i << " has " << max_bilinear_neighbors_SU2 << " bilinear partners:" << endl;
+                for (size_t j = 0; j < max_bilinear_neighbors_SU2; ++j) {
+                    size_t partner = h_bi_partners_SU2[i * max_bilinear_neighbors_SU2 + j];
+                    if (partner < lattice_size_SU2) {  // Valid partner index
+                        outfile << "  Partner: " << partner << ", Matrix: ";
+                        for (size_t k = 0; k < N_SU2 * N_SU2; ++k) {
+                            outfile << h_bi_interaction_SU2[i * max_bilinear_neighbors_SU2 * N_SU2 * N_SU2 + j * N_SU2 * N_SU2 + k] << " ";
+                        }
+                        outfile << endl;
+                    }
+                }
+            }
+        }
+
+        // For trilinear interactions, we need partner pairs and interaction tensors
+        if (max_trilinear_neighbors_SU2 > 0 && d_trilinear_partners_SU2 != nullptr) {
+            std::vector<size_t> h_tri_partners_SU2(lattice_size_SU2 * max_trilinear_neighbors_SU2 * 2);
+            std::vector<double> h_tri_interaction_SU2(lattice_size_SU2 * max_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU2);
+            
+            cudaMemcpy(h_tri_partners_SU2.data(), d_trilinear_partners_SU2, h_tri_partners_SU2.size() * sizeof(size_t), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_tri_interaction_SU2.data(), d_trilinear_interaction_SU2, h_tri_interaction_SU2.size() * sizeof(double), cudaMemcpyDeviceToHost);
+            
+            // Print trilinear interactions for first few sites
+            outfile << "\nTrilinear interactions (first 3 sites):" << endl;
+            for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+                outfile << "Site " << i << " has " << max_trilinear_neighbors_SU2 << " trilinear partner pairs:" << endl;
+                for (size_t j = 0; j < max_trilinear_neighbors_SU2; ++j) {
+                    size_t partner1 = h_tri_partners_SU2[i * max_trilinear_neighbors_SU2 * 2 + j * 2];
+                    size_t partner2 = h_tri_partners_SU2[i * max_trilinear_neighbors_SU2 * 2 + j * 2 + 1];
+                    if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {  // Valid partners
+                        outfile << "  Partners: (" << partner1 << ", " << partner2 << ")" << endl;
+                    }
+                }
+            }
+        }
+
+        // Print SU3 interactions
+        outfile << "\nSU3 Interactions:" << endl;
+        outfile << "-----------------" << endl;
+
+        // Print onsite interactions for first few sites
+        outfile << "Onsite interactions (first 3 sites):" << endl;
+        for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+            outfile << "Site " << i << ": ";
+            for (size_t j = 0; j < N_SU3 * N_SU3; ++j) {
+                outfile << h_onsite_SU3[i * N_SU3 * N_SU3 + j] << " ";
+            }
+            outfile << endl;
+        }
+
+        // Similar blocks for SU3 bilinear and trilinear interactions
+        if (max_bilinear_neighbors_SU3 > 0 && d_bilinear_partners_SU3 != nullptr) {
+            std::vector<size_t> h_bi_partners_SU3(lattice_size_SU3 * max_bilinear_neighbors_SU3);
+            std::vector<double> h_bi_interaction_SU3(lattice_size_SU3 * max_bilinear_neighbors_SU3 * N_SU3 * N_SU3);
+            
+            cudaMemcpy(h_bi_partners_SU3.data(), d_bilinear_partners_SU3, h_bi_partners_SU3.size() * sizeof(size_t), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_bi_interaction_SU3.data(), d_bilinear_interaction_SU3, h_bi_interaction_SU3.size() * sizeof(double), cudaMemcpyDeviceToHost);
+            
+            outfile << "\nBilinear interactions (first 3 sites):" << endl;
+            for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+                outfile << "Site " << i << " has " << max_bilinear_neighbors_SU3 << " bilinear partners:" << endl;
+                for (size_t j = 0; j < max_bilinear_neighbors_SU3; ++j) {
+                    size_t partner = h_bi_partners_SU3[i * max_bilinear_neighbors_SU3 + j];
+                    if (partner < lattice_size_SU3) {  // Valid partner index
+                        outfile << "  Partner: " << partner << ", Matrix: ";
+                        for (size_t k = 0; k < N_SU3 * N_SU3; ++k) {
+                            outfile << h_bi_interaction_SU3[i * max_bilinear_neighbors_SU3 * N_SU3 * N_SU3 + j * N_SU3 * N_SU3 + k] << " ";
+                        }
+                        outfile << endl;
+                    }
+                }
+            }
+        }
+
+        // Mixed interactions
+        if (max_mixed_trilinear_neighbors_SU2 > 0 && d_mixed_trilinear_partners_SU2 != nullptr) {
+            std::vector<size_t> h_mixed_tri_partners_SU2(lattice_size_SU2 * max_mixed_trilinear_neighbors_SU2 * 2);
+            std::vector<double> h_mixed_tri_interaction_SU2(lattice_size_SU2 * max_mixed_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3);
+            std::vector<size_t> h_mixed_tri_partners_SU3(lattice_size_SU3 * max_mixed_trilinear_neighbors_SU3 * 2);
+            std::vector<double> h_mixed_tri_interaction_SU3(lattice_size_SU3 * max_mixed_trilinear_neighbors_SU3 * N_SU2 * N_SU2 * N_SU3);
+            
+            cudaMemcpy(h_mixed_tri_partners_SU2.data(), d_mixed_trilinear_partners_SU2, h_mixed_tri_partners_SU2.size() * sizeof(size_t), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_mixed_tri_interaction_SU2.data(), d_mixed_trilinear_interaction_SU2, h_mixed_tri_interaction_SU2.size() * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_mixed_tri_partners_SU3.data(), d_mixed_trilinear_partners_SU3, h_mixed_tri_partners_SU3.size() * sizeof(size_t), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_mixed_tri_interaction_SU3.data(), d_mixed_trilinear_interaction_SU3, h_mixed_tri_interaction_SU3.size() * sizeof(double), cudaMemcpyDeviceToHost);
+
+
+            outfile << "\nMixed SU2-SU3 Interactions:" << endl;
+            outfile << "---------------------------" << endl;
+            outfile << "Mixed trilinear interactions from SU2 sites (first 3 sites):" << endl;
+            
+            for (size_t i = 0; i < min(size_t(3), lattice_size_SU2); ++i) {
+                outfile << "SU2 Site " << i << " has " << max_mixed_trilinear_neighbors_SU2 << " mixed partner:" << endl;
+                for (size_t j = 0; j < max_mixed_trilinear_neighbors_SU2; ++j) {
+                    size_t partner1 = h_mixed_tri_partners_SU2[i * max_mixed_trilinear_neighbors_SU2 * 2 + j * 2];
+                    size_t partner2 = h_mixed_tri_partners_SU2[i * max_mixed_trilinear_neighbors_SU2 * 2 + j * 2 + 1];
+                    if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU3) {  // Valid partners
+                        outfile << "  Partners: (SU2 site " << partner1 << ", SU3 site " << partner2 << "), Tensor: ";
+                        for (size_t k = 0; k < N_SU2 * N_SU2 * N_SU3; ++k) {
+                            outfile << h_mixed_tri_interaction_SU2[i * max_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3 + j * N_SU2 * N_SU2 * N_SU3 + k] << " ";
+                        }
+                        outfile << endl;
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < min(size_t(3), lattice_size_SU3); ++i) {
+                outfile << "SU3 Site " << i << " has " << max_mixed_trilinear_neighbors_SU3 << " mixed partner:" << endl;
+                for (size_t j = 0; j < max_mixed_trilinear_neighbors_SU3; ++j) {
+                    size_t partner1 = h_mixed_tri_partners_SU3[i * max_mixed_trilinear_neighbors_SU3 * 2 + j * 2];
+                    size_t partner2 = h_mixed_tri_partners_SU3[i * max_mixed_trilinear_neighbors_SU3 * 2 + j * 2 + 1];
+                    if (partner1 < lattice_size_SU3 && partner2 < lattice_size_SU2) {  // Valid partners
+                        outfile << "  Partners: (SU2 site " << partner1 << ", SU2 site " << partner2 << "), Tensor: ";
+                        for (size_t k = 0; k < N_SU2 * N_SU2 * N_SU3; ++k) {
+                            outfile << h_mixed_tri_interaction_SU3[i * max_trilinear_neighbors_SU3 * N_SU2 * N_SU2 * N_SU3 + j * N_SU2 * N_SU2 * N_SU3 + k] << " ";
+                        }
+                        outfile << endl;
+                    }
+                }
+            }
+        }
+
+        outfile.close();
+        cout << "CUDA lattice information written to " << filename << endl;
+    }
+
     // Host wrapper for computing total energy on GPU
     __host__
     double total_energy_cuda();
@@ -786,59 +963,157 @@ public:
     void SSPRK53_step_cuda(double step_size, double curr_time, double tol);
 
     __host__
+    void euler_step_cuda(double step_size, double curr_time, double tol);
+
+    __host__
     void molecular_dynamics_cuda(double T_start, double T_end, double step_size, string dir_name, 
                                  size_t output_frequency = 1, bool use_adaptive_stepping = false, bool verbose = false) {
         if (dir_name != "") {
             filesystem::create_directory(dir_name);
         }
+        
+        // Pre-allocate time vector with estimated size
         const size_t estimated_steps = static_cast<size_t>((T_end - T_start) / step_size) + 1;
         vector<double> time;
         time.reserve(estimated_steps);
+        
         // Copy initial spins to device if not already there
         copy_spins_to_device();
         
+        // Open file handles once instead of reopening for each write
+        ofstream mag_file_f, mag_file, mag_file_f_SU3, mag_file_SU3;
+        ofstream spin_file_SU2, spin_file_SU3;
+        
+        if (dir_name != "") {
+            mag_file_f.open(dir_name + "/M_t_f.txt", ios::out | ios::trunc);
+            mag_file.open(dir_name + "/M_t.txt", ios::out | ios::trunc);
+            mag_file_f_SU3.open(dir_name + "/M_t_f_SU3.txt", ios::out | ios::trunc);
+            mag_file_SU3.open(dir_name + "/M_t_SU3.txt", ios::out | ios::trunc);
+            
+            if (verbose) {
+                spin_file_SU2.open(dir_name + "/spin_t_SU2.txt", ios::out | ios::trunc);
+                spin_file_SU3.open(dir_name + "/spin_t_SU3.txt", ios::out | ios::trunc);
+            }
+            
+            // Set up buffering for better I/O performance
+            constexpr size_t BUFFER_SIZE = 8192;
+            mag_file_f.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+            mag_file.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+            mag_file_f_SU3.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+            mag_file_SU3.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+            
+            if (verbose) {
+                spin_file_SU2.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+                spin_file_SU3.rdbuf()->pubsetbuf(nullptr, BUFFER_SIZE);
+            }
+        }
+        
         double current_time = T_start;
         size_t step_count = 0;
+        
+        // Initial magnetization
+        if (dir_name != "") {
+            copy_spins_to_host();
+            
+            // Write initial magnetization
+            auto mag_f = this->magnetization_local(this->spins);
+            auto mag = this->magnetization_local_antiferromagnetic(this->spins);
+            auto mag_SU3 = this->magnetization_local_SU3(this->spins);
+            auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
+            
+            for (size_t j = 0; j < N_SU2; ++j) {
+                mag_file_f << mag_f[j] << " ";
+                mag_file << mag[j] << " ";
+            }
+            mag_file_f << "\n";
+            mag_file << "\n";
+            
+            for (size_t j = 0; j < N_SU3; ++j) {
+                mag_file_f_SU3 << mag_SU3[j] << " ";
+                mag_file_SU3 << mag_afm_SU3[j] << " ";
+            }
+            mag_file_f_SU3 << "\n";
+            mag_file_SU3 << "\n";
+        }
+        
+        // Main time evolution loop
         while (current_time < T_end) {
-            // Perform SSPRK53 time step on GPU
+            // Perform time step on GPU
+            time.push_back(current_time);
             SSPRK53_step_cuda(step_size, current_time, 1e-6);
             
             current_time += step_size;
             step_count++;
-            time.push_back(current_time);
+            
             // Print progress
             if (step_count % 100 == 0) {
                 std::cout << "Step: " << step_count << ", Time: " << current_time << std::endl;
             }
             
             // Periodically copy data back to host for output
-            if (step_count % output_frequency == 0 && dir_name != "") {
+            if (dir_name != "" && step_count % output_frequency == 0) {
                 copy_spins_to_host();
                 
-                if (verbose) {
-                    this->write_to_file_spin_t(dir_name + "/spin_t");
-                }
-
                 // Write output
-                auto mag = this->magnetization_local(this->spins);
-                this->write_to_file_magnetization_local_SU2(dir_name + "/M_t_f.txt", mag);
-                auto mag_afm = this->magnetization_local_antiferromagnetic(this->spins);
-                this->write_to_file_magnetization_local_SU2(dir_name + "/M_t.txt", mag_afm);
+                auto mag_f = this->magnetization_local(this->spins);
+                auto mag = this->magnetization_local_antiferromagnetic(this->spins);
                 auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-                this->write_to_file_magnetization_local_SU3(dir_name + "/M_t_f_SU3.txt", mag_SU3);
                 auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-                this->write_to_file_magnetization_local_SU3(dir_name + "/M_t_SU3.txt", mag_afm_SU3);
+                
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    mag_file_f << mag_f[j] << " ";
+                    mag_file << mag[j] << " ";
+                }
+                mag_file_f << "\n";
+                mag_file << "\n";
+                
+                for (size_t j = 0; j < N_SU3; ++j) {
+                    mag_file_f_SU3 << mag_SU3[j] << " ";
+                    mag_file_SU3 << mag_afm_SU3[j] << " ";
+                }
+                mag_file_f_SU3 << "\n";
+                mag_file_SU3 << "\n";
+                
+                // Write spin states if verbose
+                if (verbose) {
+                    for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                        for (size_t j = 0; j < N_SU2; ++j) {
+                            spin_file_SU2 << this->spins.spins_SU2[i][j] << " ";
+                        }
+                        spin_file_SU2 << "\n";
+                    }
+                    
+                    for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                        for (size_t j = 0; j < N_SU3; ++j) {
+                            spin_file_SU3 << this->spins.spins_SU3[i][j] << " ";
+                        }
+                        spin_file_SU3 << "\n";
+                    }
+                }
             }
         }
         
-        // Write time steps
-        ofstream time_sections(dir_name + "/Time_steps.txt");
-        for(const auto& t : time){
-            time_sections << t << "\n";
+        // Close output files
+        if (dir_name != "") {
+            mag_file_f.close();
+            mag_file.close();
+            mag_file_f_SU3.close();
+            mag_file_SU3.close();
+            
+            if (verbose) {
+                spin_file_SU2.close();
+                spin_file_SU3.close();
+            }
+            
+            // Write time steps
+            ofstream time_sections(dir_name + "/Time_steps.txt", ios::out | ios::trunc);
+            time_sections.rdbuf()->pubsetbuf(nullptr, 8192);
+            for (const auto& t : time) {
+                time_sections << t << "\n";
+            }
+            time_sections.close();
         }
-        time_sections.close();
     }
-    
     // CUDA implementation of M_B_t
     __host__
     void M_B_t_cuda(array<array<double,N_SU2>, N_ATOMS_SU2> &field_in, double t_B, 
@@ -980,8 +1255,6 @@ public:
         // Run molecular dynamics with CUDA
         molecular_dynamics_cuda(T_start, T_end, step_size, dir_name, output_frequency, use_adaptive_stepping);
     }
-
-public:
     
     // Copy data from device back to host
     __host__
@@ -989,6 +1262,8 @@ public:
         std::vector<double> temp_spins_SU2(lattice_size_SU2 * N_SU2);
         std::vector<double> temp_spins_SU3(lattice_size_SU3 * N_SU3);
         
+        cudaDeviceSynchronize();
+
         cudaMemcpy(temp_spins_SU2.data(), d_spins.spins_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
         cudaMemcpy(temp_spins_SU3.data(), d_spins.spins_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
         
@@ -1027,9 +1302,10 @@ public:
 };
 
 template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-__global__
-void compute_local_field_SU2_kernel(
+__device__
+void compute_local_field_SU2(
     double* out,
+    int site_index,
     const double* spins_SU2,
     const double* field_SU2,
     const double* onsite_interaction_SU2,
@@ -1047,9 +1323,6 @@ void compute_local_field_SU2_kernel(
     size_t max_tri_neighbors,
     size_t max_mixed_tri_neighbors
 ) {
-    int site_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (site_index >= lattice_size_SU2) return;
-    
     double local_field[N_SU2];
     
     // Onsite contribution
@@ -1057,12 +1330,12 @@ void compute_local_field_SU2_kernel(
                                 &spins_SU2[site_index * N_SU2], N_SU2);
     
     // Bilinear contributions
-    for (size_t i = 0; i < num_bi_SU2 && i < max_bi_neighbors; ++i) {
-        size_t partner = bilinear_partners_SU2[site_index * max_bi_neighbors + i];
+    for (size_t i = 0; i < num_bi_SU2; ++i) {
+        size_t partner = bilinear_partners_SU2[site_index * num_bi_SU2 + i];
         if (partner < lattice_size_SU2) {
             double temp[N_SU2];
             multiply_matrix_vector_device(temp, 
-                &bilinear_interaction_SU2[site_index * max_bi_neighbors * N_SU2 * N_SU2 + i * N_SU2 * N_SU2],
+                &bilinear_interaction_SU2[site_index * num_bi_SU2 * N_SU2 * N_SU2 + i * N_SU2 * N_SU2],
                 &spins_SU2[partner * N_SU2], N_SU2);
             for (size_t j = 0; j < N_SU2; ++j) {
                 local_field[j] += temp[j];
@@ -1071,37 +1344,34 @@ void compute_local_field_SU2_kernel(
     }
     
     // Trilinear contributions
-    for (size_t i = 0; i < num_tri_SU2 && i < max_tri_neighbors; ++i) {
-        size_t partner1 = trilinear_partners_SU2[site_index * max_tri_neighbors * 2 + i * 2];
-        size_t partner2 = trilinear_partners_SU2[site_index * max_tri_neighbors * 2 + i * 2 + 1];
+    for (size_t i = 0; i < num_tri_SU2; ++i) {
+        size_t partner1 = trilinear_partners_SU2[site_index * num_tri_SU2 * 2 + i * 2];
+        size_t partner2 = trilinear_partners_SU2[site_index * num_tri_SU2 * 2 + i * 2 + 1];
         if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {
             double temp[N_SU2];
             contract_trilinear_field_device(temp,
-                &trilinear_interaction_SU2[site_index * max_tri_neighbors * N_SU2 * N_SU2 * N_SU2 + i * N_SU2 * N_SU2 * N_SU2],
+                &trilinear_interaction_SU2[site_index * num_tri_SU2 * N_SU2 * N_SU2 * N_SU2 + i * N_SU2 * N_SU2 * N_SU2],
                 &spins_SU2[partner1 * N_SU2], &spins_SU2[partner2 * N_SU2], N_SU2);
             for (size_t j = 0; j < N_SU2; ++j) {
                 local_field[j] += temp[j];
             }
         }
     }
-    
     // Mixed trilinear contributions
-    for (size_t i = 0; i < num_tri_SU2_SU3 && i < max_mixed_tri_neighbors; ++i) {
-        size_t partner1 = mixed_trilinear_partners_SU2[site_index * max_mixed_tri_neighbors * 2 + i * 2];
-        size_t partner2 = mixed_trilinear_partners_SU2[site_index * max_mixed_tri_neighbors * 2 + i * 2 + 1];
-        if (partner1 < lattice_size_SU2) {
-            for (size_t a = 0; a < N_SU2; ++a) {
-                double temp = 0.0;
-                for (size_t b = 0; b < N_SU2; ++b) {
-                    for (size_t c = 0; c < N_SU3; ++c) {
-                        temp += mixed_trilinear_interaction_SU2[
-                            site_index * max_mixed_tri_neighbors * N_SU2 * N_SU2 * N_SU3 + 
-                            i * N_SU2 * N_SU2 * N_SU3 + a * N_SU2 * N_SU3 + b * N_SU3 + c] *
-                            spins_SU2[partner1 * N_SU2 + b] * spins_SU3[partner2 * N_SU3 + c];
-                    }
+    for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        size_t partner1 = mixed_trilinear_partners_SU2[site_index * num_tri_SU2_SU3 * 2 + i * 2];
+        size_t partner2 = mixed_trilinear_partners_SU2[site_index * num_tri_SU2_SU3 * 2 + i * 2 + 1];
+        for (size_t a = 0; a < N_SU2; ++a) {
+            double temp = 0.0;
+            for (size_t b = 0; b < N_SU2; ++b) {
+                for (size_t c = 0; c < N_SU3; ++c) {
+                    temp += mixed_trilinear_interaction_SU2[
+                        site_index * num_tri_SU2_SU3 * N_SU2 * N_SU2 * N_SU3 + 
+                        i * N_SU2 * N_SU2 * N_SU3 + a * N_SU2 * N_SU3 + b * N_SU3 + c] *
+                        spins_SU2[partner1 * N_SU2 + b] * spins_SU3[partner2 * N_SU3 + c];
                 }
-                local_field[a] += temp;
             }
+            local_field[a] += temp;
         }
     }
     
@@ -1112,9 +1382,10 @@ void compute_local_field_SU2_kernel(
 }
 
 template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
-__global__
-void compute_local_field_SU3_kernel(
+__device__
+void compute_local_field_SU3(
     double* out,
+    int site_index,
     const double* spins_SU3,
     const double* field_SU3,
     const double* onsite_interaction_SU3,
@@ -1132,9 +1403,7 @@ void compute_local_field_SU3_kernel(
     size_t max_tri_neighbors,
     size_t max_mixed_tri_neighbors
 ) {
-    int site_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (site_index >= lattice_size_SU3) return;
-    
+    // Debug: Print for first few sites only to avoid too much output    
     double local_field[N_SU3];
     
     // Onsite contribution
@@ -1142,12 +1411,12 @@ void compute_local_field_SU3_kernel(
                                 &spins_SU3[site_index * N_SU3], N_SU3);
     
     // Bilinear contributions
-    for (size_t i = 0; i < num_bi_SU3 && i < max_bi_neighbors; ++i) {
-        size_t partner = bilinear_partners_SU3[site_index * max_bi_neighbors + i];
+    for (size_t i = 0; i < num_bi_SU3; ++i) {
+        size_t partner = bilinear_partners_SU3[site_index * num_bi_SU3 + i];
         if (partner < lattice_size_SU3) {
             double temp[N_SU3];
             multiply_matrix_vector_device(temp, 
-                &bilinear_interaction_SU3[site_index * max_bi_neighbors * N_SU3 * N_SU3 + i * N_SU3 * N_SU3],
+                &bilinear_interaction_SU3[site_index * num_bi_SU3 * N_SU3 * N_SU3 + i * N_SU3 * N_SU3],
                 &spins_SU3[partner * N_SU3], N_SU3);
             for (size_t j = 0; j < N_SU3; ++j) {
                 local_field[j] += temp[j];
@@ -1156,85 +1425,75 @@ void compute_local_field_SU3_kernel(
     }
     
     // Trilinear contributions
-    for (size_t i = 0; i < num_tri_SU3 && i < max_tri_neighbors; ++i) {
-        size_t partner1 = trilinear_partners_SU3[site_index * max_tri_neighbors * 2 + i * 2];
-        size_t partner2 = trilinear_partners_SU3[site_index * max_tri_neighbors * 2 + i * 2 + 1];
+    for (size_t i = 0; i < num_tri_SU3; ++i) {
+        size_t partner1 = trilinear_partners_SU3[site_index * num_tri_SU3 * 2 + i * 2];
+        size_t partner2 = trilinear_partners_SU3[site_index * num_tri_SU3 * 2 + i * 2 + 1];
         if (partner1 < lattice_size_SU3 && partner2 < lattice_size_SU3) {
             double temp[N_SU3];
             contract_trilinear_field_device(temp,
-                &trilinear_interaction_SU3[site_index * max_tri_neighbors * N_SU3 * N_SU3 * N_SU3 + i * N_SU3 * N_SU3 * N_SU3],
+                &trilinear_interaction_SU3[site_index * num_tri_SU3 * N_SU3 * N_SU3 * N_SU3 + i * N_SU3 * N_SU3 * N_SU3],
                 &spins_SU3[partner1 * N_SU3], &spins_SU3[partner2 * N_SU3], N_SU3);
             for (size_t j = 0; j < N_SU3; ++j) {
                 local_field[j] += temp[j];
             }
         }
     }
+
     // Mixed trilinear contributions
-    for (size_t i = 0; i < num_tri_SU2_SU3 && i < max_mixed_tri_neighbors; ++i) {
-        size_t partner1 = mixed_trilinear_partners_SU3[site_index * max_mixed_tri_neighbors * 2 + i * 2];
-        size_t partner2 = mixed_trilinear_partners_SU3[site_index * max_mixed_tri_neighbors * 2 + i * 2 + 1];
-        if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {
-            for (size_t a = 0; a < N_SU3; ++a) {
-                double temp = 0.0;
-                for (size_t b = 0; b < N_SU2; ++b) {
-                    for (size_t c = 0; c < N_SU2; ++c) {
-                        temp += mixed_trilinear_interaction_SU3[
-                            site_index * max_mixed_tri_neighbors * N_SU3 * N_SU2 * N_SU2 + 
-                            i * N_SU3 * N_SU2 * N_SU2 + a * N_SU2 * N_SU2 + b * N_SU2 + c] *
-                            spins_SU2[partner1 * N_SU2 + b] * spins_SU2[partner2 * N_SU2 + c];
-                    }
+    for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        size_t partner1 = mixed_trilinear_partners_SU3[site_index * num_tri_SU2_SU3 * 2 + i * 2];
+        size_t partner2 = mixed_trilinear_partners_SU3[site_index * num_tri_SU2_SU3 * 2 + i * 2 + 1];
+        for (size_t a = 0; a < N_SU3; ++a) {
+            double temp = 0.0;
+            for (size_t b = 0; b < N_SU2; ++b) {
+                for (size_t c = 0; c < N_SU2; ++c) {
+                    temp += mixed_trilinear_interaction_SU3[
+                        site_index * num_tri_SU2_SU3 * N_SU3 * N_SU2 * N_SU2 + 
+                        i * N_SU3 * N_SU2 * N_SU2 + a * N_SU2 * N_SU2 + b * N_SU2 + c] *
+                        spins_SU2[partner1 * N_SU2 + b] * spins_SU2[partner2 * N_SU2 + c];
                 }
-                local_field[a] += temp;
             }
+            local_field[a] += temp;
         }
     }
-
     // Subtract external field
     for (size_t i = 0; i < N_SU3; ++i) {
         out[site_index * N_SU3 + i] = local_field[i] - field_SU3[site_index * N_SU3 + i];
     }
-
 }
 
-template <size_t N_SU2, size_t lattice_size_SU2>
-__global__
-void drive_field_T_SU2_kernel(
-    double currT, double* curr_field, 
+template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2>
+__device__
+void drive_field_T_SU2(
+    double* out, double currT, int site_index,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, 
     double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2)
 {
-    // Compute the driving field at time currT for SU2
-    int ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= lattice_size_SU2) return;
-
     double factor1_SU2 = double(d_field_drive_amp_SU2*exp(-pow((currT-d_t_B_1_SU2)/(2*d_field_drive_width_SU2),2))*cos(2*M_PI*d_field_drive_freq_SU2*(currT-d_t_B_1_SU2)));
     double factor2_SU2 = double(d_field_drive_amp_SU2*exp(-pow((currT-d_t_B_2_SU2)/(2*d_field_drive_width_SU2),2))*cos(2*M_PI*d_field_drive_freq_SU2*(currT-d_t_B_2_SU2)));
 
     double temp_field[N_SU2];
     for (size_t i = 0; i < N_SU2; ++i) {
-        curr_field[ind * N_SU2 + i] -= d_field_drive_1_SU2[ind * N_SU2 + i] * factor1_SU2 + d_field_drive_2_SU2[ind * N_SU2 + i] * factor2_SU2;
+        out[site_index * N_SU2 + i] -= d_field_drive_1_SU2[site_index * N_SU2 % N_ATOMS_SU2 + i] * factor1_SU2 + d_field_drive_2_SU2[site_index * N_SU2 % N_ATOMS_SU2 + i] * factor2_SU2;
     }
 }
 
-template <size_t N_SU3, size_t lattice_size_SU3>
-__global__
-void drive_field_T_SU3_kernel(double currT, double* curr_field
-    , double* d_field_drive_1_SU3, double* d_field_drive_2_SU3
+template <size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
+__device__
+void drive_field_T_SU3_kernel(double* out, double currT, int site_index,
+    double* d_field_drive_1_SU3, double* d_field_drive_2_SU3
     , double d_field_drive_amp_SU3, double d_field_drive_width_SU3
     , double d_field_drive_freq_SU3, double d_t_B_1_SU3, double d_t_B_2_SU3)
 {
     // Compute the driving field at time currT for SU3
-    int ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= lattice_size_SU3) return;
-
     double factor1_SU3 = double(d_field_drive_amp_SU3*exp(-pow((currT-d_t_B_1_SU3)/(2*d_field_drive_width_SU3),2))*cos(2*M_PI*d_field_drive_freq_SU3*(currT-d_t_B_1_SU3)));
     double factor2_SU3 = double(d_field_drive_amp_SU3*exp(-pow((currT-d_t_B_2_SU3)/(2*d_field_drive_width_SU3),2))*cos(2*M_PI*d_field_drive_freq_SU3*(currT-d_t_B_2_SU3)));
 
     double temp_field[N_SU3];
 
     for (size_t i = 0; i < N_SU3; ++i) {
-        curr_field[ind * N_SU3 + i] -= d_field_drive_1_SU3[ind * N_SU3 + i] * factor1_SU3 + d_field_drive_2_SU3[ind * N_SU3 + i] * factor2_SU3;
+        out[site_index * N_SU3 + i] -= d_field_drive_1_SU3[site_index * N_SU3 % N_ATOMS_SU3 + i] * factor1_SU3 + d_field_drive_2_SU3[site_index * N_SU3 % N_ATOMS_SU3 + i] * factor2_SU3;
     }
 
 }
@@ -1284,44 +1543,38 @@ void compute_site_energy_SU3_kernel(
 
 
 template <size_t N_SU2, size_t lattice_size_SU2>
-__global__
-void landau_Lifshitz_SU2_kernel(double* out, double* spins, const double* local_field) {
-    int ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= lattice_size_SU2) return;
-
+__device__
+void landau_Lifshitz_SU2(double* out, int site_index, double* spins, const double* local_field) {
     double spin[N_SU2];
     for (size_t i = 0; i < N_SU2; ++i) {
-        spin[i] = spins[ind * N_SU2 + i];
+        spin[i] = spins[site_index * N_SU2 + i];
     }
 
     // Compute the cross product with the local field
     double cross[N_SU2];
-    cross_product_SU2_device(cross, spin, local_field + ind * N_SU2);
+    cross_product_SU2_device(cross, spin, local_field + site_index * N_SU2);
 
     // Update the spins using the Landau-Lifshitz equation
     for (size_t i = 0; i < N_SU2; ++i) {
-        out[ind * N_SU2 + i] += cross[i];
+        out[site_index * N_SU2 + i] += cross[i];
     }
 }
 
 template <size_t N_SU3, size_t lattice_size_SU3>
-__global__
-void landau_Lifshitz_SU3_kernel(double* out,double* spins, const double* local_field) {
-    int ind = blockIdx.x * blockDim.x + threadIdx.x;
-    if (ind >= lattice_size_SU3) return;
-
+__device__
+void landau_Lifshitz_SU3(double* out, int site_index, double* spins, const double* local_field) {
     double spin[N_SU3];
     for (size_t i = 0; i < N_SU3; ++i) {
-        spin[i] = spins[ind * N_SU3 + i];
+        spin[i] = spins[site_index * N_SU3 + i];
     }
 
     // Compute the cross product with the local field
     double cross[N_SU3];
-    cross_product_SU3_device(cross, spin, local_field + ind * N_SU3);
+    cross_product_SU3_device(cross, spin, local_field + site_index * N_SU3);
 
     // Update the spins using the Landau-Lifshitz equation
     for (size_t i = 0; i < N_SU3; ++i) {
-        out[ind * N_SU3 + i] += cross[i];
+        out[site_index * N_SU3 + i] += cross[i];
     }
 }
 
@@ -1344,6 +1597,26 @@ void SSPRK53_step_kernel(
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt);
+    double curr_time, double dt, double d_spin_length_SU2, double d_spin_length_SU3);
+
+template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
+__host__
+void euler_step_kernel(
+    double* d_spins_SU2, double* d_spins_SU3,
+    double* d_local_field_SU2, double* d_local_field_SU3,
+    double* d_field_SU2, double* d_field_SU3,
+    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
+    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
+    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
+    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
+    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
+    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
+    double curr_time, double dt, double d_spin_length_SU2, double d_spin_length_SU3);
 
 #endif // MIXED_LATTICE_CUDA_CUH

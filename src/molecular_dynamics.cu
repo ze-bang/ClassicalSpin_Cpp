@@ -288,24 +288,53 @@ double mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, di
 
 
 // Kernel to update arrays with linear combination
-__global__ void update_arrays_kernel(double* out, const double* in1, double a1, 
-                                    const double* in2, double a2,
-                                    size_t size) {
+template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
+__global__ void update_arrays_kernel(double* out_SU2, const double* in1_SU2, double a1_SU2, 
+                                    const double* in2_SU2, double a2_SU2,
+                                    double* out_SU3, const double* in1_SU3, double a1_SU3, 
+                                    const double* in2_SU3, double a2_SU3) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < size) {
-        out[idx] = a1 * in1[idx] + a2 * in2[idx];
+    // Ensure we do not exceed the bounds of either SU2 or SU3 arrays
+    if (idx >= lattice_size_SU2 + lattice_size_SU3) return;
+    if (idx < lattice_size_SU2) {
+        // Update SU2 array
+        for (int i = 0; i < N_SU2; ++i) {
+            out_SU2[idx * N_SU2 + i] = a1_SU2 * in1_SU2[idx * N_SU2 + i] + a2_SU2 * in2_SU2[idx * N_SU2 + i];
+        }
+    }
+    else{
+        for (int i = 0; i < N_SU3; ++i) {
+            out_SU3[idx * N_SU3 + i] = a1_SU3 * in1_SU3[idx * N_SU3 + i] + a2_SU3 * in2_SU3[idx * N_SU3 + i];
+        }
     }
 }
 
 // Kernel to update arrays with linear combination of three arrays
-__global__ void update_arrays_three_kernel(double* out, 
-                                          const double* in1, double a1,
-                                          const double* in2, double a2,
-                                          const double* in3, double a3,
-                                          size_t size) {
+template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
+__global__ void update_arrays_three_kernel(double* out_SU2, 
+                                          const double* in1_SU2, double a1_SU2,
+                                          const double* in2_SU2, double a2_SU2,
+                                          const double* in3_SU2, double a3_SU2,
+                                          double* out_SU3, 
+                                          const double* in1_SU3, double a1_SU3,
+                                          const double* in2_SU3, double a2_SU3,
+                                          const double* in3_SU3, double a3_SU3) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < size) {
-        out[idx] = a1 * in1[idx] + a2 * in2[idx] + a3 * in3[idx];
+    // Ensure we do not exceed the bounds of either SU2 or SU3 arrays
+    if (idx >= lattice_size_SU2 + lattice_size_SU3) return;
+    if (idx < lattice_size_SU2) {
+        for (int i = 0; i < N_SU2; ++i) {
+            out_SU2[idx * N_SU2 + i] = a1_SU2 * in1_SU2[idx * N_SU2 + i] + 
+                                       a2_SU2 * in2_SU2[idx * N_SU2 + i] + 
+                                       a3_SU2 * in3_SU2[idx * N_SU2 + i];
+        }
+    }
+    else{
+        for (int i = 0; i < N_SU3; ++i) {
+            out_SU3[idx * N_SU3 + i] = a1_SU3 * in1_SU3[idx * N_SU3 + i] + 
+                                       a2_SU3 * in2_SU3[idx * N_SU3 + i] + 
+                                       a3_SU3 * in3_SU3[idx * N_SU3 + i];
+        }
     }
 }
 
@@ -347,8 +376,64 @@ __global__ void normalize_spins_SU3_kernel(double* spins, double spin_length, si
     }
 }
 
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
+__global__
+void LLG_kernel(
+    double* k_SU2, double* k_SU3,
+    double* d_spins_SU2, double* d_spins_SU3,
+    double* d_local_field_SU2, double* d_local_field_SU3,
+    double* d_field_SU2, double* d_field_SU3,
+    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
+    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
+    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
+    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
+    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
+    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
+    double curr_time, double dt)
+{
+    int site_index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (site_index >= lattice_size_SU2 && site_index >= lattice_size_SU3) return;
 
-template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
+    if (site_index < lattice_size_SU2) {
+        compute_local_field_SU2<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
+        d_local_field_SU2, site_index, d_spins_SU2, d_field_SU2, d_onsite_interaction_SU2,
+        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
+        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
+        d_spins_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
+
+        // Add drive field if applicable
+        drive_field_T_SU2<N_SU2, N_ATOMS_SU2, lattice_size_SU2>(
+            d_local_field_SU2, curr_time, site_index, d_field_drive_1_SU2, d_field_drive_2_SU2, 
+            d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
+            // Compute derivatives (dS/dt) using Landau-Lifshitz equation
+        landau_Lifshitz_SU2<N_SU2, lattice_size_SU2>(
+            k_SU2, site_index, d_spins_SU2, d_local_field_SU2);
+    
+    }else{
+        compute_local_field_SU3<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
+            d_local_field_SU3, site_index, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
+            d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
+            d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
+            d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
+            d_spins_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+            max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+            
+        landau_Lifshitz_SU3<N_SU3, lattice_size_SU3>(
+            k_SU3, site_index, d_spins_SU3, d_local_field_SU3);
+    }
+}
+
+
+
+template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __host__
 void SSPRK53_step_kernel(
     double* d_spins_SU2, double* d_spins_SU3,
@@ -366,7 +451,7 @@ void SSPRK53_step_kernel(
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt)
+    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
 {
     // SSPRK53 coefficients from mixed_lattice.h
     constexpr double a30 = 0.355909775063327;
@@ -480,134 +565,134 @@ void SSPRK53_step_kernel(
         return;
     }
 
-
-
     dim3 block_size(256);
-    dim3 grid_size_SU2((lattice_size_SU2 + block_size.x - 1) / block_size.x);
-    dim3 grid_size_SU3((lattice_size_SU3 + block_size.x - 1) / block_size.x);
+    dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + block_size.x - 1) / block_size.x);
+    
+
+    cudaDeviceSynchronize();
     // Stage 1: 
-    compute_local_field_SU2_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU2, block_size>>>(
-        d_local_field_SU2, d_spins_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        d_spins_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
+    LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        k_SU2, k_SU3,
+        d_spins_SU2, d_spins_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time, dt);
+
+    // Synchronize before updating arrays
+    cudaDeviceSynchronize();
     
-    compute_local_field_SU3_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU3, block_size>>>(
-        d_local_field_SU3, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-        d_spins_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+    update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
+    (tmp_SU2, d_spins_SU2, 1.0, k_SU2, b10_h, 
+     tmp_SU3, d_spins_SU3, 1.0, k_SU3, b10_h);
     
-    drive_field_T_SU2_kernel<N_SU2, lattice_size_SU2><<<grid_size_SU2, block_size>>>(
-        curr_time, d_local_field_SU2, d_field_drive_1_SU2, d_field_drive_2_SU2, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
-
-    landau_Lifshitz_SU2_kernel<N_SU2, lattice_size_SU2> <<<grid_size_SU2, block_size>>>(
-        k_SU2, d_spins_SU2, d_local_field_SU2);
-
-    landau_Lifshitz_SU3_kernel<N_SU3, lattice_size_SU3> <<<grid_size_SU3, block_size>>>(
-        k_SU3, d_spins_SU3, d_local_field_SU3);
-
-    update_arrays_kernel<<<grid_size_SU2, block_size>>>(tmp_SU2, d_spins_SU2, 1.0, k_SU2, b10_h, lattice_size_SU2 * N_SU2);
-    update_arrays_kernel<<<grid_size_SU3, block_size>>>(tmp_SU3, d_spins_SU3, 1.0, k_SU3, b10_h, lattice_size_SU3 * N_SU3);
-    // Stage 2
-    compute_local_field_SU2_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU2, block_size>>>(
-        d_local_field_SU2, tmp_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        tmp_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
+    // End of Stage 1 - Synchronize
+    cudaDeviceSynchronize();
+    
+    LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        k_SU2, k_SU3,
+        tmp_SU2, tmp_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time + c1_h, dt);
         
-    compute_local_field_SU3_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU3, block_size>>>(
-        d_local_field_SU3, tmp_SU3, d_field_SU3, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-        tmp_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+    // Synchronize before updating arrays
+    cudaDeviceSynchronize();
     
-    drive_field_T_SU2_kernel<N_SU2, lattice_size_SU2><<<grid_size_SU2, block_size>>>(
-        curr_time + c1_h, d_local_field_SU2, d_field_drive_1_SU2, d_field_drive_2_SU2, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
+    update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
+    (u_SU2, tmp_SU2, 1.0, k_SU2, b21_h, 
+     u_SU3, tmp_SU3, 1.0, k_SU3, b21_h);
 
-    landau_Lifshitz_SU2_kernel<N_SU2, lattice_size_SU2> <<<grid_size_SU2, block_size>>>(
-        k_SU2, tmp_SU2, d_local_field_SU2);
-
-    landau_Lifshitz_SU3_kernel<N_SU3, lattice_size_SU3> <<<grid_size_SU3, block_size>>>(
-        k_SU3, tmp_SU3, d_local_field_SU3);
-
-    update_arrays_kernel<<<grid_size_SU2, block_size>>>(u_SU2, tmp_SU2, 1.0, k_SU2, b21_h, lattice_size_SU2 * N_SU2);
-    update_arrays_kernel<<<grid_size_SU3, block_size>>>(u_SU3, tmp_SU3, 1.0, k_SU3, b21_h, lattice_size_SU3 * N_SU3);
+    // End of Stage 2 - Synchronize
+    cudaDeviceSynchronize();
     
     // Stage 3
-    compute_local_field_SU2_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU2, block_size>>>(
-        d_local_field_SU2, u_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        u_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
-        
-    compute_local_field_SU3_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU3, block_size>>>(
-        d_local_field_SU3, u_SU3, d_field_SU3, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-        u_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+    LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        k_SU2, k_SU3,
+        u_SU2, u_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time + c2_h, dt);
+
+    // Synchronize before updating arrays
+    cudaDeviceSynchronize();
     
-    drive_field_T_SU2_kernel<N_SU2, lattice_size_SU2><<<grid_size_SU2, block_size>>>(
-        curr_time + c2_h, d_local_field_SU2, d_field_drive_1_SU2, d_field_drive_2_SU2, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
+    update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
+    (tmp_SU2, d_spins_SU2, a30, u_SU2, a32, k_SU2, b32_h,
+     tmp_SU3, d_spins_SU3, a30, u_SU3, a32, k_SU3, b32_h);
 
-    landau_Lifshitz_SU2_kernel<N_SU2, lattice_size_SU2> <<<grid_size_SU2, block_size>>>(
-        k_SU2, u_SU2, d_local_field_SU2);
-
-    landau_Lifshitz_SU3_kernel<N_SU3, lattice_size_SU3> <<<grid_size_SU3, block_size>>>(
-        k_SU3, u_SU3, d_local_field_SU3);
-
-    update_arrays_three_kernel<<<grid_size_SU2, block_size>>>(tmp_SU2, d_spins_SU2, a30, u_SU2, a32, k_SU2, b32_h, lattice_size_SU2 * N_SU2);
-    update_arrays_three_kernel<<<grid_size_SU3, block_size>>>(tmp_SU3, d_spins_SU3, a30, u_SU3, a32, k_SU3, b32_h, lattice_size_SU3 * N_SU3);
+    // End of Stage 3 - Synchronize
+    cudaDeviceSynchronize();
 
     // Stage 4
-    compute_local_field_SU2_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU2, block_size>>>(
-        d_local_field_SU2, tmp_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        tmp_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
-        
-    compute_local_field_SU3_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU3, block_size>>>(
-        d_local_field_SU3, tmp_SU3, d_field_SU3, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-        tmp_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
-    
-    drive_field_T_SU2_kernel<N_SU2, lattice_size_SU2><<<grid_size_SU2, block_size>>>(
-        curr_time + c3_h, d_local_field_SU2, d_field_drive_1_SU2, d_field_drive_2_SU2, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
+    LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        k_SU2, k_SU3,
+        tmp_SU2, tmp_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time + c3_h, dt);
 
-    landau_Lifshitz_SU2_kernel<N_SU2, lattice_size_SU2> <<<grid_size_SU2, block_size>>>(
-        k_SU2, tmp_SU2, d_local_field_SU2);
-
-    landau_Lifshitz_SU3_kernel<N_SU3, lattice_size_SU3> <<<grid_size_SU3, block_size>>>(
-        k_SU3, tmp_SU3, d_local_field_SU3);
+    // Synchronize before updating arrays
+    cudaDeviceSynchronize();
 
     // Create temporary arrays to hold the results
     double *temp2_SU2, *temp2_SU3;
     cudaMalloc(&temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
     cudaMalloc(&temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
     
-    update_arrays_three_kernel<<<grid_size_SU2, block_size>>>(temp2_SU2, d_spins_SU2, a40, tmp_SU2, a43, k_SU2, b43_h, lattice_size_SU2 * N_SU2);
-    update_arrays_three_kernel<<<grid_size_SU3, block_size>>>(temp2_SU3, d_spins_SU3, a40, tmp_SU3, a43, k_SU3, b43_h, lattice_size_SU3 * N_SU3);
+    update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> <<<grid_size, block_size>>>
+    (temp2_SU2, d_spins_SU2, a40, tmp_SU2, a43, k_SU2, b43_h,
+     temp2_SU3, d_spins_SU3, a40, tmp_SU3, a43, k_SU3, b43_h);
+
+    // Synchronize before memory operations
+    cudaDeviceSynchronize();
     
     // Copy results back to tmp arrays
     cudaMemcpy(tmp_SU2, temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToDevice);
@@ -617,37 +702,44 @@ void SSPRK53_step_kernel(
     cudaFree(temp2_SU2);
     cudaFree(temp2_SU3);
 
+    // End of Stage 4 - Synchronize
+    cudaDeviceSynchronize();
 
     // Stage 5
-    compute_local_field_SU2_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU2, block_size>>>(
-        d_local_field_SU2, tmp_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        tmp_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
-        
-    compute_local_field_SU3_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size_SU3, block_size>>>(
-        d_local_field_SU3, tmp_SU3, d_field_SU3, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-        tmp_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+    LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        k_SU2, k_SU3,
+        tmp_SU2, tmp_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time + c4_h, dt);
+
+    // Synchronize before final update
+    cudaDeviceSynchronize();
+
+    update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
+    (d_spins_SU2, u_SU2, a52, tmp_SU2, a54, k_SU2, b54_h,
+     d_spins_SU3, u_SU3, a52, tmp_SU3, a54, k_SU3, b54_h);
+
+    // Final synchronization to ensure all operations are complete
+    cudaDeviceSynchronize();
     
-    drive_field_T_SU2_kernel<N_SU2, lattice_size_SU2><<<grid_size_SU2, block_size>>>(
-        curr_time + c3_h, d_local_field_SU2, d_field_drive_1_SU2, d_field_drive_2_SU2, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
-
-    landau_Lifshitz_SU2_kernel<N_SU2, lattice_size_SU2> <<<grid_size_SU2, block_size>>>(
-        k_SU2, tmp_SU2, d_local_field_SU2);
-
-    landau_Lifshitz_SU3_kernel<N_SU3, lattice_size_SU3> <<<grid_size_SU3, block_size>>>(
-        k_SU3, tmp_SU3, d_local_field_SU3);
-
-    update_arrays_three_kernel<<<grid_size_SU2, block_size>>>(d_spins_SU2, u_SU2, a52, tmp_SU2, a54, k_SU2, b54_h, lattice_size_SU2 * N_SU2);
-    update_arrays_three_kernel<<<grid_size_SU3, block_size>>>(d_spins_SU3, u_SU3, a52, tmp_SU3, a54, k_SU3, b54_h, lattice_size_SU3 * N_SU3);
-
+    // Check for any errors in the entire process
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error during integration: %s\n", cudaGetErrorString(err));
+    }
     // Cleanup temporary arrays - check if pointers are valid before freeing
     if (tmp_SU2) cudaFree(tmp_SU2);
     if (k_SU2) cudaFree(k_SU2);
@@ -658,7 +750,6 @@ void SSPRK53_step_kernel(
     if (d_drive_field_SU2) cudaFree(d_drive_field_SU2);
     if (d_drive_field_SU3) cudaFree(d_drive_field_SU3);
 }
-
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
 __host__
@@ -679,10 +770,7 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         cudaFree(d_local_fields_SU2);
         return;
     }
-    // Print some diagnostic info
-    fprintf(stdout, "SSPRK53_step_cuda info: lattice_size_SU2=%zu, lattice_size_SU3=%zu, curr_time=%f, step_size=%f\n", 
-            (size_t)(N_ATOMS_SU2*dim*dim1*dim2), (size_t)(N_ATOMS_SU3*dim*dim1*dim2), curr_time, step_size);
-    
+
     // Check if any CUDA arrays are NULL before passing to the kernel
     if (d_spins.spins_SU2 == nullptr || d_spins.spins_SU3 == nullptr) {
         fprintf(stderr, "CUDA error: NULL pointer in d_spins detected\n");
@@ -692,7 +780,7 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     }
 
     // Execute SSPRK53 step
-    SSPRK53_step_kernel<N_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
+    SSPRK53_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
     d_spins.spins_SU2, d_spins.spins_SU3,
     d_local_fields_SU2, d_local_fields_SU3,
     d_field_SU2, d_field_SU3,
@@ -708,12 +796,163 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
     d_field_drive_1_SU2, d_field_drive_2_SU2, 
     d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-    curr_time, step_size);    
+    curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);    
     
     // Check for errors in kernel launch
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA error: Failed to launch SSPRK53_step_kernel (Error code: %s)\n", cudaGetErrorString(err));
+    }
+    
+    // Make sure everything is synchronized
+    cudaDeviceSynchronize();
+    
+    // Cleanup temporary arrays
+    cudaFree(d_local_fields_SU2);
+    cudaFree(d_local_fields_SU3);
+}
+
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
+__host__
+void euler_step_kernel(
+    double* d_spins_SU2, double* d_spins_SU3,
+    double* d_local_field_SU2, double* d_local_field_SU3,
+    double* d_field_SU2, double* d_field_SU3,
+    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
+    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
+    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
+    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
+    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
+    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
+    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
+{
+    // Allocate device memory for intermediate results
+    double* k_SU2 = nullptr;
+    double* k_SU3 = nullptr;
+    
+    cudaError_t err = cudaMalloc(&k_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to allocate k_SU2 (Error code: %s)\n", cudaGetErrorString(err));
+        return;
+    }
+    
+    err = cudaMalloc(&k_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to allocate k_SU3 (Error code: %s)\n", cudaGetErrorString(err));
+        cudaFree(k_SU2);
+        return;
+    }
+    
+    // Set up grid and block dimensions
+    dim3 block_size(256);
+    dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + block_size.x - 1) / block_size.x);
+    
+    // Synchronize before starting the computation
+    cudaDeviceSynchronize();
+
+    // Compute local fields
+    LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        k_SU2, k_SU3,
+        d_spins_SU2, d_spins_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time, dt);
+
+    
+    // Synchronize before updating arrays
+    cudaDeviceSynchronize();
+    
+    double *temp2_SU2, *temp2_SU3;
+    cudaMalloc(&temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    cudaMalloc(&temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    
+    // Update spins using Euler step: S(t+dt) = S(t) + dt * (dS/dt)
+    update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
+    (temp2_SU2, d_spins_SU2, 1.0, k_SU2, dt, 
+     temp2_SU3, d_spins_SU3, 1.0, k_SU3, dt);
+
+    cudaMemcpy(d_spins_SU2, temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_spins_SU3, temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToDevice);
+
+    // Final synchronization
+    cudaDeviceSynchronize();
+    
+    // Free temporary arrays
+    cudaFree(temp2_SU2);
+    cudaFree(temp2_SU3);
+    cudaFree(k_SU2);
+    cudaFree(k_SU3);
+}
+
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
+__host__
+void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>::euler_step_cuda(double step_size, double curr_time, double tol) {
+    // Allocate temporary arrays for local fields
+    double *d_local_fields_SU2 = nullptr, *d_local_fields_SU3 = nullptr;
+    
+    // Error checking for memory allocation
+    cudaError_t err = cudaMalloc(&d_local_fields_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to allocate d_local_fields_SU2 (Error code: %s)\n", cudaGetErrorString(err));
+        return;
+    }
+    
+    err = cudaMalloc(&d_local_fields_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to allocate d_local_fields_SU3 (Error code: %s)\n", cudaGetErrorString(err));
+        cudaFree(d_local_fields_SU2);
+        return;
+    }
+    
+    // Check if any CUDA arrays are NULL before passing to the kernel
+    if (d_spins.spins_SU2 == nullptr || d_spins.spins_SU3 == nullptr) {
+        fprintf(stderr, "CUDA error: NULL pointer in d_spins detected\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    
+    // Execute Euler step
+    euler_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
+        d_spins.spins_SU2, d_spins.spins_SU3,
+        d_local_fields_SU2, d_local_fields_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3,
+        max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
+        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);
+    
+    // Check for errors in kernel launch
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to launch euler_step_kernel (Error code: %s)\n", cudaGetErrorString(err));
     }
     
     // Make sure everything is synchronized

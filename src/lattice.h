@@ -18,19 +18,19 @@
 #include "binning_analysis.h"
 #include <sstream>
 
-template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim3>
+template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim>
 class lattice
 {   
     public:
 
-    typedef array<array<double,N>,N_ATOMS*dim1*dim2*dim3> spin_config;
+    typedef array<array<double,N>,N_ATOMS*dim1*dim2*dim> spin_config;
     typedef function<array<double,N>(const array<double,N> &, const array<double, N> &)> cross_product_method;
     typedef function<spin_config(double &, const spin_config &, const double, cross_product_method)> ODE_method;
 
     UnitCell<N, N_ATOMS> UC;
     size_t lattice_size;
     spin_config  spins;
-    array<array<double,3>, N_ATOMS*dim1*dim2*dim3> site_pos;
+    array<array<double,3>, N_ATOMS*dim1*dim2*dim> site_pos;
     //Lookup table for the lattice
     spin_config field;
     array<array<double, N>, N_ATOMS> field_drive_1;
@@ -41,13 +41,13 @@ class lattice
     double t_B_1;
     double t_B_2;
 
-    array<array<double, N * N>, N_ATOMS*dim1*dim2*dim3> onsite_interaction;
+    array<array<double, N * N>, N_ATOMS*dim1*dim2*dim> onsite_interaction;
 
-    array<vector<array<double, N * N>>, N_ATOMS*dim1*dim2*dim3> bilinear_interaction;
-    array<vector<array<double, N * N * N>>, N_ATOMS*dim1*dim2*dim3>  trilinear_interaction;
+    array<vector<array<double, N * N>>, N_ATOMS*dim1*dim2*dim> bilinear_interaction;
+    array<vector<array<double, N * N * N>>, N_ATOMS*dim1*dim2*dim>  trilinear_interaction;
 
-    array<vector<size_t>, N_ATOMS*dim1*dim2*dim3> bilinear_partners;
-    array<vector<array<size_t, 2>>, N_ATOMS*dim1*dim2*dim3> trilinear_partners;
+    array<vector<size_t>, N_ATOMS*dim1*dim2*dim> bilinear_partners;
+    array<vector<array<size_t, 2>>, N_ATOMS*dim1*dim2*dim> trilinear_partners;
 
     size_t num_bi;
     size_t num_tri;
@@ -80,20 +80,20 @@ class lattice
 
 
     size_t flatten_index(size_t i, size_t j, size_t k, size_t l){
-        return i*dim2*dim3*N_ATOMS+ j*dim3*N_ATOMS+ k*N_ATOMS + l;
+        return i*dim2*dim*N_ATOMS+ j*dim*N_ATOMS+ k*N_ATOMS + l;
     }
     
-    size_t periodic_boundary(int i, size_t dim){
+    size_t periodic_boundary(int i, size_t D){
         if(i < 0){
-            return size_t((dim+i) % dim);
+            return size_t((D+i) % D);
         }
         else{
-            return size_t(i % dim);
+            return size_t(i % D);
         }
     }
 
     size_t flatten_index_periodic_boundary(int i, int j, int k, int l){
-        return periodic_boundary(i, dim1)*dim2*dim3*N_ATOMS+ periodic_boundary(j, dim2)*dim3*N_ATOMS+ periodic_boundary(k, dim3)*N_ATOMS + l;
+        return periodic_boundary(i, dim1)*dim2*dim*N_ATOMS+ periodic_boundary(j, dim2)*dim*N_ATOMS+ periodic_boundary(k, dim)*N_ATOMS + l;
     }
 
     lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1): UC(*atoms){
@@ -101,7 +101,7 @@ class lattice
         array<array<double,3>, 3> unit_vector;
 
 
-        lattice_size = dim1*dim2*dim3*N_ATOMS;
+        lattice_size = dim1*dim2*dim*N_ATOMS;
         basis = UC.lattice_pos;
         unit_vector = UC.lattice_vectors;
         spin_length = spin_l;
@@ -112,7 +112,7 @@ class lattice
 
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
+                for(size_t k=0; k< dim;++k){
                     for (size_t l=0; l< N_ATOMS;++l){
 
                         size_t current_site_index = flatten_index(i,j,k,l);
@@ -157,7 +157,7 @@ class lattice
         // std::cout << "Finished setting up lattice" << std::endl;
     };
 
-    lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
+    lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
         UC = lattice_in->UC;
         lattice_size = lattice_in->lattice_size;
         spins = lattice_in->spins;
@@ -173,7 +173,7 @@ class lattice
         num_gen = lattice_in->num_gen;
     };
 
-    void reset_lattice(const lattice<N, N_ATOMS, dim1, dim2, dim3> *lattice_in){
+    void reset_lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
         UC = lattice_in->UC;
         lattice_size = lattice_in->lattice_size;
         spins = lattice_in->spins;
@@ -743,7 +743,7 @@ class lattice
     }
 
     void print_2D(const spin_config &a){
-        for(size_t i = 0; i<N_ATOMS*dim1*dim2*dim3; ++i){
+        for(size_t i = 0; i<N_ATOMS*dim1*dim2*dim; ++i){
             for(size_t j = 0; j<N; ++j){
                 cout << a[i][j] << " ";
             }
@@ -887,7 +887,7 @@ class lattice
         array<double,N> mag = {{0}};
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
-                for(size_t k=0; k< dim3;++k){
+                for(size_t k=0; k< dim;++k){
                     for (size_t l=0; l< N_ATOMS;++l){
                         size_t current_site_index = flatten_index(i,j,k,l);
                         
