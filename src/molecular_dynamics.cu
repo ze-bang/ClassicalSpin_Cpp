@@ -339,19 +339,33 @@ __global__ void update_arrays_three_kernel(double* out_SU2,
 }
 
 // Kernel to normalize spins for SU2
-template<size_t N>
-__global__ void normalize_spins_SU2_kernel(double* spins, double spin_length, size_t size) {
+template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
+__global__ void normalize_spins_kernel(double* spins_SU2, double spin_length_SU2,
+                                       double* spins_SU3, double spin_length_SU3) {
     int site = blockIdx.x * blockDim.x + threadIdx.x;
-    if (site < size) {
-        double* spin = &spins[site * N];
+    if (site < lattice_size_SU2) {
+        double* spin = &spins_SU2[site * N_SU2];
         double norm = 0.0;
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < N_SU2; i++) {
             norm += spin[i] * spin[i];
         }
         norm = sqrt(norm);
         if (norm > 1e-10) {
-            for (int i = 0; i < N; i++) {
-                spin[i] = spin[i] * spin_length / norm;
+            for (int i = 0; i < N_SU2; i++) {
+                spin[i] = spin[i] * spin_length_SU2 / norm;
+            }
+        }
+    }
+    else{
+        double* spin = &spins_SU3[site * N_SU3];
+        double norm = 0.0;
+        for (int i = 0; i < N_SU3; i++) {
+            norm += spin[i] * spin[i];
+        }
+        norm = sqrt(norm);
+        if (norm > 1e-10) {
+            for (int i = 0; i < N_SU3; i++) {
+                spin[i] = spin[i] * spin_length_SU3 / norm;
             }
         }
     }
@@ -734,6 +748,10 @@ void SSPRK53_step_kernel(
 
     // Final synchronization to ensure all operations are complete
     cudaDeviceSynchronize();
+
+    normalize_spins_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
+        d_spins_SU2, spin_length_SU2,
+        d_spins_SU3, spin_length_SU3);
     
     // Check for any errors in the entire process
     err = cudaGetLastError();
