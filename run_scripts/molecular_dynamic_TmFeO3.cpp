@@ -505,9 +505,6 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
         else{
             MC.simulated_annealing(Temp_start, Temp_end , 10000, 0, 100, false);
         }
-        MC.print_lattice_info();
-        MC.print_lattice_info_cuda();
-        MC.molecular_dynamics(T_start, T_end, T_step_size, dir+"/"+std::to_string(i), true);
         MC.molecular_dynamics_cuda(T_start, T_end, T_step_size, dir+"/"+std::to_string(i), 1, false, true);
     }
 }
@@ -547,8 +544,8 @@ int main(int argc, char** argv) {
     string dir_name = (argc > 14) ? argv[14] : "TmFeO3_2DCS";
     int num_trials = (argc > 15) ? atoi(argv[15]) : 1;
     double T_start = (argc > 16) ? atof(argv[16]) : 0.0;
-    double T_end = (argc > 17) ? atof(argv[17]) : 1;
-    double T_step_size = (argc > 18) ? atof(argv[18]) : 1;
+    double T_end = (argc > 17) ? atof(argv[17]) : 50;
+    double T_step_size = (argc > 18) ? atof(argv[18]) : 1e-2;
     string spin_config_file = (argc > 19) ? argv[19] : "TmFeO3_2DCS/0/spin";
     cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
     filesystem::create_directory(dir_name);

@@ -1124,6 +1124,13 @@ public:
                     double T_start, double T_end, double step_size, string dir_name,
                     size_t output_frequency = 1, bool use_adaptive_stepping = false) {
                         
+        // Save initial spin states
+        std::vector<double> initial_spins_SU2(lattice_size_SU2 * N_SU2);
+        std::vector<double> initial_spins_SU3(lattice_size_SU3 * N_SU3);
+        
+        cudaMemcpy(initial_spins_SU2.data(), d_spins.spins_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaMemcpy(initial_spins_SU3.data(), d_spins.spins_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
+        
         // Set pulse parameters for SU2
         this->set_pulse_SU2(field_in, t_B, field_in, t_B, pulse_amp, pulse_width, pulse_freq);
 
@@ -1152,8 +1159,16 @@ public:
                   << ", step_size: " << step_size << ", dir_name: " << dir_name 
                   << ", output_frequency: " << output_frequency 
                   << ", use_adaptive_stepping: " << use_adaptive_stepping << std::endl;
+        
         // Run molecular dynamics with CUDA
         molecular_dynamics_cuda(T_start, T_end, step_size, dir_name, output_frequency, use_adaptive_stepping);
+        
+        // Restore initial spin states
+        cudaMemcpy(d_spins.spins_SU2, initial_spins_SU2.data(), lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_spins.spins_SU3, initial_spins_SU3.data(), lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
+        
+        // Also update host spins to match
+        copy_spins_to_host();
     }
 
     // CUDA implementation of M_BA_BB_t
@@ -1163,6 +1178,14 @@ public:
                         double pulse_amp, double pulse_width, double pulse_freq,
                         double T_start, double T_end, double step_size, string dir_name,
                         size_t output_frequency = 1, bool use_adaptive_stepping = false) {
+        
+        // Save initial spin states
+        std::vector<double> initial_spins_SU2(lattice_size_SU2 * N_SU2);
+        std::vector<double> initial_spins_SU3(lattice_size_SU3 * N_SU3);
+        
+        cudaMemcpy(initial_spins_SU2.data(), d_spins.spins_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaMemcpy(initial_spins_SU3.data(), d_spins.spins_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
+        
         // Set both pulses for SU2
         this->set_pulse_SU2(field_in_1, t_B_1, field_in_2, t_B_2, pulse_amp, pulse_width, pulse_freq);
 
@@ -1189,9 +1212,14 @@ public:
 
         // Run molecular dynamics with CUDA
         molecular_dynamics_cuda(T_start, T_end, step_size, dir_name, output_frequency, use_adaptive_stepping);
+        
+        // Restore initial spin states
+        cudaMemcpy(d_spins.spins_SU2, initial_spins_SU2.data(), lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_spins.spins_SU3, initial_spins_SU3.data(), lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
+        
+        // Also update host spins to match
+        copy_spins_to_host();
     }
-
-    
 
     // Copy data from device back to host
     __host__
@@ -1566,7 +1594,9 @@ void SSPRK53_step_kernel(
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3);
+    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
+    double* work_SU2_1, double* work_SU2_2, double* work_SU2_3,
+    double* work_SU3_1, double* work_SU3_2, double* work_SU3_3);
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __host__

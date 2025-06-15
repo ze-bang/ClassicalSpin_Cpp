@@ -640,29 +640,29 @@ void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double t
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
-    bool T_zero = argv[1] ? atoi(argv[1]) : 0;
-    double Temp_start = argv[2] ? atof(argv[2]) : 20;
-    double Temp_end = argv[3] ? atof(argv[3]) : 0.01;
-    double tau_start = argv[4] ? atof(argv[4]) : 0;
-    double tau_end = argv[5] ? atof(argv[5]) : -20;
-    double tau_step_size = argv[6] ? atof(argv[6]) : 0.01;
-    double T_start = argv[7] ? atof(argv[7]) : -20.0;
-    double T_end = argv[8] ? atof(argv[8]) : 20.0;
-    double T_step_size = argv[9] ? atof(argv[9]) : 0.01;
+    bool T_zero = (argc > 1) ? atoi(argv[1]) : 0;
+    double Temp_start = (argc > 2) ? atof(argv[2]) : 20;
+    double Temp_end = (argc > 3) ? atof(argv[3]) : 0.01;
+    double tau_start = (argc > 4) ? atof(argv[4]) : 0;
+    double tau_end = (argc > 5) ? atof(argv[5]) : -20;
+    double tau_step_size = (argc > 6) ? atof(argv[6]) : 0.01;
+    double T_start = (argc > 7) ? atof(argv[7]) : -20.0;
+    double T_end = (argc > 8) ? atof(argv[8]) : 20.0;
+    double T_step_size = (argc > 9) ? atof(argv[9]) : 0.01;
 
 
-    double J1ab = argv[10] ? atof(argv[10]) : 4.92;
-    double J1c = argv[11] ? atof(argv[11]) : 4.92;
-    double J2ab = argv[12] ? atof(argv[12]) : 0.29;
-    double J2c = argv[13] ? atof(argv[13]) : 0.29;
-    double Ka = argv[14] ? atof(argv[14]) : 0.0;
-    double Kc = argv[15] ? atof(argv[15]) : -0.09;
-    double D1 = argv[16] ? atof(argv[16]) : 0.0;
-    double D2 = argv[17] ? atof(argv[17]) : 0.0;
-    double e1 = argv[18] ? atof(argv[18]) : 4.0;
-    double e2 = argv[19] ? atof(argv[19]) : 0.0;
-    double xii = argv[20] ? atof(argv[20]) : 0.05;
-    double h = argv[21] ? atof(argv[21]) : 0.0;
+    double J1ab = (argc > 10) ? atof(argv[10]) : 4.92;
+    double J1c = (argc > 11) ? atof(argv[11]) : 4.92;
+    double J2ab = (argc > 12) ? atof(argv[12]) : 0.29;
+    double J2c = (argc > 13) ? atof(argv[13]) : 0.29;
+    double Ka = (argc > 14) ? atof(argv[14]) : 0.0;
+    double Kc = (argc > 15) ? atof(argv[15]) : -0.09;
+    double D1 = (argc > 16) ? atof(argv[16]) : 0.0;
+    double D2 = (argc > 17) ? atof(argv[17]) : 0.0;
+    double e1 = (argc > 18) ? atof(argv[18]) : 4.0;
+    double e2 = (argc > 19) ? atof(argv[19]) : 0.0;
+    double xii = (argc > 20) ? atof(argv[20]) : 0.05;
+    double h = (argc > 21) ? atof(argv[21]) : 0.0;
 
     J1c /= J1ab;
     J2ab /= J1ab;
@@ -675,11 +675,11 @@ int main(int argc, char** argv) {
     e2 /= J1ab;
     h /= J1ab;
     J1ab = 1;
-    string dir_name = argv[22] ? argv[22] : "TmFeO3_2DCS_xii=0.05";
+    string dir_name = (argc > 22) ? argv[22] : "TmFeO3_2DCS_xii=0.05";
     filesystem::create_directories(dir_name);
-    int slurm_ID = argv[23] ? atoi(argv[23]) : 1;
-    int total_jobs = argv[24] ? atoi(argv[24]) : 1;
-    string spin_config_file = argv[25] ? argv[25] : "TmFeO3_2DCS/0/spin";
+    int slurm_ID = (argc > 23) ? atoi(argv[23]) : 1;
+    int total_jobs = (argc > 24) ? atoi(argv[24]) : 1;
+    string spin_config_file = (argc > 25) ? argv[25] : "TmFeO3_2DCS/0/spin";
 
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;
@@ -690,7 +690,6 @@ int main(int argc, char** argv) {
     cout << "Reading from " << spin_config_file << endl;
     string output_dir = dir_name+"/"+std::to_string(slurm_ID);
     filesystem::create_directories(output_dir);
-    // MD_TmFeO3_2DCS(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file);
     MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file);
     return 0;
 }

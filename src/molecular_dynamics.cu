@@ -613,7 +613,62 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     cudaFree(d_local_fields_SU3);
 }
 
+// Memory pool class for SSPRK53 working arrays - avoids repeated allocation/deallocation
+template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
+class SSPRK53_MemoryPool {
+private:
+    double* work_SU2_1;
+    double* work_SU2_2;
+    double* work_SU2_3;
+    double* work_SU3_1;
+    double* work_SU3_2;
+    double* work_SU3_3;
+    bool allocated;
 
+public:
+    SSPRK53_MemoryPool() : allocated(false) {
+        allocate();
+    }
+    
+    ~SSPRK53_MemoryPool() {
+        deallocate();
+    }
+    
+    void allocate() {
+        if (allocated) return;
+        
+        cudaMalloc(&work_SU2_1, lattice_size_SU2 * N_SU2 * sizeof(double));
+        cudaMalloc(&work_SU2_2, lattice_size_SU2 * N_SU2 * sizeof(double));
+        cudaMalloc(&work_SU2_3, lattice_size_SU2 * N_SU2 * sizeof(double));
+        cudaMalloc(&work_SU3_1, lattice_size_SU3 * N_SU3 * sizeof(double));
+        cudaMalloc(&work_SU3_2, lattice_size_SU3 * N_SU3 * sizeof(double));
+        cudaMalloc(&work_SU3_3, lattice_size_SU3 * N_SU3 * sizeof(double));
+        allocated = true;
+    }
+    
+    void deallocate() {
+        if (!allocated) return;
+        
+        cudaFree(work_SU2_1);
+        cudaFree(work_SU2_2);
+        cudaFree(work_SU2_3);
+        cudaFree(work_SU3_1);
+        cudaFree(work_SU3_2);
+        cudaFree(work_SU3_3);
+        allocated = false;
+    }
+    
+    // Getters for the working arrays
+    double* get_work_SU2_1() const { return work_SU2_1; }
+    double* get_work_SU2_2() const { return work_SU2_2; }
+    double* get_work_SU2_3() const { return work_SU2_3; }
+    double* get_work_SU3_1() const { return work_SU3_1; }
+    double* get_work_SU3_2() const { return work_SU3_2; }
+    double* get_work_SU3_3() const { return work_SU3_3; }
+};
+
+
+// Optimized SSPRK53 kernel that reduces memory allocations and synchronizations
 template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __host__
 void SSPRK53_step_kernel(
@@ -632,9 +687,12 @@ void SSPRK53_step_kernel(
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
+    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
+    // Pre-allocated working arrays passed from caller
+    double* work_SU2_1, double* work_SU2_2, double* work_SU2_3,
+    double* work_SU3_1, double* work_SU3_2, double* work_SU3_3)
 {
-    // SSPRK53 coefficients from mixed_lattice.h
+    // SSPRK53 coefficients - now constexpr for compile-time optimization
     constexpr double a30 = 0.355909775063327;
     constexpr double a32 = 0.644090224936674;
     constexpr double a40 = 0.367933791638137;
@@ -651,7 +709,7 @@ void SSPRK53_step_kernel(
     constexpr double c3 = 0.728985661612188;
     constexpr double c4 = 0.699226135931670;
 
-    // Pre-compute step size multiplications
+    // Pre-compute all time step multiplications
     const double b10_h = b10 * dt;
     const double b21_h = b21 * dt;
     const double b32_h = b32 * dt;
@@ -662,24 +720,21 @@ void SSPRK53_step_kernel(
     const double c3_h = c3 * dt;
     const double c4_h = c4 * dt;
 
-    // Allocate all working arrays upfront
-    double* tmp_SU2 = nullptr, *k_SU2 = nullptr, *u_SU2 = nullptr;
-    double* tmp_SU3 = nullptr, *k_SU3 = nullptr, *u_SU3 = nullptr;
+    // Use pre-allocated working arrays instead of allocating
+    double* k_SU2 = work_SU2_1;
+    double* tmp_SU2 = work_SU2_2;
+    double* u_SU2 = work_SU2_3;
+    double* k_SU3 = work_SU3_1;
+    double* tmp_SU3 = work_SU3_2;
+    double* u_SU3 = work_SU3_3;
 
-    cudaMalloc(&tmp_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    cudaMalloc(&k_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    cudaMalloc(&u_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    cudaMalloc(&tmp_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    cudaMalloc(&k_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    cudaMalloc(&u_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    // Optimize grid configuration - compute once
+    constexpr dim3 block_size(256);
+    constexpr dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + 255) / 256);
 
 
-    dim3 block_size(256);
-    dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + block_size.x - 1) / block_size.x);
     
-
-    cudaDeviceSynchronize();
-    // Stage 1: 
+    // Stage 1: Compute k1 = f(t, y)
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
         k_SU2, k_SU3,
         d_spins_SU2, d_spins_SU3,
@@ -699,16 +754,12 @@ void SSPRK53_step_kernel(
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time, dt);
 
-    // Synchronize before updating arrays
-    cudaDeviceSynchronize();
-    
+    // Stage 1 update: tmp = y + b10*h*k1
     update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
     (tmp_SU2, d_spins_SU2, 1.0, k_SU2, b10_h, 
      tmp_SU3, d_spins_SU3, 1.0, k_SU3, b10_h);
     
-    // End of Stage 1 - Synchronize
-    cudaDeviceSynchronize();
-    
+    // Stage 2: Compute k2 = f(t + c1*h, tmp)
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
         k_SU2, k_SU3,
         tmp_SU2, tmp_SU3,
@@ -728,17 +779,12 @@ void SSPRK53_step_kernel(
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c1_h, dt);
         
-    // Synchronize before updating arrays
-    cudaDeviceSynchronize();
-    
+    // Stage 2 update: u = tmp + b21*h*k2
     update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
     (u_SU2, tmp_SU2, 1.0, k_SU2, b21_h, 
      u_SU3, tmp_SU3, 1.0, k_SU3, b21_h);
-
-    // End of Stage 2 - Synchronize
-    cudaDeviceSynchronize();
     
-    // Stage 3
+    // Stage 3: Compute k3 = f(t + c2*h, u)
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
         k_SU2, k_SU3,
         u_SU2, u_SU3,
@@ -758,17 +804,12 @@ void SSPRK53_step_kernel(
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c2_h, dt);
 
-    // Synchronize before updating arrays
-    cudaDeviceSynchronize();
-    
+    // Stage 3 update: tmp = a30*y + a32*u + b32*h*k3
     update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
     (tmp_SU2, d_spins_SU2, a30, u_SU2, a32, k_SU2, b32_h,
      tmp_SU3, d_spins_SU3, a30, u_SU3, a32, k_SU3, b32_h);
 
-    // End of Stage 3 - Synchronize
-    cudaDeviceSynchronize();
-
-    // Stage 4
+    // Stage 4: Compute k4 = f(t + c3*h, tmp)
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
         k_SU2, k_SU3,
         tmp_SU2, tmp_SU3,
@@ -788,33 +829,12 @@ void SSPRK53_step_kernel(
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c3_h, dt);
 
-    // Synchronize before updating arrays
-    cudaDeviceSynchronize();
-
-    // Create temporary arrays to hold the results
-    double *temp2_SU2, *temp2_SU3;
-    cudaMalloc(&temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    cudaMalloc(&temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    
+    // Stage 4 update: Reuse tmp arrays for efficiency (tmp = a40*y + a43*tmp + b43*h*k4)
     update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> <<<grid_size, block_size>>>
-    (temp2_SU2, d_spins_SU2, a40, tmp_SU2, a43, k_SU2, b43_h,
-     temp2_SU3, d_spins_SU3, a40, tmp_SU3, a43, k_SU3, b43_h);
+    (tmp_SU2, d_spins_SU2, a40, tmp_SU2, a43, k_SU2, b43_h,
+     tmp_SU3, d_spins_SU3, a40, tmp_SU3, a43, k_SU3, b43_h);
 
-    // Synchronize before memory operations
-    cudaDeviceSynchronize();
-    
-    // Copy results back to tmp arrays
-    cudaMemcpy(tmp_SU2, temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(tmp_SU3, temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToDevice);
-    
-    // Free temporary arrays
-    cudaFree(temp2_SU2);
-    cudaFree(temp2_SU3);
-
-    // End of Stage 4 - Synchronize
-    cudaDeviceSynchronize();
-
-    // Stage 5
+    // Stage 5: Compute k5 = f(t + c4*h, tmp)
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
         k_SU2, k_SU3,
         tmp_SU2, tmp_SU3,
@@ -834,28 +854,21 @@ void SSPRK53_step_kernel(
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c4_h, dt);
 
-    // Synchronize before final update
-    cudaDeviceSynchronize();
-
+    // Final update: y_new = a52*u + a54*tmp + b54*h*k5
     update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
     (d_spins_SU2, u_SU2, a52, tmp_SU2, a54, k_SU2, b54_h,
      d_spins_SU3, u_SU3, a52, tmp_SU3, a54, k_SU3, b54_h);
 
-    // Final synchronization to ensure all operations are complete
+    // Single final synchronization only - no intermediate sync needed
     cudaDeviceSynchronize();
-    
-    // Cleanup temporary arrays - check if pointers are valid before freeing
-    if (tmp_SU2) cudaFree(tmp_SU2);
-    if (k_SU2) cudaFree(k_SU2);
-    if (u_SU2) cudaFree(u_SU2);
-    if (tmp_SU3) cudaFree(tmp_SU3);
-    if (k_SU3) cudaFree(k_SU3);
-    if (u_SU3) cudaFree(u_SU3);
 }
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
 __host__
 void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>::SSPRK53_step_cuda(double step_size, double curr_time, double tol) {
+    // Static memory pool to persist across multiple calls
+    static SSPRK53_MemoryPool<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> memory_pool;
+    
     // Allocate temporary arrays for intermediate stages
     double *d_local_fields_SU2 = nullptr, *d_local_fields_SU3 = nullptr;
     
@@ -881,7 +894,7 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         return;
     }
 
-    // Execute SSPRK53 step
+    // Execute optimized SSPRK53 step with pre-allocated working arrays
     SSPRK53_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
     d_spins.spins_SU2, d_spins.spins_SU3,
     d_local_fields_SU2, d_local_fields_SU3,
@@ -898,7 +911,10 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
     d_field_drive_1_SU2, d_field_drive_2_SU2, 
     d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-    curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);    
+    curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3,
+    // Pass pre-allocated working arrays from memory pool
+    memory_pool.get_work_SU2_1(), memory_pool.get_work_SU2_2(), memory_pool.get_work_SU2_3(),
+    memory_pool.get_work_SU3_1(), memory_pool.get_work_SU3_2(), memory_pool.get_work_SU3_3());    
     
     // Check for errors in kernel launch
     err = cudaGetLastError();
@@ -906,10 +922,7 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         fprintf(stderr, "CUDA error: Failed to launch SSPRK53_step_kernel (Error code: %s)\n", cudaGetErrorString(err));
     }
     
-    // Make sure everything is synchronized
-    cudaDeviceSynchronize();
-    
-    // Cleanup temporary arrays
+    // Cleanup temporary arrays (working arrays are managed by static memory pool)
     cudaFree(d_local_fields_SU2);
     cudaFree(d_local_fields_SU3);
 }
