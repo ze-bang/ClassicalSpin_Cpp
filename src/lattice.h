@@ -290,7 +290,9 @@ class lattice
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+            array<double, N> current_spin_SU2_partner1 = spins[trilinear_partners[site_index][i][0]];
+            array<double, N> current_spin_SU2_partner2 = spins[trilinear_partners[site_index][i][1]];
+            local_field = local_field + contract_trilinear_field<N, N, N>(trilinear_interaction[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         return local_field-field[site_index];
     }
@@ -305,7 +307,9 @@ class lattice
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction[site_index][i], current_spin[trilinear_partners[site_index][i][0]], current_spin[trilinear_partners[site_index][i][1]]);
+            array<double, N> current_spin_SU2_partner1 = spins[trilinear_partners[site_index][i][0]];
+            array<double, N> current_spin_SU2_partner2 = spins[trilinear_partners[site_index][i][1]];
+            local_field = local_field + contract_trilinear_field<N, N, N>(trilinear_interaction[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         return local_field-field[site_index];
     }

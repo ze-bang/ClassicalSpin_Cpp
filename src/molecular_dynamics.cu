@@ -65,16 +65,31 @@ void cross_product_SU2_device(double* result, const double* a, const double* b) 
 
 __device__
 void cross_product_SU3_device(double* result, const double* a, const double* b) {
-    const double sqrt3 = 1.73205080756887729;
-
-    result[0] = a[1]*b[2] - a[2]*b[1] + 0.5*(a[4]*b[5] - a[5]*b[4]) + 0.5*(a[6]*b[7] - a[7]*b[6]);
-    result[1] = a[2]*b[0] - a[0]*b[2] + 0.5*(a[3]*b[5] - a[5]*b[3]) - 0.5*(a[6]*b[7] - a[7]*b[6]);
-    result[2] = a[0]*b[1] - a[1]*b[0] + 0.5*(a[3]*b[4] - a[4]*b[3]) + 0.5*(a[5]*b[6] - a[6]*b[5]);
-    result[3] = 0.5*(a[1]*b[5] - a[5]*b[1] - a[2]*b[4] + a[4]*b[2]) + 0.5*sqrt3*(a[6]*b[7] - a[7]*b[6]);
-    result[4] = 0.5*(a[2]*b[3] - a[3]*b[2] + a[5]*b[0] - a[0]*b[5]) + 0.5*sqrt3*(a[7]*b[6] - a[6]*b[7]);
-    result[5] = 0.5*(a[0]*b[4] - a[4]*b[0] - a[1]*b[3] + a[3]*b[1]) + 0.5*sqrt3*(a[6]*b[6] + a[7]*b[7]);
-    result[6] = 0.5*(a[0]*b[7] - a[7]*b[0] + a[1]*b[6] - a[6]*b[1] + a[4]*b[7] - a[7]*b[4] + a[5]*b[6] - a[6]*b[5]) + 0.5*sqrt3*(a[3]*b[7] - a[7]*b[3] - a[4]*b[6] + a[6]*b[4]);
-    result[7] = 0.5*(a[0]*b[6] - a[6]*b[0] - a[1]*b[7] + a[7]*b[1] - a[4]*b[6] + a[6]*b[4] + a[5]*b[7] - a[7]*b[5]) + 0.5*sqrt3*(a[3]*b[6] - a[6]*b[3] + a[4]*b[7] - a[7]*b[4]);
+    const double sqrt3_2 = 0.86602540378; // sqrt(3)/2
+    
+    // Component 0 (λ_1): receives contributions from f_{123}, f_{147}, f_{156}
+    result[0] = a[1]*b[2] - a[2]*b[1] + 0.5*(a[3]*b[6] - a[6]*b[3]) - 0.5*(a[4]*b[5] - a[5]*b[4]);
+    
+    // Component 1 (λ_2): receives contributions from f_{213}, f_{246}, f_{257}
+    result[1] = a[2]*b[0] - a[0]*b[2] + 0.5*(a[3]*b[5] - a[5]*b[3]) + 0.5*(a[4]*b[6] - a[6]*b[4]);
+    
+    // Component 2 (λ_3): receives contributions from f_{312}, f_{345}, f_{367}
+    result[2] = a[0]*b[1] - a[1]*b[0] + 0.5*(a[3]*b[4] - a[4]*b[3]) - 0.5*(a[5]*b[6] - a[6]*b[5]);
+    
+    // Component 3 (λ_4): receives contributions from f_{147}, f_{246}, f_{345}, f_{458}
+    result[3] = 0.5*(a[6]*b[0] - a[0]*b[6]) + 0.5*(a[5]*b[1] - a[1]*b[5]) + 0.5*(a[4]*b[2] - a[2]*b[4]) + sqrt3_2*(a[4]*b[7] - a[7]*b[4]);
+    
+    // Component 4 (λ_5): receives contributions from f_{156}, f_{257}, f_{345}, f_{458}
+    result[4] = -0.5*(a[5]*b[0] - a[0]*b[5]) + 0.5*(a[6]*b[1] - a[1]*b[6]) + 0.5*(a[2]*b[3] - a[3]*b[2]) + sqrt3_2*(a[7]*b[3] - a[3]*b[7]);
+    
+    // Component 5 (λ_6): receives contributions from f_{156}, f_{246}, f_{367}, f_{678}
+    result[5] = -0.5*(a[0]*b[4] - a[4]*b[0]) + 0.5*(a[1]*b[3] - a[3]*b[1]) - 0.5*(a[6]*b[2] - a[2]*b[6]) + sqrt3_2*(a[6]*b[7] - a[7]*b[6]);
+    
+    // Component 6 (λ_7): receives contributions from f_{147}, f_{257}, f_{367}, f_{678}
+    result[6] = 0.5*(a[0]*b[3] - a[3]*b[0]) + 0.5*(a[1]*b[4] - a[4]*b[1]) - 0.5*(a[2]*b[5] - a[5]*b[2]) + sqrt3_2*(a[7]*b[5] - a[5]*b[7]);
+    
+    // Component 7 (λ_8): receives contributions from f_{458}, f_{678}
+    result[7] = sqrt3_2*(a[3]*b[4] - a[4]*b[3]) + sqrt3_2*(a[5]*b[6] - a[6]*b[5]);
 }
 
 
@@ -303,8 +318,9 @@ __global__ void update_arrays_kernel(double* out_SU2, const double* in1_SU2, dou
         }
     }
     else{
+        int idx_SU3 = idx - lattice_size_SU2; // Adjust index for SU3
         for (int i = 0; i < N_SU3; ++i) {
-            out_SU3[idx * N_SU3 + i] = a1_SU3 * in1_SU3[idx * N_SU3 + i] + a2_SU3 * in2_SU3[idx * N_SU3 + i];
+            out_SU3[idx_SU3 * N_SU3 + i] = a1_SU3 * in1_SU3[idx_SU3 * N_SU3 + i] + a2_SU3 * in2_SU3[idx_SU3 * N_SU3 + i];
         }
     }
 }
@@ -330,10 +346,11 @@ __global__ void update_arrays_three_kernel(double* out_SU2,
         }
     }
     else{
+        int idx_SU3 = idx - lattice_size_SU2; // Adjust index for SU3
         for (int i = 0; i < N_SU3; ++i) {
-            out_SU3[idx * N_SU3 + i] = a1_SU3 * in1_SU3[idx * N_SU3 + i] + 
-                                       a2_SU3 * in2_SU3[idx * N_SU3 + i] + 
-                                       a3_SU3 * in3_SU3[idx * N_SU3 + i];
+            out_SU3[idx_SU3 * N_SU3 + i] = a1_SU3 * in1_SU3[idx_SU3 * N_SU3 + i] + 
+                                        a2_SU3 * in2_SU3[idx_SU3 * N_SU3 + i] + 
+                                        a3_SU3 * in3_SU3[idx_SU3 * N_SU3 + i];
         }
     }
 }
@@ -357,6 +374,7 @@ __global__ void normalize_spins_kernel(double* spins_SU2, double spin_length_SU2
         }
     }
     else{
+        site -= lattice_size_SU2; // Adjust index for SU3
         double* spin = &spins_SU3[site * N_SU3];
         double norm = 0.0;
         for (int i = 0; i < N_SU3; i++) {
@@ -371,24 +389,6 @@ __global__ void normalize_spins_kernel(double* spins_SU2, double spin_length_SU2
     }
 }
 
-// Kernel to normalize spins for SU3
-template<size_t N>
-__global__ void normalize_spins_SU3_kernel(double* spins, double spin_length, size_t size) {
-    int site = blockIdx.x * blockDim.x + threadIdx.x;
-    if (site < size) {
-        double* spin = &spins[site * N];
-        double norm = 0.0;
-        for (int i = 0; i < N; i++) {
-            norm += spin[i] * spin[i];
-        }
-        norm = sqrt(norm);
-        if (norm > 1e-10) {
-            for (int i = 0; i < N; i++) {
-                spin[i] = spin[i] * spin_length / norm;
-            }
-        }
-    }
-}
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __global__
@@ -412,7 +412,7 @@ void LLG_kernel(
     double curr_time, double dt)
 {
     int site_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (site_index >= lattice_size_SU2 && site_index >= lattice_size_SU3) return;
+    if (site_index > lattice_size_SU2 + lattice_size_SU3) return;
 
     if (site_index < lattice_size_SU2) {
         compute_local_field_SU2<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
@@ -429,11 +429,11 @@ void LLG_kernel(
             d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
             // Compute derivatives (dS/dt) using Landau-Lifshitz equation
         landau_Lifshitz_SU2<N_SU2, lattice_size_SU2>(
-            k_SU2, site_index, d_spins_SU2, d_local_field_SU2);
+            k_SU2, site_index, d_local_field_SU2, d_spins_SU2);
     
-    }else{
+    }else{        
         compute_local_field_SU3<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
-            d_local_field_SU3, site_index, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
+            d_local_field_SU3, site_index - lattice_size_SU2, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
             d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
             d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
             d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
@@ -441,10 +441,177 @@ void LLG_kernel(
             max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
             
         landau_Lifshitz_SU3<N_SU3, lattice_size_SU3>(
-            k_SU3, site_index, d_spins_SU3, d_local_field_SU3);
+            k_SU3, site_index - lattice_size_SU2, d_local_field_SU3, d_spins_SU3);
     }
 }
 
+
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
+__global__
+void get_local_field(
+    double* k_SU2, double* k_SU3,
+    double* d_spins_SU2, double* d_spins_SU3,
+    double* d_local_field_SU2, double* d_local_field_SU3,
+    double* d_field_SU2, double* d_field_SU3,
+    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
+    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
+    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
+    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
+    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
+    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
+    double curr_time, double dt)
+{
+    int site_index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (site_index > lattice_size_SU2 + lattice_size_SU3) return;
+
+    if (site_index < lattice_size_SU2) {
+        compute_local_field_SU2<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
+        k_SU2, site_index, d_spins_SU2, d_field_SU2, d_onsite_interaction_SU2,
+        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
+        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
+        d_spins_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
+
+        // Add drive field if applicable
+        drive_field_T_SU2<N_SU2, N_ATOMS_SU2, lattice_size_SU2>(
+            k_SU2, curr_time, site_index, d_field_drive_1_SU2, d_field_drive_2_SU2, 
+            d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
+    
+    }else{        
+        compute_local_field_SU3<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
+            k_SU3, site_index - lattice_size_SU2, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
+            d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
+            d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
+            d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
+            d_spins_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+            max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+    }
+}
+
+template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
+__host__
+void get_local_field_kernel(
+    double* d_spins_SU2, double* d_spins_SU3,
+    double* d_local_field_SU2, double* d_local_field_SU3,
+    double* d_field_SU2, double* d_field_SU3,
+    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
+    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
+    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
+    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
+    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
+    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
+    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
+{
+    
+    dim3 block_dim(256);
+    dim3 grid_dim((lattice_size_SU2 + lattice_size_SU3 + block_dim.x - 1) / block_dim.x);
+
+    double* k_SU2 = nullptr;
+    double* k_SU3 = nullptr;
+
+    // Allocate device memory for local fields
+    cudaMalloc(&k_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    cudaMalloc(&k_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+
+    // Compute local fields for SU(2) and SU(3) spins
+    get_local_field<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_dim, block_dim>>>(
+        k_SU2, k_SU3,
+        d_spins_SU2, d_spins_SU3,
+        d_local_field_SU2, d_local_field_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2,
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time, dt);
+    
+
+    cudaMemcpy(d_spins_SU2, k_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_spins_SU3, k_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToDevice);
+}
+
+
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
+__host__
+void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>::get_local_field_cuda(double step_size, double curr_time, double tol) {
+    // Allocate temporary arrays for intermediate stages
+    double *d_local_fields_SU2 = nullptr, *d_local_fields_SU3 = nullptr;
+    
+    // Error checking for memory allocation
+    cudaError_t err = cudaMalloc(&d_local_fields_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to allocate d_local_fields_SU2 (Error code: %s)\n", cudaGetErrorString(err));
+        return;
+    }
+    
+    err = cudaMalloc(&d_local_fields_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to allocate d_local_fields_SU3 (Error code: %s)\n", cudaGetErrorString(err));
+        cudaFree(d_local_fields_SU2);
+        return;
+    }
+
+    // Check if any CUDA arrays are NULL before passing to the kernel
+    if (d_spins.spins_SU2 == nullptr || d_spins.spins_SU3 == nullptr) {
+        fprintf(stderr, "CUDA error: NULL pointer in d_spins detected\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+
+    // Execute get_local_field_kernel
+    get_local_field_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
+        d_spins.spins_SU2, d_spins.spins_SU3,
+        d_local_fields_SU2, d_local_fields_SU3,
+        d_field_SU2, d_field_SU3,
+        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
+        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
+        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
+        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+        d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3,
+        max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
+        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
+        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
+        curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);    
+    
+    // Check for errors in kernel launch
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: Failed to launch SSPRK53_step_kernel (Error code: %s)\n", cudaGetErrorString(err));
+    }
+    
+    // Make sure everything is synchronized
+    cudaDeviceSynchronize();
+    
+    // Cleanup temporary arrays
+    cudaFree(d_local_fields_SU2);
+    cudaFree(d_local_fields_SU3);
+}
 
 
 template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
@@ -498,86 +665,14 @@ void SSPRK53_step_kernel(
     // Allocate all working arrays upfront
     double* tmp_SU2 = nullptr, *k_SU2 = nullptr, *u_SU2 = nullptr;
     double* tmp_SU3 = nullptr, *k_SU3 = nullptr, *u_SU3 = nullptr;
-    double* d_drive_field_SU2 = nullptr, *d_drive_field_SU3 = nullptr;
 
-    // Use cudaError_t to check for errors
-    cudaError_t err;
-    
-    err = cudaMalloc(&d_drive_field_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate d_drive_field_SU2 (Error code: %s)\n", cudaGetErrorString(err));
-        return;
-    }
-    
-    err = cudaMalloc(&d_drive_field_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate d_drive_field_SU3 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        return;
-    }
+    cudaMalloc(&tmp_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    cudaMalloc(&k_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    cudaMalloc(&u_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
+    cudaMalloc(&tmp_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    cudaMalloc(&k_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
+    cudaMalloc(&u_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
 
-    err = cudaMalloc(&tmp_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate tmp_SU2 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        cudaFree(d_drive_field_SU3);
-        return;
-    }
-    
-    err = cudaMalloc(&k_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate k_SU2 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        cudaFree(d_drive_field_SU3);
-        cudaFree(tmp_SU2);
-        return;
-    }
-    
-    err = cudaMalloc(&u_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate u_SU2 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        cudaFree(d_drive_field_SU3);
-        cudaFree(tmp_SU2);
-        cudaFree(k_SU2);
-        return;
-    }
-    
-    err = cudaMalloc(&tmp_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate tmp_SU3 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        cudaFree(d_drive_field_SU3);
-        cudaFree(tmp_SU2);
-        cudaFree(k_SU2);
-        cudaFree(u_SU2);
-        return;
-    }
-    
-    err = cudaMalloc(&k_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate k_SU3 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        cudaFree(d_drive_field_SU3);
-        cudaFree(tmp_SU2);
-        cudaFree(k_SU2);
-        cudaFree(u_SU2);
-        cudaFree(tmp_SU3);
-        return;
-    }
-    
-    err = cudaMalloc(&u_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: Failed to allocate u_SU3 (Error code: %s)\n", cudaGetErrorString(err));
-        cudaFree(d_drive_field_SU2);
-        cudaFree(d_drive_field_SU3);
-        cudaFree(tmp_SU2);
-        cudaFree(k_SU2);
-        cudaFree(u_SU2);
-        cudaFree(tmp_SU3);
-        cudaFree(k_SU3);
-        return;
-    }
 
     dim3 block_size(256);
     dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + block_size.x - 1) / block_size.x);
@@ -748,16 +843,7 @@ void SSPRK53_step_kernel(
 
     // Final synchronization to ensure all operations are complete
     cudaDeviceSynchronize();
-
-    normalize_spins_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
-        d_spins_SU2, spin_length_SU2,
-        d_spins_SU3, spin_length_SU3);
     
-    // Check for any errors in the entire process
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error during integration: %s\n", cudaGetErrorString(err));
-    }
     // Cleanup temporary arrays - check if pointers are valid before freeing
     if (tmp_SU2) cudaFree(tmp_SU2);
     if (k_SU2) cudaFree(k_SU2);
@@ -765,8 +851,6 @@ void SSPRK53_step_kernel(
     if (tmp_SU3) cudaFree(tmp_SU3);
     if (k_SU3) cudaFree(k_SU3);
     if (u_SU3) cudaFree(u_SU3);
-    if (d_drive_field_SU2) cudaFree(d_drive_field_SU2);
-    if (d_drive_field_SU3) cudaFree(d_drive_field_SU3);
 }
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
@@ -984,3 +1068,9 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
 
 //Explicitly declare template specializations for the mixed lattice class
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
+template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(
+    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    double*, double*, double, double, double, double, double, double, double
+);

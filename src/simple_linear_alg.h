@@ -165,7 +165,6 @@ array<T, N> operator/(const array<T, N> &a, const T1 n) {
 template<typename T, size_t N>
 array<T, N> operator+(const array<T, N> &a,const array<T, N>  &b) {
     array<T, N> result;
-    #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] + b[i];
     }
@@ -193,7 +192,6 @@ array<T, N> operator-=(array<T, N> &a,const array<T, N>  &b) {
 template<typename T, size_t N>
 array<T, N> operator-(const array<T, N> &a,const array<T, N>  &b) {
     array<T, N> result;
-    #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         result[i] = a[i] - b[i];
     }
@@ -298,20 +296,19 @@ inline double contract_trilinear(const array<double, N_3*N_2*N_1>  &M, const arr
 }
 
 
-template<size_t N, size_t N_2, size_t N_3>
-inline array<double, N/(N_2*N_3)> contract_trilinear_field(const array<double, N>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
-    constexpr size_t N_1 = N/(N_2*N_3);
+template<size_t N_1, size_t N_2, size_t N_3>
+inline array<double, N_1> contract_trilinear_field(const array<double, N_1*N_2*N_3>  &M, const array<double, N_2>  &b, const array<double, N_3>  &c) {
     array<double, N_1> result = {0};
     
-    #pragma omp parallel for collapse(3) 
     for(size_t i = 0; i < N_1; i++) {
+        double temp = 0;
         for(size_t j = 0; j < N_2; j++) {
             for(size_t k = 0; k < N_3; k++) {
-                result[i]  += M[i*N_2*N_3+j*N_3+k] *  b[j] * c[k];
+                temp += M[i*N_2*N_3+j*N_3+k] * b[j] * c[k];
             }
         }
+        result[i] = temp;
     }
-    
     return result;
 }
 

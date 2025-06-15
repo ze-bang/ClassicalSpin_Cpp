@@ -19,8 +19,6 @@
 #include <mutex>
 #include "cuda_contractions_wrapper.cuh"
 // #include <boost>
-#include <boost/numeric/odeint.hpp>
-
 
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 struct mixed_lattice_spin{
@@ -294,7 +292,6 @@ class mixed_lattice
                         // Copy field and onsite interaction (use std::copy for better optimization)
                         field[current_site_index] = atoms->field[l];
                         onsite_interaction[current_site_index] = atoms->onsite_interaction[l];
-                        
                         // Handle bilinear interactions
                         auto bilinear_matched = atoms->bilinear_interaction.equal_range(l);
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m) {
@@ -872,69 +869,104 @@ class mixed_lattice
     }
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
-        array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
+        array<double,N_SU2> local_field = multiply(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
+
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+            size_t partner1 = trilinear_partners_SU2[site_index][i][0];
+            size_t partner2 = trilinear_partners_SU2[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = spins.spins_SU2[partner1];
+            array<double, N_SU2> current_spin_SU2_partner2 = spins.spins_SU2[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU2, N_SU2, N_SU2>(trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
+            size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = spins.spins_SU2[partner1];
+            array<double, N_SU3> current_spin_SU3_partner2 = spins.spins_SU3[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU2, N_SU2, N_SU3>(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU3_partner2);
         }
         return local_field-field_SU2[site_index];
     }
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
-        array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
+        array<double,N_SU3> local_field = multiply(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
+            size_t partner1 = trilinear_partners_SU3[site_index][i][0];
+            size_t partner2 = trilinear_partners_SU3[site_index][i][1];
+            array<double, N_SU3> current_spin_SU3_partner1 = spins.spins_SU3[partner1];
+            array<double, N_SU3> current_spin_SU3_partner2 = spins.spins_SU3[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU3, N_SU3, N_SU3>(trilinear_interaction_SU3[site_index][i], current_spin_SU3_partner1, current_spin_SU3_partner2);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+            size_t partner1 = mixed_trilinear_partners_SU3[site_index][i][0];
+            size_t partner2 = mixed_trilinear_partners_SU3[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = spins.spins_SU2[partner1];
+            array<double, N_SU2> current_spin_SU2_partner2 = spins.spins_SU2[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU3, N_SU2, N_SU2>(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         return local_field-field_SU3[site_index];
     }
 
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
-        array<double,N_SU2> local_field =  multiply(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
-        // #pragma omp simd
-        // for (size_t i=0; i< num_bi_SU2; ++i) {
-        //     local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
-        // }
+        array<double,N_SU2> local_field = {{0.0}};
+        local_field += multiply(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
+        #pragma omp simd
+        for (size_t i=0; i< num_bi_SU2; ++i) {
+            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
+        }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU2[site_index][i], current_spin_SU2[trilinear_partners_SU2[site_index][i][0]], current_spin_SU2[trilinear_partners_SU2[site_index][i][1]]);
+            size_t partner1 = trilinear_partners_SU2[site_index][i][0];
+            size_t partner2 = trilinear_partners_SU2[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = current_spin_SU2[partner1];
+            array<double, N_SU2> current_spin_SU2_partner2 = current_spin_SU2[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU2, N_SU2, N_SU2>(trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], current_spin_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
+            size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = current_spin_SU2[partner1];
+            array<double, N_SU3> current_spin_SU3_partner2 = current_spin_SU3[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU2, N_SU2, N_SU3>(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU3_partner2);
         }
         return local_field-field_SU2[site_index];
     }
 
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
-        array<double,N_SU3> local_field =  multiply(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
+        array<double,N_SU3> local_field = {{0.0}};
+        local_field += multiply(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(trilinear_interaction_SU3[site_index][i], current_spin_SU3[trilinear_partners_SU3[site_index][i][0]], current_spin_SU3[trilinear_partners_SU3[site_index][i][1]]);
+            size_t partner1 = trilinear_partners_SU3[site_index][i][0];
+            size_t partner2 = trilinear_partners_SU3[site_index][i][1];
+            array<double, N_SU3> current_spin_SU3_partner1 = current_spin_SU3[partner1];
+            array<double, N_SU3> current_spin_SU3_partner2 = current_spin_SU3[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU3, N_SU3, N_SU3>(trilinear_interaction_SU3[site_index][i], current_spin_SU3_partner1, current_spin_SU3_partner2);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            local_field = local_field + contract_trilinear_field(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], current_spin_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
+            size_t partner1 = mixed_trilinear_partners_SU3[site_index][i][0];
+            size_t partner2 = mixed_trilinear_partners_SU3[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = current_spin_SU2[partner1];
+            array<double, N_SU2> current_spin_SU2_partner2 = current_spin_SU2[partner2];
+            local_field = local_field + contract_trilinear_field<N_SU3, N_SU2, N_SU2>(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         return local_field-field_SU3[site_index];
     }
