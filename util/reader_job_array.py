@@ -279,6 +279,53 @@ def magnetostriction(S, h, dir, g=np.zeros(10)):
         A_5 = np.mean(tau[1][1]-tau[2][1])
         return np.array([np.mean(L001_111), np.mean(L001_110), np.mean(L001_001),A_1,A_2,A_3,A_4,A_5])
 
+def magnetostriction_non_kramers(S, h, dir, g=np.zeros(4)):
+    tau = np.zeros((4,3,int(len(S)/4)))
+    for i in range(4):
+        for j in range(3):
+            tau[i,j] = S[i::4][:,j]
+    tau = np.mean(tau, axis=2)
+    
+    g1, g2, g3, g4 = g
+    c_B = 1
+    c_44 = 1
+    k1 = -4.5*np.sqrt(3)*1e-7
+    k2 = -2.6*np.sqrt(3)*1e-7
+    if dir == "111":
+        L_111_111 = 4/(3*c_44)*(2*k1+k2)*(1/np.sqrt(3)*(2*tau[1,0]-tau[2,0]-tau[3,0])+(tau[2,1]-tau[3,1]))+\
+                +(g3+g4)/(3*np.sqrt(3)*c_B) * h *(3*tau[0,2]- tau[1,2]-tau[2,2]-tau[3,2]) \
+                -2*np.sqrt(3)/(27*c_44)*h*((3*g3-6*g4)*(9*tau[0,2]+ tau[1,2]+tau[2,2]+tau[3,2]) + \
+                (32*g1+16*g2)*(tau[1,2]+tau[2,2]+tau[3,2]))
+
+    return L_111_111
+
+
+def lineread_111_non_kramers(H_start, H_end, nH, field_dir, dir, ax):
+    g = np.array([-9/(4*np.sqrt(3))*1e-7, -9/(4*np.sqrt(3))*1e-7, 14*np.sqrt(3)*1e-7, 4*np.sqrt(3)*1e-7])
+
+    HS = np.linspace(H_start, H_end, nH)
+    magnetostrictions = np.zeros(nH)
+    count = 0
+    directory = os.fsencode(dir)
+    magnetization = np.zeros((nH,4,3))
+
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename):
+            print(dir + "/" + filename)
+            info = filename.split("_")
+            S = np.loadtxt(dir + "/" + filename + "/spin.txt")
+            for i in range(4):
+                magnetization[int(info[3])][i] = magnetization_local(S[i::4])
+
+            magnetostrictions[int(info[3])] = magnetostriction_non_kramers(S, HS[int(info[3])], field_dir, g)
+            count = count + 1
+
+    ax.scatter(HS, magnetostrictions,color='red')
+    ax.scatter(HS, magnetization[:,3,0], color='blue', label=r'$Sx$')
+    ax.scatter(HS, magnetization[:,3,1], color='green', label=r'$Sy$')
+    ax.scatter(HS, magnetization[:,3,2], color='purple', label=r'$Sz$')
+
 def error_function(g, S, h, tofit):
 
     C_B = 1
@@ -667,28 +714,6 @@ def read_MC(Jpm_start, Jpm_end, nJpm, H_start, H_end, nH, field_dir, dir, filena
         os.mkdir( dir + filename + "/SSSF/")
     SSSF_collect(S, P, 50, dir + filename + "/SSSF/", field_dir, True)
 
-#Jpm_0.285000_h_1.650000_index_195_55
-#Jpm_0.054000_h_1.050000_index_118_35
-#Jpm_-0.300000_h_1.320000_index_0_44
-#Jpm_-0.300000_h_0.000000_index_0_0
-# read_MC(-0.3, 0.3, 200, 0, 3.0, 100, "110", "/scratch/zhouzb79/MC_phase_diagram_CZO_110/", "Jpm_-0.300000_h_0.000000_index_0_0")
-# fullread(-0.3, 0.3, 200, 0, 3.0, 100, "001", "/scratch/zhouzb79/MC_phase_diagram_CZO_001")
-# fullread(-0.3, 0.3, 200, 0, 3.0, 100, "110", "/scratch/zhouzb79/MC_phase_diagram_CZO_110")
-# fullread(-0.3, 0.3, 200, 0, 3.0, 100, "111", "/scratch/zhouzb79/MC_phase_diagram_CZO_111")
-# fullread(-0.3, 0.3, 200, 0, 8.0, 100, "001", "/scratch/zhouzb79/MC_phase_diagram_CZO_001_XAIAO")
-# fullread(-0.3, 0.3, 200, 0, 8.0 , 100, "110", "/scratch/zhouzb79/MC_phase_diagram_CZO_110_XAIAO")
-# fullread(-0.3, 0.3, 200, 0, 8.0, 100, "111", "/scratch/zhouzb79/MC_phase_diagram_CZO_111_XAIAO")
-# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_XAIAO", 0)
-# fullread(-0.3, 0.3, 50, 0, 15.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_XAIAO_High_field", 0)
-# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_XAIAO", 0)
-# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "001", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_001_ZAIAO", 2)
-# fullread(-0.3, 0.3, 50, 0, 8.0 , 20, "110", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_110_ZAIAO", 2)
-# fullread(-0.3, 0.3, 50, 0, 8.0, 20, "111", "/scratch/y/ybkim/zhouzb79/MC_phase_diagram_XYZ_111_ZAIAO", 2)
-# fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(10, 8), sharey=True, sharex=True, constrained_layout=True)
-# ax[0,0].set_title("CSO Octupolar")
-# ax[0,1].set_title("CSO Dipolar")
-# ax[1,0].set_title("CHO Octupolar")
-# ax[1,1].set_title("CHO Dipolar")
 
 # directory = "/Users/zhengbangzhou/Library/CloudStorage/OneDrive-UniversityofToronto/PhD Stuff/Projects/PSG_Pyrochlore/XYZ_project/magnetostriction"
 directory = "/home/pc_linux/ClassicalSpin_Cpp"
@@ -804,7 +829,12 @@ def graph_magnetostriction_111_111(filename):
     plt.savefig(filename+"_magnetostriction_111_111.pdf")
 
 # graph_magnetostriction(directory+"/CZO")
-graph_magnetostriction(directory+"/CHO")
+# graph_magnetostriction(directory+"/CHO")
+# graph_magnetostriction_111_111(directory)
+fig, ax = plt.subplots()
+lineread_111_non_kramers(0, 5, 50, "111", "adarshi_repo", ax)
+plt.savefig("non_kramers_magnetostriction.pdf")
+plt.show()
 # graph_magnetostriction_111_111(directory+"/CHO")
 # graph_magnetostriction(directory+"/CSO")
 # g_octupolar = 1e-7*np.array([ 4.70152753,  6.19843942 , 8.02100717 ,-3.06317805,  0.17587011, -1.78198302,
@@ -861,11 +891,11 @@ graph_magnetostriction(directory+"/CHO")
 # plt.savefig("magnetostriction.pdf")
 # 0.1375 0.1375 1 0.2375
 # plt.clf()
-A = np.loadtxt("minoru_111_111_rough_estimate.txt", unpack=True, dtype=np.float128, delimiter=",")[:,:-50]
+# A = np.loadtxt("minoru_111_111_rough_estimate.txt", unpack=True, dtype=np.float128, delimiter=",")[:,:-50]
 # # plt.plot(A[0],A[1])
 # # plt.savefig("minoru_111_111_rough_estimate.pdf")
-magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_gaulin_A_octupolar_111", A[0]*2.11*0.0579/0.050, A[1])
-magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_gaulin_A_dipolar_111", A[0]*2.11*0.0579/0.050, A[1])
+# magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_gaulin_A_octupolar_111", A[0]*2.11*0.0579/0.050, A[1])
+# magnetostriction_fit("/home/pc_linux/ClassicalSpin_Cpp/CHO_gaulin_A_dipolar_111", A[0]*2.11*0.0579/0.050, A[1])
 # A = np.loadtxt("TmFeO3_2DCS.txt", dtype=np.complex128)
 # tograph = np.abs(A)
 # tograph = np.log(tograph)

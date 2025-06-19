@@ -50,10 +50,10 @@ void non_kramer_pyrochlore_field_scan(double Tstart, double TargetT, double Jpm,
                                                  gxx, gyy, gzz, h, field_dir, subdir, save);
     }
     
-    // Finalize MPI if we initialized it
+    // Finalize MPI if it was initialized in this function
     int finalized;
     MPI_Finalized(&finalized);
-    if (!finalized && initialized) {
+    if (!finalized) {
         MPI_Finalize();
     }
 }

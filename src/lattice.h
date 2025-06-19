@@ -54,6 +54,18 @@ class lattice
     size_t num_gen;
     float spin_length;
 
+    // Optimization member variables for energy caching
+    private:
+    vector<double> cached_site_energies;
+    bool energy_cache_valid;
+    vector<size_t> site_update_order;
+    size_t current_sweep_index;
+    
+    // Pre-allocated temporary arrays to avoid allocations in hot loops
+    mutable array<double,N> temp_spin_array;
+    mutable array<double,N> temp_local_field;
+    
+    public:
     array<double,N> gen_random_spin(float spin_l){
         array<double,N> temp_spin;
         array<double,N-2> euler_angles;
@@ -153,11 +165,12 @@ class lattice
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
+        // Initialize optimization structures
+        initialize_energy_cache();
+        initialize_sweep_order();
+    }
 
-        // std::cout << "Finished setting up lattice" << std::endl;
-    };
-
-    lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
+        lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
         UC = lattice_in->UC;
         lattice_size = lattice_in->lattice_size;
         spins = lattice_in->spins;
@@ -188,6 +201,48 @@ class lattice
         num_tri = lattice_in->num_tri;
         num_gen = lattice_in->num_gen;
     };
+
+    // Energy cache management methods
+    void initialize_energy_cache() {
+        cached_site_energies.resize(lattice_size);
+        energy_cache_valid = false;
+        update_energy_cache();
+    }
+    
+    void initialize_sweep_order() {
+        site_update_order.resize(lattice_size);
+        std::iota(site_update_order.begin(), site_update_order.end(), 0);
+        current_sweep_index = 0;
+    }
+    
+    void update_energy_cache() {
+        #pragma omp parallel for schedule(static)
+        for(size_t i = 0; i < lattice_size; ++i) {
+            cached_site_energies[i] = site_energy(spins[i], i);
+        }
+        energy_cache_valid = true;
+    }
+    
+    void invalidate_energy_cache() {
+        energy_cache_valid = false;
+    }
+    
+    void update_cached_energy_for_site(size_t site_index, const array<double,N>& new_spin) {
+        if (energy_cache_valid) {
+            cached_site_energies[site_index] = site_energy_internal(new_spin, site_index);
+        }
+    }
+    
+    void shuffle_sweep_order() {
+        // Use a simple linear congruential generator for better performance
+        static size_t seed = 1;
+        for(size_t i = lattice_size - 1; i > 0; --i) {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            size_t j = seed % (i + 1);
+            std::swap(site_update_order[i], site_update_order[j]);
+        }
+        current_sweep_index = 0;
+    }
 
     void set_pulse(const array<array<double,N>, N_ATOMS> &field_in, double t_B, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
         field_drive_1 = field_in;
@@ -251,6 +306,45 @@ class lattice
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
             energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+        }
+        return energy;
+    }
+
+    double site_energy_diff(const array<double, N> &new_spins, const array<double, N> &old_spins, const size_t site_index) const {
+        double energy = 0.0;
+        energy -= dot(new_spins - old_spins, field[site_index]);
+        energy += contract(new_spins, onsite_interaction[site_index], new_spins) - contract(old_spins, onsite_interaction[site_index], old_spins);
+        #pragma omp simd
+        for (size_t i=0; i< num_bi; ++i) {
+            energy += contract(new_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]])
+                     - contract(old_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+        }
+        #pragma omp simd
+        for (size_t i=0; i < num_tri; ++i){
+            energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]])
+                     - contract_trilinear(trilinear_interaction[site_index][i], old_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+        }
+        return energy;
+    }
+
+    // Optimized site energy calculation that doesn't modify spins array
+    double site_energy_internal(const array<double, N> &spin_here, size_t site_index) const {
+        double energy = 0.0;
+        energy -= dot(spin_here, field[site_index]);
+        energy += contract(spin_here, onsite_interaction[site_index], spin_here);
+        
+        // Vectorized bilinear interactions
+        #pragma omp simd reduction(+:energy)
+        for (size_t i = 0; i < num_bi; ++i) {
+            energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+        }
+        
+        // Vectorized trilinear interactions  
+        #pragma omp simd reduction(+:energy)
+        for (size_t i = 0; i < num_tri; ++i){
+            energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, 
+                                       spins[trilinear_partners[site_index][i][0]], 
+                                       spins[trilinear_partners[site_index][i][1]]);
         }
         return energy;
     }
@@ -362,19 +456,65 @@ class lattice
         }
     }
 
+    // Optimized overrelaxation with sequential sweeps and cache updates
+    void overrelaxation_optimized(bool use_sequential = true){
+        if (use_sequential) {
+            // Sequential sweep - more systematic and cache-friendly
+            #pragma omp parallel for schedule(static) if(lattice_size > 1000)
+            for(size_t idx = 0; idx < lattice_size; ++idx) {
+                size_t i = site_update_order[idx];
+                
+                array<double,N> local_field = get_local_field(i);
+                double norm = dot(local_field, local_field);
+                
+                if(norm > 1e-12) { // Avoid division by very small numbers
+                    double proj = 2.0 * dot(spins[i], local_field) / norm;
+                    array<double,N> new_spin = local_field * proj - spins[i];
+                    
+                    // Update cache if valid
+                    if (energy_cache_valid) {
+                        double old_energy = cached_site_energies[i];
+                        double new_energy = site_energy_internal(new_spin, i);
+                        cached_site_energies[i] = new_energy;
+                    }
+                    
+                    spins[i] = new_spin;
+                }
+            }
+        } else {
+            // Original random selection (for comparison)
+            size_t count = 0;
+            while(count < lattice_size){
+                int i = random_int_lehman(lattice_size);
+                array<double,N> local_field = get_local_field(i);
+                double norm = dot(local_field, local_field);
+                
+                if(norm > 1e-12){
+                    double proj = 2.0 * dot(spins[i], local_field) / norm;
+                    array<double,N> new_spin = local_field * proj - spins[i];
+                    
+                    if (energy_cache_valid) {
+                        cached_site_energies[i] = site_energy_internal(new_spin, i);
+                    }
+                    
+                    spins[i] = new_spin;
+                }
+                count++;
+            }
+        }
+    }
+
     double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
-        double E, dE, r;
+        double dE, r;
         int i;
         array<double,N> new_spin;
         int accept = 0;
         size_t count = 0;
         while(count < lattice_size){
-            // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size);
-            E = site_energy(curr_spin[i], i);
             new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
                                 : gen_random_spin(spin_length);
-            dE = site_energy(new_spin, i) - E;
+            dE = site_energy_diff(new_spin, curr_spin[i], i);
             
             if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
                 curr_spin[i] = new_spin;
@@ -387,6 +527,63 @@ class lattice
         return acceptance_rate;
     }
 
+    // Optimized metropolis method with sequential sweeps and energy caching
+    double metropolis_optimized(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60, bool use_sequential=true){
+        int accept = 0;
+        
+        if (use_sequential) {
+            // Sequential sweep - visit each site exactly once
+            #pragma omp parallel for schedule(static) reduction(+:accept) if(lattice_size > 1000)
+            for(size_t idx = 0; idx < lattice_size; ++idx) {
+                size_t i = site_update_order[idx];
+                
+                // Get current energy (use cache if valid)
+                double E = energy_cache_valid ? cached_site_energies[i] : site_energy_internal(curr_spin[i], i);
+                
+                // Generate new spin
+                array<double,N> new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
+                                                   : gen_random_spin(spin_length);
+                
+                // Calculate energy change
+                double dE = site_energy_internal(new_spin, i) - E;
+                
+                // Accept or reject
+                if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
+                    curr_spin[i] = new_spin;
+                    if(energy_cache_valid) {
+                        cached_site_energies[i] = E + dE;
+                    }
+                    accept++;
+                }
+            }
+            
+            // Shuffle order for next sweep to reduce correlations
+            shuffle_sweep_order();
+        } else {
+            // Original random selection method (for comparison)
+            size_t count = 0;
+            while(count < lattice_size){
+                int i = random_int_lehman(lattice_size);
+                double E = energy_cache_valid ? cached_site_energies[i] : site_energy_internal(curr_spin[i], i);
+                
+                array<double,N> new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
+                                                   : gen_random_spin(spin_length);
+                double dE = site_energy_internal(new_spin, i) - E;
+                
+                if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
+                    curr_spin[i] = new_spin;
+                    if(energy_cache_valid) {
+                        cached_site_energies[i] = E + dE;
+                    }
+                    accept++;
+                }
+                count++;
+            }
+        }
+
+        double acceptance_rate = double(accept)/double(lattice_size);
+        return acceptance_rate;
+    }
     
     void write_to_file_spin(string filename, spin_config towrite){
         ofstream myfile;
@@ -1008,6 +1205,206 @@ class lattice
             time_sections << time[i] << endl;
         }
         time_sections.close();     
+    }
+
+    // Optimized simulated annealing with adaptive temperature schedule and parallel optimization
+    void simulated_annealing_optimized(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate = 0, 
+                                     bool gaussian_move = false, string out_dir = "", bool save_observables = false,
+                                     bool use_adaptive_cooling = true, bool use_sequential_sweep = true){    
+        if (out_dir != ""){
+            filesystem::create_directory(out_dir);
+        }
+        
+        double T = T_start;
+        double acceptance_rate = 0;
+        double sigma = 1000;
+        double cooling_factor = 0.9;
+        
+        // Adaptive cooling parameters
+        double target_acceptance_low = 0.2;
+        double target_acceptance_high = 0.7;
+        size_t cooling_adaptation_window = 5;
+        vector<double> recent_acceptance_rates;
+        
+        cout << "Starting optimized simulated annealing..." << endl;
+        cout << "Gaussian Move: " << gaussian_move << ", Sequential Sweep: " << use_sequential_sweep << endl;
+        
+        // Initialize random seed
+        srand(time(NULL));
+        seed_lehman(rand()*2+1);
+        
+        // Ensure energy cache is valid
+        if (!energy_cache_valid) {
+            update_energy_cache();
+        }
+        
+        while(T > T_end){
+            double curr_accept = 0;
+            
+            // Main annealing loop with optimizations
+            for(size_t i = 0; i < n_anneal; ++i){
+                if(overrelaxation_rate > 0){
+                    overrelaxation();
+                    if (i % overrelaxation_rate == 0){
+                        curr_accept += metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
+                    }
+                }
+                else{
+                    curr_accept += metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
+                }
+            }
+            
+            // Calculate acceptance rate
+            if (overrelaxation_rate > 0){
+                acceptance_rate = curr_accept / (n_anneal / overrelaxation_rate);
+            } else {
+                acceptance_rate = curr_accept / n_anneal;
+            }
+            
+            cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate;
+            
+            // Adaptive sigma adjustment for Gaussian moves
+            if (gaussian_move) {
+                if (acceptance_rate < 0.2) {
+                    sigma *= 0.8;
+                } else if (acceptance_rate > 0.7) {
+                    sigma *= 1.2;
+                }
+                cout << " Sigma: " << sigma;
+            }
+            
+            // Adaptive cooling rate adjustment
+            if (use_adaptive_cooling) {
+                recent_acceptance_rates.push_back(acceptance_rate);
+                if (recent_acceptance_rates.size() > cooling_adaptation_window) {
+                    recent_acceptance_rates.erase(recent_acceptance_rates.begin());
+                }
+                
+                if (recent_acceptance_rates.size() >= cooling_adaptation_window) {
+                    double avg_acceptance = 0;
+                    for (double rate : recent_acceptance_rates) {
+                        avg_acceptance += rate;
+                    }
+                    avg_acceptance /= recent_acceptance_rates.size();
+                    
+                    if (avg_acceptance < target_acceptance_low) {
+                        cooling_factor = min(0.95, cooling_factor * 1.05); // Slower cooling
+                    } else if (avg_acceptance > target_acceptance_high) {
+                        cooling_factor = max(0.85, cooling_factor * 0.95); // Faster cooling
+                    }
+                }
+                cout << " Cooling factor: " << cooling_factor;
+            }
+            cout << endl;
+            
+            // Save observables if requested (optimized version)
+            if(save_observables){
+                vector<double> energies;
+                energies.reserve(1000); // Pre-allocate for better performance
+                
+                for(size_t i = 0; i < 1e6; ++i){ // Reduced from 1e7 for better performance
+                    if(overrelaxation_rate > 0){
+                        overrelaxation();
+                        if (i % overrelaxation_rate == 0){
+                            metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
+                        }
+                    }
+                    else{
+                        metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
+                    }
+                    if (i % 1000 == 0){
+                        energies.push_back(total_energy(spins));
+                    }
+                }
+                
+                double k_B = 1.380649e-23;
+                double N_A = 6.02214076e23;
+                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size * 2 * k_B * N_A;
+                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size * 2 * k_B * N_A;
+                
+                ofstream myfile;
+                myfile.open(out_dir + "/specific_heat.txt", ios::app);
+                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat << endl;
+                myfile.close();
+            }
+            
+            // Apply temperature reduction
+            T *= cooling_factor;
+        }
+        
+        if(out_dir != ""){
+            write_to_file_spin(out_dir + "/spin.txt", spins);
+            write_to_file_pos(out_dir + "/pos.txt");
+        }
+        
+        cout << "Optimized simulated annealing completed." << endl;
+    }
+
+    // Benchmark method to compare performance of different implementations
+    void benchmark_metropolis_methods(double T, size_t n_steps, bool gaussian_move = false, double sigma = 60) {
+        cout << "=== Metropolis Method Benchmark ===" << endl;
+        cout << "Temperature: " << T << ", Steps: " << n_steps << ", Gaussian: " << gaussian_move << endl;
+        
+        // Save original state
+        spin_config original_spins = spins;
+        
+        // Benchmark original method
+        auto start = std::chrono::high_resolution_clock::now();
+        spins = original_spins; // Reset
+        invalidate_energy_cache(); // Ensure fair comparison
+        
+        double acceptance_original = 0;
+        for(size_t i = 0; i < n_steps; ++i) {
+            acceptance_original += metropolis(spins, T, gaussian_move, sigma);
+        }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration_original = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        // Benchmark optimized method with sequential sweep
+        start = std::chrono::high_resolution_clock::now();
+        spins = original_spins; // Reset
+        update_energy_cache(); // Pre-populate cache
+        shuffle_sweep_order(); // Initialize order
+        
+        double acceptance_sequential = 0;
+        for(size_t i = 0; i < n_steps; ++i) {
+            acceptance_sequential += metropolis_optimized(spins, T, gaussian_move, sigma, true);
+        }
+        
+        end = std::chrono::high_resolution_clock::now();
+        auto duration_sequential = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        // Benchmark optimized method with random selection (for comparison)
+        start = std::chrono::high_resolution_clock::now();
+        spins = original_spins; // Reset
+        update_energy_cache(); // Pre-populate cache
+        
+        double acceptance_random_opt = 0;
+        for(size_t i = 0; i < n_steps; ++i) {
+            acceptance_random_opt += metropolis_optimized(spins, T, gaussian_move, sigma, false);
+        }
+        
+        end = std::chrono::high_resolution_clock::now();
+        auto duration_random_opt = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        // Print results
+        cout << "Results:" << endl;
+        cout << "Original method:     Time: " << duration_original.count() << "ms, " 
+             << "Acceptance: " << acceptance_original/n_steps << endl;
+        cout << "Sequential optimized: Time: " << duration_sequential.count() << "ms, " 
+             << "Acceptance: " << acceptance_sequential/n_steps << " (Speedup: " 
+             << double(duration_original.count())/duration_sequential.count() << "x)" << endl;
+        cout << "Random optimized:    Time: " << duration_random_opt.count() << "ms, " 
+             << "Acceptance: " << acceptance_random_opt/n_steps << " (Speedup: " 
+             << double(duration_original.count())/duration_random_opt.count() << "x)" << endl;
+        
+        // Restore original state
+        spins = original_spins;
+        update_energy_cache();
+        
+        cout << "=== Benchmark Complete ===" << endl;
     }
 };
 #endif // LATTICE_H

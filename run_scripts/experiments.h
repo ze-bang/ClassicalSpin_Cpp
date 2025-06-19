@@ -340,9 +340,9 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     
 
 
-    array<array<double,3>, 3> Jx_ = {{{-2*Jpm + 2*Jpmpm*cos(2*M_PI/3), -2*Jpmpm*sin(2*M_PI/3),0},{-2*Jpmpm*sin(2*M_PI/3),-2*Jpm -2*Jpmpm*cos(2*M_PI/3),0},{0,0,Jz}}};
-    array<array<double,3>, 3> Jy_ = {{{-2*Jpm + 2*Jpmpm*cos(4*M_PI/3), -2*Jpmpm*sin(4*M_PI/3),0},{-2*Jpmpm*sin(4*M_PI/3),-2*Jpm -2*Jpmpm*cos(4*M_PI/3),0},{0,0,Jz}}};
-    array<array<double,3>, 3> Jz_ = {{{-2*Jpm + 2*Jpmpm*cos(0), -2*Jpmpm*sin(0),0},{-2*Jpmpm*sin(0),-2*Jpm -2*Jpmpm*cos(0),0},{0,0,Jz}}};
+    array<array<double,3>, 3> Jx_ = {{{-2*Jpm - Jpmpm, -sqrt(3)*Jpmpm,0},{-sqrt(3)*Jpmpm, -2*Jpm+Jpmpm,0},{0,0,Jz}}};
+    array<array<double,3>, 3> Jy_ = {{{-2*Jpm - Jpmpm, sqrt(3)*Jpmpm,0},{sqrt(3)*Jpmpm, -2*Jpm+Jpmpm,0},{0,0,Jz}}};
+    array<array<double,3>, 3> Jz_ = {{{-2*Jpm + 2*Jpmpm, 0,0},{0,-2*Jpm -2*Jpmpm,0},{0,0,Jz}}};
 
 
     array<double, 3> field = field_dir*h;
@@ -363,27 +363,38 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     atoms.set_bilinear_interaction(Jx_, 1, 3, {-1, 0, 1}); 
     atoms.set_bilinear_interaction(Jz_, 2, 3, {0, 1, -1}); 
 
-    array<double, 3> rot_field = {0,0,gzz};
+    array<double, 4> hz = {dot(field, z1), dot(field, z2), dot(field, z3), dot(field, z4)};
+    array<double, 4> hy = {dot(field, y1), dot(field, y2), dot(field, y3), dot(field, y4)};
+    array<double, 4> hx = {dot(field, x1), dot(field, x2), dot(field, x3), dot(field, x4)};
+    double delta1 = 0.00075;
+    double delta2 = -0.000088;
 
-    atoms.set_field(rot_field*dot(field, z1), 0);
-    atoms.set_field(rot_field*dot(field, z2), 1);
-    atoms.set_field(rot_field*dot(field, z3), 2);
-    atoms.set_field(rot_field*dot(field, z4), 3);
+    auto NK_field = [&](int i) {
+        return array<double, 3>{delta1*hx[i]*hz[i]+delta2*(hy[i]*hy[i]-hx[i]*hx[i]), delta1*hy[i]*hz[i]+2*delta2*hx[i]*hy[i], hz[i]};
+    };
+
+    auto field0 = NK_field(0);
+    auto field1 = NK_field(1);
+    auto field2 = NK_field(2);
+    auto field3 = NK_field(3);
+
+    atoms.set_field(field0, 0);
+    atoms.set_field(field1, 1);
+    atoms.set_field(field2, 2);
+    atoms.set_field(field3, 3);
 
     lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, dir, save);
+    MC.simulated_annealing(Tstart, TargetT, 1e4, 1e1, true, dir, save);
 
-    // for (size_t i = 0; i < 1e4; ++i){
-    //     MC.deterministic_sweep();
-    // }
+    for (size_t i = 0; i < 1e4; ++i){
+        MC.deterministic_sweep();
+    }
 
     MC.write_to_file_pos(dir + "/pos.txt");
     MC.write_to_file_spin(dir + "/spin.txt", MC.spins);
     MC.write_to_file_magnetization_local(dir + "/M_t_f.txt", MC.magnetization(MC.spins, x, y, z));
     MC.write_to_file_magnetization_local(dir + "/M_t_f_local.txt", MC.magnetization_local(MC.spins));
 }
-
-
 
 #endif
