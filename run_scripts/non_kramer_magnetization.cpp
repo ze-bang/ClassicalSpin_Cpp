@@ -46,7 +46,7 @@ void non_kramer_pyrochlore_field_scan(double Tstart, double TargetT, double Jpm,
         string subdir = dir + "/h_" + to_string(h) + "_index_" + to_string(i);
         
         // Run simulation
-        simulated_annealing_pyrochlore_non_kramer(Tstart, TargetT, Jpm, Jpmpm, Jzz, 
+    simulated_annealing_pyrochlore_non_kramer(Tstart, TargetT, Jpm, Jpmpm, Jzz, 
                                                  gxx, gyy, gzz, h, field_dir, subdir, save);
     }
     

@@ -397,6 +397,21 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
+    // Get CUDA device count and assign GPUs to MPI ranks
+    int device_count;
+    cudaGetDeviceCount(&device_count);
+    int device_id = rank % device_count;  // Distribute ranks across available GPUs
+    cudaSetDevice(device_id);
+    
+    if (rank == 0) {
+        cout << "Total MPI processes: " << size << ", Available GPUs: " << device_count << endl;
+        cout << "GPU assignment - Each GPU handles ~" << (size + device_count - 1) / device_count << " MPI ranks" << endl;
+    }
+    cout << "Rank " << rank << " using GPU " << device_id << endl;
+    
+    // Synchronize all ranks before starting computations
+    MPI_Barrier(MPI_COMM_WORLD);
+    
     filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -547,7 +562,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
-    mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+    mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
 
     MC.write_to_file_pos(dir+"/pos.txt");
     MC.write_to_file_spin(dir+"/spin_0.txt");
@@ -570,7 +585,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         }
     } else {
         cout << "No spin configuration specified. Using simulated annealing." << endl;
-        MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 1000, true);
+        MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 100, true);
         if (T_zero) {
             for (size_t i = 0; i < 100000; ++i) {
                 MC.deterministic_sweep();
@@ -585,6 +600,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     if (rank==0){
         filesystem::create_directories(dir+"/M_time_0");
         // Use the CUDA version of the method
+        MC.read_spin_from_file(spin_config);
         MC.M_B_t_cuda(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
         ofstream run_param;
         run_param.open(dir + "/param.txt");
@@ -600,7 +616,9 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         filesystem::create_directories(dir+"/M_time_"+ std::to_string(current_tau));
         cout << "Time: " << current_tau << endl;
         // Use the CUDA versions of the methods
+        MC.read_spin_from_file(spin_config);
         MC.M_B_t_cuda(field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M1");
+        MC.read_spin_from_file(spin_config);
         MC.M_BA_BB_t_cuda(field_drive, 0.0, field_drive, current_tau, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_"+std::to_string(current_tau)+"/M01");
         current_tau += tau_step_size;
     }
@@ -679,7 +697,7 @@ int main(int argc, char** argv) {
     filesystem::create_directories(dir_name);
     int slurm_ID = (argc > 23) ? atoi(argv[23]) : 1;
     int total_jobs = (argc > 24) ? atoi(argv[24]) : 1;
-    string spin_config_file = (argc > 25) ? argv[25] : "TmFeO3_2DCS/0/spin";
+    string spin_config_file = (argc > 25) ? argv[25] : "TFO_4_0_xii=0.05/spin_zero.txt";
 
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;

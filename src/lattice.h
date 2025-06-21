@@ -413,7 +413,6 @@ class lattice
         size_t count = 0;
         int i;
         while(count < lattice_size){
-            // i = random_int(0, lattice_size-1, gen);
             i = random_int_lehman(lattice_size);
             array<double,N> local_field = get_local_field(i);
             double norm = sqrt(dot(local_field, local_field));

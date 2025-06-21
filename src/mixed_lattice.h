@@ -739,24 +739,54 @@ class mixed_lattice
         }
         file.close();
     }
-    double site_energy_SU2(array<double, N_SU2> &spin_here, size_t site_index){
-        double energy = 0.0;
-        energy -= dot(spin_here, field_SU2[site_index]);
-        energy += contract(spin_here, onsite_interaction_SU2[site_index], spin_here);
 
-        #pragma omp simd
-        for (size_t i=0; i<num_bi_SU2; ++i) {
-            energy += contract(spin_here, bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+    double site_energy_SU2(const array<double, N_SU2> &spin_here, size_t site_index) const {
+        // Use separate accumulators for better numerical stability and potential SIMD optimization
+        double field_energy = -dot(spin_here, field_SU2[site_index]);
+        double onsite_energy = contract(spin_here, onsite_interaction_SU2[site_index], spin_here);
+        double bilinear_energy = 0.0;
+        double trilinear_energy_SU2 = 0.0;
+        double trilinear_energy_mixed = 0.0;
+        
+        // Bilinear interactions - vectorized with SIMD
+        #pragma omp simd reduction(+:bilinear_energy)
+        for (size_t i = 0; i < num_bi_SU2; ++i) {
+            const size_t partner_idx = bilinear_partners_SU2[site_index][i];
+            bilinear_energy += contract(
+                spin_here, 
+                bilinear_interaction_SU2[site_index][i], 
+                spins.spins_SU2[partner_idx]
+            );
         }
-        #pragma omp simd
-        for (size_t i=0; i < num_tri_SU2; ++i){
-            energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
+        
+        // SU2 trilinear interactions - vectorized with SIMD
+        #pragma omp simd reduction(+:trilinear_energy_SU2)
+        for (size_t i = 0; i < num_tri_SU2; ++i) {
+            const size_t partner1 = trilinear_partners_SU2[site_index][i][0];
+            const size_t partner2 = trilinear_partners_SU2[site_index][i][1];
+            trilinear_energy_SU2 += contract_trilinear(
+                trilinear_interaction_SU2[site_index][i],
+                spin_here, 
+                spins.spins_SU2[partner1], 
+                spins.spins_SU2[partner2]
+            );
         }
-        #pragma omp simd
-        for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+        
+        // Mixed SU2-SU3 interactions - vectorized with SIMD
+        #pragma omp simd reduction(+:trilinear_energy_mixed)
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            const size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
+            const size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
+            trilinear_energy_mixed += contract_trilinear(
+                mixed_trilinear_interaction_SU2[site_index][i],
+                spin_here, 
+                spins.spins_SU2[partner1], 
+                spins.spins_SU3[partner2]
+            );
         }
-        return energy;
+        
+        // Combine all energy components at the end for better numerical stability
+        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU2 + trilinear_energy_mixed;
     }
 
     double site_energy_SU3(array<double, N_SU3> &spin_here, size_t site_index){
@@ -779,51 +809,259 @@ class mixed_lattice
         return energy;
     }
 
-    double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins){
-        double field_energy = 0.0;
-        double onsite_energy = 0.0;
+
+    double site_energy_SU2_diff(const array<double, N_SU2> &new_spin, const array<double, N_SU2> &old_spin, const size_t site_index) const {
+        // Pre-compute the spin difference to avoid redundant calculations
+        array<double, N_SU2> spin_diff;
+        #pragma omp simd
+        for (size_t j = 0; j < N_SU2; ++j) {
+            spin_diff[j] = new_spin[j] - old_spin[j];
+        }
+        
+        // Field energy - direct dot product with difference
+        double field_energy = -dot(spin_diff, field_SU2[site_index]);
+        
+        // Onsite energy - use separate calculation for better numerical stability
+        double onsite_energy = contract(new_spin, onsite_interaction_SU2[site_index], new_spin) 
+                             - contract(old_spin, onsite_interaction_SU2[site_index], old_spin);
+        
+        // Use separate accumulators for different interaction types
         double bilinear_energy = 0.0;
-        double trilinear_energy = 0.0;
+        double trilinear_energy_SU2 = 0.0;
+        double trilinear_energy_mixed = 0.0;
+        
+        // Bilinear interactions - vectorize with SIMD
+        #pragma omp simd reduction(+:bilinear_energy)
+        for (size_t i = 0; i < num_bi_SU2; ++i) {
+            const size_t partner_idx = bilinear_partners_SU2[site_index][i];
+            const auto& partner_spin = spins.spins_SU2[partner_idx];
+            const auto& interaction = bilinear_interaction_SU2[site_index][i];
+            
+            // Calculate the energy change directly
+            bilinear_energy += contract(spin_diff, interaction, partner_spin);
+        }
+        
+        // SU2 trilinear interactions
+        #pragma omp simd reduction(+:trilinear_energy_SU2)
+        for (size_t i = 0; i < num_tri_SU2; ++i) {
+            const size_t partner1_idx = trilinear_partners_SU2[site_index][i][0];
+            const size_t partner2_idx = trilinear_partners_SU2[site_index][i][1];
+            const auto& partner1_spin = spins.spins_SU2[partner1_idx];
+            const auto& partner2_spin = spins.spins_SU2[partner2_idx];
+            const auto& interaction = trilinear_interaction_SU2[site_index][i];
+            
+            trilinear_energy_SU2 += contract_trilinear(interaction, new_spin, partner1_spin, partner2_spin)
+                                  - contract_trilinear(interaction, old_spin, partner1_spin, partner2_spin);
+        }
+        
+        // Mixed SU2-SU3 interactions
+        #pragma omp simd reduction(+:trilinear_energy_mixed)
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            const size_t partner1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
+            const size_t partner2_idx = mixed_trilinear_partners_SU2[site_index][i][1];
+            const auto& partner1_spin = spins.spins_SU2[partner1_idx];
+            const auto& partner2_spin = spins.spins_SU3[partner2_idx];
+            const auto& interaction = mixed_trilinear_interaction_SU2[site_index][i];
+            
+            trilinear_energy_mixed += contract_trilinear(interaction, new_spin, partner1_spin, partner2_spin)
+                                    - contract_trilinear(interaction, old_spin, partner1_spin, partner2_spin);
+        }
+        
+        // Combine all energy components for better numerical stability
+        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU2 + trilinear_energy_mixed;
+    }
 
-        size_t site_index, i;
+    double site_energy_SU3_diff(const array<double, N_SU3> &new_spin, const array<double, N_SU3> &old_spin, const size_t site_index) const {
+        // Pre-compute the spin difference to avoid redundant calculations
+        array<double, N_SU3> spin_diff;
         #pragma omp simd
-        for(site_index = 0; site_index < lattice_size_SU2; ++site_index){
-            field_energy -= dot(curr_spins.spins_SU2[site_index], field_SU2[site_index]);
-            onsite_energy += contract(curr_spins.spins_SU2[site_index], onsite_interaction_SU2[site_index], curr_spins.spins_SU2[site_index]);
+        for (size_t j = 0; j < N_SU3; ++j) {
+            spin_diff[j] = new_spin[j] - old_spin[j];
+        }
+        
+        // Field energy - direct dot product with difference
+        double field_energy = -dot(spin_diff, field_SU3[site_index]);
+        
+        // Onsite energy - use separate calculation for better numerical stability
+        double onsite_energy = contract(new_spin, onsite_interaction_SU3[site_index], new_spin) 
+                             - contract(old_spin, onsite_interaction_SU3[site_index], old_spin);
+        
+        // Use separate accumulators for different interaction types
+        double bilinear_energy = 0.0;
+        double trilinear_energy_SU3 = 0.0;
+        double trilinear_energy_mixed = 0.0;
+        
+        // Bilinear interactions - vectorize with SIMD
+        #pragma omp simd reduction(+:bilinear_energy)
+        for (size_t i = 0; i < num_bi_SU3; ++i) {
+            const size_t partner_idx = bilinear_partners_SU3[site_index][i];
+            const auto& partner_spin = spins.spins_SU3[partner_idx];
+            const auto& interaction = bilinear_interaction_SU3[site_index][i];
+            
+            // Calculate the energy change directly using spin difference
+            bilinear_energy += contract(spin_diff, interaction, partner_spin);
+        }
+        
+        // SU3 trilinear interactions
+        #pragma omp simd reduction(+:trilinear_energy_SU3)
+        for (size_t i = 0; i < num_tri_SU3; ++i) {
+            const size_t partner1_idx = trilinear_partners_SU3[site_index][i][0];
+            const size_t partner2_idx = trilinear_partners_SU3[site_index][i][1];
+            const auto& partner1_spin = spins.spins_SU3[partner1_idx];
+            const auto& partner2_spin = spins.spins_SU3[partner2_idx];
+            const auto& interaction = trilinear_interaction_SU3[site_index][i];
+            
+            // Calculate new - old energy
+            trilinear_energy_SU3 += contract_trilinear(interaction, new_spin, partner1_spin, partner2_spin)
+                                  - contract_trilinear(interaction, old_spin, partner1_spin, partner2_spin);
+        }
+        
+        // Mixed SU2-SU3 interactions
+        #pragma omp simd reduction(+:trilinear_energy_mixed)
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            const size_t partner1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
+            const size_t partner2_idx = mixed_trilinear_partners_SU3[site_index][i][1];
+            const auto& partner1_spin = spins.spins_SU2[partner1_idx];
+            const auto& partner2_spin = spins.spins_SU2[partner2_idx];
+            const auto& interaction = mixed_trilinear_interaction_SU3[site_index][i];
+            
+            // Calculate new - old energy
+            trilinear_energy_mixed += contract_trilinear(interaction, new_spin, partner1_spin, partner2_spin)
+                                    - contract_trilinear(interaction, old_spin, partner1_spin, partner2_spin);
+        }
+        
+        // Combine all energy components for better numerical stability
+        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU3 + trilinear_energy_mixed;
+    }
 
-            // #pragma omp simd reduction(+:bilinear_energy)
-            for (i=0; i<num_bi_SU2; ++i) {
-                bilinear_energy += contract(curr_spins.spins_SU2[site_index], bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+    double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {
+        // Pre-calculate scaling factors for better numerical stability
+        constexpr double onsite_factor = 0.5;
+        constexpr double bilinear_factor = 0.5;
+        constexpr double trilinear_factor = 1.0/3.0;
+        
+        // Use OpenMP reductions to safely accumulate energy across threads
+        double field_energy_SU2 = 0.0;
+        double onsite_energy_SU2 = 0.0;
+        double bilinear_energy_SU2 = 0.0;
+        double trilinear_energy_SU2 = 0.0;
+        double mixed_trilinear_energy_SU2 = 0.0;
+        
+        double field_energy_SU3 = 0.0;
+        double onsite_energy_SU3 = 0.0;
+        double bilinear_energy_SU3 = 0.0;
+        double trilinear_energy_SU3 = 0.0;
+        double mixed_trilinear_energy_SU3 = 0.0;
+        
+        // Process SU2 and SU3 lattices in parallel sections
+        #pragma omp parallel sections reduction(+:field_energy_SU2,onsite_energy_SU2,bilinear_energy_SU2,trilinear_energy_SU2,mixed_trilinear_energy_SU2,field_energy_SU3,onsite_energy_SU3,bilinear_energy_SU3,trilinear_energy_SU3,mixed_trilinear_energy_SU3)
+        {
+            #pragma omp section
+            {
+                // Process SU2 lattice with better vectorization opportunities
+                #pragma omp parallel for reduction(+:field_energy_SU2,onsite_energy_SU2,bilinear_energy_SU2,trilinear_energy_SU2,mixed_trilinear_energy_SU2) schedule(static)
+                for(size_t site_index = 0; site_index < lattice_size_SU2; ++site_index) {
+                    // Fetch current spin once to avoid repeated memory access
+                    const auto& current_spin = curr_spins.spins_SU2[site_index];
+                    
+                    // Field energy computation
+                    field_energy_SU2 -= dot(current_spin, field_SU2[site_index]);
+                    
+                    // Onsite energy computation
+                    onsite_energy_SU2 += contract(current_spin, onsite_interaction_SU2[site_index], current_spin);
+                    
+                    // Bilinear energy - use SIMD for auto-vectorization of hot loop
+                    #pragma omp simd reduction(+:bilinear_energy_SU2)
+                    for (size_t i = 0; i < num_bi_SU2; ++i) {
+                        bilinear_energy_SU2 += contract(
+                            current_spin,
+                            bilinear_interaction_SU2[site_index][i],
+                            curr_spins.spins_SU2[bilinear_partners_SU2[site_index][i]]
+                        );
+                    }
+                    
+                    // Trilinear energy - SU2 components
+                    #pragma omp simd reduction(+:trilinear_energy_SU2)
+                    for (size_t i = 0; i < num_tri_SU2; ++i) {
+                        trilinear_energy_SU2 += contract_trilinear(
+                            trilinear_interaction_SU2[site_index][i],
+                            current_spin,
+                            curr_spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]],
+                            curr_spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]
+                        );
+                    }
+                    
+                    // Mixed trilinear energy - SU2-SU3 interactions
+                    #pragma omp simd reduction(+:mixed_trilinear_energy_SU2)
+                    for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+                        mixed_trilinear_energy_SU2 += contract_trilinear(
+                            mixed_trilinear_interaction_SU2[site_index][i],
+                            current_spin,
+                            curr_spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
+                            curr_spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]
+                        );
+                    }
+                }
             }
-            // #pragma omp simd reduction(+:trilinear_energy)
-            for (i=0; i < num_tri_SU3; ++i){
-                trilinear_energy += contract_trilinear(trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]], spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]);
-            }
-            // #pragma omp simd reduction(+:trilinear_energy)
-            for (i=0; i < num_tri_SU2_SU3; ++i){
-                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU2[site_index][i], curr_spins.spins_SU2[site_index], spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]], spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]);
+            
+            #pragma omp section
+            {
+                // Process SU3 lattice
+                #pragma omp parallel for reduction(+:field_energy_SU3,onsite_energy_SU3,bilinear_energy_SU3,trilinear_energy_SU3,mixed_trilinear_energy_SU3) schedule(static)
+                for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index) {
+                    // Fetch current spin once to avoid repeated memory access
+                    const auto& current_spin = curr_spins.spins_SU3[site_index];
+                    
+                    // Field energy computation
+                    field_energy_SU3 -= dot(current_spin, field_SU3[site_index]);
+                    
+                    // Onsite energy computation
+                    onsite_energy_SU3 += contract(current_spin, onsite_interaction_SU3[site_index], current_spin);
+                    
+                    // Bilinear energy - use SIMD for auto-vectorization of hot loop
+                    #pragma omp simd reduction(+:bilinear_energy_SU3)
+                    for (size_t i = 0; i < num_bi_SU3; ++i) {
+                        bilinear_energy_SU3 += contract(
+                            current_spin,
+                            bilinear_interaction_SU3[site_index][i],
+                            curr_spins.spins_SU3[bilinear_partners_SU3[site_index][i]]
+                        );
+                    }
+                    
+                    // Trilinear energy - SU3 components
+                    #pragma omp simd reduction(+:trilinear_energy_SU3)
+                    for (size_t i = 0; i < num_tri_SU3; ++i) {
+                        trilinear_energy_SU3 += contract_trilinear(
+                            trilinear_interaction_SU3[site_index][i],
+                            current_spin,
+                            curr_spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]],
+                            curr_spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]
+                        );
+                    }
+                    
+                    // Mixed trilinear energy - SU3-SU2 interactions
+                    #pragma omp simd reduction(+:mixed_trilinear_energy_SU3)
+                    for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+                        mixed_trilinear_energy_SU3 += contract_trilinear(
+                            mixed_trilinear_interaction_SU3[site_index][i],
+                            current_spin,
+                            curr_spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
+                            curr_spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]
+                        );
+                    }
+                }
             }
         }
-
-        #pragma omp simd
-        for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index){
-            field_energy -= dot(curr_spins.spins_SU3[site_index], field_SU3[site_index]);
-            onsite_energy += contract(curr_spins.spins_SU3[site_index], onsite_interaction_SU3[site_index], curr_spins.spins_SU3[site_index]);
-
-            // #pragma omp simd reduction(+:bilinear_energy)
-            for (size_t i=0; i<num_bi_SU3; ++i) {
-                bilinear_energy += contract(curr_spins.spins_SU3[site_index], bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
-            }
-            // #pragma omp simd reduction(+:trilinear_energy)
-            for (size_t i=0; i < num_tri_SU3; ++i){
-                trilinear_energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
-            }
-            // #pragma omp simd reduction(+:trilinear_energy)
-            for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-                trilinear_energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], curr_spins.spins_SU3[site_index], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
-            }
-        }
-        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/3;
+        
+        // Combine all energy components with appropriate scaling factors
+        const double field_energy = field_energy_SU2 + field_energy_SU3;
+        const double onsite_energy = (onsite_energy_SU2 + onsite_energy_SU3) * onsite_factor;
+        const double bilinear_energy = (bilinear_energy_SU2 + bilinear_energy_SU3) * bilinear_factor;
+        const double trilinear_energy = (trilinear_energy_SU2 + trilinear_energy_SU3 + 
+                                        mixed_trilinear_energy_SU2 + mixed_trilinear_energy_SU3) * trilinear_factor;
+        
+        // Return the total energy
+        return field_energy + onsite_energy + bilinear_energy + trilinear_energy;
     }
 
     double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3>  &curr_spins){
@@ -995,19 +1233,15 @@ class mixed_lattice
 
             if (i < lattice_size_SU2) {
                 // SU2 case
-                array<double,N_SU2> new_spin_SU2;
-                const double E_old = site_energy_SU2(curr_spin.spins_SU2[i], i);
-                
+                array<double,N_SU2> new_spin_SU2;                
                 // Generate new spin configuration
                 if (gaussian) {
                     new_spin_SU2 = gaussian_move_SU2(curr_spin.spins_SU2[i], sigma);
                 } else {
                     new_spin_SU2 = gen_random_spin_SU2();
                 }
-                
-                const double E_new = site_energy_SU2(new_spin_SU2, i);
-                const double dE = E_new - E_old;
-                
+                const double dE = site_energy_SU2_diff(new_spin_SU2, curr_spin.spins_SU2[i], i);
+
                 // Fast path for acceptance when dE <= 0
                 bool accepted = (dE <= 0);
                 if (!accepted) {
@@ -1022,19 +1256,16 @@ class mixed_lattice
             } else {
                 // SU3 case
                 const size_t i_SU3 = i - lattice_size_SU2;
-                array<double,N_SU3> new_spin_SU3;
-                const double E_old = site_energy_SU3(curr_spin.spins_SU3[i_SU3], i_SU3);
-                
+                array<double,N_SU3> new_spin_SU3;                
                 // Generate new spin configuration
                 if (gaussian) {
                     new_spin_SU3 = gaussian_move_SU3(curr_spin.spins_SU3[i_SU3], sigma);
                 } else {
                     new_spin_SU3 = gen_random_spin_SU3();
                 }
-                
-                const double E_new = site_energy_SU3(new_spin_SU3, i_SU3);
-                const double dE = E_new - E_old;
-                
+
+                const double dE = site_energy_SU3_diff(new_spin_SU3, curr_spin.spins_SU3[i_SU3], i_SU3);
+
                 // Fast path for acceptance when dE <= 0
                 bool accepted = (dE <= 0);
                 if (!accepted) {

@@ -289,22 +289,32 @@ def magnetostriction_non_kramers(S, h, dir, g=np.zeros(4)):
     g1, g2, g3, g4 = g
     c_B = 1
     c_44 = 1
+    c_11 = 1
+    c_12 = 0
     k1 = -4.5*np.sqrt(3)*1e-7
     k2 = -2.6*np.sqrt(3)*1e-7
     if dir == "111":
-        L_111_111 = 4/(3*c_44)*(2*k1+k2)*(1/np.sqrt(3)*(2*tau[1,0]-tau[2,0]-tau[3,0])+(tau[2,1]-tau[3,1]))+\
-                +(g3+g4)/(3*np.sqrt(3)*c_B) * h *(3*tau[0,2]- tau[1,2]-tau[2,2]-tau[3,2]) \
+        L_111_111_xy = 4/(3*c_44)*(2*k1+k2)*(1/np.sqrt(3)*(2*tau[1,0]-tau[2,0]-tau[3,0])+(tau[2,1]-tau[3,1]))
+        L_111_111_z = (g3+g4)/(3*np.sqrt(3)*c_B) * h *(3*tau[0,2]- tau[1,2]-tau[2,2]-tau[3,2]) \
                 -2*np.sqrt(3)/(27*c_44)*h*((3*g3-6*g4)*(9*tau[0,2]+ tau[1,2]+tau[2,2]+tau[3,2]) + \
                 (32*g1+16*g2)*(tau[1,2]+tau[2,2]+tau[3,2]))
+        L_111_111 = L_111_111_xy + L_111_111_z
+        
+        L_111_110_xy = -(2*k1+k2)/(c_44)*((tau[0,0]-tau[1,0]-tau[2,0]+tau[3,0])/np.sqrt(3) + (tau[0,1] - tau[1,1] - tau[2,1] + tau[3,1])) + \
+                    +(k1-k2)/(4*(c_11-c_12))*((tau[0,0]+tau[1,0]+tau[2,0]+tau[3,0])/np.sqrt(3) + (tau[0,1] + tau[1,1] + tau[2,1] + tau[3,1]))
+        L_111_110_z = (g3+g4)/(3*np.sqrt(3)*c_B) * h *(3*tau[0,2]- tau[1,2]-tau[2,2]-tau[3,2]) \
+                    -np.sqrt(3)*(g1-g2)/(9*(c_11-c_12))*h*(tau[1,2]+tau[2,2]-2*tau[3,2]) \
+                    -np.sqrt(3)/(9*c_44)*h*((3*g3-6*g4)*(3*tau[0,2]+ tau[1,2]+tau[2,2]-tau[3,2]) + (8*g1+4*g2)*(tau[1,2]+tau[2,2]+2*tau[3,2])) 
+        L_111_110 = L_111_110_xy + L_111_110_z
 
-    return L_111_111
+    return L_111_111_xy, L_111_111_z, L_111_111, L_111_110_xy, L_111_110_z, L_111_110
 
 
 def lineread_111_non_kramers(H_start, H_end, nH, field_dir, dir, ax):
     g = np.array([-9/(4*np.sqrt(3))*1e-7, -9/(4*np.sqrt(3))*1e-7, 14*np.sqrt(3)*1e-7, 4*np.sqrt(3)*1e-7])
 
     HS = np.linspace(H_start, H_end, nH)
-    magnetostrictions = np.zeros(nH)
+    magnetostrictions = np.zeros((nH, 6))
     count = 0
     directory = os.fsencode(dir)
     magnetization = np.zeros((nH,4,3))
@@ -321,10 +331,18 @@ def lineread_111_non_kramers(H_start, H_end, nH, field_dir, dir, ax):
             magnetostrictions[int(info[3])] = magnetostriction_non_kramers(S, HS[int(info[3])], field_dir, g)
             count = count + 1
 
-    ax.scatter(HS, magnetostrictions,color='red')
-    ax.scatter(HS, magnetization[:,3,0], color='blue', label=r'$Sx$')
-    ax.scatter(HS, magnetization[:,3,1], color='green', label=r'$Sy$')
-    ax.scatter(HS, magnetization[:,3,2], color='purple', label=r'$Sz$')
+    ax[0].scatter(HS, magnetostrictions[:,0],color='green', label='XY')
+    ax[0].scatter(HS, magnetostrictions[:,1],color='blue', label='Z')
+    ax[0].scatter(HS, magnetostrictions[:,2],color='red', label='Total')
+    ax[1].scatter(HS, magnetostrictions[:,3],color='green', label='XY')
+    ax[1].scatter(HS, magnetostrictions[:,4],color='blue', label='Z')
+    ax[1].scatter(HS, magnetostrictions[:,5],color='red', label='Total')
+    ax[0].set_xlabel(r'$H$')
+    ax[0].set_ylabel(r'$\lambda_{111}$')
+    ax[1].set_xlabel(r'$H$')
+    ax[1].set_ylabel(r'$\lambda_{110}$')
+    plt.legend()
+
 
 def error_function(g, S, h, tofit):
 
@@ -831,7 +849,7 @@ def graph_magnetostriction_111_111(filename):
 # graph_magnetostriction(directory+"/CZO")
 # graph_magnetostriction(directory+"/CHO")
 # graph_magnetostriction_111_111(directory)
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(16, 8), constrained_layout=True)
 lineread_111_non_kramers(0, 5, 50, "111", "adarshi_repo", ax)
 plt.savefig("non_kramers_magnetostriction.pdf")
 plt.show()

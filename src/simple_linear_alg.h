@@ -98,9 +98,9 @@ const array<array<T, N>,N> operator*(const array<array<T, N>,N> &a, const array<
 
 template<typename T, typename T1, size_t N>
 array<T, N> operator*= (array<T, N> &a, const T1 n) {
-    #pragma omp simd
     const T converted_n = T(n);  // Convert type once outside the loop
 
+    #pragma omp simd
     for (size_t i = 0; i < N; ++i) {
         a[i] *= converted_n;
     }
@@ -397,7 +397,6 @@ array<array<double, M>, N> operator+(const array<array<double, M>, N> &a, const 
     #pragma omp parallel for schedule(static)
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < M; ++j) {
-            #pragma omp simd
             result[i][j] = a[i][j] + b[i][j];
         }
     }

@@ -4,8 +4,22 @@
 __device__
 double dot_device(const double* a, const double* b, size_t n) {
     double result = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        result += a[i] * b[i];
+    
+    // Unroll loop for small, compile-time known sizes
+    if (n <= 4) {
+        switch (n) {
+            case 4: result += a[3] * b[3]; [[fallthrough]];
+            case 3: result += a[2] * b[2]; [[fallthrough]];
+            case 2: result += a[1] * b[1]; [[fallthrough]];
+            case 1: result += a[0] * b[0]; break;
+            default: break;
+        }
+    } else {
+        // Standard loop for larger sizes, use #pragma unroll for small constant sizes
+        #pragma unroll 8
+        for (size_t i = 0; i < n; ++i) {
+            result += a[i] * b[i];
+        }
     }
     return result;
 }
@@ -13,9 +27,35 @@ double dot_device(const double* a, const double* b, size_t n) {
 __device__
 double contract_device(const double* spin1, const double* matrix, const double* spin2, size_t n) {
     double result = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = 0; j < n; ++j) {
-            result += spin1[i] * matrix[i * n + j] * spin2[j];
+    
+    // Optimize for common small matrix sizes (SU(2) = 3x3, SU(3) = 8x8)
+    if (n == 3) {
+        // Manually unrolled 3x3 matrix contraction
+        result = spin1[0] * (matrix[0] * spin2[0] + matrix[1] * spin2[1] + matrix[2] * spin2[2]) +
+                 spin1[1] * (matrix[3] * spin2[0] + matrix[4] * spin2[1] + matrix[5] * spin2[2]) +
+                 spin1[2] * (matrix[6] * spin2[0] + matrix[7] * spin2[1] + matrix[8] * spin2[2]);
+    } else if (n == 8) {
+        // Use register blocking for 8x8 matrix
+        double temp_results[8];
+        #pragma unroll
+        for (size_t i = 0; i < 8; ++i) {
+            temp_results[i] = 0.0;
+            #pragma unroll
+            for (size_t j = 0; j < 8; ++j) {
+                temp_results[i] += matrix[i * 8 + j] * spin2[j];
+            }
+            result += spin1[i] * temp_results[i];
+        }
+    } else {
+        // General case with loop unrolling
+        #pragma unroll 4
+        for (size_t i = 0; i < n; ++i) {
+            double temp = 0.0;
+            #pragma unroll 4
+            for (size_t j = 0; j < n; ++j) {
+                temp += matrix[i * n + j] * spin2[j];
+            }
+            result += spin1[i] * temp;
         }
     }
     return result;
@@ -24,11 +64,52 @@ double contract_device(const double* spin1, const double* matrix, const double* 
 __device__
 double contract_trilinear_device(const double* tensor, const double* spin1, const double* spin2, const double* spin3, size_t n) {
     double result = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = 0; j < n; ++j) {
-            for (size_t k = 0; k < n; ++k) {
-                result += tensor[i * n * n + j * n + k] * spin1[i] * spin2[j] * spin3[k];
+    
+    if (n == 3) {
+        // Fully unrolled 3x3x3 trilinear contraction for SU(2)
+        for (size_t i = 0; i < 3; ++i) {
+            double temp_j = 0.0;
+            for (size_t j = 0; j < 3; ++j) {
+                double temp_k = 0.0;
+                temp_k += tensor[i * 9 + j * 3 + 0] * spin3[0];
+                temp_k += tensor[i * 9 + j * 3 + 1] * spin3[1];
+                temp_k += tensor[i * 9 + j * 3 + 2] * spin3[2];
+                temp_j += spin2[j] * temp_k;
             }
+            result += spin1[i] * temp_j;
+        }
+    } else if (n == 8) {
+        // Register-blocked 8x8x8 trilinear contraction for SU(3)
+        double temp_results[8];
+        #pragma unroll
+        for (size_t i = 0; i < 8; ++i) {
+            temp_results[i] = 0.0;
+            #pragma unroll
+            for (size_t j = 0; j < 8; ++j) {
+                double temp_k = 0.0;
+                #pragma unroll
+                for (size_t k = 0; k < 8; ++k) {
+                    temp_k += tensor[i * 64 + j * 8 + k] * spin3[k];
+                }
+                temp_results[i] += spin2[j] * temp_k;
+            }
+            result += spin1[i] * temp_results[i];
+        }
+    } else {
+        // General case with optimized memory access pattern
+        #pragma unroll 2
+        for (size_t i = 0; i < n; ++i) {
+            double temp_i = 0.0;
+            #pragma unroll 2
+            for (size_t j = 0; j < n; ++j) {
+                double temp_j = 0.0;
+                #pragma unroll 4
+                for (size_t k = 0; k < n; ++k) {
+                    temp_j += tensor[i * n * n + j * n + k] * spin3[k];
+                }
+                temp_i += spin2[j] * temp_j;
+            }
+            result += spin1[i] * temp_i;
         }
     }
     return result;
@@ -36,21 +117,83 @@ double contract_trilinear_device(const double* tensor, const double* spin1, cons
 
 __device__
 void multiply_matrix_vector_device(double* result, const double* matrix, const double* vector, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        result[i] = 0.0;
-        for (size_t j = 0; j < n; ++j) {
-            result[i] += matrix[i * n + j] * vector[j];
+    if (n == 3) {
+        // Optimized 3x3 matrix-vector multiplication
+        result[0] = matrix[0] * vector[0] + matrix[1] * vector[1] + matrix[2] * vector[2];
+        result[1] = matrix[3] * vector[0] + matrix[4] * vector[1] + matrix[5] * vector[2];
+        result[2] = matrix[6] * vector[0] + matrix[7] * vector[1] + matrix[8] * vector[2];
+    } else if (n == 8) {
+        // Optimized 8x8 matrix-vector multiplication with unrolling
+        #pragma unroll
+        for (size_t i = 0; i < 8; ++i) {
+            double temp = 0.0;
+            #pragma unroll
+            for (size_t j = 0; j < 8; ++j) {
+                temp += matrix[i * 8 + j] * vector[j];
+            }
+            result[i] = temp;
+        }
+    } else {
+        // General case with pragma unroll
+        #pragma unroll 4
+        for (size_t i = 0; i < n; ++i) {
+            result[i] = 0.0;
+            #pragma unroll 4
+            for (size_t j = 0; j < n; ++j) {
+                result[i] += matrix[i * n + j] * vector[j];
+            }
         }
     }
 }
 
 __device__
 void contract_trilinear_field_device(double* result, const double* tensor, const double* spin1, const double* spin2, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        result[i] = 0.0;
+    if (n == 3) {
+        // Optimized 3x3x3 trilinear field contraction for SU(2)
+        result[0] = result[1] = result[2] = 0.0;
+        
+        for (size_t j = 0; j < 3; ++j) {
+            for (size_t k = 0; k < 3; ++k) {
+                double spin_product = spin1[j] * spin2[k];
+                result[0] += tensor[0 * 9 + j * 3 + k] * spin_product;
+                result[1] += tensor[1 * 9 + j * 3 + k] * spin_product;
+                result[2] += tensor[2 * 9 + j * 3 + k] * spin_product;
+            }
+        }
+    } else if (n == 8) {
+        // Register-blocked 8x8x8 trilinear field contraction for SU(3)
+        #pragma unroll
+        for (size_t i = 0; i < 8; ++i) {
+            result[i] = 0.0;
+        }
+        
+        #pragma unroll
+        for (size_t j = 0; j < 8; ++j) {
+            #pragma unroll
+            for (size_t k = 0; k < 8; ++k) {
+                double spin_product = spin1[j] * spin2[k];
+                #pragma unroll
+                for (size_t i = 0; i < 8; ++i) {
+                    result[i] += tensor[i * 64 + j * 8 + k] * spin_product;
+                }
+            }
+        }
+    } else {
+        // General case with optimized access pattern
+        #pragma unroll 4
+        for (size_t i = 0; i < n; ++i) {
+            result[i] = 0.0;
+        }
+        
+        #pragma unroll 2
         for (size_t j = 0; j < n; ++j) {
+            #pragma unroll 2
             for (size_t k = 0; k < n; ++k) {
-                result[i] += tensor[i * n * n + j * n + k] * spin1[j] * spin2[k];
+                double spin_product = spin1[j] * spin2[k];
+                #pragma unroll 4
+                for (size_t i = 0; i < n; ++i) {
+                    result[i] += tensor[i * n * n + j * n + k] * spin_product;
+                }
             }
         }
     }
@@ -515,9 +658,25 @@ void get_local_field_kernel(
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
 {
+    // Optimized kernel launch configuration
+    // Use device properties to determine optimal block size
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, device);
     
-    dim3 block_dim(256);
-    dim3 grid_dim((lattice_size_SU2 + lattice_size_SU3 + block_dim.x - 1) / block_dim.x);
+    // Calculate optimal block size based on register usage and shared memory
+    const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+    const int max_threads_per_block = deviceProp.maxThreadsPerBlock;
+    const int warp_size = deviceProp.warpSize;
+    
+    // Choose block size that's a multiple of warp size and maximizes occupancy
+    int block_size = min(max_threads_per_block, 
+                        ((total_sites < 1024) ? 128 : 256)); // Adaptive block size
+    block_size = ((block_size + warp_size - 1) / warp_size) * warp_size; // Round to warp boundary
+    
+    dim3 block_dim(block_size);
+    dim3 grid_dim((total_sites + block_dim.x - 1) / block_dim.x);
 
     double* k_SU2 = nullptr;
     double* k_SU3 = nullptr;
@@ -1082,6 +1241,14 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
 //Explicitly declare template specializations for the mixed lattice class
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
 template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(
+    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    double*, double*, double, double, double, double, double, double, double
+);
+
+template class mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4>;
+template void __global__ LLG_kernel<3, 4, 256, 8, 4, 256>(
     double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
     unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
     unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,

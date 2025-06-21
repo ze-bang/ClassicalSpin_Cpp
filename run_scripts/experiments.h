@@ -311,8 +311,8 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     z4 /= double(sqrt(3));
 
 
-    array<double, 3> y1 = {0,1,-1};
-    array<double, 3> y2 = {0,-1,1};
+    array<double, 3> y1 = {0,-1,1};
+    array<double, 3> y2 = {0,1,-1};
     array<double, 3> y3 = {0,-1,-1};
     array<double, 3> y4 = {0,1,1};
     y1 /= sqrt(2);
@@ -333,17 +333,18 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     array<array<double,3>, 4> y = {{{y1[0], y1[1], y1[2]}, {y2[0], y2[1], y2[2]}, {y3[0], y3[1], y3[2]}, {y4[0], y4[1], y4[2]}}};
     array<array<double,3>, 4> z = {{{z1[0], z1[1], z1[2]}, {z2[0], z2[1], z2[2]}, {z3[0], z3[1], z3[2]}, {z4[0], z4[1], z4[2]}}};
 
-    double Jx, Jy, Jz;
-
 
     cout << "Begin simulated annealing with parameters: " << Jpm << " " << Jpmpm << " " << Jzz << endl;
     
+    auto Ja_ = [&](double Jpm, double Jpmpm, double Jzz, double theta) {
+        return array<array<double,3>, 3> {{{-2*Jpm + 2*Jpmpm*cos(theta), -2*Jpmpm*sin(theta),0},
+                                            {-2*Jpmpm*sin(theta), -2*Jpm - 2*Jpmpm*cos(theta),0},
+                                            {0                  ,0          ,Jzz}}};
+    };
 
-
-    array<array<double,3>, 3> Jx_ = {{{-2*Jpm - Jpmpm, -sqrt(3)*Jpmpm,0},{-sqrt(3)*Jpmpm, -2*Jpm+Jpmpm,0},{0,0,Jz}}};
-    array<array<double,3>, 3> Jy_ = {{{-2*Jpm - Jpmpm, sqrt(3)*Jpmpm,0},{sqrt(3)*Jpmpm, -2*Jpm+Jpmpm,0},{0,0,Jz}}};
-    array<array<double,3>, 3> Jz_ = {{{-2*Jpm + 2*Jpmpm, 0,0},{0,-2*Jpm -2*Jpmpm,0},{0,0,Jz}}};
-
+    array<array<double,3>, 3> Jx_ = Ja_(Jpm, Jpmpm, Jzz, 2*M_PI/3);
+    array<array<double,3>, 3> Jy_ = Ja_(Jpm, Jpmpm, Jzz, 4*M_PI/3);
+    array<array<double,3>, 3> Jz_ = Ja_(Jpm, Jpmpm, Jzz, 0);
 
     array<double, 3> field = field_dir*h;
 
@@ -383,13 +384,12 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     atoms.set_field(field2, 2);
     atoms.set_field(field3, 3);
 
-    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
-    // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(Tstart, TargetT, 1e4, 1e1, true, dir, save);
+    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e1, true, dir, save);
 
-    for (size_t i = 0; i < 1e4; ++i){
-        MC.deterministic_sweep();
-    }
+    // for (size_t i = 0; i < 1e4; ++i){
+    //     MC.deterministic_sweep();
+    // }
 
     MC.write_to_file_pos(dir + "/pos.txt");
     MC.write_to_file_spin(dir + "/spin.txt", MC.spins);
