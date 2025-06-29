@@ -18,6 +18,7 @@
 #include <atomic>
 #include <mutex>
 #include "cuda_contractions_wrapper.cuh"
+#include "convergence_monitor.h"
 // #include <boost>
 
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
@@ -1581,6 +1582,182 @@ class mixed_lattice
         }
     }
 
+    // Enhanced simulated annealing with convergence monitoring
+    void simulated_annealing_with_convergence(double T_start, double T_end, 
+                                             size_t max_steps_per_temp = 10000,
+                                             size_t n_deterministics = 1000,
+                                             size_t overrelaxation_rate = 0,
+                                             bool gaussian_move = true, 
+                                             string dir_name = "",
+                                             double energy_tol = 1e-8,
+                                             double acceptance_tol = 0.01,
+                                             double config_tol = 1e-6,
+                                             bool early_stop = true) {
+        
+        srand(time(NULL));
+        seed_lehman(rand() * 2 + 1);
+        
+        // Setup convergence monitoring
+        ConvergenceMonitor monitor;
+        monitor.set_tolerances(energy_tol, acceptance_tol, config_tol);
+        
+        // Create output directory
+        if (dir_name != "") {
+            filesystem::create_directory(dir_name);
+        }
+        
+        double T = T_start;
+        double sigma = 1000;
+        size_t total_steps = 0;
+        
+        // Store initial configuration for change tracking
+        auto prev_config = spins;
+        
+        std::cout << "Starting enhanced simulated annealing with convergence monitoring:" << std::endl;
+        std::cout << "T_start: " << T_start << ", T_end: " << T_end << std::endl;
+        std::cout << "Max steps per temp: " << max_steps_per_temp << std::endl;
+        std::cout << "Tolerances - Energy: " << energy_tol 
+                  << ", Acceptance: " << acceptance_tol 
+                  << ", Config: " << config_tol << std::endl;
+        
+        bool globally_converged = false;
+        
+        while (T > T_end && !globally_converged) {
+            size_t steps_at_temp = 0;
+            double cumulative_accept = 0;
+            bool temp_converged = false;
+            
+            std::cout << "\n--- Temperature: " << T << " ---" << std::endl;
+            
+            while (steps_at_temp < max_steps_per_temp && !temp_converged) {
+                // Perform MC step
+                double accept_rate;
+                if (overrelaxation_rate > 0) {
+                    overrelaxation();
+                    if (steps_at_temp % overrelaxation_rate == 0) {
+                        accept_rate = metropolis(spins, T, gaussian_move, sigma);
+                        cumulative_accept += accept_rate;
+                    } else {
+                        accept_rate = 0.0; // No metropolis step
+                    }
+                } else {
+                    accept_rate = metropolis(spins, T, gaussian_move, sigma);
+                    cumulative_accept += accept_rate;
+                }
+                
+                // Record metrics every few steps
+                if (steps_at_temp % 10 == 0) {
+                    double E = total_energy(spins);
+                    monitor.record_energy(E);
+                    
+                    if (steps_at_temp > 0) {
+                        double avg_accept = cumulative_accept / (steps_at_temp + 1);
+                        monitor.record_acceptance(avg_accept);
+                        
+                        // Calculate configuration change
+                        double config_change = calculate_configuration_change(prev_config, spins);
+                        monitor.record_config_change(config_change);
+                        prev_config = spins;
+                    }
+                }
+                
+                // Check convergence at this temperature
+                if (steps_at_temp > 1000 && steps_at_temp % 500 == 0) {
+                    auto metrics = monitor.get_metrics();
+                    
+                    // Adjust sigma based on acceptance rate
+                    if (gaussian_move && metrics.acceptance_rate > 0 && metrics.acceptance_rate < 0.5) {
+                        sigma = sigma * 0.5 / (1 - metrics.acceptance_rate);
+                        std::cout << "Sigma adjusted to: " << sigma << std::endl;
+                    }
+                    
+                    // Check if we've converged at this temperature
+                    temp_converged = metrics.energy_converged && metrics.acceptance_converged;
+                    
+                    if (temp_converged) {
+                        std::cout << "*** TEMPERATURE CONVERGED at T = " << T << " after " << steps_at_temp << " steps ***" << std::endl;
+                        std::cout << "Moving to next temperature..." << std::endl;
+                        break; // Exit the inner loop and proceed to next temperature
+                    }
+                    
+                    if (steps_at_temp % 2000 == 0) {
+                        monitor.print_status(T, total_steps + steps_at_temp);
+                    }
+                }
+                
+                // More frequent convergence check after longer equilibration
+                else if (steps_at_temp > 3000 && steps_at_temp % 100 == 0) {
+                    auto metrics = monitor.get_metrics();
+                    if (metrics.energy_converged && metrics.acceptance_converged) {
+                        temp_converged = true;
+                        std::cout << "*** RAPID CONVERGENCE DETECTED at T = " << T << " after " << steps_at_temp << " steps ***" << std::endl;
+                        std::cout << "Moving to next temperature..." << std::endl;
+                        break; // Exit immediately when converged
+                    }
+                }
+                
+                steps_at_temp++;
+            }
+            
+            // Final metrics for this temperature
+            auto final_metrics = monitor.get_metrics();
+            std::cout << "Temperature " << T << " completed:" << std::endl;
+            std::cout << "  Steps taken: " << steps_at_temp << " / " << max_steps_per_temp << std::endl;
+            std::cout << "  Final energy: " << final_metrics.energy_mean << std::endl;
+            std::cout << "  Final acceptance: " << final_metrics.acceptance_rate << std::endl;
+            std::cout << "  Energy variance: " << final_metrics.energy_variance << std::endl;
+            std::cout << "  Config change: " << final_metrics.config_change << std::endl;
+            std::cout << "  Converged: " << (temp_converged ? "Yes (early exit)" : "No (max steps reached)") << std::endl;
+            
+            // Clear some history for next temperature to avoid interference
+            if (temp_converged) {
+                // Keep some recent history but reset for fresh start at new temperature
+                monitor.reset_for_new_temperature();
+            }
+            
+            total_steps += steps_at_temp;
+            
+            // Temperature reduction
+            T *= 0.9;
+            
+            // Check for global convergence at low temperatures
+            if (early_stop && T < T_end * 2) {
+                globally_converged = final_metrics.is_fully_converged();
+                if (globally_converged) {
+                    std::cout << "\n*** GLOBAL CONVERGENCE ACHIEVED ***" << std::endl;
+                    std::cout << "Stopping early at T = " << T << std::endl;
+                }
+            }
+        }
+        
+        // Final deterministic optimization
+        std::cout << "\nPerforming final deterministic optimization..." << std::endl;
+        for (size_t i = 0; i < 1000; ++i) {
+            deterministic_sweep();
+        }
+        
+        // Output final results
+        double final_energy = total_energy(spins);
+        std::cout << "\nSimulated annealing completed:" << std::endl;
+        std::cout << "  Total steps: " << total_steps << std::endl;
+        std::cout << "  Final temperature: " << T << std::endl;
+        std::cout << "  Final energy: " << final_energy << std::endl;
+        std::cout << "  Final energy per site: " << final_energy / (lattice_size_SU2 + lattice_size_SU3) << std::endl;
+        std::cout << "  Globally converged: " << (globally_converged ? "Yes" : "No") << std::endl;
+        
+        // Save results
+        if (dir_name != "") {
+            filesystem::create_directory(dir_name);
+            write_to_file_spin(dir_name + "/spin_final");
+            write_to_file_pos(dir_name + "/pos");
+            monitor.save_convergence_data(dir_name + "/convergence_data.txt");
+            
+            // Save final energy
+            std::ofstream energy_file(dir_name + "/final_energy.txt");
+            energy_file << final_energy << std::endl;
+            energy_file.close();
+        }
+    }
 
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
 

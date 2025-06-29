@@ -495,10 +495,17 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     Fe_atoms.set_field(fielddir*h, 3);
 
     //Tm atoms
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
+    //Set energy splitting for Tm atoms
+    //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
+    double alpha = -e1/2;
+    double beta = -sqrt(3)/6*(2*e2-e1);
+    double gamma = (e1+e2)/3 *3/16;
+
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 2);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 3);
+
 
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
@@ -506,10 +513,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     if (xii != 0.0){
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
-
-        xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-
+        ////////// Trilinear coupling/Oxygen path way
         ///////////////////
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
@@ -519,6 +523,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 0, {0,1,0}, {1,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 2, 3, {0,1,0}, {1,0,0});
+
         //////////////////
         TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 2, 2, 3, {0,0,1}, {0,0,1});
@@ -549,6 +554,47 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
         TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {1,0,0}, {1,0,0});
 
+        ///////////// Trilinear Interaction - Nearest neighbours
+
+        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
+        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
+
+        TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
+        TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
+
+        //////////////////
+        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
+        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
+        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
+
+        TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
+        TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
+
+        //////////////////
+        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
+
+        //////////////////
+        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
+
     
     }
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
@@ -576,7 +622,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         } catch (const std::exception& e) {
             cout << "Error loading spin configuration: " << e.what() << endl;
             cout << "Falling back to simulated annealing." << endl;
-            MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 1000, true);
+            MC.simulated_annealing_with_convergence(Temp_start, Temp_end, 100000, 0, 1000, true);
             if (T_zero) {
                 for (size_t i = 0; i < 100000; ++i) {
                     MC.deterministic_sweep();
@@ -585,7 +631,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         }
     } else {
         cout << "No spin configuration specified. Using simulated annealing." << endl;
-        MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 100, true);
+        MC.simulated_annealing_with_convergence(Temp_start, Temp_end, 100000, 0, 100, true);
         if (T_zero) {
             for (size_t i = 0; i < 100000; ++i) {
                 MC.deterministic_sweep();
