@@ -121,17 +121,15 @@ def Spin(k, S, P):
 
 
 def Spin_global_pyrochlore_t(k,S,P):
-    size = int(len(P)/4)
+    size = int(len(P))
     tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
-    # tS = np.zeros((len(S), len(k),3), dtype=np.complex128)
     for i in range(4):
         ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
-        # tS = tS + contract('tjs, ij, sp->tip', S[:,i::4], ffact, localframe[:,i,:])/np.sqrt(size)
         tS[:,i,:,:] = contract('tjs, ij->tis', S[:,i::4], ffact)/np.sqrt(size)
     return tS
 
 def Spin_global_pyrochlore(k,S,P):
-    size = int(len(P)/4)
+    size = int(len(P))
     tS = np.zeros((4, len(k),3), dtype=np.complex128)
     for i in range(4):
         ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
@@ -197,19 +195,14 @@ def DSSF(w, k, S, P, T, gb=False):
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
         read = np.abs(contract('wnia, wmib, inmab->winmab', Somega, np.conj(Somega), gg(k)))
         read = np.where(read <= 1e-8, 1e-8, read)
-        return np.log(read)
+        return read
 
     else:
-        # A = Spin_t(k, S, P)
-        # Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
-        # read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
-        # # read = contract('wiab, ab->wi', read, g(k))
-        # return np.log(read[:,:,2,2])
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
         read = np.abs(contract('wnia, wmib->winmab', Somega, np.conj(Somega)))
         read = np.where(read <= 1e-8, 1e-8, read)
-        return np.log(read)
+        return read
 
 
 def SSSFGraphHHL(A,B,d1, filename):
@@ -700,7 +693,104 @@ def read_MD_tot(dir, mag, SSSFGraph):
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_local), dir_to_save + "/DSSF_local/")
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_global), dir_to_save + "/DSSF_global/")
 
+def generate_K_points_pengcheng_dai(H_range_min, H_range_max, nH, K_range_min, K_range_max, nK, L_range_min, L_range_max, nL):
+    H_vector = 2*np.pi*np.array([1, 1, -2])
+    K_vector = 2*np.pi*np.array([1, -1, 0])
+    L_vector = 2*np.pi*np.array([1, 1, 1])
 
+    # Create coefficient ranges
+    h_values = np.linspace(H_range_min, H_range_max, nH)
+    k_values = np.linspace(K_range_min, K_range_max, nK)
+    l_values = np.linspace(L_range_min, L_range_max, nL)
+
+    # Create a grid of all possible combinations
+    h_grid, k_grid, l_grid = np.meshgrid(h_values, k_values, l_values, indexing='ij')
+    h_grid = h_grid.flatten()
+    k_grid = k_grid.flatten()
+    l_grid = l_grid.flatten()
+    
+    # Calculate K points using linear combinations
+    K_points = np.zeros((len(h_grid), 3))
+    for i in range(len(h_grid)):
+        K_points[i] = h_grid[i] * H_vector + k_grid[i] * K_vector + l_grid[i] * L_vector
+    # Calculate the volume element dV
+    dV = np.abs(np.linalg.det(np.array([H_vector, K_vector, L_vector]))) / (nH * nK * nL)
+
+    return K_points, dV
+
+def read_MD_int(dir, mag):
+    directory = os.fsencode(dir)
+    w0 = -5
+    wmax = 10
+    w = np.linspace(w0, wmax, 2000)
+    K_, dV = generate_K_points_pengcheng_dai(-0.1, 0.1, 5, 0.739, 0.839, 3, -0.1, 0.1, 5)
+
+    DSSF_local = np.zeros((len(w), len(K_),4,4,3,3))
+    DSSF_global = np.zeros((len(w), len(K_),4,4,3,3))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename) and filename != "results":
+            P = np.loadtxt(dir + "/" + filename + "/pos.txt")
+            T = np.loadtxt(dir + "/" + filename + "/Time_steps.txt")
+            S = np.loadtxt(dir + "/" + filename + "/spin_t.txt").reshape((len(T), len(P), 3))
+            DSSF_local = DSSF_local +  DSSF(w, K_, S, P, T, False)
+            DSSF_global = DSSF_global +  DSSF(w, K_, S, P, T, True)
+    DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global), axis=1) * dV
+    DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local), axis=1) * dV
+
+    # Plot all components of DSSF_global, DSSF_local and their sum
+    def plot_DSSF_components(DSSF, w, dir, name):
+        fig, axes = plt.subplots(3, 3, figsize=(15, 15))
+        com_string = ['x', 'y', 'z']
+        
+        for i in range(3):
+            for j in range(3):
+                # Plot DSSF_global component
+                axes[i, j].plot(w, DSSF[:, i, j], 'b-', label=f'S_{com_string[i]}{com_string[j]}')
+                # Plot DSSF_local component  
+                axes[i, j].set_xlabel('ω')
+                axes[i, j].set_ylabel('DSSF')
+                axes[i, j].legend()
+                axes[i, j].grid(True)
+                axes[i, j].set_title(f'S_{com_string[i]}{com_string[j]}')
+        
+        plt.tight_layout()
+        plt.savefig(dir + "/DSSF_all_components_{}.pdf".format(name))
+        plt.close()
+        
+        # Also save the data
+        dir_to_save = dir + "/results"
+        if not os.path.isdir(dir_to_save):
+            os.mkdir(dir_to_save)
+        
+        for i in range(3):
+            for j in range(3):
+                np.savetxt(f"{dir_to_save}/DSSF_{name}_{com_string[i]}{com_string[j]}.txt", DSSF[:, i, j])
+
+        DSSF_sum = np.sum(DSSF, axis=(1, 2))
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(w, DSSF_sum, 'r-', label='Sum of all components')
+        ax.set_xlabel('ω')
+        ax.set_ylabel('DSSF Sum')
+        ax.legend()
+        ax.grid(True)
+        plt.savefig(dir + "/DSSF_sum_{}.pdf".format(name))
+        plt.close()
+
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(w, np.log(DSSF_sum), 'r-', label='Sum of all components')
+        ax.set_xlabel('ω')
+        ax.set_ylabel('DSSF Sum')
+        ax.legend()
+        ax.grid(True)
+        plt.savefig(dir + "/DSSF_sum_{}_log.pdf".format(name))
+        plt.close()
+    
+    w = w * 0.063
+    plot_DSSF_components(DSSF_global, w, dir, "global")
+    plot_DSSF_components(DSSF_local, w, dir, "local")
+    
 def read_MD(dir, mag, w):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
@@ -723,45 +813,8 @@ def read_MD(dir, mag, w):
         S_local = SSSFHnHL(S0, P, 50, dir, False)
     DSSF_local = DSSF(w, DSSF_K, S, P, T, False)
     DSSF_global = DSSF(w, DSSF_K, S, P, T, True)
-    # A = A / np.max(A)
-    # np.savetxt(dir + "_DSSF.txt", A)
-    # fig, ax = plt.subplots(figsize=(10,4))
-    # C = ax.imshow(A, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=g5, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
-    # xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
-    # # labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
-    # labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
-    # ax.set_xticks(xlabpos, labels)
-    # ax.set_xlim([0, gGamma4])
-    # fig.colorbar(C)
-    # plt.savefig(dir+"DSSF.pdf")
-    # plt.clf()
-    # C = ax.imshow(A, origin='lower', extent=[0, gGamma3, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gW, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gK, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gGamma2, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gL, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gU, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gW1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gX1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gGamma3, color='b', label='axvline - full height', linestyle='dashed')
-    # xlabpos = [gGamma1, gX, gW, gK, gGamma2, gL, gU, gW1, gX1, gGamma3]
-    # labels = [r'$\Gamma$', r'$X$', r'$W$', r'$K$', r'$\Gamma$', r'$L$', r'$U$', r'$W^\prime$', r'$X^\prime$',
-    #             r'$\Gamma$']
-    # ax.set_xticks(xlabpos, labels)
-    # ax.set_xlim([0, gGamma3])
-    # fig.colorbar(C)
-    # plt.savefig(dir+"DSSF.pdf") 
-    # plt.clf()
     return S_local, S_global, DSSF_local, DSSF_global
+
 
 def read_0_field(numJpm, dir):
     directory = os.fsencode(dir)
@@ -841,8 +894,11 @@ def read_2D_nonlinear_tot(dir):
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
-dir = "CZO_MD_h1-10=8"
-read_MD_tot(dir, "1-10", SSSFGraphHHL)
+# dir = "CZO_MD_h1-10=8"
+read_MD_int("CZO_0_field", "111")
+read_MD_int("CZO_0.1_field", "111")
+read_MD_int("CZO_0.2_field", "111")
+
 # parseDSSF(dir)
 # fullread(dir, False, "111")
 # fullread(dir, True, "111")

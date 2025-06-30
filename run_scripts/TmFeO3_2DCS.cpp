@@ -622,7 +622,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         } catch (const std::exception& e) {
             cout << "Error loading spin configuration: " << e.what() << endl;
             cout << "Falling back to simulated annealing." << endl;
-            MC.simulated_annealing_with_convergence(Temp_start, Temp_end, 100000, 0, 1000, true);
+            MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 1000, true);
             if (T_zero) {
                 for (size_t i = 0; i < 100000; ++i) {
                     MC.deterministic_sweep();
@@ -631,16 +631,19 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         }
     } else {
         cout << "No spin configuration specified. Using simulated annealing." << endl;
-        MC.simulated_annealing_with_convergence(Temp_start, Temp_end, 100000, 0, 100, true);
+        MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 1000, true);
+        MC.write_to_file_spin(dir+"/spin");
+        spin_config = dir+"/spin";
         if (T_zero) {
             for (size_t i = 0; i < 100000; ++i) {
                 MC.deterministic_sweep();
             }
         }
+        MC.write_to_file_spin(dir+"/spin_zero");
+        spin_config = dir+"/spin_zero";
     }
 
     MC.write_to_file_pos(dir+"/pos.txt");
-    MC.write_to_file_spin(dir+"/spin_0.txt");
 
     cout << "Starting calculations..." << endl;
     if (rank==0){

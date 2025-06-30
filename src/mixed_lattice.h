@@ -1315,60 +1315,105 @@ class mixed_lattice
         const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
         const double inv_T = 1.0 / T;  // Precompute inverse temperature
         
-        // Process sites in a batch for better cache locality
-        #pragma omp parallel for reduction(+:accept)
-        for (size_t count = 0; count < total_sites; ++count) {
-            size_t i = random_int_lehman(total_sites);
-
-            if (i < lattice_size_SU2) {
-                // SU2 case
-                array<double,N_SU2> new_spin_SU2;                
-                // Generate new spin configuration
-                if (gaussian) {
-                    new_spin_SU2 = gaussian_move_SU2(curr_spin.spins_SU2[i], sigma);
-                } else {
-                    new_spin_SU2 = gen_random_spin_SU2();
-                }
-                const double dE = site_energy_SU2_diff(new_spin_SU2, curr_spin.spins_SU2[i], i);
-
-                // Fast path for acceptance when dE <= 0
-                bool accepted = (dE <= 0);
-                if (!accepted) {
-                    // Only compute exp when needed
-                    accepted = (random_double_lehman(0,1) < exp(-dE * inv_T));
-                }
+        // Pre-allocate arrays to avoid repeated allocations
+        array<double, N_SU2> new_spin_SU2;
+        array<double, N_SU3> new_spin_SU3;
+        
+        // Batch generate random numbers for better performance
+        constexpr size_t BATCH_SIZE = 64;
+        std::vector<size_t> random_sites(BATCH_SIZE);
+        std::vector<double> random_uniforms(BATCH_SIZE);
+        
+        // Process sites in batches for better cache locality
+        for (size_t batch_start = 0; batch_start < total_sites; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, total_sites);
+            const size_t current_batch_size = batch_end - batch_start;
+            
+            // Generate random sites and uniform numbers in batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                random_sites[j] = random_int_lehman(total_sites);
+                random_uniforms[j] = random_double_lehman(0, 1);
+            }
+            
+            // Process batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                const size_t i = random_sites[j];
+                const double rand_uniform = random_uniforms[j];
                 
-                if (accepted) {
-                    curr_spin.spins_SU2[i] = new_spin_SU2;
-                    accept++;
-                }
-            } else {
-                // SU3 case
-                const size_t i_SU3 = i - lattice_size_SU2;
-                array<double,N_SU3> new_spin_SU3;                
-                // Generate new spin configuration
-                if (gaussian) {
-                    new_spin_SU3 = gaussian_move_SU3(curr_spin.spins_SU3[i_SU3], sigma);
+                if (i < lattice_size_SU2) {
+                    // SU2 case - inline spin generation to avoid function call overhead
+                    if (gaussian) {
+                        // Inline gaussian move computation
+                        const auto& current_spin_ref = curr_spin.spins_SU2[i];
+                        gen_random_spin(new_spin_SU2, spin_length_SU2);
+                        
+                        // Compute new_spin = current + random * sigma, then normalize
+                        double norm_sq = 0.0;
+                        #pragma omp simd reduction(+:norm_sq)
+                        for (size_t k = 0; k < N_SU2; ++k) {
+                            new_spin_SU2[k] = current_spin_ref[k] + new_spin_SU2[k] * sigma;
+                            norm_sq += new_spin_SU2[k] * new_spin_SU2[k];
+                        }
+                        
+                        const double inv_norm = spin_length_SU2 / sqrt(norm_sq);
+                        #pragma omp simd
+                        for (size_t k = 0; k < N_SU2; ++k) {
+                            new_spin_SU2[k] *= inv_norm;
+                        }
+                    } else {
+                        gen_random_spin(new_spin_SU2, spin_length_SU2);
+                    }
+                    
+                    const double dE = site_energy_SU2_diff(new_spin_SU2, curr_spin.spins_SU2[i], i);
+                    
+                    // Branchless acceptance check using conditional move
+                    const bool accepted = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                    
+                    if (accepted) {
+                        // Use std::copy for potentially better optimization
+                        std::copy(new_spin_SU2.begin(), new_spin_SU2.end(), curr_spin.spins_SU2[i].begin());
+                        accept++;
+                    }
                 } else {
-                    new_spin_SU3 = gen_random_spin_SU3();
-                }
-
-                const double dE = site_energy_SU3_diff(new_spin_SU3, curr_spin.spins_SU3[i_SU3], i_SU3);
-
-                // Fast path for acceptance when dE <= 0
-                bool accepted = (dE <= 0);
-                if (!accepted) {
-                    // Only compute exp when needed
-                    accepted = (random_double_lehman(0,1) < exp(-dE * inv_T));
-                }
-                
-                if (accepted) {
-                    curr_spin.spins_SU3[i_SU3] = new_spin_SU3;
-                    accept++;
+                    // SU3 case
+                    const size_t i_SU3 = i - lattice_size_SU2;
+                    
+                    if (gaussian) {
+                        // Inline gaussian move computation
+                        const auto& current_spin_ref = curr_spin.spins_SU3[i_SU3];
+                        gen_random_spin(new_spin_SU3, spin_length_SU3);
+                        
+                        // Compute new_spin = current + random * sigma, then normalize
+                        double norm_sq = 0.0;
+                        #pragma omp simd reduction(+:norm_sq)
+                        for (size_t k = 0; k < N_SU3; ++k) {
+                            new_spin_SU3[k] = current_spin_ref[k] + new_spin_SU3[k] * sigma;
+                            norm_sq += new_spin_SU3[k] * new_spin_SU3[k];
+                        }
+                        
+                        const double inv_norm = spin_length_SU3 / sqrt(norm_sq);
+                        #pragma omp simd
+                        for (size_t k = 0; k < N_SU3; ++k) {
+                            new_spin_SU3[k] *= inv_norm;
+                        }
+                    } else {
+                        gen_random_spin(new_spin_SU3, spin_length_SU3);
+                    }
+                    
+                    const double dE = site_energy_SU3_diff(new_spin_SU3, curr_spin.spins_SU3[i_SU3], i_SU3);
+                    
+                    // Branchless acceptance check
+                    const bool accepted = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                    
+                    if (accepted) {
+                        std::copy(new_spin_SU3.begin(), new_spin_SU3.end(), curr_spin.spins_SU3[i_SU3].begin());
+                        accept++;
+                    }
                 }
             }
         }
-        return static_cast<double>(accept) / double(total_sites);
+        
+        return static_cast<double>(accept) / static_cast<double>(total_sites);
     }
     void overrelaxation(){
         array<double,N_SU2> local_field_SU2;
@@ -1429,8 +1474,8 @@ class mixed_lattice
                 spins.spins_SU3[i] = local_field/(-norm)*spin_length_SU3;
             }
         }
-    }
-    
+    } 
+
     void write_to_file_spin(string filename){
         ofstream myfile;
         myfile.open(filename+"_SU2.txt");
@@ -1450,8 +1495,6 @@ class mixed_lattice
         }
         myfile.close();
     }
-
-
     void write_to_file_spin_t(string filename){
         ofstream myfile;
         myfile.open(filename+"_SU2.txt", ios::app);
@@ -1582,6 +1625,8 @@ class mixed_lattice
         }
     }
 
+
+
     // Enhanced simulated annealing with convergence monitoring
     void simulated_annealing_with_convergence(double T_start, double T_end, 
                                              size_t max_steps_per_temp = 10000,
@@ -1590,7 +1635,7 @@ class mixed_lattice
                                              bool gaussian_move = true, 
                                              string dir_name = "",
                                              double energy_tol = 1e-8,
-                                             double acceptance_tol = 0.01,
+                                             double acceptance_tol = 1e-4,
                                              double config_tol = 1e-6,
                                              bool early_stop = true) {
         
@@ -1630,47 +1675,32 @@ class mixed_lattice
             std::cout << "\n--- Temperature: " << T << " ---" << std::endl;
             
             while (steps_at_temp < max_steps_per_temp && !temp_converged) {
-                // Perform MC step
-                double accept_rate;
                 if (overrelaxation_rate > 0) {
                     overrelaxation();
                     if (steps_at_temp % overrelaxation_rate == 0) {
-                        accept_rate = metropolis(spins, T, gaussian_move, sigma);
-                        cumulative_accept += accept_rate;
-                    } else {
-                        accept_rate = 0.0; // No metropolis step
+                        cumulative_accept += metropolis(spins, T, gaussian_move, sigma);
                     }
                 } else {
-                    accept_rate = metropolis(spins, T, gaussian_move, sigma);
-                    cumulative_accept += accept_rate;
+                    cumulative_accept += metropolis(spins, T, gaussian_move, sigma);
                 }
                 
                 // Record metrics every few steps
                 if (steps_at_temp % 10 == 0) {
-                    double E = total_energy(spins);
+                    double E = energy_density(spins);
                     monitor.record_energy(E);
                     
-                    if (steps_at_temp > 0) {
-                        double avg_accept = cumulative_accept / (steps_at_temp + 1);
-                        monitor.record_acceptance(avg_accept);
-                        
-                        // Calculate configuration change
-                        double config_change = calculate_configuration_change(prev_config, spins);
-                        monitor.record_config_change(config_change);
-                        prev_config = spins;
-                    }
+                    double avg_accept = cumulative_accept / (steps_at_temp / overrelaxation_rate);
+                    monitor.record_acceptance(avg_accept);
+                    
+                    // Calculate configuration change
+                    double config_change = calculate_configuration_change(prev_config, spins, spin_length_SU2, spin_length_SU3);
+                    monitor.record_config_change(config_change);
+                    prev_config = std::move(spins);
                 }
                 
                 // Check convergence at this temperature
                 if (steps_at_temp > 1000 && steps_at_temp % 500 == 0) {
                     auto metrics = monitor.get_metrics();
-                    
-                    // Adjust sigma based on acceptance rate
-                    if (gaussian_move && metrics.acceptance_rate > 0 && metrics.acceptance_rate < 0.5) {
-                        sigma = sigma * 0.5 / (1 - metrics.acceptance_rate);
-                        std::cout << "Sigma adjusted to: " << sigma << std::endl;
-                    }
-                    
                     // Check if we've converged at this temperature
                     temp_converged = metrics.energy_converged && metrics.acceptance_converged;
                     
@@ -1680,7 +1710,7 @@ class mixed_lattice
                         break; // Exit the inner loop and proceed to next temperature
                     }
                     
-                    if (steps_at_temp % 2000 == 0) {
+                    if (steps_at_temp % int(max_steps_per_temp / 10) == 0) {
                         monitor.print_status(T, total_steps + steps_at_temp);
                     }
                 }
@@ -1698,6 +1728,13 @@ class mixed_lattice
                 
                 steps_at_temp++;
             }
+
+            // Adjust sigma based on acceptance rate
+            auto metrics = monitor.get_metrics();
+            if (gaussian_move && metrics.acceptance_rate > 0 && metrics.acceptance_rate < 0.5) {
+                sigma = sigma * 0.5 / (1 - metrics.acceptance_rate);
+                std::cout << "Sigma adjusted to: " << sigma << std::endl;
+            }
             
             // Final metrics for this temperature
             auto final_metrics = monitor.get_metrics();
@@ -1709,12 +1746,7 @@ class mixed_lattice
             std::cout << "  Config change: " << final_metrics.config_change << std::endl;
             std::cout << "  Converged: " << (temp_converged ? "Yes (early exit)" : "No (max steps reached)") << std::endl;
             
-            // Clear some history for next temperature to avoid interference
-            if (temp_converged) {
-                // Keep some recent history but reset for fresh start at new temperature
-                monitor.reset_for_new_temperature();
-            }
-            
+            monitor.reset_for_new_temperature();
             total_steps += steps_at_temp;
             
             // Temperature reduction
@@ -1732,7 +1764,7 @@ class mixed_lattice
         
         // Final deterministic optimization
         std::cout << "\nPerforming final deterministic optimization..." << std::endl;
-        for (size_t i = 0; i < 1000; ++i) {
+        for (size_t i = 0; i < n_deterministics; ++i) {
             deterministic_sweep();
         }
         
@@ -1741,8 +1773,7 @@ class mixed_lattice
         std::cout << "\nSimulated annealing completed:" << std::endl;
         std::cout << "  Total steps: " << total_steps << std::endl;
         std::cout << "  Final temperature: " << T << std::endl;
-        std::cout << "  Final energy: " << final_energy << std::endl;
-        std::cout << "  Final energy per site: " << final_energy / (lattice_size_SU2 + lattice_size_SU3) << std::endl;
+        std::cout << "  Final energy per site: : " << final_energy << std::endl;
         std::cout << "  Globally converged: " << (globally_converged ? "Yes" : "No") << std::endl;
         
         // Save results
