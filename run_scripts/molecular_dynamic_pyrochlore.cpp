@@ -99,8 +99,8 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     double k_B = 0.08620689655;
     for(int i=start; i<end;++i){
         lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, 1e-3, 1e4, 10, true);
-        MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
+        MC.simulated_annealing(5, 1e-2, 1e5, 10, true);
+        MC.molecular_dynamics(0, 600, 0.01, dir+"/"+std::to_string(i));
         for(int i=0; i<1e6; ++i){
             MC.deterministic_sweep();
         }

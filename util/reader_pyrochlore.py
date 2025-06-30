@@ -193,14 +193,14 @@ def DSSF(w, k, S, P, T, gb=False):
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.abs(contract('wnia, wmib, inmab->winmab', Somega, np.conj(Somega), gg(k)))
+        read = np.abs(contract('wnia, wmib, inmab, w->winmab', Somega, np.conj(Somega), gg(k), w))
         read = np.where(read <= 1e-8, 1e-8, read)
         return read
 
     else:
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.abs(contract('wnia, wmib->winmab', Somega, np.conj(Somega)))
+        read = np.abs(contract('wnia, wmib, w->winmab', Somega, np.conj(Somega), w))
         read = np.where(read <= 1e-8, 1e-8, read)
         return read
 
@@ -598,9 +598,9 @@ def read_MD_tot(dir, mag, SSSFGraph):
     nK = 50
     S_local = np.zeros((nK,nK,4,4,3,3))
     S_global = np.zeros((nK,nK,4,4,3,3))
-    w0 = 0
+    w0 = 1e-2
     wmax = 10
-    w = np.linspace(w0, wmax, 2000)
+    w = np.arange(w0, wmax, 1/600)
     DSSF_local = np.zeros((len(w), len(DSSF_K),4,4,3,3))
     DSSF_global = np.zeros((len(w), len(DSSF_K),4,4,3,3))
     H = np.linspace(-2.5, 2.5, nK)
@@ -629,23 +629,8 @@ def read_MD_tot(dir, mag, SSSFGraph):
         SSSFGraph(A, B, S_global[:, :, 1, 2], filename + "/Syz_global")
 
     def DSSF_helper(DSSF, filename):
-        DSSF = DSSF / np.max(DSSF)
-        # np.savetxt(filename+".txt", DSSF)
+        # DSSF = DSSF / np.max(DSSF)
         fig, ax = plt.subplots(figsize=(10,4))
-        # C = ax.imshow(DSSF, origin='lower', extent=[0, gGamma4, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-        # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
-        # ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
-        # ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
-        # ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
-        # ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-        # ax.axvline(x=g5, color='b', label='axvline - full height', linestyle='dashed')
-        # ax.axvline(x=gGamma4, color='b', label='axvline - full height', linestyle='dashed')
-        # xlabpos = [gGamma1, g1, g2, g3, g4, g5, gGamma4]
-        # # labels = [r'$(0,0,0)$', r'$(1,0,0)$', r'$(2,0,0)$', r'$(2,1,0)$', r'$(2,2,0)$', r'$(1,1,0)$', r'$(0,0,0)$']
-        # labels = [r'$(0,0,0)$', r'$(1,1,0)$', r'$(2,2,0)$', r'$(2,2,1)$', r'$(2,2,2)$', r'$(1,1,1)$', r'$(0,0,0)$']
-        # ax.set_xticks(xlabpos, labels)
-        # ax.set_xlim([0, gGamma4])
-        # fig.colorbar(C)
         C = ax.imshow(DSSF, origin='lower', extent=[0, gGamma3, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
         ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
         ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
@@ -672,23 +657,21 @@ def read_MD_tot(dir, mag, SSSFGraph):
         for i in range(3):
             for j in range(3):
                 DSSF_helper(DSSF[:,:,i,j], filename + "_"+ com_string[i]+com_string[j])
+        DSSF_helper(np.sum(DSSF, axis=(2,3)), filename + "_sum")
 
     dir_to_save = dir + "/results"
     if not os.path.isdir(dir_to_save):
         os.mkdir(dir_to_save)
-    # for i in range(4):
-    #     for j in range (4):
-    #         if not os.path.isdir(dir_to_save + "/"+str(i)+str(j)):
-    #             os.mkdir(dir_to_save + "/"+str(i)+str(j))
-    #         SSSF_helper(S_local[:,:,i,j], S_global[:,:,i,j], dir_to_save + "/"+str(i)+str(j))
-    #         DSSF_all_spin_components(DSSF_local[:,:,i,j], dir_to_save + "/"+str(i)+str(j)+"/DSSF_local")
-    #         DSSF_all_spin_components(DSSF_global[:,:,i,j], dir_to_save + "/"+str(i)+str(j)+"/DSSF_global")
     if not os.path.isdir(dir_to_save + "/SSSF"):
         os.mkdir(dir_to_save + "/SSSF")
     if not os.path.isdir(dir_to_save + "/DSSF_local"):
         os.mkdir(dir_to_save + "/DSSF_local")
     if not os.path.isdir(dir_to_save + "/DSSF_global"):
         os.mkdir(dir_to_save + "/DSSF_global")
+    S_global = np.log(S_global)
+    S_local = np.log(S_local)
+    DSSF_local = np.log(DSSF_local)
+    DSSF_global = np.log(DSSF_global)
     SSSF_helper(contract('ijxyab->ijab', S_local), contract('ijxyab->ijab', S_global), dir_to_save + "/SSSF")
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_local), dir_to_save + "/DSSF_local/")
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_global), dir_to_save + "/DSSF_global/")
@@ -895,9 +878,9 @@ def read_2D_nonlinear_tot(dir):
 #
 # dir = "CZO_h=4T"
 # dir = "CZO_MD_h1-10=8"
-read_MD_int("CZO_0_field", "111")
-read_MD_int("CZO_0.1_field", "111")
-read_MD_int("CZO_0.2_field", "111")
+read_MD_tot("CZO_0_field", "111", SSSFGraphHnHL)
+read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHL)
+read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHL)
 
 # parseDSSF(dir)
 # fullread(dir, False, "111")
