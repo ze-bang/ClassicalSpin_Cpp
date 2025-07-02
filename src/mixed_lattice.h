@@ -1789,140 +1789,202 @@ class mixed_lattice
             energy_file.close();
         }
     }
-
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
-
         int initialized;
-        int swap_accept = 0;
-        double curr_accept = 0;
-        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
         MPI_Initialized(&initialized);
         if (!initialized){
             MPI_Init(NULL, NULL);
         }
-        int rank, size, partner_rank;
+        
+        int rank, size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &size);
-        srand (time(NULL));
+        
+        // Initialize random seed once per rank
+        srand(time(NULL) + rank);  // Add rank to ensure different seeds
         seed_lehman(rand()*2+1);
-        double E, T_partner, E_partner;
-        bool accept;        
+        
+        // Pre-calculate constants
+        const double curr_Temp = temp[rank];
+        const int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
+        const size_t total_steps = n_anneal + n_measure;
+        const size_t su2_data_size = N_SU2 * lattice_size_SU2;
+        const size_t su3_data_size = N_SU3 * lattice_size_SU3;
+        
+        // Pre-allocate buffers for MPI communication
         spin_config_SU2 newspins_SU2;
         spin_config_SU3 newspins_SU3;
-        double curr_Temp = temp[rank];
-        // vector<double> heat_capacity, dHeat;
-        // if (rank == 0){
-        //     heat_capacity.resize(size);
-        //     dHeat.resize(size);
-        // }   
-        // vector<double> energies;
-        // vector<array<double,N>> magnetizations;
-        // vector<spin_config> spin_configs_at_temp;
-
+        
+        // Flatten spin arrays for more efficient MPI transfers
+        vector<double> su2_send_buffer(su2_data_size);
+        vector<double> su3_send_buffer(su3_data_size);
+        vector<double> su2_recv_buffer(su2_data_size);
+        vector<double> su3_recv_buffer(su3_data_size);
+        
+        // Statistics tracking
+        int swap_accept = 0;
+        double curr_accept = 0;
+        
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
-
-        for(size_t i=0; i < n_anneal+n_measure; ++i){
-
-            // Metropolisfh
-            if(overrelaxation_rate > 0){
+        
+        // Main simulation loop with optimizations
+        for(size_t i = 0; i < total_steps; ++i){
+            // Metropolis updates with reduced branching
+            if(overrelaxation_rate > 0 && i % overrelaxation_rate != 0){
                 overrelaxation();
-                if (i%overrelaxation_rate == 0){
-                    curr_accept += metropolis(spins, curr_Temp, gaussian_move);
-                }
-            }
-            else{
+            } else {
                 curr_accept += metropolis(spins, curr_Temp, gaussian_move);
             }
-            E = total_energy(spins);
-
-            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
-                accept = false;
-                if ((i / swap_rate) % 2 ==0){
-                    partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
-                }else{
-                    partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
-                }
-                if ((partner_rank >= 0) && (partner_rank < size)){
-                    T_partner = temp[partner_rank];
-                    if (partner_rank % 2 == 0){
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    } else{
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
+            
+            // Compute energy only when needed for swapping
+            double E = 0.0;
+            const bool is_swap_step = (i % swap_rate == 0) && (i % overrelaxation_flag == 0);
+            
+            if (is_swap_step){
+                E = total_energy(spins);
+                
+                // Determine partner rank with simpler logic
+                const int swap_phase = (i / swap_rate) % 2;
+                const int partner_rank = (swap_phase == 0) ? 
+                    (rank % 2 == 0 ? rank + 1 : rank - 1) :
+                    (rank % 2 == 0 ? rank - 1 : rank + 1);
+                
+                if (partner_rank >= 0 && partner_rank < size){
+                    const double T_partner = temp[partner_rank];
+                    double E_partner;
+                    bool accept = false;
+                    
+                    // Use non-blocking MPI for better overlap
+                    MPI_Request send_req, recv_req;
+                    
+                    if (rank < partner_rank){
+                        // Lower rank sends first, receives second
+                        MPI_Isend(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &send_req);
+                        MPI_Irecv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &recv_req);
+                        MPI_Wait(&send_req, MPI_STATUS_IGNORE);
+                        MPI_Wait(&recv_req, MPI_STATUS_IGNORE);
+                        
+                        // Lower rank decides acceptance
+                        const double delta = (1.0/curr_Temp - 1.0/T_partner) * (E - E_partner);
+                        accept = (delta <= 0) || (random_double_lehman(0,1) < exp(delta));
+                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 1, MPI_COMM_WORLD);
+                    } else {
+                        // Higher rank receives first, sends second
+                        MPI_Irecv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &recv_req);
+                        MPI_Isend(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &send_req);
+                        MPI_Wait(&recv_req, MPI_STATUS_IGNORE);
+                        MPI_Wait(&send_req, MPI_STATUS_IGNORE);
+                        
+                        // Receive acceptance decision
+                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     }
-                    if (partner_rank % 2 == 0){
-                        accept = min(double(1.0), exp((1/curr_Temp-1/T_partner)*(E - E_partner))) > random_double_lehman(0,1);
-                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
-                    } else{
-                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    }
+                    
                     if (accept){
-                        if (partner_rank % 2 == 0){
-                            MPI_Send(&(spins.spins_SU2), N_SU2*lattice_size_SU2, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
-                            MPI_Recv(&newspins_SU2, N_SU2*lattice_size_SU2, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            MPI_Send(&(spins.spins_SU3), N_SU3*lattice_size_SU3, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
-                            MPI_Recv(&newspins_SU3, N_SU3*lattice_size_SU3, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        } else{
-                            MPI_Recv(&newspins_SU2, N_SU2*lattice_size_SU2, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            MPI_Send(&(spins.spins_SU2), N_SU2*lattice_size_SU2, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-                            MPI_Recv(&newspins_SU3, N_SU3*lattice_size_SU3, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            MPI_Send(&(spins.spins_SU3), N_SU3*lattice_size_SU3, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD);
+                        // Flatten spins for efficient MPI transfer
+                        #pragma omp parallel sections
+                        {
+                            #pragma omp section
+                            {
+                                #pragma omp parallel for simd
+                                for(size_t j = 0; j < lattice_size_SU2; ++j){
+                                    for(size_t k = 0; k < N_SU2; ++k){
+                                        su2_send_buffer[j*N_SU2 + k] = spins.spins_SU2[j][k];
+                                    }
+                                }
+                            }
+                            
+                            #pragma omp section
+                            {
+                                #pragma omp parallel for simd
+                                for(size_t j = 0; j < lattice_size_SU3; ++j){
+                                    for(size_t k = 0; k < N_SU3; ++k){
+                                        su3_send_buffer[j*N_SU3 + k] = spins.spins_SU3[j][k];
+                                    }
+                                }
+                            }
                         }
-                        copy(newspins_SU2.begin(), newspins_SU2.end(), spins.spins_SU2.begin());
-                        copy(newspins_SU3.begin(), newspins_SU3.end(), spins.spins_SU3.begin());
+                        
+                        // Use non-blocking MPI for overlapped communication
+                        MPI_Request su2_send_req, su2_recv_req, su3_send_req, su3_recv_req;
+                        
+                        MPI_Isend(su2_send_buffer.data(), su2_data_size, MPI_DOUBLE, partner_rank, 2, MPI_COMM_WORLD, &su2_send_req);
+                        MPI_Irecv(su2_recv_buffer.data(), su2_data_size, MPI_DOUBLE, partner_rank, 2, MPI_COMM_WORLD, &su2_recv_req);
+                        MPI_Isend(su3_send_buffer.data(), su3_data_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, &su3_send_req);
+                        MPI_Irecv(su3_recv_buffer.data(), su3_data_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, &su3_recv_req);
+                        
+                        // Wait for all communications to complete
+                        MPI_Wait(&su2_recv_req, MPI_STATUS_IGNORE);
+                        MPI_Wait(&su3_recv_req, MPI_STATUS_IGNORE);
+                        MPI_Wait(&su2_send_req, MPI_STATUS_IGNORE);
+                        MPI_Wait(&su3_send_req, MPI_STATUS_IGNORE);
+                        
+                        // Unflatten received spins
+                        #pragma omp parallel sections
+                        {
+                            #pragma omp section
+                            {
+                                #pragma omp parallel for simd
+                                for(size_t j = 0; j < lattice_size_SU2; ++j){
+                                    for(size_t k = 0; k < N_SU2; ++k){
+                                        spins.spins_SU2[j][k] = su2_recv_buffer[j*N_SU2 + k];
+                                    }
+                                }
+                            }
+                            
+                            #pragma omp section
+                            {
+                                #pragma omp parallel for simd
+                                for(size_t j = 0; j < lattice_size_SU3; ++j){
+                                    for(size_t k = 0; k < N_SU3; ++k){
+                                        spins.spins_SU3[j][k] = su3_recv_buffer[j*N_SU3 + k];
+                                    }
+                                }
+                            }
+                        }
+                        
                         E = E_partner;
                         swap_accept++;
                     }
                 }
             }
-            // if (i >= n_anneal){
-            //     if (i % probe_rate == 0){
-            //         if(dir_name != ""){
-            //             magnetizations.push_back(magnetization_local(spins));
-            //             spin_configs_at_temp.push_back(spins);
-            //             energies.push_back(E);
-            //         }
-            //     }
-            // }
-            if (i % 10000 == 0){
-                std::cout << "Percentage sweep done: " << double(i)/double(n_anneal+n_measure) * 100 << " % on rank: " << rank << endl;
+            
+            // Progress reporting with reduced frequency
+            if (i > 0 && i % 10000 == 0){
+                const double progress = 100.0 * i / total_steps;
+                cout << "Progress: " << progress << "% on rank " << rank 
+                     << " (accepts: " << curr_accept << ", swaps: " << swap_accept << ")" << endl;
             }
         }
         
-        // std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-        // double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
-        // double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
-        // MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        // MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
-        if(dir_name != ""){
-            filesystem::create_directory(dir_name);
-            for(size_t i=0; i<rank_to_write.size(); ++i){
-                if (rank == rank_to_write[i]){
-                    write_to_file_spin(dir_name + "/spin" + to_string(rank));
-                    // write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
-                    // write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
-                    //     write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
-                    // }
-                }
+        // Calculate final statistics
+        const double local_accept_rate = curr_accept / (total_steps / overrelaxation_flag);
+        const double swap_accept_rate = (swap_rate > 0) ? 
+            static_cast<double>(swap_accept) / (total_steps / (swap_rate * overrelaxation_flag)) : 0.0;
+        
+        cout << "Process finished on rank: " << rank 
+             << " with temperature: " << curr_Temp 
+             << " with local acceptance rate: " << local_accept_rate 
+             << " Swap Acceptance rate: " << swap_accept_rate << endl;
+        
+        // Output results if requested
+        if(!dir_name.empty()){
+            // Create directory only on rank 0 to avoid race conditions
+            if(rank == 0){
+                filesystem::create_directory(dir_name);
             }
-            // if (rank == 0){
-            //     write_to_file_pos(dir_name + "/pos.txt");
-            //     ofstream myfile;
-            //     myfile.open(dir_name + "/heat_capacity.txt", ios::app);
-            //     for(size_t j = 0; j<size; ++j){
-            //         myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
-            //     }
-            //     myfile.close();
-            // }
+            MPI_Barrier(MPI_COMM_WORLD);  // Ensure directory is created
+            
+            // Check if this rank should write output
+            if(std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end()){
+                write_to_file_spin(dir_name + "/spin" + to_string(rank));
+            }
         }
-        int finalized;
-        if (!MPI_Finalized(&finalized)){
+        
+        // Clean up MPI
+        MPI_Initialized(&initialized);
+        if (initialized && !MPI_Finalized(&initialized)){
             MPI_Finalize();
         }
-        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
     }
 
 

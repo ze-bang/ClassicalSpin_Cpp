@@ -599,7 +599,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     }
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 2;
+    double pulse_amp = 1.2;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -612,6 +612,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     MC.write_to_file_pos(dir+"/pos.txt");
     MC.write_to_file_spin(dir+"/spin_0.txt");
+    
+
 
     // Continue with the rest of the initialization code...
     if (spin_config != ""){
@@ -645,7 +647,11 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     MC.write_to_file_pos(dir+"/pos.txt");
 
+
     cout << "Starting calculations..." << endl;
+
+    MC.molecular_dynamics_cuda(0, 100, 1e-2, dir+"/spin_t.txt", 1);
+
     if (rank==0){
         filesystem::create_directories(dir+"/M_time_0");
         // Use the CUDA version of the method
