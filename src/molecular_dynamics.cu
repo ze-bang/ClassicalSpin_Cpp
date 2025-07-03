@@ -576,9 +576,10 @@ void LLG_kernel(
         landau_Lifshitz_SU2<N_SU2, lattice_size_SU2>(
             k_SU2, site_index, d_local_field_SU2, d_spins_SU2);
     
-    }else{        
+    }else{
+        size_t site_index_SU3 = site_index - lattice_size_SU2;        
         compute_local_field_SU3<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
-            d_local_field_SU3, site_index - lattice_size_SU2, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
+            d_local_field_SU3, site_index_SU3, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
             d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
             d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
             d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
@@ -586,12 +587,12 @@ void LLG_kernel(
             max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
 
         drive_field_T_SU3<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            k_SU3, curr_time, site_index - lattice_size_SU2, d_field_drive_1_SU2, d_field_drive_2_SU2, 
+            k_SU3, curr_time, site_index_SU3, d_field_drive_1_SU2, d_field_drive_2_SU2, 
             d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
             max_mixed_tri_neighbors_SU3, d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3, d_spins_SU2);
             
         landau_Lifshitz_SU3<N_SU3, lattice_size_SU3>(
-            k_SU3, site_index - lattice_size_SU2, d_local_field_SU3, d_spins_SU3);
+            k_SU3, site_index_SU3, d_local_field_SU3, d_spins_SU3);
     }
 }
 
