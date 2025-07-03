@@ -112,6 +112,12 @@ class mixed_lattice
     double field_drive_width_SU3;
     double t_B_1_SU3;
     double t_B_2_SU3;
+
+    double field_drive_freq_SU2_SU3;
+    double field_drive_amp_SU2_SU3;
+    double field_drive_width_SU2_SU3;
+    double t_B_1_SU2_SU3;
+    double t_B_2_SU2_SU3;
     //Look up table for SU2
     array<array<double,N_SU2>, N_ATOMS_SU2*dim1*dim2*dim> field_SU2;
     array<array<double,N_SU2>, N_ATOMS_SU2> field_drive_1_SU2;
@@ -138,8 +144,12 @@ class mixed_lattice
 
     //Look up table for SU2 and SU3 mix
     array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_interaction_SU2;
+    array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_interaction_SU3;
     array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_partners_SU2;
     array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim> mixed_bilinear_partners_SU3;
+
+    array<array<double,N_SU2>, N_ATOMS_SU2> field_drive_1_SU2_SU3;
+    array<array<double,N_SU2>, N_ATOMS_SU2> field_drive_2_SU2_SU3;
 
     array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_trilinear_interaction_SU2;
     array<vector<array<double, N_SU2 * N_SU2 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim> mixed_trilinear_interaction_SU3;
@@ -154,6 +164,7 @@ class mixed_lattice
     size_t num_tri_SU2;
     size_t num_bi_SU3;
     size_t num_tri_SU3;
+    size_t num_bi_SU2_SU3;
     size_t num_tri_SU2_SU3;
 
     DeviceStructureTensorManager device_structure_tensor_manager;
@@ -182,7 +193,6 @@ class mixed_lattice
         temp_spin *= spin_l;
     }
 
-    
     array<double,N_SU2> gen_random_spin_SU2(){
         array<double,N_SU2> temp_spin;
         array<double,N_SU2-2> euler_angles;
@@ -399,6 +409,11 @@ class mixed_lattice
         t_B_2_SU2 = 0.0;
         t_B_1_SU3 = 0.0;
         t_B_2_SU3 = 0.0;
+        field_drive_freq_SU2_SU3 = 0.0;
+        field_drive_amp_SU2_SU3 = 0.0;
+        field_drive_width_SU2_SU3 = 1.0;
+        t_B_1_SU2_SU3 = 0.0;
+        t_B_2_SU2_SU3 = 0.0;
 
         // Set up sublattices in parallel
         #pragma omp parallel sections
@@ -431,6 +446,57 @@ class mixed_lattice
         lattice_size_SU3 = dim1 * dim2 * dim * N_ATOMS_SU3;
 
         // Process trilinear mixed interactions in parallel across outer loop dimensions
+        #pragma omp parallel for collapse(3) schedule(static)
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    // Thread-local vectors to avoid synchronization overhead
+                    vector<vector<array<double, N_SU2 * N_SU3>>> local_mixed_bilinear_interaction_SU2(N_ATOMS_SU2);
+                    vector<vector<size_t>> local_mixed_bilinear_partners_SU2(N_ATOMS_SU2);
+                    
+                    for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
+                        const size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU3);
+
+                        // Process mixed bilinear interactions
+                        auto bilinear_matched = atoms->bilinear_SU2_SU3.equal_range(l);
+                        for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m) {
+                            const mixed_bilinear<N_SU2, N_SU3>& J = m->second;
+                            const size_t partner = flatten_index_periodic_boundary(
+                                i + J.offset[0], j + J.offset[1], k + J.offset[2], J.partner, N_ATOMS_SU2);
+
+                            // Add directly to site-specific array for SU3
+                            #pragma omp critical(SU3_update)
+                            {
+                                mixed_bilinear_interaction_SU3[current_site_index].push_back(J.bilinear_interaction);
+                                mixed_bilinear_partners_SU3[current_site_index].push_back(partner);
+                            }
+                            
+                            // Precompute transposed tensors once
+                            const auto transposed = transpose2D<N_SU3, N_SU2>(J.bilinear_interaction);
+
+                            local_mixed_bilinear_interaction_SU2[partner].push_back(transposed);
+                            local_mixed_bilinear_partners_SU2[partner].push_back(current_site_index);
+
+                        }
+                    }
+                    
+                    // Merge thread-local data into global arrays
+                    #pragma omp critical(SU2_update)
+                    {
+                        for (size_t idx = 0; idx < local_mixed_bilinear_interaction_SU2.size(); ++idx) {
+                            for (size_t v = 0; v < local_mixed_bilinear_interaction_SU2[idx].size(); ++v) {
+                                mixed_bilinear_interaction_SU2[idx].push_back(
+                                    local_mixed_bilinear_interaction_SU2[idx][v]);
+                                mixed_bilinear_partners_SU2[idx].push_back(
+                                    local_mixed_bilinear_partners_SU2[idx][v]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+
         #pragma omp parallel for collapse(3) schedule(static)
         for (size_t i = 0; i < dim1; ++i) {
             for (size_t j = 0; j < dim2; ++j) {
@@ -560,6 +626,7 @@ class mixed_lattice
         }
         
         // Get the number of trilinear SU2-SU3 interactions (should be same for all sites)
+        num_bi_SU2_SU3 = mixed_bilinear_partners_SU2[0].size();
         num_tri_SU2_SU3 = mixed_trilinear_partners_SU3[0].size();
         
         // Initialize device structure tensor manager - can be done in parallel with above work
@@ -1176,6 +1243,16 @@ class mixed_lattice
         t_B_1_SU3 = t_B;
         t_B_2_SU3 = t_B_2;
     }
+
+    void set_pulse_SU2_SU3(const array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_SU2_SU3, double t_B, const array<array<double,N_SU2>, N_ATOMS_SU2> &field_in_2_SU2_SU3, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
+        field_drive_1_SU2_SU3 = field_in_SU2_SU3;
+        field_drive_2_SU2_SU3 = field_in_2_SU2_SU3;
+        field_drive_amp_SU2_SU3 = pulse_amp;
+        field_drive_freq_SU2_SU3 = pulse_freq;
+        field_drive_width_SU2_SU3 = pulse_width;
+        t_B_1_SU2_SU3 = t_B;
+        t_B_2_SU2_SU3 = t_B_2;
+    }
     
     void reset_pulse(){
         field_drive_1_SU2 = {{0}};
@@ -1193,6 +1270,14 @@ class mixed_lattice
         field_drive_width_SU3 = 1;
         t_B_1_SU3 = 0;
         t_B_2_SU3 = 0;
+
+        field_drive_1_SU2_SU3 = {{0}};
+        field_drive_2_SU2_SU3 = {{0}};
+        field_drive_amp_SU2_SU3 = 0;
+        field_drive_freq_SU2_SU3 = 0;
+        field_drive_width_SU2_SU3 = 1;
+        t_B_1_SU2_SU3 = 0;
+        t_B_2_SU2_SU3 = 0;
     }
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
@@ -1962,7 +2047,7 @@ class mixed_lattice
             static_cast<double>(swap_accept) / (total_steps / (swap_rate * overrelaxation_flag)) : 0.0;
         
         cout << "Process finished on rank: " << rank 
-             << " with temperature: " << curr_Temp 
+             << " with tempegetrature: " << curr_Temp 
              << " with local acceptance rate: " << local_accept_rate 
              << " Swap Acceptance rate: " << swap_accept_rate << endl;
         
@@ -1987,18 +2072,156 @@ class mixed_lattice
         }
     }
 
-
-    const array<double, N_SU2> drive_field_T_SU2(double currT, size_t ind){
-        double factor1_SU2 = double(field_drive_amp_SU2*exp(-pow((currT-t_B_1_SU2)/(2*field_drive_width_SU2),2))*cos(2*M_PI*field_drive_freq_SU2*(currT-t_B_1_SU2)));
-        double factor2_SU2 = double(field_drive_amp_SU2*exp(-pow((currT-t_B_2_SU2)/(2*field_drive_width_SU2),2))*cos(2*M_PI*field_drive_freq_SU2*(currT-t_B_2_SU2)));
-        return field_drive_1_SU2[ind]*factor1_SU2 + field_drive_2_SU2[ind]*factor2_SU2;
+    const array<double, N_SU2> drive_field_T_SU2(double currT, size_t ind, const spin_config_SU3 &spins_SU3) {
+        // Pre-compute expensive transcendental functions once
+        const double exp_factor1 = exp(-pow((currT - t_B_1_SU2) / (2 * field_drive_width_SU2), 2));
+        const double exp_factor2 = exp(-pow((currT - t_B_2_SU2) / (2 * field_drive_width_SU2), 2));
+        const double cos_factor1 = cos(2 * M_PI * field_drive_freq_SU2 * (currT - t_B_1_SU2));
+        const double cos_factor2 = cos(2 * M_PI * field_drive_freq_SU2 * (currT - t_B_2_SU2));
+        
+        const double factor1_SU2 = field_drive_amp_SU2 * exp_factor1 * cos_factor1;
+        const double factor2_SU2 = field_drive_amp_SU2 * exp_factor2 * cos_factor2;
+        
+        // Early exit if both factors are negligible
+        constexpr double EPSILON = 1e-15;
+        if (std::abs(factor1_SU2) < EPSILON && std::abs(factor2_SU2) < EPSILON) {
+            return {{0}};
+        }
+        
+        // Get the atom index once
+        const size_t atom_idx = ind % N_ATOMS_SU2;
+        
+        // Initialize result with the direct field contribution
+        array<double, N_SU2> result;
+        #pragma omp simd
+        for (size_t j = 0; j < N_SU2; ++j) {
+            result[j] = field_drive_1_SU2[atom_idx][j] * factor1_SU2 + 
+                        field_drive_2_SU2[atom_idx][j] * factor2_SU2;
+        }
+        
+        // If no trilinear interactions, return early
+        if (num_tri_SU2_SU3 == 0) {
+            return result;
+        }
+        
+        // Accumulate trilinear contributions directly into result
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            const auto& partners = mixed_trilinear_partners_SU2[ind][i];
+            const auto& interaction = mixed_trilinear_interaction_SU2[ind][i];
+            
+            const size_t partner1_atom = partners[0] % N_ATOMS_SU2;
+            const size_t partner2_idx = partners[1];
+            
+            // Prefetch next iteration's data
+            if (i + 1 < num_tri_SU2_SU3) {
+                __builtin_prefetch(&mixed_trilinear_partners_SU2[ind][i+1], 0, 3);
+                __builtin_prefetch(&mixed_trilinear_interaction_SU2[ind][i+1], 0, 3);
+            }
+            
+            // Contract trilinear field for both drive fields and accumulate
+            if (std::abs(factor1_SU2) >= EPSILON) {
+                auto contrib1 = contract_trilinear_field<N_SU2, N_SU2, N_SU3>(
+                    interaction, 
+                    field_drive_1_SU2[partner1_atom], 
+                    spins_SU3[partner2_idx]
+                );
+                #pragma omp simd
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    result[j] += contrib1[j] * factor1_SU2;
+                }
+            }
+            
+            if (std::abs(factor2_SU2) >= EPSILON) {
+                auto contrib2 = contract_trilinear_field<N_SU2, N_SU2, N_SU3>(
+                    interaction, 
+                    field_drive_2_SU2[partner1_atom], 
+                    spins_SU3[partner2_idx]
+                );
+                #pragma omp simd
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    result[j] += contrib2[j] * factor2_SU2;
+                }
+            }
+        }
+        
+        return result;
     }
 
-    const array<double, N_SU3> drive_field_T_SU3(double currT, size_t ind){
-        double factor1_SU3 = double(field_drive_amp_SU3*exp(-pow((currT-t_B_1_SU3)/(2*field_drive_width_SU3),2))*cos(2*M_PI*field_drive_freq_SU3*(currT-t_B_1_SU3)));
-        double factor2_SU3 = double(field_drive_amp_SU3*exp(-pow((currT-t_B_2_SU3)/(2*field_drive_width_SU3),2))*cos(2*M_PI*field_drive_freq_SU3*(currT-t_B_2_SU3)));
-        return field_drive_1_SU3[ind]*factor1_SU3 + field_drive_2_SU3[ind]*factor2_SU3;
+    const array<double, N_SU3> drive_field_T_SU3(double currT, size_t ind, const spin_config_SU2 &spins_SU2) {
+        // Pre-compute expensive transcendental functions once
+        const double exp_factor1 = exp(-pow((currT - t_B_1_SU3) / (2 * field_drive_width_SU3), 2));
+        const double exp_factor2 = exp(-pow((currT - t_B_2_SU3) / (2 * field_drive_width_SU3), 2));
+        const double cos_factor1 = cos(2 * M_PI * field_drive_freq_SU3 * (currT - t_B_1_SU3));
+        const double cos_factor2 = cos(2 * M_PI * field_drive_freq_SU3 * (currT - t_B_2_SU3));
+        
+        const double factor1_SU3 = field_drive_amp_SU3 * exp_factor1 * cos_factor1;
+        const double factor2_SU3 = field_drive_amp_SU3 * exp_factor2 * cos_factor2;
+        
+        // Early exit if both factors are negligible
+        constexpr double EPSILON = 1e-15;
+        if (std::abs(factor1_SU3) < EPSILON && std::abs(factor2_SU3) < EPSILON) {
+            return {{0}};
+        }
+        
+        // Get the atom index once
+        const size_t atom_idx = ind % N_ATOMS_SU3;
+        
+        // Initialize result with the direct field contribution
+        array<double, N_SU3> result;
+        #pragma omp simd
+        for (size_t j = 0; j < N_SU3; ++j) {
+            result[j] = field_drive_1_SU3[atom_idx][j] * factor1_SU3 + 
+                        field_drive_2_SU3[atom_idx][j] * factor2_SU3;
+        }
+        
+        // If no trilinear interactions, return early
+        if (num_tri_SU2_SU3 == 0) {
+            return result;
+        }
+        
+        // Accumulate trilinear contributions directly into result
+        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+            const auto& partners = mixed_trilinear_partners_SU3[ind][i];
+            const auto& interaction = mixed_trilinear_interaction_SU3[ind][i];
+            
+            const size_t partner1_atom = partners[0] % N_ATOMS_SU2;
+            const size_t partner2_idx = partners[1];
+            
+            // Prefetch next iteration's data
+            if (i + 1 < num_tri_SU2_SU3) {
+                __builtin_prefetch(&mixed_trilinear_partners_SU3[ind][i+1], 0, 3);
+                __builtin_prefetch(&mixed_trilinear_interaction_SU3[ind][i+1], 0, 3);
+            }
+            
+            // Contract trilinear field for both drive fields and accumulate
+            if (std::abs(factor1_SU3) >= EPSILON) {
+                auto contrib1 = contract_trilinear_field<N_SU3, N_SU2, N_SU2>(
+                    interaction, 
+                    field_drive_1_SU2[partner1_atom], 
+                    spins_SU2[partner2_idx]
+                );
+                #pragma omp simd
+                for (size_t j = 0; j < N_SU3; ++j) {
+                    result[j] += contrib1[j] * factor1_SU3;
+                }
+            }
+            
+            if (std::abs(factor2_SU3) >= EPSILON) {
+                auto contrib2 = contract_trilinear_field<N_SU3, N_SU2, N_SU2>(
+                    interaction, 
+                    field_drive_2_SU2[partner1_atom], 
+                    spins_SU2[partner2_idx]
+                );
+                #pragma omp simd
+                for (size_t j = 0; j < N_SU3; ++j) {
+                    result[j] += contrib2[j] * factor2_SU3;
+                }
+            }
+        }
+        
+        return result;
     }
+
 
     spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time) {
         // Use thread-local static vectors to avoid repeated allocations
@@ -2028,7 +2251,7 @@ class mixed_lattice
         #pragma omp parallel for schedule(static)
         for(size_t i = 0; i < lattice_size_SU2; ++i) {
             array<double, N_SU2> local_field = get_local_field_SU2_lattice(i, current_spin_SU2, current_spin_SU3);
-            array<double, N_SU2> drive_field = drive_field_T_SU2(curr_time, i % N_ATOMS_SU2);
+            array<double, N_SU2> drive_field = drive_field_T_SU2(curr_time, i, current_spin_SU3);
             
             const size_t base_idx = i * N_SU2;
             #pragma omp simd
@@ -2083,7 +2306,7 @@ class mixed_lattice
         #pragma omp parallel for schedule(static)
         for(size_t i = 0; i < lattice_size_SU3; ++i) {
             array<double, N_SU3> local_field = get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3);
-            array<double, N_SU3> drive_field = drive_field_T_SU3(curr_time, i % N_ATOMS_SU3);
+            array<double, N_SU3> drive_field = drive_field_T_SU3(curr_time, i, current_spin_SU2);
             
             const size_t base_idx = i * N_SU3;
             #pragma omp simd
@@ -2109,46 +2332,6 @@ class mixed_lattice
         }
         return dS;
     }
-
-    // Previous CPU implementation of landau_lifshitz equations
-    // spin_config_SU2 landau_lifshitz_SU2(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
-    //     spin_config_SU2 dS;
-    //     // Pre-compute drive field factors once
-    //     const double factor1_SU2 = field_drive_amp_SU2 * exp(-pow((curr_time - t_B_1_SU2) / (2 * field_drive_width_SU2), 2)) * cos(2 * M_PI * field_drive_freq_SU2 * (curr_time - t_B_1_SU2));
-    //     const double factor2_SU2 = field_drive_amp_SU2 * exp(-pow((curr_time - t_B_2_SU2) / (2 * field_drive_width_SU2), 2)) * cos(2 * M_PI * field_drive_freq_SU2 * (curr_time - t_B_2_SU2));
-    //     #pragma omp parallel for schedule(static)
-    //     for(size_t i = 0; i < lattice_size_SU2; ++i){
-    //         const size_t atom_index = i % N_ATOMS_SU2;  
-    //         // Compute drive field inline to avoid function call overhead
-    //         array<double, N_SU2> drive_field = field_drive_1_SU2[atom_index] * factor1_SU2 + field_drive_2_SU2[atom_index] * factor2_SU2;
-    //         // Get local field
-    //         array<double, N_SU2> local_field = get_local_field_SU2_lattice(i, current_spin_SU2, current_spin_SU3);
-    //         // Compute effective field
-    //         local_field = local_field - drive_field;
-    //         // Compute cross product
-    //         dS[i] = cross_prod_SU2(local_field, current_spin_SU2[i]);
-    //     }
-    //     return dS;
-    // }
-    // spin_config_SU3 landau_lifshitz_SU3(const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3, const double &curr_time){
-    //     spin_config_SU3 dS;
-    //     // Pre-compute drive field factors once
-    //     const double factor1_SU3 = field_drive_amp_SU3 * exp(-pow((curr_time - t_B_1_SU3) / (2 * field_drive_width_SU3), 2)) * cos(2 * M_PI * field_drive_freq_SU3 * (curr_time - t_B_1_SU3));
-    //     const double factor2_SU3 = field_drive_amp_SU3 * exp(-pow((curr_time - t_B_2_SU3) / (2 * field_drive_width_SU3), 2)) * cos(2 * M_PI * field_drive_freq_SU3 * (curr_time - t_B_2_SU3));
-    //     #pragma omp parallel for schedule(static)
-    //     for(size_t i = 0; i < lattice_size_SU3; ++i){
-    //         const size_t atom_index = i % N_ATOMS_SU3;
-    //         // Compute drive field inline to avoid function call overhead
-    //         array<double, N_SU3> drive_field = field_drive_1_SU3[atom_index] * factor1_SU3 + field_drive_2_SU3[atom_index] * factor2_SU3;
-    //         // Get local field
-    //         array<double, N_SU3> local_field = get_local_field_SU3_lattice(i, current_spin_SU2, current_spin_SU3);    
-    //         // Compute effective field
-    //         local_field = local_field - drive_field;
-    //         // Compute cross product
-    //         dS[i] = cross_prod_SU3(local_field, current_spin_SU3[i]);
-    //     }
-    //     return dS;
-    // }
 
     void RK4_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
         spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
@@ -2402,27 +2585,6 @@ class mixed_lattice
         curr_spins.spins_SU2 = std::move(result.spins_SU2);
         curr_spins.spins_SU3 = std::move(result.spins_SU3);
     }
-
-
-    void test_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
-        // Pre-compute all step size multiplications
-        // Update the current spins with the result using the set method
-        mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> result;
-
-        for(size_t i = 0; i < lattice_size_SU2; ++i) {
-            array<double, N_SU2> local_field = get_local_field_SU2_lattice(i, curr_spins.spins_SU2, curr_spins.spins_SU3);
-            array<double, N_SU2> drive_field = drive_field_T_SU2(curr_time, i % N_ATOMS_SU2);
-            result.spins_SU2[i] = local_field - drive_field;
-        }
-        for(size_t i = 0; i < lattice_size_SU3; ++i) {
-            array<double, N_SU3> local_field = get_local_field_SU3_lattice(i, curr_spins.spins_SU2, curr_spins.spins_SU3);
-            result.spins_SU3[i] = local_field;
-        }
-
-        curr_spins.spins_SU2 = std::move(result.spins_SU2);
-        curr_spins.spins_SU3 = std::move(result.spins_SU3);
-    }
-
 
     void write_to_file_magnetization_local_SU2(string filename, array<double, N_SU2> towrite){
         ofstream myfile;

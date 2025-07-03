@@ -165,6 +165,47 @@ struct mixed_trilinear{
 };
 
 
+template <size_t N_SU2, size_t N_SU3> 
+struct mixed_bilinear{
+    array<double,N_SU2*N_SU3> bilinear_interaction;
+    size_t partner;
+    array<int, 3> offset;
+
+    // Constructor
+
+    mixed_bilinear(){
+        partner = -1;
+        for(size_t i =0; i<N_SU3; i++){
+            for (size_t j=0; j<N_SU2; j++){
+                this->bilinear_interaction[i*N_SU2+j] = 0;
+            }
+        }
+        for(int i=0; i<3; i++) {
+            this->offset[i] = 0;
+        }
+    }
+
+    mixed_bilinear(array<array<double,N_SU2>, N_SU3> &b_set, int partner1, int partner2) : partner(partner) {
+        for(int i=0; i<3; i++) {
+            this->offset[i] = 0;
+        }
+        for(size_t i=0; i<N_SU3; i++){
+            for (size_t j=0; j<N_SU2; j++){
+                this->bilinear_interaction[i*N_SU2+j] = b_set[i][j];
+                }
+            }
+        }
+
+    mixed_bilinear(array<array<double,N_SU2>, N_SU3> &b_set, int partner, const array<int, 3> &offset) : partner(partner), offset(offset) {
+        for(size_t i=0; i<N_SU3; i++){
+            for (size_t j=0; j<N_SU2; j++){
+                this->bilinear_interaction[i*N_SU2+j] = b_set[i][j];
+            }
+        }
+    };
+};
+
+
 template<size_t N, size_t N_ATOMS>
 struct UnitCell{
 
@@ -229,9 +270,11 @@ struct mixed_UnitCell{
     UnitCell<N_SU2, N_ATOMS_SU2> SU2;
     UnitCell<N_SU3, N_ATOMS_SU3> SU3;
     multimap<int, mixed_trilinear<N_SU2, N_SU3>> trilinear_SU2_SU3;
+    multimap<int, mixed_bilinear<N_SU2, N_SU3>> bilinear_SU2_SU3;
 
     mixed_UnitCell() : SU2(), SU3() {
         trilinear_SU2_SU3.clear();
+        bilinear_SU2_SU3.clear();
     };
 
     mixed_UnitCell(UnitCell<N_SU2, N_ATOMS_SU2> *SU2, UnitCell<N_SU3, N_ATOMS_SU3> *SU3) : SU2(*SU2), SU3(*SU3) {
@@ -245,6 +288,13 @@ struct mixed_UnitCell{
         mixed_trilinear<N_SU2, N_SU3> t_set(tin, partner1, partner2, offset1, offset2);
         trilinear_SU2_SU3.insert(make_pair(source, t_set));
     };
+
+    void set_mix_bilinear_interaction(array<array<double,N_SU2>, N_SU3> &bin, int source, int partner, const array<int, 3> & offset){
+        mixed_bilinear<N_SU2, N_SU3> b_set(bin, partner, offset);
+        bilinear_SU2_SU3.insert(make_pair(source, b_set));
+    };
+
+
 };
 
 

@@ -259,6 +259,26 @@ inline double contract(const array<double, N>  &a, const array<double, N*N>  &M,
 }
 
 
+template<size_t N, size_t M>
+inline double contract_mixed_bilinear(const array<double, N>  &a, const array<double, N*M>  &M_, const array<double, M>  &b) {
+    double result = 0;
+    #pragma omp parallel for reduction(+:result) schedule(static)
+    for (size_t i = 0; i < N; ++i) {
+        const double a_i = a[i];
+        const size_t base_idx = i * M;
+        
+        double row_sum = 0.0;
+        #pragma omp simd reduction(+:row_sum)
+        for (size_t j = 0; j < M; ++j) {
+            row_sum += M_[base_idx + j] * b[j];
+        }
+        
+        result += a_i * row_sum;
+    }
+    return result;
+}
+
+
 template<size_t N_1, size_t N_2, size_t N_3>
 inline double contract_trilinear(const array<double, N_1*N_2*N_3> &M, const array<double, N_1> &a, const array<double, N_2> &b, const array<double, N_3> &c) {
     double result = 0.0;
@@ -502,14 +522,14 @@ inline int random_int(int min, int max, std::mt19937 &gen){
     return dis(gen);
 }
 
-template<size_t N>
-array<double, N> transpose2D(const array<double, N>& matrix) {
-    array<double, N> transposed;
-    int size = int(sqrt(N));
+template<size_t N, size_t M>
+array<double, N*M> transpose2D(const array<double, N*M>& matrix) {
+    array<double, N*M> transposed;
+
     #pragma omp parallel for collapse(2) schedule(dynamic, 1)
-    for (size_t i = 0; i < size; ++i) {
-        for (size_t j = 0; j < size; ++j) {
-            transposed[j*size + i] = matrix[i*size + j];
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < M; ++j) {
+            transposed[j*N + i] = matrix[i*M + j];
         }
     }
     return transposed;

@@ -139,7 +139,7 @@ class lattice
                             size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner);
                             bilinear_interaction[current_site_index].push_back(J.bilinear_interaction);
                             bilinear_partners[current_site_index].push_back(partner);
-                            bilinear_interaction[partner].push_back(transpose2D(J.bilinear_interaction));
+                            bilinear_interaction[partner].push_back(transpose2D<N, N>(J.bilinear_interaction));
                             bilinear_partners[partner].push_back(current_site_index);
                         }
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);

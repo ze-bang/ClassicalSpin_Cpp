@@ -703,8 +703,8 @@ def generate_K_points_pengcheng_dai(H_range_min, H_range_max, nH, K_range_min, K
 
 def read_MD_int(dir, mag):
     directory = os.fsencode(dir)
-    w0 = -5
-    wmax = 10
+    w0 = 0.03
+    wmax = 8
     w = np.linspace(w0, wmax, 2000)
     K_, dV = generate_K_points_pengcheng_dai(-0.1, 0.1, 5, 0.739, 0.839, 3, -0.1, 0.1, 5)
 
@@ -760,6 +760,7 @@ def read_MD_int(dir, mag):
         plt.savefig(dir + "/DSSF_sum_{}.pdf".format(name))
         plt.close()
 
+        np.savetxt(f"{dir_to_save}/DSSF_{name}_sum.txt", DSSF_sum)
 
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(w, np.log(DSSF_sum), 'r-', label='Sum of all components')
@@ -881,6 +882,14 @@ def read_2D_nonlinear_tot(dir):
 read_MD_tot("CZO_0_field", "111", SSSFGraphHnHL)
 read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHL)
 read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHL)
+read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHL)
+
+read_MD_int("CZO_1_field", "111")
+read_MD_int("CZO_2_field", "111")
+read_MD_int("CZO_3_field", "111")
+read_MD_int("CZO_4_field", "111")
+
+
 
 # parseDSSF(dir)
 # fullread(dir, False, "111")
