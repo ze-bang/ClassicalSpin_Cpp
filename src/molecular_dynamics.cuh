@@ -1617,6 +1617,9 @@ void drive_field_T_SU3(
         out[site_index * N_SU3 + i] = 0.0;
     }
 
+    // Early exit if factors are small
+    if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
+
     // Early exit if no mixed interactions
     if (max_mixed_tri_neighbors == 0) return;
     
