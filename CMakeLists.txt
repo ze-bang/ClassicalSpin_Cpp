@@ -24,9 +24,8 @@ find_package(CUDAToolkit REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(MPI REQUIRED)
 
-# Set CUDA architectures for better performance targeting (auto-detect or specify)
-# For modern GPUs, you can use "native" (CMake 3.24+) or specify architectures
-set(CMAKE_CUDA_ARCHITECTURES "89" CACHE STRING "CUDA architectures")
+# Set CUDA architectures for multiple GPU support
+set(CMAKE_CUDA_ARCHITECTURES "75 80 86 89" CACHE STRING "CUDA architectures")
 
 # Enable position independent code
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
