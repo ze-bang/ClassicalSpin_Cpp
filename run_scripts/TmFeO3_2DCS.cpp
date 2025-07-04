@@ -385,7 +385,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 }
 
 
-void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
+void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -598,12 +598,6 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
     mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
-
-    MC.write_to_file_pos(dir+"/pos.txt");
-    MC.write_to_file_spin(dir+"/spin_0.txt");
-    
-
-
     // Continue with the rest of the initialization code...
     if (spin_config != ""){
         // Check if the spin configuration file exists
@@ -614,34 +608,30 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
             cout << "Error loading spin configuration: " << e.what() << endl;
             cout << "Falling back to simulated annealing." << endl;
             MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 1000, true);
-            if (T_zero) {
-                for (size_t i = 0; i < 100000; ++i) {
-                    MC.deterministic_sweep();
-                }
-            }
         }
     } else {
         cout << "No spin configuration specified. Using simulated annealing." << endl;
         MC.simulated_annealing(Temp_start, Temp_end, 100000, 0, 1000, true);
         MC.write_to_file_spin(dir+"/spin");
         spin_config = dir+"/spin";
-        if (T_zero) {
-            for (size_t i = 0; i < 100000; ++i) {
-                MC.deterministic_sweep();
-            }
-        }
-        MC.write_to_file_spin(dir+"/spin_zero");
-        spin_config = dir+"/spin_zero";
     }
+
+    if (T_zero) {
+        for (size_t i = 0; i < 100000; ++i) {
+            MC.deterministic_sweep();
+        }
+    }
+    MC.write_to_file_spin(dir+"/spin_zero");
+    spin_config = dir+"/spin_zero";
 
     MC.write_to_file_pos(dir+"/pos.txt");
 
 
     cout << "Starting calculations..." << endl;
 
-    MC.molecular_dynamics_cuda(0, 100, 1e-2, dir+"/spin_t.txt", 1);
+    // MC.molecular_dynamics_cuda(0, 100, 1e-2, dir+"/spin_t.txt", 1);
 
-    if (rank==0){
+    if (rank==0 && if_zero_is_in_T_range){
         filesystem::create_directories(dir+"/M_time_0");
         // Use the CUDA version of the method
         MC.read_spin_from_file(spin_config);
@@ -752,7 +742,8 @@ int main(int argc, char** argv) {
     cout << "Reading from " << spin_config_file << endl;
     string output_dir = dir_name+"/"+std::to_string(slurm_ID);
     filesystem::create_directories(output_dir);
-    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file);
+    bool if_zero_is_in_T_range = slurm_ID == 0;
+    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
 

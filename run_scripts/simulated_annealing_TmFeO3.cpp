@@ -1,14 +1,12 @@
 #include "experiments.h"
 
 void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir){
-    filesystem::create_directory(dir);
+    filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
-    cout << "Beginning lattice setup" << endl;
-
-    array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
-    array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
+    array<array<double, 3>, 3> Ja = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
+    array<array<double, 3>, 3> Jb = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
     array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
 
     array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
@@ -16,8 +14,6 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
     array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
-
-    array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
 
     Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
@@ -29,6 +25,7 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
     Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
     Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+
     //Next Nearest Neighbour
     Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
     Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
@@ -38,6 +35,7 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
     Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
     Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+
     //Out of plane interaction
     Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
     Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
@@ -70,42 +68,31 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     Fe_atoms.set_onsite_interaction(K, 2);
     Fe_atoms.set_onsite_interaction(K, 3);
 
-    //Dzyaloshinskii-Moriya interaction
-    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,-1,0});
-    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,-1,0});
-    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,-1,0});
-    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
-
     Fe_atoms.set_field(fielddir*h, 0);
     Fe_atoms.set_field(fielddir*h, 1);
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
-    cout << "Finished setting up Fe atoms" << endl;
-
     //Tm atoms
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
+    //Set energy splitting for Tm atoms
+    //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
+    double alpha = -e1/2;
+    double beta = -sqrt(3)/6*(2*e2-e1);
+    double gamma = (e1+e2)/3 *3/16;
 
-    cout << "Finished setting up Tm atoms" << endl;
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 2);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 3);
+
+
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
-    array<array<array<double,3>,3>,8> xi = {{{0}}};
+    if (xii != 0.0){
 
-    xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-    xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-
-    if (xii != 0){
-
+        array<array<array<double,3>,3>,8> xi = {{{0}}};
         ////////// Trilinear coupling/Oxygen path way
-        ///////////////////
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
 
@@ -185,6 +172,8 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
 
         TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
+
+    
     }
 
     cout << "Finished setting up TmFeO3" << endl;

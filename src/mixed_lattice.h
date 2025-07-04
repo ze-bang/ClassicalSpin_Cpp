@@ -1874,200 +1874,132 @@ class mixed_lattice
             energy_file.close();
         }
     }
+
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
+
         int initialized;
         MPI_Initialized(&initialized);
         if (!initialized){
             MPI_Init(NULL, NULL);
         }
-        
+
         int rank, size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &size);
-        
-        // Initialize random seed once per rank
-        srand(time(NULL) + rank);  // Add rank to ensure different seeds
-        seed_lehman(rand()*2+1);
-        
-        // Pre-calculate constants
-        const double curr_Temp = temp[rank];
-        const int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
-        const size_t total_steps = n_anneal + n_measure;
-        const size_t su2_data_size = N_SU2 * lattice_size_SU2;
-        const size_t su3_data_size = N_SU3 * lattice_size_SU3;
-        
-        // Pre-allocate buffers for MPI communication
-        spin_config_SU2 newspins_SU2;
-        spin_config_SU3 newspins_SU3;
-        
-        // Flatten spin arrays for more efficient MPI transfers
-        vector<double> su2_send_buffer(su2_data_size);
-        vector<double> su3_send_buffer(su3_data_size);
-        vector<double> su2_recv_buffer(su2_data_size);
-        vector<double> su3_recv_buffer(su3_data_size);
-        
-        // Statistics tracking
-        int swap_accept = 0;
-        double curr_accept = 0;
-        
+
+        srand(time(NULL) + rank); // Ensure different seeds per rank
+        seed_lehman(rand() * 2 + 1);
+
+        double curr_Temp = temp[rank];
+        double E = total_energy(spins);
+
+        // Use heap allocation for large temporary buffers to prevent stack overflow
+        std::vector<double> recv_buffer_SU2(N_SU2 * lattice_size_SU2);
+        std::vector<double> send_buffer_SU2(N_SU2 * lattice_size_SU2);
+        std::vector<double> recv_buffer_SU3(N_SU3 * lattice_size_SU3);
+        std::vector<double> send_buffer_SU3(N_SU3 * lattice_size_SU3);
+
+        long long swap_attempts = 0;
+        long long swap_accepts = 0;
+        double total_accept = 0;
+        size_t metropolis_steps = 0;
+
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
-        
-        // Main simulation loop with optimizations
-        for(size_t i = 0; i < total_steps; ++i){
-            // Metropolis updates with reduced branching
-            if(overrelaxation_rate > 0 && i % overrelaxation_rate != 0){
+
+        for(size_t i = 0; i < n_anneal + n_measure; ++i){
+            // Metropolis step
+            if (overrelaxation_rate > 0 && i % overrelaxation_rate != 0) {
                 overrelaxation();
             } else {
-                curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+                total_accept += metropolis(spins, curr_Temp, gaussian_move);
+                metropolis_steps++;
             }
-            
-            // Compute energy only when needed for swapping
-            double E = 0.0;
-            const bool is_swap_step = (i % swap_rate == 0) && (i % overrelaxation_flag == 0);
-            
-            if (is_swap_step){
+
+            // Parallel Tempering Swap Attempt
+            if (i > 0 && i % swap_rate == 0) {
                 E = total_energy(spins);
-                
-                // Determine partner rank with simpler logic
-                const int swap_phase = (i / swap_rate) % 2;
-                const int partner_rank = (swap_phase == 0) ? 
-                    (rank % 2 == 0 ? rank + 1 : rank - 1) :
-                    (rank % 2 == 0 ? rank - 1 : rank + 1);
-                
-                if (partner_rank >= 0 && partner_rank < size){
-                    const double T_partner = temp[partner_rank];
+                swap_attempts++;
+
+                // Determine swap partner
+                int partner_rank;
+                if ((i / swap_rate) % 2 == 0) { // Pair (0,1), (2,3), ...
+                    partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+                } else { // Pair (1,2), (3,4), ...
+                    partner_rank = (rank % 2 != 0) ? rank + 1 : rank - 1;
+                }
+
+                if (partner_rank >= 0 && partner_rank < size) {
                     double E_partner;
-                    bool accept = false;
-                    
-                    // Use non-blocking MPI for better overlap
-                    MPI_Request send_req, recv_req;
-                    
-                    if (rank < partner_rank){
-                        // Lower rank sends first, receives second
-                        MPI_Isend(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &send_req);
-                        MPI_Irecv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &recv_req);
-                        MPI_Wait(&send_req, MPI_STATUS_IGNORE);
-                        MPI_Wait(&recv_req, MPI_STATUS_IGNORE);
-                        
-                        // Lower rank decides acceptance
-                        const double delta = (1.0/curr_Temp - 1.0/T_partner) * (E - E_partner);
-                        accept = (delta <= 0) || (random_double_lehman(0,1) < exp(delta));
-                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 1, MPI_COMM_WORLD);
+                    // Exchange energies with partner using a single, safer call
+                    MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
+                                 &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
+                                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                    bool accept_swap = false;
+                    if (rank < partner_rank) { // Lower rank decides
+                        double delta_beta = (1.0 / temp[partner_rank]) - (1.0 / curr_Temp);
+                        double delta_E = E - E_partner;
+                        if (delta_beta * delta_E <= 0 || random_double_lehman(0, 1) < exp(delta_beta * delta_E)) {
+                            accept_swap = true;
+                        }
+                        MPI_Send(&accept_swap, 1, MPI_C_BOOL, partner_rank, 1, MPI_COMM_WORLD);
                     } else {
-                        // Higher rank receives first, sends second
-                        MPI_Irecv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &recv_req);
-                        MPI_Isend(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, &send_req);
-                        MPI_Wait(&recv_req, MPI_STATUS_IGNORE);
-                        MPI_Wait(&send_req, MPI_STATUS_IGNORE);
-                        
-                        // Receive acceptance decision
-                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        MPI_Recv(&accept_swap, 1, MPI_C_BOOL, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     }
-                    
-                    if (accept){
-                        // Flatten spins for efficient MPI transfer
-                        #pragma omp parallel sections
-                        {
-                            #pragma omp section
-                            {
-                                #pragma omp parallel for simd
-                                for(size_t j = 0; j < lattice_size_SU2; ++j){
-                                    for(size_t k = 0; k < N_SU2; ++k){
-                                        su2_send_buffer[j*N_SU2 + k] = spins.spins_SU2[j][k];
-                                    }
-                                }
-                            }
-                            
-                            #pragma omp section
-                            {
-                                #pragma omp parallel for simd
-                                for(size_t j = 0; j < lattice_size_SU3; ++j){
-                                    for(size_t k = 0; k < N_SU3; ++k){
-                                        su3_send_buffer[j*N_SU3 + k] = spins.spins_SU3[j][k];
-                                    }
-                                }
-                            }
-                        }
+
+                    if (accept_swap) {
+                        swap_accepts++;
+                        // Print swap information
+                        cout << "Rank " << rank << " accepted swap with rank " << partner_rank
+                                << " at step " << i << ": E = " << E << ", E_partner = " << E_partner << endl;
+                        E = E_partner; // Energy is swapped regardless of who sends/receives first
+
+                        // Prepare send buffers
+                        std::copy(spins.spins_SU2.begin(), spins.spins_SU2.end(), reinterpret_cast<array<double, N_SU2>*>(send_buffer_SU2.data()));
+                        std::copy(spins.spins_SU3.begin(), spins.spins_SU3.end(), reinterpret_cast<array<double, N_SU3>*>(send_buffer_SU3.data()));
+
+                        // Exchange SU2 configurations
+                        MPI_Sendrecv(send_buffer_SU2.data(), send_buffer_SU2.size(), MPI_DOUBLE, partner_rank, 2,
+                                     recv_buffer_SU2.data(), recv_buffer_SU2.size(), MPI_DOUBLE, partner_rank, 2,
+                                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                         
-                        // Use non-blocking MPI for overlapped communication
-                        MPI_Request su2_send_req, su2_recv_req, su3_send_req, su3_recv_req;
-                        
-                        MPI_Isend(su2_send_buffer.data(), su2_data_size, MPI_DOUBLE, partner_rank, 2, MPI_COMM_WORLD, &su2_send_req);
-                        MPI_Irecv(su2_recv_buffer.data(), su2_data_size, MPI_DOUBLE, partner_rank, 2, MPI_COMM_WORLD, &su2_recv_req);
-                        MPI_Isend(su3_send_buffer.data(), su3_data_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, &su3_send_req);
-                        MPI_Irecv(su3_recv_buffer.data(), su3_data_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, &su3_recv_req);
-                        
-                        // Wait for all communications to complete
-                        MPI_Wait(&su2_recv_req, MPI_STATUS_IGNORE);
-                        MPI_Wait(&su3_recv_req, MPI_STATUS_IGNORE);
-                        MPI_Wait(&su2_send_req, MPI_STATUS_IGNORE);
-                        MPI_Wait(&su3_send_req, MPI_STATUS_IGNORE);
-                        
-                        // Unflatten received spins
-                        #pragma omp parallel sections
-                        {
-                            #pragma omp section
-                            {
-                                #pragma omp parallel for simd
-                                for(size_t j = 0; j < lattice_size_SU2; ++j){
-                                    for(size_t k = 0; k < N_SU2; ++k){
-                                        spins.spins_SU2[j][k] = su2_recv_buffer[j*N_SU2 + k];
-                                    }
-                                }
-                            }
-                            
-                            #pragma omp section
-                            {
-                                #pragma omp parallel for simd
-                                for(size_t j = 0; j < lattice_size_SU3; ++j){
-                                    for(size_t k = 0; k < N_SU3; ++k){
-                                        spins.spins_SU3[j][k] = su3_recv_buffer[j*N_SU3 + k];
-                                    }
-                                }
-                            }
-                        }
-                        
-                        E = E_partner;
-                        swap_accept++;
+                        // Exchange SU3 configurations
+                        MPI_Sendrecv(send_buffer_SU3.data(), send_buffer_SU3.size(), MPI_DOUBLE, partner_rank, 3,
+                                     recv_buffer_SU3.data(), recv_buffer_SU3.size(), MPI_DOUBLE, partner_rank, 3,
+                                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                        // Copy received data back to spins
+                        std::copy(recv_buffer_SU2.begin(), recv_buffer_SU2.end(), reinterpret_cast<double*>(spins.spins_SU2.data()));
+                        std::copy(recv_buffer_SU3.begin(), recv_buffer_SU3.end(), reinterpret_cast<double*>(spins.spins_SU3.data()));
                     }
                 }
             }
-            
-            // Progress reporting with reduced frequency
+
             if (i > 0 && i % 10000 == 0){
-                const double progress = 100.0 * i / total_steps;
-                cout << "Progress: " << progress << "% on rank " << rank 
-                     << " (accepts: " << curr_accept << ", swaps: " << swap_accept << ")" << endl;
+                double metro_rate = (metropolis_steps > 0) ? total_accept / metropolis_steps : 0.0;
+                double swap_rate_val = (swap_attempts > 0) ? static_cast<double>(swap_accepts) / swap_attempts : 0.0;
+                std::cout << "Rank " << rank << " (" << double(i) * 100.0 / (n_anneal + n_measure) << "%): "
+                          << "Metro Accept Rate: " << metro_rate << ", Swap Accept Rate: " << swap_rate_val << std::endl;
             }
         }
         
-        // Calculate final statistics
-        const double local_accept_rate = curr_accept / (total_steps / overrelaxation_flag);
-        const double swap_accept_rate = (swap_rate > 0) ? 
-            static_cast<double>(swap_accept) / (total_steps / (swap_rate * overrelaxation_flag)) : 0.0;
-        
-        cout << "Process finished on rank: " << rank 
-             << " with tempegetrature: " << curr_Temp 
-             << " with local acceptance rate: " << local_accept_rate 
-             << " Swap Acceptance rate: " << swap_accept_rate << endl;
-        
-        // Output results if requested
-        if(!dir_name.empty()){
-            // Create directory only on rank 0 to avoid race conditions
-            if(rank == 0){
-                filesystem::create_directory(dir_name);
-            }
-            MPI_Barrier(MPI_COMM_WORLD);  // Ensure directory is created
-            
-            // Check if this rank should write output
-            if(std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end()){
-                write_to_file_spin(dir_name + "/spin" + to_string(rank));
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << endl;
+
+        if(dir_name != ""){
+            filesystem::create_directory(dir_name);
+            for(int rank_to_write_val : rank_to_write){
+                if (rank == rank_to_write_val){
+                    write_to_file_spin(dir_name + "/spin" + to_string(rank));
+                    if (rank == 0) {
+                        write_to_file_pos(dir_name + "/pos");
+                    }
+                }
             }
         }
-        
-        // Clean up MPI
-        MPI_Initialized(&initialized);
-        if (initialized && !MPI_Finalized(&initialized)){
+
+        int finalized;
+        MPI_Finalized(&finalized);
+        if (!finalized){
             MPI_Finalize();
         }
     }
