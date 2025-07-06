@@ -1529,11 +1529,13 @@ void drive_field_T_SU2(
     // Cache sublattice index for site
     const int site_sublattice = site_index % N_ATOMS_SU2;
     const size_t site_sublattice_base = site_sublattice * N_SU2;
+
+    if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
     
     // Initialize output with direct field contribution
     #pragma unroll
     for (size_t i = 0; i < N_SU2; ++i) {
-        out[site_index * N_SU2 + i] = -(d_field_drive_1_SU2[site_sublattice_base + i] * factor1_SU2 + 
+        out[site_index * N_SU2 + i] -= (d_field_drive_1_SU2[site_sublattice_base + i] * factor1_SU2 + 
                                         d_field_drive_2_SU2[site_sublattice_base + i] * factor2_SU2);
     }
 
@@ -1611,12 +1613,6 @@ void drive_field_T_SU3(
     const double factor1_SU2 = d_field_drive_amp_SU2 * exp1 * cos(omega * dt1);
     const double factor2_SU2 = d_field_drive_amp_SU2 * exp2 * cos(omega * dt2);
     
-    // Initialize output to zero
-    #pragma unroll
-    for (size_t i = 0; i < N_SU3; ++i) {
-        out[site_index * N_SU3 + i] = 0.0;
-    }
-
     // Early exit if factors are small
     if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
 

@@ -512,9 +512,9 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice):
     
     
     # Load M0 data once
-    m0_file = os.path.join(directory, "M_time_0/M0/M_t_f.txt")
-    m0_time_file = os.path.join(directory, "M_time_0/M0/Time_steps.txt")
-    
+    m0_file = os.path.join(directory, "M_time_0.000000/M1/M_t_f.txt")
+    m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
+
     time_steps = len(np.loadtxt(m0_time_file))
 
     try:
@@ -636,9 +636,8 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
     
-    # Load M0 data once
-    m0_file = os.path.join(directory, "M_time_0/M0/M_t_f_SU3.txt")
-    m0_time_file = os.path.join(directory, "M_time_0/M0/Time_steps.txt")
+    m0_file = os.path.join(directory, "M_time_0.000000/M1/M_t_f_SU3.txt")
+    m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
     
     time_steps = len(np.loadtxt(m0_time_file))
 
@@ -787,7 +786,7 @@ def read_2D_nonlinear_tot(dir):
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-dir = "TmFeO3_2DCS_D=0.05_xii=0.1"
+dir = "TmFeO3_2DCS_D=0_xii=0.05"
 directory = dir + "/1/"
 # read_MD_tot(dir)
 read_2D_nonlinear_adaptive_time_step(directory, 0)
