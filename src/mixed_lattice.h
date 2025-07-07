@@ -460,7 +460,7 @@ class mixed_lattice
                         // Process mixed bilinear interactions
                         auto bilinear_matched = atoms->bilinear_SU2_SU3.equal_range(l);
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m) {
-                            const mixed_bilinear<N_SU2, N_SU3>& J = m->second;
+                            const mixed_bilinear<N_SU3, N_SU2>& J = m->second;
                             const size_t partner = flatten_index_periodic_boundary(
                                 i + J.offset[0], j + J.offset[1], k + J.offset[2], J.partner, N_ATOMS_SU2);
 
@@ -808,75 +808,6 @@ class mixed_lattice
         file.close();
     }
 
-    double site_energy_SU2(const array<double, N_SU2> &spin_here, size_t site_index) const {
-        // Use separate accumulators for better numerical stability and potential SIMD optimization
-        double field_energy = -dot(spin_here, field_SU2[site_index]);
-        double onsite_energy = contract(spin_here, onsite_interaction_SU2[site_index], spin_here);
-        double bilinear_energy = 0.0;
-        double trilinear_energy_SU2 = 0.0;
-        double trilinear_energy_mixed = 0.0;
-        
-        // Bilinear interactions - vectorized with SIMD
-        #pragma omp simd reduction(+:bilinear_energy)
-        for (size_t i = 0; i < num_bi_SU2; ++i) {
-            const size_t partner_idx = bilinear_partners_SU2[site_index][i];
-            bilinear_energy += contract(
-                spin_here, 
-                bilinear_interaction_SU2[site_index][i], 
-                spins.spins_SU2[partner_idx]
-            );
-        }
-        
-        // SU2 trilinear interactions - vectorized with SIMD
-        #pragma omp simd reduction(+:trilinear_energy_SU2)
-        for (size_t i = 0; i < num_tri_SU2; ++i) {
-            const size_t partner1 = trilinear_partners_SU2[site_index][i][0];
-            const size_t partner2 = trilinear_partners_SU2[site_index][i][1];
-            trilinear_energy_SU2 += contract_trilinear(
-                trilinear_interaction_SU2[site_index][i],
-                spin_here, 
-                spins.spins_SU2[partner1], 
-                spins.spins_SU2[partner2]
-            );
-        }
-        
-        // Mixed SU2-SU3 interactions - vectorized with SIMD
-        #pragma omp simd reduction(+:trilinear_energy_mixed)
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-            const size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
-            const size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
-            trilinear_energy_mixed += contract_trilinear(
-                mixed_trilinear_interaction_SU2[site_index][i],
-                spin_here, 
-                spins.spins_SU2[partner1], 
-                spins.spins_SU3[partner2]
-            );
-        }
-        
-        // Combine all energy components at the end for better numerical stability
-        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU2 + trilinear_energy_mixed;
-    }
-
-    double site_energy_SU3(array<double, N_SU3> &spin_here, size_t site_index){
-        double energy = 0.0;
-        energy -= dot(spin_here, field_SU3[site_index]);
-        energy += contract(spin_here, onsite_interaction_SU3[site_index], spin_here);
-
-        #pragma omp simd
-        for (size_t i=0; i<num_bi_SU3; ++i) {
-            energy += contract(spin_here, bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
-        }
-        #pragma omp simd
-        for (size_t i=0; i < num_tri_SU3; ++i){
-            energy += contract_trilinear(trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]], spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]);
-        }
-        #pragma omp simd
-        for (size_t i=0; i < num_tri_SU2_SU3; ++i){
-            energy += contract_trilinear(mixed_trilinear_interaction_SU3[site_index][i], spin_here, spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]], spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]);
-        }
-        return energy;
-    }
-
     double site_energy_SU2_diff(const array<double, N_SU2> &new_spin, const array<double, N_SU2> &old_spin, const size_t site_index) const {
         // Calculate field energy directly - no need for temporary spin_diff array
         double field_energy = 0.0;
@@ -899,7 +830,7 @@ class mixed_lattice
         
         // Pre-fetch critical data for bilinear interactions
         double bilinear_energy = 0.0;
-        
+        double bilinear_energy_mixed = 0.0;
         #pragma omp simd reduction(+:bilinear_energy)
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             const size_t partner_idx = bilinear_partners_SU2[site_index][i];
@@ -916,14 +847,44 @@ class mixed_lattice
             // Inline the contract operation for bilinear interactions
             for (size_t a = 0; a < N_SU2; ++a) {
                 const double diff_a = new_spin[a] - old_spin[a];
-                if (diff_a == 0.0) continue; // Skip zero differences
+                if (std::abs(diff_a) < 1e-10) continue; 
                 
                 for (size_t b = 0; b < N_SU2; ++b) {
                     bilinear_energy += diff_a * interaction[a*N_SU2 + b] * partner_spin[b];
                 }
             }
         }
-        
+        // Optimized mixed bilinear energy calculation
+        #pragma omp simd reduction(+:bilinear_energy_mixed)
+        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+            const size_t partner_idx = mixed_bilinear_partners_SU2[site_index][i];
+            // Prefetch next iteration's data to avoid cache misses
+            if (i < num_bi_SU2_SU3 - 1) {
+                __builtin_prefetch(&mixed_bilinear_partners_SU2[site_index][i+1], 0, 3);
+                __builtin_prefetch(&mixed_bilinear_interaction_SU2[site_index][i+1], 0, 3);
+                __builtin_prefetch(&spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i+1]], 0, 3);
+            }
+            
+            const auto& partner_spin = spins.spins_SU3[partner_idx]; 
+            const auto& interaction = mixed_bilinear_interaction_SU2[site_index][i];
+            
+            // Process all non-zero differences in one pass to reduce branch mispredictions
+            for (size_t a = 0; a < N_SU2; ++a) {
+                const double diff_a = new_spin[a] - old_spin[a];
+                if (std::abs(diff_a) < 1e-10) continue; // Use absolute comparison for stability
+                
+                // Compute dot product directly with better memory access pattern
+                // This helps the compiler better vectorize the inner loop
+                double dot_result = 0.0;
+                #pragma omp simd reduction(+:dot_result)
+                for (size_t b = 0; b < N_SU3; ++b) {
+                    dot_result += interaction[a*N_SU3 + b] * partner_spin[b];
+                }
+                
+                bilinear_energy_mixed += diff_a * dot_result;
+            }
+        }
+
         // Specialized trilinear computation to reduce redundant calculations
         double trilinear_energy_SU2 = 0.0;
         double trilinear_energy_mixed = 0.0;
@@ -1006,7 +967,7 @@ class mixed_lattice
         
         // Bilinear interactions with prefetching and early skipping
         double bilinear_energy = 0.0;
-        
+        double bilinear_energy_mixed = 0.0;
         for (size_t i = 0; i < num_bi_SU3; ++i) {
             const size_t partner_idx = bilinear_partners_SU3[site_index][i];
             // Prefetch next iteration's data
@@ -1029,6 +990,38 @@ class mixed_lattice
                 }
             }
         }
+
+                // Optimized mixed bilinear energy calculation
+        #pragma omp simd reduction(+:bilinear_energy_mixed)
+        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+            const size_t partner_idx = mixed_bilinear_partners_SU3[site_index][i];
+            // Prefetch next iteration's data to avoid cache misses
+            if (i < num_bi_SU2_SU3 - 1) {
+                __builtin_prefetch(&mixed_bilinear_partners_SU3[site_index][i+1], 0, 3);
+                __builtin_prefetch(&mixed_bilinear_interaction_SU3[site_index][i+1], 0, 3);
+                __builtin_prefetch(&spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i+1]], 0, 3);
+            }
+            
+            const auto& partner_spin = spins.spins_SU2[partner_idx]; 
+            const auto& interaction = mixed_bilinear_interaction_SU3[site_index][i];
+            
+            // Process all non-zero differences in one pass to reduce branch mispredictions
+            for (size_t a = 0; a < N_SU3; ++a) {
+                const double diff_a = new_spin[a] - old_spin[a];
+                if (std::abs(diff_a) < 1e-10) continue; // Use absolute comparison for stability
+                
+                // Compute dot product directly with better memory access pattern
+                // This helps the compiler better vectorize the inner loop
+                double dot_result = 0.0;
+                #pragma omp simd reduction(+:dot_result)
+                for (size_t b = 0; b < N_SU2; ++b) {
+                    dot_result += interaction[a*N_SU2 + b] * partner_spin[b];
+                }
+                
+                bilinear_energy_mixed += diff_a * dot_result;
+            }
+        }
+
         
         // Block processing for trilinear interactions to improve cache utilization
         double trilinear_energy_SU3 = 0.0;
@@ -1101,12 +1094,14 @@ class mixed_lattice
         double onsite_energy_SU2 = 0.0;
         double bilinear_energy_SU2 = 0.0;
         double trilinear_energy_SU2 = 0.0;
+        double mixed_bilinear_energy_SU2 = 0.0;
         double mixed_trilinear_energy_SU2 = 0.0;
         
         double field_energy_SU3 = 0.0;
         double onsite_energy_SU3 = 0.0;
         double bilinear_energy_SU3 = 0.0;
         double trilinear_energy_SU3 = 0.0;
+        double mixed_bilinear_energy_SU3 = 0.0;
         double mixed_trilinear_energy_SU3 = 0.0;
         
         // Process SU2 and SU3 lattices in parallel sections
@@ -1133,6 +1128,16 @@ class mixed_lattice
                             current_spin,
                             bilinear_interaction_SU2[site_index][i],
                             curr_spins.spins_SU2[bilinear_partners_SU2[site_index][i]]
+                        );
+                    }
+
+                    // Mixed Bilinear energy - SU2-SU3 interactions
+                    #pragma omp simd reduction(+:mixed_bilinear_energy_SU2)
+                    for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+                        mixed_bilinear_energy_SU2 += contract(
+                            mixed_bilinear_interaction_SU2[site_index][i],
+                            current_spin,
+                            curr_spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]
                         );
                     }
                     
@@ -1183,6 +1188,16 @@ class mixed_lattice
                             curr_spins.spins_SU3[bilinear_partners_SU3[site_index][i]]
                         );
                     }
+
+                    // Mixed Bilinear energy - SU3-SU2 interactions
+                    #pragma omp simd reduction(+:mixed_bilinear_energy_SU3)
+                    for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+                        mixed_bilinear_energy_SU3 += contract(  
+                            mixed_bilinear_interaction_SU3[site_index][i],
+                            current_spin,
+                            curr_spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]
+                        );
+                    }
                     
                     // Trilinear energy - SU3 components
                     #pragma omp simd reduction(+:trilinear_energy_SU3)
@@ -1212,7 +1227,8 @@ class mixed_lattice
         // Combine all energy components with appropriate scaling factors
         const double field_energy = field_energy_SU2 + field_energy_SU3;
         const double onsite_energy = (onsite_energy_SU2 + onsite_energy_SU3) * onsite_factor;
-        const double bilinear_energy = (bilinear_energy_SU2 + bilinear_energy_SU3) * bilinear_factor;
+        const double bilinear_energy = (bilinear_energy_SU2 + bilinear_energy_SU3 
+                                        + mixed_bilinear_energy_SU2 + mixed_bilinear_energy_SU3) * bilinear_factor;
         const double trilinear_energy = (trilinear_energy_SU2 + trilinear_energy_SU3 + 
                                         mixed_trilinear_energy_SU2 + mixed_trilinear_energy_SU3) * trilinear_factor;
         
@@ -1232,6 +1248,18 @@ class mixed_lattice
         field_drive_width_SU2 = pulse_width;
         t_B_1_SU2 = t_B;
         t_B_2_SU2 = t_B_2;
+
+        const array<double, N_SU3> drive_field_basis_x_SU3 = {{0,0,0,0,2.3915,0,0.9128,0}};
+        const array<double, N_SU3> drive_field_basis_y_SU3 = {{0,0,0,0,2.7866,0,-0.4655,0}};
+        const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,5.264,0,0,0,0,0,0}};
+
+        field_drive_1_SU3 = drive_field_basis_x_SU3 * field_drive_1_SU2[atom_idx][0] +
+                                                        drive_field_basis_y_SU3 * field_drive_1_SU2[atom_idx][1] +
+                                                        drive_field_basis_z_SU3 * field_drive_1_SU2[atom_idx][2];
+        field_drive_2_SU3 = drive_field_basis_x_SU3 * field_drive_2_SU2[atom_idx][0] +
+                                                        drive_field_basis_y_SU3 * field_drive_2_SU2[atom_idx][1] +
+                                                        drive_field_basis_z_SU3 * field_drive_2_SU2[atom_idx][2];
+
     }
 
     void set_pulse_SU3(const array<array<double,N_SU3>, N_ATOMS_SU3> &field_in_SU3, double t_B, const array<array<double,N_SU3>, N_ATOMS_SU3> &field_in_2_SU3, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
@@ -1288,6 +1316,10 @@ class mixed_lattice
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
+        for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
+            local_field = local_field + multiply(mixed_bilinear_interaction_SU2[site_index][i], spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
+        }   
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             size_t partner1 = trilinear_partners_SU2[site_index][i][0];
             size_t partner2 = trilinear_partners_SU2[site_index][i][1];
@@ -1311,6 +1343,10 @@ class mixed_lattice
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+        }
+        #pragma omp simd
+        for (size_t i=0; i < num_bi_SU2_SU3; ++i){
+            local_field = local_field + multiply(mixed_bilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
@@ -1339,6 +1375,10 @@ class mixed_lattice
             local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
+        for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
+            local_field = local_field + multiply(mixed_bilinear_interaction_SU2[site_index][i], current_spin_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
+        }
+        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             size_t partner1 = trilinear_partners_SU2[site_index][i][0];
             size_t partner2 = trilinear_partners_SU2[site_index][i][1];
@@ -1363,6 +1403,10 @@ class mixed_lattice
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
+        }
+        #pragma omp simd
+        for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
+            local_field = local_field + multiply(mixed_bilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
@@ -2030,64 +2074,18 @@ class mixed_lattice
             result[j] = field_drive_1_SU2[atom_idx][j] * factor1_SU2 + 
                         field_drive_2_SU2[atom_idx][j] * factor2_SU2;
         }
-        
-        // If no trilinear interactions, return early
-        if (num_tri_SU2_SU3 == 0) {
-            return result;
-        }
-        
-        // Accumulate trilinear contributions directly into result
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-            const auto& partners = mixed_trilinear_partners_SU2[ind][i];
-            const auto& interaction = mixed_trilinear_interaction_SU2[ind][i];
-            
-            const size_t partner1_atom = partners[0] % N_ATOMS_SU2;
-            const size_t partner2_idx = partners[1];
-            
-            // Prefetch next iteration's data
-            if (i + 1 < num_tri_SU2_SU3) {
-                __builtin_prefetch(&mixed_trilinear_partners_SU2[ind][i+1], 0, 3);
-                __builtin_prefetch(&mixed_trilinear_interaction_SU2[ind][i+1], 0, 3);
-            }
-            
-            // Contract trilinear field for both drive fields and accumulate
-            if (std::abs(factor1_SU2) >= EPSILON) {
-                auto contrib1 = contract_trilinear_field<N_SU2, N_SU2, N_SU3>(
-                    interaction, 
-                    field_drive_1_SU2[partner1_atom], 
-                    spins_SU3[partner2_idx]
-                );
-                #pragma omp simd
-                for (size_t j = 0; j < N_SU2; ++j) {
-                    result[j] += contrib1[j] * factor1_SU2;
-                }
-            }
-            
-            if (std::abs(factor2_SU2) >= EPSILON) {
-                auto contrib2 = contract_trilinear_field<N_SU2, N_SU2, N_SU3>(
-                    interaction, 
-                    field_drive_2_SU2[partner1_atom], 
-                    spins_SU3[partner2_idx]
-                );
-                #pragma omp simd
-                for (size_t j = 0; j < N_SU2; ++j) {
-                    result[j] += contrib2[j] * factor2_SU2;
-                }
-            }
-        }
-        
         return result;
     }
 
     const array<double, N_SU3> drive_field_T_SU3(double currT, size_t ind, const spin_config_SU2 &spins_SU2) {
         // Pre-compute expensive transcendental functions once
-        const double exp_factor1 = exp(-pow((currT - t_B_1_SU3) / (2 * field_drive_width_SU3), 2));
-        const double exp_factor2 = exp(-pow((currT - t_B_2_SU3) / (2 * field_drive_width_SU3), 2));
-        const double cos_factor1 = cos(2 * M_PI * field_drive_freq_SU3 * (currT - t_B_1_SU3));
-        const double cos_factor2 = cos(2 * M_PI * field_drive_freq_SU3 * (currT - t_B_2_SU3));
+        const double exp_factor1 = exp(-pow((currT - t_B_1_SU2) / (2 * field_drive_width_SU2), 2));
+        const double exp_factor2 = exp(-pow((currT - t_B_2_SU2) / (2 * field_drive_width_SU2), 2));
+        const double cos_factor1 = cos(2 * M_PI * field_drive_freq_SU2 * (currT - t_B_1_SU2));
+        const double cos_factor2 = cos(2 * M_PI * field_drive_freq_SU2 * (currT - t_B_2_SU2));
         
-        const double factor1_SU3 = field_drive_amp_SU3 * exp_factor1 * cos_factor1;
-        const double factor2_SU3 = field_drive_amp_SU3 * exp_factor2 * cos_factor2;
+        const double factor1_SU3 = field_drive_amp_SU2 * exp_factor1 * cos_factor1;
+        const double factor2_SU3 = field_drive_amp_SU2 * exp_factor2 * cos_factor2;
         
         // Early exit if both factors are negligible
         constexpr double EPSILON = 1e-15;
@@ -2097,7 +2095,7 @@ class mixed_lattice
         
         // Get the atom index once
         const size_t atom_idx = ind % N_ATOMS_SU3;
-        
+    
         // Initialize result with the direct field contribution
         array<double, N_SU3> result;
         #pragma omp simd
@@ -2105,52 +2103,6 @@ class mixed_lattice
             result[j] = field_drive_1_SU3[atom_idx][j] * factor1_SU3 + 
                         field_drive_2_SU3[atom_idx][j] * factor2_SU3;
         }
-        
-        // If no trilinear interactions, return early
-        if (num_tri_SU2_SU3 == 0) {
-            return result;
-        }
-        
-        // Accumulate trilinear contributions directly into result
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-            const auto& partners = mixed_trilinear_partners_SU3[ind][i];
-            const auto& interaction = mixed_trilinear_interaction_SU3[ind][i];
-            
-            const size_t partner1_atom = partners[0] % N_ATOMS_SU2;
-            const size_t partner2_idx = partners[1];
-            
-            // Prefetch next iteration's data
-            if (i + 1 < num_tri_SU2_SU3) {
-                __builtin_prefetch(&mixed_trilinear_partners_SU3[ind][i+1], 0, 3);
-                __builtin_prefetch(&mixed_trilinear_interaction_SU3[ind][i+1], 0, 3);
-            }
-            
-            // Contract trilinear field for both drive fields and accumulate
-            if (std::abs(factor1_SU3) >= EPSILON) {
-                auto contrib1 = contract_trilinear_field<N_SU3, N_SU2, N_SU2>(
-                    interaction, 
-                    field_drive_1_SU2[partner1_atom], 
-                    spins_SU2[partner2_idx]
-                );
-                #pragma omp simd
-                for (size_t j = 0; j < N_SU3; ++j) {
-                    result[j] += contrib1[j] * factor1_SU3;
-                }
-            }
-            
-            if (std::abs(factor2_SU3) >= EPSILON) {
-                auto contrib2 = contract_trilinear_field<N_SU3, N_SU2, N_SU2>(
-                    interaction, 
-                    field_drive_2_SU2[partner1_atom], 
-                    spins_SU2[partner2_idx]
-                );
-                #pragma omp simd
-                for (size_t j = 0; j < N_SU3; ++j) {
-                    result[j] += contrib2[j] * factor2_SU3;
-                }
-            }
-        }
-        
         return result;
     }
 

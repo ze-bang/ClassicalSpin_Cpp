@@ -165,7 +165,7 @@ struct mixed_trilinear{
 };
 
 
-template <size_t N_SU2, size_t N_SU3> 
+template <size_t N_SU3, size_t N_SU2> 
 struct mixed_bilinear{
     array<double,N_SU2*N_SU3> bilinear_interaction;
     size_t partner;
