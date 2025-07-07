@@ -1125,7 +1125,7 @@ public:
                     size_t output_frequency = 1, bool use_adaptive_stepping = false) {
                         
         // Set pulse parameters for SU2
-        this->set_pulse_SU2(field_in, t_B, field_in, t_B, pulse_amp, pulse_width, pulse_freq);
+        this->set_pulse_SU2(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
 
         // Update device parameters
         d_field_drive_freq_SU2 = this->field_drive_freq_SU2;
