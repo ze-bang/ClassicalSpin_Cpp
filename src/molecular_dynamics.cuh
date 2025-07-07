@@ -1533,11 +1533,11 @@ void drive_field_T_SU2(
     if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
     
     // Initialize output with direct field contribution
-    #pragma unroll
-    for (size_t i = 0; i < N_SU2; ++i) {
-        out[site_index * N_SU2 + i] -= (d_field_drive_1_SU2[site_sublattice_base + i] * factor1_SU2 + 
-                                        d_field_drive_2_SU2[site_sublattice_base + i] * factor2_SU2);
-    }
+    // #pragma unroll
+    // for (size_t i = 0; i < N_SU2; ++i) {
+    //     out[site_index * N_SU2 + i] -= (d_field_drive_1_SU2[site_sublattice_base + i] * factor1_SU2 + 
+    //                                     d_field_drive_2_SU2[site_sublattice_base + i] * factor2_SU2);
+    // }
 
     // Early exit if no mixed interactions
     if (max_mixed_tri_neighbors == 0) return;
@@ -1585,7 +1585,7 @@ void drive_field_T_SU2(
                     }
                     temp -= inner_sum * spin3_c;
                 }
-                out[site_index * N_SU2 + a] += temp;
+                out[site_index * N_SU2 + a] += temp * 20; // Scale factor for contribution
             }
         }
     }
@@ -1677,7 +1677,7 @@ void drive_field_T_SU3(
                     }
                     temp -= inner_sum * field2_c;
                 }
-                out[site_index * N_SU3 + a] += temp;
+                out[site_index * N_SU3 + a] += temp * 20; // Scale factor for contribution
             }
         }
     }

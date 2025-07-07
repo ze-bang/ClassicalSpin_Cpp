@@ -501,7 +501,7 @@ def read_2D_nonlinear(dir):
     plt.clf()
 
 
-def read_2D_nonlinear_adaptive_time_step(dir, readslice):
+def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps.
     
@@ -510,9 +510,13 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice):
     """
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
+    if fm:
+        readfile = "M_t_f.txt"
+    else:
+        readfile = "M_t.txt"
     
     # Load M0 data once
-    m0_file = os.path.join(directory, "M_time_0.000000/M1/M_t_f.txt")
+    m0_file = os.path.join(directory, "M_time_0.000000/M1/" + readfile)
     m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
 
     time_steps = len(np.loadtxt(m0_time_file))
@@ -569,10 +573,10 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice):
             base_path = os.path.join(directory, subdir)
             
             # Load M1 data
-            M1 = np.loadtxt(os.path.join(base_path, "M1/M_t_f.txt"))[-time_steps:,readslice]
+            M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:,readslice]
             M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
             # Load M01 data
-            M01 = np.loadtxt(os.path.join(base_path, "M01/M_t_f.txt"))[-time_steps:,readslice]
+            M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:,readslice]
             M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
             
             # Transform to frequency domain
@@ -593,7 +597,10 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice):
     
     # Take absolute value for plotting
     M_NL_FF_abs = np.abs(M_NL_FF)
-    
+
+    # Suppress intensity near (0,0)
+    M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
+
     # Save raw data
     output_file = os.path.join(directory, "M_NL_FF.txt")
     np.savetxt(output_file, M_NL_FF_abs)
@@ -609,7 +616,7 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice):
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
     plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_{readslice}.pdf", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
     
     # Log scale plot
@@ -619,14 +626,14 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice):
     plt.xlabel('Frequency (THz)')
     plt.ylabel('Frequency (THz)')
     plt.title('2D Nonlinear Spectrum (Log Scale)')
-    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}.pdf", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
     plt.close()
     
     return M_NL_FF_abs
 
 
 
-def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
+def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps.
     
@@ -635,8 +642,12 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
     """
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
-    
-    m0_file = os.path.join(directory, "M_time_0.000000/M1/M_t_f_SU3.txt")
+    if fm:
+        readfile = "M_t_f_SU3.txt"
+    else:
+        readfile = "M_t_SU3.txt"
+
+    m0_file = os.path.join(directory, "M_time_0.000000/M1/" + readfile)
     m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
     
     time_steps = len(np.loadtxt(m0_time_file))
@@ -693,10 +704,10 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
             base_path = os.path.join(directory, subdir)
             
             # Load M1 data
-            M1 = np.loadtxt(os.path.join(base_path, "M1/M_t_f_SU3.txt"))[-time_steps:,readslice]
+            M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:,readslice]
             M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
             # Load M01 data
-            M01 = np.loadtxt(os.path.join(base_path, "M01/M_t_f_SU3.txt"))[-time_steps:,readslice]
+            M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:,readslice]
             M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
             
             # Transform to frequency domain
@@ -717,7 +728,9 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
     
     # Take absolute value for plotting
     M_NL_FF_abs = np.abs(M_NL_FF)
-    
+
+    M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
+
     # Save raw data
     output_file = os.path.join(directory, "M_NL_FF_SU3.txt")
     np.savetxt(output_file, M_NL_FF_abs)
@@ -733,7 +746,7 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
     plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_{readslice}_SU3.pdf", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
     
     # Log scale plot
@@ -743,11 +756,19 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice):
     plt.xlabel('Frequency (THz)')
     plt.ylabel('Frequency (THz)')
     plt.title('2D Nonlinear Spectrum (Log Scale)')
-    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_SU3.pdf", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
     plt.close()
     
     return M_NL_FF_abs
 
+
+def full_read_2DCS_TFO(dir):
+    for i in range(3):
+        read_2D_nonlinear_adaptive_time_step(dir, i, False)
+        read_2D_nonlinear_adaptive_time_step(dir, i, True)
+    for i in range(8):
+        read_2D_nonlinear_adaptive_time_step_SU3(dir, i, False)
+        read_2D_nonlinear_adaptive_time_step_SU3(dir, i, True)
 
 def read_2D_nonlinear_tot(dir):
     directory = os.fsencode(dir)
@@ -788,18 +809,9 @@ def read_2D_nonlinear_tot(dir):
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
 dir = "TmFeO3_2DCS_D=0_xii=0.05"
 directory = dir + "/1/"
+full_read_2DCS_TFO(directory)
 # read_MD_tot(dir)
-read_2D_nonlinear_adaptive_time_step(directory, 0)
-read_2D_nonlinear_adaptive_time_step(directory, 1)
-read_2D_nonlinear_adaptive_time_step(directory, 2)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 0)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 1)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 2)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 3)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 4)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 5)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 6)
-read_2D_nonlinear_adaptive_time_step_SU3(directory, 7)
+
 
 # read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_xii=0.0_H_B")
 
