@@ -1134,9 +1134,9 @@ class mixed_lattice
                     // Mixed Bilinear energy - SU2-SU3 interactions
                     #pragma omp simd reduction(+:mixed_bilinear_energy_SU2)
                     for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
-                        mixed_bilinear_energy_SU2 += contract(
-                            mixed_bilinear_interaction_SU2[site_index][i],
+                        mixed_bilinear_energy_SU2 += contract_mixed_bilinear(
                             current_spin,
+                            mixed_bilinear_interaction_SU2[site_index][i],
                             curr_spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]
                         );
                     }
@@ -1192,9 +1192,9 @@ class mixed_lattice
                     // Mixed Bilinear energy - SU3-SU2 interactions
                     #pragma omp simd reduction(+:mixed_bilinear_energy_SU3)
                     for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
-                        mixed_bilinear_energy_SU3 += contract(  
-                            mixed_bilinear_interaction_SU3[site_index][i],
+                        mixed_bilinear_energy_SU3 += contract_mixed_bilinear(  
                             current_spin,
+                            mixed_bilinear_interaction_SU3[site_index][i],
                             curr_spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]
                         );
                     }
@@ -1253,13 +1253,15 @@ class mixed_lattice
         const array<double, N_SU3> drive_field_basis_y_SU3 = {{0,0,0,0,2.7866,0,-0.4655,0}};
         const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,5.264,0,0,0,0,0,0}};
 
-        field_drive_1_SU3 = drive_field_basis_x_SU3 * field_drive_1_SU2[atom_idx][0] +
-                                                        drive_field_basis_y_SU3 * field_drive_1_SU2[atom_idx][1] +
-                                                        drive_field_basis_z_SU3 * field_drive_1_SU2[atom_idx][2];
-        field_drive_2_SU3 = drive_field_basis_x_SU3 * field_drive_2_SU2[atom_idx][0] +
-                                                        drive_field_basis_y_SU3 * field_drive_2_SU2[atom_idx][1] +
-                                                        drive_field_basis_z_SU3 * field_drive_2_SU2[atom_idx][2];
-
+        for (size_t atom_idx = 0; atom_idx < N_ATOMS_SU3; ++atom_idx) {
+            // Convert SU2 drive fields to SU3 basis
+            field_drive_1_SU3[atom_idx] = drive_field_basis_x_SU3 * field_drive_1_SU2[0][0] +
+                                          drive_field_basis_y_SU3 * field_drive_1_SU2[0][1] +
+                                          drive_field_basis_z_SU3 * field_drive_1_SU2[0][2];
+            field_drive_2_SU3[atom_idx] = drive_field_basis_x_SU3 * field_drive_2_SU2[0][0] +
+                                          drive_field_basis_y_SU3 * field_drive_2_SU2[0][1] +
+                                          drive_field_basis_z_SU3 * field_drive_2_SU2[0][2];
+        }
     }
 
     void set_pulse_SU3(const array<array<double,N_SU3>, N_ATOMS_SU3> &field_in_SU3, double t_B, const array<array<double,N_SU3>, N_ATOMS_SU3> &field_in_2_SU3, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
@@ -1309,15 +1311,15 @@ class mixed_lattice
     }
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
-        array<double,N_SU2> local_field = multiply(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
+        array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
 
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+            local_field = local_field + multiply<N_SU2, N_SU2>(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
-            local_field = local_field + multiply(mixed_bilinear_interaction_SU2[site_index][i], spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
+            local_field = local_field + multiply<N_SU2, N_SU3>(mixed_bilinear_interaction_SU2[site_index][i], spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
         }   
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
@@ -1339,14 +1341,14 @@ class mixed_lattice
     }
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
-        array<double,N_SU3> local_field = multiply(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
+        array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+            local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i){
-            local_field = local_field + multiply(mixed_bilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
+            local_field = local_field + multiply<N_SU3, N_SU2>(mixed_bilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
@@ -1369,14 +1371,14 @@ class mixed_lattice
 
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field = {{0.0}};
-        local_field += multiply(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
+        local_field += multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
+            local_field = local_field + multiply<N_SU2, N_SU2>(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
-            local_field = local_field + multiply(mixed_bilinear_interaction_SU2[site_index][i], current_spin_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
+            local_field = local_field + multiply<N_SU2, N_SU3>(mixed_bilinear_interaction_SU2[site_index][i], current_spin_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
@@ -1399,14 +1401,14 @@ class mixed_lattice
 
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU3> local_field = {{0.0}};
-        local_field += multiply(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
+        local_field += multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
-            local_field = local_field + multiply(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
+            local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
-            local_field = local_field + multiply(mixed_bilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
+            local_field = local_field + multiply<N_SU3, N_SU2>(mixed_bilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){

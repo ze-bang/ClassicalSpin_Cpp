@@ -1246,7 +1246,7 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3,
         max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
         max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, 
+        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3,
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);
     

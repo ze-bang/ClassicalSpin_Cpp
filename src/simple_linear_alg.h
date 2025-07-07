@@ -337,19 +337,19 @@ inline array<double, N_1> contract_trilinear_field(const array<double, N_1*N_2*N
 
 
 template <size_t N, size_t M>
-inline array<double, N>  multiply(const array<double, N*M>  &M, const array<double, M>  &a){
+inline array<double, N>  multiply(const array<double, N*M>  &M_, const array<double, M>  &a){
     array<double, N>  result;
     if constexpr (N == 3 && M == 3){
-        result = multiply_SU2(M, a);
+        result = multiply_SU2(M_, a);
     }else if constexpr (N == 8 && M == 8){
-        result = multiply_SU3(M, a);
+        result = multiply_SU3(M_, a);
     }else{
         // General case for arbitrary N and M
         #pragma omp parallel for schedule(static)
         for (size_t i = 0; i < N; ++i) {
             double sum = 0.0;
             for (size_t j = 0; j < M; ++j) {
-                sum += M[i * M + j] * a[j];
+                sum += M_[i * M + j] * a[j];
             }
             result[i] = sum;
         }
