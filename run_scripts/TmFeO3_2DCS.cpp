@@ -385,7 +385,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 }
 
 
-void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
+void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -500,14 +500,20 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
+    if (chii != 0.0){
+        array<array<double,3>,8> chi = {{{0}}};
+        chi[2] = {{chii,chii,chii}};
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
+
+    }
+
     if (xii != 0.0){
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
         xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
         xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        
+
         ////////// Trilinear coupling/Oxygen path way
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
