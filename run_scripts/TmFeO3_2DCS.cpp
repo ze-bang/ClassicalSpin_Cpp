@@ -397,6 +397,12 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
+    // Check for valid MPI size to prevent division by zero
+    if (size <= 0) {
+        cout << "Error: Invalid MPI size (" << size << "). Setting size to 1." << endl;
+        size = 1;
+    }
+    
     // Get CUDA device count and assign GPUs to MPI ranks
     int device_count;
     cudaGetDeviceCount(&device_count);
@@ -733,6 +739,8 @@ int main(int argc, char** argv) {
     int total_jobs = (argc > 24) ? atoi(argv[24]) : 1;
     string spin_config_file = (argc > 25) ? argv[25] : "TFO_4_0_xii=0.05/spin_zero.txt";
 
+    cout << "Slurm ID: " << slurm_ID << ", Total Jobs: " << total_jobs << endl;
+
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;
     double tau_start_here = tau_start + (slurm_ID-1)*tau_section;
@@ -743,7 +751,10 @@ int main(int argc, char** argv) {
     string output_dir = dir_name+"/"+std::to_string(slurm_ID);
     filesystem::create_directories(output_dir);
     bool if_zero_is_in_T_range = slurm_ID == 0;
-    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
+    cout << "Tau start: " << tau_start_here << ", Tau end: " << tau_end_here << ", Tau step size: " << tau_step_size << endl;
+    cout << "Time range: " << T_start << " to " << T_end << ", Time step size: " << T_step_size << endl;
+    cout << "Temperature start: " << Temp_start << ", Temperature end: " << Temp_end << endl;
+    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, dir_name, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
 
