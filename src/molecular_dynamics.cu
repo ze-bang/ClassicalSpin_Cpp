@@ -568,7 +568,7 @@ void LLG_kernel(
 
         // Add drive field if applicable
         drive_field_T_SU2<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            k_SU2, curr_time, site_index, d_field_drive_1_SU2, d_field_drive_2_SU2, 
+            d_local_field_SU2, curr_time, site_index, d_field_drive_1_SU2, d_field_drive_2_SU2, 
             d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
             max_mixed_tri_neighbors_SU2, d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2, d_spins_SU3);
         
@@ -587,7 +587,7 @@ void LLG_kernel(
             max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
 
         drive_field_T_SU3<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            k_SU3, curr_time, site_index_SU3, d_field_drive_1_SU2, d_field_drive_2_SU2, 
+            d_local_field_SU3, curr_time, site_index_SU3, d_field_drive_1_SU2, d_field_drive_2_SU2, 
             d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
             max_mixed_tri_neighbors_SU3, d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3, d_spins_SU2);
             
@@ -810,12 +810,24 @@ public:
     void allocate() {
         if (allocated) return;
         
-        cudaMalloc(&work_SU2_1, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU2_2, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU2_3, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU3_1, lattice_size_SU3 * N_SU3 * sizeof(double));
-        cudaMalloc(&work_SU3_2, lattice_size_SU3 * N_SU3 * sizeof(double));
-        cudaMalloc(&work_SU3_3, lattice_size_SU3 * N_SU3 * sizeof(double));
+        size_t size_SU2 = lattice_size_SU2 * N_SU2 * sizeof(double);
+        size_t size_SU3 = lattice_size_SU3 * N_SU3 * sizeof(double);
+
+        cudaMalloc(&work_SU2_1, size_SU2);
+        cudaMalloc(&work_SU2_2, size_SU2);
+        cudaMalloc(&work_SU2_3, size_SU2);
+        cudaMalloc(&work_SU3_1, size_SU3);
+        cudaMalloc(&work_SU3_2, size_SU3);
+        cudaMalloc(&work_SU3_3, size_SU3);
+
+        // Set allocated memory to zero
+        cudaMemset(work_SU2_1, 0, size_SU2);
+        cudaMemset(work_SU2_2, 0, size_SU2);
+        cudaMemset(work_SU2_3, 0, size_SU2);
+        cudaMemset(work_SU3_1, 0, size_SU3);
+        cudaMemset(work_SU3_2, 0, size_SU3);
+        cudaMemset(work_SU3_3, 0, size_SU3);
+        
         allocated = true;
     }
     
@@ -839,6 +851,7 @@ public:
     double* get_work_SU3_2() const { return work_SU3_2; }
     double* get_work_SU3_3() const { return work_SU3_3; }
 };
+
 
 
 // Optimized SSPRK53 kernel that reduces memory allocations and synchronizations

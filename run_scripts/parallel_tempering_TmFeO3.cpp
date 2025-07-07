@@ -92,6 +92,11 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     if (xii != 0.0){
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
+        xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        
         ////////// Trilinear coupling/Oxygen path way
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
