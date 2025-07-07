@@ -1514,6 +1514,9 @@ void drive_field_T_SU2(
     size_t max_mixed_tri_neighbors, double* mixed_trilinear_interaction_SU2, size_t* mixed_trilinear_partners_SU2,
     double* d_spins_SU3)
 {
+    // Output drive field
+    double drive_field_out[N_SU2] = {0.0};
+
     // Pre-compute common exponential terms
     const double dt1 = currT - d_t_B_1_SU2;
     const double dt2 = currT - d_t_B_2_SU2;
@@ -1526,18 +1529,8 @@ void drive_field_T_SU2(
     const double factor1_SU2 = d_field_drive_amp_SU2 * exp1 * cos(omega * dt1);
     const double factor2_SU2 = d_field_drive_amp_SU2 * exp2 * cos(omega * dt2);
     
-    // Cache sublattice index for site
-    const int site_sublattice = site_index % N_ATOMS_SU2;
-    const size_t site_sublattice_base = site_sublattice * N_SU2;
-
+    // Early exit if factors are small
     if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
-    
-    // Initialize output with direct field contribution
-    // #pragma unroll
-    // for (size_t i = 0; i < N_SU2; ++i) {
-    //     out[site_index * N_SU2 + i] -= (d_field_drive_1_SU2[site_sublattice_base + i] * factor1_SU2 + 
-    //                                     d_field_drive_2_SU2[site_sublattice_base + i] * factor2_SU2);
-    // }
 
     // Early exit if no mixed interactions
     if (max_mixed_tri_neighbors == 0) return;
@@ -1585,9 +1578,36 @@ void drive_field_T_SU2(
                     }
                     temp -= inner_sum * spin3_c;
                 }
-                out[site_index * N_SU2 + a] += temp * 20; // Scale factor for contribution
+                drive_field_out[a] += temp * 20; // Scale factor for contribution
             }
         }
+    }
+
+    // Print the change in the drive field for a specific site to avoid excessive output
+    if (site_index == 0 && factor1_SU2 > 1e-2 && factor2_SU2 > 1e-2) {
+        printf("SU2 Drive field change for site 0 at time %f: (", currT);
+        for (size_t i = 0; i < N_SU2; ++i) {
+            double change = drive_field_out[i];
+            printf("%f%s", change, (i == N_SU2 - 1) ? "" : ", ");
+        }
+        printf(") with factors: (");
+        printf("%f, %f) at times (%f, %f)\n", factor1_SU2, factor2_SU2, d_t_B_1_SU2, d_t_B_2_SU2);
+        printf("Current time: %f\n", currT);
+        printf("Current drive field: (");
+        for (size_t i = 0; i < N_SU2; ++i) {
+            printf("%f%s", d_field_drive_1_SU2[(site_index % N_ATOMS_SU2 )* N_SU2 + i], (i == N_SU2 - 1) ? "" : ", ");
+        }
+        printf(")\n");
+        printf("Mixed trilinear interaction tensor for site 0, neighbor 0: (");
+        for (size_t k = 0; k < N_SU2 * N_SU2 * N_SU3; ++k) {
+            printf("%f%s", mixed_trilinear_interaction_SU2[k], (k == N_SU2 * N_SU2 * N_SU3 - 1) ? "" : ", ");
+        }
+        printf(")\n");
+    }
+
+    // Copy the computed drive field back to the output
+    for (size_t i = 0; i < N_SU2; ++i) {
+        out[site_index * N_SU2 + i] -= drive_field_out[i];
     }
 }
 
@@ -1601,6 +1621,14 @@ void drive_field_T_SU3(
     size_t max_mixed_tri_neighbors, double* mixed_trilinear_interaction_SU3,
     size_t* mixed_trilinear_partners_SU3, double* d_spins_SU2)
 {
+    // Output drive field
+    double drive_field_out[N_SU3] = {0.0};
+    // Initialize output drive field to zero
+    #pragma unroll
+    for (size_t i = 0; i < N_SU3; ++i) {
+        drive_field_out[i] = 0.0;
+    }
+
     // Pre-compute common exponential terms
     const double dt1 = currT - d_t_B_1_SU2;
     const double dt2 = currT - d_t_B_2_SU2;
@@ -1641,8 +1669,8 @@ void drive_field_T_SU3(
             #pragma unroll
             for (size_t b = 0; b < N_SU2; ++b) {
                 field_sum1[b] = d_field_drive_1_SU2[sublattice_base1 + b] * factor1_SU2 + 
-                                d_field_drive_2_SU2[sublattice_base1 + b] * factor2_SU2;
-                field_sum2[b] = d_field_drive_1_SU2[sublattice_base2 + b] * factor1_SU2 + 
+                                d_field_drive_2_SU2[sublattice_base2 + b] * factor2_SU2;
+                field_sum2[b] = d_field_drive_1_SU2[sublattice_base1 + b] * factor1_SU2 + 
                                 d_field_drive_2_SU2[sublattice_base2 + b] * factor2_SU2;
             }
             
@@ -1677,10 +1705,24 @@ void drive_field_T_SU3(
                     }
                     temp -= inner_sum * field2_c;
                 }
-                out[site_index * N_SU3 + a] += temp * 20; // Scale factor for contribution
+                drive_field_out[a] += temp * 20; // Scale factor for contribution
             }
         }
     }
+
+    // Print the change in the drive field for a specific site to avoid excessive output
+    // if (site_index == 0) {
+    //     printf("SU3 Drive field change for site 0 at time %f: (", currT);
+    //     for (size_t i = 0; i < N_SU3; ++i) {
+    //         double change = drive_field_out[i];
+    //         printf("%f%s", change, (i == N_SU3 - 1) ? "" : ", ");
+    //     }
+    //     printf(")\n");
+    // }
+    // Copy the computed drive field back to the output
+    for (size_t i = 0; i < N_SU3; ++i) {
+        out[site_index * N_SU3 + i] -= drive_field_out[i];
+    }   
 }
 
 __global__
