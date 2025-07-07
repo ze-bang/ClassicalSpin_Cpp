@@ -810,12 +810,24 @@ public:
     void allocate() {
         if (allocated) return;
         
-        cudaMalloc(&work_SU2_1, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU2_2, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU2_3, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU3_1, lattice_size_SU3 * N_SU3 * sizeof(double));
-        cudaMalloc(&work_SU3_2, lattice_size_SU3 * N_SU3 * sizeof(double));
-        cudaMalloc(&work_SU3_3, lattice_size_SU3 * N_SU3 * sizeof(double));
+        size_t size_SU2 = lattice_size_SU2 * N_SU2 * sizeof(double);
+        size_t size_SU3 = lattice_size_SU3 * N_SU3 * sizeof(double);
+
+        cudaMalloc(&work_SU2_1, size_SU2);
+        cudaMalloc(&work_SU2_2, size_SU2);
+        cudaMalloc(&work_SU2_3, size_SU2);
+        cudaMalloc(&work_SU3_1, size_SU3);
+        cudaMalloc(&work_SU3_2, size_SU3);
+        cudaMalloc(&work_SU3_3, size_SU3);
+
+        // Set allocated memory to zero
+        cudaMemset(work_SU2_1, 0, size_SU2);
+        cudaMemset(work_SU2_2, 0, size_SU2);
+        cudaMemset(work_SU2_3, 0, size_SU2);
+        cudaMemset(work_SU3_1, 0, size_SU3);
+        cudaMemset(work_SU3_2, 0, size_SU3);
+        cudaMemset(work_SU3_3, 0, size_SU3);
+        
         allocated = true;
     }
     
@@ -839,6 +851,7 @@ public:
     double* get_work_SU3_2() const { return work_SU3_2; }
     double* get_work_SU3_3() const { return work_SU3_3; }
 };
+
 
 
 // Optimized SSPRK53 kernel that reduces memory allocations and synchronizations
