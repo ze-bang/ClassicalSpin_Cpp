@@ -1,6 +1,6 @@
 #include "experiments.h"
 
-void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, const vector<int> &rank_to_write){
+void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir, const vector<int> &rank_to_write){
     filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -89,14 +89,62 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
+
+    if (chii != 0.0){
+        array<array<double,3>,8> chi = {{{0}}};
+        chi[2] = {{chii,chii,chii}};
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
+
+
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
+
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
+    }
+
     if (xii != 0.0){
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
         xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
         xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        
+
         ////////// Trilinear coupling/Oxygen path way
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
@@ -178,7 +226,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
         TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
     }
-
+    
     cout << "Finished setting up TmFeO3" << endl;
 
     int initialized;
@@ -215,16 +263,17 @@ int main(int argc, char** argv) {
     double Kc = argv[6] ? atof(argv[6])/J1ab  : 0.0;
     double D1 = argv[7] ? atof(argv[7])/J1ab  : 0.0;
     double D2 = argv[8] ? atof(argv[8])/J1ab  : 0.0;
-    double xii = argv[9] ? atof(argv[9])/J1ab  : 0.0;
-    double e1 = argv[10] ? atof(argv[10])/J1ab  : 0.0;
-    double e2 = argv[11] ? atof(argv[11])/J1ab  : 0.0;
-    double h = argv[12] ? atof(argv[12])/J1ab  : 0.0;
+    double chii = argv[9] ? atof(argv[9])/J1ab  : 0.0;
+    double xii = argv[10] ? atof(argv[10])/J1ab  : 0.0;
+    double e1 = argv[11] ? atof(argv[11])/J1ab  : 0.0;
+    double e2 = argv[12] ? atof(argv[12])/J1ab  : 0.0;
+    double h = argv[13] ? atof(argv[13])/J1ab  : 0.0;
     J1ab = 1;
-    string dir_name = argv[13] ? argv[13] : "";
-    double T_start = argv[14] ? atof(argv[14]) : 0.0;
-    double T_end = argv[15] ? atof(argv[15]) : 0.0;
+    string dir_name = argv[14] ? argv[14] : "";
+    double T_start = argv[15] ? atof(argv[15]) : 0.0;
+    double T_end = argv[16] ? atof(argv[16]) : 0.0;
     cout << "Begin parallel tempering on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << endl;
     cout << "T_start: " << T_start << " T_end: " << T_end << endl;
-    parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0,1,0}, dir_name, rank_to_write);    
+    parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0,1,0}, dir_name, rank_to_write);    
     return 0;
 }

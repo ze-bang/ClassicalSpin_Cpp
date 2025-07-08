@@ -385,7 +385,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 }
 
 
-void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
+void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -506,14 +506,61 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
+    if (chii != 0.0){
+        array<array<double,3>,8> chi = {{{0}}};
+        chi[2] = {{chii,chii,chii}};
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
+
+
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
+
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
+    }
+
     if (xii != 0.0){
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
         xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
         xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        
+
         ////////// Trilinear coupling/Oxygen path way
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
@@ -597,6 +644,11 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     
     }
+    
+    //
+    cout << "Finished setting up TmFeO3 model." << endl;
+    cout << "Starting calculations..." << endl;
+
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
     double pulse_amp = 1.2;
@@ -609,6 +661,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
     mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
+
+    cout << "Initialized mixed lattice with CUDA support." << endl;
     // Continue with the rest of the initialization code...
     if (spin_config != ""){
         // Check if the spin configuration file exists
@@ -724,8 +778,9 @@ int main(int argc, char** argv) {
     double D2 = (argc > 17) ? atof(argv[17]) : 0.0;
     double e1 = (argc > 18) ? atof(argv[18]) : 4.0;
     double e2 = (argc > 19) ? atof(argv[19]) : 0.0;
-    double xii = (argc > 20) ? atof(argv[20]) : 0.05;
-    double h = (argc > 21) ? atof(argv[21]) : 0.0;
+    double chii = (argc > 20) ? atof(argv[20]) : 0.05; // TmFeO bilinear coupling parameter
+    double xii = (argc > 21) ? atof(argv[21]) : 0.0;
+    double h = (argc > 22) ? atof(argv[22]) : 0.0;
 
     J1c /= J1ab;
     J2ab /= J1ab;
@@ -738,11 +793,11 @@ int main(int argc, char** argv) {
     e2 /= J1ab;
     h /= J1ab;
     J1ab = 1;
-    string dir_name = (argc > 22) ? argv[22] : "TmFeO3_2DCS_xii=0.05";
+    string dir_name = (argc > 23) ? argv[23] : "TmFeO3_2DCS_xii=0.05";
     filesystem::create_directories(dir_name);
-    int slurm_ID = (argc > 23) ? atoi(argv[23]) : 1;
-    int total_jobs = (argc > 24) ? atoi(argv[24]) : 1;
-    string spin_config_file = (argc > 25) ? argv[25] : "TFO_4_0_xii=0.05/spin_zero.txt";
+    int slurm_ID = (argc > 24) ? atoi(argv[24]) : 1;
+    int total_jobs = (argc > 25) ? atoi(argv[25]) : 1;
+    string spin_config_file = (argc > 26) ? argv[26] : "TFO_4_0_xii=0.05/spin_zero.txt";
 
     cout << "Slurm ID: " << slurm_ID << ", Total Jobs: " << total_jobs << endl;
 
@@ -756,10 +811,7 @@ int main(int argc, char** argv) {
     string output_dir = dir_name+"/"+std::to_string(slurm_ID);
     filesystem::create_directories(output_dir);
     bool if_zero_is_in_T_range = slurm_ID == 0;
-    cout << "Tau start: " << tau_start_here << ", Tau end: " << tau_end_here << ", Tau step size: " << tau_step_size << endl;
-    cout << "Time range: " << T_start << " to " << T_end << ", Time step size: " << T_step_size << endl;
-    cout << "Temperature start: " << Temp_start << ", Temperature end: " << Temp_end << endl;
-    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, dir_name, T_zero, spin_config_file, if_zero_is_in_T_range);
+    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
 

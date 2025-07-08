@@ -165,7 +165,7 @@ struct mixed_trilinear{
 };
 
 
-template <size_t N_SU2, size_t N_SU3> 
+template <size_t N_SU3, size_t N_SU2> 
 struct mixed_bilinear{
     array<double,N_SU2*N_SU3> bilinear_interaction;
     size_t partner;
@@ -270,7 +270,7 @@ struct mixed_UnitCell{
     UnitCell<N_SU2, N_ATOMS_SU2> SU2;
     UnitCell<N_SU3, N_ATOMS_SU3> SU3;
     multimap<int, mixed_trilinear<N_SU2, N_SU3>> trilinear_SU2_SU3;
-    multimap<int, mixed_bilinear<N_SU2, N_SU3>> bilinear_SU2_SU3;
+    multimap<int, mixed_bilinear<N_SU3, N_SU2>> bilinear_SU2_SU3;
 
     mixed_UnitCell() : SU2(), SU3() {
         trilinear_SU2_SU3.clear();
@@ -290,7 +290,7 @@ struct mixed_UnitCell{
     };
 
     void set_mix_bilinear_interaction(array<array<double,N_SU2>, N_SU3> &bin, int source, int partner, const array<int, 3> & offset){
-        mixed_bilinear<N_SU2, N_SU3> b_set(bin, partner, offset);
+        mixed_bilinear<N_SU3, N_SU2> b_set(bin, partner, offset);
         bilinear_SU2_SU3.insert(make_pair(source, b_set));
     };
 

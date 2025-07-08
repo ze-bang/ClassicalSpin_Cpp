@@ -377,10 +377,10 @@ class lattice
     
     array<double, N>  get_local_field(size_t site_index){
         array<double,N> local_field;
-        local_field = multiply(onsite_interaction[site_index], spins[site_index]);
+        local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            local_field = local_field + multiply(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+            local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
@@ -394,10 +394,10 @@ class lattice
 
     array<double, N>  get_local_field_lattice(size_t site_index, const spin_config &current_spin){
         array<double,N> local_field;
-        local_field =  multiply(onsite_interaction[site_index], spins[site_index]);
+        local_field =  multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            local_field = local_field + multiply(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
+            local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
