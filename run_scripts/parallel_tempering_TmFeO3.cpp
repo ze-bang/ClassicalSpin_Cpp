@@ -1,7 +1,7 @@
 #include "experiments.h"
 
 void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double xii, double h, const array<double,3> &fielddir, string dir, const vector<int> &rank_to_write){
-        filesystem::create_directories(dir);
+    filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
