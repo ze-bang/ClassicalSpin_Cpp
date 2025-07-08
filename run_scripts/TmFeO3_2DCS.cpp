@@ -504,7 +504,48 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         array<array<double,3>,8> chi = {{{0}}};
         chi[2] = {{chii,chii,chii}};
         TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
 
+
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
+
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
     }
 
     if (xii != 0.0){
@@ -597,6 +638,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     
     }
+    
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
     double pulse_amp = 1.2;
@@ -724,8 +766,9 @@ int main(int argc, char** argv) {
     double D2 = (argc > 17) ? atof(argv[17]) : 0.0;
     double e1 = (argc > 18) ? atof(argv[18]) : 4.0;
     double e2 = (argc > 19) ? atof(argv[19]) : 0.0;
-    double xii = (argc > 20) ? atof(argv[20]) : 0.05;
-    double h = (argc > 21) ? atof(argv[21]) : 0.0;
+    double chii = (argc > 20) ? atof(argv[20]) : 0.05; // Trilinear coupling parameter
+    double xii = (argc > 21) ? atof(argv[21]) : 0.0;
+    double h = (argc > 22) ? atof(argv[22]) : 0.0;
 
     J1c /= J1ab;
     J2ab /= J1ab;
@@ -738,11 +781,11 @@ int main(int argc, char** argv) {
     e2 /= J1ab;
     h /= J1ab;
     J1ab = 1;
-    string dir_name = (argc > 22) ? argv[22] : "TmFeO3_2DCS_xii=0.05";
+    string dir_name = (argc > 23) ? argv[23] : "TmFeO3_2DCS_xii=0.05";
     filesystem::create_directories(dir_name);
-    int slurm_ID = (argc > 23) ? atoi(argv[23]) : 1;
-    int total_jobs = (argc > 24) ? atoi(argv[24]) : 1;
-    string spin_config_file = (argc > 25) ? argv[25] : "TFO_4_0_xii=0.05/spin_zero.txt";
+    int slurm_ID = (argc > 24) ? atoi(argv[24]) : 1;
+    int total_jobs = (argc > 25) ? atoi(argv[25]) : 1;
+    string spin_config_file = (argc > 26) ? argv[26] : "TFO_4_0_xii=0.05/spin_zero.txt";
 
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;
