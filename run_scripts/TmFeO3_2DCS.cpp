@@ -639,6 +639,10 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     
     }
     
+    //
+    cout << "Finished setting up TmFeO3 model." << endl;
+    cout << "Starting calculations..." << endl;
+
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
     double pulse_amp = 1.2;
@@ -651,6 +655,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
 
     mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
+
+    cout << "Initialized mixed lattice with CUDA support." << endl;
     // Continue with the rest of the initialization code...
     if (spin_config != ""){
         // Check if the spin configuration file exists
@@ -766,7 +772,7 @@ int main(int argc, char** argv) {
     double D2 = (argc > 17) ? atof(argv[17]) : 0.0;
     double e1 = (argc > 18) ? atof(argv[18]) : 4.0;
     double e2 = (argc > 19) ? atof(argv[19]) : 0.0;
-    double chii = (argc > 20) ? atof(argv[20]) : 0.05; // Trilinear coupling parameter
+    double chii = (argc > 20) ? atof(argv[20]) : 0.05; // TmFeO bilinear coupling parameter
     double xii = (argc > 21) ? atof(argv[21]) : 0.0;
     double h = (argc > 22) ? atof(argv[22]) : 0.0;
 
@@ -797,7 +803,7 @@ int main(int argc, char** argv) {
     string output_dir = dir_name+"/"+std::to_string(slurm_ID);
     filesystem::create_directories(output_dir);
     bool if_zero_is_in_T_range = slurm_ID == 0;
-    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
+    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
 

@@ -274,6 +274,6 @@ int main(int argc, char** argv) {
     double T_end = argv[16] ? atof(argv[16]) : 0.0;
     cout << "Begin parallel tempering on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << endl;
     cout << "T_start: " << T_start << " T_end: " << T_end << endl;
-    parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, xii, h, {0,1,0}, dir_name, rank_to_write);    
+    parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0,1,0}, dir_name, rank_to_write);    
     return 0;
 }

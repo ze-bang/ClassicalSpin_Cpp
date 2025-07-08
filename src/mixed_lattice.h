@@ -144,7 +144,7 @@ class mixed_lattice
 
     //Look up table for SU2 and SU3 mix
     array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_interaction_SU2;
-    array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_interaction_SU3;
+    array<vector<array<double, N_SU2 * N_SU3>>, N_ATOMS_SU3*dim1*dim2*dim> mixed_bilinear_interaction_SU3;
     array<vector<size_t>, N_ATOMS_SU2*dim1*dim2*dim> mixed_bilinear_partners_SU2;
     array<vector<size_t>, N_ATOMS_SU3*dim1*dim2*dim> mixed_bilinear_partners_SU3;
 
@@ -445,15 +445,14 @@ class mixed_lattice
         lattice_size_SU2 = dim1 * dim2 * dim * N_ATOMS_SU2;
         lattice_size_SU3 = dim1 * dim2 * dim * N_ATOMS_SU3;
 
-        // Process trilinear mixed interactions in parallel across outer loop dimensions
+        cout << "Mixed lattice initialized with SU2 size: " << lattice_size_SU2 
+             << ", SU3 size: " << lattice_size_SU3 << endl;
+
+        // Process bilinear mixed interactions in parallel across outer loop dimensions
         #pragma omp parallel for collapse(3) schedule(static)
         for (size_t i = 0; i < dim1; ++i) {
             for (size_t j = 0; j < dim2; ++j) {
                 for (size_t k = 0; k < dim; ++k) {
-                    // Thread-local vectors to avoid synchronization overhead
-                    vector<vector<array<double, N_SU2 * N_SU3>>> local_mixed_bilinear_interaction_SU2(N_ATOMS_SU2);
-                    vector<vector<size_t>> local_mixed_bilinear_partners_SU2(N_ATOMS_SU2);
-                    
                     for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
                         const size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU3);
 
@@ -464,32 +463,18 @@ class mixed_lattice
                             const size_t partner = flatten_index_periodic_boundary(
                                 i + J.offset[0], j + J.offset[1], k + J.offset[2], J.partner, N_ATOMS_SU2);
 
-                            // Add directly to site-specific array for SU3
-                            #pragma omp critical(SU3_update)
-                            {
-                                mixed_bilinear_interaction_SU3[current_site_index].push_back(J.bilinear_interaction);
-                                mixed_bilinear_partners_SU3[current_site_index].push_back(partner);
-                            }
+                            mixed_bilinear_interaction_SU3[current_site_index].push_back(J.bilinear_interaction);
+                            mixed_bilinear_partners_SU3[current_site_index].push_back(partner);
                             
                             // Precompute transposed tensors once
                             const auto transposed = transpose2D<N_SU3, N_SU2>(J.bilinear_interaction);
 
-                            local_mixed_bilinear_interaction_SU2[partner].push_back(transposed);
-                            local_mixed_bilinear_partners_SU2[partner].push_back(current_site_index);
-
-                        }
-                    }
-                    
-                    // Merge thread-local data into global arrays
-                    #pragma omp critical(SU2_update)
-                    {
-                        for (size_t idx = 0; idx < local_mixed_bilinear_interaction_SU2.size(); ++idx) {
-                            for (size_t v = 0; v < local_mixed_bilinear_interaction_SU2[idx].size(); ++v) {
-                                mixed_bilinear_interaction_SU2[idx].push_back(
-                                    local_mixed_bilinear_interaction_SU2[idx][v]);
-                                mixed_bilinear_partners_SU2[idx].push_back(
-                                    local_mixed_bilinear_partners_SU2[idx][v]);
+                            #pragma omp critical(bilinear_SU2_update)
+                            {
+                                mixed_bilinear_interaction_SU2[partner].push_back(transposed);
+                                mixed_bilinear_partners_SU2[partner].push_back(current_site_index);
                             }
+
                         }
                     }
                 }

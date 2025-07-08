@@ -290,7 +290,7 @@ struct mixed_UnitCell{
     };
 
     void set_mix_bilinear_interaction(array<array<double,N_SU2>, N_SU3> &bin, int source, int partner, const array<int, 3> & offset){
-        mixed_bilinear<N_SU2, N_SU3> b_set(bin, partner, offset);
+        mixed_bilinear<N_SU3, N_SU2> b_set(bin, partner, offset);
         bilinear_SU2_SU3.insert(make_pair(source, b_set));
     };
 
