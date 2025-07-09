@@ -152,6 +152,7 @@ public:
     
     // Mixed interaction arrays
     double* d_mixed_bilinear_interaction_SU2;   // [lattice_size_SU2 * max_mixed_neighbors * N_SU2 * N_SU3]
+    double* d_mixed_bilinear_interaction_SU3;   // [lattice_size_SU3 * max_mixed_neighbors * N_SU2 * N_SU3]
     size_t* d_mixed_bilinear_partners_SU2;      // [lattice_size_SU2 * max_mixed_neighbors * 2]
     size_t* d_mixed_bilinear_partners_SU3;      // [lattice_size_SU3 * max_mixed_neighbors * 2]
     
@@ -213,6 +214,7 @@ public:
         d_trilinear_partners_SU2 = nullptr;
         d_trilinear_partners_SU3 = nullptr;
         d_mixed_bilinear_interaction_SU2 = nullptr;
+        d_mixed_bilinear_interaction_SU3 = nullptr;
         d_mixed_bilinear_partners_SU2 = nullptr;
         d_mixed_bilinear_partners_SU3 = nullptr;
         d_mixed_trilinear_interaction_SU2 = nullptr;
@@ -382,6 +384,7 @@ private:
         // Allocate mixed interaction arrays
         if (max_mixed_bilinear_neighbors_SU2 > 0) {
             cudaMalloc(&d_mixed_bilinear_interaction_SU2, lattice_size_SU2 * max_mixed_bilinear_neighbors_SU2 * N_SU2 * N_SU3 * sizeof(double));
+            cudaMalloc(&d_mixed_bilinear_interaction_SU3, lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * N_SU2 * N_SU3 * sizeof(double));
             cudaMalloc(&d_mixed_bilinear_partners_SU2, lattice_size_SU2 * max_mixed_bilinear_neighbors_SU2 * 2 * sizeof(size_t));
             cudaMalloc(&d_mixed_bilinear_partners_SU3, lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * 2 * sizeof(size_t));
         }
@@ -602,27 +605,45 @@ private:
         if (max_mixed_bilinear_neighbors_SU2 > 0){ 
             std::vector<double> temp_mixed_bi_SU2(lattice_size_SU2 * max_mixed_bilinear_neighbors_SU2 * N_SU2 * N_SU3, 0.0);
             std::vector<size_t> temp_mixed_bi_partners_SU2(lattice_size_SU2 * max_mixed_bilinear_neighbors_SU2, 0);
-            std::vector<size_t> temp_mixed_bi_partners_SU3(lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3, 0);
             // Fill mixed bilinear data for SU2
             for (size_t site = 0; site < lattice_size_SU2; ++site) {
                 const auto& interactions = this->mixed_bilinear_interaction_SU2[site];
-                const auto& partners_SU2 = this->mixed_bilinear_partners_SU2[site];
-                const auto& partners_SU3 = this->mixed_bilinear_partners_SU3[site];
+                const auto& partner = this->mixed_bilinear_partners_SU2[site];
 
                 for (size_t i = 0; i < max_mixed_bilinear_neighbors_SU2; ++i) {
                     size_t base_idx = site * max_mixed_bilinear_neighbors_SU2 * N_SU2 * N_SU3 + i * N_SU2 * N_SU3;
                     for (size_t j = 0; j < N_SU2 * N_SU3; ++j) {
                         temp_mixed_bi_SU2[base_idx + j] = interactions[i][j];
                     }
-                    temp_mixed_bi_partners_SU2[site * max_mixed_bilinear_neighbors_SU2 + i] = partners_SU2[i];
-                    temp_mixed_bi_partners_SU3[site * max_mixed_bilinear_neighbors_SU3 + i] = partners_SU3[i];
+                    temp_mixed_bi_partners_SU2[site * max_mixed_bilinear_neighbors_SU2 + i] = partner[i];
                 }
             }
 
             cudaMemcpy(d_mixed_bilinear_interaction_SU2, temp_mixed_bi_SU2.data(), temp_mixed_bi_SU2.size() * sizeof(double), cudaMemcpyHostToDevice);
             cudaMemcpy(d_mixed_bilinear_partners_SU2, temp_mixed_bi_partners_SU2.data(), temp_mixed_bi_partners_SU2.size() * sizeof(size_t), cudaMemcpyHostToDevice);
+        }
+
+        if (max_mixed_bilinear_neighbors_SU3 > 0){ 
+            std::vector<double> temp_mixed_bi_SU3(lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * N_SU2 * N_SU3, 0.0);
+            std::vector<size_t> temp_mixed_bi_partners_SU3(lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3, 0);
+            // Fill mixed bilinear data for SU2
+            for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                const auto& interactions = this->mixed_bilinear_interaction_SU2[site];
+                const auto& partner = this->mixed_bilinear_partners_SU3[site];
+
+                for (size_t i = 0; i < max_mixed_bilinear_neighbors_SU2; ++i) {
+                    size_t base_idx = site * max_mixed_bilinear_neighbors_SU2 * N_SU2 * N_SU3 + i * N_SU2 * N_SU3;
+                    for (size_t j = 0; j < N_SU2 * N_SU3; ++j) {
+                        temp_mixed_bi_SU3[base_idx + j] = interactions[i][j];
+                    }
+                    temp_mixed_bi_partners_SU3[site * max_mixed_bilinear_neighbors_SU3 + i] = partner[i];
+                }
+            }
+
+            cudaMemcpy(d_mixed_bilinear_interaction_SU3, temp_mixed_bi_SU3.data(), temp_mixed_bi_SU3.size() * sizeof(double), cudaMemcpyHostToDevice);
             cudaMemcpy(d_mixed_bilinear_partners_SU3, temp_mixed_bi_partners_SU3.data(), temp_mixed_bi_partners_SU3.size() * sizeof(size_t), cudaMemcpyHostToDevice);
         }
+
 
         if (max_mixed_trilinear_neighbors_SU2 > 0){
             std::vector<double> temp_mixed_tri_SU2(lattice_size_SU2 * max_mixed_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3, 0.0);
@@ -739,6 +760,10 @@ private:
         if (d_mixed_bilinear_interaction_SU2) {
             cudaFree(d_mixed_bilinear_interaction_SU2);
             d_mixed_bilinear_interaction_SU2 = nullptr;
+        }
+        if (d_mixed_bilinear_interaction_SU3) {
+            cudaFree(d_mixed_bilinear_interaction_SU3);
+            d_mixed_bilinear_interaction_SU3 = nullptr;
         }
         if (d_mixed_bilinear_partners_SU2) {
             cudaFree(d_mixed_bilinear_partners_SU2);
