@@ -809,9 +809,9 @@ int main(int argc, char** argv) {
 
     cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " xi::" << xii << " saving to: " << dir_name << endl;
     cout << "Reading from " << spin_config_file << endl;
-    string output_dir = dir_name+"/"+std::to_string(slurm_ID);
+    string output_dir = dir_name;
     filesystem::create_directories(output_dir);
-    bool if_zero_is_in_T_range = slurm_ID == 0;
+    bool if_zero_is_in_T_range = slurm_ID == 1;
     MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
