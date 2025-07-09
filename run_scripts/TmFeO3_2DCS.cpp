@@ -397,6 +397,12 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
+    // Check for valid MPI size to prevent division by zero
+    if (size <= 0) {
+        cout << "Error: Invalid MPI size (" << size << "). Setting size to 1." << endl;
+        size = 1;
+    }
+    
     // Get CUDA device count and assign GPUs to MPI ranks
     int device_count;
     cudaGetDeviceCount(&device_count);
@@ -793,6 +799,8 @@ int main(int argc, char** argv) {
     int slurm_ID = (argc > 24) ? atoi(argv[24]) : 1;
     int total_jobs = (argc > 25) ? atoi(argv[25]) : 1;
     string spin_config_file = (argc > 26) ? argv[26] : "TFO_4_0_xii=0.05/spin_zero.txt";
+
+    cout << "Slurm ID: " << slurm_ID << ", Total Jobs: " << total_jobs << endl;
 
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;
