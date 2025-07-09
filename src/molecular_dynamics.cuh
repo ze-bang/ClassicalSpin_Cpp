@@ -1144,9 +1144,21 @@ public:
                 temp_drive2_SU2[i * N_SU2 + j] = this->field_drive_2_SU2[i][j];
             }
         }
+
+        std::vector<double> temp_drive1_SU3(N_ATOMS_SU3 * N_SU3);
+        std::vector<double> temp_drive2_SU3(N_ATOMS_SU3 * N_SU3);
+        for (size_t i = 0; i < N_ATOMS_SU3; ++i) {
+            for (size_t j = 0; j < N_SU3; ++j) {
+                temp_drive1_SU3[i * N_SU3 + j] = this->field_drive_1_SU3[i][j];
+                temp_drive2_SU3[i * N_SU3 + j] = this->field_drive_2_SU3[i][j];
+            }
+        }
         
         cudaMemcpy(d_field_drive_1_SU2, temp_drive1_SU2.data(), N_ATOMS_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
         cudaMemcpy(d_field_drive_2_SU2, temp_drive2_SU2.data(), N_ATOMS_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_field_drive_1_SU3, temp_drive1_SU3.data(), N_ATOMS_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_field_drive_2_SU3, temp_drive2_SU3.data(), N_ATOMS_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
+
 
         std::cout << "Running M_B_t_cuda with T_start: " << T_start << ", T_end: " << T_end 
                   << ", step_size: " << step_size << ", dir_name: " << dir_name 
@@ -1184,9 +1196,21 @@ public:
                 temp_drive2_SU2[i * N_SU2 + j] = this->field_drive_2_SU2[i][j];
             }
         }
+
+        std::vector<double> temp_drive1_SU3(N_ATOMS_SU3 * N_SU3);
+        std::vector<double> temp_drive2_SU3(N_ATOMS_SU3 * N_SU3);
+        for (size_t i = 0; i < N_ATOMS_SU3; ++i) {
+            for (size_t j = 0; j < N_SU3; ++j) {
+                temp_drive1_SU3[i * N_SU3 + j] = this->field_drive_1_SU3[i][j];
+                temp_drive2_SU3[i * N_SU3 + j] = this->field_drive_2_SU3[i][j];
+            }
+        }
         
         cudaMemcpy(d_field_drive_1_SU2, temp_drive1_SU2.data(), N_ATOMS_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
         cudaMemcpy(d_field_drive_2_SU2, temp_drive2_SU2.data(), N_ATOMS_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_field_drive_1_SU3, temp_drive1_SU3.data(), N_ATOMS_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_field_drive_2_SU3, temp_drive2_SU3.data(), N_ATOMS_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
+
 
         // Run molecular dynamics with CUDA
         molecular_dynamics_cuda(T_start, T_end, step_size, dir_name, output_frequency, use_adaptive_stepping);
@@ -1673,7 +1697,7 @@ void LLG_kernel(
     size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
     size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt);
 
@@ -1694,7 +1718,7 @@ void SSPRK53_step_kernel(
     size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
     size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
     double* work_SU2_1, double* work_SU2_2, double* work_SU2_3,
@@ -1716,48 +1740,7 @@ void euler_step_kernel(
     size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
     size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
     size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3);
-
-template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
-__global__
-void get_local_field(
-    double* k_SU2, double* k_SU3,
-    double* d_spins_SU2, double* d_spins_SU3,
-    double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt);
-
-template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
-__host__
-void get_local_field_kernel(
-    double* d_spins_SU2, double* d_spins_SU3,
-    double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
+    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3);
 
