@@ -1088,45 +1088,73 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     cudaFree(d_local_fields_SU3);
 }
 
-
 //Explicitly declare template specializations for the mixed lattice class
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
-template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(
-    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
-    double*, double*, double*, double*, double, double, double, double, double, double, double
-);
+template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(double*, double*, double*, double*, 
+    double* , double* ,double* , double* ,double* , double* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    size_t , size_t , size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    double* , double* , double* , double* ,
+    double , double , double , double , double ,
+    double , double );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4>;
-template void __global__ LLG_kernel<3, 4, 256, 8, 4, 256>(
-    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
-    double*, double*, double*, double*, double, double, double, double, double, double, double
-);
+template void __global__ LLG_kernel<3, 4, 256, 8, 4, 256>(double*, double*, double*, double*, 
+    double* , double* ,double* , double* ,double* , double* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    size_t , size_t , size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    double* , double* , double* , double* ,
+    double , double , double , double , double ,
+    double , double );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 1, 1, 1>;
-template void __global__ LLG_kernel<3, 4, 4, 8, 4, 4>(
-    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
-    double*, double*, double*, double*, double, double, double, double, double, double, double
-);
-
+template void __global__ LLG_kernel<3, 4, 4, 8, 4, 4>(double*, double*, double*, double*, 
+    double* , double* ,double* , double* ,double* , double* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    size_t , size_t , size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    double* , double* , double* , double* ,
+    double , double , double , double , double ,
+    double , double );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 2, 2, 2>;
-template void __global__ LLG_kernel<3, 4, 32, 8, 4, 32>(
-    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
-    double*, double*, double*, double*, double, double, double, double, double, double, double
-);
+template void __global__ LLG_kernel<3, 4, 32, 8, 4, 32>(double*, double*, double*, double*, 
+    double* , double* ,double* , double* ,double* , double* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    size_t , size_t , size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    double* , double* , double* , double* ,
+    double , double , double , double , double ,
+    double , double );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 3, 3, 3>;
-template void __global__ LLG_kernel<3, 4, 108, 8, 4, 108>(
-    double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
-    double*, double*, double*, double*, double, double, double, double, double, double, double
-);
+template void __global__ LLG_kernel<3, 4, 108, 8, 4, 108>(double*, double*, double*, double*, 
+    double* , double* ,double* , double* ,double* , double* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    double* , double* ,size_t* , size_t* ,
+    size_t , size_t , size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    size_t , size_t , size_t , size_t ,
+    double* , double* , double* , double* ,
+    double , double , double , double , double ,
+    double , double );

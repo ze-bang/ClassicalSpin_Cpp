@@ -167,7 +167,7 @@ public:
     double d_field_drive_freq_SU3, d_field_drive_amp_SU3, d_field_drive_width_SU3;
     double d_t_B_1_SU3, d_t_B_2_SU3;
     
-    size_t d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3;
+    size_t d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_bi_SU2_SU3, d_num_tri_SU2_SU3;
     
     // Maximum neighbor counts (determined from host data)
     size_t max_bilinear_neighbors_SU2;
@@ -238,6 +238,7 @@ public:
         d_num_tri_SU2 = this->num_tri_SU2;
         d_num_bi_SU3 = this->num_bi_SU3;
         d_num_tri_SU3 = this->num_tri_SU3;
+        d_num_bi_SU2_SU3 = this->num_bi_SU2_SU3;
         d_num_tri_SU2_SU3 = this->num_tri_SU2_SU3;
 
         // Print all parameters of the base class
@@ -268,6 +269,7 @@ public:
         std::cout << "num_tri_SU2: " << this->num_tri_SU2 << std::endl;
         std::cout << "num_bi_SU3: " << this->num_bi_SU3 << std::endl;
         std::cout << "num_tri_SU3: " << this->num_tri_SU3 << std::endl;
+        std::cout << "num_bi_SU2_SU3: " << this->num_bi_SU2_SU3 << std::endl;
         std::cout << "num_tri_SU2_SU3: " << this->num_tri_SU2_SU3 << std::endl;
         
         // Unit cell info
@@ -788,6 +790,7 @@ public:
         outfile << "Number of trilinear interactions SU2: " << d_num_tri_SU2 << endl;
         outfile << "Number of bilinear interactions SU3: " << d_num_bi_SU3 << endl;
         outfile << "Number of trilinear interactions SU3: " << d_num_tri_SU3 << endl;
+        outfile << "Number of mixed bilinear interactions SU2-SU3: " << d_num_bi_SU2_SU3 << endl;
         outfile << "Number of mixed trilinear interactions SU2-SU3: " << d_num_tri_SU2_SU3 << endl;
 
         // Get data from device for display
@@ -1770,14 +1773,17 @@ void SSPRK53_step_kernel(
     size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
     double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
     size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
+    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
     double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
     size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
+    // Pre-allocated working arrays passed from caller
     double* work_SU2_1, double* work_SU2_2, double* work_SU2_3,
     double* work_SU3_1, double* work_SU3_2, double* work_SU3_3);
 
@@ -1792,11 +1798,13 @@ void euler_step_kernel(
     size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
     double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
     size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
+    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
     double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
     size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3);
