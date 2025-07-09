@@ -545,11 +545,13 @@ void LLG_kernel(
     size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
     double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
     size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
+    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
     double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
     size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt)
@@ -562,9 +564,10 @@ void LLG_kernel(
         d_local_field_SU2, site_index, d_spins_SU2, d_field_SU2, d_onsite_interaction_SU2,
         d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
         d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_partners_SU2,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        d_spins_SU3, num_bi_SU2, num_tri_SU2, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2);
+        d_spins_SU3, num_bi_SU2, num_tri_SU2, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2);
 
         // Add drive field if applicable
         drive_field_T_SU2<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
@@ -582,9 +585,10 @@ void LLG_kernel(
             d_local_field_SU3, site_index_SU3, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
             d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
             d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
+            d_mixed_bilinear_interaction_SU3, d_mixed_bilinear_partners_SU3,
             d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-            d_spins_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-            max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+            d_spins_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+            max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3);
 
         drive_field_T_SU3<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
             d_local_field_SU3, curr_time, site_index_SU3, d_field_drive_1_SU3, d_field_drive_2_SU3, 
@@ -666,11 +670,13 @@ void SSPRK53_step_kernel(
     size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
     double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
     size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
+    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
     double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
     size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
@@ -731,11 +737,13 @@ void SSPRK53_step_kernel(
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time, dt);
@@ -756,11 +764,13 @@ void SSPRK53_step_kernel(
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c1_h, dt);
@@ -781,11 +791,13 @@ void SSPRK53_step_kernel(
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c2_h, dt);
@@ -806,11 +818,13 @@ void SSPRK53_step_kernel(
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c3_h, dt);
@@ -831,11 +845,13 @@ void SSPRK53_step_kernel(
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time + c4_h, dt);
@@ -890,11 +906,13 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     d_bilinear_partners_SU2, d_bilinear_partners_SU3,
     d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
     d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+    d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+    d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
     d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
     d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-    d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3,
-    max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
-    max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
+    d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_bi_SU2_SU3, d_num_tri_SU2_SU3,
+    max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_bilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
+    max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_bilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
     d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
     d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
     curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3,
@@ -924,11 +942,13 @@ void euler_step_kernel(
     size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
     double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
     size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
+    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
+    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
     double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
     size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
+    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
+    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
+    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
     double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
     double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
     double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
@@ -968,11 +988,13 @@ void euler_step_kernel(
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_tri_neighbors_SU3,
+        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
+        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
+        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time, dt);
@@ -1041,11 +1063,13 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         d_bilinear_partners_SU2, d_bilinear_partners_SU3,
         d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
         d_trilinear_partners_SU2, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
+        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
         d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
         d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3,
-        max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
-        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
+        d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_bi_SU2_SU3, d_num_tri_SU2_SU3,
+        max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_bilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
+        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_bilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);
@@ -1069,24 +1093,24 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
 template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(
     double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
     double*, double*, double*, double*, double, double, double, double, double, double, double
 );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4>;
 template void __global__ LLG_kernel<3, 4, 256, 8, 4, 256>(
     double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
     double*, double*, double*, double*, double, double, double, double, double, double, double
 );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 1, 1, 1>;
 template void __global__ LLG_kernel<3, 4, 4, 8, 4, 4>(
     double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
     double*, double*, double*, double*, double, double, double, double, double, double, double
 );
 
@@ -1094,15 +1118,15 @@ template void __global__ LLG_kernel<3, 4, 4, 8, 4, 4>(
 template class mixed_lattice_cuda<3, 4, 8, 4, 2, 2, 2>;
 template void __global__ LLG_kernel<3, 4, 32, 8, 4, 32>(
     double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
     double*, double*, double*, double*, double, double, double, double, double, double, double
 );
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 3, 3, 3>;
 template void __global__ LLG_kernel<3, 4, 108, 8, 4, 108>(
     double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*,
-    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
-    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
+    unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*, double*, double*, unsigned long*, unsigned long*,
+    unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long,
     double*, double*, double*, double*, double, double, double, double, double, double, double
 );
