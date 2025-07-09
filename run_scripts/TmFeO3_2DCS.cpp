@@ -700,6 +700,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         filesystem::create_directories(dir+"/M_time_0");
         // Use the CUDA version of the method
         MC.read_spin_from_file(spin_config);
+        cout << "Calculating M0..." << endl;
         MC.M_B_t_cuda(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
         ofstream run_param;
         run_param.open(dir + "/param.txt");
