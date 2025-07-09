@@ -1589,6 +1589,8 @@ void drive_field_T_SU3(
     // Early exit if factors are small
     if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
 
+    int site_sublattice_base = site_index % N_ATOMS_SU3;
+
     // Initialize output with direct field contribution
     #pragma unroll
     for (size_t i = 0; i < N_SU3; ++i) {
