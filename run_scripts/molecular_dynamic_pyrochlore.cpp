@@ -1,5 +1,5 @@
 #include "experiments.h"
-void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=false){
+void MD_pyrochlore(double T_target, size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=false){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -99,7 +99,7 @@ void MD_pyrochlore(size_t num_trials, double Jxx, double Jyy, double Jzz, double
     double k_B = 0.08620689655;
     for(int i=start; i<end;++i){
         lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, 1e-2, 1e5, 10, true);
+        MC.simulated_annealing(5, T_target, 1e5, 10, true);
         MC.molecular_dynamics(0, 600, 0.01, dir+"/"+std::to_string(i));
         if(dir != ""){
             filesystem::create_directory(dir);
@@ -146,7 +146,8 @@ int main(int argc, char** argv) {
     string dir_name = argv[7] ? argv[7] : "";
     filesystem::create_directory(dir_name);
     int num_trials = argv[8] ? atoi(argv[8]) : 1;
+    double T_target = argv[9] ? atof(argv[9]) : 0.0;
     std::cout << "Initializing molecular dynamic calculation with parameters: Jxx: " << Jxx << " Jyy: " << Jyy << " Jzz: " << Jzz << " Jxz: " << Jxz << " H: " << h << " field direction : " << dir_string << " saving to: " << dir_name << endl;
-    MD_pyrochlore(num_trials, Jxx, Jyy, Jzz, 0.0, 0.0, 1, h, field_dir, dir_name, Jxz);
+    MD_pyrochlore(T_target, num_trials, Jxx, Jyy, Jzz, 0.0, 0.0, 1, h, field_dir, dir_name, Jxz);
     return 0;
 }
