@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import os
 from math import gcd
 from functools import reduce
+from mpi4py import MPI
+import time
 # plt.rcParams['text.usetex'] = True
 
 
@@ -503,83 +505,100 @@ def read_2D_nonlinear(dir):
 
 def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
     """
-    Process 2D nonlinear spectroscopy data with adaptive time steps.
+    Process 2D nonlinear spectroscopy data with adaptive time steps using MPI for parallelization.
     
     Args:
         dir: Directory containing the spectroscopy data
+        readslice: The slice of data to read from the files.
+        fm: Boolean flag to determine which file to read.
     """
-    directory = os.path.abspath(dir)  # Use absolute path for reliability
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    directory = os.path.abspath(dir)
     
     if fm:
         readfile = "M_t_f.txt"
     else:
         readfile = "M_t.txt"
-    
-    # Load M0 data once
-    m0_file = os.path.join(directory, "M_time_0.000000/M1/" + readfile)
+
+    # All processes need M0 data and frequency setup
+    m0_file = os.path.join(directory, "M_time_0.000000/M1/", readfile)
     m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
 
-    time_steps = len(np.loadtxt(m0_time_file))
-
     try:
-        M0 = np.loadtxt(m0_file)[-time_steps:,readslice]
-        M0_T = np.loadtxt(m0_time_file)
+        # Ensure all processes don't read the file at the exact same time on a shared filesystem
+        time.sleep(0.1 * rank)
+        m0_data = np.loadtxt(m0_file)
+        m0_time_data = np.loadtxt(m0_time_file)
+        time_steps = np.min([len(m0_data), len(m0_time_data)])
+        M0 = m0_data[-time_steps:, readslice]
+        M0_T = m0_time_data[-time_steps:]
     except (IOError, IndexError) as e:
-        print(f"Error loading M0 data: {e}")
+        if rank == 0:
+            print(f"Error loading M0 data: {e}")
+        # Ensure all processes exit if M0 data is not available
+        comm.Abort()
         return
-    
-    # Setup frequency range
+
     omega_range = 3
     w = np.arange(0, omega_range, 0.1)
     wp = np.arange(-omega_range, omega_range, 0.1)
 
-    # Precompute M0 frequency domain data
     M0_phase = np.exp(1j * np.outer(wp, M0_T))
     M0_w = np.dot(M0, M0_phase.T)
+
+    # Initialize local result array for each process
+    local_M_NL_FF = np.zeros((len(wp), len(w)), dtype=complex)
     
-    # Initialize result array
-    M_NL_FF = np.zeros((len(wp), len(w)), dtype=complex)
-    
-    # Calculate tau values by extracting from directory names
+    subdirs_to_process = []
     tau_values = []
-    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
-    
-    for subdir in subdirs:
-        if subdir.startswith("M_time_") and subdir != "M_time_0":
-            try:
-                parts = subdir.split("_")
-                if len(parts) >= 3:
-                    tau_val = float(parts[2])
-                    tau_values.append(tau_val)
-            except (ValueError, IndexError):
-                continue
-    
-    tau = np.array(sorted(tau_values))
-    
-    # Process directories
-    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
-    
-    for subdir in sorted(subdirs):
-        if subdir == "M_time_0":
-            continue
-            
+
+    # Rank 0 discovers the directories and tau values
+    if rank == 0:
+        all_subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+        for subdir in all_subdirs:
+            if subdir.startswith("M_time_") and subdir != "M_time_0.000000":
+                try:
+                    parts = subdir.split("_")
+                    if len(parts) >= 3:
+                        tau_val = float(parts[2])
+                        tau_values.append(tau_val)
+                        subdirs_to_process.append(subdir)
+                except (ValueError, IndexError):
+                    continue
+        tau_values.sort()
+        subdirs_to_process.sort()
+
+    # Broadcast the list of directories and tau values to all processes
+    subdirs_to_process = comm.bcast(subdirs_to_process, root=0)
+    tau_values = comm.bcast(tau_values, root=0)
+    tau = np.array(tau_values)
+
+    # Distribute directories among processes
+    dirs_per_process = np.array_split(subdirs_to_process, size)
+    my_dirs = dirs_per_process[rank]
+
+    # Each process works on its subset of directories
+    for subdir in my_dirs:
         try:
-            # Parse tau value from directory name
-            parts = subdir.split("_")
-            if len(parts) != 3:
-                continue
-                
-            current_tau = float(parts[2])
+            current_tau = float(subdir.split("_")[2])
             base_path = os.path.join(directory, subdir)
             
-            # Load M1 data
-            M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:,readslice]
-            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
-            # Load M01 data
-            M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:,readslice]
-            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
-            
-            # Transform to frequency domain
+            m1_data = np.loadtxt(os.path.join(base_path, "M1/", readfile))
+            m1_time = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
+            m01_data = np.loadtxt(os.path.join(base_path, "M01/", readfile))
+            m01_time = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
+
+            ts = np.min([len(m1_data), len(m1_time), len(m01_data), len(m01_time), time_steps])
+
+            M1 = m1_data[-ts:, readslice]
+            M1_T = m1_time[-ts:]
+            M01 = m01_data[-ts:, readslice]
+            M01_T = m01_time[-ts:]
+
             M1_phase = np.exp(1j * np.outer(wp, M1_T))
             M01_phase = np.exp(1j * np.outer(wp, M01_T))
             
@@ -587,130 +606,148 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
             M01_w = np.dot(M01, M01_phase.T)
             M_NL_here = M01_w - M0_w - M1_w
             
-            # Apply phase factor
-            ffactau = np.exp(-1j * w * current_tau) / len(tau)
-            M_NL_FF += np.outer(M_NL_here, ffactau)
+            ffactau = np.exp(-1j * w * current_tau)
+            local_M_NL_FF += np.outer(M_NL_here, ffactau)
             
         except Exception as e:
-            print(f"Error processing {subdir}: {e}")
+            print(f"Rank {rank} error processing {subdir}: {e}")
             continue
-    
-    # Take absolute value for plotting
-    M_NL_FF_abs = np.abs(M_NL_FF)
 
-    # Suppress intensity near (0,0)
-    M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
+    # Reduce (sum) the results from all processes to rank 0
+    global_M_NL_FF = np.zeros_like(local_M_NL_FF)
+    comm.Reduce([local_M_NL_FF, MPI.COMPLEX], [global_M_NL_FF, MPI.COMPLEX], op=MPI.SUM, root=0)
 
-    # Save raw data
-    output_file = os.path.join(directory, "M_NL_FF.txt")
-    np.savetxt(output_file, M_NL_FF_abs)
-    
-    # Create plots with shared setup
-    plt.figure(figsize=(10, 8))
-    extent = [0, omega_range, -omega_range, omega_range]
-    
-    # Linear scale plot
-    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
-    plt.xlabel('Frequency (J1)')
-    plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
-    plt.clf()
-    
-    # Log scale plot
-    plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Log Amplitude')
-    plt.xlabel('Frequency (THz)')
-    plt.ylabel('Frequency (THz)')
-    plt.title('2D Nonlinear Spectrum (Log Scale)')
-    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    return M_NL_FF_abs
+    # Rank 0 performs the final steps (saving, plotting)
+    if rank == 0:
+        global_M_NL_FF /= len(tau)
+        M_NL_FF_abs = np.abs(global_M_NL_FF)
+        M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
+
+        output_file = os.path.join(directory, f"M_NL_FF_{readslice}_{fm}.txt")
+        np.savetxt(output_file, M_NL_FF_abs)
+        
+        plt.figure(figsize=(10, 8))
+        extent = [0, omega_range, -omega_range, omega_range]
+        
+        plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
+                  aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum')
+        plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
+        plt.clf()
+        
+        plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
+                  aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Log Amplitude')
+        plt.xlabel('Frequency (THz)')
+        plt.ylabel('Frequency (THz)')
+        plt.title('2D Nonlinear Spectrum (Log Scale)')
+        plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return M_NL_FF_abs
+    else:
+        return None
 
 
 
 def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
     """
-    Process 2D nonlinear spectroscopy data with adaptive time steps.
+    Process 2D nonlinear spectroscopy data with adaptive time steps using MPI for parallelization.
     
     Args:
         dir: Directory containing the spectroscopy data
+        readslice: The slice of data to read from the files.
+        fm: Boolean flag to determine which file to read.
     """
-    directory = os.path.abspath(dir)  # Use absolute path for reliability
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    directory = os.path.abspath(dir)
     
     if fm:
         readfile = "M_t_f_SU3.txt"
     else:
         readfile = "M_t_SU3.txt"
 
-    m0_file = os.path.join(directory, "M_time_0.000000/M1/" + readfile)
+    # All processes need M0 data and frequency setup
+    m0_file = os.path.join(directory, "M_time_0.000000/M1/", readfile)
     m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
-    
-    time_steps = len(np.loadtxt(m0_time_file))
 
     try:
-        M0 = np.loadtxt(m0_file)[-time_steps:,readslice]
-        M0_T = np.loadtxt(m0_time_file)
+        # Ensure all processes don't read the file at the exact same time on a shared filesystem
+        time.sleep(0.1 * rank)
+        m0_data = np.loadtxt(m0_file)
+        m0_time_data = np.loadtxt(m0_time_file)
+        time_steps = np.min([len(m0_data), len(m0_time_data)])
+        M0 = m0_data[-time_steps:, readslice]
+        M0_T = m0_time_data[-time_steps:]
     except (IOError, IndexError) as e:
-        print(f"Error loading M0 data: {e}")
+        if rank == 0:
+            print(f"Error loading M0 data: {e}")
+        # Ensure all processes exit if M0 data is not available
+        comm.Abort()
         return
-    
-    # Setup frequency range
+
     omega_range = 3
     w = np.arange(0, omega_range, 0.1)
     wp = np.arange(-omega_range, omega_range, 0.1)
 
-    # Precompute M0 frequency domain data
     M0_phase = np.exp(1j * np.outer(wp, M0_T))
     M0_w = np.dot(M0, M0_phase.T)
+
+    # Initialize local result array for each process
+    local_M_NL_FF = np.zeros((len(wp), len(w)), dtype=complex)
     
-    # Initialize result array
-    M_NL_FF = np.zeros((len(wp), len(w)), dtype=complex)
-    
-    # Calculate tau values by extracting from directory names
+    subdirs_to_process = []
     tau_values = []
-    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
-    
-    for subdir in subdirs:
-        if subdir.startswith("M_time_") and subdir != "M_time_0":
-            try:
-                parts = subdir.split("_")
-                if len(parts) >= 3:
-                    tau_val = float(parts[2])
-                    tau_values.append(tau_val)
-            except (ValueError, IndexError):
-                continue
-    
-    tau = np.array(sorted(tau_values))
-    
-    # Process directories
-    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
-    
-    for subdir in sorted(subdirs):
-        if subdir == "M_time_0":
-            continue
-            
+
+    # Rank 0 discovers the directories and tau values
+    if rank == 0:
+        all_subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+        for subdir in all_subdirs:
+            if subdir.startswith("M_time_") and subdir != "M_time_0.000000":
+                try:
+                    parts = subdir.split("_")
+                    if len(parts) >= 3:
+                        tau_val = float(parts[2])
+                        tau_values.append(tau_val)
+                        subdirs_to_process.append(subdir)
+                except (ValueError, IndexError):
+                    continue
+        tau_values.sort()
+        subdirs_to_process.sort()
+
+    # Broadcast the list of directories and tau values to all processes
+    subdirs_to_process = comm.bcast(subdirs_to_process, root=0)
+    tau_values = comm.bcast(tau_values, root=0)
+    tau = np.array(tau_values)
+
+    # Distribute directories among processes
+    dirs_per_process = np.array_split(subdirs_to_process, size)
+    my_dirs = dirs_per_process[rank]
+
+    # Each process works on its subset of directories
+    for subdir in my_dirs:
         try:
-            # Parse tau value from directory name
-            parts = subdir.split("_")
-            if len(parts) != 3:
-                continue
-                
-            current_tau = float(parts[2])
+            current_tau = float(subdir.split("_")[2])
             base_path = os.path.join(directory, subdir)
             
-            # Load M1 data
-            M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:,readslice]
-            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
-            # Load M01 data
-            M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:,readslice]
-            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
-            
-            # Transform to frequency domain
+            m1_data = np.loadtxt(os.path.join(base_path, "M1/", readfile))
+            m1_time = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
+            m01_data = np.loadtxt(os.path.join(base_path, "M01/", readfile))
+            m01_time = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
+
+            ts = np.min([len(m1_data), len(m1_time), len(m01_data), len(m01_time), time_steps])
+
+            M1 = m1_data[-ts:, readslice]
+            M1_T = m1_time[-ts:]
+            M01 = m01_data[-ts:, readslice]
+            M01_T = m01_time[-ts:]
+
             M1_phase = np.exp(1j * np.outer(wp, M1_T))
             M01_phase = np.exp(1j * np.outer(wp, M01_T))
             
@@ -718,57 +755,118 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
             M01_w = np.dot(M01, M01_phase.T)
             M_NL_here = M01_w - M0_w - M1_w
             
-            # Apply phase factor
-            ffactau = np.exp(-1j * w * current_tau) / len(tau)
-            M_NL_FF += np.outer(M_NL_here, ffactau)
+            ffactau = np.exp(-1j * w * current_tau)
+            local_M_NL_FF += np.outer(M_NL_here, ffactau)
             
         except Exception as e:
-            print(f"Error processing {subdir}: {e}")
+            print(f"Rank {rank} error processing {subdir}: {e}")
             continue
-    
-    # Take absolute value for plotting
-    M_NL_FF_abs = np.abs(M_NL_FF)
 
-    M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
+    # Reduce (sum) the results from all processes to rank 0
+    global_M_NL_FF = np.zeros_like(local_M_NL_FF)
+    comm.Reduce([local_M_NL_FF, MPI.COMPLEX], [global_M_NL_FF, MPI.COMPLEX], op=MPI.SUM, root=0)
 
-    # Save raw data
-    output_file = os.path.join(directory, "M_NL_FF_SU3.txt")
-    np.savetxt(output_file, M_NL_FF_abs)
-    
-    # Create plots with shared setup
-    plt.figure(figsize=(10, 8))
-    extent = [0, omega_range, -omega_range, omega_range]
-    
-    # Linear scale plot
-    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
-    plt.xlabel('Frequency (J1)')
-    plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
-    plt.clf()
-    
-    # Log scale plot
-    plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Log Amplitude')
-    plt.xlabel('Frequency (THz)')
-    plt.ylabel('Frequency (THz)')
-    plt.title('2D Nonlinear Spectrum (Log Scale)')
-    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    return M_NL_FF_abs
+    # Rank 0 performs the final steps (saving, plotting)
+    if rank == 0:
+        if len(tau) > 0:
+            global_M_NL_FF /= len(tau)
+        M_NL_FF_abs = np.abs(global_M_NL_FF)
+        M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
 
+        output_file = os.path.join(directory, f"M_NL_FF_SU3_{readslice}_{fm}.txt")
+        np.savetxt(output_file, M_NL_FF_abs)
+        
+        plt.figure(figsize=(10, 8))
+        extent = [0, omega_range, -omega_range, omega_range]
+        
+        plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
+                    aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum (SU3)')
+        plt.savefig(f"{directory}_NLSPEC_SU3_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
+        plt.clf()
+        
+        plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
+                    aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Log Amplitude')
+        plt.xlabel('Frequency (THz)')
+        plt.ylabel('Frequency (THz)')
+        plt.title('2D Nonlinear Spectrum (SU3, Log Scale)')
+        plt.savefig(f"{directory}_NLSPEC_logC_SU3_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return M_NL_FF_abs
+    else:
+        return None
 
 def full_read_2DCS_TFO(dir):
-    for i in range(3):
-        read_2D_nonlinear_adaptive_time_step(dir, i, False)
-        read_2D_nonlinear_adaptive_time_step(dir, i, True)
-    for i in range(8):
-        read_2D_nonlinear_adaptive_time_step_SU3(dir, i, False)
-        read_2D_nonlinear_adaptive_time_step_SU3(dir, i, True)
+    """
+    Reads and processes 2DCS data for TFO, combining results from different components.
+    This function is designed to be run with MPI.
+    """
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    # All processes participate in the data reading functions.
+    # The functions are internally MPI-aware and will distribute the load.
+    SU2x = read_2D_nonlinear_adaptive_time_step(dir, 0, True)
+    SU2y = read_2D_nonlinear_adaptive_time_step(dir, 1, True)
+    SU2z = read_2D_nonlinear_adaptive_time_step(dir, 2, True)
+    SU32 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 1, True)
+    SU35 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 4, True)
+    SU37 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 6, True)
+
+    # Only rank 0 will have the aggregated data and perform the final combination and plotting.
+    if rank == 0:
+        # Check if all data components were successfully loaded.
+        if SU2x is None or SU2y is None or SU2z is None or SU32 is None or SU35 is None or SU37 is None:
+            print("One or more data components could not be loaded. Aborting final processing.")
+            return
+
+        # Define plot parameters
+        omega_range = 3
+        extent = [0, omega_range, -omega_range, omega_range]
+        directory = os.path.abspath(dir)
+
+        # Combine the components
+        xtotal = 2.4 * SU2x + 2.4 * SU35 + 0.9128 * SU37
+        ytotal = 2.4 * SU2y + 2.8 * SU35 - 0.4655 * SU37
+        ztotal = 2.4 * SU2z + 5.2 * SU32
+
+        # Plot for xtotal
+        plt.figure(figsize=(10, 8))
+        plt.imshow(xtotal, origin='lower', extent=extent,
+                    aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum (X-component)')
+        plt.savefig(f"{directory}_NLSPEC_x_total.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # Plot for ytotal
+        plt.figure(figsize=(10, 8))
+        plt.imshow(ytotal, origin='lower', extent=extent,
+                    aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum (Y-component)')
+        plt.savefig(f"{directory}_NLSPEC_y_total.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # Plot for ztotal
+        plt.figure(figsize=(10, 8))
+        plt.imshow(ztotal, origin='lower', extent=extent,
+                    aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum (Z-component)')
+        plt.savefig(f"{directory}_NLSPEC_z_total.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
 
 def read_2D_nonlinear_tot(dir):
     directory = os.fsencode(dir)
@@ -807,8 +905,8 @@ def read_2D_nonlinear_tot(dir):
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-dir = "TmFeO3_2DCS_D=0_xii=0.05_quadrupolar_field_only"
-directory = dir + "/1/"
+dir = "TmFeO3_2DCS_D=0_xii=0.05"
+directory = dir
 full_read_2DCS_TFO(directory)
 # read_MD_tot(dir)
 
