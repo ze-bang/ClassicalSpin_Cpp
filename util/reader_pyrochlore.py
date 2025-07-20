@@ -3,6 +3,7 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
+from scipy.ndimage import gaussian_filter1d
 # plt.rcParams['text.usetex'] = True
 
 
@@ -181,12 +182,12 @@ def SSSF_q(k, S, P, gb=False):
         A = Spin_global_pyrochlore(k, S, P)
         read = np.abs(contract('nia, mib, inmab->inmab', A, np.conj(A), gg(k)))
         read = np.where(read <= 1e-8, 1e-8, read)
-        return np.log(read)
+        return read
     else:
         A = Spin_global_pyrochlore(k, S, P)
         read = np.abs(contract('nia, mib->inmab', A, np.conj(A)))
         read = np.where(read <= 1e-8, 1e-8, read)
-        return np.log(read)
+        return read
 
 def DSSF(w, k, S, P, T, gb=False):
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
@@ -235,6 +236,16 @@ def SSSFGraphHK0(A,B,d1, filename):
     fig.clf()
     plt.close()
 
+def SSSFGraphHnHn(A,B,d1, filename):
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.pcolormesh(A,B, d1)
+    fig.colorbar(C)
+    ax.set_ylabel(r'$(K,K,2K)$')
+    ax.set_xlabel(r'$(H,-H,0)$')
+    fig.savefig(filename+".pdf")
+    fig.clf()
+    plt.close()
+
 def SSSFGraph2D(A, B, d1, filename):
     plt.pcolormesh(A, B, d1)
     plt.colorbar()
@@ -256,6 +267,9 @@ def hnhltoK(H, L, K=0):
 
 def hhztoK(H, K):
     return contract('ij,k->ijk',H, 2*np.array([np.pi,0,0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi,0]))
+
+def hnhztoK(H, K):
+    return contract('ij,k->ijk',H, 2*np.pi*np.array([1,-1,0])) + contract('ij,k->ijk',K, 2*np.pi*np.array([1,1,-2]))
 
 def hk2d(H,K):
     return contract('ij,k->ijk',H, 2*np.array([np.pi,0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi]))
@@ -294,7 +308,6 @@ def SSSF2D(S, P, nK, filename, gb=False):
     SSSFGraph2D(A, B, S[:, :, 0, 2], f5)
     SSSFGraph2D(A, B, S[:, :, 1, 2], f6)
 
-
 def SSSFHHL(S, P, nK, filename, gb=False):
     H = np.linspace(-2.5, 2.5, nK)
     L = np.linspace(-2.5, 2.5, nK)
@@ -318,6 +331,15 @@ def SSSFHK0(S, P, nK, filename, gb=False):
     L = np.linspace(-2.5, 2.5, nK)
     A, B = np.meshgrid(H, L)
     K = hhztoK(A, B).reshape((nK*nK,3))
+    S = SSSF_q(K, S, P, gb)
+    S = S.reshape((nK, nK, 4,4, 3, 3))
+    return S
+
+def SSSFHnHn(S, P, nK, filename, gb=False):
+    H = np.linspace(-2.5, 2.5, nK)
+    L = np.linspace(-2.5, 2.5, nK)
+    A, B = np.meshgrid(H, L)
+    K = hnhztoK(A, B).reshape((nK*nK,3))
     S = SSSF_q(K, S, P, gb)
     S = S.reshape((nK, nK, 4,4, 3, 3))
     return S
@@ -614,6 +636,11 @@ def read_MD_tot(dir, mag, SSSFGraph):
             S_global = S_global + Sg
             DSSF_local = DSSF_local + Dl
             DSSF_global = DSSF_global + Dg
+    S_local = S_local / len(os.listdir(directory))
+    S_global = S_global / len(os.listdir(directory))
+    DSSF_local = DSSF_local / len(os.listdir(directory))
+    DSSF_global = DSSF_global / len(os.listdir(directory))
+
     def SSSF_helper(S_local, S_global, filename):
         SSSFGraph(A, B, S_local[:,:,0,0], filename + "/Sxx_local")
         SSSFGraph(A, B, S_local[:,:,1,1], filename + "/Syy_local")
@@ -701,7 +728,32 @@ def generate_K_points_pengcheng_dai(H_range_min, H_range_max, nH, K_range_min, K
 
     return K_points, dV
 
-def read_MD_int(dir, mag):
+def gaussian_resolution(energy, intensity, resolution_fwhm):
+    """
+    Convolve intensity with Gaussian experimental resolution.
+    
+    Parameters:
+    - energy: array of energy values
+    - intensity: array of intensity values
+    - resolution_fwhm: Full Width at Half Maximum of the Gaussian resolution function
+    """
+    # Calculate energy spacing
+    energy_spacing = np.mean(np.diff(energy))
+    
+    # Convert FWHM to standard deviation
+    sigma = resolution_fwhm / (2 * np.sqrt(2 * np.log(2)))
+    
+    # Convert sigma from energy units to array index units
+    sigma_indices = sigma / energy_spacing
+    
+    # Apply Gaussian convolution
+    convolved_intensity = gaussian_filter1d(intensity, sigma_indices)
+    
+    return convolved_intensity
+
+
+
+def read_MD_int(dir, mag, SSSFGraph):
     directory = os.fsencode(dir)
     w0 = 0.03
     wmax = 8
@@ -710,6 +762,16 @@ def read_MD_int(dir, mag):
 
     DSSF_local = np.zeros((len(w), len(K_),4,4,3,3))
     DSSF_global = np.zeros((len(w), len(K_),4,4,3,3))
+    nK = 50
+
+
+    SSSF_local = np.zeros((nK,nK,4,4,3,3))
+    SSSF_global = np.zeros((nK,nK,4,4,3,3))
+
+    H = np.linspace(-2.5, 2.5, nK)
+    L = np.linspace(-2.5, 2.5, nK)
+    A, B = np.meshgrid(H, L)
+
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename) and filename != "results":
@@ -718,19 +780,37 @@ def read_MD_int(dir, mag):
             S = np.loadtxt(dir + "/" + filename + "/spin_t.txt").reshape((len(T), len(P), 3))
             DSSF_local = DSSF_local +  DSSF(w, K_, S, P, T, False)
             DSSF_global = DSSF_global +  DSSF(w, K_, S, P, T, True)
+            S0 = np.loadtxt(dir + "/" + filename + "/spin_0.txt").reshape((len(P), 3))
+            SSSF_local = SSSF_local + SSSFHnHn(S0, P, 50, dir + "/" + filename, False)
+            SSSF_global = SSSF_global + SSSFHnHn(S0, P, 50, dir + "/" + filename, True)
+
+    SSSF_local = SSSF_local / len(os.listdir(directory))
+    SSSF_global = SSSF_global / len(os.listdir(directory))
+    DSSF_local = DSSF_local / len(os.listdir(directory))
+    DSSF_global = DSSF_global / len(os.listdir(directory))
+
     DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global), axis=1) * dV
     DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local), axis=1) * dV
 
     # Plot all components of DSSF_global, DSSF_local and their sum
     def plot_DSSF_components(DSSF, w, dir, name):
+        # Extend w to negative values and DSSF with zeros
+        w_negative = -np.flip(w)
+        w_extended = np.concatenate((w_negative, w))
+        
+        DSSF_extended = np.zeros((len(w_extended), 3, 3))
+        DSSF_extended[len(w):, :, :] = DSSF
+
         fig, axes = plt.subplots(3, 3, figsize=(15, 15))
         com_string = ['x', 'y', 'z']
         
         for i in range(3):
             for j in range(3):
-                # Plot DSSF_global component
-                axes[i, j].plot(w, DSSF[:, i, j], 'b-', label=f'S_{com_string[i]}{com_string[j]}')
-                # Plot DSSF_local component  
+                # Apply Gaussian resolution on the extended data
+                convolved_DSSF = gaussian_resolution(w_extended, DSSF_extended[:, i, j], 0.04)
+                
+                # Plot the convolved data
+                axes[i, j].plot(w_extended, convolved_DSSF, 'b-', label=f'S_{com_string[i]}{com_string[j]}')
                 axes[i, j].set_xlabel('ω')
                 axes[i, j].set_ylabel('DSSF')
                 axes[i, j].legend()
@@ -748,11 +828,14 @@ def read_MD_int(dir, mag):
         
         for i in range(3):
             for j in range(3):
-                np.savetxt(f"{dir_to_save}/DSSF_{name}_{com_string[i]}{com_string[j]}.txt", DSSF[:, i, j])
+                convolved_DSSF_component = gaussian_resolution(w_extended, DSSF_extended[:, i, j], 0.04)
+                np.savetxt(f"{dir_to_save}/DSSF_{name}_{com_string[i]}{com_string[j]}.txt", np.column_stack((w_extended, convolved_DSSF_component)))
 
-        DSSF_sum = np.sum(DSSF, axis=(1, 2))
+        DSSF_sum = np.sum(DSSF_extended, axis=(1, 2))
+        convolved_DSSF_sum = gaussian_resolution(w_extended, DSSF_sum, 0.04)
+
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(w, DSSF_sum, 'r-', label='Sum of all components')
+        ax.plot(w_extended, convolved_DSSF_sum, 'r-', label='Sum of all components')
         ax.set_xlabel('ω')
         ax.set_ylabel('DSSF Sum')
         ax.legend()
@@ -760,21 +843,22 @@ def read_MD_int(dir, mag):
         plt.savefig(dir + "/DSSF_sum_{}.pdf".format(name))
         plt.close()
 
-        np.savetxt(f"{dir_to_save}/DSSF_{name}_sum.txt", DSSF_sum)
+        np.savetxt(f"{dir_to_save}/DSSF_{name}_sum.txt", np.column_stack((w_extended, convolved_DSSF_sum)))
 
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(w, np.log(DSSF_sum), 'r-', label='Sum of all components')
+        ax.plot(w_extended, np.log(np.maximum(convolved_DSSF_sum, 1e-9)), 'r-', label='Sum of all components (log scale)')
         ax.set_xlabel('ω')
-        ax.set_ylabel('DSSF Sum')
+        ax.set_ylabel('log(DSSF Sum)')
         ax.legend()
         ax.grid(True)
         plt.savefig(dir + "/DSSF_sum_{}_log.pdf".format(name))
         plt.close()
-    
     w = w * 0.063
     plot_DSSF_components(DSSF_global, w, dir, "global")
     plot_DSSF_components(DSSF_local, w, dir, "local")
-    
+    # SSSF_helper(contract('ijxyab->ijab', SSSF_local), contract('ijxyab->ijab', SSSF_global), dir + "/results/SSSF")
+
+
 def read_MD(dir, mag, w):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
@@ -795,6 +879,9 @@ def read_MD(dir, mag, w):
     elif mag == "110":
         S_global = SSSFHnHL(S0, P, 50, dir, True)
         S_local = SSSFHnHL(S0, P, 50, dir, False)
+    elif mag == "111":
+        S_global = SSSFHnHn(S0, P, 50, dir, True)
+        S_local = SSSFHnHn(S0, P, 50, dir, False)
     DSSF_local = DSSF(w, DSSF_K, S, P, T, False)
     DSSF_global = DSSF(w, DSSF_K, S, P, T, True)
     return S_local, S_global, DSSF_local, DSSF_global
@@ -873,22 +960,58 @@ def read_2D_nonlinear_tot(dir):
     plt.clf()
 
 
-# read_2D_nonlinear("pyrochlore_h110=10_driven_001")
+def QFI_calculate(beta, K, S, P, T, dir, glob=False):
+    omega = np.linspace(0, 8, 1000)
+    toint = DSSF(omega, K, S, P, T, glob)
+    toint = contract('wixyab, w->wixyab' ,toint,4*(1-np.exp(-omega*beta)) * np.tanh(omega/2*beta))
+    toint = np.trapz(toint, x=omega, axis=0)
+    return toint
+
+def QFI(dir, K, beta):
+    directory = os.fsencode(dir)
+    QFI_local = np.zeros((len(K), 4, 4, 3, 3))
+    QFI_global = np.zeros((len(K), 4, 4, 3, 3))
+    for file in sorted(os.listdir(directory)):
+        filename = os.fsdecode(file)
+        if os.path.isdir(dir + "/" + filename) and filename != "results":
+            P = np.loadtxt(dir + "/" + filename + "/pos.txt")
+            T = np.loadtxt(dir + "/" + filename + "/Time_steps.txt")
+            S = np.loadtxt(dir + "/" + filename + "/spin_t.txt").reshape((len(T), len(P), 3))
+
+            QFI_local += QFI_calculate(beta, K, S, P, T, dir + "/" + filename, False)
+            QFI_global += QFI_calculate(beta, K, S, P, T, dir + "/" + filename, True)
+    QFI_local = QFI_local / len(os.listdir(directory))
+    QFI_global = QFI_global / len(os.listdir(directory))
+    QFI_local = contract('kxyab->kab', QFI_local)
+    QFI_global = contract('kxyab->kab', QFI_global)
+    print("QFI_local:", QFI_local)
+    print("QFI_global:", QFI_global)
+
 
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
 # dir = "CZO_MD_h1-10=8"
-read_MD_tot("CZO_0_field", "111", SSSFGraphHnHL)
-read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHL)
-read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHL)
-read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHL)
+read_MD_tot("CZO_0_field", "111", SSSFGraphHnHn)
+read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHn)
+read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHn)
+read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHn)
+# QFI("CZO_0_field", np.array([[0,0,0]]), 1000)
+# QFI("CZO_0_field", np.array([[0,0,2*np.pi]]), 1000)
+# read_MD_tot("0_flux_T=1e-1", "111", SSSFGraphHnHL)
+# read_MD_tot("0_flux_T=1e-2", "111", SSSFGraphHnHL)
+# read_MD_tot("0_flux_T=1e-3", "111", SSSFGraphHnHL)
 
-read_MD_int("CZO_1_field", "111")
-read_MD_int("CZO_2_field", "111")
-read_MD_int("CZO_3_field", "111")
-read_MD_int("CZO_4_field", "111")
-
+# QFI("0_flux_T=1e-1", np.array([[0,0,0]]), 10)
+# QFI("0_flux_T=1e-1", np.array([[0,0,2*np.pi]]), 10)
+# QFI("0_flux_T=1e-2", np.array([[0,0,0]]), 100)
+# QFI("0_flux_T=1e-2", np.array([[0,0,2*np.pi]]), 100)
+# QFI("0_flux_T=1e-3", np.array([[0,0,0]]), 1000)
+# QFI("0_flux_T=1e-3", np.array([[0,0,2*np.pi]]), 1000)
+read_MD_int("CZO_0_field", "111", SSSFGraphHHL)
+read_MD_int("CZO_0.1_field", "111", SSSFGraphHHL)
+read_MD_int("CZO_0.2_field", "111", SSSFGraphHHL)
+read_MD_int("CZO_0.5_field", "111", SSSFGraphHHL)
 
 
 # parseDSSF(dir)

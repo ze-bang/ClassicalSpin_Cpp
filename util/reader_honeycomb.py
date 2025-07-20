@@ -102,7 +102,7 @@ stepN = 8
 
 kitaevBasis = 4*np.pi/np.sqrt(3)*np.array([[np.sqrt(3)/2,-1/2,0],[0,1,0], [0,0,1]])
 
-kitaevLocal = np.array([[1,-1,-1],[-1,1,-1],[-1,-1,1]])/np.sqrt(3)
+kitaevLocal = np.array([[1/np.sqrt(6),1/np.sqrt(6),-2/np.sqrt(6)],[-1/np.sqrt(2),1/np.sqrt(2),0],[1/np.sqrt(3),1/np.sqrt(3),1/np.sqrt(3)]])
 
 Gamma = np.array([0, 0, 0])
 K1 = np.array([1/3, 2/3, 0])
@@ -222,44 +222,23 @@ def hhknk(H,K):
     A = contract('ij,k->ijk',H,  np.array([1,1, 0])) + contract('ij,k->ijk',K, np.array([1,-1, 0]))
     return contract('ijk,ka->ija', A, KBasis)
 
+def hk0(H,K):
+    A = contract('ij,k->ijk',H,  np.array([1,0, 0])) + contract('ij,k->ijk',K, np.array([0,1, 0]))
+    return contract('ijk,ka->ija', A, KBasis)
+
 def hhknk_2D(H,K):
     return contract('ij,k->ijk', H, np.array([1,0])) + contract('ij,k->ijk',K, np.array([0,1]))
 
-def SSSF2D(S, P, nK, filename, gb=False):
+def SSSF2D(S, P, nK, dir, gb=False):
     H = np.linspace(0, 1, nK)
     L = np.linspace(0, 1, nK)
     A, B = np.meshgrid(H, L)
-    K = hhknk(A, B).reshape((nK*nK,3))
+    K = hk0(A, B).reshape((nK*nK,3))
+    
     S = SSSF_q(K, S, P, gb)
-    if gb:
-        f1 = filename + "Sxx_global"
-        f2 = filename + "Syy_global"
-        f3 = filename + "Szz_global"
-        f4 = filename + "Sxy_global"
-        f5 = filename + "Sxz_global"
-        f6 = filename + "Syz_global"
-    else:
-        f1 = filename + "Sxx_local"
-        f2 = filename + "Syy_local"
-        f3 = filename + "Szz_local"
-        f4 = filename + "Sxy_local"
-        f5 = filename + "Sxz_local"
-        f6 = filename + "Syz_local"
     S = S.reshape((nK, nK, 3, 3))
-    # np.savetxt(f1 + '.txt', S[:,:,0,0])
-    # np.savetxt(f2 + '.txt', S[:,:,1,1])
-    # np.savetxt(f3 + '.txt', S[:,:,2,2])
-    # np.savetxt(f4 + '.txt', S[:,:,0,1])
-    # np.savetxt(f5 + '.txt', S[:,:,0,2])
-    # np.savetxt(f6 + '.txt', S[:,:,1,2])
-    # SSSFGraph2D(A, B, S[:,:,0,0], f1)
-    # SSSFGraph2D(A, B, S[:,:,1,1], f2)
-    # SSSFGraph2D(A, B, S[:,:,2,2], f3)
-    # SSSFGraph2D(A, B, S[:, :, 0, 1], f4)
-    # SSSFGraph2D(A, B, S[:, :, 0, 2], f5)
-    # SSSFGraph2D(A, B, S[:, :, 1, 2], f6)
-    SSSFGraph2D(A, B, contract('ijab->ij', S), filename + "S_total")
-    return contract('ijab->ij', S), hhknk_2D(A, B).reshape((nK*nK,2))
+    SSSFGraph2D(A, B, contract('ijab->ij', S), dir+"/SSSF_tot")
+    return S
 
 def ordering_q_SSSF2D(SSSF, K):
     maxindx = np.argmax(SSSF)
@@ -564,21 +543,27 @@ def read_MD_tot(dir):
     A = np.zeros((8, nK, nK))
     w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
     w0 = 0
-    wmax = 15
+    wmax = 5
     w_line = np.arange(w0, wmax, 1/100)[1:]
     B = np.zeros((len(w_line), len(DSSF_K)))
+    SSSF = np.zeros((nK, nK, 3, 3))
+
+    H = np.linspace(0, 1, nK)
+    L = np.linspace(0, 1, nK)
+    C, D = np.meshgrid(H, L)
+
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            if not os.path.isfile(dir + "/" + filename + "_DSSF.txt"):
-                B += read_MD(dir + "/" + filename)
-            else:
-                B += np.loadtxt(dir + "/" + filename + "_DSSF.txt").reshape((len(w_line), len(DSSF_K)))
-            # if not os.path.isfile(dir + "/" + filename + "_DSSF_sliced.txt"):
-            #     A += read_MD_slice(dir + "/" + filename, nK)
-            # else:
-            #     A += np.loadtxt(dir + "/" + filename + "_DSSF_sliced.txt").reshape((8, nK, nK))
-    
+            B += read_MD(dir + "/" + filename, w_line)
+            S = np.loadtxt(dir + "/" + filename + "/spin.txt")
+            P = np.loadtxt(dir + "/" + filename + "/pos.txt")
+            SSSF += SSSF2D(S, P, nK, dir + "/" + filename)
+
+    # plot the SSSF
+    SSSFGraph2D(C, D, contract('ijab->ij', SSSF), dir + "/SSSF_tot")
+
+
     A = np.transpose(A, (0, 2, 1))
     
     
@@ -603,10 +588,7 @@ def read_MD_tot(dir):
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            if not os.path.isfile(dir + "/" + filename + "_DSSF_sliced.txt"):
-                A += read_MD_slice(dir + "/" + filename, nK)
-            else:
-                A += np.loadtxt(dir + "/" + filename + "_DSSF_sliced.txt").reshape((8, nK, nK))
+            A += read_MD_slice(dir + "/" + filename, nK, w)
     
 
 
@@ -682,29 +664,23 @@ def read_MD_tot(dir):
         plt.close()
 
         
-def read_MD(dir):
+def read_MD(dir, w):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
 
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
-
-    w0 = 0
-    wmax = 15
-    w = np.arange(w0, wmax, 1/100)[1:]
 
     A = DSSF(w, DSSF_K, S, P, T, True)
     np.savetxt(dir + "_DSSF.txt", A)
     return A
 
-def read_MD_slice(dir, nK):
+def read_MD_slice(dir, nK, w):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
 
     S = np.loadtxt(dir + "/spin_t.txt").reshape((len(T), len(P), 3))
-
-    w = np.array([0.1, 1, 2, 3, 4, 5, 6, 7])
 
     nK = 100
     H = np.linspace(-1.5, 1.5, nK)
@@ -715,13 +691,6 @@ def read_MD_slice(dir, nK):
     A = DSSF(w, K, S, P, T, True)
     np.savetxt(dir + "_DSSF_sliced.txt", A)
     A = A.reshape((len(w), nK, nK))
-    # for i in range(len(w)):
-    #     fig, ax = plt.subplots(figsize=(5,5))
-    #     C = ax.imshow(A[i], origin='lower', extent=[-1.5, 1.5, -2.5, 2.5], aspect='auto', cmap='gnuplot2')
-
-    #     plt.savefig(dir + "/DSSF_" + str(w[i]) + ".pdf")
-    #     plt.clf()
-    #     plt.close()
     return A
 
 
@@ -801,7 +770,24 @@ def read_2D_nonlinear_tot(dir):
 # dir = "Kitaev_BCAO"
 # read_MD_tot(dir)
 # read_MD_tot("BCAO_zero_field_5K_sasha")
-read_MD_tot("BCAO_sasha")
+# read_MD_tot("BCAO_zero_field_15K")
+
+base_dir = "Asim_BCAO_param"
+if os.path.isdir(base_dir):
+    for subdir in sorted(os.listdir(base_dir)):
+        full_path = os.path.join(base_dir, subdir)
+        if os.path.isdir(full_path):
+            print(f"Processing directory: {full_path}")
+            try:
+                read_MD_tot(full_path)
+            except Exception as e:
+                print(f"Could not process {full_path}: {e}")
+
+# dir = "BCAO_sasha_phase/J3_1.308000_Jzp_0.000000"
+# S = np.loadtxt(dir + "/spins.txt")
+# P = np.loadtxt(dir + "/pos.txt")
+# SSSF2D(S, P, 100, dir)
+
 # read_MD_tot("BCAO_J1J3")
 # parseDSSF(dir)
 

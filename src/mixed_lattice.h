@@ -1234,8 +1234,8 @@ class mixed_lattice
         t_B_1_SU2 = t_B;
         t_B_2_SU2 = t_B_2;
 
-        const array<double, N_SU3> drive_field_basis_x_SU3 = {{0,0,0,0,2.3915/5.264,0,0.9128/5.264,0}};
-        const array<double, N_SU3> drive_field_basis_y_SU3 = {{0,0,0,0,2.7866/5.264,0,-0.4655/5.264,0}};
+        const array<double, N_SU3> drive_field_basis_x_SU3 = {{0}};
+        const array<double, N_SU3> drive_field_basis_y_SU3 = {{0}};
         const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,5.264/5.264,0,0,0,0,0,0}};
 
         for (size_t atom_idx = 0; atom_idx < N_ATOMS_SU3; ++atom_idx) {

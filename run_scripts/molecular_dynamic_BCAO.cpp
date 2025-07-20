@@ -792,7 +792,7 @@ void parameter_sweep_BCAO_honeycomb(double min_J3, double max_J3, size_t num_J3_
 
             // Run simulation
             lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
-            MC.simulated_annealing(100*k_B, 1e-2*k_B, 100000, 100, true);
+            MC.simulated_annealing(20, 1e-3, 10000, 10, true);
             
             // Additional sweeps for convergence
             for (size_t k = 0; k < 1e4; ++k) {

@@ -96,7 +96,7 @@ void simulated_annealing_pyrochlore(double Tstart, double TargetT, double Jxx, d
     atoms.set_field(rot_field*dot(field, z3)+ By3, 2);
     atoms.set_field(rot_field*dot(field, z4)+ By4, 3);
 
-    lattice<3, 4, 4, 4, 4> MC(&atoms, 0.5);
+    lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
     MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, dir, save);
 }
