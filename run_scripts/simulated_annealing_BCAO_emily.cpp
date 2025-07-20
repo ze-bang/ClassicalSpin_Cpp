@@ -92,7 +92,7 @@ void create_default_parameter_file(const string& filename) {
 }
 
 
-void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
+void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
     filesystem::create_directory(dir);
     HoneyComb_standarx<3> atoms;
 
@@ -164,13 +164,35 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
     param_file << "MD steps: 100\n";
     param_file << "MD timestep: 0.01\n";
     param_file.close();
+    double min_energy;
+    int min_index = 0;
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 1);
         MC.simulated_annealing(20, 1e-3, 100000, 10, true, dir+"/"+std::to_string(i));
-        MC.molecular_dynamics(0, 200, 1e-2, dir+"/"+std::to_string(i));
+        // Additional sweeps for convergence
+        for (size_t k = 0; k < 1e4; ++k) {
+            MC.deterministic_sweep();
+        }
+        
+        if (i == 0) {
+            min_energy = MC.energy_density(MC.spins);
+            min_index = i;
+        } else {
+            if (MC.energy_density(MC.spins) < min_energy) {
+                min_energy = MC.energy_density(MC.spins);
+                min_index = i;
+            }
+        }
     }
+
+    // Output the information about the best configuration to a file
+    ofstream best_config_file(dir + "/best_configuration.txt");
+    best_config_file << "Best Configuration Found:\n";
+    best_config_file << "Trial Index: " << min_index << "\n";
+    best_config_file << "Minimum Energy Density: " << min_energy << "\n";
+    best_config_file.close();
 }
 
 
@@ -219,7 +241,7 @@ int main(int argc, char** argv) {
     // Convert field strength to internal units
     double h_internal = params.h;
     
-    MD_BCAO_honeycomb(params.num_trials, h_internal, params.field_dir, params.dir, 
+    sim_BCAO_honeycomb(params.num_trials, h_internal, params.field_dir, params.dir, 
                       params.J1xy, params.J1z, params.D, params.E, params.F, params.G, 
                       params.J3xy, params.J3z);
     

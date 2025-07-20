@@ -767,12 +767,18 @@ def full_read_2DCS_TFO(dir):
     SU2y = read_2D_nonlinear_adaptive_time_step(dir, 1, True)
     SU2z = read_2D_nonlinear_adaptive_time_step(dir, 2, True)
     SU32 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 1, True)
-    SU35 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 4, True)
-    SU37 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 6, True)
+    # SU35 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 4, True)
+    # SU37 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 6, True)
+    for i in range(8):
+        if i == 1:
+            continue
+        read_2D_nonlinear_adaptive_time_step_SU3(dir, i, True)
+
+
     omega_range = 3
 
-    xtotal = 5 * SU2x + 2.4 * SU35 + 0.9128 * SU37
-    ytotal = 5 * SU2y + 2.8 * SU35 - 0.4655 * SU37
+    xtotal = 5 * SU2x 
+    ytotal = 5 * SU2y 
     ztotal = 5 * SU2z + 5.2 * SU32
 
     extent = [0, omega_range, -omega_range, omega_range]

@@ -3,6 +3,7 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
+from scipy.ndimage import gaussian_filter1d
 # plt.rcParams['text.usetex'] = True
 
 
@@ -694,10 +695,10 @@ def read_MD_tot(dir, mag, SSSFGraph):
         os.mkdir(dir_to_save + "/DSSF_local")
     if not os.path.isdir(dir_to_save + "/DSSF_global"):
         os.mkdir(dir_to_save + "/DSSF_global")
-    # S_global = np.log(S_global)
-    # S_local = np.log(S_local)
-    # DSSF_local = np.log(DSSF_local)
-    # DSSF_global = np.log(DSSF_global)
+    S_global = np.log(S_global)
+    S_local = np.log(S_local)
+    DSSF_local = np.log(DSSF_local)
+    DSSF_global = np.log(DSSF_global)
     SSSF_helper(contract('ijxyab->ijab', S_local), contract('ijxyab->ijab', S_global), dir_to_save + "/SSSF")
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_local), dir_to_save + "/DSSF_local/")
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_global), dir_to_save + "/DSSF_global/")
@@ -727,7 +728,32 @@ def generate_K_points_pengcheng_dai(H_range_min, H_range_max, nH, K_range_min, K
 
     return K_points, dV
 
-def read_MD_int(dir, mag):
+def gaussian_resolution(energy, intensity, resolution_fwhm):
+    """
+    Convolve intensity with Gaussian experimental resolution.
+    
+    Parameters:
+    - energy: array of energy values
+    - intensity: array of intensity values
+    - resolution_fwhm: Full Width at Half Maximum of the Gaussian resolution function
+    """
+    # Calculate energy spacing
+    energy_spacing = np.mean(np.diff(energy))
+    
+    # Convert FWHM to standard deviation
+    sigma = resolution_fwhm / (2 * np.sqrt(2 * np.log(2)))
+    
+    # Convert sigma from energy units to array index units
+    sigma_indices = sigma / energy_spacing
+    
+    # Apply Gaussian convolution
+    convolved_intensity = gaussian_filter1d(intensity, sigma_indices)
+    
+    return convolved_intensity
+
+
+
+def read_MD_int(dir, mag, SSSFGraph):
     directory = os.fsencode(dir)
     w0 = 0.03
     wmax = 8
@@ -736,6 +762,16 @@ def read_MD_int(dir, mag):
 
     DSSF_local = np.zeros((len(w), len(K_),4,4,3,3))
     DSSF_global = np.zeros((len(w), len(K_),4,4,3,3))
+    nK = 50
+
+
+    SSSF_local = np.zeros((nK,nK,4,4,3,3))
+    SSSF_global = np.zeros((nK,nK,4,4,3,3))
+
+    H = np.linspace(-2.5, 2.5, nK)
+    L = np.linspace(-2.5, 2.5, nK)
+    A, B = np.meshgrid(H, L)
+
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename) and filename != "results":
@@ -744,19 +780,37 @@ def read_MD_int(dir, mag):
             S = np.loadtxt(dir + "/" + filename + "/spin_t.txt").reshape((len(T), len(P), 3))
             DSSF_local = DSSF_local +  DSSF(w, K_, S, P, T, False)
             DSSF_global = DSSF_global +  DSSF(w, K_, S, P, T, True)
+            S0 = np.loadtxt(dir + "/" + filename + "/spin_0.txt").reshape((len(P), 3))
+            SSSF_local = SSSF_local + SSSFHnHn(S0, P, 50, dir + "/" + filename, False)
+            SSSF_global = SSSF_global + SSSFHnHn(S0, P, 50, dir + "/" + filename, True)
+
+    SSSF_local = SSSF_local / len(os.listdir(directory))
+    SSSF_global = SSSF_global / len(os.listdir(directory))
+    DSSF_local = DSSF_local / len(os.listdir(directory))
+    DSSF_global = DSSF_global / len(os.listdir(directory))
+
     DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global), axis=1) * dV
     DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local), axis=1) * dV
 
     # Plot all components of DSSF_global, DSSF_local and their sum
     def plot_DSSF_components(DSSF, w, dir, name):
+        # Extend w to negative values and DSSF with zeros
+        w_negative = -np.flip(w)
+        w_extended = np.concatenate((w_negative, w))
+        
+        DSSF_extended = np.zeros((len(w_extended), 3, 3))
+        DSSF_extended[len(w):, :, :] = DSSF
+
         fig, axes = plt.subplots(3, 3, figsize=(15, 15))
         com_string = ['x', 'y', 'z']
         
         for i in range(3):
             for j in range(3):
-                # Plot DSSF_global component
-                axes[i, j].plot(w, DSSF[:, i, j], 'b-', label=f'S_{com_string[i]}{com_string[j]}')
-                # Plot DSSF_local component  
+                # Apply Gaussian resolution on the extended data
+                convolved_DSSF = gaussian_resolution(w_extended, DSSF_extended[:, i, j], 0.04)
+                
+                # Plot the convolved data
+                axes[i, j].plot(w_extended, convolved_DSSF, 'b-', label=f'S_{com_string[i]}{com_string[j]}')
                 axes[i, j].set_xlabel('ω')
                 axes[i, j].set_ylabel('DSSF')
                 axes[i, j].legend()
@@ -774,11 +828,14 @@ def read_MD_int(dir, mag):
         
         for i in range(3):
             for j in range(3):
-                np.savetxt(f"{dir_to_save}/DSSF_{name}_{com_string[i]}{com_string[j]}.txt", DSSF[:, i, j])
+                convolved_DSSF_component = gaussian_resolution(w_extended, DSSF_extended[:, i, j], 0.04)
+                np.savetxt(f"{dir_to_save}/DSSF_{name}_{com_string[i]}{com_string[j]}.txt", np.column_stack((w_extended, convolved_DSSF_component)))
 
-        DSSF_sum = np.sum(DSSF, axis=(1, 2))
+        DSSF_sum = np.sum(DSSF_extended, axis=(1, 2))
+        convolved_DSSF_sum = gaussian_resolution(w_extended, DSSF_sum, 0.04)
+
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(w, DSSF_sum, 'r-', label='Sum of all components')
+        ax.plot(w_extended, convolved_DSSF_sum, 'r-', label='Sum of all components')
         ax.set_xlabel('ω')
         ax.set_ylabel('DSSF Sum')
         ax.legend()
@@ -786,21 +843,22 @@ def read_MD_int(dir, mag):
         plt.savefig(dir + "/DSSF_sum_{}.pdf".format(name))
         plt.close()
 
-        np.savetxt(f"{dir_to_save}/DSSF_{name}_sum.txt", DSSF_sum)
+        np.savetxt(f"{dir_to_save}/DSSF_{name}_sum.txt", np.column_stack((w_extended, convolved_DSSF_sum)))
 
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(w, np.log(DSSF_sum), 'r-', label='Sum of all components')
+        ax.plot(w_extended, np.log(np.maximum(convolved_DSSF_sum, 1e-9)), 'r-', label='Sum of all components (log scale)')
         ax.set_xlabel('ω')
-        ax.set_ylabel('DSSF Sum')
+        ax.set_ylabel('log(DSSF Sum)')
         ax.legend()
         ax.grid(True)
         plt.savefig(dir + "/DSSF_sum_{}_log.pdf".format(name))
         plt.close()
-    
     w = w * 0.063
     plot_DSSF_components(DSSF_global, w, dir, "global")
     plot_DSSF_components(DSSF_local, w, dir, "local")
-    
+    # SSSF_helper(contract('ijxyab->ijab', SSSF_local), contract('ijxyab->ijab', SSSF_global), dir + "/results/SSSF")
+
+
 def read_MD(dir, mag, w):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos.txt")
@@ -934,27 +992,26 @@ def QFI(dir, K, beta):
 #
 # dir = "CZO_h=4T"
 # dir = "CZO_MD_h1-10=8"
-# read_MD_tot("CZO_0_field", "111", SSSFGraphHnHL)
-# read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHL)
-# read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHL)
-# read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHL)
+read_MD_tot("CZO_0_field", "111", SSSFGraphHnHn)
+read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHn)
+read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHn)
+read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHn)
 # QFI("CZO_0_field", np.array([[0,0,0]]), 1000)
 # QFI("CZO_0_field", np.array([[0,0,2*np.pi]]), 1000)
 # read_MD_tot("0_flux_T=1e-1", "111", SSSFGraphHnHL)
 # read_MD_tot("0_flux_T=1e-2", "111", SSSFGraphHnHL)
 # read_MD_tot("0_flux_T=1e-3", "111", SSSFGraphHnHL)
 
-QFI("0_flux_T=1e-1", np.array([[0,0,0]]), 10)
-QFI("0_flux_T=1e-1", np.array([[0,0,2*np.pi]]), 10)
-QFI("0_flux_T=1e-2", np.array([[0,0,0]]), 100)
-QFI("0_flux_T=1e-2", np.array([[0,0,2*np.pi]]), 100)
-QFI("0_flux_T=1e-3", np.array([[0,0,0]]), 1000)
-QFI("0_flux_T=1e-3", np.array([[0,0,2*np.pi]]), 1000)
-# read_MD_int("CZO_1_field", "111")
-# read_MD_int("CZO_2_field", "111")
-# read_MD_int("CZO_3_field", "111")
-# read_MD_int("CZO_4_field", "111")
-
+# QFI("0_flux_T=1e-1", np.array([[0,0,0]]), 10)
+# QFI("0_flux_T=1e-1", np.array([[0,0,2*np.pi]]), 10)
+# QFI("0_flux_T=1e-2", np.array([[0,0,0]]), 100)
+# QFI("0_flux_T=1e-2", np.array([[0,0,2*np.pi]]), 100)
+# QFI("0_flux_T=1e-3", np.array([[0,0,0]]), 1000)
+# QFI("0_flux_T=1e-3", np.array([[0,0,2*np.pi]]), 1000)
+read_MD_int("CZO_0_field", "111", SSSFGraphHHL)
+read_MD_int("CZO_0.1_field", "111", SSSFGraphHHL)
+read_MD_int("CZO_0.2_field", "111", SSSFGraphHHL)
+read_MD_int("CZO_0.5_field", "111", SSSFGraphHHL)
 
 
 # parseDSSF(dir)

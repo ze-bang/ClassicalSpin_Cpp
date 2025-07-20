@@ -96,9 +96,8 @@ if __name__ == "__main__":
 
     # Update file paths to use the specified directory
     pos_file = os.path.join(directory, 'pos.txt')
-    spin_file = os.path.join(directory, 'spins.txt')
+    spin_file = os.path.join(directory, 'spin.txt')
 
 
     # Plot without Kitaev transformation
-    plot_spin_configuration(pos_file, spin_file, 'spin_config.png', False)
-    
+    plot_spin_configuration(pos_file, spin_file, args.directory+'spin_config.png', False)
