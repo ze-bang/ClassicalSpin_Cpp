@@ -22,8 +22,8 @@ struct SimulationParams {
     double J3xy = 2.5, J3z = -0.85;
 
     // Parallel Tempering parameters
-    double T_start = 1.0;
-    double T_end = 25.0;
+    double T_start = 1e-2;
+    double T_end = 30.0;
     size_t thermalization_sweeps = 1000000;
     size_t measurement_sweeps = 1000000;
     size_t overrelaxation_rate = 10; // Overrelaxation rate for the simulation
@@ -80,9 +80,9 @@ SimulationParams read_parameters(const string& filename) {
             else if (key == "T_end") params.T_end = stod(value);
             else if (key == "thermalization_sweeps") params.thermalization_sweeps = stoul(value);
             else if (key == "measurement_sweeps") params.measurement_sweeps = stoul(value);
+            else if (key == "overrelaxation_rate") params.overrelaxation_rate = stoul(value);
             else if (key == "swap_interval") params.swap_interval = stoul(value);
-            else if (key == "measurement_interval") params.measurement_interval = stoul(value);
-            else if (key == "num_bins") params.num_bins = stoul(value);
+            else if (key == "probe_rate") params.probe_rate = stoul(value);
         }
     }
     
