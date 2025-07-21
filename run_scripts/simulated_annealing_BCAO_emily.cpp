@@ -169,8 +169,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
 
     for(size_t i=0; i<num_trials;++i){
 
-        lattice<3, 2, 36, 36, 1> MC(&atoms, 1);
-        MC.simulated_annealing(20, 1e-3, 100000, 10, true, dir+"/"+std::to_string(i));
+        lattice<3, 2, 48, 48, 1> MC(&atoms, 1);
+        MC.simulated_annealing(20, 1e-3, 1e6, 10, true, dir+"/"+std::to_string(i));
         // Additional sweeps for convergence
         for (size_t k = 0; k < 1e4; ++k) {
             MC.deterministic_sweep();
