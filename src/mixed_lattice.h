@@ -928,7 +928,7 @@ class mixed_lattice
             }
         }
         
-        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU2 + trilinear_energy_mixed;
+        return field_energy + onsite_energy + bilinear_energy/2 + bilinear_energy_mixed/2 + trilinear_energy_SU2/3 + trilinear_energy_mixed/3;
     }
 
     double site_energy_SU3_diff(const array<double, N_SU3> &new_spin, const array<double, N_SU3> &old_spin, const size_t site_index) const {
@@ -1065,7 +1065,7 @@ class mixed_lattice
             }
         }
         
-        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU3 + trilinear_energy_mixed;
+        return field_energy + onsite_energy + bilinear_energy/2 + bilinear_energy_mixed/2 + trilinear_energy_SU3/3 + trilinear_energy_mixed/3;
     }
 
     double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {

@@ -233,14 +233,20 @@ int main(int argc, char** argv) {
         cout << "Field: " << params.h << " mu_B, Direction: [" << params.field_dir[0] << "," << params.field_dir[1] << "," << params.field_dir[2] << "]\n";
         cout << "Temperature Range: " << params.T_start << "K to " << params.T_end << "K\n";
         cout << "Output directory: " << params.dir << "\n";
+        filesystem::create_directory(params.dir);
     }
     
     for (size_t i = 0; i < params.num_trials; ++i) {
+        SimulationParams trial_params = params;
+        trial_params.dir = params.dir + "/trial_" + to_string(i);
+
         if (rank == 0) {
             cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
         }
-        SimulationParams trial_params = params;
-        trial_params.dir = params.dir + "/trial_" + to_string(i);
+        
+        // Synchronize all processes before starting the next trial
+        MPI_Barrier(MPI_COMM_WORLD);
+
         // Run the Parallel Tempering simulation
         PT_BCAO_honeycomb(trial_params);
     }
