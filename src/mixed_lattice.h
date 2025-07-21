@@ -1296,7 +1296,7 @@ class mixed_lattice
     }
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
-        array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
+        array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]) * 2;
 
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
@@ -1326,7 +1326,7 @@ class mixed_lattice
     }
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
-        array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
+        array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]) * 2;
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);

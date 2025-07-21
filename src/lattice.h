@@ -377,7 +377,7 @@ class lattice
     
     array<double, N>  get_local_field(size_t site_index){
         array<double,N> local_field;
-        local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
+        local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index])*2;
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
