@@ -538,11 +538,14 @@ def read_MD_tot(dir):
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            B += read_MD(dir + "/" + filename, w_line)
-            S = np.loadtxt(dir + "/" + filename + "/spin.txt")
-            P = np.loadtxt(dir + "/" + filename + "/pos.txt")
-            SSSF += SSSF2D(S, P, nK, dir + "/" + filename)
-
+            try:
+                B += read_MD(dir + "/" + filename, w_line)
+                S = np.loadtxt(dir + "/" + filename + "/spin.txt")
+                P = np.loadtxt(dir + "/" + filename + "/pos.txt")
+                SSSF += SSSF2D(S, P, nK, dir + "/" + filename)
+            except:
+                print("Error reading file: " + filename)
+                continue
     # plot the SSSF
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), dir + "/SSSF_tot")
 
@@ -571,8 +574,11 @@ def read_MD_tot(dir):
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            A += read_MD_slice(dir + "/" + filename, nK, w)
-    
+            try:
+                A += read_MD_slice(dir + "/" + filename, nK, w)
+            except:
+                print("Error reading file: " + filename)
+                continue
 
 
     for i in range(2):
@@ -814,7 +820,7 @@ if os.path.isdir(base_dir):
         if os.path.isdir(full_path):
             print(f"Processing directory: {full_path}")
             try:
-                parse_spin_config(full_path)
+                read_MD_tot(full_path)
             except Exception as e:
                 print(f"Could not process {full_path}: {e}")
 

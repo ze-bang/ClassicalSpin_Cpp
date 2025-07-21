@@ -850,7 +850,7 @@ def read_2D_nonlinear_tot(dir):
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-dir = "TmFeO3_2DCS_xii=0.05"
+dir = "TmFeO3_2DCS_D=0_xii=0.05"
 directory = dir
 full_read_2DCS_TFO(directory)
 # read_MD_tot(dir)
