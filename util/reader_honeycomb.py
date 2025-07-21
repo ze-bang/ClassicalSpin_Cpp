@@ -407,23 +407,6 @@ def findindex(k):
         return 2
     else:
         return 3
-def graphconfig(S, P, filename):
-    ax = plt.axes(projection='3d')
-    for i in range(len(S)):
-        A = strip(P[i])
-        index = findindex(A)
-        S[i] = S[i,0] * x[index] + S[i,1] * y[index] + S[i,2] * z[index]
-        # print(P[i], A, index, S[i])
-    for i in range(2):
-        for j in range(2):
-            for k in range(2):
-                plottetrahedron(i,j,k,ax)
-    S = S/2
-
-    ax.scatter(P[:,0], P[:,1], P[:,2])
-    ax.quiver(P[:,0], P[:,1], P[:,2],S[:,0], S[:,1], S[:,2], color='red', length=0.3)
-    plt.savefig(filename)
-    plt.clf()
 
 def fullread(dir, gb=False, magi=""):
     directory = os.fsencode(dir)
@@ -772,6 +755,58 @@ def read_2D_nonlinear_tot(dir):
 # read_MD_tot("BCAO_zero_field_5K_sasha")
 # read_MD_tot("BCAO_zero_field_15K")
 
+def plot_spin_config_2d(P, S, filename):
+    """
+    Graphs the spin configuration projected on the 2D xy plane.
+
+    Args:
+        P (numpy.ndarray): Array of site positions (N, 3).
+        S (numpy.ndarray): Array of spin vectors (N, 3).
+        filename (str): Path to save the output plot.
+    """
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    # Plot sites
+    ax.scatter(P[:, 0], P[:, 1], c='lightblue', edgecolors='k', s=2, zorder=1)
+    
+    # Plot spins (projected on xy plane)
+    # The color of the quiver can represent the z-component of the spin
+    colors = S[:, 2]
+    q = ax.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 1], colors, 
+                  cmap='viridis', scale_units='xy', angles='xy', scale=1,
+                  width=0.002, headwidth=3, headlength=4, zorder=2)
+    
+    cbar = fig.colorbar(q, ax=ax, shrink=0.8)
+    cbar.set_label('Spin z-component')
+    
+    ax.set_xlabel('x position')
+    ax.set_ylabel('y position')
+    ax.set_title('Spin Configuration (2D XY Projection)')
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    
+    plt.savefig(filename)
+    plt.clf()
+    plt.close(fig)
+
+def parse_spin_config(directory):
+    nK = 100
+    SSSF = np.zeros((nK, nK, 3, 3))
+
+    H = np.linspace(0, 1, nK)
+    L = np.linspace(0, 1, nK)
+    C, D = np.meshgrid(H, L)
+    for file in sorted(os.listdir(directory)):  
+        filename = os.fsdecode(file)
+        if os.path.isdir(directory + "/" + filename):
+            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
+            P = np.loadtxt(directory + "/" + filename + "/pos.txt")
+            SSSF += SSSF2D(S, P, 100, directory + "/" + filename )
+            plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
+    SSSF = SSSF / len(os.listdir(directory))
+    SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
+
+
 base_dir = "Asim_BCAO_param"
 if os.path.isdir(base_dir):
     for subdir in sorted(os.listdir(base_dir)):
@@ -779,7 +814,7 @@ if os.path.isdir(base_dir):
         if os.path.isdir(full_path):
             print(f"Processing directory: {full_path}")
             try:
-                read_MD_tot(full_path)
+                parse_spin_config(full_path)
             except Exception as e:
                 print(f"Could not process {full_path}: {e}")
 
