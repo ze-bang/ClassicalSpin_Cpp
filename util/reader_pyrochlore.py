@@ -987,15 +987,114 @@ def QFI(dir, K, beta):
     print("QFI_local:", QFI_local)
     print("QFI_global:", QFI_global)
 
+def plot_heat_capacity(dir):
+    specific_heat = np.loadtxt(dir + "/heat_capacity.txt")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(specific_heat[:, 0], specific_heat[:, 1], label='Specific Heat')
+    ax.errorbar(specific_heat[:, 0], specific_heat[:, 1], yerr=specific_heat[:, 2], fmt='.', capsize=5, ecolor='red', alpha=0.7, label='Error')
+    ax.set_xlabel('Temperature (T)')
+    ax.set_ylabel('Specific Heat (C)')
+    ax.set_title('Specific Heat vs Temperature')
+    ax.set_xscale('log')
+    ax.legend()
+    plt.savefig(dir + "/heat_capacity.pdf")
+    plt.clf()
+
+
+def plot_all_specific_heat(root_dir, make_combined_plot=False):
+    """
+    Find all subdirectories in the root directory and plot the specific heat for each one.
+    Optionally create a combined plot with all curves.
+    
+    Parameters:
+    - root_dir: String path to the root directory
+    - make_combined_plot: Boolean, whether to make a combined plot of all heat capacities
+    """
+    # Keep track of whether any heat capacity files were found
+    found_any = False
+    
+    # Store data for combined plot
+    all_data = []
+    all_labels = []
+    
+    # Walk through all subdirectories
+    for subdir, dirs, files in os.walk(root_dir):
+        # Skip the root directory itself
+        if subdir == root_dir:
+            continue
+        
+        # Check if heat_capacity.txt exists in this directory
+        heat_capacity_file = os.path.join(subdir, "heat_capacity.txt")
+        if os.path.isfile(heat_capacity_file):
+            print(f"Processing {subdir}")
+            found_any = True
+            
+            # Use the existing function to plot the heat capacity
+            plot_heat_capacity(subdir)
+            
+            # Store data for combined plot
+            if make_combined_plot:
+                try:
+                    specific_heat = np.loadtxt(heat_capacity_file)
+                    all_data.append(specific_heat)
+                    # Use directory name as label
+                    all_labels.append(os.path.basename(subdir))
+                except Exception as e:
+                    print(f"Error loading data from {heat_capacity_file}: {e}")
+    
+    if not found_any:
+        print(f"No heat_capacity.txt files found in any subdirectory of {root_dir}")
+        return
+        
+    # Create combined plot if requested and data was found
+    if make_combined_plot and all_data:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        for data, label in zip(all_data, all_labels):
+            ax.plot(data[:, 0], data[:, 1], label=label, marker='o', markersize=4, linestyle='-', alpha=0.7)
+            # Add error bars if available (column 2 typically contains the error)
+            if data.shape[1] > 2:
+                ax.errorbar(data[:, 0], data[:, 1], yerr=data[:, 2], fmt='.', capsize=3, alpha=0.5)
+        
+        ax.set_xlabel('Temperature (T)')
+        ax.set_ylabel('Specific Heat (C)')
+        ax.set_title('Specific Heat vs Temperature - Combined Plot')
+        
+        # Set legend with appropriate size and columns based on number of entries
+        if len(all_labels) > 12:
+            ax.legend(loc='best', ncol=3, fontsize='small')
+        elif len(all_labels) > 6:
+            ax.legend(loc='best', ncol=2, fontsize='small')
+        else:
+            ax.legend(loc='best')
+        
+        # Add grid for better readability
+        ax.grid(True, linestyle='--', alpha=0.7)
+        
+        # Try to use log scale if the temperature range is wide
+        if any(data[:, 0].max() / data[:, 0].min() > 10 for data in all_data):
+            ax.set_xscale('log')
+            plt.savefig(os.path.join(root_dir, "combined_heat_capacity_log.pdf"))
+            # Also save a version with linear scale
+            ax.set_xscale('linear')
+            plt.savefig(os.path.join(root_dir, "combined_heat_capacity.pdf"))
+        else:
+            plt.savefig(os.path.join(root_dir, "combined_heat_capacity.pdf"))
+        
+        plt.close()
+        print(f"Combined plot saved to {os.path.join(root_dir, 'combined_heat_capacity.pdf')}")
+
+
+plot_all_specific_heat("Asim_BCAO_param")
 
 # obenton_to_xx_zz()
 #
 # dir = "CZO_h=4T"
 # dir = "CZO_MD_h1-10=8"
-read_MD_tot("CZO_0_field", "111", SSSFGraphHnHn)
-read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHn)
-read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHn)
-read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHn)
+# read_MD_tot("CZO_0_field", "111", SSSFGraphHnHn)
+# read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHn)
+# read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHn)
+# read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHn)
 # QFI("CZO_0_field", np.array([[0,0,0]]), 1000)
 # QFI("CZO_0_field", np.array([[0,0,2*np.pi]]), 1000)
 # read_MD_tot("0_flux_T=1e-1", "111", SSSFGraphHnHL)
@@ -1008,10 +1107,10 @@ read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHn)
 # QFI("0_flux_T=1e-2", np.array([[0,0,2*np.pi]]), 100)
 # QFI("0_flux_T=1e-3", np.array([[0,0,0]]), 1000)
 # QFI("0_flux_T=1e-3", np.array([[0,0,2*np.pi]]), 1000)
-read_MD_int("CZO_0_field", "111", SSSFGraphHHL)
-read_MD_int("CZO_0.1_field", "111", SSSFGraphHHL)
-read_MD_int("CZO_0.2_field", "111", SSSFGraphHHL)
-read_MD_int("CZO_0.5_field", "111", SSSFGraphHHL)
+# read_MD_int("CZO_0_field", "111", SSSFGraphHHL)
+# read_MD_int("CZO_0.1_field", "111", SSSFGraphHHL)
+# read_MD_int("CZO_0.2_field", "111", SSSFGraphHHL)
+# read_MD_int("CZO_0.5_field", "111", SSSFGraphHHL)
 
 
 # parseDSSF(dir)
