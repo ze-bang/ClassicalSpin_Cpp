@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import os
 from math import gcd
 from functools import reduce
+from matplotlib.colors import PowerNorm
 # plt.rcParams['text.usetex'] = True
 
 
@@ -602,7 +603,7 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
     # M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
 
     # Save raw data
-    output_file = os.path.join(directory, "M_NL_FF.txt")
+    output_file = os.path.join(dir, "M_NL_FF.txt")
     np.savetxt(output_file, M_NL_FF_abs)
     
     # Create plots with shared setup
@@ -616,18 +617,19 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
     plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{dir}/NLSPEC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
     
     # Log scale plot
-    plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Log Amplitude')
-    plt.xlabel('Frequency (THz)')
-    plt.ylabel('Frequency (THz)')
-    plt.title('2D Nonlinear Spectrum (Log Scale)')
-    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
-    plt.close()
+    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+              norm=PowerNorm(gamma=0.5))
+    plt.colorbar(label='Amplitude (sqrt scale)')
+    plt.xlabel('Frequency (J1)')
+    plt.ylabel('Frequency (J1)')
+    plt.title('2D Nonlinear Spectrum')
+    plt.savefig(f"{directory}/NLSPEC_{readslice}_{fm}_SU3_log.pdf", dpi=300, bbox_inches='tight')
+    plt.clf()
     
     return M_NL_FF_abs
 
@@ -746,18 +748,19 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
     plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{directory}/NLSPEC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
     
     # Log scale plot
-    plt.imshow(np.log(M_NL_FF_abs + 1e-10), origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Log Amplitude')
-    plt.xlabel('Frequency (THz)')
-    plt.ylabel('Frequency (THz)')
-    plt.title('2D Nonlinear Spectrum (Log Scale)')
-    plt.savefig(f"{directory}_NLSPEC_logC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
-    plt.close()
+    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+              norm=PowerNorm(gamma=0.5))
+    plt.colorbar(label='Amplitude (sqrt scale)')
+    plt.xlabel('Frequency (J1)')
+    plt.ylabel('Frequency (J1)')
+    plt.title('2D Nonlinear Spectrum')
+    plt.savefig(f"{directory}/NLSPEC_{readslice}_{fm}_SU3_log.pdf", dpi=300, bbox_inches='tight')
+    plt.clf()
     
     return M_NL_FF_abs
 
@@ -783,34 +786,37 @@ def full_read_2DCS_TFO(dir):
 
     extent = [0, omega_range, -omega_range, omega_range]
 
-    # Linear scale plot
+    # Power-law normalized plot for xtotal
     plt.imshow(xtotal, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+              norm=PowerNorm(gamma=0.5))
+    plt.colorbar(label='Amplitude (sqrt scale)')
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_x_total.pdf", dpi=300, bbox_inches='tight')
+    plt.title('2D Nonlinear Spectrum (X Total)')
+    plt.savefig(f"{dir}/NLSPEC_x_total_sqrt.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
 
-    # Linear scale plot
+    # Power-law normalized plot for ytotal
     plt.imshow(ytotal, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+              norm=PowerNorm(gamma=0.5))
+    plt.colorbar(label='Amplitude (sqrt scale)')
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_y_total.pdf", dpi=300, bbox_inches='tight')
+    plt.title('2D Nonlinear Spectrum (Y Total)')
+    plt.savefig(f"{dir}/NLSPEC_y_total_sqrt.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
 
-    # Linear scale plot
+    # Power-law normalized plot for ztotal
     plt.imshow(ztotal, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
+              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+              norm=PowerNorm(gamma=0.5))
+    plt.colorbar(label='Amplitude (sqrt scale)')
     plt.xlabel('Frequency (J1)')
     plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}_NLSPEC_z_total.pdf", dpi=300, bbox_inches='tight')
+    plt.title('2D Nonlinear Spectrum (Z Total)')
+    plt.savefig(f"{dir}/NLSPEC_z_total_sqrt.pdf", dpi=300, bbox_inches='tight')
     plt.clf()
 
 def read_2D_nonlinear_tot(dir):

@@ -814,7 +814,7 @@ if os.path.isdir(base_dir):
         if os.path.isdir(full_path):
             print(f"Processing directory: {full_path}")
             try:
-                parse_spin_config(full_path)
+                read_MD_tot(full_path)
             except Exception as e:
                 print(f"Could not process {full_path}: {e}")
 
