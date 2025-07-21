@@ -56,7 +56,7 @@ void parallel_tempering_BCAO(double T_start, double T_end, double h, array<doubl
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     vector<double> temps = logspace(log10(T_start), log10(T_end), size);
 
-    lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5);
+    lattice<3, 2, 36, 36, 1> MC(&atoms, 0.5);
     MC.parallel_tempering(temps, 1e6, 1e6, 10, 50, 2e3, dir, {0});
 
     int finalized;
