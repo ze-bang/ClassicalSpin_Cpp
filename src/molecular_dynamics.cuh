@@ -1326,7 +1326,7 @@ void compute_local_field_SU2(
         double sum = 0.0;
         #pragma unroll
         for (size_t j = 0; j < N_SU2; ++j) {
-            sum += onsite_interaction_SU2[onsite_base + i * N_SU2 + j] * spin_site[j];
+            sum += 2 * onsite_interaction_SU2[onsite_base + i * N_SU2 + j] * spin_site[j];
         }
         local_field[i] = sum;
     }
@@ -1486,7 +1486,7 @@ void compute_local_field_SU3(
         double sum = 0.0;
         #pragma unroll
         for (size_t j = 0; j < N_SU3; ++j) {
-            sum += onsite_interaction_SU3[onsite_base + i * N_SU3 + j] * spin_site[j];
+            sum += 2 * onsite_interaction_SU3[onsite_base + i * N_SU3 + j] * spin_site[j];
         }
         local_field[i] = sum;
     }
