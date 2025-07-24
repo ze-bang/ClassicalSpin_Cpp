@@ -864,7 +864,7 @@ def parse_spin_config(directory):
 #             except Exception as e:
 #                 print(f"Could not process {full_path}: {e}")
 
-base_dir = "Asim_BCAO_param_2"
+base_dir = "Asim_BCAO_param"
 if os.path.isdir(base_dir):
     for subdir in sorted(os.listdir(base_dir)):
         full_path = os.path.join(base_dir, subdir)
