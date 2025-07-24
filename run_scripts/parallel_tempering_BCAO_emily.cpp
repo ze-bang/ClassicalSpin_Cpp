@@ -136,7 +136,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     HoneyComb_standarx<3> atoms;
 
     // Define interaction matrices based on Emily's model
-    array<array<double,3>, 3> J1z_ = {{{params.J1xy+params.D, params.E, params.F},{-params.E, params.J1xy-params.D, -params.G},{params.F, -params.G, params.J1z}}};
+    array<array<double,3>, 3> J1z_ = {{{params.J1xy+params.D, params.E, params.F},{params.E, params.J1xy-params.D, params.G},{params.F, params.G, params.J1z}}};
     array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), -sin(2*M_PI/3), 0},{sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
 
     auto transpose = [](const array<array<double,3>, 3>& m) {
