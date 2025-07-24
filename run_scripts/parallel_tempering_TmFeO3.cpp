@@ -274,6 +274,24 @@ int main(int argc, char** argv) {
     double T_end = argv[16] ? atof(argv[16]) : 0.0;
     cout << "Begin parallel tempering on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << endl;
     cout << "T_start: " << T_start << " T_end: " << T_end << endl;
+    ofstream params_file;
+    params_file.open(dir_name + "/params.txt");
+    params_file << "J1ab " << J1ab << endl;
+    params_file << "J1c " << J1c << endl;
+    params_file << "J2ab " << J2ab << endl;
+    params_file << "J2c " << J2c << endl;
+    params_file << "Ka " << Ka << endl;
+    params_file << "Kc " << Kc << endl;
+    params_file << "D1 " << D1 << endl;
+    params_file << "D2 " << D2 << endl;
+    params_file << "chii " << chii << endl;
+    params_file << "xii " << xii << endl;
+    params_file << "e1 " << e1 << endl;
+    params_file << "e2 " << e2 << endl;
+    params_file << "h " << h << endl;
+    params_file << "T_start " << T_start << endl;
+    params_file << "T_end " << T_end << endl;
+    params_file.close();
     parallel_tempering_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0,1,0}, dir_name, rank_to_write);    
     return 0;
 }

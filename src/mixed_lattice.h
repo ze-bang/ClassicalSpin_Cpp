@@ -928,7 +928,7 @@ class mixed_lattice
             }
         }
         
-        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU2 + trilinear_energy_mixed;
+        return field_energy + onsite_energy + bilinear_energy/2 + bilinear_energy_mixed/2 + trilinear_energy_SU2/3 + trilinear_energy_mixed/3;
     }
 
     double site_energy_SU3_diff(const array<double, N_SU3> &new_spin, const array<double, N_SU3> &old_spin, const size_t site_index) const {
@@ -1065,7 +1065,7 @@ class mixed_lattice
             }
         }
         
-        return field_energy + onsite_energy + bilinear_energy + trilinear_energy_SU3 + trilinear_energy_mixed;
+        return field_energy + onsite_energy + bilinear_energy/2 + bilinear_energy_mixed/2 + trilinear_energy_SU3/3 + trilinear_energy_mixed/3;
     }
 
     double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {
@@ -1296,7 +1296,7 @@ class mixed_lattice
     }
 
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
-        array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]);
+        array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]) * 2;
 
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
@@ -1326,7 +1326,7 @@ class mixed_lattice
     }
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
-        array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]);
+        array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]) * 2;
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);

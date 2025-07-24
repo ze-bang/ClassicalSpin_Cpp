@@ -19,7 +19,7 @@ class SingleQAnsatz:
     min_psi_A, max_psi_A = (0, (2-eta_small)*np.pi)
     min_phi_B, max_phi_B = (0, (2-eta_small)*np.pi)
     min_theta_B, max_theta_B = (0, (2-eta_small)*np.pi)
-    min_psi_B, max_psi_B = (0, (2-eta_small)*np.pi)
+    min_psi_B, max_psi_B = (0, (2-eta_small)*np.pi) 
     min_alpha_A, max_alpha_A = (0, 1.0)
     min_alpha_B, max_alpha_B = (0, 1.0)
     parameter_bounds = [

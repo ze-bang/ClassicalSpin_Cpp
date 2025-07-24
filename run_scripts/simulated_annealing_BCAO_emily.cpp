@@ -97,8 +97,10 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     HoneyComb_standarx<3> atoms;
 
 
-    array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},{-E, J1xy-D, -G},{F, -G, J1z}}};
-    array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), -sin(2*M_PI/3), 0},{sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
+    array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},
+                                        {E, J1xy-D, G},
+                                        {F, G, J1z}}};
+    array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), sin(2*M_PI/3), 0},{-sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
 
     auto transpose = [](const array<array<double,3>, 3>& m) {
         array<array<double,3>, 3> res;
@@ -168,16 +170,16 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     int min_index = 0;
 
     for(size_t i=0; i<num_trials;++i){
-
-        lattice<3, 2, 48, 48, 1> MC(&atoms, 1);
-        MC.simulated_annealing(20, 1e-3, 1e6, 10, true, dir+"/"+std::to_string(i));
+        filesystem::create_directory(dir + "/" + std::to_string(i));
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
+        MC.simulated_annealing(20, 1e-3, 1e5, 10, true);
+        MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         for (size_t k = 0; k < 1e4; ++k) {
             MC.deterministic_sweep();
         }
-
+        MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
         // Save the final configuration
-        cout << "Writing zero temperature spin configuration to " << dir + "/Tzero" << endl;
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);        
         if (i == 0) {
             min_energy = MC.energy_density(MC.spins);

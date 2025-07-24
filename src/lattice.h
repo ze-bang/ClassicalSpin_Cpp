@@ -311,20 +311,20 @@ class lattice
     }
 
     double site_energy_diff(const array<double, N> &new_spins, const array<double, N> &old_spins, const size_t site_index) const {
-        double energy = 0.0;
-        energy -= dot(new_spins - old_spins, field[site_index]);
-        energy += contract(new_spins, onsite_interaction[site_index], new_spins) - contract(old_spins, onsite_interaction[site_index], old_spins);
+        double single_site_energy = 0, double_site_energy = 0, triple_site_energy = 0;
+        single_site_energy -= dot(new_spins - old_spins, field[site_index]);
+        single_site_energy += contract(new_spins, onsite_interaction[site_index], new_spins) - contract(old_spins, onsite_interaction[site_index], old_spins);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            energy += contract(new_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]])
+            double_site_energy += contract(new_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]])
                      - contract(old_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
-            energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]])
+            triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]])
                      - contract_trilinear(trilinear_interaction[site_index][i], old_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        return energy;
+        return single_site_energy + double_site_energy/2 + triple_site_energy/3;
     }
 
     // Optimized site energy calculation that doesn't modify spins array
@@ -368,7 +368,7 @@ class lattice
                 trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
-        return field_energy + onsite_energy/2 + bilinear_energy/2 + trilinear_energy/3;
+        return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
     }
 
     double energy_density(spin_config &curr_spins){
@@ -377,7 +377,7 @@ class lattice
     
     array<double, N>  get_local_field(size_t site_index){
         array<double,N> local_field;
-        local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
+        local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index])*2;
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
             local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);

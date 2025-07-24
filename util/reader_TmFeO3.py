@@ -6,6 +6,7 @@ import os
 from math import gcd
 from functools import reduce
 from matplotlib.colors import PowerNorm
+from sys import argv
 # plt.rcParams['text.usetex'] = True
 
 
@@ -856,10 +857,9 @@ def read_2D_nonlinear_tot(dir):
 # parseDSSF(dir)
 
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
-dir = "TmFeO3_2DCS_xii=0.05_H_c"
-full_read_2DCS_TFO(dir)
-dir = "TmFeO3_2DCS_xii=0.0"
-full_read_2DCS_TFO(dir)
+if __name__ == "__main__":
+    directory = argv[1] if len(argv) > 1 else "TmFeO3_2DCS_D=0_xii=0.05"
+    full_read_2DCS_TFO(directory)
 # read_MD_tot(dir)
 
 

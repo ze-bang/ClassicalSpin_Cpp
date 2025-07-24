@@ -29,6 +29,8 @@ struct SimulationParams {
     size_t overrelaxation_rate = 10; // Overrelaxation rate for the simulation
     size_t swap_interval = 50;
     size_t probe_rate = 2000;
+
+    size_t num_trials = 5; // Number of trials for the simulation
 };
 
 // Function to read parameters from a file
@@ -65,6 +67,7 @@ SimulationParams read_parameters(const string& filename) {
                     params.field_dir[i++] = stod(item);
                 }
             }
+            else if (key == "num_trials") params.num_trials = stoi(value);
             else if (key == "dir") params.dir = value;
             // Model parameters
             else if (key == "J1xy") params.J1xy = stod(value);
@@ -182,6 +185,14 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     // Lattice and simulation
     lattice<3, 2, 36, 36, 1> MC(&atoms, 1);
     MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0});
+    if (rank == 0) {
+        cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
+        MC.write_to_file_spin(params.dir + "/spin.txt", MC.spins);
+        for (size_t i = 0; i < 1e4; ++i) {
+            MC.deterministic_sweep();
+        }
+        MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -222,9 +233,23 @@ int main(int argc, char** argv) {
         cout << "Field: " << params.h << " mu_B, Direction: [" << params.field_dir[0] << "," << params.field_dir[1] << "," << params.field_dir[2] << "]\n";
         cout << "Temperature Range: " << params.T_start << "K to " << params.T_end << "K\n";
         cout << "Output directory: " << params.dir << "\n";
+        filesystem::create_directory(params.dir);
     }
     
-    PT_BCAO_honeycomb(params);
+    for (size_t i = 0; i < params.num_trials; ++i) {
+        SimulationParams trial_params = params;
+        trial_params.dir = params.dir + "/trial_" + to_string(i);
+
+        if (rank == 0) {
+            cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
+        }
+        
+        // Synchronize all processes before starting the next trial
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Run the Parallel Tempering simulation
+        PT_BCAO_honeycomb(trial_params);
+    }
     
     int finalized;
     MPI_Finalized(&finalized);
