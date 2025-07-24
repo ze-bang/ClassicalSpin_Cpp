@@ -98,7 +98,7 @@ void MD_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, 
 
 
     array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},{E, J1xy-D, G},{F, G, J1z}}};
-    array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), -sin(2*M_PI/3), 0},{sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
+    array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), sin(2*M_PI/3), 0},{-sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
 
     auto transpose = [](const array<array<double,3>, 3>& m) {
         array<array<double,3>, 3> res;

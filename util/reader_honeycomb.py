@@ -199,6 +199,44 @@ def SSSFGraphHK0(A,B,d1, filename):
 
 
 def SSSFGraph2D(A, B, d1, filename):
+    # Plot the first Brillouin zone (a hexagon)
+    # The vertices of the hexagon in units of 2*pi/a
+    # We assume a=1, so the units are 2*pi
+    # The user's plot seems to be in units of (kx/2pi, ky/2pi)
+    # So we need to divide the standard BZ coordinates by 2*pi
+    
+    # Vertices of the BZ in (kx, ky)
+    a = 1 # lattice constant
+    v = (4 * np.pi) / (3 * a)
+    bz_vertices = np.array([
+        [v * np.sqrt(3)/2, v / 2],
+        [0, v],
+        [-v * np.sqrt(3)/2, v / 2],
+        [-v * np.sqrt(3)/2, -v / 2],
+        [0, -v],
+        [v * np.sqrt(3)/2, -v / 2],
+        [v * np.sqrt(3)/2, v / 2]  # Close the hexagon
+    ])
+
+    # High-symmetry points in (kx, ky)
+    gamma_point = np.array([0, 0])
+    k_point = np.array([ (2 * np.pi) / (np.sqrt(3) * a), (2 * np.pi) / (3 * a)])
+    m_point = np.array([ (2 * np.pi) / (np.sqrt(3) * a), 0])
+
+    # Scale points to match the plot's axes (kx/2pi, ky/2pi)
+    bz_vertices_plot = bz_vertices / (2 * np.pi)
+    gamma_plot = gamma_point / (2 * np.pi)
+    k_plot = k_point / (2 * np.pi)
+    m_plot = m_point / (2 * np.pi)
+
+    plt.plot(bz_vertices_plot[:, 0], bz_vertices_plot[:, 1], 'w--', lw=1.5)
+
+    # Plot symmetry points and labels
+    plt.scatter([gamma_plot[0], k_plot[0], m_plot[0]], [gamma_plot[1], k_plot[1], m_plot[1]], c='white', s=50, zorder=5)
+    plt.text(gamma_plot[0] + 0.02, gamma_plot[1] + 0.02, r'$\Gamma$', color='white', fontsize=14)
+    plt.text(k_plot[0] + 0.02, k_plot[1] + 0.02, 'K', color='white', fontsize=14)
+    plt.text(m_plot[0] + 0.02, m_plot[1] + 0.02, 'M', color='white', fontsize=14)
+
     plt.pcolormesh(A, B, d1)
     plt.colorbar()
     plt.ylabel(r'$K_y$')
@@ -230,10 +268,10 @@ def hhknk_2D(H,K):
     return contract('ij,k->ijk', H, np.array([1,0])) + contract('ij,k->ijk',K, np.array([0,1]))
 
 def SSSF2D(S, P, nK, dir, gb=False):
-    H = np.linspace(0, 1, nK)
-    L = np.linspace(0, 1, nK)
+    H = np.linspace(-1, 1, nK)
+    L = np.linspace(-1, 1, nK)
     A, B = np.meshgrid(H, L)
-    K = hk0(A, B).reshape((nK*nK,3))
+    K = hk2d(A, B).reshape((nK*nK,3))
     
     S = SSSF_q(K, S, P, gb)
     S = S.reshape((nK, nK, 3, 3))
@@ -837,6 +875,19 @@ if os.path.isdir(base_dir):
                 # read_MD_tot(full_path)
             except Exception as e:
                 print(f"Could not process {full_path}: {e}")
+
+base_dir = "Asim_BCAO_param_2"
+if os.path.isdir(base_dir):
+    for subdir in sorted(os.listdir(base_dir)):
+        full_path = os.path.join(base_dir, subdir)
+        if os.path.isdir(full_path):
+            print(f"Processing directory: {full_path}")
+            try:
+                parse_spin_config(full_path)
+                # read_MD_tot(full_path)
+            except Exception as e:
+                print(f"Could not process {full_path}: {e}")
+
 
 # dir = "BCAO_sasha_phase/J3_1.308000_Jzp_0.000000"
 # S = np.loadtxt(dir + "/spins.txt")
