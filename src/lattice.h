@@ -391,7 +391,6 @@ class lattice
         return local_field-field[site_index];
     }
 
-
     array<double, N>  get_local_field_lattice(size_t site_index, const spin_config &current_spin){
         array<double,N> local_field;
         local_field =  multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
@@ -672,7 +671,7 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, string out_dir = "", bool save_observables = false){    
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, double cooling_rate = 0.9, string out_dir = "", bool save_observables = false){    
         if (out_dir != ""){
             filesystem::create_directory(out_dir);
         }
@@ -733,7 +732,7 @@ class lattice
                 myfile << endl;
                 myfile.close();
             }
-            T *= 0.9;
+            T *= cooling_rate;
         }
         if(out_dir != ""){
             write_to_file_spin(out_dir + "/spin.txt", spins);
@@ -752,6 +751,147 @@ class lattice
             write_to_file_spin(dir_name + "/spin.txt", spins);
             write_to_file_pos(dir_name + "/pos.txt");
         }
+    }
+
+    void adaptive_restarted_simulated_annealing(
+        double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate,
+        size_t max_restarts, size_t stagnation_patience, bool gaussian_move = false,
+        string out_dir = "")
+    {
+        if (!out_dir.empty()) {
+            filesystem::create_directory(out_dir);
+        }
+
+        spin_config best_spins_so_far = spins;
+        double best_energy_so_far = total_energy(spins);
+        cout << "Initial Energy: " << best_energy_so_far / lattice_size << endl;
+
+        size_t restarts_done = 0;
+        bool restart_triggered = true;
+
+        while (restarts_done <= max_restarts) {
+            if (restart_triggered) {
+                cout << "\n--- Starting Annealing Cycle " << restarts_done + 1 << "/" << max_restarts + 1 << " ---" << endl;
+                if (restarts_done > 0) {
+                    // Re-initialize spins from the best state found so far
+                    spins = best_spins_so_far;
+                    
+                    // Add a perturbation to escape the local minimum
+                    cout << "Applying perturbation to escape local minimum..." << endl;
+                    double perturbation_temperature = T_start * 1.5; // High temperature kick
+                    size_t perturbation_sweeps = 20; // A few sweeps to shake things up
+                    for(size_t i = 0; i < perturbation_sweeps; ++i) {
+                        metropolis(spins, perturbation_temperature, gaussian_move, 1000.0);
+                    }
+                }
+            }
+
+            double T = T_start;
+            double cooling_rate = 0.9; // Start with a standard cooling rate
+            double sigma = 1000.0;
+            size_t stagnation_counter = 0;
+            double last_energy = total_energy(spins);
+
+            while (T > T_end) {
+                double total_acceptance_in_step = 0;
+                size_t metropolis_calls = 0;
+
+                for (size_t i = 0; i < n_anneal; ++i) {
+                    if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                        overrelaxation();
+                    }
+                    total_acceptance_in_step += metropolis(spins, T, gaussian_move, sigma);
+                    metropolis_calls++;
+                }
+
+                double acceptance_rate = total_acceptance_in_step / metropolis_calls;
+                cout << "T: " << T << ", Acceptance: " << acceptance_rate;
+
+                // Adaptive sigma for Gaussian moves
+                if (gaussian_move && acceptance_rate < 0.5){
+                    sigma = sigma * 0.5 / (1-acceptance_rate); 
+                    cout << "Sigma is adjusted to: " << sigma << endl;   
+                }
+
+                // Adaptive cooling rate
+                if (acceptance_rate > 0.8) cooling_rate = 0.85; // Cool faster
+                else if (acceptance_rate < 0.1) cooling_rate = 0.98; // Cool slower
+                else cooling_rate = 0.9; // Default
+                cout << ", Cooling Rate: " << cooling_rate << endl;
+
+                double current_energy = total_energy(spins);
+                if (current_energy < best_energy_so_far) {
+                    best_energy_so_far = current_energy;
+                    best_spins_so_far = spins;
+                    stagnation_counter = 0; // Reset stagnation counter on improvement
+                    cout << "New best energy found: " << best_energy_so_far / lattice_size << endl;
+                } else {
+                    // Check for stagnation if energy hasn't improved significantly
+                    if (abs(current_energy - last_energy) / abs(last_energy) < 1e-5) {
+                        stagnation_counter++;
+                    } else {
+                        stagnation_counter = 0; // Reset if there's some change
+                    }
+                }
+                last_energy = current_energy;
+
+                if (stagnation_counter >= stagnation_patience) {
+                    cout << "Stagnation detected. Triggering restart." << endl;
+                    restart_triggered = true;
+                    break; // Exit inner while loop to restart
+                } else {
+                    restart_triggered = false;
+                }
+
+                T *= cooling_rate;
+            }
+
+            restarts_done++;
+            if (!restart_triggered) {
+                cout << "\nAnnealing cycle finished without stagnation. Concluding." << endl;
+                break; // Exit outer while loop
+            }
+        }
+
+        cout << "\n--- Simulated Annealing Finished ---" << endl;
+        cout << "Final best energy: " << best_energy_so_far / lattice_size << endl;
+        spins = best_spins_so_far;
+
+        if (!out_dir.empty()) {
+            write_to_file_spin(out_dir + "/spin_final.txt", spins);
+            write_to_file_pos(out_dir + "/pos.txt");
+        }
+    }
+
+    void simulated_annealing_zigzag(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, double cooling_rate = 0.9, string out_dir = "", bool save_observables = false){
+        // Set initial spin configuration to zigzag order
+        array<double, N> spin_up = {0};
+        if (N > 0) {
+            spin_up[N-1] = spin_length;
+        }
+
+        for (size_t i=0; i< dim1; ++i){
+            for (size_t j=0; j< dim2; ++j){
+                for(size_t k=0; k< dim;++k){
+                    for (size_t l=0; l< N_ATOMS;++l){
+                        size_t current_site_index = flatten_index(i,j,k,l);
+                        if ((i + j + k) % 2 == 0) {
+                            spins[current_site_index] = spin_up;
+                        } else {
+                            spins[current_site_index] = -spin_up;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Invalidate and update energy cache after changing spins
+        invalidate_energy_cache();
+        update_energy_cache();
+
+        cout << "Starting simulated annealing with zigzag initial configuration." << endl;
+        // Call the existing simulated annealing method
+        simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
 
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){

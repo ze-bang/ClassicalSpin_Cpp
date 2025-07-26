@@ -862,7 +862,7 @@ void SSPRK53_step_kernel(
      d_spins_SU3, u_SU3, a52, tmp_SU3, a54, k_SU3, b54_h);
 
     // Single final synchronization only - no intermediate sync needed
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 }
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
@@ -975,7 +975,7 @@ void euler_step_kernel(
     dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + block_size.x - 1) / block_size.x);
     
     // Synchronize before starting the computation
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     // Compute local fields
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
@@ -1001,7 +1001,7 @@ void euler_step_kernel(
 
     
     // Synchronize before updating arrays
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
     
     double *temp2_SU2, *temp2_SU3;
     cudaMalloc(&temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
@@ -1016,7 +1016,7 @@ void euler_step_kernel(
     cudaMemcpy(d_spins_SU3, temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToDevice);
 
     // Final synchronization
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
     
     // Free temporary arrays
     cudaFree(temp2_SU2);
@@ -1081,7 +1081,7 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     }
     
     // Make sure everything is synchronized
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
     
     // Cleanup temporary arrays
     cudaFree(d_local_fields_SU2);

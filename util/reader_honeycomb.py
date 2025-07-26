@@ -801,35 +801,66 @@ def read_2D_nonlinear_tot(dir):
 
 def plot_spin_config_2d(P, S, filename):
     """
-    Graphs the spin configuration projected on the 2D xy plane.
+    Graphs the spin configuration projected on the 2D xy, xz, and yz planes.
 
     Args:
         P (numpy.ndarray): Array of site positions (N, 3).
         S (numpy.ndarray): Array of spin vectors (N, 3).
-        filename (str): Path to save the output plot.
+        filename (str): Base path to save the output plots. Projections will be appended.
     """
+    base_filename, ext = os.path.splitext(filename)
+
+    # --- XY Projection ---
     fig, ax = plt.subplots(figsize=(8, 8))
-    
-    # Plot sites
     ax.scatter(P[:, 0], P[:, 1], c='lightblue', edgecolors='k', s=2, zorder=1)
-    
-    # Plot spins (projected on xy plane)
-    # The color of the quiver can represent the z-component of the spin
-    colors = S[:, 2]
-    q = ax.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 1], colors, 
-                  cmap='viridis', scale_units='xy', angles='xy', scale=1,
-                  width=0.002, headwidth=3, headlength=4, zorder=2)
-    
-    cbar = fig.colorbar(q, ax=ax, shrink=0.8)
-    cbar.set_label('Spin z-component')
-    
+    colors_xy = S[:, 2]
+    q_xy = ax.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 1], colors_xy,
+                     cmap='viridis', scale_units='xy', angles='xy', scale=1,
+                     width=0.002, headwidth=3, headlength=4, zorder=2)
+    cbar_xy = fig.colorbar(q_xy, ax=ax, shrink=0.8)
+    cbar_xy.set_label('Spin z-component')
     ax.set_xlabel('x position')
     ax.set_ylabel('y position')
     ax.set_title('Spin Configuration (2D XY Projection)')
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, linestyle='--', alpha=0.6)
-    
-    plt.savefig(filename)
+    plt.savefig(f"{base_filename}_xy{ext}")
+    plt.clf()
+    plt.close(fig)
+
+    # --- XZ Projection ---
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(P[:, 0], P[:, 2], c='lightblue', edgecolors='k', s=2, zorder=1)
+    colors_xz = S[:, 1]
+    q_xz = ax.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 2], colors_xz,
+                     cmap='viridis', scale_units='xy', angles='xy', scale=1,
+                     width=0.002, headwidth=3, headlength=4, zorder=2)
+    cbar_xz = fig.colorbar(q_xz, ax=ax, shrink=0.8)
+    cbar_xz.set_label('Spin y-component')
+    ax.set_xlabel('x position')
+    ax.set_ylabel('z position')
+    ax.set_title('Spin Configuration (2D XZ Projection)')
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    plt.savefig(f"{base_filename}_xz{ext}")
+    plt.clf()
+    plt.close(fig)
+
+    # --- YZ Projection ---
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(P[:, 1], P[:, 2], c='lightblue', edgecolors='k', s=2, zorder=1)
+    colors_yz = S[:, 0]
+    q_yz = ax.quiver(P[:, 0], P[:, 1], S[:, 1], S[:, 2], colors_yz,
+                     cmap='viridis', scale_units='xy', angles='xy', scale=1,
+                     width=0.002, headwidth=3, headlength=4, zorder=2)
+    cbar_yz = fig.colorbar(q_yz, ax=ax, shrink=0.8)
+    cbar_yz.set_label('Spin x-component')
+    ax.set_xlabel('y position')
+    ax.set_ylabel('z position')
+    ax.set_title('Spin Configuration (2D YZ Projection)')
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    plt.savefig(f"{base_filename}_yz{ext}")
     plt.clf()
     plt.close(fig)
 
@@ -851,7 +882,59 @@ def parse_spin_config(directory):
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
 
 
-base_dir = "Asim_BCAO_param"
+def read_field_scan(directory):
+    h_values = []
+    m_values = []
+
+    for subdir in sorted(os.listdir(directory)):
+        full_path = os.path.join(directory, subdir)
+        if os.path.isdir(full_path) and subdir.startswith("h_"):
+            try:
+                h_str = subdir.split('_')[1]
+                h = float(h_str)
+                spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
+                if os.path.exists(spin_file):
+                    S = np.loadtxt(spin_file)
+                    M = np.mean(S, axis=0)
+                    # m_magnitude = np.linalg.norm(M)
+                    
+                    h_values.append(h)
+                    m_values.append(M)
+                else:
+                    print(f"Magnetization file not found in {full_path}")
+
+            except (IndexError, ValueError) as e:
+                print(f"Could not parse field value from directory {subdir}: {e}")
+            except Exception as e:
+                print(f"An error occurred while processing {full_path}: {e}")
+
+    if not h_values:
+        print(f"No magnetization data found in {directory}")
+        return
+
+    # Sort values by field strength for a clean plot
+    sorted_indices = np.argsort(h_values)
+    h_values_sorted = np.array(h_values)[sorted_indices]
+    m_values_sorted = np.array(m_values)[sorted_indices]
+
+    # Save magnetization as a function of h
+    output_data = np.c_[h_values_sorted, m_values_sorted]
+    output_filename = os.path.join(directory, "magnetization_vs_field.txt")
+    np.savetxt(output_filename, output_data, header="h Mx My Mz", fmt='%f %f %f %f')
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(h_values_sorted, m_values_sorted, marker='o', linestyle='-')
+    plt.xlabel("Field Strength (h)")
+    plt.ylabel("Magnetization Magnitude |M|")
+    plt.legend(["Mx", "My", "Mz"], loc='upper right')
+    plt.title(f"Magnetization vs. Field Strength in {os.path.basename(directory)}")
+    plt.grid(True)
+    plt.savefig(os.path.join(directory, "magnetization_vs_field.pdf"))
+    plt.clf()
+    plt.close()
+
+
+base_dir = "test_param"
 if os.path.isdir(base_dir):
     for subdir in sorted(os.listdir(base_dir)):
         full_path = os.path.join(base_dir, subdir)
@@ -859,21 +942,23 @@ if os.path.isdir(base_dir):
             print(f"Processing directory: {full_path}")
             try:
                 parse_spin_config(full_path)
+                # read_field_scan(full_path)
                 # read_MD_tot(full_path)
             except Exception as e:
                 print(f"Could not process {full_path}: {e}")
 
-base_dir = "Asim_BCAO_param_2"
-if os.path.isdir(base_dir):
-    for subdir in sorted(os.listdir(base_dir)):
-        full_path = os.path.join(base_dir, subdir)
-        if os.path.isdir(full_path):
-            print(f"Processing directory: {full_path}")
-            try:
-                parse_spin_config(full_path)
-                # read_MD_tot(full_path)
-            except Exception as e:
-                print(f"Could not process {full_path}: {e}")
+# base_dir = "Asim_BCAO_param_2"
+# if os.path.isdir(base_dir):
+#     for subdir in sorted(os.listdir(base_dir)):
+#         full_path = os.path.join(base_dir, subdir)
+#         if os.path.isdir(full_path):
+#             print(f"Processing directory: {full_path}")
+#             try:
+#                 # parse_spin_config(full_path)
+#                 read_field_scan(full_path)
+#                 # read_MD_tot(full_path)
+#             except Exception as e:
+#                 print(f"Could not process {full_path}: {e}")
 
 
 # dir = "BCAO_sasha_phase/J3_1.308000_Jzp_0.000000"

@@ -35,7 +35,7 @@ void simulated_annealing_honeycomb(double T_start, double T_end, double K, doubl
 
     lattice<3, 2, 36, 36, 1> MC(&atoms);
     if (deterministic == false){
-        MC.simulated_annealing(T_start, T_end, 10000, 0, false, dir);
+        MC.simulated_annealing(T_start, T_end, 10000, 0, false, 0.9, dir);
     }
     else{
         MC.simulated_annealing_deterministic(T_start, T_end, 10000, 10000, 0, dir);
