@@ -868,16 +868,17 @@ def parse_spin_config(directory):
     nK = 100
     SSSF = np.zeros((nK, nK, 3, 3))
 
-    H = np.linspace(0, 1, nK)
-    L = np.linspace(0, 1, nK)
+    H = np.linspace(-0.5, 0.5, nK)
+    L = np.linspace(-0.5, 0.5, nK)
     C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
-        filename = os.fsdecode(file)
-        if os.path.isdir(directory + "/" + filename):
-            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
-            P = np.loadtxt(directory + "/" + filename + "/pos.txt")
-            SSSF += SSSF2D(S, P, 100, directory + "/" + filename )
-            plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
+        if file.startswith('trial'):
+            filename = os.fsdecode(file)
+            if os.path.isdir(directory + "/" + filename):
+                S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
+                P = np.loadtxt(directory + "/" + filename + "/pos.txt")
+                SSSF += SSSF2D(S, P, 100, directory + "/" + filename )
+                plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
     SSSF = SSSF / len(os.listdir(directory))
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
 
