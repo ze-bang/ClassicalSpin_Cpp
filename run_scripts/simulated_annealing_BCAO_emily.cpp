@@ -14,6 +14,8 @@ struct SimulationParams {
     string dir = "BCAO_simulation";
     double J1xy = -7.6, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
     double J3xy = 2.5, J3z = -0.85;
+    double h_start = 0.0, h_end = 1.0;
+    int num_steps = 50;
 };
 
 SimulationParams read_parameters(const string& filename) {

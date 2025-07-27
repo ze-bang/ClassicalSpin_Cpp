@@ -649,8 +649,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     cout << "Finished setting up TmFeO3 model." << endl;
     cout << "Starting calculations..." << endl;
 
-    // array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
-    array<array<double, 3>,4> field_drive = {{{0,0,1},{0,0,1},{0,0,1},{0,0,1}}};
+    array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
+    // array<array<double, 3>,4> field_drive = {{{0,0,1},{0,0,1},{0,0,1},{0,0,1}}};
 
     double pulse_amp = 1.2;
     double pulse_width = 0.38;
