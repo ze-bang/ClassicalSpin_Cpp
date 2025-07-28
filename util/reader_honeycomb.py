@@ -935,7 +935,7 @@ def read_field_scan(directory):
     plt.close()
 
 
-base_dir = "test_param"
+base_dir = "Asim_BCAO_param"
 if os.path.isdir(base_dir):
     for subdir in sorted(os.listdir(base_dir)):
         full_path = os.path.join(base_dir, subdir)
@@ -948,18 +948,18 @@ if os.path.isdir(base_dir):
             except Exception as e:
                 print(f"Could not process {full_path}: {e}")
 
-# base_dir = "Asim_BCAO_param_2"
-# if os.path.isdir(base_dir):
-#     for subdir in sorted(os.listdir(base_dir)):
-#         full_path = os.path.join(base_dir, subdir)
-#         if os.path.isdir(full_path):
-#             print(f"Processing directory: {full_path}")
-#             try:
-#                 # parse_spin_config(full_path)
-#                 read_field_scan(full_path)
-#                 # read_MD_tot(full_path)
-#             except Exception as e:
-#                 print(f"Could not process {full_path}: {e}")
+base_dir = "Asim_BCAO_param_2"
+if os.path.isdir(base_dir):
+    for subdir in sorted(os.listdir(base_dir)):
+        full_path = os.path.join(base_dir, subdir)
+        if os.path.isdir(full_path):
+            print(f"Processing directory: {full_path}")
+            try:
+                parse_spin_config(full_path)
+                # read_field_scan(full_path)
+                # read_MD_tot(full_path)
+            except Exception as e:
+                print(f"Could not process {full_path}: {e}")
 
 
 # dir = "BCAO_sasha_phase/J3_1.308000_Jzp_0.000000"

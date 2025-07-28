@@ -524,7 +524,7 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
     time_steps = np.min([len(np.loadtxt(m0_file)), len(np.loadtxt(m0_time_file))])
 
     try:
-        M0 = np.loadtxt(m0_file)[-time_steps:,readslice]
+        M0 = np.loadtxt(m0_file)[-time_steps:]
         M0_T = np.loadtxt(m0_time_file)
     except (IOError, IndexError) as e:
         print(f"Error loading M0 data: {e}")
@@ -537,7 +537,7 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
 
     # Precompute M0 frequency domain data
     M0_phase = np.exp(1j * np.outer(wp, M0_T))
-    M0_w = np.dot(M0, M0_phase.T)
+    M0_w = contract('ta, wt->wa', M0, M0_phase)  # M0 in frequency domain
     
     # Initialize result array
     M_NL_FF = np.zeros((len(wp), len(w)), dtype=complex)
@@ -575,23 +575,23 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
             base_path = os.path.join(directory, subdir)
             
             # Load M1 data
-            M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:,readslice]
+            M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:]
             M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
             # Load M01 data
-            M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:,readslice]
+            M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:]
             M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
             
             # Transform to frequency domain
             M1_phase = np.exp(1j * np.outer(wp, M1_T))
             M01_phase = np.exp(1j * np.outer(wp, M01_T))
             
-            M1_w = np.dot(M1, M1_phase.T)
-            M01_w = np.dot(M01, M01_phase.T)
+            M1_w = contract('ta, wt->wa', M1, M1_phase)  # M1 in frequency domain
+            M01_w = contract('ta, wt->wa', M01, M01_phase)  # M01 in frequency domain
             M_NL_here = M01_w - M0_w - M1_w
             
             # Apply phase factor
-            ffactau = np.exp(-1j * w * current_tau) / len(tau)
-            M_NL_FF += np.outer(M_NL_here, ffactau)
+            ffactau = np.exp(-1j * w * current_tau)
+            M_NL_FF += contract('wa, e->ewa', M_NL_here, ffactau)
             
         except Exception as e:
             print(f"Error processing {subdir}: {e}")
@@ -603,34 +603,38 @@ def read_2D_nonlinear_adaptive_time_step(dir, readslice, fm):
     # Suppress intensity near (0,0)
     # M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
 
-    # Save raw data
-    output_file = os.path.join(dir, "M_NL_FF.txt")
-    np.savetxt(output_file, M_NL_FF_abs)
-    
     # Create plots with shared setup
     plt.figure(figsize=(10, 8))
-    extent = [0, omega_range, -omega_range, omega_range]
+    real_range = omega_range * 4.92/4.14
+    extent = [0, real_range, -real_range, real_range]
     
-    # Linear scale plot
-    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
-    plt.xlabel('Frequency (J1)')
-    plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{dir}/NLSPEC_{readslice}_{fm}.pdf", dpi=300, bbox_inches='tight')
-    plt.clf()
-    
-    # Log scale plot
-    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
-              norm=PowerNorm(gamma=0.5))
-    plt.colorbar(label='Amplitude (sqrt scale)')
-    plt.xlabel('Frequency (J1)')
-    plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}/NLSPEC_{readslice}_{fm}_SU3_log.pdf", dpi=300, bbox_inches='tight')
-    plt.clf()
+
+    # Save raw data
+    for i in range(3):
+        M_NL_here = M_NL_FF_abs[:,:,i]
+        output_file = os.path.join(dir, f"M_NL_FF_{i}.txt")
+        np.savetxt(output_file, M_NL_here)
+
+        # Linear scale plot
+        plt.imshow(M_NL_here, origin='lower', extent=extent,
+                aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (THz)')
+        plt.ylabel('Frequency (THz)')
+        plt.title('2D Nonlinear Spectrum')
+        plt.savefig(f"{dir}/NLSPEC_{i}_{fm}_SU2.pdf", dpi=300, bbox_inches='tight')
+        plt.clf()
+        
+        # Log scale plot
+        plt.imshow(M_NL_here, origin='lower', extent=extent,
+                aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+                norm=PowerNorm(gamma=0.5))
+        plt.colorbar(label='Amplitude (sqrt scale)')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum')
+        plt.savefig(f"{directory}/NLSPEC_{i}_{fm}_SU2_log.pdf", dpi=300, bbox_inches='tight')
+        plt.clf()
     
     return M_NL_FF_abs
 
@@ -656,7 +660,7 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
     time_steps = np.min([len(np.loadtxt(m0_file)), len(np.loadtxt(m0_time_file))])
 
     try:
-        M0 = np.loadtxt(m0_file)[-time_steps:,readslice]
+        M0 = np.loadtxt(m0_file)[-time_steps:]
         M0_T = np.loadtxt(m0_time_file)
     except (IOError, IndexError) as e:
         print(f"Error loading M0 data: {e}")
@@ -669,7 +673,7 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
 
     # Precompute M0 frequency domain data
     M0_phase = np.exp(1j * np.outer(wp, M0_T))
-    M0_w = np.dot(M0, M0_phase.T)
+    M0_w = contract('ta, wt->wa', M0, M0_phase)  # M0 in frequency domain
     
     # Initialize result array
     M_NL_FF = np.zeros((len(wp), len(w)), dtype=complex)
@@ -717,13 +721,13 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
             M1_phase = np.exp(1j * np.outer(wp, M1_T))
             M01_phase = np.exp(1j * np.outer(wp, M01_T))
             
-            M1_w = np.dot(M1, M1_phase.T)
-            M01_w = np.dot(M01, M01_phase.T)
+            M1_w = contract('ta, wt->wa', M1, M1_phase)  # M1 in frequency domain
+            M01_w = contract('ta, wt->wa', M01, M01_phase)  # M01 in frequency domain
             M_NL_here = M01_w - M0_w - M1_w
             
             # Apply phase factor
             ffactau = np.exp(-1j * w * current_tau) / len(tau)
-            M_NL_FF += np.outer(M_NL_here, ffactau)
+            M_NL_FF += contract('wa, e->ewa', M_NL_here, ffactau)
             
         except Exception as e:
             print(f"Error processing {subdir}: {e}")
@@ -733,57 +737,49 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, readslice, fm):
     M_NL_FF_abs = np.abs(M_NL_FF)
 
     # M_NL_FF_abs[len(wp)//2-2:len(wp)//2+2, 0:2] = 1e-15
+    real_range = omega_range * 4.92/4.14
+    extent = [0, real_range, -real_range, real_range]
 
     # Save raw data
-    output_file = os.path.join(directory, "M_NL_FF_SU3.txt")
-    np.savetxt(output_file, M_NL_FF_abs)
-    
-    # Create plots with shared setup
-    plt.figure(figsize=(10, 8))
-    extent = [0, omega_range, -omega_range, omega_range]
-    
-    # Linear scale plot
-    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    plt.colorbar(label='Amplitude')
-    plt.xlabel('Frequency (J1)')
-    plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}/NLSPEC_{readslice}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
-    plt.clf()
-    
-    # Log scale plot
-    plt.imshow(M_NL_FF_abs, origin='lower', extent=extent,
-              aspect='auto', interpolation='lanczos', cmap='gnuplot2',
-              norm=PowerNorm(gamma=0.5))
-    plt.colorbar(label='Amplitude (sqrt scale)')
-    plt.xlabel('Frequency (J1)')
-    plt.ylabel('Frequency (J1)')
-    plt.title('2D Nonlinear Spectrum')
-    plt.savefig(f"{directory}/NLSPEC_{readslice}_{fm}_SU3_log.pdf", dpi=300, bbox_inches='tight')
-    plt.clf()
+    for i in range(8):
+        M_NL_here = M_NL_FF_abs[:,:,i]
+        output_file = os.path.join(dir, f"M_NL_FF_SU3_{i}.txt")
+        np.savetxt(output_file, M_NL_here)
+
+        # Linear scale plot
+        plt.imshow(M_NL_here, origin='lower', extent=extent,
+                aspect='auto', interpolation='lanczos', cmap='gnuplot2')
+        plt.colorbar(label='Amplitude')
+        plt.xlabel('Frequency (THz)')
+        plt.ylabel('Frequency (THz)')
+        plt.title('2D Nonlinear Spectrum')
+        plt.savefig(f"{dir}/NLSPEC_{i}_{fm}_SU3.pdf", dpi=300, bbox_inches='tight')
+        plt.clf()
+        
+        # Log scale plot
+        plt.imshow(M_NL_here, origin='lower', extent=extent,
+                aspect='auto', interpolation='lanczos', cmap='gnuplot2',
+                norm=PowerNorm(gamma=0.5))
+        plt.colorbar(label='Amplitude (sqrt scale)')
+        plt.xlabel('Frequency (J1)')
+        plt.ylabel('Frequency (J1)')
+        plt.title('2D Nonlinear Spectrum')
+        plt.savefig(f"{directory}/NLSPEC_{i}_{fm}_SU3_log.pdf", dpi=300, bbox_inches='tight')
+        plt.clf()
     
     return M_NL_FF_abs
 
 
 def full_read_2DCS_TFO(dir):
-    SU2x = read_2D_nonlinear_adaptive_time_step(dir, 0, True)
-    SU2y = read_2D_nonlinear_adaptive_time_step(dir, 1, True)
-    SU2z = read_2D_nonlinear_adaptive_time_step(dir, 2, True)
-    SU32 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 1, True)
-    # SU35 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 4, True)
-    # SU37 = read_2D_nonlinear_adaptive_time_step_SU3(dir, 6, True)
-    for i in range(8):
-        if i == 1:
-            continue
-        read_2D_nonlinear_adaptive_time_step_SU3(dir, i, True)
+    SU2 = read_2D_nonlinear_adaptive_time_step(dir, True)
+    SU3 = read_2D_nonlinear_adaptive_time_step_SU3(dir, True)
 
 
     omega_range = 3
 
-    xtotal = 5 * SU2x 
-    ytotal = 5 * SU2y 
-    ztotal = 5 * SU2z + 5.2 * SU32
+    xtotal = 5 * SU2[:,:,0]
+    ytotal = 5 * SU2[:,:,1]
+    ztotal = 5 * SU2[:,:,2] + 5.2 * SU3[:,:,1]
 
     extent = [0, omega_range, -omega_range, omega_range]
 
