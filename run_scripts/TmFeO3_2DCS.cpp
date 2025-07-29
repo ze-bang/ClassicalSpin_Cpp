@@ -385,7 +385,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 }
 
 
-void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
+void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, const array<array<double, 3>,4> &field_drive, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
     int initialized;
 
     MPI_Initialized(&initialized);
@@ -650,7 +650,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     cout << "Finished setting up TmFeO3 model." << endl;
     cout << "Starting calculations..." << endl;
 
-    array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
+    // Use the field_drive parameter passed to the function
+    // array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
     // array<array<double, 3>,4> field_drive = {{{0,0,1},{0,0,1},{0,0,1},{0,0,1}}};
 
     double pulse_amp = 1.2;
@@ -784,6 +785,11 @@ int main(int argc, char** argv) {
     double chii = (argc > 20) ? atof(argv[20]) : 0.05; // TmFeO bilinear coupling parameter
     double xii = (argc > 21) ? atof(argv[21]) : 0.0;
     double h = (argc > 22) ? atof(argv[22]) : 0.0;
+    
+    // Field drive components - default to x-direction [1,0,0] for all atoms
+    double field_drive_x = (argc > 23) ? atof(argv[23]) : 1.0;
+    double field_drive_y = (argc > 24) ? atof(argv[24]) : 0.0;
+    double field_drive_z = (argc > 25) ? atof(argv[25]) : 0.0;
 
     J1c /= J1ab;
     J2ab /= J1ab;
@@ -796,11 +802,11 @@ int main(int argc, char** argv) {
     e2 /= J1ab;
     h /= J1ab;
     J1ab = 1;
-    string dir_name = (argc > 23) ? argv[23] : "TmFeO3_2DCS_xii=0.05";
+    string dir_name = (argc > 26) ? argv[26] : "TmFeO3_2DCS_xii=0.05";
     filesystem::create_directories(dir_name);
-    int slurm_ID = (argc > 24) ? atoi(argv[24]) : 1;
-    int total_jobs = (argc > 25) ? atoi(argv[25]) : 1;
-    string spin_config_file = (argc > 26) ? argv[26] : "TFO_4_0_xii=0.05/spin_zero.txt";
+    int slurm_ID = (argc > 27) ? atoi(argv[27]) : 1;
+    int total_jobs = (argc > 28) ? atoi(argv[28]) : 1;
+    string spin_config_file = (argc > 29) ? argv[29] : "TFO_4_0_xii=0.05/spin_zero.txt";
 
     cout << "Slurm ID: " << slurm_ID << ", Total Jobs: " << total_jobs << endl;
 
@@ -810,11 +816,19 @@ int main(int argc, char** argv) {
     double tau_end_here = tau_start + tau_section;
 
     cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " xi::" << xii << " saving to: " << dir_name << endl;
+    cout << "Field drive: [" << field_drive_x << ", " << field_drive_y << ", " << field_drive_z << "]" << endl;
     cout << "Reading from " << spin_config_file << endl;
     string output_dir = dir_name;
     filesystem::create_directories(output_dir);
     bool if_zero_is_in_T_range = slurm_ID == 1;
-    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
+    
+    // Define field_drive using command line parameters
+    array<array<double, 3>,4> field_drive = {{{field_drive_x, field_drive_y, field_drive_z},
+                                              {field_drive_x, field_drive_y, field_drive_z},
+                                              {field_drive_x, field_drive_y, field_drive_z},
+                                              {field_drive_x, field_drive_y, field_drive_z}}};
+    
+    MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, field_drive, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
 
