@@ -133,7 +133,7 @@ void create_default_parameter_file(const string& filename) {
 // Main simulation function for Parallel Tempering
 void PT_BCAO_honeycomb(const SimulationParams& params){
     filesystem::create_directory(params.dir);
-    HoneyComb_standarx<3> atoms;
+    HoneyComb<3> atoms;
 
     // Define interaction matrices based on Emily's model
     array<array<double,3>, 3> J1z_ = {{{params.J1xy+params.D, params.E, params.F},{params.E, params.J1xy-params.D, params.G},{params.F, params.G, params.J1z}}};
@@ -165,8 +165,8 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     array<double, 3> field = {4.8*params.h*params.field_dir[0], 4.85*params.h*params.field_dir[1], 2.5*params.h*params.field_dir[2]};
     
     // Set interactions
-    atoms.set_bilinear_interaction(J1x_, 0, 1, {0,-1,0});
-    atoms.set_bilinear_interaction(J1y_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(J1y_, 0, 1, {0,-1,0});
     atoms.set_bilinear_interaction(J1z_, 0, 1, {0,0,0});
     atoms.set_bilinear_interaction(J3_, 0, 1, {1,0,0});
     atoms.set_bilinear_interaction(J3_, 0, 1, {-1,0,0});

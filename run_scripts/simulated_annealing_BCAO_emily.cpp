@@ -14,6 +14,8 @@ struct SimulationParams {
     string dir = "BCAO_simulation";
     double J1xy = -7.6, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
     double J3xy = 2.5, J3z = -0.85;
+    double h_start = 0.0, h_end = 1.0;
+    int num_steps = 50;
 };
 
 SimulationParams read_parameters(const string& filename) {
@@ -58,6 +60,9 @@ SimulationParams read_parameters(const string& filename) {
             else if (key == "G") params.G = stod(value);
             else if (key == "J3xy") params.J3xy = stod(value);
             else if (key == "J3z") params.J3z = stod(value);
+            else if (key == "h_start") params.h_start = stod(value);
+            else if (key == "h_end") params.h_end = stod(value);
+            else if (key == "num_steps") params.num_steps = stoi(value);
         }
     }
     
@@ -94,7 +99,7 @@ void create_default_parameter_file(const string& filename) {
 
 void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
     filesystem::create_directory(dir);
-    HoneyComb_standarx<3> atoms;
+    HoneyComb<3> atoms;
 
 
     array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},
@@ -207,7 +212,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
 
 void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
     filesystem::create_directory(dir);
-    HoneyComb_standarx<3> atoms;
+    HoneyComb<3> atoms;
 
 
     array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},
@@ -240,7 +245,7 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
     array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
 
     std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
-    array<double, 3> field = {4.8*h*field_dir[0],4.85*h*field_dir[1],2.5*h*field_dir[2]};
+    array<double, 3> field = {h*field_dir[0],h*field_dir[1],h*field_dir[2]};
     
 
     //nearest neighbour
@@ -411,12 +416,7 @@ int main(int argc, char** argv) {
     }
 
     if (do_field_scan) {
-        // Assuming h_start, h_end, num_steps are in params. If not, they need to be added to SimulationParams struct and the parameter file logic.
-        // For this example, let's define them here if they are not in the struct.
-        size_t num_steps = 10; // Example value
-        double h_start = 0.0;  // Example value
-        double h_end = 0.5;    // Example value
-        magnetic_field_scan(num_steps, h_start, h_end, params.field_dir, params.dir,
+        magnetic_field_scan(params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
                             params.J3xy, params.J3z);
     } else {

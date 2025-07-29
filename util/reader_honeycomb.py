@@ -960,6 +960,7 @@ def read_field_scan(directory):
     plt.savefig(os.path.join(directory, "magnetization_vs_field.pdf"))
     plt.clf()
     plt.close()
+    
 if __name__ == "__main__":
 
     base_dir = sys.argv[1] if len(sys.argv) > 1 else "."
