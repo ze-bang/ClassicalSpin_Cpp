@@ -508,7 +508,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
     if (chii != 0.0){
         array<array<double,3>,8> chi = {{{0}}};
-        chi[2] = {{chii,chii,chii}};
+        chi[4] = {{chii,chii,chii}};
+        chi[6] = {{chii,chii,chii}};
         TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
