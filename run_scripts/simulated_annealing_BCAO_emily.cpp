@@ -171,7 +171,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
 
     for(size_t i=0; i<num_trials;++i){
         filesystem::create_directory(dir + "/" + std::to_string(i));
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 1);
         MC.simulated_annealing(20, 1e-3, 1e5, 10, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
@@ -282,10 +282,10 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
     double min_energy;
     int min_index = 0;
 
-    for(size_t i=0; i<num_trials;++i){
+    for(size_t i=0; i<1;++i){
         filesystem::create_directory(dir + "/" + std::to_string(i));
         lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
-        MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e5, 10, 20, 20, true);
+        MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e5, 10, num_trials, num_trials, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         for (size_t k = 0; k < 1e5; ++k) {

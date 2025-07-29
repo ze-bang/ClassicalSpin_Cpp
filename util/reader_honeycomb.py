@@ -3,6 +3,7 @@ import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
+import sys
 from math import gcd
 from functools import reduce
 # plt.rcParams['text.usetex'] = True
@@ -244,7 +245,13 @@ def SSSFGraph2D(A, B, d1, filename):
     plt.savefig(filename + ".pdf")
     plt.clf()
 
-
+def SSSFGraph2D_flat(A, B, d1, filename):
+    plt.pcolormesh(A, B, d1)
+    plt.colorbar()
+    plt.ylabel(r'$K_y$')
+    plt.xlabel(r'$K_x$')
+    plt.savefig(filename + ".pdf")
+    plt.clf()
 def hnhltoK(H, L, K=0):
     A = contract('ij,k->ijk',H, 2*np.array([np.pi,-np.pi,0])) \
         + contract('ij,k->ijk',L, 2*np.array([0,0,np.pi]))
@@ -267,16 +274,36 @@ def hk0(H,K):
 def hhknk_2D(H,K):
     return contract('ij,k->ijk', H, np.array([1,0])) + contract('ij,k->ijk',K, np.array([0,1]))
 
+def hk0_rlu(H, K):
+    A = contract('ij,k->ijk',H,  np.array([1,0, 0])) + contract('ij,k->ijk',K, np.array([0,1, 0]))
+    return A
+
 def SSSF2D(S, P, nK, dir, gb=False):
     H = np.linspace(-1, 1, nK)
     L = np.linspace(-1, 1, nK)
     A, B = np.meshgrid(H, L)
-    K = hk2d(A, B).reshape((nK*nK,3))
+    K = hhztoK(A, B).reshape((nK*nK,3))
     
-    S = SSSF_q(K, S, P, gb)
-    S = S.reshape((nK, nK, 3, 3))
-    SSSFGraph2D(A, B, contract('ijab->ij', S), dir+"/SSSF_tot")
-    return S
+    SSSF = SSSF_q(K, S, P, gb)
+    SSSF = SSSF.reshape((nK, nK, 3, 3))
+    SSSFGraph2D(A, B, contract('ijab->ij', SSSF), dir+"/SSSF_tot")
+
+    H = np.linspace(-0.5, 0.5, nK)
+    L = np.linspace(-0.5, 0.5, nK)
+    A, B = np.meshgrid(H, L)
+    K_rlu = hk0_rlu(A, B).reshape((nK*nK,3))
+    K = contract('ik,ka->ia', K_rlu, kitaevBasis)
+    SSSF = SSSF_q(K, S, P, gb)
+    SSSF = SSSF.reshape((nK, nK, 3, 3))
+    SSSFGraph2D_flat(A, B, contract('ijab->ij', SSSF), dir+"/SSSF_tot_rlu")
+    # Find the maximum point
+    max_idx = np.argmax(contract('ijab->ij', SSSF))
+    max_point = K_rlu[max_idx]
+    
+    # Save the maximum point
+    np.savetxt(dir+"/SSSF_max_point.txt", max_point, header="H K")
+    print(f"Maximum SSSF at H={max_point[0]:.4f}, K={max_point[1]:.4f}")
+    return SSSF
 
 def ordering_q_SSSF2D(SSSF, K):
     maxindx = np.argmax(SSSF)
@@ -830,7 +857,7 @@ def plot_spin_config_2d(P, S, filename):
 
     # --- XZ Projection ---
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(P[:, 0], P[:, 2], c='lightblue', edgecolors='k', s=2, zorder=1)
+    ax.scatter(P[:, 0], P[:, 1], c='lightblue', edgecolors='k', s=2, zorder=1)
     colors_xz = S[:, 1]
     q_xz = ax.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 2], colors_xz,
                      cmap='viridis', scale_units='xy', angles='xy', scale=1,
@@ -848,7 +875,7 @@ def plot_spin_config_2d(P, S, filename):
 
     # --- YZ Projection ---
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(P[:, 1], P[:, 2], c='lightblue', edgecolors='k', s=2, zorder=1)
+    ax.scatter(P[:, 0], P[:, 1], c='lightblue', edgecolors='k', s=2, zorder=1)
     colors_yz = S[:, 0]
     q_yz = ax.quiver(P[:, 0], P[:, 1], S[:, 1], S[:, 2], colors_yz,
                      cmap='viridis', scale_units='xy', angles='xy', scale=1,
@@ -865,20 +892,20 @@ def plot_spin_config_2d(P, S, filename):
     plt.close(fig)
 
 def parse_spin_config(directory):
-    nK = 100
+    nK = 101
     SSSF = np.zeros((nK, nK, 3, 3))
 
-    H = np.linspace(-0.5, 0.5, nK)
-    L = np.linspace(-0.5, 0.5, nK)
+    H = np.linspace(-1, 1, nK)
+    L = np.linspace(-1, 1, nK)
     C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
-        if file.startswith('trial'):
-            filename = os.fsdecode(file)
-            if os.path.isdir(directory + "/" + filename):
-                S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
-                P = np.loadtxt(directory + "/" + filename + "/pos.txt")
-                SSSF += SSSF2D(S, P, 100, directory + "/" + filename )
-                plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
+        filename = os.fsdecode(file)
+        if os.path.isdir(directory + "/" + filename):
+            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
+            P = np.loadtxt(directory + "/" + filename + "/pos.txt")
+            SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
+            plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
+
     SSSF = SSSF / len(os.listdir(directory))
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
 
@@ -933,33 +960,21 @@ def read_field_scan(directory):
     plt.savefig(os.path.join(directory, "magnetization_vs_field.pdf"))
     plt.clf()
     plt.close()
+if __name__ == "__main__":
 
+    base_dir = sys.argv[1] if len(sys.argv) > 1 else "."
+    if os.path.isdir(base_dir):
+        for subdir in sorted(os.listdir(base_dir)):
+            full_path = os.path.join(base_dir, subdir)
+            if os.path.isdir(full_path):
+                print(f"Processing directory: {full_path}")
+                try:
+                    parse_spin_config(full_path)
+                    # read_field_scan(full_path)
+                    # read_MD_tot(full_path)
+                except Exception as e:
+                    print(f"Could not process {full_path}: {e}")
 
-base_dir = "test_param"
-if os.path.isdir(base_dir):
-    for subdir in sorted(os.listdir(base_dir)):
-        full_path = os.path.join(base_dir, subdir)
-        if os.path.isdir(full_path):
-            print(f"Processing directory: {full_path}")
-            try:
-                parse_spin_config(full_path)
-                # read_field_scan(full_path)
-                # read_MD_tot(full_path)
-            except Exception as e:
-                print(f"Could not process {full_path}: {e}")
-
-# base_dir = "Asim_BCAO_param_2"
-# if os.path.isdir(base_dir):
-#     for subdir in sorted(os.listdir(base_dir)):
-#         full_path = os.path.join(base_dir, subdir)
-#         if os.path.isdir(full_path):
-#             print(f"Processing directory: {full_path}")
-#             try:
-#                 # parse_spin_config(full_path)
-#                 read_field_scan(full_path)
-#                 # read_MD_tot(full_path)
-#             except Exception as e:
-#                 print(f"Could not process {full_path}: {e}")
 
 
 # dir = "BCAO_sasha_phase/J3_1.308000_Jzp_0.000000"
