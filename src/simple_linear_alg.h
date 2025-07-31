@@ -50,6 +50,7 @@ inline const array<array<array<double, 8>, 8>,8> SU3_structure_constant(){
 }
 
 
+
 // Due to the number of different basis SU(3) can take, the structure constant is not always the same
 // Even though the Cartan algebra has Gell-mann matrices as the standard basis for SU(3),
 // typical systems obtain their SU(3) nature by promoting SU(2) spins to SU(3) spins via the construction of 
@@ -73,6 +74,23 @@ array<T, N> operator*(const array<T, N> &a, const T1 n) {
     }
     
     return result;
+}
+
+template <typename T, size_t N>
+void flattened_matmul(const array<T, N*N>& A, array<T, N*N>& B) {
+    array<T, N*N> result = {};
+    #pragma omp parallel for schedule(static)
+    for (size_t i = 0; i < N; ++i) {
+        for (size_t j = 0; j < N; ++j) {
+            T sum = 0;
+            #pragma omp simd reduction(+:sum)
+            for (size_t k = 0; k < N; ++k) {
+                sum += A[i*N + k] * B[k*N + j];
+            }
+            result[i*N + j] = sum;
+        }
+    }
+    B = std::move(result);
 }
 
 template<typename T, size_t N>
@@ -211,49 +229,21 @@ inline array<double, 8> multiply_SU3(const array<double, 64> &M, const array<dou
     return result;
 }
 
-
-inline double contract_SU2(const array<double, 3> &a, const array<double, 9> &M, const array<double, 3> &b) {
-    double result = 0.0;
-    
-    // Compute directly without temporary array for better cache efficiency
-    #pragma omp simd reduction(+:result)
-    for (int i = 0; i < 3; i++) {
-        // Calculate M*b for this component and multiply by a[i] in one step
-        result += a[i] * (M[i*3] * b[0] + M[i*3 + 1] * b[1] + M[i*3 + 2] * b[2]);
-    }
-    
-    return result;
-}
-
-inline double contract_SU3(const array<double, 8> &a, const array<double, 64> &M, const array<double, 8> &b) {
-    double result = 0.0;
-    
-    // Compute directly without temporary array for better cache efficiency
-    #pragma omp simd reduction(+:result)
-    for (int i = 0; i < 8; i++) {
-        const int base = i * 8;
-        // Calculate M*b for this component and multiply by a[i] in one step
-        result += a[i] * (M[base]   * b[0] + 
-                          M[base+1] * b[1] + 
-                          M[base+2] * b[2] + 
-                          M[base+3] * b[3] + 
-                          M[base+4] * b[4] + 
-                          M[base+5] * b[5] + 
-                          M[base+6] * b[6] + 
-                          M[base+7] * b[7]);
-    }
-    
-    return result;
-}
-
 template<size_t N>
 inline double contract(const array<double, N>  &a, const array<double, N*N>  &M, const array<double, N>  &b) {
     double result = 0;
-    if constexpr (N == 3){
-        result = contract_SU2(a, M, b);
-    }
-    else if constexpr (N == 8){
-        result = contract_SU3(a, M, b);
+    #pragma omp parallel for reduction(+:result) schedule(static)
+    for (size_t i = 0; i < N; ++i) {
+        const double a_i = a[i];
+        const size_t base_idx = i * N;
+        
+        double row_sum = 0.0;
+        #pragma omp simd reduction(+:row_sum)
+        for (size_t j = 0; j < N; ++j) {
+            row_sum += M[base_idx + j] * b[j];
+        }
+        
+        result += a_i * row_sum;
     }
     return result;
 }

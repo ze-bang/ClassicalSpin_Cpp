@@ -374,8 +374,8 @@ def create_honeycomb_lattice(L):
         
     # Nearest neighbor vectors from A site
     delta1 = np.array([0, 0])  # Z bond
-    delta2 = np.array([0, -1]) # X bond
-    delta3 = np.array([1,-1])  # Y bond
+    delta2 = np.array([0, -1]) # Y bond
+    delta3 = np.array([1,-1])  # X bond
     deltas = [delta1, delta2, delta3]
 
     # Second nearest neighbor vectors from A site
@@ -418,9 +418,9 @@ def create_honeycomb_lattice(L):
                 if (delta==delta1).all():
                     bondtype = 2
                 elif (delta==delta2).all(): 
-                    bondtype = 0
-                elif (delta==delta3).all():
                     bondtype = 1
+                elif (delta==delta3).all():
+                    bondtype = 0
 
                 NN_bonds[site_a, neigh_b] = bondtype
                 NN_bonds[neigh_b, site_a] = bondtype
@@ -494,9 +494,10 @@ def get_bond_vectors(a1, a2):
     """Get bond vectors for different neighbor types."""
     # A to B site vectors (nearest neighbors)
     delta3 = np.array([0, 1/np.sqrt(3)])           # Z bond
-    delta1 = -a2 + delta3                          # X bond
-    delta2 = a1 - a2 + delta3                      # Y bond
+    delta2 = -a2 + delta3                          # Y bond
+    delta1 = a1 - a2 + delta3                      # X bond
     nn_vectors = [delta1, delta2, delta3]
+    print("Nearest neighbor vectors:", nn_vectors)
     
     # Second nearest neighbor vectors (A to A or B to B)
     nnn_vectors = [a1, a2, a1-a2, -a1, -a2, a2-a1]
