@@ -108,10 +108,25 @@ class lattice
         return periodic_boundary(i, dim1)*dim2*dim*N_ATOMS+ periodic_boundary(j, dim2)*dim*N_ATOMS+ periodic_boundary(k, dim)*N_ATOMS + l;
     }
 
-    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1): UC(*atoms){
+    // Helper for default twist_matrix argument
+    static constexpr array<array<double, N*N>, 3> default_twist_matrix() {
+        array<array<double, N*N>, 3> twist_matrix = {};
+        for (size_t d = 0; d < 3; ++d) {
+            for (size_t i = 0; i < N; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    twist_matrix[d][i*N + j] = (i == j) ? 1.0 : 0.0;
+                }
+            }
+        }
+        return twist_matrix;
+    }
+
+    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1, bool periodic = true,
+            const array<array<double, N*N>,3>& twist_matrix = default_twist_matrix())
+        : UC(*atoms)
+    {
         array<array<double,3>, N_ATOMS> basis;
         array<array<double,3>, 3> unit_vector;
-
 
         lattice_size = dim1*dim2*dim*N_ATOMS;
         basis = UC.lattice_pos;
@@ -122,11 +137,18 @@ class lattice
         srand (time(NULL));
         seed_lehman(rand()*2+1);
 
+        size_t total_sites = dim1 * dim2 * dim * N_ATOMS;
+        size_t processed_sites = 0;
+        
+        cout << "Initializing lattice sites..." << endl;
+        cout << "Progress: [";
+        for(int p = 0; p < 50; ++p) cout << " ";
+        cout << "] 0%" << flush;
+        
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim;++k){
                     for (size_t l=0; l< N_ATOMS;++l){
-
                         size_t current_site_index = flatten_index(i,j,k,l);
 
                         site_pos[current_site_index]  = unit_vector[0]*int(i) + unit_vector[1]*int(j)  + unit_vector[2]*int(k)  + basis[l];
@@ -136,26 +158,87 @@ class lattice
                         auto bilinear_matched = UC.bilinear_interaction.equal_range(l);
                         for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m){
                             bilinear<N> J = m->second;
-                            size_t partner = flatten_index_periodic_boundary(int(i)+J.offset[0], int(j)+J.offset[1], int(k)+J.offset[2], J.partner);
-                            bilinear_interaction[current_site_index].push_back(J.bilinear_interaction);
-                            bilinear_partners[current_site_index].push_back(partner);
-                            bilinear_interaction[partner].push_back(transpose2D<N, N>(J.bilinear_interaction));
-                            bilinear_partners[partner].push_back(current_site_index);
+                            int partner_i = int(i) + J.offset[0];
+                            int partner_j = int(j) + J.offset[1];
+                            int partner_k = int(k) + J.offset[2];
+                            size_t partner = flatten_index_periodic_boundary(partner_i, partner_j, partner_k, J.partner);
+                            if (periodic || partner_i < dim1 && partner_i >= 0 && partner_j < dim2 && partner_j >= 0 && partner_k < dim && partner_k >= 0) {
+                                bool cross_i = (partner_i < 0 || partner_i >= dim1) ? 1 : 0;
+                                bool cross_j = (partner_j < 0 || partner_j >= dim2) ? 1 : 0;
+                                bool cross_k = (partner_k < 0 || partner_k >= dim) ? 1 : 0;
+
+                                array<double, N * N> bilinear_matrix_here = J.bilinear_interaction;
+                                if (cross_i){
+                                    flattened_matmul<double, N>(twist_matrix[0], bilinear_matrix_here);
+                                }
+                                if (cross_j){
+                                    flattened_matmul<double, N>(twist_matrix[1], bilinear_matrix_here);
+                                }
+                                if (cross_k){
+                                    flattened_matmul<double, N>(twist_matrix[2], bilinear_matrix_here);
+                                }
+                                bilinear_interaction[current_site_index].push_back(bilinear_matrix_here);
+                                bilinear_partners[current_site_index].push_back(partner);
+                                bilinear_interaction[partner].push_back(transpose2D<N, N>(bilinear_matrix_here));
+                                bilinear_partners[partner].push_back(current_site_index);
+                            }else{
+                                array<double, N * N> zero_matrix = {{{0}}};
+                                bilinear_interaction[current_site_index].push_back(zero_matrix);
+                                bilinear_partners[current_site_index].push_back(partner);
+                                bilinear_interaction[partner].push_back(zero_matrix);
+                                bilinear_partners[partner].push_back(current_site_index);
+                            }
                         }
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
                         for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m){
                             trilinear<N> J = m->second;
-                            size_t partner1 = flatten_index_periodic_boundary(i+J.offset1[0], j+J.offset1[1], k+J.offset1[2], J.partner1);
-                            size_t partner2 = flatten_index_periodic_boundary(i+J.offset2[0], j+J.offset2[1], k+J.offset2[2], J.partner2);
+                            int partner1_i = int(i) + J.offset1[0];
+                            int partner1_j = int(j) + J.offset1[1];
+                            int partner1_k = int(k) + J.offset1[2];
+                            int partner2_i = int(i) + J.offset2[0];
+                            int partner2_j = int(j) + J.offset2[1];
+                            int partner2_k = int(k) + J.offset2[2];
+
+                            size_t partner1 = flatten_index_periodic_boundary(partner1_i, partner1_j, partner1_k, J.partner1);
+                            size_t partner2 = flatten_index_periodic_boundary(partner2_i, partner2_j, partner2_k, J.partner2);
+                            if (periodic || (partner1_i < dim1 && partner1_i >= 0 && partner1_j < dim2 && partner1_j >= 0 && partner1_k < dim && partner1_k >= 0) &&
+                            (partner2_i < dim1 && partner2_i >= 0 && partner2_j < dim2 && partner2_j >= 0 && partner2_k < dim && partner2_k >= 0)) {
                             
-                            trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
-                            trilinear_partners[current_site_index].push_back({partner1, partner2});
+                                
+                                trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
+                                trilinear_partners[current_site_index].push_back({partner1, partner2});
 
-                            trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
-                            trilinear_partners[partner1].push_back({partner2, current_site_index});
+                                trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
+                                trilinear_partners[partner1].push_back({partner2, current_site_index});
 
-                            trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction, N, N, N), N, N, N));
-                            trilinear_partners[partner2].push_back({current_site_index, partner1});
+                                trilinear_interaction[partner2].push_back(transpose3D(transpose3D(J.trilinear_interaction, N, N, N), N, N, N));
+                                trilinear_partners[partner2].push_back({current_site_index, partner1});
+                            }else{
+                                array<double, N*N*N> zero_matrix = {{{0}}};
+                                trilinear_interaction[current_site_index].push_back(zero_matrix);
+                                trilinear_partners[current_site_index].push_back({partner1, partner2});
+
+                                trilinear_interaction[partner1].push_back(zero_matrix);
+                                trilinear_partners[partner1].push_back({partner2, current_site_index});
+
+                                trilinear_interaction[partner2].push_back(zero_matrix);
+                                trilinear_partners[partner2].push_back({current_site_index, partner1});
+                            }
+                        }
+                    
+                        // Update progress bar
+                        processed_sites++;
+                        if (processed_sites % max(total_sites / 100, size_t(1)) == 0 || processed_sites == total_sites) {
+                            double progress = 100.0 * processed_sites / total_sites;
+                            int filled = static_cast<int>(progress / 2);
+                            
+                            cout << "\rProgress: [";
+                            for(int p = 0; p < 50; ++p) {
+                            if(p < filled) cout << "=";
+                            else if(p == filled) cout << ">";
+                            else cout << " ";
+                            }
+                            cout << "] " << fixed << setprecision(1) << progress << "%" << flush;
                         }
                     }
                 }
@@ -165,12 +248,17 @@ class lattice
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
+        cout << "\nLattice initialization complete!" << endl;
+        cout << "Total sites: " << lattice_size << endl;
+        cout << "Bilinear interactions: " << num_bi << endl;
+        cout << "Trilinear interactions: " << num_tri << endl;
+        cout << "Spin dimension: " << num_gen << endl;
         // Initialize optimization structures
         initialize_energy_cache();
         initialize_sweep_order();
     }
 
-        lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
+    lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
         UC = lattice_in->UC;
         lattice_size = lattice_in->lattice_size;
         spins = lattice_in->spins;
@@ -354,18 +442,21 @@ class lattice
         double onsite_energy = 0.0;
         double bilinear_energy = 0.0;
         double trilinear_energy = 0.0;
-
+        
+        size_t test_site_index = 0; // Define a test site index, e.g., 0
         #pragma omp simd
         for(size_t i = 0; i < lattice_size; ++i){
             field_energy -= dot(curr_spins[i], field[i]);
             onsite_energy += contract(curr_spins[i], onsite_interaction[i], curr_spins[i]);
             #pragma omp simd
             for (size_t j=0; j< num_bi; ++j) {
-                bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], curr_spins[bilinear_partners[i][j]]);
+            size_t partner_idx = bilinear_partners[i][j];
+            bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], curr_spins[partner_idx]);
             }
+
             #pragma omp simd
             for (size_t j=0; j < num_tri; ++j){
-                trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
+            trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
         return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;

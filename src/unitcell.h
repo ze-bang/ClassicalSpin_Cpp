@@ -263,6 +263,83 @@ struct UnitCell{
         onsite_interaction[index] = oin;
     };
 
+    void print() const {
+        cout << "--- UnitCell Information ---" << endl;
+        cout << "Number of atoms: " << N_ATOMS << endl;
+        cout << "Spin dimension (N): " << N << endl;
+
+        cout << "\nLattice Positions:" << endl;
+        for (size_t i = 0; i < N_ATOMS; ++i) {
+            cout << "  Atom " << i << ": (" << lattice_pos[i][0] << ", " << lattice_pos[i][1] << ", " << lattice_pos[i][2] << ")" << endl;
+        }
+
+        cout << "\nLattice Vectors:" << endl;
+        for (size_t i = 0; i < 3; ++i) {
+            cout << "  v" << i + 1 << ": (" << lattice_vectors[i][0] << ", " << lattice_vectors[i][1] << ", " << lattice_vectors[i][2] << ")" << endl;
+        }
+
+        cout << "\nFields:" << endl;
+        for (size_t i = 0; i < N_ATOMS; ++i) {
+            cout << "  Atom " << i << ": [";
+            for (size_t j = 0; j < N; ++j) {
+                cout << field[i][j] << (j == N - 1 ? "" : ", ");
+            }
+            cout << "]" << endl;
+        }
+
+        cout << "\nOn-site Interactions:" << endl;
+        for (size_t i = 0; i < N_ATOMS; ++i) {
+            cout << "  Atom " << i << " matrix:" << endl;
+            for (size_t row = 0; row < N; ++row) {
+                cout << "    [";
+                for (size_t col = 0; col < N; ++col) {
+                    cout << onsite_interaction[i][row * N + col] << (col == N - 1 ? "" : ", ");
+                }
+                cout << "]" << endl;
+            }
+        }
+
+        cout << "\nBilinear Interactions:" << endl;
+        if (bilinear_interaction.empty()) {
+            cout << "  None" << endl;
+        } else {
+            for (const auto& pair : bilinear_interaction) {
+                cout << "  Source Atom " << pair.first << " -> Partner Atom " << pair.second.partner << endl;
+                cout << "    Offset: (" << pair.second.offset[0] << ", " << pair.second.offset[1] << ", " << pair.second.offset[2] << ")" << endl;
+                cout << "    Interaction Matrix:" << endl;
+                for (size_t i = 0; i < N; ++i) {
+                    cout << "      [";
+                    for (size_t j = 0; j < N; ++j) {
+                        cout << pair.second.bilinear_interaction[i * N + j] << (j == N - 1 ? "" : ", ");
+                    }
+                    cout << "]" << endl;
+                }
+            }
+        }
+
+        cout << "\nTrilinear Interactions:" << endl;
+        if (trilinear_interaction.empty()) {
+            cout << "  None" << endl;
+        } else {
+            for (const auto& pair : trilinear_interaction) {
+                cout << "  Source Atom " << pair.first << " -> Partner1 Atom " << pair.second.partner1 << ", Partner2 Atom " << pair.second.partner2 << endl;
+                cout << "    Offset1: (" << pair.second.offset1[0] << ", " << pair.second.offset1[1] << ", " << pair.second.offset1[2] << ")" << endl;
+                cout << "    Offset2: (" << pair.second.offset2[0] << ", " << pair.second.offset2[1] << ", " << pair.second.offset2[2] << ")" << endl;
+                cout << "    Interaction Tensor:" << endl;
+                for (size_t i = 0; i < N; ++i) {
+                    cout << "      Slice " << i << ":" << endl;
+                    for (size_t j = 0; j < N; ++j) {
+                        cout << "        [";
+                        for (size_t l = 0; l < N; ++l) {
+                            cout << pair.second.trilinear_interaction[i * N * N + j * N + l] << (l == N - 1 ? "" : ", ");
+                        }
+                        cout << "]" << endl;
+                    }
+                }
+            }
+        }
+        cout << "--- End of UnitCell Information ---" << endl;
+    }
 };
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3>
