@@ -385,7 +385,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
 }
 
 
-void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, const array<array<double, 3>,4> &field_drive, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
+void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, array<array<double, 3>,4> &field_drive, string dir, bool T_zero=false, string spin_config="", bool if_zero_is_in_T_range=false){
     int initialized;
 
     MPI_Initialized(&initialized);
