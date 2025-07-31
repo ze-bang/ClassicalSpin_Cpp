@@ -183,7 +183,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
 
     // Lattice and simulation
-    lattice<3, 2, 36, 36, 1> MC(&atoms, 1);
+    lattice<3, 2, 60, 60, 1> MC(&atoms, 1);
     MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0});
     if (rank == 0) {
         cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
