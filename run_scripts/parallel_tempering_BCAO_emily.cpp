@@ -131,7 +131,7 @@ void create_default_parameter_file(const string& filename) {
 }
 
 // Main simulation function for Parallel Tempering
-void PT_BCAO_honeycomb(const SimulationParams& params){
+void PT_BCAO_honeycomb(const SimulationParams& params, array<array<double, 9>, 3> twist_matrix){
     filesystem::create_directory(params.dir);
     HoneyComb<3> atoms;
 
@@ -182,6 +182,8 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     // Temperature schedule
     vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
 
+
+    
     // Lattice and simulation
     lattice<3, 2, 60, 60, 1> MC(&atoms, 1);
     MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0});
@@ -236,6 +238,34 @@ int main(int argc, char** argv) {
         filesystem::create_directory(params.dir);
     }
     
+    auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
+        double c = cos(theta);
+        double s = sin(theta);
+        double t = 1.0 - c;
+        double nx = n[0], ny = n[1], nz = n[2];
+
+        // Rodrigues' rotation formula for rotation around axis n by angle theta
+        double r11 = t * nx * nx + c;
+        double r12 = t * nx * ny - s * nz;
+        double r13 = t * nx * nz + s * ny;
+        double r21 = t * nx * ny + s * nz;
+        double r22 = t * ny * ny + c;
+        double r23 = t * ny * nz - s * nx;
+        double r31 = t * nx * nz - s * ny;
+        double r32 = t * ny * nz + s * nx;
+        double r33 = t * nz * nz + c;
+
+        return {{{r11, r12, r13,
+                  r21, r22, r23,
+                  r31, r32, r33},
+                 {1, 0, 0, 
+                  0, 1, 0, 
+                  0, 0, 1},
+                 {1, 0, 0, 
+                  0, 1, 0, 
+                  0, 0, 1}}};
+    };
+    
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
         trial_params.dir = params.dir + "/trial_" + to_string(i);
@@ -243,12 +273,13 @@ int main(int argc, char** argv) {
         if (rank == 0) {
             cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
         }
-        
+        double twist_angle = 2 * M_PI / params.num_trials * i;
+        auto twist_matrix = generate_twist_matrix(twist_angle, {0, 0, 1});
         // Synchronize all processes before starting the next trial
         MPI_Barrier(MPI_COMM_WORLD);
 
         // Run the Parallel Tempering simulation
-        PT_BCAO_honeycomb(trial_params);
+        PT_BCAO_honeycomb(trial_params, twist_matrix);
     }
     
     int finalized;
