@@ -174,10 +174,41 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     double min_energy;
     int min_index = 0;
 
+    auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
+        double c = cos(theta);
+        double s = sin(theta);
+        double t = 1.0 - c;
+        double nx = n[0], ny = n[1], nz = n[2];
+
+        // Rodrigues' rotation formula for rotation around axis n by angle theta
+        double r11 = t * nx * nx + c;
+        double r12 = t * nx * ny - s * nz;
+        double r13 = t * nx * nz + s * ny;
+        double r21 = t * nx * ny + s * nz;
+        double r22 = t * ny * ny + c;
+        double r23 = t * ny * nz - s * nx;
+        double r31 = t * nx * nz - s * ny;
+        double r32 = t * ny * nz + s * nx;
+        double r33 = t * nz * nz + c;
+
+        return {{{r11, r12, r13,
+                  r21, r22, r23,
+                  r31, r32, r33},
+                 {1, 0, 0, 
+                  0, 1, 0, 
+                  0, 0, 1},
+                 {1, 0, 0, 
+                  0, 1, 0, 
+                  0, 0, 1}}};
+    };
+
     for(size_t i=0; i<num_trials;++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 36, 36, 1> MC(&atoms, 1);
-        MC.simulated_annealing(20, 1e-3, 1e5, 10, true);
+        double twist_angle = 2*M_PI/num_trials * i;
+        array<array<double, 9>, 3> twist_matrix = generate_twist_matrix(twist_angle, {0, 0, 1});
+
+        lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true, twist_matrix);
+        MC.simulated_annealing(20, 1e-3, 2e5, 10, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         for (size_t k = 0; k < 1e7; ++k) {
@@ -191,6 +222,16 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";
         energy_file.close();      
+        ofstream twist_file(dir +"/"+std::to_string(i)+ "/twist_matrix.txt");
+        twist_file << "Twist Angle : " << twist_angle << "\n";
+        twist_file << "Twist Matrix:\n";
+        for (const auto& row : twist_matrix) {
+            for (const auto& val : row) {
+                twist_file << val << " ";
+            }
+            twist_file << "\n";
+        }
+        twist_file.close();
         if (i == 0) {
             min_energy = MC.energy_density(MC.spins);
             min_index = i;
@@ -287,13 +328,42 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
     double min_energy;
     int min_index = 0;
 
-    for(size_t i=0; i<1;++i){
+    auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
+        double c = cos(theta);
+        double s = sin(theta);
+        double t = 1.0 - c;
+        double nx = n[0], ny = n[1], nz = n[2];
+
+        // Rodrigues' rotation formula for rotation around axis n by angle theta
+        double r11 = t * nx * nx + c;
+        double r12 = t * nx * ny - s * nz;
+        double r13 = t * nx * nz + s * ny;
+        double r21 = t * nx * ny + s * nz;
+        double r22 = t * ny * ny + c;
+        double r23 = t * ny * nz - s * nx;
+        double r31 = t * nx * nz - s * ny;
+        double r32 = t * ny * nz + s * nx;
+        double r33 = t * nz * nz + c;
+
+        return {{{r11, r12, r13,
+                  r21, r22, r23,
+                  r31, r32, r33},
+                 {1, 0, 0, 
+                  0, 1, 0, 
+                  0, 0, 1},
+                 {1, 0, 0, 
+                  0, 1, 0, 
+                  0, 0, 1}}};
+    };
+    
+
+    for(size_t i=0; i<num_trials;++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 1);
-        MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e5, 10, num_trials, num_trials, true);
+        lattice<3, 2, 60, 60, 1> MC(&atoms, 1);
+        MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e6, 10, num_trials, num_trials, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
-        for (size_t k = 0; k < 1e5; ++k) {
+        for (size_t k = 0; k < 1e7; ++k) {
             MC.deterministic_sweep();
         }
         MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
