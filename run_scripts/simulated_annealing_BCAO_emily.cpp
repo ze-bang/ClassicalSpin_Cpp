@@ -190,13 +190,12 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         double r31 = t * nx * nz - s * ny;
         double r32 = t * ny * nz + s * nx;
         double r33 = t * nz * nz + c;
-
-        return {{{r11, r12, r13,
+        return {{{0, 1, 0, 
+                  -1, 0, 0, 
+                  0, 0, 1},
+                  {r11, r12, r13,
                   r21, r22, r23,
                   r31, r32, r33},
-                 {1, 0, 0, 
-                  0, 1, 0, 
-                  0, 0, 1},
                  {1, 0, 0, 
                   0, 1, 0, 
                   0, 0, 1}}};
@@ -207,8 +206,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         double twist_angle = 2*M_PI/num_trials * i;
         array<array<double, 9>, 3> twist_matrix = generate_twist_matrix(twist_angle, {0, 0, 1});
 
-        lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true, twist_matrix);
-        MC.simulated_annealing(20, 1e-3, 2e5, 10, true);
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 1, true, twist_matrix);
+        MC.simulated_annealing(5, 1e-3, 1e6, 100, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         for (size_t k = 0; k < 1e7; ++k) {

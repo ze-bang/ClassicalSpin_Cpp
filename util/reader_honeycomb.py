@@ -206,29 +206,33 @@ def SSSFGraph2D(A, B, d1, filename):
     # The user's plot seems to be in units of (kx/2pi, ky/2pi)
     # So we need to divide the standard BZ coordinates by 2*pi
     
-    # Vertices of the BZ in (kx, ky)
-    a = 1 # lattice constant
-    v = (4 * np.pi) / (3 * a)
+    # Get the reciprocal lattice vectors from the honeycomb_reciprocal_basis function
+    reciprocal_basis = honeycomb_reciprocal_basis()
+    b1 = reciprocal_basis[0]/2*np.pi  # First reciprocal lattice vector
+    b2 = reciprocal_basis[1]/2*np.pi  # Second reciprocal lattice vector
+
+    # Create the hexagonal Brillouin zone using the reciprocal lattice vectors
+    # Vertices of the hexagon in reciprocal space
     bz_vertices = np.array([
-        [v * np.sqrt(3)/2, v / 2],
-        [0, v],
-        [-v * np.sqrt(3)/2, v / 2],
-        [-v * np.sqrt(3)/2, -v / 2],
-        [0, -v],
-        [v * np.sqrt(3)/2, -v / 2],
-        [v * np.sqrt(3)/2, v / 2]  # Close the hexagon
+        b1 * (1/3) + b2 * (1/3),      # K point
+        b1 * 0 + b2 * (1/2),          # M point  
+        b1 * (-1/3) + b2 * (1/3),     # K' point
+        b1 * (-1/3) + b2 * (-1/3),    # -K point
+        b1 * 0 + b2 * (-1/2),         # -M point
+        b1 * (1/3) + b2 * (-1/3),     # -K' point
+        b1 * (1/3) + b2 * (1/3)       # Close the hexagon
     ])
 
-    # High-symmetry points in (kx, ky)
-    gamma_point = np.array([0, 0])
-    k_point = np.array([ (2 * np.pi) / (np.sqrt(3) * a), (2 * np.pi) / (3 * a)])
-    m_point = np.array([ (2 * np.pi) / (np.sqrt(3) * a), 0])
+    # High-symmetry points
+    gamma_point = np.array([0, 0, 0])
+    k_point = b1 * (1/3) + b2 * (1/3)
+    m_point = b1 * 0 + b2 * (1/2)
 
-    # Scale points to match the plot's axes (kx/2pi, ky/2pi)
-    bz_vertices_plot = bz_vertices / (2 * np.pi)
-    gamma_plot = gamma_point / (2 * np.pi)
-    k_plot = k_point / (2 * np.pi)
-    m_plot = m_point / (2 * np.pi)
+    # Extract only x and y components for 2D plotting
+    bz_vertices_plot = bz_vertices[:, :2]
+    gamma_plot = gamma_point[:2]
+    k_plot = k_point[:2]
+    m_plot = m_point[:2]
 
     plt.plot(bz_vertices_plot[:, 0], bz_vertices_plot[:, 1], 'w--', lw=1.5)
 
@@ -283,26 +287,141 @@ def SSSF2D(S, P, nK, dir, gb=False):
     L = np.linspace(-1, 1, nK)
     A, B = np.meshgrid(H, L)
     K = hhztoK(A, B).reshape((nK*nK,3))
-    
     SSSF = SSSF_q(K, S, P, gb)
     SSSF = SSSF.reshape((nK, nK, 3, 3))
     SSSFGraph2D(A, B, contract('ijab->ij', SSSF), dir+"/SSSF_tot")
 
     H = np.linspace(-0.5, 0.5, nK)
     L = np.linspace(-0.5, 0.5, nK)
-    A, B = np.meshgrid(H, L)
-    K_rlu = hk0_rlu(A, B).reshape((nK*nK,3))
-    K = contract('ik,ka->ia', K_rlu, kitaevBasis)
+    C, D = np.meshgrid(H, L)
+    K_rlu = hk0_rlu(C, D).reshape((nK*nK,3))
+    K = contract('ik,ka->ia', K_rlu, KBasis)
     SSSF = SSSF_q(K, S, P, gb)
     SSSF = SSSF.reshape((nK, nK, 3, 3))
-    SSSFGraph2D_flat(A, B, contract('ijab->ij', SSSF), dir+"/SSSF_tot_rlu")
-    # Find the maximum point
-    max_idx = np.argmax(contract('ijab->ij', SSSF))
-    max_point = K_rlu[max_idx]
+    SSSFGraph2D_flat(C, D, contract('ijab->ij', SSSF), dir+"/SSSF_tot_rlu")
+
+    # Find and plot the maximum point for each component (xx, yy, zz)
+    for i, component in enumerate(['x', 'y', 'z']):
+        for j, comp in enumerate(['x', 'y', 'z']):
+            max_idx = np.argmax(SSSF[:,:,i,j])
+            max_point = K_rlu[max_idx]
+            max_intensity = np.max(SSSF[:,:,i,j])
+            np.savetxt(dir+f"/SSSF_max_point_{component}{comp}.txt", 
+                      np.concatenate([max_point, [max_intensity]]), 
+                      header="H K L Intensity")
+            print(f"Maximum SSSF_{component}{comp} = {max_intensity:.6f} at H={max_point[0]:.4f}, K={max_point[1]:.4f}, L={max_point[2]:.4f}")
+
+            SSSFGraph2D(A, B, SSSF[:,:,i,j], dir+f"/SSSF_{component}{comp}")
+            # Plot the individual component
+            SSSFGraph2D_flat(C, D, SSSF[:,:,i,j], dir+f"/SSSF_{component}{comp}_rlu")
+
+    # Find and analyze top 50 points for both xx and yy components
     
-    # Save the maximum point
-    np.savetxt(dir+"/SSSF_max_point.txt", max_point, header="H K")
-    print(f"Maximum SSSF at H={max_point[0]:.4f}, K={max_point[1]:.4f}")
+    # For yy component
+    yy_component = SSSF[:,:,1,1].flatten()
+    yy_top_50_indices = np.argsort(yy_component)[-50:][::-1]  # Top 50 indices in descending order
+    yy_top_50_points = K_rlu[yy_top_50_indices]
+    yy_top_50_intensities = yy_component[yy_top_50_indices]
+    xx_intensities_at_yy_top = SSSF.reshape(nK*nK, 3, 3)[yy_top_50_indices, 0, 0]
+    
+    # Save top 50 yy points with corresponding xx intensities
+    yy_analysis_data = np.column_stack([yy_top_50_points, yy_top_50_intensities, xx_intensities_at_yy_top])
+    np.savetxt(dir+"/SSSF_yy_top50_analysis.txt", 
+              yy_analysis_data, 
+              header="H K L SSSF_yy SSSF_xx_at_yy_point")
+    
+    # For xx component
+    xx_component = SSSF[:,:,0,0].flatten()
+    xx_top_50_indices = np.argsort(xx_component)[-50:][::-1]  # Top 50 indices in descending order
+    xx_top_50_points = K_rlu[xx_top_50_indices]
+    xx_top_50_intensities = xx_component[xx_top_50_indices]
+    yy_intensities_at_xx_top = SSSF.reshape(nK*nK, 3, 3)[xx_top_50_indices, 1, 1]
+    
+    # Save top 50 xx points with corresponding yy intensities
+    xx_analysis_data = np.column_stack([xx_top_50_points, xx_top_50_intensities, yy_intensities_at_xx_top])
+    np.savetxt(dir+"/SSSF_xx_top50_analysis.txt", 
+              xx_analysis_data, 
+              header="H K L SSSF_xx SSSF_yy_at_xx_point")
+    
+    # Create subplot figure showing top points on both xx and yy plots
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Top-left: SSSF_yy with top yy points labeled
+    im1 = axes[0,0].pcolormesh(C, D, SSSF[:,:,1,1], shading='auto')
+    axes[0,0].scatter(yy_top_50_points[:5,0], yy_top_50_points[:5,1], 
+                     c='red', s=100, marker='x', linewidths=3)
+    for i in range(5):
+        axes[0,0].annotate(f'{i+1}', (yy_top_50_points[i,0], yy_top_50_points[i,1]), 
+                          xytext=(5, 5), textcoords='offset points', 
+                          fontsize=12, color='red', weight='bold')
+    axes[0,0].set_title('SSSF_yy with Top 5 YY Points')
+    axes[0,0].set_xlabel('H')
+    axes[0,0].set_ylabel('K')
+    plt.colorbar(im1, ax=axes[0,0])
+    
+    # Top-right: SSSF_xx with top yy points labeled
+    im2 = axes[0,1].pcolormesh(C, D, SSSF[:,:,0,0], shading='auto')
+    axes[0,1].scatter(yy_top_50_points[:5,0], yy_top_50_points[:5,1], 
+                     c='red', s=100, marker='x', linewidths=3)
+    for i in range(5):
+        axes[0,1].annotate(f'{i+1}', (yy_top_50_points[i,0], yy_top_50_points[i,1]), 
+                          xytext=(5, 5), textcoords='offset points', 
+                          fontsize=12, color='red', weight='bold')
+    axes[0,1].set_title('SSSF_xx with Top 5 YY Points')
+    axes[0,1].set_xlabel('H')
+    axes[0,1].set_ylabel('K')
+    plt.colorbar(im2, ax=axes[0,1])
+    
+    # Bottom-left: SSSF_yy with top xx points labeled
+    im3 = axes[1,0].pcolormesh(C, D, SSSF[:,:,1,1], shading='auto')
+    axes[1,0].scatter(xx_top_50_points[:5,0], xx_top_50_points[:5,1], 
+                     c='blue', s=100, marker='o', linewidths=2, facecolors='none')
+    for i in range(5):
+        axes[1,0].annotate(f'{i+1}', (xx_top_50_points[i,0], xx_top_50_points[i,1]), 
+                          xytext=(5, 5), textcoords='offset points', 
+                          fontsize=12, color='blue', weight='bold')
+    axes[1,0].set_title('SSSF_yy with Top 5 XX Points')
+    axes[1,0].set_xlabel('H')
+    axes[1,0].set_ylabel('K')
+    plt.colorbar(im3, ax=axes[1,0])
+    
+    # Bottom-right: SSSF_xx with top xx points labeled
+    im4 = axes[1,1].pcolormesh(C, D, SSSF[:,:,0,0], shading='auto')
+    axes[1,1].scatter(xx_top_50_points[:5,0], xx_top_50_points[:5,1], 
+                     c='blue', s=100, marker='o', linewidths=2, facecolors='none')
+    for i in range(5):
+        axes[1,1].annotate(f'{i+1}', (xx_top_50_points[i,0], xx_top_50_points[i,1]), 
+                          xytext=(5, 5), textcoords='offset points', 
+                          fontsize=12, color='blue', weight='bold')
+    axes[1,1].set_title('SSSF_xx with Top 5 XX Points')
+    axes[1,1].set_xlabel('H')
+    axes[1,1].set_ylabel('K')
+    plt.colorbar(im4, ax=axes[1,1])
+    
+    plt.tight_layout()
+    plt.savefig(dir+"/SSSF_top_points_analysis.pdf")
+    plt.clf()
+    plt.close()
+    
+    print(f"Top 5 yy component points:")
+    for i in range(5):
+        h, k, l = yy_top_50_points[i]
+        print(f"  {i+1}. H={h:.4f}, K={k:.4f}, L={l:.4f}: SSSF_yy={yy_top_50_intensities[i]:.6f}, SSSF_xx={xx_intensities_at_yy_top[i]:.6f}")
+    
+    print(f"Top 5 xx component points:")
+    for i in range(5):
+        h, k, l = xx_top_50_points[i]
+        print(f"  {i+1}. H={h:.4f}, K={k:.4f}, L={l:.4f}: SSSF_xx={xx_top_50_intensities[i]:.6f}, SSSF_yy={yy_intensities_at_xx_top[i]:.6f}")
+
+    # Save the overall maximum point (total SSSF)
+    total_sssf = contract('ijab->ij', SSSF)
+    total_max_idx = np.argmax(total_sssf)
+    total_max_point = K_rlu[total_max_idx]
+    total_max_intensity = np.max(total_sssf)
+    np.savetxt(dir+"/SSSF_max_point.txt", 
+              np.concatenate([total_max_point, [total_max_intensity]]), 
+              header="H K L Intensity")
+    print(f"Maximum total SSSF = {total_max_intensity:.6f} at H={total_max_point[0]:.4f}, K={total_max_point[1]:.4f}, L={total_max_point[2]:.4f}")
     return SSSF
 
 def ordering_q_SSSF2D(SSSF, K):
@@ -909,6 +1028,11 @@ def parse_spin_config(directory):
     SSSF = SSSF / len(os.listdir(directory))
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
 
+    # Plot each component of SSSF
+    for i, component_i in enumerate(['x', 'y', 'z']):
+        for j, component_j in enumerate(['x', 'y', 'z']):
+            SSSFGraph2D(C, D, SSSF[:,:,i,j], directory + f"/SSSF_{component_i}{component_j}")
+
 
 def read_field_scan(directory):
     h_values = []
@@ -921,6 +1045,7 @@ def read_field_scan(directory):
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
                 spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
+                parse_spin_config(full_path)
                 if os.path.exists(spin_file):
                     S = np.loadtxt(spin_file)
                     M = np.mean(S, axis=0)
@@ -964,14 +1089,17 @@ def read_field_scan(directory):
 if __name__ == "__main__":
 
     base_dir = sys.argv[1] if len(sys.argv) > 1 else "."
+    field_scan = sys.argv[2] if len(sys.argv) > 2 else "field_scan"
     if os.path.isdir(base_dir):
         for subdir in sorted(os.listdir(base_dir)):
             full_path = os.path.join(base_dir, subdir)
             if os.path.isdir(full_path):
                 print(f"Processing directory: {full_path}")
                 try:
-                    parse_spin_config(full_path)
-                    # read_field_scan(full_path)
+                    if field_scan.lower() == "true":
+                        read_field_scan(full_path)
+                    else:
+                        parse_spin_config(full_path)
                     # read_MD_tot(full_path)
                 except Exception as e:
                     print(f"Could not process {full_path}: {e}")

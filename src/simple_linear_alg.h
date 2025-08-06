@@ -231,21 +231,46 @@ inline array<double, 8> multiply_SU3(const array<double, 64> &M, const array<dou
 
 template<size_t N>
 inline double contract(const array<double, N>  &a, const array<double, N*N>  &M, const array<double, N>  &b) {
-    double result = 0;
-    #pragma omp parallel for reduction(+:result) schedule(static)
-    for (size_t i = 0; i < N; ++i) {
-        const double a_i = a[i];
-        const size_t base_idx = i * N;
-        
-        double row_sum = 0.0;
-        #pragma omp simd reduction(+:row_sum)
-        for (size_t j = 0; j < N; ++j) {
-            row_sum += M[base_idx + j] * b[j];
-        }
-        
-        result += a_i * row_sum;
+    if constexpr (N == 3) {
+        // Optimized for 3x3 matrices - complete loop unrolling
+        return a[0] * (M[0] * b[0] + M[1] * b[1] + M[2] * b[2]) +
+               a[1] * (M[3] * b[0] + M[4] * b[1] + M[5] * b[2]) +
+               a[2] * (M[6] * b[0] + M[7] * b[1] + M[8] * b[2]);
     }
-    return result;
+    else if constexpr (N == 8) {
+        // Optimized for 8x8 matrices - cache vector b and use SIMD
+        const double b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+        const double b4 = b[4], b5 = b[5], b6 = b[6], b7 = b[7];
+        
+        double result = 0.0;
+        #pragma omp simd reduction(+:result)
+        for (size_t i = 0; i < 8; ++i) {
+            const size_t base = i * 8;
+            result += a[i] * (M[base]   * b0 + M[base+1] * b1 + 
+                             M[base+2] * b2 + M[base+3] * b3 +
+                             M[base+4] * b4 + M[base+5] * b5 + 
+                             M[base+6] * b6 + M[base+7] * b7);
+        }
+        return result;
+    }
+    else {
+        // General case for arbitrary N
+        double result = 0;
+        #pragma omp parallel for reduction(+:result) schedule(static)
+        for (size_t i = 0; i < N; ++i) {
+            const double a_i = a[i];
+            const size_t base_idx = i * N;
+            
+            double row_sum = 0.0;
+            #pragma omp simd reduction(+:row_sum)
+            for (size_t j = 0; j < N; ++j) {
+                row_sum += M[base_idx + j] * b[j];
+            }
+            
+            result += a_i * row_sum;
+        }
+        return result;
+    }
 }
 
 
