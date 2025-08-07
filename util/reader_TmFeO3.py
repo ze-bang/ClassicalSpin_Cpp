@@ -154,7 +154,7 @@ def DSSF(w, k, S, P, T, gb=False):
     else:
         A = Spin_t(k, S, P)
         Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
-        read = np.real(contract('wia, wib->wi', Somega, np.conj(Somega)))
+        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
         return read
 
 def SSSFGraphHnHL(A,B,d1, filename):
@@ -346,35 +346,36 @@ def parseSSSF(dir):
     SSSFhelper("Syy_global")
     SSSFhelper("Szz_global")
 
+def read_MD(dir):
+    w0 = 0
+    wmax = 15
+    t_evolved = 100
+    SU2 = read_MD_SU2(dir, w0, wmax, t_evolved)
+    SU3 = read_MD_SU3(dir, w0, wmax, t_evolved)
+    A = contract('wiab->wi',SU2) + contract('wiab->wi',SU3)
+    np.savetxt(dir + "/DSSF.txt", A)
+    fig, ax = plt.subplots(figsize=(10,4))
+    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
+    ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+    ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+    xlabpos = [g1, g2, g3, g4]
+    ax.set_xticks(xlabpos, labels)
+    ax.set_xlim([0, g4])
+    ax.set_xlim([0, g4])
+    fig.colorbar(C)
+    plt.savefig(dir+"/DSSF.pdf")
+    plt.clf()
 
 def read_MD_tot(dir):
     print("Begin MD reading")
     directory = os.fsencode(dir)
     for file in sorted(os.listdir(directory)):
-        print(file)
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            w0 = 0
-            wmax = 15
-            t_evolved = 100
-            SU2 = read_MD_SU2(dir + "/" + filename, w0, wmax, t_evolved)
-            SU3 = read_MD_SU3(dir + "/" + filename, w0, wmax, t_evolved)
-            A = SU2 + SU3
-            np.savetxt(dir + "/DSSF.txt", A)
-            fig, ax = plt.subplots(figsize=(10,4))
-            C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
-            ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
-            ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
-            ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
-            ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-            labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
-            xlabpos = [g1, g2, g3, g4]
-            ax.set_xticks(xlabpos, labels)
-            ax.set_xlim([0, g4])
-            ax.set_xlim([0, g4])
-            fig.colorbar(C)
-            plt.savefig(dir+"/DSSF.pdf")
-            plt.clf()
+            read_MD(dir + "/" + filename)
             
 def read_MD_SU2(dir, w0, wmax, t_evolved):
     directory = os.fsencode(dir)
@@ -387,49 +388,36 @@ def read_MD_SU2(dir, w0, wmax, t_evolved):
 
     w = np.arange(w0, wmax, 1/t_evolved)
     A = DSSF(w, DSSF_K, S, P, T, False)
-    A = np.log(A)
-    # A = A / np.max(A)
-    np.savetxt(dir + "_DSSF_SU2.txt", A)
+    def DSSF_graph(DSSF, i, j):
+        fig, ax = plt.subplots(figsize=(10,4))
+        C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
+        ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+        ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+        ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+        ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+        xlabpos = [g1, g2, g3, g4]
+        labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+
+        ax.set_xticks(xlabpos, labels)
+        ax.set_xlim([0, g4])
+        fig.colorbar(C)
+        plt.savefig(dir+"DSSF_SU2_{}_{}.pdf".format(i, j))
+        plt.clf()
+
+    for i in range(3):
+        DSSF_graph(A[:,:,i,i], i, i)
+    
+    DSSF_sum = contract('wiab->wi', A)
+
+    DSSF_graph(DSSF_sum, 'sum', '')
+
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
-    ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-    xlabpos = [g1, g2, g3, g4]
-    # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
-    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
-    # labels = [r'$(-1,1,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
-    # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
-    # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
-    # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
-    # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
-# 
-    ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, g4])
-    fig.colorbar(C)
-    plt.savefig(dir+"DSSF_SU2.pdf")
+    ax.plot(w, np.log(DSSF_sum[:,0]))
+    ax.set_xlim([0, 3])
+    plt.savefig(dir+"DSSF_SU2_gap_Gamma.pdf")
     plt.clf()
+    plt.close('all')
     return A
-    # C = ax.imshow(A, origin='lower', extent=[0, gGamma3, w0, wmax], aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-    # ax.axvline(x=gGamma1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gX, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gW, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gK, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gGamma2, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gL, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gU, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gW1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gX1, color='b', label='axvline - full height', linestyle='dashed')
-    # ax.axvline(x=gGamma3, color='b', label='axvline - full height', linestyle='dashed')
-    # xlabpos = [gGamma1, gX, gW, gK, gGamma2, gL, gU, gW1, gX1, gGamma3]
-    # labels = [r'$\Gamma$', r'$X$', r'$W$', r'$K$', r'$\Gamma$', r'$L$', r'$U$', r'$W^\prime$', r'$X^\prime$',
-    #             r'$\Gamma$']
-    # ax.set_xticks(xlabpos, labels)
-    # ax.set_xlim([0, gGamma3])
-    # fig.colorbar(C)
-    # plt.savefig(dir+"DSSF.pdf") 
-    # plt.clf()
 
 def read_MD_SU3(dir, w0, wmax, t_evolved):
     directory = os.fsencode(dir)
@@ -442,29 +430,36 @@ def read_MD_SU3(dir, w0, wmax, t_evolved):
 
     w = np.arange(w0, wmax, 1/t_evolved)
     A = DSSF(w, DSSF_K, S, P, T, False)
-    A = np.log(A)
-    # A = A / np.max(A)
-    np.savetxt(dir + "_DSSF_SU3.txt", A)
+    def DSSF_graph(DSSF, i, j):
+        fig, ax = plt.subplots(figsize=(10,4))
+        C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
+        ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
+        ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
+        ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
+        ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
+        xlabpos = [g1, g2, g3, g4]
+        labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+
+        ax.set_xticks(xlabpos, labels)
+        ax.set_xlim([0, g4])
+        ax.set_ylim([0, 3])
+        fig.colorbar(C)
+        plt.savefig(dir+"DSSF_SU3_{}_{}.pdf".format(i, j))
+        plt.clf()
+
+    for i in range(8):
+        DSSF_graph(A[:,:,i,i], i, i)
+    
+    DSSF_sum = contract('wiab->wi', A)
+
+    DSSF_graph(DSSF_sum, 'sum', '')
+
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2')
-    ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
-    ax.axvline(x=g4, color='b', label='axvline - full height', linestyle='dashed')
-    xlabpos = [g1, g2, g3, g4]
-    # labels = [r'$(0,0,1)$', r'$(0,1,1)$', r'$(0,2,1)$', r'$(0,3,1)$']
-    # labels = [r'$(1,0,3)', r'$(3,0,3)$', r'$(3,0,1)$', r'$(3,2,1)$']
-    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
-    # labels = [r'$(2,0,1)$', r'$(2,1,1)$', r'$(2,2,1)$']
-    # labels = [r'$(2,1,0)$', r'$(2,1,1)$', r'$(2,1,2)$']
-    # labels = [r'$(0,1,-1)$', r'$(0,1,0)$', r'$(0,1,1)$']
-    # labels = [r'$(0,-1,1)$', r'$(0,0,1)$', r'$(0,1,1)$']
-# 
-    ax.set_xticks(xlabpos, labels)
-    ax.set_xlim([0, g4])
-    fig.colorbar(C)
-    plt.savefig(dir+"DSSF_SU3.pdf")
+    ax.plot(w, np.log(DSSF_sum[:,0]))
+    ax.set_xlim([0, 3])
+    plt.savefig(dir+"DSSF_SU3_gap_Gamma.pdf")
     plt.clf()
+    plt.close('all')
     return A
 
 def read_2D_nonlinear(dir):
@@ -788,7 +783,7 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
     }
     
     results = {}
-    omega_range = 3
+    omega_range = 10
     w = np.arange(0, omega_range, 0.1)
     wp = np.arange(-omega_range, omega_range, 0.1)
 
@@ -878,7 +873,7 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
         
         config = configs[group]
         M_NL_FF_abs = np.abs(res['M_NL_FF'] / len(tau)) if len(tau) > 0 else np.abs(res['M_NL_FF'])
-        final_results[group] = M_NL_FF_abs
+        final_results[group] = np.transpose(M_NL_FF_abs, (1, 0, 2))  # Transpose for correct orientation
 
         real_range = omega_range * 4.92 / 4.14
         extent = [0, real_range, -real_range, real_range]
@@ -886,11 +881,11 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
         for i in range(config['components']):
             M_NL_here = M_NL_FF_abs[:, :, i]
             output_file = os.path.join(dir, f"M_NL_FF{config['suffix']}_{i}.txt")
-            np.savetxt(output_file, M_NL_here)
+            np.savetxt(output_file, M_NL_here.T)
 
             # Linear scale plot
             plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_here, origin='lower', extent=extent,
+            plt.imshow(M_NL_here.T, origin='lower', extent=extent,
                         aspect='auto', interpolation='lanczos', cmap='gnuplot2')
             plt.colorbar(label='Amplitude')
             plt.xlabel('Frequency (THz)')
@@ -898,19 +893,21 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
             plt.title(f'2D Nonlinear Spectrum ({group} component {i})')
             plt.savefig(f"{dir}/NLSPEC{config['suffix']}_{i}_{fm}.pdf", dpi=300, bbox_inches='tight')
             plt.clf()
+            plt.close()
             
             # Log scale plot
             plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_here, origin='lower', extent=extent,
+            plt.imshow(M_NL_here.T, origin='lower', extent=extent,
                         aspect='auto', interpolation='lanczos', cmap='gnuplot2',
                         norm=PowerNorm(gamma=0.5))
             plt.colorbar(label='Amplitude (sqrt scale)')
             plt.xlabel('Frequency (J1)')
             plt.ylabel('Frequency (J1)')
-            plt.title(f'2D Nonlinear Spectrum ({group} component {i}, log scale)')
-            plt.savefig(f"{directory}/NLSPEC{config['suffix']}_{i}_{fm}_log.pdf", dpi=300, bbox_inches='tight')
+            plt.title(f'2D Nonlinear Spectrum ({group} component {i}, PowerNorm)')
+            plt.savefig(f"{directory}/NLSPEC{config['suffix']}_{i}_{fm}_POW.pdf", dpi=300, bbox_inches='tight')
             plt.clf()
-            
+            plt.close()
+
     return final_results
 
 def full_read_2DCS_TFO(dir):
@@ -929,7 +926,7 @@ def full_read_2DCS_TFO(dir):
     SU2 = results['SU2']
     SU3 = results['SU3']
 
-    omega_range = 3
+    omega_range = 10
     real_range = omega_range * 4.92 / 4.14
 
     xtotal = 5 * SU2[:, :, 0]
@@ -950,6 +947,7 @@ def full_read_2DCS_TFO(dir):
         plt.title(f'2D Nonlinear Spectrum ({title_suffix} Total)')
         plt.savefig(f"{dir}/NLSPEC_{filename_suffix}_total_sqrt.pdf", dpi=300, bbox_inches='tight')
         plt.clf()
+        plt.close()
 
     plot_spectrum(xtotal, 'X', 'x')
     plot_spectrum(ytotal, 'Y', 'y')
@@ -994,8 +992,9 @@ def read_2D_nonlinear_tot(dir):
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
 if __name__ == "__main__":
     directory = argv[1] if len(argv) > 1 else "TmFeO3_2DCS_D=0_xii=0.05"
-    full_read_2DCS_TFO(directory)
-# read_MD_tot(dir)
+    # full_read_2DCS_TFO(directory)
+    # read_MD(directory + "spin_t.txt")
+    read_MD_tot(directory)
 
 
 # read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_xii=0.0_H_B")

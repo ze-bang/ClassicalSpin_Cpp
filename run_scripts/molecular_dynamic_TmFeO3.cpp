@@ -90,9 +90,8 @@ void MD_TmFeO3_Fe(int num_trials, double T_start, double T_end, double Jai, doub
     }
 }
 
-void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, double offset, string dir, string spin_config_filename){
+void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double chii, double xii, double h, const array<double,3> &fielddir, double e1, double e2, double offset, string dir, string spin_config_filename){
     filesystem::create_directory(dir);
-    
     int initialized;
     MPI_Initialized(&initialized);
     if (!initialized){
@@ -103,11 +102,12 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
+
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
-    array<array<double, 3>, 3> Ja = {{{Jai, 0, 0}, {0, Jai, 0}, {0, 0, Jai}}};
-    array<array<double, 3>, 3> Jb = {{{Jbi, 0, 0}, {0, Jbi, 0}, {0, 0, Jbi}}};
+    array<array<double, 3>, 3> Ja = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
+    array<array<double, 3>, 3> Jb = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
     array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
 
     array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
@@ -115,8 +115,6 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
 
     array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
-
-    array<array<double, 3>,3> D = {{{0, D2, -D1}, {-D2, 0, 0}, {D1, 0, 0}}};
     //In plane interactions
 
     Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
@@ -128,6 +126,7 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
     Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
     Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+
     //Next Nearest Neighbour
     Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
     Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
@@ -137,6 +136,7 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
     Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
     Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+
     //Out of plane interaction
     Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
     Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
@@ -169,39 +169,85 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
     Fe_atoms.set_onsite_interaction(K, 2);
     Fe_atoms.set_onsite_interaction(K, 3);
 
-    //Dzyaloshinskii-Moriya interaction
-    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 0, 0, {1,-1,0});
-    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 1, 1, {1,-1,0});
-    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 2, 2, {1,-1,0});
-    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,1,0});
-    Fe_atoms.set_bilinear_interaction(D, 3, 3, {1,-1,0});
-
     Fe_atoms.set_field(fielddir*h, 0);
     Fe_atoms.set_field(fielddir*h, 1);
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
+    //Tm atoms
+    //Set energy splitting for Tm atoms
+    //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
+    double alpha = -e1/2;
+    double beta = -sqrt(3)/6*(2*e2-e1);
+    double gamma = (e1+e2)/3 *3/16;
+
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 2);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 3);
 
 
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
 
-    if (xii != 0){
-        array<array<array<double,3>,3>,8> xi = {{{0}}};
+    if (chii != 0.0){
+        array<array<double,3>,8> chi = {{{0}}};
+        chi[4] = {{chii,chii,chii}};
+        chi[6] = {{chii,chii,chii}};        
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
 
+
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
+
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
+    }
+
+    if (xii != 0.0){
+
+        array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
 
         ////////// Trilinear coupling/Oxygen path way
-        ///////////////////
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
 
@@ -281,14 +327,13 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
 
         TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
-
     }
-
     
+    cout << "Finished setting up TmFeO3" << endl;
     int trial_section = int(num_trials/size);
 
     for(size_t i = rank*trial_section; i < (rank+1)*trial_section; ++i){
-        mixed_lattice<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+        mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
         if (spin_config_filename != ""){
             MC.read_spin_from_file(spin_config_filename);
         }
@@ -300,7 +345,7 @@ void MD_TmFeO3(int num_trials, double Temp_start, double Temp_end, double T_star
 
 }
 
-void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double xii, double h, const array<double,3> &fielddir, double e1, double e2, double offset, string dir, string spin_config_filename){
+void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double chii, double xii, double h, const array<double,3> &fielddir, double e1, double e2, double offset, string dir, string spin_config_filename){
     filesystem::create_directory(dir);
     
     int initialized;
@@ -394,24 +439,76 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
     Fe_atoms.set_field(fielddir*h, 2);
     Fe_atoms.set_field(fielddir*h, 3);
 
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 0);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 1);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 2);
-    Tm_atoms.set_field({0,0,e1,0,0,0,0,e2}, 3);
+    double alpha = -e1/2;
+    double beta = -sqrt(3)/6*(2*e2-e1);
+    double gamma = (e1+e2)/3 *3/16;
 
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 2);
+    Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 3);
 
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
 
 
-    if (xii != 0){
-        array<array<array<double,3>,3>,8> xi = {{{0}}};
+    if (chii != 0.0){
+        array<array<double,3>,8> chi = {{{0}}};
+        chi[4] = {{chii,chii,chii}};
+        chi[6] = {{chii,chii,chii}};        
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
 
+
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
+
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+
+        ///////////////
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
+
+        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
+    }
+
+    if (xii != 0.0){
+
+        array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[1] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
 
         ////////// Trilinear coupling/Oxygen path way
-        ///////////////////
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
 
@@ -453,52 +550,51 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
 
         ///////////// Trilinear Interaction - Nearest neighbours
 
-        // TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
+        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
 
-        // TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
-        // TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
+        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
+        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
 
-        // TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
-        // TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
-
-        //////////////////
-        // TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
-        // TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
-
-        // TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
-        // TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
-
-        // TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
-        // TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
+        TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
+        TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
 
         //////////////////
-        // TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
+        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
+        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
 
-        // TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
+        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
+        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
 
-        // TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
+        TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
 
         //////////////////
-        // TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
 
-        // TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
 
-        // TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
-        // TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
 
+        //////////////////
+        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
+
+        TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
+        TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
     }
-
+    
     
     int trial_section = int(num_trials/size);
 
     for(size_t i = rank*trial_section; i < (rank+1)*trial_section; ++i){
-        mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8> MC(&TFO, 2.5, 1.0);
+        mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
         if (spin_config_filename != ""){
             MC.read_spin_from_file(spin_config_filename);
         }
@@ -522,11 +618,12 @@ int main(int argc, char** argv) {
     double Kc = (argc > 6) ? atof(argv[6]) : -0.09;
     double D1 = (argc > 7) ? atof(argv[7]) : 0.0;
     double D2 = (argc > 8) ? atof(argv[8]) : 0.0;
-    double xii = (argc > 9) ? atof(argv[9]) : 0.05;
-    double e1 = (argc > 10) ? atof(argv[10]) : 4.0;
-    double e2 = (argc > 11) ? atof(argv[11]) : 0.0;
-    double offset = (argc > 12) ? atof(argv[12]) : 0.0;
-    double h = (argc > 13) ? atof(argv[13]) : 0.0;
+    double chii = (argc > 9) ? atof(argv[9]) : 0.05; // chii is the Tm-O coupling
+    double xii = (argc > 10) ? atof(argv[10]) : 0.0;
+    double e1 = (argc > 11) ? atof(argv[11]) : 0.44715447154;
+    double e2 = (argc > 12) ? atof(argv[12]) : 0.97560975609;
+    double offset = (argc > 13) ? atof(argv[13]) : 0.0;
+    double h = (argc > 14) ? atof(argv[14]) : 0.0;
 
     J1c /= J1ab;
     J2ab /= J1ab;
@@ -541,12 +638,12 @@ int main(int argc, char** argv) {
     h /= J1ab;
     J1ab = 1;
 
-    string dir_name = (argc > 14) ? argv[14] : "TmFeO3_2DCS";
-    int num_trials = (argc > 15) ? atoi(argv[15]) : 1;
-    double T_start = (argc > 16) ? atof(argv[16]) : 0.0;
-    double T_end = (argc > 17) ? atof(argv[17]) : 50;
-    double T_step_size = (argc > 18) ? atof(argv[18]) : 1e-2;
-    string spin_config_file = (argc > 19) ? argv[19] : "TmFeO3_2DCS/0/spin";
+    string dir_name = (argc > 15) ? argv[15] : "TmFeO3_2DCS";
+    int num_trials = (argc > 16) ? atoi(argv[16]) : 1;
+    double T_start = (argc > 17) ? atof(argv[17]) : 0.0;
+    double T_end = (argc > 18) ? atof(argv[18]) : 50;
+    double T_step_size = (argc > 19) ? atof(argv[19]) : 1e-2;
+    string spin_config_file = (argc > 20) ? argv[20] : "TmFeO3_2DCS/0/spin";
     cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
     filesystem::create_directory(dir_name);
 
@@ -572,7 +669,7 @@ int main(int argc, char** argv) {
     myfile << "spin_config_file: " << spin_config_file << endl;
     myfile.close();
     // MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {0,1,0}, e1, e2, offset, dir_name, spin_config_file);
-    MD_TmFeO3_cuda(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, {0,1,0}, e1, e2, offset, dir_name, spin_config_file);
+    MD_TmFeO3_cuda(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, chii, xii, h, {0,1,0}, e1, e2, offset, dir_name, spin_config_file);
     
     int finalized;
     MPI_Finalized(&finalized);
