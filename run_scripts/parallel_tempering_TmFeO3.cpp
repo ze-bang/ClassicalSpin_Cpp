@@ -242,7 +242,7 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 
 
     mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
-    MC.parallel_tempering(temps, 4e5, 1e3, 1000, 50, 2e3, dir, rank_to_write);
+    MC.parallel_tempering(temps, 1e6, 1e3, 1000, 50, 2e3, dir, rank_to_write);
 
     int finalized;
     MPI_Finalized(&finalized);
