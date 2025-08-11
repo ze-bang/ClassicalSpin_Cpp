@@ -653,7 +653,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     // array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
     // array<array<double, 3>,4> field_drive = {{{0,0,1},{0,0,1},{0,0,1},{0,0,1}}};
 
-    double pulse_amp = 1.2;
+    double pulse_amp = 4;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -695,21 +695,15 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
 
     cout << "Starting calculations..." << endl;
-
-    MC.molecular_dynamics_cuda(0, 600, 1e-2, dir+"/spin_t.txt", 1);
+    cout << "Drive field direction: " << fielddir[0] << ", " << fielddir[1] << ", " << fielddir[2] << endl;
+    // MC.molecular_dynamics_cuda(0, 600, 1e-2, dir+"/spin_t.txt", 1);
 
     if (rank==0 && if_zero_is_in_T_range){
-        filesystem::create_directories(dir+"/M_time_0");
-        // Use the CUDA version of the method
-        MC.read_spin_from_file(spin_config);
-        cout << "Calculating M0..." << endl;
-        MC.M_B_t_cuda(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
         ofstream run_param;
         run_param.open(dir + "/param.txt");
         run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
         run_param.close();
     }
-    cout << "Finished M0 calculation." << endl;
 
     int tau_length = int(tau_steps/size);
     double current_tau = tau_start+tau_steps*rank/size*tau_step_size;

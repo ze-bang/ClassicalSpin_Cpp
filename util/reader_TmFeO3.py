@@ -766,14 +766,17 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
     return M_NL_FF_abs
 
 
-def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
+def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps for both SU(2) and SU(3) data.
     This version is optimized for performance by reducing redundant file I/O and computations.
+    Background subtraction is performed using data from dir/no_field/0 before Fourier transform.
     
     Args:
         dir (str): Directory containing the spectroscopy data.
         fm (bool): Flag to use filtered data files (e.g., 'M_t_f.txt').
+        w (array): Positive frequency array for tau dimension.
+        wp (array): Full frequency array for time dimension.
     """
     directory = os.path.abspath(dir)
     
@@ -783,9 +786,23 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
     }
     
     results = {}
-    omega_range = 10
-    w = np.arange(0, omega_range, 0.1)
-    wp = np.arange(-omega_range, omega_range, 0.1)
+
+    # Load background data from no_field/0 directory
+    background_data = {}
+    background_dir = os.path.join(directory, "no_field", "0")
+    
+    for group, config in configs.items():
+        try:
+            bg_file = os.path.join(background_dir, config['readfile'])
+            if os.path.exists(bg_file):
+                background_data[group] = np.loadtxt(bg_file)
+                print(f"Loaded background data for {group} from {bg_file}")
+            else:
+                background_data[group] = None
+                print(f"No background file found for {group} at {bg_file}")
+        except Exception as e:
+            print(f"Error loading background for {group}: {e}")
+            background_data[group] = None
 
     # Load initial M0 data for both SU(2) and SU(3)
     for group, config in configs.items():
@@ -800,9 +817,14 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
             M0 = m0_data[-time_steps:]
             M0_T = m0_time[-time_steps:]
             
+            # Subtract background if available
+            if background_data[group] is not None:
+                bg_length = min(len(background_data[group]), len(M0))
+                M0[:bg_length] -= background_data[group][-bg_length:]
+                print(f"Background subtracted for {group} M0 data")
+            
             M0_phase = np.exp(1j * np.outer(wp, M0_T))
             M0_w = contract('ta, wt->wa', M0, M0_phase)
-            
             results[group] = {
                 'M0_w': M0_w,
                 'M_NL_FF': np.zeros((len(w), len(wp), config['components']), dtype=complex),
@@ -839,10 +861,19 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
                 readfile = config['readfile']
                 time_steps = results[group]['time_steps']
                 try:
+                    M1 = np.loadtxt(os.path.join(base_path, "M1/", readfile))[-time_steps:]
+                    M01 = np.loadtxt(os.path.join(base_path, "M01/", readfile))[-time_steps:]
+                    
+                    # Subtract background if available
+                    if background_data[group] is not None:
+                        bg_length = min(len(background_data[group]), len(M1))
+                        M1[:bg_length] -= background_data[group][-bg_length:]
+                        M01[:bg_length] -= background_data[group][-bg_length:]
+                    
                     data_cache[group] = {
-                        'M1': np.loadtxt(os.path.join(base_path, "M1/", readfile))[-time_steps:],
+                        'M1': M1,
                         'M1_T': np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))[-time_steps:],
-                        'M01': np.loadtxt(os.path.join(base_path, "M01/", readfile))[-time_steps:],
+                        'M01': M01,
                         'M01_T': np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))[-time_steps:]
                     }
                 except (IOError, IndexError, FileNotFoundError) as e:
@@ -861,7 +892,10 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
                 M01_w = contract('ta, wt->wa', data['M01'], M01_phase)
                 
                 M_NL_here = M01_w - results[group]['M0_w'] - M1_w
-                results[group]['M_NL_FF'] += contract('wa, e->ewa', M_NL_here, ffactau)
+                if np.any(np.isnan(M_NL_here)):
+                    print(f"M_NL_here contains NaN values in {group} at tau={current_tau}")
+                else:
+                    results[group]['M_NL_FF'] += contract('wa, e->ewa', M_NL_here, ffactau)
 
         except Exception as e:
             print(f"Error processing directory {subdir}: {e}")
@@ -873,9 +907,15 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
         
         config = configs[group]
         M_NL_FF_abs = np.abs(res['M_NL_FF'] / len(tau)) if len(tau) > 0 else np.abs(res['M_NL_FF'])
+        # Set M_NL_FF_abs to zero if w is near zero
+        # w_zero_tolerance = 0.1  # Tolerance for "near zero"
+        # w_indices_near_zero = np.where(np.abs(wp) < w_zero_tolerance)[0]
+        # print(w_indices_near_zero)
+        # if len(w_indices_near_zero) > 0:
+        #     M_NL_FF_abs[:, w_indices_near_zero, :] = 0
         final_results[group] = np.transpose(M_NL_FF_abs, (1, 0, 2))  # Transpose for correct orientation
 
-        real_range = omega_range * 4.92 / 4.14
+        real_range = np.max(w)
         extent = [0, real_range, -real_range, real_range]
 
         for i in range(config['components']):
@@ -910,28 +950,78 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
 
     return final_results
 
-def full_read_2DCS_TFO(dir):
+def full_read_2DCS_TFO(dir, done=False):
     """
     Reads and processes 2DCS data for TmFeO3 using the combined function.
     
     Args:
         dir (str): The directory containing the data.
     """
-    results = read_2D_nonlinear_adaptive_time_step_combined(dir, True)
+    lenT = 80
+    Tstep = 0.01
+    freqs = np.fft.fftfreq(int(lenT/Tstep), d=Tstep) * 2 * np.pi
+    print(freqs)
+    omega_range = 2
+
+    # Create ordered frequency arrays
+    w = freqs[freqs >= 0]  # Positive frequencies only
+    w = w[w <= omega_range]  # Limit to omega_range
+    w = np.sort(w)  # Ensure ordering
+
+    wp = freqs[np.abs(freqs) <= omega_range]  # Frequencies within range
+    wp = np.sort(wp)  # Sort from -omega_range to +omega_range
+
+    print(len(w), len(wp))
+    if done:
+        # Load pre-computed results from saved files
+        SU2_results = []
+        SU3_results = []
+
+        # Load SU2 results (3 components)
+        for i in range(3):
+            filename = os.path.join(dir, f"M_NL_FF_{i}.txt")
+            if os.path.exists(filename):
+                SU2_results.append(np.loadtxt(filename))
+            else:
+                print(f"Warning: {filename} not found")
+
+        # Load SU3 results (8 components)
+        for i in range(8):
+            filename = os.path.join(dir, f"M_NL_FF_SU3_{i}.txt")
+            if os.path.exists(filename):
+                SU3_results.append(np.loadtxt(filename))
+            else:
+                print(f"Warning: {filename} not found")
+
+        # Convert to numpy arrays and add component dimension
+        if SU2_results:
+            SU2 = np.stack(SU2_results, axis=2)
+        else:
+            print("No SU2 results loaded")
+            return
+
+        if SU3_results:
+            SU3 = np.stack(SU3_results, axis=2)
+        else:
+            print("No SU3 results loaded")
+            return
+
+        results = {'SU2': SU2, 'SU3': SU3}
+    else:
+        results = read_2D_nonlinear_adaptive_time_step_combined(dir, True, w, wp)
+        SU2 = results['SU2']
+        SU3 = results['SU3']
 
     if 'SU2' not in results or 'SU3' not in results:
         print("Could not process SU2 or SU3 data. Aborting.")
         return
 
-    SU2 = results['SU2']
-    SU3 = results['SU3']
+    real_range = omega_range
 
-    omega_range = 10
-    real_range = omega_range * 4.92 / 4.14
-
-    xtotal = 5 * SU2[:, :, 0]
-    ytotal = 5 * SU2[:, :, 1]
-    ztotal = 5 * SU2[:, :, 2] + 5.2 * SU3[:, :, 1]
+    xtotal = SU2[:, :, 0] + SU3[:, :, 4] + 3*SU3[:, :, 6]
+    ytotal = SU2[:, :, 1] + SU3[:, :, 4] + 3*SU3[:, :, 6]
+    ztotal = SU2[:, :, 2]
+    SU3_contribution = SU3[:, :, 4] + SU3[:, :, 6]
 
     extent = [0, real_range, -real_range, real_range]
 
@@ -952,6 +1042,7 @@ def full_read_2DCS_TFO(dir):
     plot_spectrum(xtotal, 'X', 'x')
     plot_spectrum(ytotal, 'Y', 'y')
     plot_spectrum(ztotal, 'Z', 'z')
+    plot_spectrum(SU3_contribution, 'SU3 Contribution', 'su3_contribution')
 
 def read_2D_nonlinear_tot(dir):
     directory = os.fsencode(dir)
@@ -992,9 +1083,14 @@ def read_2D_nonlinear_tot(dir):
 # read_2D_nonlinear_adaptive_time_step("C://Users/raima/Downloads/TmFeO3_Fe_2DCS_Tzero_xii=0")
 if __name__ == "__main__":
     directory = argv[1] if len(argv) > 1 else "TmFeO3_2DCS_D=0_xii=0.05"
-    # full_read_2DCS_TFO(directory)
+    MD_read = argv[2] if len(argv) > 2 else "False"
+    MD_read = MD_read.lower() == "true"
+    if MD_read:
+        read_MD_tot(directory)
+    else:
+        full_read_2DCS_TFO(directory)
     # read_MD(directory + "spin_t.txt")
-    read_MD_tot(directory)
+    # read_MD_tot(directory)
 
 
 # read_2D_nonlinear_adaptive_time_step("/scratch/y/ybkim/zhouzb79/TmFeO3_2DCS_xii=0.0_H_B")

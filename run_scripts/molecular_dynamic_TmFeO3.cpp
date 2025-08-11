@@ -620,8 +620,8 @@ int main(int argc, char** argv) {
     double D2 = (argc > 8) ? atof(argv[8]) : 0.0;
     double chii = (argc > 9) ? atof(argv[9]) : 0.05; // chii is the Tm-O coupling
     double xii = (argc > 10) ? atof(argv[10]) : 0.0;
-    double e1 = (argc > 11) ? atof(argv[11]) : 0.44715447154;
-    double e2 = (argc > 12) ? atof(argv[12]) : 0.97560975609;
+    double e1 = (argc > 11) ? atof(argv[11]) : 2.2;
+    double e2 = (argc > 12) ? atof(argv[12]) : 4.8;
     double offset = (argc > 13) ? atof(argv[13]) : 0.0;
     double h = (argc > 14) ? atof(argv[14]) : 0.0;
 

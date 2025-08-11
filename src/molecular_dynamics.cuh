@@ -1076,9 +1076,21 @@ public:
             current_time += step_size;
             step_count++;
             
-            // Print progress
+            // Print progress with loading bar
             if (step_count % 100 == 0) {
-                std::cout << "Step: " << step_count << ", Time: " << current_time << std::endl;
+                double progress = (current_time - T_start) / (T_end - T_start);
+                int barWidth = 50;
+                int pos = static_cast<int>(barWidth * progress);
+                
+                std::cout << "\r[";
+                for (int i = 0; i < barWidth; ++i) {
+                    if (i < pos) std::cout << "=";
+                    else if (i == pos) std::cout << ">";
+                    else std::cout << " ";
+                }
+                std::cout << "] " << std::fixed << std::setprecision(1) 
+                          << (progress * 100.0) << "% | Time: " << std::setprecision(3) 
+                          << current_time << "/" << T_end << std::flush;
             }
             
             // Periodically copy data back to host for output
