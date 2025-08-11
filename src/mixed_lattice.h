@@ -1354,6 +1354,187 @@ class mixed_lattice
         return local_field-field_SU3[site_index];
     }
 
+    array<double, N_SU2>  get_local_field_SU2_debug(size_t site_index){
+        std::cout << "\n=== DEBUG: get_local_field_SU2 for site " << site_index << " ===" << std::endl;
+        
+        // Initialize and debug onsite contribution
+        array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]) * 2;
+        std::cout << "Onsite contribution: [";
+        for (size_t j = 0; j < N_SU2; ++j) {
+            std::cout << local_field[j] << (j < N_SU2-1 ? ", " : "");
+        }
+        std::cout << "]" << std::endl;
+        
+        // Debug bilinear SU2-SU2 interactions
+        std::cout << "\nBilinear SU2-SU2 interactions (" << num_bi_SU2 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i< num_bi_SU2; ++i) {
+            auto contrib = multiply<N_SU2, N_SU2>(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
+            std::cout << "  Partner " << bilinear_partners_SU2[site_index][i] << " contribution: [";
+            for (size_t j = 0; j < N_SU2; ++j) {
+                std::cout << contrib[j] << (j < N_SU2-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug mixed bilinear SU2-SU3 interactions
+        std::cout << "\nMixed bilinear SU2-SU3 interactions (" << num_bi_SU2_SU3 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
+            auto contrib = multiply<N_SU2, N_SU3>(mixed_bilinear_interaction_SU2[site_index][i], spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
+            std::cout << "  SU3 Partner " << mixed_bilinear_partners_SU2[site_index][i] << " contribution: [";
+            for (size_t j = 0; j < N_SU2; ++j) {
+                std::cout << contrib[j] << (j < N_SU2-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug trilinear SU2-SU2-SU2 interactions
+        std::cout << "\nTrilinear SU2-SU2-SU2 interactions (" << num_tri_SU2 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i < num_tri_SU2; ++i){
+            size_t partner1 = trilinear_partners_SU2[site_index][i][0];
+            size_t partner2 = trilinear_partners_SU2[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = spins.spins_SU2[partner1];
+            array<double, N_SU2> current_spin_SU2_partner2 = spins.spins_SU2[partner2];
+            auto contrib = contract_trilinear_field<N_SU2, N_SU2, N_SU2>(trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
+            std::cout << "  Partners (" << partner1 << ", " << partner2 << ") contribution: [";
+            for (size_t j = 0; j < N_SU2; ++j) {
+                std::cout << contrib[j] << (j < N_SU2-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug mixed trilinear SU2-SU2-SU3 interactions
+        std::cout << "\nMixed trilinear SU2-SU2-SU3 interactions (" << num_tri_SU2_SU3 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i < num_tri_SU2_SU3; ++i){
+            size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
+            size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = spins.spins_SU2[partner1];
+            array<double, N_SU3> current_spin_SU3_partner2 = spins.spins_SU3[partner2];
+            auto contrib = contract_trilinear_field<N_SU2, N_SU2, N_SU3>(mixed_trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU3_partner2);
+            std::cout << "  Partners (SU2:" << partner1 << ", SU3:" << partner2 << ") contribution: [";
+            for (size_t j = 0; j < N_SU2; ++j) {
+                std::cout << contrib[j] << (j < N_SU2-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug field subtraction
+        std::cout << "\nExternal field at site: [";
+        for (size_t j = 0; j < N_SU2; ++j) {
+            std::cout << field_SU2[site_index][j] << (j < N_SU2-1 ? ", " : "");
+        }
+        std::cout << "]" << std::endl;
+        
+        auto result = local_field - field_SU2[site_index];
+        
+        std::cout << "Final local field: [";
+        for (size_t j = 0; j < N_SU2; ++j) {
+            std::cout << result[j] << (j < N_SU2-1 ? ", " : "");
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "=== END DEBUG ===" << std::endl;
+        
+        return result;
+    }
+
+    array<double, N_SU3>  get_local_field_SU3_debug(size_t site_index){
+        std::cout << "\n=== DEBUG: get_local_field_SU3 for site " << site_index << " ===" << std::endl;
+        
+        // Initialize and debug onsite contribution
+        array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]) * 2;
+        std::cout << "Onsite contribution: [";
+        for (size_t j = 0; j < N_SU3; ++j) {
+            std::cout << local_field[j] << (j < N_SU3-1 ? ", " : "");
+        }
+        std::cout << "]" << std::endl;
+        
+        // Debug bilinear SU3-SU3 interactions
+        std::cout << "\nBilinear SU3-SU3 interactions (" << num_bi_SU3 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i< num_bi_SU3; ++i) {
+            auto contrib = multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
+            std::cout << "  Partner " << bilinear_partners_SU3[site_index][i] << " contribution: [";
+            for (size_t j = 0; j < N_SU3; ++j) {
+                std::cout << contrib[j] << (j < N_SU3-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug mixed bilinear SU3-SU2 interactions
+        std::cout << "\nMixed bilinear SU3-SU2 interactions (" << num_bi_SU2_SU3 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i < num_bi_SU2_SU3; ++i){
+            auto contrib = multiply<N_SU3, N_SU2>(mixed_bilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
+            std::cout << "  SU2 Partner " << mixed_bilinear_partners_SU3[site_index][i] << " contribution: [";
+            for (size_t j = 0; j < N_SU3; ++j) {
+                std::cout << contrib[j] << (j < N_SU3-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug trilinear SU3-SU3-SU3 interactions
+        std::cout << "\nTrilinear SU3-SU3-SU3 interactions (" << num_tri_SU3 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i < num_tri_SU3; ++i){
+            size_t partner1 = trilinear_partners_SU3[site_index][i][0];
+            size_t partner2 = trilinear_partners_SU3[site_index][i][1];
+            array<double, N_SU3> current_spin_SU3_partner1 = spins.spins_SU3[partner1];
+            array<double, N_SU3> current_spin_SU3_partner2 = spins.spins_SU3[partner2];
+            auto contrib = contract_trilinear_field<N_SU3, N_SU3, N_SU3>(trilinear_interaction_SU3[site_index][i], current_spin_SU3_partner1, current_spin_SU3_partner2);
+            std::cout << "  Partners (" << partner1 << ", " << partner2 << ") contribution: [";
+            for (size_t j = 0; j < N_SU3; ++j) {
+                std::cout << contrib[j] << (j < N_SU3-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug mixed trilinear SU3-SU2-SU2 interactions
+        std::cout << "\nMixed trilinear SU3-SU2-SU2 interactions (" << num_tri_SU2_SU3 << " total):" << std::endl;
+        #pragma omp simd
+        for (size_t i=0; i < num_tri_SU2_SU3; ++i){
+            size_t partner1 = mixed_trilinear_partners_SU3[site_index][i][0];
+            size_t partner2 = mixed_trilinear_partners_SU3[site_index][i][1];
+            array<double, N_SU2> current_spin_SU2_partner1 = spins.spins_SU2[partner1];
+            array<double, N_SU2> current_spin_SU2_partner2 = spins.spins_SU2[partner2];
+            auto contrib = contract_trilinear_field<N_SU3, N_SU2, N_SU2>(mixed_trilinear_interaction_SU3[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
+            std::cout << "  Partners (SU2:" << partner1 << ", SU2:" << partner2 << ") contribution: [";
+            for (size_t j = 0; j < N_SU3; ++j) {
+                std::cout << contrib[j] << (j < N_SU3-1 ? ", " : "");
+            }
+            std::cout << "]" << std::endl;
+            local_field = local_field + contrib;
+        }
+        
+        // Debug field subtraction
+        std::cout << "\nExternal field at site: [";
+        for (size_t j = 0; j < N_SU3; ++j) {
+            std::cout << field_SU3[site_index][j] << (j < N_SU3-1 ? ", " : "");
+        }
+        std::cout << "]" << std::endl;
+        
+        auto result = local_field - field_SU3[site_index];
+        
+        std::cout << "Final local field: [";
+        for (size_t j = 0; j < N_SU3; ++j) {
+            std::cout << result[j] << (j < N_SU3-1 ? ", " : "");
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "=== END DEBUG ===" << std::endl;
+        
+        return result;
+    }
+
+
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field = {{0.0}};
         local_field += multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
