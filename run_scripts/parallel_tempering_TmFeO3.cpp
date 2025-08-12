@@ -5,62 +5,94 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
-    array<array<double, 3>, 3> Ja = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
-    array<array<double, 3>, 3> Jb = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
-    array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+    // We need to consider the local frame where
+    // eta_1 = 1, 1, 1
+    // eta_2 = 1, -1, -1
+    // eta_3 = -1, 1, -1
+    // eta_4 = -1, -1, 1
 
-    array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
-    array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
-    array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+    // Define eta vectors
+    array<array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
+
+    // Original exchange matrices
+    array<array<double, 3>, 3> Ja_orig = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
+    array<array<double, 3>, 3> Jb_orig = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
+    array<array<double, 3>, 3> Jc_orig = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+
+    array<array<double, 3>, 3> J2a_orig = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    array<array<double, 3>, 3> J2b_orig = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    array<array<double, 3>, 3> J2c_orig = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+    // Create 4x4 sublattice versions for each exchange matrix
+    // First two indices denote sublattices i,j; last two are matrix indices
+    array<array<array<array<double, 3>, 3>, 4>, 4> Ja;
+    array<array<array<array<double, 3>, 3>, 4>, 4> Jb;
+    array<array<array<array<double, 3>, 3>, 4>, 4> Jc;
+    array<array<array<array<double, 3>, 3>, 4>, 4> J2a;
+    array<array<array<array<double, 3>, 3>, 4>, 4> J2b;
+    array<array<array<array<double, 3>, 3>, 4>, 4> J2c;
+    
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            for (int a = 0; a < 3; a++) {
+                for (int b = 0; b < 3; b++) {
+                    Ja[i][j][a][b] = Ja_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jb[i][j][a][b] = Jb_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jc[i][j][a][b] = Jc_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2a[i][j][a][b] = J2a_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2b[i][j][a][b] = J2b_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2c[i][j][a][b] = J2c_orig[a][b] * eta[i][a] * eta[j][b];
+                }
+            }
+        }
+    }
 
     array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
     //In plane interactions
+    Fe_atoms.set_bilinear_interaction(Ja[1][0], 1, 0, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb[1][0], 1, 0, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb[1][0], 1, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja[1][0], 1, 0, {1,-1,0});
 
-    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {1,-1,0});
-
-    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(Ja[2][3], 2, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb[2][3], 2, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb[2][3], 2, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja[2][3], 2, 3, {1,-1,0});
 
     //Next Nearest Neighbour
-    Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2a, 1, 1, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 1, 1, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2a, 2, 2, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[0][0], 0, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[0][0], 0, 0, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[1][1], 1, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[1][1], 1, 1, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[2][2], 2, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[2][2], 2, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[3][3], 3, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[3][3], 3, 3, {0,1,0});
 
     //Out of plane interaction
-    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
-    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc[0][3], 0, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc[0][3], 0, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc[1][2], 1, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc[1][2], 1, 2, {0,0,1});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,1,0});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,1,1});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,-1,0});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,-1,1});
 
     //single ion anisotropy
     Fe_atoms.set_onsite_interaction(K, 0);
