@@ -92,6 +92,20 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     // Here we go!
 
     if (chii != 0.0){
+        // Actually, for any non-linear response, one must also consider
+        // some type of DM interaction between the SU(2) and SU(3) spin.
+        // The idea is essentially, for the ordered phase, clearly we have
+        // a condensate of lambda3 and lambda8. As such, these are the ordered
+        // moment to expand upon. As such, a bilinear term can only yield a 
+        // bilinear term S\lambda or a quartic term like SS\lambda\lambda.
+        // So what do we do here? Well, either we want coupling of the form
+        // S lambda3 or S lambda 8. But these operators are time reversal even
+        // and inversion even.
+        // So what about a trilinear interaction like SS\lambda?
+        // Well in this case then the only lambda operator allowed to couple is 
+        // \lambda1,3,and 8. So therefore, we can only consider \lambda1.
+        // Then we must consider the process: Namely, \lambda1 only has |E0><E1|
+        // Therefore, we must have a bilinear term in \lambda that contains |E1><E2|
         array<array<double,3>,8> chi = {{{0}}};
         chi[1] = {{0, 0, 5.264*chii}};
         chi[4] = {{2.3915*chii,2.7866*chii,0}};
@@ -151,8 +165,8 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        // xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        // xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
 
         ////////// Trilinear coupling/Oxygen path way
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
