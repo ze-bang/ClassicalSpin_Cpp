@@ -98,9 +98,12 @@ void create_default_parameter_file(const string& filename) {
 
 
 void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
     filesystem::create_directories(dir);
     HoneyComb<3> atoms;
-
 
     array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},
                                         {E, J1xy-D, G},
@@ -131,10 +134,11 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
 
     array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
 
-    std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
+    if (rank == 0) {
+        std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
+    }
     array<double, 3> field = {h*field_dir[0],h*field_dir[1],h*field_dir[2]};
     
-
     //nearest neighbour
     atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1y_, 0, 1, {0,-1,0});
@@ -149,30 +153,31 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     atoms.set_field(field, 1);
     double k_B = 0.08620689655;
 
-    // Save simulation parameters
-    ofstream param_file(dir + "/simulation_parameters.txt");
-    param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
-    param_file << "==========================================\n";
-    param_file << "Number of trials: " << num_trials << "\n";
-    param_file << "Magnetic field strength (h): " << h << "\n";
-    param_file << "Field direction: [" << field_dir[0] << ", " << field_dir[1] << ", " << field_dir[2] << "]\n";
-    param_file << "Applied field: [" << field[0] << ", " << field[1] << ", " << field[2] << "]\n";
-    param_file << "J1xy: " << J1xy << "\n";
-    param_file << "J1z: " << J1z << "\n";
-    param_file << "D: " << D << "\n";
-    param_file << "E: " << E << "\n";
-    param_file << "F: " << F << "\n";
-    param_file << "G: " << G << "\n";
-    param_file << "J3xy: " << J3xy << "\n";
-    param_file << "J3z: " << J3z << "\n";
-    param_file << "Lattice size: 24x24x1\n";
-    param_file << "Temperature for SA: 10K to 0.001K\n";
-    param_file << "SA steps: 100000\n";
-    param_file << "MD steps: 100\n";
-    param_file << "MD timestep: 0.01\n";
-    param_file.close();
-    double min_energy;
-    int min_index = 0;
+    // Save simulation parameters (only rank 0)
+    if (rank == 0) {
+        ofstream param_file(dir + "/simulation_parameters.txt");
+        param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
+        param_file << "==========================================\n";
+        param_file << "Number of trials: " << num_trials << "\n";
+        param_file << "Magnetic field strength (h): " << h << "\n";
+        param_file << "Field direction: [" << field_dir[0] << ", " << field_dir[1] << ", " << field_dir[2] << "]\n";
+        param_file << "Applied field: [" << field[0] << ", " << field[1] << ", " << field[2] << "]\n";
+        param_file << "J1xy: " << J1xy << "\n";
+        param_file << "J1z: " << J1z << "\n";
+        param_file << "D: " << D << "\n";
+        param_file << "E: " << E << "\n";
+        param_file << "F: " << F << "\n";
+        param_file << "G: " << G << "\n";
+        param_file << "J3xy: " << J3xy << "\n";
+        param_file << "J3z: " << J3z << "\n";
+        param_file << "Lattice size: 36x36x1\n";
+        param_file << "Temperature for SA: 5K to 0.001K\n";
+        param_file << "SA steps: 100000\n";
+        param_file << "MD steps: 100\n";
+        param_file << "MD timestep: 0.01\n";
+        param_file << "MPI processes: " << size << "\n";
+        param_file.close();
+    }
 
     auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
         double c = cos(theta);
@@ -201,7 +206,12 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
                   0, 0, 1}}};
     };
 
-    for(size_t i=0; i<num_trials;++i){
+    // Variables for storing local minimum energy
+    double local_min_energy = std::numeric_limits<double>::max();
+    int local_min_index = -1;
+
+    // Each process handles a subset of trials
+    for(size_t i = rank; i < num_trials; i += size){
         filesystem::create_directories(dir + "/" + std::to_string(i));
         double twist_angle = 2*M_PI/num_trials * i;
         array<array<double, 9>, 3> twist_matrix = generate_twist_matrix(twist_angle, {0, 0, 1});
@@ -231,23 +241,56 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
             twist_file << "\n";
         }
         twist_file.close();
-        if (i == 0) {
-            min_energy = MC.energy_density(MC.spins);
-            min_index = i;
-        } else {
-            if (MC.energy_density(MC.spins) < min_energy) {
-                min_energy = MC.energy_density(MC.spins);
-                min_index = i;
-            }
+        
+        // Update local minimum
+        if (energy_density < local_min_energy) {
+            local_min_energy = energy_density;
+            local_min_index = i;
         }
     }
 
-    // Output the information about the best configuration to a file
-    ofstream best_config_file(dir + "/best_configuration.txt");
-    best_config_file << "Best Configuration Found:\n";
-    best_config_file << "Trial Index: " << min_index << "\n";
-    best_config_file << "Minimum Energy Density: " << min_energy << "\n";
-    best_config_file.close();
+    // Gather all minimum energies to rank 0
+    struct {
+        double energy;
+        int index;
+        int rank;
+    } local_min = {local_min_energy, local_min_index, rank}, global_min;
+
+    MPI_Reduce(&local_min.energy, &global_min.energy, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+    
+    // Find which process has the global minimum
+    if (rank == 0) {
+        double *all_energies = new double[size];
+        int *all_indices = new int[size];
+        
+        MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, all_energies, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&local_min_index, 1, MPI_INT, all_indices, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        
+        double min_energy = all_energies[0];
+        int min_index = all_indices[0];
+        
+        for (int i = 1; i < size; ++i) {
+            if (all_energies[i] < min_energy) {
+                min_energy = all_energies[i];
+                min_index = all_indices[i];
+            }
+        }
+        
+        // Output the information about the best configuration to a file
+        ofstream best_config_file(dir + "/best_configuration.txt");
+        best_config_file << "Best Configuration Found:\n";
+        best_config_file << "Trial Index: " << min_index << "\n";
+        best_config_file << "Minimum Energy Density: " << min_energy << "\n";
+        best_config_file.close();
+        
+        delete[] all_energies;
+        delete[] all_indices;
+    } else {
+        MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&local_min_index, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){

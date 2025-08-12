@@ -88,22 +88,30 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
 
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
-
+    // I have finally cracked the correct model...
+    // Here we go!
 
     if (chii != 0.0){
         array<array<double,3>,8> chi = {{{0}}};
-        chi[4] = {{chii,chii,chii}};
-        chi[6] = {{chii,chii,chii}};        
+        chi[1] = {{0, 0, 5.264*chii}};
+        chi[4] = {{2.3915*chii,2.7866*chii,0}};
+        chi[6] = {{0.9128*chii,-0.4655*chii,0}};
+
+        array<array<double,3>,8> chi_inv = {{{0}}};
+        chi_inv[1] = {{0, 0, 5.264*chii}};
+        chi_inv[4] = {{-2.3915*chii,-2.7866*chii,0}};
+        chi_inv[6] = {{-0.9128*chii,0.4655*chii,0}};
+
         TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
 
 
-        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 0, {1,0,0});
 
         ///////////////
         TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
@@ -111,10 +119,10 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
         TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
         TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
 
-        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
-        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
-        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
-        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 0, {0,1,0});
 
         ///////////////
         TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
@@ -122,10 +130,10 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
         TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
 
-        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
-        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
-        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
-        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 0, {1,0,0});
 
         ///////////////
         TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
@@ -133,10 +141,10 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
         TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
 
-        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 0, {1,-1,0});
     }
 
     if (xii != 0.0){
