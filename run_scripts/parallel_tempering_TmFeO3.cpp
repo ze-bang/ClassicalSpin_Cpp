@@ -5,11 +5,6 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
 
-    // We need to consider the local frame where
-    // eta_1 = 1, 1, 1
-    // eta_2 = 1, -1, -1
-    // eta_3 = -1, 1, -1
-    // eta_4 = -1, -1, 1
 
     // Define eta vectors
     array<array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
