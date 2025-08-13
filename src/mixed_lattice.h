@@ -1236,16 +1236,11 @@ class mixed_lattice
 
         // Calculate the norm of z basis vector
 
-        const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,5.264,0,0,0,0,0,0}};
+        const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,1,0,0,0,0,0,0}};
         double z_norm = 0.0;
-        for (size_t i = 0; i < N_SU3; ++i) {
-            z_norm += drive_field_basis_z_SU3[i] * drive_field_basis_z_SU3[i];
-        }
-        z_norm = sqrt(z_norm);
-        // Normalize the z basis vector
-        for (size_t i = 0; i < N_SU3; ++i) {
-            drive_field_basis_z_SU3[i] /= z_norm;
-        }
+
+        z_norm = 5.264;
+
 
         // Normalize all basis vectors by the norm of z
         const array<double, N_SU3> drive_field_basis_x_SU3 = {{0,0,0,0,2.3915/z_norm,0,0.9128/z_norm,0}};
