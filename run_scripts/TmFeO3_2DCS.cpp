@@ -517,9 +517,9 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     //Tm atoms
     //Set energy splitting for Tm atoms
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
-    double alpha = -e1/2;
-    double beta = -sqrt(3)/6*(2*e2-e1);
-    double gamma = (e1+e2)/3 *3/16;
+    double alpha = e1/2;
+    double beta = sqrt(3)/6*(2*e2-e1);
+    double gamma = -(e1+e2)/3 *3/16;
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
@@ -533,20 +533,6 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     // Here we go!
 
     if (chii != 0.0){
-        // Actually, for any non-linear response, one must also consider
-        // some type of DM interaction between the SU(2) and SU(3) spin.
-        // The idea is essentially, for the ordered phase, clearly we have
-        // a condensate of lambda3 and lambda8. As such, these are the ordered
-        // moment to expand upon. As such, a bilinear term can only yield a 
-        // bilinear term S\lambda or a quartic term like SS\lambda\lambda.
-        // So what do we do here? Well, either we want coupling of the form
-        // S lambda3 or S lambda 8. But these operators are time reversal even
-        // and inversion even.
-        // So what about a trilinear interaction like SS\lambda?
-        // Well in this case then the only lambda operator allowed to couple is 
-        // \lambda1,3,and 8. So therefore, we can only consider \lambda1.
-        // Then we must consider the process: Namely, \lambda1 only has |E0><E1|
-        // Therefore, we must have a bilinear term in \lambda that contains |E1><E2|
         array<array<double,3>,8> chi = {{{0}}};
         chi[1] = {{0, 0, 5.264*chii}};
         chi[4] = {{2.3915*chii,2.7866*chii,0}};
