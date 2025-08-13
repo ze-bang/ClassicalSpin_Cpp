@@ -103,9 +103,9 @@ void parallel_tempering_TmFeO3(double T_start, double T_end, double Jai, double 
     //Tm atoms
     //Set energy splitting for Tm atoms
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
-    double alpha = -e1/2;
-    double beta = -sqrt(3)/6*(2*e2-e1);
-    double gamma = (e1+e2)/3 *3/16;
+    double alpha = e1/2;
+    double beta = sqrt(3)/6*(2*e2-e1);
+    double gamma = -(e1+e2)/3;
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
