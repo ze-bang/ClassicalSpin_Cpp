@@ -420,63 +420,88 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
+    // Define eta vectors
+    array<array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
 
-    array<array<double, 3>, 3> Ja = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
-    array<array<double, 3>, 3> Jb = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
-    array<array<double, 3>, 3> Jc = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+    // Original exchange matrices
+    array<array<double, 3>, 3> Ja_orig = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
+    array<array<double, 3>, 3> Jb_orig = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
+    array<array<double, 3>, 3> Jc_orig = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
 
-    array<array<double, 3>, 3> J2a = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
-    array<array<double, 3>, 3> J2b = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
-    array<array<double, 3>, 3> J2c = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+    array<array<double, 3>, 3> J2a_orig = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    array<array<double, 3>, 3> J2b_orig = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    array<array<double, 3>, 3> J2c_orig = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+    // Create 4x4 sublattice versions for each exchange matrix
+    // First two indices denote sublattices i,j; last two are matrix indices
+    array<array<array<array<double, 3>, 3>, 4>, 4> Ja;
+    array<array<array<array<double, 3>, 3>, 4>, 4> Jb;
+    array<array<array<array<double, 3>, 3>, 4>, 4> Jc;
+    array<array<array<array<double, 3>, 3>, 4>, 4> J2a;
+    array<array<array<array<double, 3>, 3>, 4>, 4> J2b;
+    array<array<array<array<double, 3>, 3>, 4>, 4> J2c;
+    
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            for (int a = 0; a < 3; a++) {
+                for (int b = 0; b < 3; b++) {
+                    Ja[i][j][a][b] = Ja_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jb[i][j][a][b] = Jb_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jc[i][j][a][b] = Jc_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2a[i][j][a][b] = J2a_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2b[i][j][a][b] = J2b_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2c[i][j][a][b] = J2c_orig[a][b] * eta[i][a] * eta[j][b];
+                }
+            }
+        }
+    }
 
     array<double, 9> K = {{Ka, 0, 0, 0, 0, 0, 0, 0, Kc}};
     //In plane interactions
+    Fe_atoms.set_bilinear_interaction(Ja[1][0], 1, 0, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb[1][0], 1, 0, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb[1][0], 1, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja[1][0], 1, 0, {1,-1,0});
 
-    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 1, 0, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(Ja, 1, 0, {1,-1,0});
-
-    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(Jb, 2, 3, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(Ja, 2, 3, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(Ja[2][3], 2, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jb[2][3], 2, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(Jb[2][3], 2, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(Ja[2][3], 2, 3, {1,-1,0});
 
     //Next Nearest Neighbour
-    Fe_atoms.set_bilinear_interaction(J2a, 0, 0, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 0, 0, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2a, 1, 1, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 1, 1, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2a, 2, 2, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 2, 2, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2a, 3, 3, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2b, 3, 3, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[0][0], 0, 0, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[0][0], 0, 0, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[1][1], 1, 1, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[1][1], 1, 1, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[2][2], 2, 2, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[2][2], 2, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2a[3][3], 3, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2b[3][3], 3, 3, {0,1,0});
 
     //Out of plane interaction
-    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jc, 0, 3, {0,0,1});
-    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(Jc, 1, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc[0][3], 0, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc[0][3], 0, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(Jc[1][2], 1, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(Jc[1][2], 1, 2, {0,0,1});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,1,0});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {0,1,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 0, 2, {-1,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {0,1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[0][2], 0, 2, {-1,1,1});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,0});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,-1,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,0,0});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,-1,0});
 
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {0,-1,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,0,1});
-    Fe_atoms.set_bilinear_interaction(J2c, 1, 3, {1,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {0,-1,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,0,1});
+    Fe_atoms.set_bilinear_interaction(J2c[1][3], 1, 3, {1,-1,1});
 
     //single ion anisotropy
     Fe_atoms.set_onsite_interaction(K, 0);
@@ -492,9 +517,9 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     //Tm atoms
     //Set energy splitting for Tm atoms
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
-    double alpha = -e1/2;
-    double beta = -sqrt(3)/6*(2*e2-e1);
-    double gamma = (e1+e2)/3 *3/16;
+    double alpha = e1/2;
+    double beta = sqrt(3)/6*(2*e2-e1);
+    double gamma = -(e1+e2)/3 *3/16;
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
@@ -504,21 +529,30 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
 
     TmFeO3<3, 8> TFO(&Fe_atoms, &Tm_atoms);
+    // I have finally cracked the correct model...
+    // Here we go!
 
     if (chii != 0.0){
         array<array<double,3>,8> chi = {{{0}}};
-        chi[4] = {{chii,chii,chii}};
-        chi[6] = {{chii,chii,chii}};
+        chi[1] = {{0, 0, 5.264*chii}};
+        chi[4] = {{2.3915*chii,2.7866*chii,0}};
+        chi[6] = {{0.9128*chii,-0.4655*chii,0}};
+
+        array<array<double,3>,8> chi_inv = {{{0}}};
+        chi_inv[1] = {{0, 0, 5.264*chii}};
+        chi_inv[4] = {{-2.3915*chii,-2.7866*chii,0}};
+        chi_inv[6] = {{-0.9128*chii,0.4655*chii,0}};
+
         TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
         TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
 
 
-        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 3, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 2, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 3, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 1, {0,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 0, {1,0,0});
 
         ///////////////
         TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
@@ -526,10 +560,10 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
         TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
 
-        TFO.set_mix_bilinear_interaction(chi, 0, 2, {-1,1,1});
-        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,1,1});
-        TFO.set_mix_bilinear_interaction(chi, 0, 1, {-1,1,0});
-        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 2, {-1,1,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 3, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 1, {-1,1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 0, {0,1,0});
 
         ///////////////
         TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
@@ -537,10 +571,10 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
 
-        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,1,1});
-        TFO.set_mix_bilinear_interaction(chi, 2, 3, {1,0,1});
-        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,1,0});
-        TFO.set_mix_bilinear_interaction(chi, 2, 0, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 2, {0,1,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 3, {1,0,1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 1, {0,1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 0, {1,0,0});
 
         ///////////////
         TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
@@ -548,18 +582,18 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
         TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
 
-        TFO.set_mix_bilinear_interaction(chi, 3, 2, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,-1,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 1, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 2, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 3, {1,-1,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 1, {1,0,0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 0, {1,-1,0});
     }
 
     if (xii != 0.0){
 
         array<array<array<double,3>,3>,8> xi = {{{0}}};
         xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
-        xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        // xi[2] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
+        // xi[7] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
 
         ////////// Trilinear coupling/Oxygen path way
         TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
@@ -641,8 +675,6 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
         TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
         TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
-
-    
     }
     
     //
@@ -695,21 +727,15 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
 
 
     cout << "Starting calculations..." << endl;
-
-    MC.molecular_dynamics_cuda(0, 600, 1e-2, dir+"/spin_t.txt", 1);
+    cout << "Drive field direction: " << fielddir[0] << ", " << fielddir[1] << ", " << fielddir[2] << endl;
+    // MC.molecular_dynamics_cuda(0, 600, 1e-2, dir+"/spin_t.txt", 1);
 
     if (rank==0 && if_zero_is_in_T_range){
-        filesystem::create_directories(dir+"/M_time_0");
-        // Use the CUDA version of the method
-        MC.read_spin_from_file(spin_config);
-        cout << "Calculating M0..." << endl;
-        MC.M_B_t_cuda(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
         ofstream run_param;
         run_param.open(dir + "/param.txt");
         run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
         run_param.close();
     }
-    cout << "Finished M0 calculation." << endl;
 
     int tau_length = int(tau_steps/size);
     double current_tau = tau_start+tau_steps*rank/size*tau_step_size;
@@ -822,9 +848,9 @@ int main(int argc, char** argv) {
     
     // Define field_drive using command line parameters
     array<array<double, 3>,4> field_drive = {{{field_drive_x, field_drive_y, field_drive_z},
-                                              {field_drive_x, field_drive_y, field_drive_z},
-                                              {field_drive_x, field_drive_y, field_drive_z},
-                                              {field_drive_x, field_drive_y, field_drive_z}}};
+                                              {field_drive_x, -field_drive_y, -field_drive_z},
+                                              {-field_drive_x, field_drive_y, -field_drive_z},
+                                              {-field_drive_x, -field_drive_y, field_drive_z}}};
     
     MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, field_drive, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
