@@ -316,7 +316,7 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     }
     array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
 
-    double pulse_amp = 1.2;
+    double pulse_amp = 4;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -842,6 +842,7 @@ int main(int argc, char** argv) {
     cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " xi::" << xii << " saving to: " << dir_name << endl;
     cout << "Field drive: [" << field_drive_x << ", " << field_drive_y << ", " << field_drive_z << "]" << endl;
     cout << "Reading from " << spin_config_file << endl;
+    cout << "Evolving from " << tau_start_here << " to " << tau_end_here << " with step size " << tau_step_size << endl;
     string output_dir = dir_name;
     filesystem::create_directories(output_dir);
     bool if_zero_is_in_T_range = slurm_ID == 1;
