@@ -2790,6 +2790,66 @@ class mixed_lattice
         return mag;
     }
 
+    array<double,N_SU2> magnetization_global(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
+        array<double,N_SU2> mag = {{0}};
+        
+        #pragma omp parallel
+        {
+            array<double,N_SU2> local_mag = {{0}};
+            
+            #pragma omp for nowait
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    local_mag[j] += spin_t.spins_SU2[i][j];
+                }
+            }
+            
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < N_SU2; ++j) {
+                    mag[j] += local_mag[j];
+                }
+            }
+        }
+        
+        const double inv_size = 1.0 / double(lattice_size_SU2);
+        for (size_t j = 0; j < N_SU2; ++j) {
+            mag[j] *= inv_size;
+        }
+        
+        return mag;
+    }
+
+    array<double,N_SU3> magnetization_global_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
+        array<double,N_SU3> mag = {{0}};
+        
+        #pragma omp parallel
+        {
+            array<double,N_SU3> local_mag = {{0}};
+            
+            #pragma omp for nowait
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                for (size_t j = 0; j < N_SU3; ++j) {
+                    local_mag[j] += spin_t.spins_SU3[i][j];
+                }
+            }
+            
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < N_SU3; ++j) {
+                    mag[j] += local_mag[j];
+                }
+            }
+        }
+        
+        const double inv_size = 1.0 / double(lattice_size_SU3);
+        for (size_t j = 0; j < N_SU3; ++j) {
+            mag[j] *= inv_size;
+        }
+        
+        return mag;
+    }
+
 
     void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name, bool verbose= false) {
         if (dir_name != ""){

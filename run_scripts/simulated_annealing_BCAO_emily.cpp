@@ -241,7 +241,15 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
             twist_file << "\n";
         }
         twist_file.close();
-        
+
+        const auto energy_langscape = MC.local_energy_densities(MC.spins);
+        ofstream landscape_file(dir +"/"+std::to_string(i)+ "/energy_landscape.txt");
+        landscape_file << "Energy Landscape:\n";
+        for (size_t j = 0; j < energy_langscape.size(); ++j) {
+            landscape_file << j << " " << energy_langscape[j] << "\n";
+        }
+        landscape_file.close();
+
         // Update local minimum
         if (energy_density < local_min_energy) {
             local_min_energy = energy_density;
@@ -459,6 +467,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         sim_BCAO_honeycomb(1, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z);
     }
 }
+
 int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     

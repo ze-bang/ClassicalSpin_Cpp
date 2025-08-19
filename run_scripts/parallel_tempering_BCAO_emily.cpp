@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <array>
 
 using namespace std;
 
@@ -31,6 +32,19 @@ struct SimulationParams {
     size_t probe_rate = 2000;
 
     size_t num_trials = 5; // Number of trials for the simulation
+
+    array<array<double, 9>, 3> twist_matrix = {{
+        {1, 0, 0, 
+         0, 1, 0, 
+         0, 0, 1},
+        {1, 0, 0, 
+         0, 1, 0, 
+         0, 0, 1},
+        {1, 0, 0, 
+         0, 1, 0, 
+         0, 0, 1}
+    }};
+
 };
 
 // Function to read parameters from a file
@@ -43,6 +57,48 @@ SimulationParams read_parameters(const string& filename) {
         return params;
     }
     
+    auto sanitize_and_split = [](string s) -> vector<string> {
+        // Replace semicolons and whitespace with commas, remove brackets/parentheses
+        for (char& c : s) {
+            if (c == ';' || c == '\t' || c == ' ') c = ',';
+            if (c == '[' || c == ']' || c == '(' || c == ')') c = ' ';
+        }
+        // collapse repeats of commas
+        string tmp;
+        bool last_comma = false;
+        for (char c : s) {
+            if (c == ',') {
+                if (!last_comma) tmp.push_back(c);
+                last_comma = true;
+            } else {
+                tmp.push_back(c);
+                last_comma = false;
+            }
+        }
+        // split by comma
+        vector<string> out;
+        string token;
+        stringstream ss(tmp);
+        while (getline(ss, token, ',')) {
+            // trim
+            size_t start = token.find_first_not_of(" \t\n\r");
+            size_t end = token.find_last_not_of(" \t\n\r");
+            if (start != string::npos && end != string::npos) {
+                out.emplace_back(token.substr(start, end - start + 1));
+            }
+        }
+        return out;
+    };
+
+    auto parse_matrix9 = [&](const string& value, array<double, 9>& out) -> bool {
+        vector<string> toks = sanitize_and_split(value);
+        if (toks.size() < 9) return false;
+        try {
+            for (size_t i = 0; i < 9; ++i) out[i] = stod(toks[i]);
+        } catch (...) { return false; }
+        return true;
+    };
+
     string line;
     while (getline(file, line)) {
         // Skip comments and empty lines
@@ -86,6 +142,40 @@ SimulationParams read_parameters(const string& filename) {
             else if (key == "overrelaxation_rate") params.overrelaxation_rate = stoul(value);
             else if (key == "swap_interval") params.swap_interval = stoul(value);
             else if (key == "probe_rate") params.probe_rate = stoul(value);
+            // Twist matrix (accept multiple formats)
+            else if (key == "twist_matrix" || key == "twist") {
+                // Expect 27 numbers; allow commas/semicolons/spaces/brackets
+                vector<string> toks = sanitize_and_split(value);
+                if (toks.size() >= 27) {
+                    try {
+                        size_t idx = 0;
+                        for (int b = 0; b < 3; ++b) {
+                            for (int i = 0; i < 9; ++i) {
+                                params.twist_matrix[b][i] = stod(toks[idx++]);
+                            }
+                        }
+                    } catch (...) {
+                        cout << "Warning: Failed to parse twist_matrix; keeping defaults.\n";
+                    }
+                } else {
+                    cout << "Warning: twist_matrix expects 27 numbers; got " << toks.size() << ". Keeping defaults.\n";
+                }
+            }
+            else if (key == "twist_matrix_0" || key == "twist_x") {
+                array<double,9> tmp{};
+                if (parse_matrix9(value, tmp)) params.twist_matrix[0] = tmp;
+                else cout << "Warning: Failed to parse twist_matrix_0; keeping default.\n";
+            }
+            else if (key == "twist_matrix_1" || key == "twist_y") {
+                array<double,9> tmp{};
+                if (parse_matrix9(value, tmp)) params.twist_matrix[1] = tmp;
+                else cout << "Warning: Failed to parse twist_matrix_1; keeping default.\n";
+            }
+            else if (key == "twist_matrix_2" || key == "twist_z") {
+                array<double,9> tmp{};
+                if (parse_matrix9(value, tmp)) params.twist_matrix[2] = tmp;
+                else cout << "Warning: Failed to parse twist_matrix_2; keeping default.\n";
+            }
         }
     }
     
@@ -127,11 +217,19 @@ void create_default_parameter_file(const string& filename) {
     file << "measurement_interval = 50\n";
     file << "num_bins = 2000\n";
 
+    file << "\n# Twist boundary matrices (three 3x3 blocks, row-major).\n";
+    file << "# Option A: one line with 27 numbers (x-block, then y-block, then z-block):\n";
+    file << "# twist_matrix = 1,0,0, 0,1,0, 0,0,1,   1,0,0, 0,1,0, 0,0,1,   1,0,0, 0,1,0, 0,0,1\n";
+    file << "# Option B: three lines with 9 numbers each (aliases: twist_x/y/z):\n";
+    file << "twist_matrix_0 = 1,0,0, 0,1,0, 0,0,1\n";
+    file << "twist_matrix_1 = 1,0,0, 0,1,0, 0,0,1\n";
+    file << "twist_matrix_2 = 1,0,0, 0,1,0, 0,0,1\n";
+
     file.close();
 }
 
 // Main simulation function for Parallel Tempering
-void PT_BCAO_honeycomb(const SimulationParams& params, array<array<double, 9>, 3> twist_matrix){
+void PT_BCAO_honeycomb(const SimulationParams& params){
     filesystem::create_directory(params.dir);
     HoneyComb<3> atoms;
 
@@ -185,7 +283,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, array<array<double, 9>, 3
 
     
     // Lattice and simulation
-    lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true, twist_matrix);
+    lattice<3, 2, 100, 100, 1> MC(&atoms, 1, true, params.twist_matrix);
     MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0});
     if (rank == 0) {
         cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
@@ -194,6 +292,36 @@ void PT_BCAO_honeycomb(const SimulationParams& params, array<array<double, 9>, 3
             MC.deterministic_sweep();
         }
         MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);
+        ofstream param_file(params.dir + "/simulation_parameters.txt");
+        param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
+        param_file << "==========================================\n";
+        param_file << "Field: " << params.h << " mu_B, Direction: [" << params.field_dir[0] << "," << params.field_dir[1] << "," << params.field_dir[2] << "]\n";
+        param_file << "Temperature Range: " << params.T_start << "K to " << params.T_end << "K\n";
+        param_file << "Output directory: " << params.dir << "\n";
+        param_file << "J1xy: " << params.J1xy << "\n";
+        param_file << "J1z: " << params.J1z << "\n";
+        param_file << "D: " << params.D << "\n";
+        param_file << "E: " << params.E << "\n";
+        param_file << "F: " << params.F << "\n";
+        param_file << "G: " << params.G << "\n";
+        param_file << "J3xy: " << params.J3xy << "\n";
+        param_file << "J3z: " << params.J3z << "\n";
+        param_file << "Lattice size: 100x100x1\n";
+        param_file.close();
+        cout << "Simulation parameters saved to: " << params.dir + "/simulation_parameters.txt" << "\n";
+        
+        const auto energy_landscape = MC.local_energy_densities(MC.spins);
+        ofstream energy_file(params.dir + "/energy_landscape.txt");
+        energy_file << "# Energy landscape for BCAO Honeycomb\n";
+        for (size_t i = 0; i < energy_landscape.size(); ++i) {
+            energy_file << i << " " << energy_landscape[i] << "\n";
+        }
+        energy_file.close();
+        cout << "Energy landscape saved to: " << params.dir + "/energy_landscape.txt" << "\n";
+    }
+    else{
+        // Other ranks can perform their own tasks or just wait
+        cout << "Rank " << rank << " completed its part of the simulation.\n";
     }
 }
 
@@ -238,34 +366,6 @@ int main(int argc, char** argv) {
         filesystem::create_directory(params.dir);
     }
     
-    auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
-        double c = cos(theta);
-        double s = sin(theta);
-        double t = 1.0 - c;
-        double nx = n[0], ny = n[1], nz = n[2];
-
-        // Rodrigues' rotation formula for rotation around axis n by angle theta
-        double r11 = t * nx * nx + c;
-        double r12 = t * nx * ny - s * nz;
-        double r13 = t * nx * nz + s * ny;
-        double r21 = t * nx * ny + s * nz;
-        double r22 = t * ny * ny + c;
-        double r23 = t * ny * nz - s * nx;
-        double r31 = t * nx * nz - s * ny;
-        double r32 = t * ny * nz + s * nx;
-        double r33 = t * nz * nz + c;
-
-        return {{{r11, r12, r13,
-                  r21, r22, r23,
-                  r31, r32, r33},
-                 {1, 0, 0, 
-                  0, 1, 0, 
-                  0, 0, 1},
-                 {1, 0, 0, 
-                  0, 1, 0, 
-                  0, 0, 1}}};
-    };
-    
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
         trial_params.dir = params.dir + "/trial_" + to_string(i);
@@ -273,13 +373,11 @@ int main(int argc, char** argv) {
         if (rank == 0) {
             cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
         }
-        double twist_angle = 2 * M_PI / params.num_trials * i;
-        auto twist_matrix = generate_twist_matrix(twist_angle, {0, 0, 1});
         // Synchronize all processes before starting the next trial
         MPI_Barrier(MPI_COMM_WORLD);
 
         // Run the Parallel Tempering simulation
-        PT_BCAO_honeycomb(trial_params, twist_matrix);
+        PT_BCAO_honeycomb(trial_params);
     }
     
     int finalized;

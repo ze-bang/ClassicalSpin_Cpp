@@ -96,7 +96,11 @@ g4 = g3 + len(P34)
 DSSF_K = np.concatenate((P12, P23, P34))
 # DSSF_K = np.concatenate((P12, P23))
 
+x = np.array([[1, 0, 0], [1, 0, 0], [-1, 0, 0], [-1, 0, 0]])
+y = np.array([[0, 1, 0], [0, -1, 0], [0, 1, 0], [0, -1, 0]])
+z = np.array([[0, 0, 1], [0, 0, -1], [0, 0, -1], [0, 0, 1]])
 
+localframe = np.array([x, y, z])
 
 def Spin_global_pyrochlore(k,S,P):
     size = int(len(P)/4)
@@ -148,8 +152,8 @@ def DSSF(w, k, S, P, T, gb=False):
     ffactt = np.exp(1j*contract('w,t->wt', w, T))
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
-        Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.real(contract('wni, wmi, inm->wi', Somega[:,:,:,2], np.conj(Somega[:,:,:,2]), g(k)))
+        Somega = contract('tnis, wt->wis', A, ffactt)/np.sqrt(len(T))
+        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
         return read
     else:
         A = Spin_t(k, S, P)
@@ -346,12 +350,12 @@ def parseSSSF(dir):
     SSSFhelper("Syy_global")
     SSSFhelper("Szz_global")
 
-def read_MD(dir):
+def read_MD(dir,isglobal=False):
     w0 = 0
     wmax = 15
     t_evolved = 100
-    SU2 = read_MD_SU2(dir, w0, wmax, t_evolved)
-    SU3 = read_MD_SU3(dir, w0, wmax, t_evolved)
+    SU2 = read_MD_SU2(dir, w0, wmax, t_evolved, isglobal)
+    SU3 = read_MD_SU3(dir, w0, wmax, t_evolved, isglobal)
     A = contract('wiab->wi',SU2) + contract('wiab->wi',SU3)
     np.savetxt(dir + "/DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -369,15 +373,15 @@ def read_MD(dir):
     plt.savefig(dir+"/DSSF.pdf")
     plt.clf()
 
-def read_MD_tot(dir):
+def read_MD_tot(dir, isglobal=False):
     print("Begin MD reading")
     directory = os.fsencode(dir)
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            read_MD(dir + "/" + filename)
-            
-def read_MD_SU2(dir, w0, wmax, t_evolved):
+            read_MD(dir + "/" + filename, isglobal)
+
+def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos_SU2.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
@@ -387,7 +391,7 @@ def read_MD_SU2(dir, w0, wmax, t_evolved):
     S = S[-len(T):]  # Ensure S has the same length as T
 
     w = np.arange(w0, wmax, 1/t_evolved)
-    A = DSSF(w, DSSF_K, S, P, T, False)
+    A = DSSF(w, DSSF_K, S, P, T, isglobal)
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
         C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
@@ -419,7 +423,7 @@ def read_MD_SU2(dir, w0, wmax, t_evolved):
     plt.close('all')
     return A
 
-def read_MD_SU3(dir, w0, wmax, t_evolved):
+def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     directory = os.fsencode(dir)
     P = np.loadtxt(dir + "/pos_SU3.txt")
     T = np.loadtxt(dir + "/Time_steps.txt")
@@ -429,7 +433,7 @@ def read_MD_SU3(dir, w0, wmax, t_evolved):
     S = S[-len(T):]  # Ensure S has the same length as T
 
     w = np.arange(w0, wmax, 1/t_evolved)
-    A = DSSF(w, DSSF_K, S, P, T, False)
+    A = DSSF(w, DSSF_K, S, P, T, isglobal)
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
         C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')

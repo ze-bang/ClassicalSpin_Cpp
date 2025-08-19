@@ -384,18 +384,27 @@ class lattice
     }
 
     double site_energy(array<double, N> &spin_here, size_t site_index){
-        double energy = 0.0;
-        energy -= dot(spin_here, field[site_index]);
-        energy += contract(spin_here, onsite_interaction[site_index], spin_here);
+        double single_site_energy = 0, double_site_energy = 0, triple_site_energy = 0;
+        single_site_energy -= dot(spin_here, field[site_index]);
+        single_site_energy += contract(spin_here, onsite_interaction[site_index], spin_here);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+            double_site_energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
-            energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+            triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
         }
-        return energy;
+        return single_site_energy + double_site_energy/2 + triple_site_energy/3;
+    }
+
+    array<double, dim1*dim2*dim*N_ATOMS> local_energy_densities(spin_config &curr_spins){
+        array<double, dim1*dim2*dim*N_ATOMS> local_energies;
+        #pragma omp simd
+        for(size_t i = 0; i < dim1*dim2*dim*N_ATOMS; ++i){
+            local_energies[i] = site_energy(curr_spins[i], i);
+        }
+        return local_energies;
     }
 
     double site_energy_diff(const array<double, N> &new_spins, const array<double, N> &old_spins, const size_t site_index) const {
