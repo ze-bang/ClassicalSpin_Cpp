@@ -288,7 +288,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     if (rank == 0) {
         cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
         MC.write_to_file_spin(params.dir + "/spin.txt", MC.spins);
-        for (size_t i = 0; i < 1e6; ++i) {
+        for (size_t i = 0; i < 1e7; ++i) {
             MC.deterministic_sweep();
         }
         MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);

@@ -665,7 +665,7 @@ def obenton_to_xx_zz():
     plt.savefig("o_benton_Jxx_Jzz.pdf")
     plt.clf()
 
-def magnetic_moment_along(P, S):
+def magnetic_moment_along(P, S, dir):
     directions = np.array([
         [1, 0, 0],
         [-1, 0, 0],
@@ -673,15 +673,6 @@ def magnetic_moment_along(P, S):
         [-1/2, np.sqrt(3)/2, 0],
         [1/2, -np.sqrt(3)/2, 0],
         [-1/2, -np.sqrt(3)/2, 0]
-    ])
-    sublattice_offset = np.array([0, 1/np.sqrt(3), 0])
-    sublattice_offset_dir = np.array([
-        [1/2, -np.sqrt(3)/6, 0],
-        [-1/2, -np.sqrt(3)/6, 0],
-        [0, 1/np.sqrt(3), 0],
-        [0, 1/np.sqrt(3), 0],
-        [1/2, -np.sqrt(3)/6, 0],
-        [-1/2, -np.sqrt(3)/6, 0]
     ])
 
     z_axis = np.array([0, 0, 1])
@@ -692,54 +683,51 @@ def magnetic_moment_along(P, S):
     # In-plane perpendicular directions to each chain (moment directions)
     moment_dir = np.cross(u_dirs, z_axis)
 
-    results = {
-        "direction_unit": u_dirs,
-        "moment_dir_unit": moment_dir,
-        "per_direction_chain_means": [],
-        "per_direction_average": [],
-        "overall_average": 0.0,
-    }
-
     # For each chain direction, group sites into parallel chains and average spin·moment_dir
     for i in range(len(u_dirs)):
         u = u_dirs[i]                   # chain direction (unit)
         v_perp = moment_dir[i]          # perpendicular (unit), also moment_dir
         # Coordinates along and across the chain
-        s = P @ u
-        t = P @ v_perp
+        s_A = P[::2] @ u
+        s_B = (P[1::2] - np.array([0, 1/np.sqrt(3), 0])) @ u
 
-        # Inter-chain spacing from provided geometry
-        delta_t = abs(np.dot(sublattice_offset_dir[i], v_perp))
-        if delta_t < 1e-10:
-            delta_t = abs(np.dot(sublattice_offset, v_perp))
-        if delta_t < 1e-8:
-            # Data-driven fallback (smallest positive gap)
-            t_sorted = np.unique(np.round(t, 8))
-            gaps = np.diff(np.sort(t_sorted))
-            gaps = gaps[gaps > 1e-6]
-            delta_t = gaps.min() if gaps.size else 1.0
+        proj_A = S[::2] @ v_perp
+        proj_B = S[1::2] @ v_perp
 
-        # Assign chain ids by binning in the perpendicular coordinate
-        t0 = t.min()
-        chain_ids = np.rint((t - t0) / delta_t).astype(int)
+        # Group identical s_A (with tolerance) and average proj_A over those groups
+        keys = np.round(s_A, 4)
+        uniq_keys, inv = np.unique(keys, return_inverse=True)
+        counts = np.bincount(inv)
+        sums = np.bincount(inv, weights=proj_A)
+        proj_A_avg = sums / counts
+
+        # Use grouped/averaged A-values for plotting
+        s_A = uniq_keys
+        proj_A = proj_A_avg
+
+
+        # Group identical s_B (with tolerance) and average proj_B over those groups
+        keys = np.round(s_B, 4)
+        uniq_keys, inv = np.unique(keys, return_inverse=True)
+        counts = np.bincount(inv)
+        sums = np.bincount(inv, weights=proj_B)
+        proj_B_avg = sums / counts
+
+        # Use grouped/averaged A-values for plotting
+        s_B = uniq_keys
+        proj_B = proj_B_avg
+
 
         # Spin projection onto the moment direction for this family
-        proj = S @ v_perp
+        fig, ax = plt.subplots(figsize=(20, 4))
 
-        chain_means = []
-        for cid in np.unique(chain_ids):
-            mask = (chain_ids == cid)
-            if not np.any(mask):
-                continue
-            chain_means.append(np.mean(proj[mask]))
+        ax.plot(s_A*10, proj_A, 'o')
+        ax.plot(s_B*10, proj_B, 'o')
+        ax.set_xlabel("Position along chain")
+        ax.set_ylabel("Spin projection")
+        plt.savefig(f"{dir}/chain_{i+1}.pdf")
+        plt.close()
 
-        chain_means = np.array(chain_means, dtype=float)
-        results["per_direction_chain_means"].append(chain_means)
-        results["per_direction_average"].append(chain_means.mean() if chain_means.size else 0.0)
-
-    results["per_direction_average"] = np.array(results["per_direction_average"], dtype=float)
-    results["overall_average"] = float(results["per_direction_average"].mean())
-    return results
 
 def parseDSSF(dir):
     size = 0
@@ -1099,6 +1087,7 @@ def parse_spin_config(directory):
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
             plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
+            magnetic_moment_along(P, S, directory + "/" + filename)
 
     SSSF = SSSF / len(os.listdir(directory))
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
@@ -1174,6 +1163,7 @@ if __name__ == "__main__":
                     if field_scan.lower() == "true":
                         read_field_scan(full_path)
                     else:
+                        print("Computing spin configuration information...")
                         parse_spin_config(full_path)
                     # read_MD_tot(full_path)
                 except Exception as e:

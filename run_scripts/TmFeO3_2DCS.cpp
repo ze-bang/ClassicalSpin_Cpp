@@ -1,5 +1,68 @@
 #include "experiments.h"
 #include "../src/molecular_dynamics.cuh"
+#include <unordered_map>
+#include <sstream>
+#include <cctype>
+
+static inline std::string trim(const std::string &s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+static std::unordered_map<std::string, std::string> read_params_from_file(const std::string &path) {
+    std::unordered_map<std::string, std::string> kv;
+    std::ifstream in(path);
+    if (!in) {
+        std::cout << "Warning: could not open param file: " << path << std::endl;
+        return kv;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        // strip comments (# or //)
+        size_t pos_hash = line.find('#');
+        if (pos_hash != std::string::npos) line = line.substr(0, pos_hash);
+        size_t pos_slashes = line.find("//");
+        if (pos_slashes != std::string::npos) line = line.substr(0, pos_slashes);
+        line = trim(line);
+        if (line.empty()) continue;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = trim(line.substr(0, eq));
+        std::string val = trim(line.substr(eq + 1));
+        if (!key.empty()) kv[key] = val;
+    }
+    return kv;
+}
+
+static bool getBool(const std::unordered_map<std::string, std::string> &m, const std::string &key, bool defVal) {
+    auto it = m.find(key);
+    if (it == m.end()) return defVal;
+    std::string v = it->second;
+    for (auto &c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (v == "1" || v == "true" || v == "yes" || v == "on") return true;
+    if (v == "0" || v == "false" || v == "no" || v == "off") return false;
+    return defVal;
+}
+
+static int getInt(const std::unordered_map<std::string, std::string> &m, const std::string &key, int defVal) {
+    auto it = m.find(key);
+    if (it == m.end()) return defVal;
+    try { return std::stoi(it->second); } catch (...) { return defVal; }
+}
+
+static double getDouble(const std::unordered_map<std::string, std::string> &m, const std::string &key, double defVal) {
+    auto it = m.find(key);
+    if (it == m.end()) return defVal;
+    try { return std::stod(it->second); } catch (...) { return defVal; }
+}
+
+static std::string getString(const std::unordered_map<std::string, std::string> &m, const std::string &key, const std::string &defVal) {
+    auto it = m.find(key);
+    if (it == m.end()) return defVal;
+    return it->second;
+}
 
 void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, double tau_end, double tau_step_size, double T_start, double T_end, double T_step_size, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double h, const array<double,3> &fielddir, string dir, bool T_zero=false, string spin_config=""){
     int initialized;
@@ -420,6 +483,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
+
+
     // Define eta vectors
     array<array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
 
@@ -519,7 +584,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
     double alpha = e1/2;
     double beta = sqrt(3)/6*(2*e2-e1);
-    double gamma = -(e1+e2)/3 *3/16;
+    double gamma = -(e1+e2)/3;
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
@@ -533,6 +598,20 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     // Here we go!
 
     if (chii != 0.0){
+        // Actually, for any non-linear response, one must also consider
+        // some type of DM interaction between the SU(2) and SU(3) spin.
+        // The idea is essentially, for the ordered phase, clearly we have
+        // a condensate of lambda3 and lambda8. As such, these are the ordered
+        // moment to expand upon. As such, a bilinear term can only yield a 
+        // bilinear term S\lambda or a quartic term like SS\lambda\lambda.
+        // So what do we do here? Well, either we want coupling of the form
+        // S lambda3 or S lambda 8. But these operators are time reversal even
+        // and inversion even.
+        // So what about a trilinear interaction like SS\lambda?
+        // Well in this case then the only lambda operator allowed to couple is 
+        // \lambda1,3,and 8. So therefore, we can only consider \lambda1.
+        // Then we must consider the process: Namely, \lambda1 only has |E0><E1|
+        // Therefore, we must have a bilinear term in \lambda that contains |E1><E2|
         array<array<double,3>,8> chi = {{{0}}};
         chi[1] = {{0, 0, 5.264*chii}};
         chi[4] = {{2.3915*chii,2.7866*chii,0}};
@@ -785,35 +864,87 @@ void TmFeO3_2DCS(size_t num_trials, double Temp_start, double Temp_end, double t
 int main(int argc, char** argv) {
     double k_B = 0.08620689655;
     double mu_B = 5.7883818012e-2;
-    bool T_zero = (argc > 1) ? atoi(argv[1]) : 0;
-    double Temp_start = (argc > 2) ? atof(argv[2]) : 20;
-    double Temp_end = (argc > 3) ? atof(argv[3]) : 0.01;
-    double tau_start = (argc > 4) ? atof(argv[4]) : 0;
-    double tau_end = (argc > 5) ? atof(argv[5]) : -20;
-    double tau_step_size = (argc > 6) ? atof(argv[6]) : 0.01;
-    double T_start = (argc > 7) ? atof(argv[7]) : -20.0;
-    double T_end = (argc > 8) ? atof(argv[8]) : 20.0;
-    double T_step_size = (argc > 9) ? atof(argv[9]) : 0.01;
 
+    // Prefer loading parameters from a key=value param file if argv[1] is a valid file path.
+    bool T_zero;
+    double Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size;
+    double J1ab, J1c, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h;
+    double field_drive_x, field_drive_y, field_drive_z;
+    std::string dir_name, spin_config_file;
+    int slurm_ID, total_jobs;
 
-    double J1ab = (argc > 10) ? atof(argv[10]) : 4.92;
-    double J1c = (argc > 11) ? atof(argv[11]) : 4.92;
-    double J2ab = (argc > 12) ? atof(argv[12]) : 0.29;
-    double J2c = (argc > 13) ? atof(argv[13]) : 0.29;
-    double Ka = (argc > 14) ? atof(argv[14]) : 0.0;
-    double Kc = (argc > 15) ? atof(argv[15]) : -0.09;
-    double D1 = (argc > 16) ? atof(argv[16]) : 0.0;
-    double D2 = (argc > 17) ? atof(argv[17]) : 0.0;
-    double e1 = (argc > 18) ? atof(argv[18]) : 4.0;
-    double e2 = (argc > 19) ? atof(argv[19]) : 0.0;
-    double chii = (argc > 20) ? atof(argv[20]) : 0.05; // TmFeO bilinear coupling parameter
-    double xii = (argc > 21) ? atof(argv[21]) : 0.0;
-    double h = (argc > 22) ? atof(argv[22]) : 0.0;
-    
-    // Field drive components - default to x-direction [1,0,0] for all atoms
-    double field_drive_x = (argc > 23) ? atof(argv[23]) : 1.0;
-    double field_drive_y = (argc > 24) ? atof(argv[24]) : 0.0;
-    double field_drive_z = (argc > 25) ? atof(argv[25]) : 0.0;
+    std::string param_file = (argc > 1 && filesystem::exists(argv[1])) ? argv[1] : "";
+    if (!param_file.empty()) {
+        std::cout << "Loading parameters from file: " << param_file << std::endl;
+        auto p = read_params_from_file(param_file);
+        // Defaults (same as original CLI defaults)
+        T_zero = getBool(p, "T_zero", false);
+        Temp_start = getDouble(p, "Temp_start", 20);
+        Temp_end = getDouble(p, "Temp_end", 0.01);
+        tau_start = getDouble(p, "tau_start", 0);
+        tau_end = getDouble(p, "tau_end", -20);
+        tau_step_size = getDouble(p, "tau_step_size", 0.01);
+        T_start = getDouble(p, "T_start", -20.0);
+        T_end = getDouble(p, "T_end", 20.0);
+        T_step_size = getDouble(p, "T_step_size", 0.01);
+
+        J1ab = getDouble(p, "J1ab", 4.92);
+        J1c  = getDouble(p, "J1c", 4.92);
+        J2ab = getDouble(p, "J2ab", 0.29);
+        J2c  = getDouble(p, "J2c", 0.29);
+        Ka   = getDouble(p, "Ka", 0.0);
+        Kc   = getDouble(p, "Kc", -0.09);
+        D1   = getDouble(p, "D1", 0.0);
+        D2   = getDouble(p, "D2", 0.0);
+        e1   = getDouble(p, "e1", 4.0);
+        e2   = getDouble(p, "e2", 0.0);
+        chii = getDouble(p, "chii", 0.05);
+        xii  = getDouble(p, "xii", 0.0);
+        h    = getDouble(p, "h", 0.0);
+
+        field_drive_x = getDouble(p, "field_drive_x", 1.0);
+        field_drive_y = getDouble(p, "field_drive_y", 0.0);
+        field_drive_z = getDouble(p, "field_drive_z", 0.0);
+
+        dir_name = getString(p, "dir_name", "TmFeO3_2DCS_xii=0.05");
+        slurm_ID = getInt(p, "slurm_ID", 1);
+        total_jobs = getInt(p, "total_jobs", 1);
+        spin_config_file = getString(p, "spin_config_file", "TFO_4_0_xii=0.05/spin_zero.txt");
+    } else {
+        // Fallback to original CLI parsing
+        T_zero = (argc > 1) ? atoi(argv[1]) : 0;
+        Temp_start = (argc > 2) ? atof(argv[2]) : 20;
+        Temp_end = (argc > 3) ? atof(argv[3]) : 0.01;
+        tau_start = (argc > 4) ? atof(argv[4]) : 0;
+        tau_end = (argc > 5) ? atof(argv[5]) : -20;
+        tau_step_size = (argc > 6) ? atof(argv[6]) : 0.01;
+        T_start = (argc > 7) ? atof(argv[7]) : -20.0;
+        T_end = (argc > 8) ? atof(argv[8]) : 20.0;
+        T_step_size = (argc > 9) ? atof(argv[9]) : 0.01;
+
+        J1ab = (argc > 10) ? atof(argv[10]) : 4.92;
+        J1c = (argc > 11) ? atof(argv[11]) : 4.92;
+        J2ab = (argc > 12) ? atof(argv[12]) : 0.29;
+        J2c = (argc > 13) ? atof(argv[13]) : 0.29;
+        Ka = (argc > 14) ? atof(argv[14]) : 0.0;
+        Kc = (argc > 15) ? atof(argv[15]) : -0.09;
+        D1 = (argc > 16) ? atof(argv[16]) : 0.0;
+        D2 = (argc > 17) ? atof(argv[17]) : 0.0;
+        e1 = (argc > 18) ? atof(argv[18]) : 4.0;
+        e2 = (argc > 19) ? atof(argv[19]) : 0.0;
+        chii = (argc > 20) ? atof(argv[20]) : 0.05; // TmFeO bilinear coupling parameter
+        xii = (argc > 21) ? atof(argv[21]) : 0.0;
+        h = (argc > 22) ? atof(argv[22]) : 0.0;
+
+        field_drive_x = (argc > 23) ? atof(argv[23]) : 1.0;
+        field_drive_y = (argc > 24) ? atof(argv[24]) : 0.0;
+        field_drive_z = (argc > 25) ? atof(argv[25]) : 0.0;
+
+        dir_name = (argc > 26) ? argv[26] : std::string("TmFeO3_2DCS_xii=0.05");
+        slurm_ID = (argc > 27) ? atoi(argv[27]) : 1;
+        total_jobs = (argc > 28) ? atoi(argv[28]) : 1;
+        spin_config_file = (argc > 29) ? argv[29] : std::string("TFO_4_0_xii=0.05/spin_zero.txt");
+    }
 
     J1c /= J1ab;
     J2ab /= J1ab;
@@ -826,35 +957,33 @@ int main(int argc, char** argv) {
     e2 /= J1ab;
     h /= J1ab;
     J1ab = 1;
-    string dir_name = (argc > 26) ? argv[26] : "TmFeO3_2DCS_xii=0.05";
-    filesystem::create_directories(dir_name);
-    int slurm_ID = (argc > 27) ? atoi(argv[27]) : 1;
-    int total_jobs = (argc > 28) ? atoi(argv[28]) : 1;
-    string spin_config_file = (argc > 29) ? argv[29] : "TFO_4_0_xii=0.05/spin_zero.txt";
+    std::string dir_name_copy = dir_name;
+    filesystem::create_directories(dir_name_copy);
+    std::string dir_name_ref = dir_name_copy;
 
-    cout << "Slurm ID: " << slurm_ID << ", Total Jobs: " << total_jobs << endl;
+    std::cout << "Slurm ID: " << slurm_ID << ", Total Jobs: " << total_jobs << std::endl;
 
     double tau_length = (tau_end - tau_start);
     double tau_section = tau_length/total_jobs;
     double tau_start_here = tau_start + (slurm_ID-1)*tau_section;
     double tau_end_here = tau_start + tau_section;
 
-    cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " xi::" << xii << " saving to: " << dir_name << endl;
-    cout << "Field drive: [" << field_drive_x << ", " << field_drive_y << ", " << field_drive_z << "]" << endl;
-    cout << "Reading from " << spin_config_file << endl;
-    cout << "Evolving from " << tau_start_here << " to " << tau_end_here << " with step size " << tau_step_size << endl;
-    string output_dir = dir_name;
+    std::cout << "Initializing TmFeO3 2DCS calculation with parameters: J1ab: " << J1ab << " J1c: " << J1c << " J2ab: " << J2ab << " J2c: " << J2c << " Ka: " << Ka << " Kc: " << Kc << " D1: " << D1 << " D2: " << D2 << " H: " << h << " xi::" << xii << " saving to: " << dir_name_ref << std::endl;
+    std::cout << "Field drive: [" << field_drive_x << ", " << field_drive_y << ", " << field_drive_z << "]" << std::endl;
+    std::cout << "Reading from " << spin_config_file << std::endl;
+    std::cout << "Evolving from " << tau_start_here << " to " << tau_end_here << " with step size " << tau_step_size << std::endl;
+    std::string output_dir = dir_name_ref;
     filesystem::create_directories(output_dir);
     bool if_zero_is_in_T_range = slurm_ID == 1;
-    
-    // Define field_drive using command line parameters
+
+    // Define field_drive using parameters
     array<array<double, 3>,4> field_drive = {{{field_drive_x, field_drive_y, field_drive_z},
                                               {field_drive_x, -field_drive_y, -field_drive_z},
                                               {-field_drive_x, field_drive_y, -field_drive_z},
                                               {-field_drive_x, -field_drive_y, field_drive_z}}};
-    
+
     MD_TmFeO3_2DCS_cuda(Temp_start, Temp_end, tau_start_here, tau_end_here, tau_step_size, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0.0, 0.0, 1.0}, field_drive, output_dir, T_zero, spin_config_file, if_zero_is_in_T_range);
     return 0;
 }
 
-//J1ab=J1c=4.92meV J2ab=J2c=0.29meV Ka=0meV Kc=-0.09meV D1=D2=0 xii is the modeling param E1 = -0.97meV E2=-3.89134081434meV
+////J1ab=J1c=4.92meV J2ab=J2c=0.29meV Ka=0meV Kc=-0.09meV D1=D2=0 xii is the modeling param E1 = -0.97meV E2=-3.89134081434meV
