@@ -8,6 +8,7 @@
 #include <string>
 #include <iostream>
 #include <array>
+#include <iomanip>
 
 using namespace std;
 
@@ -32,6 +33,11 @@ struct SimulationParams {
     size_t probe_rate = 2000;
 
     size_t num_trials = 5; // Number of trials for the simulation
+
+    // Field scan parameters (set num_steps > 0 to enable field scan mode)
+    double h_start = 0.0;
+    double h_end = 0.0;
+    size_t num_steps = 0;
 
     array<array<double, 9>, 3> twist_matrix = {{
         {1, 0, 0, 
@@ -123,6 +129,9 @@ SimulationParams read_parameters(const string& filename) {
                     params.field_dir[i++] = stod(item);
                 }
             }
+            else if (key == "h_start") params.h_start = stod(value);
+            else if (key == "h_end") params.h_end = stod(value);
+            else if (key == "num_steps") params.num_steps = stoul(value);
             else if (key == "num_trials") params.num_trials = stoi(value);
             else if (key == "dir") params.dir = value;
             // Model parameters
@@ -196,6 +205,11 @@ void create_default_parameter_file(const string& filename) {
     file << "field_dir = 0,1,0\n\n";
     file << "# Output directory\n";
     file << "dir = BCAO_PT_simulation\n\n";
+
+    file << "# Field scan (set num_steps>0 to enable field-scan mode)\n";
+    file << "h_start = 0.0\n";
+    file << "h_end = 0.0\n";
+    file << "num_steps = 0\n\n";
     
     file << "# Exchange interaction parameters\n";
     file << "J1xy = -7.6\n";
@@ -331,10 +345,11 @@ int main(int argc, char** argv) {
     if (argc > 1) {
         string arg = argv[1];
         if (arg == "--help" || arg == "-h") {
-            cout << "Usage: " << argv[0] << " [parameter_file]\n";
+            cout << "Usage: " << argv[0] << " [parameter_file] [--field_scan]\n";
             cout << "  parameter_file    Path to parameter file (default: bcao_pt_parameters.txt)\n";
             cout << "  --help, -h        Show this help message\n";
-            cout << "  --create-params   Create default parameter file\n\n";
+            cout << "  --create-params   Create default parameter file\n";
+            cout << "  --field_scan      Enable field-scan mode (must be passed as argv[2])\n\n";
             cout << "If parameter file doesn't exist, default parameters will be used.\n";
             return 0;
         } else if (arg == "--create-params") {
@@ -346,6 +361,9 @@ int main(int argc, char** argv) {
             param_file = arg;
         }
     }
+
+    // Enable field-scan mode only when argv[2] is --field_scan
+    bool field_scan = (argc > 2 && string(argv[2]) == "--field_scan");
     
     SimulationParams params = read_parameters(param_file);
     
@@ -363,12 +381,14 @@ int main(int argc, char** argv) {
         cout << "Field: " << params.h << " mu_B, Direction: [" << params.field_dir[0] << "," << params.field_dir[1] << "," << params.field_dir[2] << "]\n";
         cout << "Temperature Range: " << params.T_start << "K to " << params.T_end << "K\n";
         cout << "Output directory: " << params.dir << "\n";
+        if (field_scan) {
+            cout << "Field scan enabled: h from " << params.h_start << " to " << params.h_end << " in " << params.num_steps << " steps\n";
+        }
         filesystem::create_directory(params.dir);
     }
     
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
-        trial_params.dir = params.dir + "/trial_" + to_string(i);
 
         if (rank == 0) {
             cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
@@ -376,8 +396,36 @@ int main(int argc, char** argv) {
         // Synchronize all processes before starting the next trial
         MPI_Barrier(MPI_COMM_WORLD);
 
-        // Run the Parallel Tempering simulation
-        PT_BCAO_honeycomb(trial_params);
+        // If field scan is enabled, sweep over h; otherwise, run a single h
+        if (field_scan) {
+            size_t steps = params.num_steps;
+            if (steps == 0) {
+                if (rank == 0) cout << "Warning: field_scan enabled but num_steps==0; nothing to do.\n";
+                continue;
+            }
+            for (size_t s = 0; s < steps; ++s) {
+                double hval = (steps > 1)
+                    ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
+                    : params.h_start;
+                trial_params.h = hval;
+                trial_params.num_trials = 3;
+                ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << hval;
+                trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
+
+                if (rank == 0) {
+                    cout << "  Field step " << (s + 1) << "/" << steps << ": h = " << hval << "\n";
+                }
+                // Barrier before each field step
+                MPI_Barrier(MPI_COMM_WORLD);
+                PT_BCAO_honeycomb(trial_params);
+            }
+        } else {
+            trial_params.dir = params.dir + "/trial_" + to_string(i);
+            // Barrier before the fixed-h run
+            MPI_Barrier(MPI_COMM_WORLD);
+            // Run the Parallel Tempering simulation
+            PT_BCAO_honeycomb(trial_params);
+        }
     }
     
     int finalized;
