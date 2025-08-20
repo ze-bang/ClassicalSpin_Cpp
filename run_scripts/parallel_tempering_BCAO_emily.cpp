@@ -244,7 +244,7 @@ void create_default_parameter_file(const string& filename) {
 
 // Main simulation function for Parallel Tempering
 void PT_BCAO_honeycomb(const SimulationParams& params){
-    filesystem::create_directory(params.dir);
+    filesystem::create_directories(params.dir);
     HoneyComb<3> atoms;
 
     // Define interaction matrices based on Emily's model
