@@ -17,6 +17,7 @@
 #include <mpi.h>
 #include "binning_analysis.h"
 #include <sstream>
+#include <cstdint>
 
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim>
 class lattice
@@ -31,6 +32,9 @@ class lattice
     size_t lattice_size;
     spin_config  spins;
     array<array<double,3>, N_ATOMS*dim1*dim2*dim> site_pos;
+    array<array<double, N*N>, 3> twist_matrices;
+    array<array<double, N>, 3> rotation_axis;
+
     //Lookup table for the lattice
     spin_config field;
     array<array<double, N>, N_ATOMS> field_drive_1;
@@ -65,7 +69,23 @@ class lattice
     mutable array<double,N> temp_spin_array;
     mutable array<double,N> temp_local_field;
     
+    // Twist-boundary Monte Carlo support
+    // For each bilinear neighbor of a site, record whether the partner wraps across a boundary in x (dim1), y (dim2), z (dim)
+    // Values are -1 for negative wrap, 0 for no wrap, +1 for positive wrap
+    array<vector<array<int8_t,3>>, N_ATOMS*dim1*dim2*dim> bilinear_wrap_dir;
+    
+    // Boundary sites per lattice dimension (0->dim1, 1->dim2, 2->dim)
+    array<vector<size_t>, 3> boundary_sites_per_dim;
+    array<size_t, 3> boundary_thickness; // how many layers from each face are affected by TBC (max abs neighbor offset per dimension)
+    
     public:
+    // Configure twist axes per dimension (0:x,1:y,2:z index of lattice directions)
+    void set_twist_axes(const array<array<double,N>,3>& axes){
+        rotation_axis = axes;
+    }
+    const array<array<double,N>,3>& get_twist_axes() const { return rotation_axis; }
+    const array<array<double,N*N>,3>& get_twist_matrices() const { return twist_matrices; }
+
     array<double,N> gen_random_spin(float spin_l){
         array<double,N> temp_spin;
         array<double,N-2> euler_angles;
@@ -109,7 +129,7 @@ class lattice
     }
 
     // Helper for default twist_matrix argument
-    static constexpr array<array<double, N*N>, 3> default_twist_matrix() {
+    array<array<double, N*N>, 3> default_twist_matrix() {
         array<array<double, N*N>, 3> twist_matrix = {};
         for (size_t d = 0; d < 3; ++d) {
             for (size_t i = 0; i < N; ++i) {
@@ -121,8 +141,8 @@ class lattice
         return twist_matrix;
     }
 
-    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1, bool periodic = true,
-            const array<array<double, N*N>,3>& twist_matrix = default_twist_matrix())
+
+    lattice(const UnitCell<N, N_ATOMS> *atoms, float spin_l=1, bool periodic = true)
         : UC(*atoms)
     {
         array<array<double,3>, N_ATOMS> basis;
@@ -133,7 +153,7 @@ class lattice
         unit_vector = UC.lattice_vectors;
         spin_length = spin_l;
 
-        set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
+    set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
         srand (time(NULL));
         seed_lehman(rand()*2+1);
 
@@ -145,6 +165,25 @@ class lattice
         for(int p = 0; p < 50; ++p) cout << " ";
         cout << "] 0%" << flush;
         
+        // Precompute maximum neighbor offset to determine boundary thickness in each dimension
+        boundary_thickness = {0,0,0};
+        for (size_t l=0; l<N_ATOMS; ++l){
+            auto bilinear_matched_pre = UC.bilinear_interaction.equal_range(l);
+            for (auto m = bilinear_matched_pre.first; m != bilinear_matched_pre.second; ++m){
+                bilinear<N> J = m->second;
+                boundary_thickness[0] = std::max(boundary_thickness[0], size_t(std::abs(J.offset[0])));
+                boundary_thickness[1] = std::max(boundary_thickness[1], size_t(std::abs(J.offset[1])));
+                boundary_thickness[2] = std::max(boundary_thickness[2], size_t(std::abs(J.offset[2])));
+            }
+            auto trilinear_matched_pre = UC.trilinear_interaction.equal_range(l);
+            for (auto m = trilinear_matched_pre.first; m != trilinear_matched_pre.second; ++m){
+                trilinear<N> J = m->second;
+                boundary_thickness[0] = std::max(boundary_thickness[0], size_t(std::max(std::abs(J.offset1[0]), std::abs(J.offset2[0]))));
+                boundary_thickness[1] = std::max(boundary_thickness[1], size_t(std::max(std::abs(J.offset1[1]), std::abs(J.offset2[1]))));
+                boundary_thickness[2] = std::max(boundary_thickness[2], size_t(std::max(std::abs(J.offset1[2]), std::abs(J.offset2[2]))));
+            }
+        }
+
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
                 for(size_t k=0; k< dim;++k){
@@ -163,30 +202,26 @@ class lattice
                             int partner_k = int(k) + J.offset[2];
                             size_t partner = flatten_index_periodic_boundary(partner_i, partner_j, partner_k, J.partner);
                             if (periodic || partner_i < dim1 && partner_i >= 0 && partner_j < dim2 && partner_j >= 0 && partner_k < dim && partner_k >= 0) {
-                                bool cross_i = (partner_i < 0 || partner_i >= dim1) ? 1 : 0;
-                                bool cross_j = (partner_j < 0 || partner_j >= dim2) ? 1 : 0;
-                                bool cross_k = (partner_k < 0 || partner_k >= dim) ? 1 : 0;
-
+                                array<int8_t,3> wrap_dir = {0,0,0};
+                                if (partner_i < 0) wrap_dir[0] = -1; else if (partner_i >= int(dim1)) wrap_dir[0] = +1;
+                                if (partner_j < 0) wrap_dir[1] = -1; else if (partner_j >= int(dim2)) wrap_dir[1] = +1;
+                                if (partner_k < 0) wrap_dir[2] = -1; else if (partner_k >= int(dim)) wrap_dir[2] = +1;
                                 array<double, N * N> bilinear_matrix_here = J.bilinear_interaction;
-                                if (cross_i){
-                                    flattened_matmul<double, N>(twist_matrix[0], bilinear_matrix_here);
-                                }
-                                if (cross_j){
-                                    flattened_matmul<double, N>(twist_matrix[1], bilinear_matrix_here);
-                                }
-                                if (cross_k){
-                                    flattened_matmul<double, N>(twist_matrix[2], bilinear_matrix_here);
-                                }
                                 bilinear_interaction[current_site_index].push_back(bilinear_matrix_here);
                                 bilinear_partners[current_site_index].push_back(partner);
+                                bilinear_wrap_dir[current_site_index].push_back(wrap_dir);
                                 bilinear_interaction[partner].push_back(transpose2D<N, N>(bilinear_matrix_here));
                                 bilinear_partners[partner].push_back(current_site_index);
+                                array<int8_t,3> wrap_dir_partner = {int8_t(-wrap_dir[0]), int8_t(-wrap_dir[1]), int8_t(-wrap_dir[2])};
+                                bilinear_wrap_dir[partner].push_back(wrap_dir_partner);
                             }else{
                                 array<double, N * N> zero_matrix = {{{0}}};
                                 bilinear_interaction[current_site_index].push_back(zero_matrix);
                                 bilinear_partners[current_site_index].push_back(partner);
+                                bilinear_wrap_dir[current_site_index].push_back({0,0,0});
                                 bilinear_interaction[partner].push_back(zero_matrix);
                                 bilinear_partners[partner].push_back(current_site_index);
+                                bilinear_wrap_dir[partner].push_back({0,0,0});
                             }
                         }
                         auto trilinear_matched = UC.trilinear_interaction.equal_range(l);
@@ -203,10 +238,19 @@ class lattice
                             size_t partner2 = flatten_index_periodic_boundary(partner2_i, partner2_j, partner2_k, J.partner2);
                             if (periodic || (partner1_i < dim1 && partner1_i >= 0 && partner1_j < dim2 && partner1_j >= 0 && partner1_k < dim && partner1_k >= 0) &&
                             (partner2_i < dim1 && partner2_i >= 0 && partner2_j < dim2 && partner2_j >= 0 && partner2_k < dim && partner2_k >= 0)) {
-                            
+                                // Note: For trilinear terms, we will apply twist only using wrap relative to the current site.
+                                array<int8_t,3> wrap1 = {0,0,0};
+                                array<int8_t,3> wrap2 = {0,0,0};
+                                if (partner1_i < 0) wrap1[0] = -1; else if (partner1_i >= int(dim1)) wrap1[0] = +1;
+                                if (partner1_j < 0) wrap1[1] = -1; else if (partner1_j >= int(dim2)) wrap1[1] = +1;
+                                if (partner1_k < 0) wrap1[2] = -1; else if (partner1_k >= int(dim)) wrap1[2] = +1;
+                                if (partner2_i < 0) wrap2[0] = -1; else if (partner2_i >= int(dim1)) wrap2[0] = +1;
+                                if (partner2_j < 0) wrap2[1] = -1; else if (partner2_j >= int(dim2)) wrap2[1] = +1;
+                                if (partner2_k < 0) wrap2[2] = -1; else if (partner2_k >= int(dim)) wrap2[2] = +1;
                                 
                                 trilinear_interaction[current_site_index].push_back(J.trilinear_interaction);
                                 trilinear_partners[current_site_index].push_back({partner1, partner2});
+                                // We do not push wrap metadata arrays for trilinear explicitly; handled at evaluation time from current site perspective.
 
                                 trilinear_interaction[partner1].push_back(transpose3D(J.trilinear_interaction, N, N, N));
                                 trilinear_partners[partner1].push_back({partner2, current_site_index});
@@ -244,7 +288,14 @@ class lattice
                 }
             }
         }
-        
+
+        twist_matrices = default_twist_matrix();
+        // Default twist rotation axes (z-axis). Users can override via set_twist_axes.
+        for (size_t d=0; d<3; ++d) {
+            for (size_t t=0; t<N; ++t) rotation_axis[d][t] = 0.0;
+            if (N>=3) rotation_axis[d][2] = 1.0;
+        }
+
         num_bi = bilinear_partners[0].size();
         num_tri = trilinear_partners[0].size();
         num_gen = spins[0].size();
@@ -256,6 +307,7 @@ class lattice
         // Initialize optimization structures
         initialize_energy_cache();
         initialize_sweep_order();
+    build_boundary_sites();
     }
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
@@ -301,6 +353,68 @@ class lattice
         site_update_order.resize(lattice_size);
         std::iota(site_update_order.begin(), site_update_order.end(), 0);
         current_sweep_index = 0;
+    }
+    
+    void build_boundary_sites() {
+        // Build boundary site lists based on boundary_thickness and lattice dimensions
+        boundary_sites_per_dim[0].clear();
+        boundary_sites_per_dim[1].clear();
+        boundary_sites_per_dim[2].clear();
+        for (size_t i=0; i< dim1; ++i){
+            bool is_boundary_x = (dim1>1) && (i < boundary_thickness[0] || i >= dim1 - boundary_thickness[0]);
+            for (size_t j=0; j< dim2; ++j){
+                bool is_boundary_y = (dim2>1) && (j < boundary_thickness[1] || j >= dim2 - boundary_thickness[1]);
+                for (size_t k=0; k< dim; ++k){
+                    bool is_boundary_z = (dim>1) && (k < boundary_thickness[2] || k >= dim - boundary_thickness[2]);
+                    for (size_t l=0; l<N_ATOMS; ++l){
+                        size_t idx = flatten_index(i,j,k,l);
+                        if (is_boundary_x) boundary_sites_per_dim[0].push_back(idx);
+                        if (is_boundary_y) boundary_sites_per_dim[1].push_back(idx);
+                        if (is_boundary_z) boundary_sites_per_dim[2].push_back(idx);
+                    }
+                }
+            }
+        }
+    }
+
+    
+    static array<double, N*N> identityNN(){
+        array<double, N*N> I = {};
+        for (size_t i=0;i<N;++i) I[i*N + i] = 1.0;
+        return I;
+    }
+    
+    static array<double, N*N> rotation_from_axis_angle(const array<double, N>& axis_in, double angle){
+        // Only defined for 3D spins; otherwise return identity
+        if constexpr (N == 3) {
+            double ax = axis_in[0], ay = axis_in[1], az = axis_in[2];
+            double nrm = sqrt(ax*ax + ay*ay + az*az);
+            if (nrm < 1e-12) return identityNN();
+            ax /= nrm; ay /= nrm; az /= nrm;
+            double c = cos(angle), s = sin(angle), C = 1.0 - c;
+            array<double, N*N> R = { ax*ax*C + c,     ax*ay*C - az*s, ax*az*C + ay*s,
+                                      ay*ax*C + az*s, ay*ay*C + c,    ay*az*C - ax*s,
+                                      az*ax*C - ay*s, az*ay*C + ax*s, az*az*C + c };
+            return R;
+        } else {
+            return identityNN();
+        }
+    }
+    
+    array<double,N> apply_twist_to_partner_spin(const array<double,N>& partner_spin,
+                                                const array<int8_t,3>& wrap) const {
+        array<double,N> s = partner_spin;
+        for (size_t d=0; d<3; ++d){
+            int8_t w = wrap[d];
+            if (w == 0) continue;
+            if (w > 0) {
+                s = multiply<N,N>(twist_matrices[d], s);
+            } else {
+                // inverse (transpose) for rotations
+                s = multiply<N,N>(transpose2D<N,N>(twist_matrices[d]), s);
+            }
+        }
+        return s;
     }
     
     void update_energy_cache() {
@@ -389,11 +503,17 @@ class lattice
         single_site_energy += contract(spin_here, onsite_interaction[site_index], spin_here);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            double_site_energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+            array<double,N> partner_spin_eff = apply_twist_to_partner_spin(spins[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
+            double_site_energy += contract(spin_here, bilinear_interaction[site_index][i], partner_spin_eff);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
-            triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+            // For trilinear, approximate by applying twists from current site to both partners when they wrap.
+            size_t p1 = trilinear_partners[site_index][i][0];
+            size_t p2 = trilinear_partners[site_index][i][1];
+            // We don't have stored wrap metadata for trilinear; as a fallback, use identity (no twist).
+            // Extend here if trilinear twist is needed.
+            triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[p1], spins[p2]);
         }
         return single_site_energy + double_site_energy/2 + triple_site_energy/3;
     }
@@ -413,37 +533,18 @@ class lattice
         single_site_energy += contract(new_spins, onsite_interaction[site_index], new_spins) - contract(old_spins, onsite_interaction[site_index], old_spins);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            double_site_energy += contract(new_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]])
-                     - contract(old_spins, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+            array<double,N> partner_spin_eff = apply_twist_to_partner_spin(spins[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
+            double_site_energy += contract(new_spins, bilinear_interaction[site_index][i], partner_spin_eff)
+                     - contract(old_spins, bilinear_interaction[site_index][i], partner_spin_eff);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
-            triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]])
-                     - contract_trilinear(trilinear_interaction[site_index][i], old_spins, spins[trilinear_partners[site_index][i][0]], spins[trilinear_partners[site_index][i][1]]);
+            size_t p1 = trilinear_partners[site_index][i][0];
+            size_t p2 = trilinear_partners[site_index][i][1];
+            triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[p1], spins[p2])
+                     - contract_trilinear(trilinear_interaction[site_index][i], old_spins, spins[p1], spins[p2]);
         }
         return single_site_energy + double_site_energy/2 + triple_site_energy/3;
-    }
-
-    // Optimized site energy calculation that doesn't modify spins array
-    double site_energy_internal(const array<double, N> &spin_here, size_t site_index) const {
-        double energy = 0.0;
-        energy -= dot(spin_here, field[site_index]);
-        energy += contract(spin_here, onsite_interaction[site_index], spin_here);
-        
-        // Vectorized bilinear interactions
-        #pragma omp simd reduction(+:energy)
-        for (size_t i = 0; i < num_bi; ++i) {
-            energy += contract(spin_here, bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
-        }
-        
-        // Vectorized trilinear interactions  
-        #pragma omp simd reduction(+:energy)
-        for (size_t i = 0; i < num_tri; ++i){
-            energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, 
-                                       spins[trilinear_partners[site_index][i][0]], 
-                                       spins[trilinear_partners[site_index][i][1]]);
-        }
-        return energy;
     }
 
     double total_energy(spin_config &curr_spins){
@@ -460,7 +561,8 @@ class lattice
             #pragma omp simd
             for (size_t j=0; j< num_bi; ++j) {
             size_t partner_idx = bilinear_partners[i][j];
-            bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], curr_spins[partner_idx]);
+            array<double,N> partner_spin_eff = apply_twist_to_partner_spin(curr_spins[partner_idx], bilinear_wrap_dir[i][j]);
+            bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], partner_spin_eff);
             }
 
             #pragma omp simd
@@ -480,7 +582,8 @@ class lattice
         local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index])*2;
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], spins[bilinear_partners[site_index][i]]);
+            array<double,N> partner_spin_eff = apply_twist_to_partner_spin(spins[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
+            local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], partner_spin_eff);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
@@ -496,7 +599,8 @@ class lattice
         local_field =  multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
         #pragma omp simd
         for (size_t i=0; i< num_bi; ++i) {
-            local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], current_spin[bilinear_partners[site_index][i]]);
+            array<double,N> partner_spin_eff = apply_twist_to_partner_spin(current_spin[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
+            local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], partner_spin_eff);
         }
         #pragma omp simd
         for (size_t i=0; i < num_tri; ++i){
@@ -505,6 +609,41 @@ class lattice
             local_field = local_field + contract_trilinear_field<N, N, N>(trilinear_interaction[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
         return local_field-field[site_index];
+    }
+
+    // Perform a Metropolis update for global twist matrices along relevant dimensions
+    void metropolis_twist_sweep(double T){
+        // For each dimension that has length > 1, attempt one global angle move
+        for (size_t d=0; d<3; ++d){
+            size_t Ld = (d==0? dim1 : (d==1? dim2 : dim));
+            if (Ld <= 1) continue; // not relevant
+
+            // Energy on boundary sites before the move
+            double E_before = 0.0;
+            for (size_t idx : boundary_sites_per_dim[d]){
+                E_before += site_energy(spins[idx], idx);
+            }
+
+            // Propose a small rotation update
+            double delta = random_double_lehman(0, 2*M_PI);
+            array<double, N> rotation_axis_d = gen_random_spin(1.0);
+            array<double, N*N> R_new = rotation_from_axis_angle(rotation_axis_d, delta);
+
+            // Temporarily apply
+            auto saved_R = twist_matrices[d];
+            twist_matrices[d] = R_new;
+
+            double E_after = 0.0;
+            for (size_t idx : boundary_sites_per_dim[d]){
+                E_after += site_energy(spins[idx], idx);
+            }
+
+            double dE = E_after - E_before;
+            bool accept = (dE < 0) || (random_double_lehman(0,1) < exp(-dE/T));
+            if (!accept){
+                twist_matrices[d] = saved_R;
+            } 
+        }
     }
 
 
@@ -554,54 +693,6 @@ class lattice
         }
     }
 
-    // Optimized overrelaxation with sequential sweeps and cache updates
-    void overrelaxation_optimized(bool use_sequential = true){
-        if (use_sequential) {
-            // Sequential sweep - more systematic and cache-friendly
-            #pragma omp parallel for schedule(static) if(lattice_size > 1000)
-            for(size_t idx = 0; idx < lattice_size; ++idx) {
-                size_t i = site_update_order[idx];
-                
-                array<double,N> local_field = get_local_field(i);
-                double norm = dot(local_field, local_field);
-                
-                if(norm > 1e-12) { // Avoid division by very small numbers
-                    double proj = 2.0 * dot(spins[i], local_field) / norm;
-                    array<double,N> new_spin = local_field * proj - spins[i];
-                    
-                    // Update cache if valid
-                    if (energy_cache_valid) {
-                        double old_energy = cached_site_energies[i];
-                        double new_energy = site_energy_internal(new_spin, i);
-                        cached_site_energies[i] = new_energy;
-                    }
-                    
-                    spins[i] = new_spin;
-                }
-            }
-        } else {
-            // Original random selection (for comparison)
-            size_t count = 0;
-            while(count < lattice_size){
-                int i = random_int_lehman(lattice_size);
-                array<double,N> local_field = get_local_field(i);
-                double norm = dot(local_field, local_field);
-                
-                if(norm > 1e-12){
-                    double proj = 2.0 * dot(spins[i], local_field) / norm;
-                    array<double,N> new_spin = local_field * proj - spins[i];
-                    
-                    if (energy_cache_valid) {
-                        cached_site_energies[i] = site_energy_internal(new_spin, i);
-                    }
-                    
-                    spins[i] = new_spin;
-                }
-                count++;
-            }
-        }
-    }
-
     double metropolis(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60){
         double dE, r;
         int i;
@@ -625,64 +716,7 @@ class lattice
         return acceptance_rate;
     }
 
-    // Optimized metropolis method with sequential sweeps and energy caching
-    double metropolis_optimized(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60, bool use_sequential=true){
-        int accept = 0;
-        
-        if (use_sequential) {
-            // Sequential sweep - visit each site exactly once
-            #pragma omp parallel for schedule(static) reduction(+:accept) if(lattice_size > 1000)
-            for(size_t idx = 0; idx < lattice_size; ++idx) {
-                size_t i = site_update_order[idx];
-                
-                // Get current energy (use cache if valid)
-                double E = energy_cache_valid ? cached_site_energies[i] : site_energy_internal(curr_spin[i], i);
-                
-                // Generate new spin
-                array<double,N> new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
-                                                   : gen_random_spin(spin_length);
-                
-                // Calculate energy change
-                double dE = site_energy_internal(new_spin, i) - E;
-                
-                // Accept or reject
-                if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
-                    curr_spin[i] = new_spin;
-                    if(energy_cache_valid) {
-                        cached_site_energies[i] = E + dE;
-                    }
-                    accept++;
-                }
-            }
-            
-            // Shuffle order for next sweep to reduce correlations
-            shuffle_sweep_order();
-        } else {
-            // Original random selection method (for comparison)
-            size_t count = 0;
-            while(count < lattice_size){
-                int i = random_int_lehman(lattice_size);
-                double E = energy_cache_valid ? cached_site_energies[i] : site_energy_internal(curr_spin[i], i);
-                
-                array<double,N> new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
-                                                   : gen_random_spin(spin_length);
-                double dE = site_energy_internal(new_spin, i) - E;
-                
-                if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
-                    curr_spin[i] = new_spin;
-                    if(energy_cache_valid) {
-                        cached_site_energies[i] = E + dE;
-                    }
-                    accept++;
-                }
-                count++;
-            }
-        }
 
-        double acceptance_rate = double(accept)/double(lattice_size);
-        return acceptance_rate;
-    }
-    
     void write_to_file_spin(string filename, spin_config towrite){
         ofstream myfile;
         myfile.open(filename);
@@ -793,6 +827,9 @@ class lattice
                 else{
                     curr_accept += metropolis(spins, T, gaussian_move, sigma);
                 }
+            }
+            for (size_t i = 0; i < 1e3; ++i){
+                metropolis_twist_sweep(T);
             }
             if (overrelaxation_rate > 0){
                 acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
@@ -1021,12 +1058,18 @@ class lattice
         vector<double> energies;
         vector<array<double,N>> magnetizations;
         vector<spin_config> spin_configs_at_temp;
-
+        
+        // Twist angle coordination variables
+        array<array<double, N*N>, 3> shared_twist_matrices = twist_matrices;
+        array<array<double, N>, 3> shared_rotation_axes = rotation_axis;
+        size_t twist_update_interval = 100; // Update twist angles every N iterations
+        size_t twist_consensus_interval = 500; // Global consensus every M iterations
+        
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
         for(size_t i=0; i < n_anneal+n_measure; ++i){
 
-            // Metropolisfh
+            // Metropolis with local twist updates
             if(overrelaxation_rate > 0){
                 overrelaxation();
                 if (i%overrelaxation_rate == 0){
@@ -1036,6 +1079,65 @@ class lattice
             else{
                 curr_accept += metropolis(spins, curr_Temp, gaussian_move);
             }
+            
+            // Coordinated twist angle updates
+            if (i % twist_update_interval == 0 && i % overrelaxation_flag == 0) {
+                // Strategy 1: Temperature-weighted consensus
+                // Lower temperature processes have more weight in determining global twist
+                if (i % twist_consensus_interval == 0) {
+                    // Gather all local twist matrices weighted by inverse temperature
+                    array<double, 3*N*N> local_twist_flat;
+                    array<double, 3*N*N> global_twist_sum = {0};
+                    
+                    // Flatten local twist matrices with temperature weighting
+                    double weight = 1.0 / curr_Temp; // Lower T = higher weight
+                    for (size_t d = 0; d < 3; ++d) {
+                        for (size_t j = 0; j < N*N; ++j) {
+                            local_twist_flat[d*N*N + j] = twist_matrices[d][j] * weight;
+                        }
+                    }
+                    
+                    // All-reduce to sum weighted matrices across all processes
+                    MPI_Allreduce(local_twist_flat.data(), global_twist_sum.data(), 
+                                  3*N*N, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+                    
+                    // Compute total weight
+                    double local_weight = weight;
+                    double total_weight = 0;
+                    MPI_Allreduce(&local_weight, &total_weight, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+                    
+                    // Normalize and orthogonalize the consensus matrices
+                    for (size_t d = 0; d < 3; ++d) {
+                        for (size_t j = 0; j < N*N; ++j) {
+                            shared_twist_matrices[d][j] = global_twist_sum[d*N*N + j] / total_weight;
+                        }
+                        // Re-orthogonalize using Gram-Schmidt if needed (for rotation matrices)
+                        if constexpr (N == 3) {
+                            shared_twist_matrices[d] = orthogonalize_rotation_matrix(shared_twist_matrices[d]);
+                        }
+                    }
+                    
+                    // Update local twist matrices to consensus
+                    twist_matrices = shared_twist_matrices;
+                }
+                
+                // Strategy 2: Stochastic local updates with broadcast from lowest T
+                else if (rank == 0) { // Lowest temperature process leads
+                    // Perform twist update only at lowest temperature
+                    metropolis_twist_sweep(curr_Temp);
+                    
+                    // Broadcast the updated twist matrices to all other processes
+                    for (size_t d = 0; d < 3; ++d) {
+                        MPI_Bcast(twist_matrices[d].data(), N*N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                    }
+                } else {
+                    // Receive broadcast from rank 0
+                    for (size_t d = 0; d < 3; ++d) {
+                        MPI_Bcast(twist_matrices[d].data(), N*N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                    }
+                }
+            }
+            
             E = total_energy(spins);
 
             if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
@@ -1061,12 +1163,28 @@ class lattice
                         MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     }
                     if (accept){
+                        // Exchange both spins AND twist matrices during replica exchange
                         if (partner_rank % 2 == 0){
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                            
+                            // Also exchange twist matrices to maintain consistency
+                            for (size_t d = 0; d < 3; ++d) {
+                                array<double, N*N> temp_twist;
+                                MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD);
+                                MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                twist_matrices[d] = temp_twist;
+                            }
                         } else{
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
+                            
+                            for (size_t d = 0; d < 3; ++d) {
+                                array<double, N*N> temp_twist;
+                                MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD);
+                                twist_matrices[d] = temp_twist;
+                            }
                         }
                         copy(new_spins.begin(), new_spins.end(), spins.begin());
                         E = E_partner;
@@ -1098,9 +1216,6 @@ class lattice
                 if (rank == rank_to_write[i]){
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
-                    //     write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
-                    // }
                 }
             }
             if (rank == 0){
@@ -1113,7 +1228,36 @@ class lattice
                 myfile.close();
             }
         }
-        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
+    }
+    
+    // Helper function to orthogonalize rotation matrix (Gram-Schmidt)
+    array<double, N*N> orthogonalize_rotation_matrix(const array<double, N*N>& M) {
+        if constexpr (N == 3) {
+            // Extract columns
+            array<double, 3> c0 = {M[0], M[3], M[6]};
+            array<double, 3> c1 = {M[1], M[4], M[7]};
+            array<double, 3> c2 = {M[2], M[5], M[8]};
+            
+            // Normalize first column
+            double norm0 = sqrt(c0[0]*c0[0] + c0[1]*c0[1] + c0[2]*c0[2]);
+            c0 = c0 * (1.0/norm0);
+            
+            // Make c1 orthogonal to c0 and normalize
+            double dot01 = c0[0]*c1[0] + c0[1]*c1[1] + c0[2]*c1[2];
+            c1 = c1 - c0 * dot01;
+            double norm1 = sqrt(c1[0]*c1[0] + c1[1]*c1[1] + c1[2]*c1[2]);
+            c1 = c1 * (1.0/norm1);
+            
+            // c2 = c0 x c1 (cross product for proper rotation matrix)
+            c2[0] = c0[1]*c1[2] - c0[2]*c1[1];
+            c2[1] = c0[2]*c1[0] - c0[0]*c1[2];
+            c2[2] = c0[0]*c1[1] - c0[1]*c1[0];
+            
+            return {c0[0], c1[0], c2[0],
+                    c0[1], c1[1], c2[1],
+                    c0[2], c1[2], c2[2]};
+        }
+        return M;
     }
 
     void measurement(string toread, double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
@@ -1446,204 +1590,5 @@ class lattice
         time_sections.close();     
     }
 
-    // Optimized simulated annealing with adaptive temperature schedule and parallel optimization
-    void simulated_annealing_optimized(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate = 0, 
-                                     bool gaussian_move = false, string out_dir = "", bool save_observables = false,
-                                     bool use_adaptive_cooling = true, bool use_sequential_sweep = true){    
-        if (out_dir != ""){
-            filesystem::create_directory(out_dir);
-        }
-        
-        double T = T_start;
-        double acceptance_rate = 0;
-        double sigma = 1000;
-        double cooling_factor = 0.9;
-        
-        // Adaptive cooling parameters
-        double target_acceptance_low = 0.2;
-        double target_acceptance_high = 0.7;
-        size_t cooling_adaptation_window = 5;
-        vector<double> recent_acceptance_rates;
-        
-        cout << "Starting optimized simulated annealing..." << endl;
-        cout << "Gaussian Move: " << gaussian_move << ", Sequential Sweep: " << use_sequential_sweep << endl;
-        
-        // Initialize random seed
-        srand(time(NULL));
-        seed_lehman(rand()*2+1);
-        
-        // Ensure energy cache is valid
-        if (!energy_cache_valid) {
-            update_energy_cache();
-        }
-        
-        while(T > T_end){
-            double curr_accept = 0;
-            
-            // Main annealing loop with optimizations
-            for(size_t i = 0; i < n_anneal; ++i){
-                if(overrelaxation_rate > 0){
-                    overrelaxation();
-                    if (i % overrelaxation_rate == 0){
-                        curr_accept += metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
-                    }
-                }
-                else{
-                    curr_accept += metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
-                }
-            }
-            
-            // Calculate acceptance rate
-            if (overrelaxation_rate > 0){
-                acceptance_rate = curr_accept / (n_anneal / overrelaxation_rate);
-            } else {
-                acceptance_rate = curr_accept / n_anneal;
-            }
-            
-            cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate;
-            
-            // Adaptive sigma adjustment for Gaussian moves
-            if (gaussian_move) {
-                if (acceptance_rate < 0.2) {
-                    sigma *= 0.8;
-                } else if (acceptance_rate > 0.7) {
-                    sigma *= 1.2;
-                }
-                cout << " Sigma: " << sigma;
-            }
-            
-            // Adaptive cooling rate adjustment
-            if (use_adaptive_cooling) {
-                recent_acceptance_rates.push_back(acceptance_rate);
-                if (recent_acceptance_rates.size() > cooling_adaptation_window) {
-                    recent_acceptance_rates.erase(recent_acceptance_rates.begin());
-                }
-                
-                if (recent_acceptance_rates.size() >= cooling_adaptation_window) {
-                    double avg_acceptance = 0;
-                    for (double rate : recent_acceptance_rates) {
-                        avg_acceptance += rate;
-                    }
-                    avg_acceptance /= recent_acceptance_rates.size();
-                    
-                    if (avg_acceptance < target_acceptance_low) {
-                        cooling_factor = min(0.95, cooling_factor * 1.05); // Slower cooling
-                    } else if (avg_acceptance > target_acceptance_high) {
-                        cooling_factor = max(0.85, cooling_factor * 0.95); // Faster cooling
-                    }
-                }
-                cout << " Cooling factor: " << cooling_factor;
-            }
-            cout << endl;
-            
-            // Save observables if requested (optimized version)
-            if(save_observables){
-                vector<double> energies;
-                energies.reserve(1000); // Pre-allocate for better performance
-                
-                for(size_t i = 0; i < 1e6; ++i){ // Reduced from 1e7 for better performance
-                    if(overrelaxation_rate > 0){
-                        overrelaxation();
-                        if (i % overrelaxation_rate == 0){
-                            metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
-                        }
-                    }
-                    else{
-                        metropolis_optimized(spins, T, gaussian_move, sigma, use_sequential_sweep);
-                    }
-                    if (i % 1000 == 0){
-                        energies.push_back(total_energy(spins));
-                    }
-                }
-                
-                double k_B = 1.380649e-23;
-                double N_A = 6.02214076e23;
-                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size * 2 * k_B * N_A;
-                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size * 2 * k_B * N_A;
-                
-                ofstream myfile;
-                myfile.open(out_dir + "/specific_heat.txt", ios::app);
-                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat << endl;
-                myfile.close();
-            }
-            
-            // Apply temperature reduction
-            T *= cooling_factor;
-        }
-        
-        if(out_dir != ""){
-            write_to_file_spin(out_dir + "/spin.txt", spins);
-            write_to_file_pos(out_dir + "/pos.txt");
-        }
-        
-        cout << "Optimized simulated annealing completed." << endl;
-    }
-
-    // Benchmark method to compare performance of different implementations
-    void benchmark_metropolis_methods(double T, size_t n_steps, bool gaussian_move = false, double sigma = 60) {
-        cout << "=== Metropolis Method Benchmark ===" << endl;
-        cout << "Temperature: " << T << ", Steps: " << n_steps << ", Gaussian: " << gaussian_move << endl;
-        
-        // Save original state
-        spin_config original_spins = spins;
-        
-        // Benchmark original method
-        auto start = std::chrono::high_resolution_clock::now();
-        spins = original_spins; // Reset
-        invalidate_energy_cache(); // Ensure fair comparison
-        
-        double acceptance_original = 0;
-        for(size_t i = 0; i < n_steps; ++i) {
-            acceptance_original += metropolis(spins, T, gaussian_move, sigma);
-        }
-        
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration_original = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        // Benchmark optimized method with sequential sweep
-        start = std::chrono::high_resolution_clock::now();
-        spins = original_spins; // Reset
-        update_energy_cache(); // Pre-populate cache
-        shuffle_sweep_order(); // Initialize order
-        
-        double acceptance_sequential = 0;
-        for(size_t i = 0; i < n_steps; ++i) {
-            acceptance_sequential += metropolis_optimized(spins, T, gaussian_move, sigma, true);
-        }
-        
-        end = std::chrono::high_resolution_clock::now();
-        auto duration_sequential = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        // Benchmark optimized method with random selection (for comparison)
-        start = std::chrono::high_resolution_clock::now();
-        spins = original_spins; // Reset
-        update_energy_cache(); // Pre-populate cache
-        
-        double acceptance_random_opt = 0;
-        for(size_t i = 0; i < n_steps; ++i) {
-            acceptance_random_opt += metropolis_optimized(spins, T, gaussian_move, sigma, false);
-        }
-        
-        end = std::chrono::high_resolution_clock::now();
-        auto duration_random_opt = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        // Print results
-        cout << "Results:" << endl;
-        cout << "Original method:     Time: " << duration_original.count() << "ms, " 
-             << "Acceptance: " << acceptance_original/n_steps << endl;
-        cout << "Sequential optimized: Time: " << duration_sequential.count() << "ms, " 
-             << "Acceptance: " << acceptance_sequential/n_steps << " (Speedup: " 
-             << double(duration_original.count())/duration_sequential.count() << "x)" << endl;
-        cout << "Random optimized:    Time: " << duration_random_opt.count() << "ms, " 
-             << "Acceptance: " << acceptance_random_opt/n_steps << " (Speedup: " 
-             << double(duration_original.count())/duration_random_opt.count() << "x)" << endl;
-        
-        // Restore original state
-        spins = original_spins;
-        update_energy_cache();
-        
-        cout << "=== Benchmark Complete ===" << endl;
-    }
 };
 #endif // LATTICE_H

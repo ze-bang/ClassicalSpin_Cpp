@@ -2,12 +2,17 @@ import h5py
 import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401, ensures 3D projection is registered
 import os
 import sys
 from math import gcd
 from functools import reduce
 # plt.rcParams['text.usetex'] = True
-
+import re
+from scipy.optimize import minimize
+from scipy.spatial import Delaunay
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter, maximum_filter, minimum_filter, generate_binary_structure
 def honeycomb_reciprocal_basis():
     """
     Calculate reciprocal lattice vectors for a honeycomb lattice.
@@ -208,24 +213,24 @@ def SSSFGraph2D(A, B, d1, filename):
     
     # Get the reciprocal lattice vectors from the honeycomb_reciprocal_basis function
     reciprocal_basis = honeycomb_reciprocal_basis()
-    b1 = reciprocal_basis[0]/2*np.pi  # First reciprocal lattice vector
-    b2 = reciprocal_basis[1]/2*np.pi  # Second reciprocal lattice vector
+    b1 = reciprocal_basis[0] # First reciprocal lattice vector
+    b2 = reciprocal_basis[1]  # Second reciprocal lattice vector
 
     # Create the hexagonal Brillouin zone using the reciprocal lattice vectors
     # Vertices of the hexagon in reciprocal space
     bz_vertices = np.array([
-        b1 * (1/3) + b2 * (1/3),      # K point
-        b1 * 0 + b2 * (1/2),          # M point  
-        b1 * (-1/3) + b2 * (1/3),     # K' point
-        b1 * (-1/3) + b2 * (-1/3),    # -K point
-        b1 * 0 + b2 * (-1/2),         # -M point
-        b1 * (1/3) + b2 * (-1/3),     # -K' point
-        b1 * (1/3) + b2 * (1/3)       # Close the hexagon
+        b1 * (-1/3) + b2 * (1/3),      # K point
+        b1 * (1/3) + b2 * (2/3),     # K' point
+        b1 * (2/3) + b2 * (1/3),    # -K point
+        b1 * (1/3) + b2 * (-1/3),    # -K point
+        b1 * (-1/3) + b2 * (-2/3),     # -K' point
+        b1 * (-2/3) + b2 * (-1/3),    # -K point
+        b1 * (-1/3) + b2 * (1/3),      # K point
     ])
 
     # High-symmetry points
     gamma_point = np.array([0, 0, 0])
-    k_point = b1 * (1/3) + b2 * (1/3)
+    k_point = b1 * (-1/3) + b2 * (1/3)
     m_point = b1 * 0 + b2 * (1/2)
 
     # Extract only x and y components for 2D plotting
@@ -250,19 +255,52 @@ def SSSFGraph2D(A, B, d1, filename):
     plt.clf()
 
 def SSSFGraph2D_flat(A, B, d1, filename):
+
+    # Create the hexagonal Brillouin zone using the reciprocal lattice vectors
+    # Vertices of the hexagon in reciprocal space
+    bz_vertices = np.array([
+        [-1/3, 1/3],      # K point
+        [1/3, 2/3],     # K' point
+        [2/3, 1/3],    # -K point
+        [1/3, -1/3],    # -K point
+        [-1/3, -2/3],     # -K' point
+        [-2/3, -1/3],    # -K point
+        [-1/3, 1/3]       # Close the hexagon
+    ])
+
+    # High-symmetry points
+    gamma_point = np.array([0, 0, 0])
+    k_point = [-1/3, 1/3]
+    m_point = [0, 1/2]
+
+    # Extract only x and y components for 2D plotting
+    bz_vertices_plot = bz_vertices
+    gamma_plot = gamma_point
+    k_plot = k_point
+    m_plot = m_point
+
+    plt.plot(bz_vertices_plot[:, 0], bz_vertices_plot[:, 1], 'w--', lw=1.5)
+
+    # Plot symmetry points and labels
+    plt.scatter([gamma_plot[0], k_plot[0], m_plot[0]], [gamma_plot[1], k_plot[1], m_plot[1]], c='white', s=50, zorder=5)
+    plt.text(gamma_plot[0] + 0.02, gamma_plot[1] + 0.02, r'$\Gamma$', color='white', fontsize=14)
+    plt.text(k_plot[0] + 0.02, k_plot[1] + 0.02, 'K', color='white', fontsize=14)
+    plt.text(m_plot[0] + 0.02, m_plot[1] + 0.02, 'M', color='white', fontsize=14)
+
     plt.pcolormesh(A, B, d1)
     plt.colorbar()
-    plt.ylabel(r'$K_y$')
-    plt.xlabel(r'$K_x$')
+    plt.ylabel(r'$h$')
+    plt.xlabel(r'$k$')
     plt.savefig(filename + ".pdf")
     plt.clf()
+
 def hnhltoK(H, L, K=0):
     A = contract('ij,k->ijk',H, 2*np.array([np.pi,-np.pi,0])) \
         + contract('ij,k->ijk',L, 2*np.array([0,0,np.pi]))
     return A
 
 def hhztoK(H, K):
-    return contract('ij,k->ijk',H, 2*np.array([np.pi,0,0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi,0]))
+    return contract('ij,k->ijk',H, np.array([1,0,0])) + contract('ij,k->ijk',K, np.array([0,1,0]))
 
 def hk2d(H,K):
     return contract('ij,k->ijk',H, 2*np.array([np.pi,0, 0])) + contract('ij,k->ijk',K, 2*np.array([0,np.pi, 0]))
@@ -283,28 +321,19 @@ def hk0_rlu(H, K):
     return A
 
 def SSSF2D(S, P, nK, dir, gb=False):
-    H = np.linspace(-1, 1, nK)
-    L = np.linspace(-1, 1, nK)
+    H = np.linspace(-2*np.pi, 2*np.pi, nK)
+    L = np.linspace(-2*np.pi, 2*np.pi, nK)
     A, B = np.meshgrid(H, L)
     K = hhztoK(A, B).reshape((nK*nK,3))
     SSSF = SSSF_q(K, S, P, gb)
     SSSF = SSSF.reshape((nK, nK, 3, 3))
     SSSFGraph2D(A, B, contract('ijab->ij', SSSF), dir+"/SSSF_tot")
 
-    H = np.linspace(-0.5, 0.5, nK)
-    L = np.linspace(-0.5, 0.5, nK)
-    C, D = np.meshgrid(H, L)
-    K_rlu = hk0_rlu(C, D).reshape((nK*nK,3))
-    K = contract('ik,ka->ia', K_rlu, KBasis)
-    SSSF = SSSF_q(K, S, P, gb)
-    SSSF = SSSF.reshape((nK, nK, 3, 3))
-    SSSFGraph2D_flat(C, D, contract('ijab->ij', SSSF), dir+"/SSSF_tot_rlu")
-
     # Find and plot the maximum point for each component (xx, yy, zz)
     for i, component in enumerate(['x', 'y', 'z']):
         for j, comp in enumerate(['x', 'y', 'z']):
             max_idx = np.argmax(SSSF[:,:,i,j])
-            max_point = K_rlu[max_idx]
+            max_point = K[max_idx]/2*np.pi # Cubic 
             max_intensity = np.max(SSSF[:,:,i,j])
             np.savetxt(dir+f"/SSSF_max_point_{component}{comp}.txt", 
                       np.concatenate([max_point, [max_intensity]]), 
@@ -312,42 +341,38 @@ def SSSF2D(S, P, nK, dir, gb=False):
             print(f"Maximum SSSF_{component}{comp} = {max_intensity:.6f} at H={max_point[0]:.4f}, K={max_point[1]:.4f}, L={max_point[2]:.4f}")
 
             SSSFGraph2D(A, B, SSSF[:,:,i,j], dir+f"/SSSF_{component}{comp}")
-            # Plot the individual component
-            SSSFGraph2D_flat(C, D, SSSF[:,:,i,j], dir+f"/SSSF_{component}{comp}_rlu")
-
-    # Find and analyze top 50 points for both xx and yy components
     
     # For yy component
     yy_component = SSSF[:,:,1,1].flatten()
     yy_top_50_indices = np.argsort(yy_component)[-50:][::-1]  # Top 50 indices in descending order
-    yy_top_50_points = K_rlu[yy_top_50_indices]
+    yy_top_50_points = K[yy_top_50_indices] 
     yy_top_50_intensities = yy_component[yy_top_50_indices]
     xx_intensities_at_yy_top = SSSF.reshape(nK*nK, 3, 3)[yy_top_50_indices, 0, 0]
     
     # Save top 50 yy points with corresponding xx intensities
     yy_analysis_data = np.column_stack([yy_top_50_points, yy_top_50_intensities, xx_intensities_at_yy_top])
     np.savetxt(dir+"/SSSF_yy_top50_analysis.txt", 
-              yy_analysis_data, 
+              yy_analysis_data/ (2*np.pi), 
               header="H K L SSSF_yy SSSF_xx_at_yy_point")
     
     # For xx component
     xx_component = SSSF[:,:,0,0].flatten()
     xx_top_50_indices = np.argsort(xx_component)[-50:][::-1]  # Top 50 indices in descending order
-    xx_top_50_points = K_rlu[xx_top_50_indices]
+    xx_top_50_points = K[xx_top_50_indices]
     xx_top_50_intensities = xx_component[xx_top_50_indices]
     yy_intensities_at_xx_top = SSSF.reshape(nK*nK, 3, 3)[xx_top_50_indices, 1, 1]
     
     # Save top 50 xx points with corresponding yy intensities
     xx_analysis_data = np.column_stack([xx_top_50_points, xx_top_50_intensities, yy_intensities_at_xx_top])
     np.savetxt(dir+"/SSSF_xx_top50_analysis.txt", 
-              xx_analysis_data, 
+              xx_analysis_data/ (2*np.pi), 
               header="H K L SSSF_xx SSSF_yy_at_xx_point")
     
     # Create subplot figure showing top points on both xx and yy plots
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     
     # Top-left: SSSF_yy with top yy points labeled
-    im1 = axes[0,0].pcolormesh(C, D, SSSF[:,:,1,1], shading='auto')
+    im1 = axes[0,0].pcolormesh(A, B, SSSF[:,:,1,1], shading='auto')
     axes[0,0].scatter(yy_top_50_points[:5,0], yy_top_50_points[:5,1], 
                      c='red', s=100, marker='x', linewidths=3)
     for i in range(5):
@@ -360,7 +385,7 @@ def SSSF2D(S, P, nK, dir, gb=False):
     plt.colorbar(im1, ax=axes[0,0])
     
     # Top-right: SSSF_xx with top yy points labeled
-    im2 = axes[0,1].pcolormesh(C, D, SSSF[:,:,0,0], shading='auto')
+    im2 = axes[0,1].pcolormesh(A, B, SSSF[:,:,0,0], shading='auto')
     axes[0,1].scatter(yy_top_50_points[:5,0], yy_top_50_points[:5,1], 
                      c='red', s=100, marker='x', linewidths=3)
     for i in range(5):
@@ -373,7 +398,7 @@ def SSSF2D(S, P, nK, dir, gb=False):
     plt.colorbar(im2, ax=axes[0,1])
     
     # Bottom-left: SSSF_yy with top xx points labeled
-    im3 = axes[1,0].pcolormesh(C, D, SSSF[:,:,1,1], shading='auto')
+    im3 = axes[1,0].pcolormesh(A, B, SSSF[:,:,1,1], shading='auto')
     axes[1,0].scatter(xx_top_50_points[:5,0], xx_top_50_points[:5,1], 
                      c='blue', s=100, marker='o', linewidths=2, facecolors='none')
     for i in range(5):
@@ -386,7 +411,7 @@ def SSSF2D(S, P, nK, dir, gb=False):
     plt.colorbar(im3, ax=axes[1,0])
     
     # Bottom-right: SSSF_xx with top xx points labeled
-    im4 = axes[1,1].pcolormesh(C, D, SSSF[:,:,0,0], shading='auto')
+    im4 = axes[1,1].pcolormesh(A, B, SSSF[:,:,0,0], shading='auto')
     axes[1,1].scatter(xx_top_50_points[:5,0], xx_top_50_points[:5,1], 
                      c='blue', s=100, marker='o', linewidths=2, facecolors='none')
     for i in range(5):
@@ -416,12 +441,32 @@ def SSSF2D(S, P, nK, dir, gb=False):
     # Save the overall maximum point (total SSSF)
     total_sssf = contract('ijab->ij', SSSF)
     total_max_idx = np.argmax(total_sssf)
-    total_max_point = K_rlu[total_max_idx]
+    total_max_point = K[total_max_idx] 
     total_max_intensity = np.max(total_sssf)
+    # Get all SSSF components at the maximum point
+    total_max_point_idx = np.unravel_index(total_max_idx, total_sssf.shape)
+    i, j = total_max_point_idx
+    SSSF_components_at_max = SSSF[i, j, :, :]  # shape (3,3)
+    # Flatten and label the components for saving
+    component_labels = ['xx', 'xy', 'xz', 'yx', 'yy', 'yz', 'zx', 'zy', 'zz']
+    components_flat = SSSF_components_at_max.flatten()
+    # Prepare header
+    header = "Kx Ky Kz Intensity " + " ".join([f"SSSF_{lbl}" for lbl in component_labels])
+    # Prepare row to save (divide K by 2pi for consistency)
+    row = np.concatenate([total_max_point, [total_max_intensity], components_flat]) / (2*np.pi)
     np.savetxt(dir+"/SSSF_max_point.txt", 
-              np.concatenate([total_max_point, [total_max_intensity]]), 
-              header="H K L Intensity")
+               row.reshape(1, -1), 
+               header=header)
     print(f"Maximum total SSSF = {total_max_intensity:.6f} at H={total_max_point[0]:.4f}, K={total_max_point[1]:.4f}, L={total_max_point[2]:.4f}")
+    
+    # Save the overall maximum point in RLU (reciprocal lattice units)
+    total_max_point_rlu = np.linalg.solve(KBasis.T, total_max_point)
+    max_point_rlu_data = np.concatenate([total_max_point_rlu, [total_max_intensity], components_flat])
+    np.savetxt(dir+"/SSSF_max_point_rlu.txt", 
+               max_point_rlu_data.reshape(1, -1), 
+               header="h k l Intensity " + " ".join([f"SSSF_{lbl}" for lbl in component_labels]))
+    print(f"Maximum total SSSF in RLU = {total_max_intensity:.6f} at h={total_max_point_rlu[0]:.4f}, k={total_max_point_rlu[1]:.4f}, l={total_max_point_rlu[2]:.4f}")
+    
     return SSSF
 
 def ordering_q_SSSF2D(SSSF, K):
@@ -729,6 +774,526 @@ def magnetic_moment_along(P, S, dir):
         plt.close()
 
 
+
+def regnault_magnetic_moment_reconstruction(P, SSSF):
+    # Read the SSSF_max_point.txt file and extract Kx, Ky, Kz, and SSSF components
+    file_path = os.path.join(SSSF, "SSSF_max_point.txt")
+
+    with open(file_path, "r") as f:
+        for line in f:
+            if line.strip().startswith("#") or line.strip() == "":
+                continue
+            values = np.array([float(x) for x in line.strip().split()])
+            break  # Only read the first data line
+
+    # Extract Kx, Ky, Kz and SSSF components
+    Kx, Ky, Kz = values[0:3]
+    Intensity = values[3]
+    SSSF_xx, SSSF_xy, SSSF_xz, SSSF_yx, SSSF_yy, SSSF_yz, SSSF_zx, SSSF_zy, SSSF_zz = values[4:13]
+
+    # Single-Q ansatz fitting for honeycomb lattice
+    print(f"\nReconstructing magnetic moment using single-Q ansatz at Q=({Kx:.4f}, {Ky:.4f}, {Kz:.4f})")
+    
+    # Q in reciprocal space (assuming Kx, Ky are in reduced units)
+    Q_vec = np.array([Kx, Ky]) * 2*np.pi
+    
+    # Create SSSF tensor from the components
+    SSSF_target = np.array([
+        [SSSF_xx, SSSF_xy, SSSF_xz],
+        [SSSF_yx, SSSF_yy, SSSF_yz],
+        [SSSF_zx, SSSF_zy, SSSF_zz]
+    ])
+    
+    # Normalize SSSF_target for better convergence
+    SSSF_norm = np.linalg.norm(SSSF_target)
+    if SSSF_norm > 1e-10:
+        SSSF_target_normalized = SSSF_target / SSSF_norm
+    else:
+        print("Warning: SSSF tensor has very small norm, using unnormalized version")
+        SSSF_target_normalized = SSSF_target
+        SSSF_norm = 1.0
+    
+    def generate_spin_configuration(params, positions, Q_vec):
+        """
+        Generate spin configuration using constrained ansatz:
+        S_x(R_i) = m_b * sin(gamma) * cos(Q·R + phi_i^a)
+        S_y(R_i) = m_b * cos(gamma) * cos(Q·R + phi_i^b)
+        S_z(R_i) = m_c * cos(Q·R + phi_i^c)
+        
+        With constraints:
+        - m_b, m_c same for both sublattices
+        - gamma same for both sublattices
+        - phi_1^c - phi_1^b = -(phi_2^c - phi_2^b)
+        - phi_1^b - phi_1^a = -(phi_2^b - phi_2^a)
+        
+        params: [m_b, m_c, gamma, phi_1^a, delta_ba, delta_cb, phi_2^a]
+        where:
+        - delta_ba = phi_1^b - phi_1^a = -(phi_2^b - phi_2^a)
+        - delta_cb = phi_1^c - phi_1^b = -(phi_2^c - phi_2^b)
+        - phi_2^a is free
+        """
+        m_b, m_c, gamma, phi_1_a, delta_ba, delta_cb, phi_2_a = params
+        
+        # Sublattice A (1) phases
+        phi_1_b = phi_1_a + delta_ba
+        phi_1_c = phi_1_b + delta_cb
+        
+        # Sublattice B (2) phases with constraints
+        # delta_ba = -(phi_2^b - phi_2^a) => phi_2^b = phi_2^a - delta_ba
+        # delta_cb = -(phi_2^c - phi_2^b) => phi_2^c = phi_2^b - delta_cb
+        phi_2_b = phi_2_a - delta_ba
+        phi_2_c = phi_2_b - delta_cb
+        
+        N = len(positions)
+        spins = np.zeros((N, 3))
+        
+        for i in range(N):
+            pos = positions[i][:2]  # Use only x,y components for 2D lattice
+            Q_dot_R = np.dot(Q_vec, pos)
+            
+            if i % 2 == 0:  # A sublattice (1)
+                spins[i, 0] = m_b * np.sin(gamma) * np.cos(Q_dot_R + phi_1_a)
+                spins[i, 1] = m_b * np.cos(gamma) * np.cos(Q_dot_R + phi_1_b)
+                spins[i, 2] = m_c * np.cos(Q_dot_R + phi_1_c)
+            else:  # B sublattice (2)
+                spins[i, 0] = m_b * np.sin(gamma) * np.cos(Q_dot_R + phi_2_a)
+                spins[i, 1] = m_b * np.cos(gamma) * np.cos(Q_dot_R + phi_2_b)
+                spins[i, 2] = m_c * np.cos(Q_dot_R + phi_2_c)
+            
+            # Normalize the spin
+            norm = np.linalg.norm(spins[i])
+            if norm > 1e-10:
+                spins[i] = spins[i] / norm
+        
+        return spins
+    
+    def compute_sssf_at_q(spins, positions, Q_eval):
+        """Compute SSSF at specific Q"""
+        # Use only x,y components of positions for 2D
+        pos_2d = positions[:, :2]
+        ffact = np.exp(1j * np.dot(pos_2d, Q_eval))
+        N = len(spins)
+        S_q = np.dot(spins.T, ffact) / np.sqrt(N)
+        
+        # Compute SSSF tensor
+        SSSF = np.real(np.outer(S_q, np.conj(S_q)))
+        return SSSF
+    
+    def objective_function(params, positions, Q_vec, SSSF_target_normalized):
+        """Objective function to minimize using normalized SSSF"""
+        # Generate spin configuration
+        spins = generate_spin_configuration(params, positions, Q_vec)
+        
+        # Compute SSSF at the ordering wavevector
+        SSSF_calc = compute_sssf_at_q(spins, positions, Q_vec)
+        
+        # Normalize calculated SSSF
+        SSSF_calc_norm = np.linalg.norm(SSSF_calc)
+        if SSSF_calc_norm > 1e-10:
+            SSSF_calc_normalized = SSSF_calc / SSSF_calc_norm
+        else:
+            SSSF_calc_normalized = SSSF_calc
+        
+        # Calculate mean squared error between normalized tensors
+        mse = np.sum((SSSF_calc_normalized - SSSF_target_normalized)**2)
+        
+        return mse
+    
+    # Parameter bounds
+    bounds = [
+        (0, 1.0),  # m_b
+        (0, 1.0),  # m_c
+        (0, 2*np.pi),  # gamma
+        (0, 2*np.pi),  # phi_1^a
+        (-2*np.pi, 2*np.pi),  # delta_ba
+        (-2*np.pi, 2*np.pi),  # delta_cb
+        (0, 2*np.pi),  # phi_2^a (free parameter)
+    ]
+    
+    # Multiple optimization attempts with random initial guesses
+    best_result = None
+    best_cost = np.inf
+    
+    n_attempts = 30  # Increased attempts for constrained problem
+    for attempt in range(n_attempts):
+        # Random initial guess
+        initial_params = np.array([
+            np.random.uniform(0, 1),  # m_b
+            np.random.uniform(0, 1),  # m_c
+            np.random.uniform(0, 2*np.pi),  # gamma
+            np.random.uniform(0, 2*np.pi),  # phi_1^a
+            np.random.uniform(-np.pi, np.pi),  # delta_ba
+            np.random.uniform(-np.pi, np.pi),  # delta_cb
+            np.random.uniform(0, 2*np.pi),  # phi_2^a
+        ])
+        
+        # Optimize
+        result = minimize(
+            objective_function,
+            initial_params,
+            args=(P, Q_vec, SSSF_target_normalized),
+            method='L-BFGS-B',
+            bounds=bounds,
+            options={'maxiter': 3000, 'ftol': 1e-12}
+        )
+        
+        if result.fun < best_cost:
+            best_result = result
+            best_cost = result.fun
+            
+        # Early termination if good enough solution found
+        if best_cost < 1e-8:
+            print(f"Good solution found after {attempt+1} attempts")
+            break
+    
+    if best_result is not None and best_cost < 0.1:  # Relaxed convergence criterion for normalized fitting
+        print("Optimization successful!")
+        print(f"Final cost (normalized): {best_cost:.6e}")
+        
+        # Extract optimized parameters
+        opt_params = best_result.x
+        m_b, m_c, gamma, phi_1_a, delta_ba, delta_cb, phi_2_a = opt_params
+        
+        # Compute all phases
+        phi_1_b = phi_1_a + delta_ba
+        phi_1_c = phi_1_b + delta_cb
+        phi_2_b = phi_2_a - delta_ba
+        phi_2_c = phi_2_b - delta_cb
+        
+        # Verify constraints
+        constraint1 = (phi_1_c - phi_1_b) + (phi_2_c - phi_2_b)
+        constraint2 = (phi_1_b - phi_1_a) + (phi_2_b - phi_2_a)
+        
+        print("\nOptimized parameters (with constraints):")
+        print(f"Common: m_b={m_b:.4f}, m_c={m_c:.4f}, gamma={gamma:.4f}")
+        print(f"Phase differences: delta_ba={delta_ba:.4f}, delta_cb={delta_cb:.4f}")
+        print(f"Sublattice A (1): phi_a={phi_1_a:.4f}, phi_b={phi_1_b:.4f}, phi_c={phi_1_c:.4f}")
+        print(f"Sublattice B (2): phi_a={phi_2_a:.4f}, phi_b={phi_2_b:.4f}, phi_c={phi_2_c:.4f}")
+        print(f"\nConstraint verification:")
+        print(f"phi_1^c - phi_1^b = {phi_1_c - phi_1_b:.4f}")
+        print(f"phi_2^c - phi_2^b = {phi_2_c - phi_2_b:.4f}")
+        print(f"Sum (should be ~0): {constraint1:.6f}")
+        print(f"phi_1^b - phi_1^a = {phi_1_b - phi_1_a:.4f}")
+        print(f"phi_2^b - phi_2^a = {phi_2_b - phi_2_a:.4f}")
+        print(f"Sum (should be ~0): {constraint2:.6f}")
+        
+        # Generate final spin configuration
+        final_spins = generate_spin_configuration(opt_params, P, Q_vec)
+        
+        # Verify by computing SSSF
+        SSSF_fitted = compute_sssf_at_q(final_spins, P, Q_vec)
+        
+        # Scale fitted SSSF to match original norm
+        SSSF_fitted_scaled = SSSF_fitted * (SSSF_norm / np.linalg.norm(SSSF_fitted))
+        
+        print("\nTarget SSSF tensor (original scale):")
+        print(SSSF_target)
+        print("\nFitted SSSF tensor (scaled to match):")
+        print(SSSF_fitted_scaled)
+        print("\nRelative error:")
+        print(np.abs(SSSF_fitted_scaled - SSSF_target) / (np.abs(SSSF_target) + 1e-10))
+        
+        # Save results
+        save_path = os.path.dirname(file_path) if isinstance(file_path, str) else "."
+        np.savetxt(os.path.join(save_path, "fitted_spins_constrained.txt"), final_spins)
+        np.savetxt(os.path.join(save_path, "fitted_positions_constrained.txt"), P)
+        
+        # Save parameters
+        full_params = np.array([m_b, m_c, gamma, phi_1_a, phi_1_b, phi_1_c, phi_2_a, phi_2_b, phi_2_c, delta_ba, delta_cb])
+        param_names = "m_b m_c gamma phi_1_a phi_1_b phi_1_c phi_2_a phi_2_b phi_2_c delta_ba delta_cb"
+        np.savetxt(os.path.join(save_path, "fitted_parameters_constrained.txt"), 
+                   full_params.reshape(1, -1),
+                   header=param_names)
+        
+        # Save fitting quality metrics
+        fitting_metrics = np.array([
+            SSSF_norm,  # Original SSSF norm
+            np.linalg.norm(SSSF_fitted),  # Fitted SSSF norm
+            best_cost,  # Normalized cost
+            np.linalg.norm(SSSF_fitted_scaled - SSSF_target)  # Absolute error
+        ])
+        np.savetxt(os.path.join(save_path, "fitting_metrics_constrained.txt"),
+                   fitting_metrics,
+                   header="original_norm fitted_norm normalized_cost absolute_error")
+        
+        # Plot the fitted spin configuration
+        plot_spin_config_2d(P, final_spins, os.path.join(save_path, "fitted_spin_config_constrained.pdf"))
+
+        magnetic_moment_along(P, final_spins, save_path)
+        print("\nConstrained spin configuration plots saved.")
+        
+        return {
+            "params": opt_params,
+            "spins": final_spins,
+            "positions": P,
+            "SSSF_fitted": SSSF_fitted_scaled,
+            "cost": best_cost
+        }
+    else:
+        print(f"Optimization did not converge sufficiently after {n_attempts} attempts!")
+        print(f"Best cost achieved: {best_cost:.6e}")
+        return None
+
+
+
+def compute_skyrmion_chirality(P, S):
+    """Compute per-triangle skyrmion (scalar chirality) density using Berg–Lüscher.
+    Returns triangulation, densities per triangle, total Q, and triangle centroids.
+    """
+    # Normalize spins
+    S_norm = S / (np.linalg.norm(S, axis=1, keepdims=True) + 1e-12)
+    pts2d = P[:, :2]
+    tri = Delaunay(pts2d)
+    tris = tri.simplices
+    q = np.zeros(len(tris))
+    centroids = np.zeros((len(tris), 2))
+    for idx, (i, j, k) in enumerate(tris):
+        r0, r1, r2 = pts2d[i], pts2d[j], pts2d[k]
+        # Oriented area sign to keep a consistent mapping orientation
+        area2 = (r1[0]-r0[0])*(r2[1]-r0[1]) - (r1[1]-r0[1])*(r2[0]-r0[0])
+        area_sign = 1.0 if area2 == 0 else np.sign(area2)
+        s0, s1, s2 = S_norm[i], S_norm[j], S_norm[k]
+        num = np.dot(s0, np.cross(s1, s2))
+        den = 1.0 + np.dot(s0, s1) + np.dot(s1, s2) + np.dot(s2, s0)
+        omega = 2.0 * np.arctan2(num, den)
+        q[idx] = area_sign * omega / (4.0 * np.pi)
+        centroids[idx] = (r0 + r1 + r2) / 3.0
+    Q_total = float(np.sum(q))
+    return tri, q, Q_total, centroids
+
+
+def plot_chirality_real_space(P, S, out_base):
+    """Plot skyrmion chirality density in real space and save artifacts.
+    Saves: out_base_density.pdf, out_base_density.txt, out_base_Q.txt
+    """
+    tri, q, Q_total, centroids = compute_skyrmion_chirality(P, S)
+    import matplotlib.tri as mtri
+    triang = mtri.Triangulation(P[:, 0], P[:, 1], tri.simplices)
+
+    # Ensure output directory exists
+    out_dir = os.path.dirname(out_base)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    plt.figure(figsize=(8, 8))
+    tpc = plt.tripcolor(triang, facecolors=q, shading='flat', cmap='RdBu_r')
+    plt.colorbar(tpc, label='Skyrmion density q_t')
+    # plt.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 1], S[:, 2], cmap='viridis',
+    #            scale_units='xy', angles='xy', scale=1, width=0.002, headwidth=3, headlength=4)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title(f'Chirality density, Q≈{Q_total:.3f}')
+    plt.tight_layout()
+    plt.savefig(out_base + '_density.pdf')
+    plt.clf()
+    plt.close()
+
+    # Save per-triangle data and total Q
+    np.savetxt(out_base + '_density.txt', np.column_stack([centroids, q]), header='x y q_t')
+    with open(out_base + '_Q.txt', 'w') as f:
+        f.write(f'{Q_total}\n')
+
+
+def _interpolate_spins_to_grid(P, S, grid_res=256, method='linear'):
+    """Interpolate spins onto a regular XY grid.
+    Returns X, Y, Sxg, Syg, Szg, mask, and grid spacings dx, dy.
+    """
+    pts = P[:, :2]
+    x_min, y_min = np.min(pts, axis=0)
+    x_max, y_max = np.max(pts, axis=0)
+    # Pad a bit to reduce edge effects
+    pad_x = 0.02 * (x_max - x_min + 1e-12)
+    pad_y = 0.02 * (y_max - y_min + 1e-12)
+    x = np.linspace(x_min - pad_x, x_max + pad_x, grid_res)
+    y = np.linspace(y_min - pad_y, y_max + pad_y, grid_res)
+    X, Y = np.meshgrid(x, y)
+    # Primary interp
+    Sx_lin = griddata(pts, S[:, 0], (X, Y), method=method)
+    Sy_lin = griddata(pts, S[:, 1], (X, Y), method=method)
+    Sz_lin = griddata(pts, S[:, 2], (X, Y), method=method)
+    # Fallback fill with nearest for NaNs
+    Sx_near = griddata(pts, S[:, 0], (X, Y), method='nearest')
+    Sy_near = griddata(pts, S[:, 1], (X, Y), method='nearest')
+    Sz_near = griddata(pts, S[:, 2], (X, Y), method='nearest')
+    Sxg = np.where(np.isnan(Sx_lin), Sx_near, Sx_lin)
+    Syg = np.where(np.isnan(Sy_lin), Sy_near, Sy_lin)
+    Szg = np.where(np.isnan(Sz_lin), Sz_near, Sz_lin)
+    # Normalize spins per-gridpoint to unit length to mitigate interpolation artifacts
+    norm = np.sqrt(Sxg**2 + Syg**2 + Szg**2) + 1e-12
+    Sxg, Syg, Szg = Sxg / norm, Syg / norm, Szg / norm
+    mask = ~np.isnan(Sx_lin) & ~np.isnan(Sy_lin) & ~np.isnan(Sz_lin)
+    dx = (x_max - x_min + 2 * pad_x) / (grid_res - 1)
+    dy = (y_max - y_min + 2 * pad_y) / (grid_res - 1)
+    return X, Y, Sxg, Syg, Szg, mask, dx, dy
+
+
+def compute_continuum_chirality(P, S, grid_res=256, sigma=1.0, method='linear'):
+    """Continuum chirality q(x,y) = (1/4pi) S · (∂x S × ∂y S) on a regular grid.
+    Returns dict with X,Y,Sx,Sy,Sz,q,mask,dx,dy,Q_total.
+    """
+    # Normalize input spins
+    S = S / (np.linalg.norm(S, axis=1, keepdims=True) + 1e-12)
+    X, Y, Sxg, Syg, Szg, mask, dx, dy = _interpolate_spins_to_grid(P, S, grid_res, method)
+    if sigma and sigma > 0:
+        # Smooth each component a bit to stabilize derivatives
+        Sxg = gaussian_filter(Sxg, sigma=sigma)
+        Syg = gaussian_filter(Syg, sigma=sigma)
+        Szg = gaussian_filter(Szg, sigma=sigma)
+        # Renormalize after smoothing
+        norm = np.sqrt(Sxg**2 + Syg**2 + Szg**2) + 1e-12
+        Sxg, Syg, Szg = Sxg / norm, Syg / norm, Szg / norm
+
+    # Finite differences (np.gradient handles uneven but we pass dx,dy scalars)
+    dSx_dy, dSx_dx = np.gradient(Sxg, dy, dx)
+    dSy_dy, dSy_dx = np.gradient(Syg, dy, dx)
+    dSz_dy, dSz_dx = np.gradient(Szg, dy, dx)
+    # Cross product ∂x S × ∂y S
+    cx = dSy_dx * dSz_dy - dSz_dx * dSy_dy
+    cy = dSz_dx * dSx_dy - dSx_dx * dSz_dy
+    cz = dSx_dx * dSy_dy - dSy_dx * dSx_dy
+    q = (Sxg * cx + Syg * cy + Szg * cz) / (4.0 * np.pi)
+
+    # Only integrate within valid mask region
+    q_masked = np.where(mask, q, 0.0)
+    Q_total = float(np.sum(q_masked) * dx * dy)
+    return {
+        'X': X,
+        'Y': Y,
+        'Sx': Sxg,
+        'Sy': Syg,
+        'Sz': Szg,
+        'q': q,
+        'mask': mask,
+        'dx': dx,
+        'dy': dy,
+        'Q_total': Q_total,
+    }
+
+
+def _find_local_extrema(arr, mode='max', size=5, mask=None, threshold=None):
+    """Find local maxima or minima indices in 2D array using morphological filters.
+    - mode: 'max' or 'min'
+    - size: neighborhood size (odd integer)
+    - mask: optional boolean mask to limit valid region
+    - threshold: optional absolute threshold for arr values (for 'max') or -arr for 'min'
+    Returns list of (i,j) indices.
+    """
+    if mask is None:
+        mask = np.ones_like(arr, dtype=bool)
+    footprint = generate_binary_structure(2, 2)
+    footprint = np.pad(footprint, ((0, 0), (0, 0)), mode='constant', constant_values=0)
+    if mode == 'max':
+        filt = maximum_filter(arr, size=size)
+        candidates = (arr == filt) & mask
+        if threshold is not None:
+            candidates &= (arr >= threshold)
+    else:
+        inv = -arr
+        filt = maximum_filter(inv, size=size)
+        candidates = (inv == filt) & mask
+        if threshold is not None:
+            candidates &= (arr <= threshold)
+    ii, jj = np.where(candidates)
+    return list(zip(ii, jj))
+
+
+def detect_skyrmion_cores_from_grid(X, Y, Sz, q, mask, q_rel_thresh=0.2, sz_prominence=None, neighborhood=7):
+    """Detect skyrmion/antiskyrmion cores as local maxima of |q| and extrema of Sz.
+    Returns dict with core lists and a combined table.
+    """
+    # |q| peaks
+    absq = np.abs(q)
+    q_max = np.nanmax(absq[mask]) if np.any(mask) else np.nanmax(absq)
+    q_thr = q_rel_thresh * (q_max + 1e-12)
+    peaks = _find_local_extrema(absq, mode='max', size=neighborhood, mask=mask, threshold=q_thr)
+    q_cores = []
+    for i, j in peaks:
+        x, y = X[i, j], Y[i, j]
+        q_val = q[i, j]
+        sz_val = Sz[i, j]
+        kind = 'skyrmion' if q_val > 0 else 'antiskyrmion'
+        q_cores.append((x, y, q_val, sz_val, kind))
+
+    # Sz minima and maxima (optional context)
+    sz_min_thr = None
+    sz_max_thr = None
+    if sz_prominence is not None:
+        smin = np.nanmin(Sz[mask])
+        smax = np.nanmax(Sz[mask])
+        rng = smax - smin + 1e-12
+        sz_min_thr = smin + sz_prominence * rng
+        sz_max_thr = smax - sz_prominence * rng
+    sz_mins = _find_local_extrema(Sz, mode='min', size=neighborhood, mask=mask, threshold=sz_min_thr)
+    sz_maxs = _find_local_extrema(Sz, mode='max', size=neighborhood, mask=mask, threshold=sz_max_thr)
+    sz_min_list = [(X[i, j], Y[i, j], q[i, j], Sz[i, j], 'min_Sz') for i, j in sz_mins]
+    sz_max_list = [(X[i, j], Y[i, j], q[i, j], Sz[i, j], 'max_Sz') for i, j in sz_maxs]
+
+    # Merge for convenience
+    combined = q_cores + sz_min_list + sz_max_list
+    return {
+        'q_peaks': q_cores,
+        'sz_mins': sz_min_list,
+        'sz_maxs': sz_max_list,
+        'combined': combined,
+    }
+
+
+def plot_continuum_chirality_and_cores(res, cores, out_base):
+    """Plot q(x,y) and Sz with detected cores and save data tables."""
+    X, Y, q, Sz, mask, Q_total = res['X'], res['Y'], res['q'], res['Sz'], res['mask'], res['Q_total']
+    out_dir = os.path.dirname(out_base)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    # q heatmap
+    plt.figure(figsize=(7, 6))
+    im = plt.pcolormesh(X, Y, q, shading='auto', cmap='RdBu_r')
+    plt.colorbar(im, label='Continuum chirality q(x,y)')
+    # for x, y, qv, szv, kind in cores['q_peaks']:
+    #     plt.plot(x, y, 'ko' if kind == 'skyrmion' else 'ks', markersize=6, fillstyle='none')
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.title(f'Continuum chirality, Q≈{Q_total:.3f}')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.tight_layout()
+    plt.savefig(out_base + '_q.pdf')
+    plt.clf()
+    plt.close()
+
+    # Sz heatmap
+    plt.figure(figsize=(7, 6))
+    im2 = plt.pcolormesh(X, Y, Sz, shading='auto', cmap='viridis')
+    plt.colorbar(im2, label='S_z(x,y)')
+    # Overlay Sz minima/maxima
+    for x, y, qv, szv, _ in cores['sz_mins']:
+        plt.plot(x, y, 'rv', markersize=6)
+    for x, y, qv, szv, _ in cores['sz_maxs']:
+        plt.plot(x, y, 'r^', markersize=6)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.title('S_z field with local extrema')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.tight_layout()
+    plt.savefig(out_base + '_Sz.pdf')
+    plt.clf()
+    plt.close()
+
+    # Save grids and core tables
+    np.savetxt(out_base + '_q_grid.txt', np.column_stack([X.ravel(), Y.ravel(), q.ravel()]), header='x y q')
+    np.savetxt(out_base + '_Sz_grid.txt', np.column_stack([X.ravel(), Y.ravel(), Sz.ravel()]), header='x y Sz')
+    with open(out_base + '_Q_total.txt', 'w') as f:
+        f.write(f'{Q_total}\n')
+    if cores['combined']:
+        core_arr = np.array(cores['combined'], dtype=object)
+        # Save as CSV-like text
+        with open(out_base + '_cores.txt', 'w') as f:
+            f.write('x y q sz kind\n')
+            for x, y, qv, szv, kind in cores['combined']:
+                f.write(f'{x} {y} {qv} {szv} {kind}\n')
+
+
+
 def parseDSSF(dir):
     size = 0
     directory = os.fsencode(dir)
@@ -930,6 +1495,7 @@ def read_MD_slice(dir, nK, w):
     return A
 
 
+
 def plot_spin_config(P, S, field_dir, filename):
     from matplotlib.animation import FuncAnimation
     fig = plt.figure()
@@ -1008,7 +1574,7 @@ def read_2D_nonlinear_tot(dir):
 # read_MD_tot("BCAO_zero_field_5K_sasha")
 # read_MD_tot("BCAO_zero_field_15K")
 
-def plot_spin_config_2d(P, S, filename):
+def plot_spin_config_2d(P, S, filename, zoom_frac=None):
     """
     Graphs the spin configuration projected on the 2D xy, xz, and yz planes.
 
@@ -1018,6 +1584,21 @@ def plot_spin_config_2d(P, S, filename):
         filename (str): Base path to save the output plots. Projections will be appended.
     """
     base_filename, ext = os.path.splitext(filename)
+
+    # Helper to compute axis limits based on zoom fraction
+    def _limits_from_zoom(x, y, frac):
+        if frac is None or frac >= 1.0:
+            return (np.min(x), np.max(x)), (np.min(y), np.max(y))
+        # Centered crop
+        xmin, xmax = float(np.min(x)), float(np.max(x))
+        ymin, ymax = float(np.min(y)), float(np.max(y))
+        cx = 0.5 * (xmin + xmax)
+        cy = 0.5 * (ymin + ymax)
+        rx = 0.5 * (xmax - xmin) * frac
+        ry = 0.5 * (ymax - ymin) * frac
+        rx = max(rx, 1e-6)
+        ry = max(ry, 1e-6)
+        return (cx - rx, cx + rx), (cy - ry, cy + ry)
 
     # --- XY Projection ---
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -1033,6 +1614,10 @@ def plot_spin_config_2d(P, S, filename):
     ax.set_title('Spin Configuration (2D XY Projection)')
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, linestyle='--', alpha=0.6)
+    # Apply zoom if requested
+    xlim, ylim = _limits_from_zoom(P[:, 0], P[:, 1], zoom_frac)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     plt.savefig(f"{base_filename}_xy{ext}")
     plt.clf()
     plt.close(fig)
@@ -1051,6 +1636,9 @@ def plot_spin_config_2d(P, S, filename):
     ax.set_title('Spin Configuration (2D XZ Projection)')
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, linestyle='--', alpha=0.6)
+    xlim, ylim = _limits_from_zoom(P[:, 0], P[:, 1], zoom_frac)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     plt.savefig(f"{base_filename}_xz{ext}")
     plt.clf()
     plt.close(fig)
@@ -1069,7 +1657,123 @@ def plot_spin_config_2d(P, S, filename):
     ax.set_title('Spin Configuration (2D YZ Projection)')
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, linestyle='--', alpha=0.6)
+    xlim, ylim = _limits_from_zoom(P[:, 0], P[:, 1], zoom_frac)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     plt.savefig(f"{base_filename}_yz{ext}")
+    plt.clf()
+    plt.close(fig)
+
+def plot_spin_config_3d(P, S, filename, color_by='z', subsample=None, zoom_frac=None):
+    """
+    Plot 3D spin orientations at their real-space positions.
+
+    Args:
+        P (ndarray): Positions, shape (N, 2 or 3). If 2D, z is set to 0.
+        S (ndarray): Spins, shape (N, 3).
+        filename (str): Output file path (e.g., path/to/spin_config_3d.pdf/png).
+        color_by (str): One of {'z','magnitude','x','y'}. Color arrows by this component/magnitude.
+        subsample (int|None): If set and N > subsample, uniformly subsample to this many arrows.
+    """
+    if P.shape[1] == 2:
+        P3 = np.column_stack([P[:, 0], P[:, 1], np.zeros(len(P))])
+    else:
+        P3 = P.copy()
+
+    N = len(P3)
+    if subsample is not None and N > subsample:
+        idx = np.linspace(0, N - 1, subsample, dtype=int)
+        P3 = P3[idx]
+        S = S[idx]
+
+    # Choose colors
+    if color_by == 'magnitude':
+        colors = np.linalg.norm(S, axis=1)
+        cbar_label = '|S|'
+    elif color_by in ('x', 'X'):
+        colors = S[:, 0]
+        cbar_label = 'Sx'
+    elif color_by in ('y', 'Y'):
+        colors = S[:, 1]
+        cbar_label = 'Sy'
+    else:  # 'z' default
+        colors = S[:, 2]
+        cbar_label = 'Sz'
+
+    # Heuristic arrow length based on typical neighbor spacing
+    # Use median nearest-neighbor distance
+    try:
+        from sklearn.neighbors import NearestNeighbors  # optional, skip if not available
+        nn = NearestNeighbors(n_neighbors=min(2, len(P3)))
+        nn.fit(P3)
+        dists, _ = nn.kneighbors(P3)
+        # dists[:,0] is 0 (self); use dists[:,1] if available
+        if dists.shape[1] > 1:
+            med_nn = float(np.median(dists[:, 1]))
+        else:
+            med_nn = float(np.median(dists))
+    except Exception:
+        # Fallback: range-based scale
+        span = np.ptp(P3, axis=0)
+        med_nn = float(np.mean(span) / max(10, np.cbrt(len(P3))))
+    arrow_len = 0.4 * med_nn if med_nn > 0 else 0.1
+
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Scatter sites
+    ax.scatter(P3[:, 0], P3[:, 1], P3[:, 2], c='lightgray', s=10, depthshade=True, linewidths=0)
+    # Quiver spins
+    q = ax.quiver(
+        P3[:, 0], P3[:, 1], P3[:, 2],
+        S[:, 0], S[:, 1], S[:, 2],
+        length=arrow_len, normalize=True, cmap='viridis', lw=0.6
+    )
+    # Matplotlib's 3D quiver doesn't directly support array colors, so set via set_array
+    try:
+        q.set_array(colors)
+        cbar = fig.colorbar(q, ax=ax, shrink=0.8)
+        cbar.set_label(cbar_label)
+    except Exception:
+        pass
+
+    # Set equal aspect ratio
+    def _set_axes_equal(ax_3d):
+        """Set equal aspect for 3D axes"""
+        x_limits = ax_3d.get_xlim3d()
+        y_limits = ax_3d.get_ylim3d()
+        z_limits = ax_3d.get_zlim3d()
+
+        x_range = abs(x_limits[1] - x_limits[0])
+        x_middle = np.mean(x_limits)
+        y_range = abs(y_limits[1] - y_limits[0])
+        y_middle = np.mean(y_limits)
+        z_range = abs(z_limits[1] - z_limits[0])
+        z_middle = np.mean(z_limits)
+
+        plot_radius = 0.5 * max([x_range, y_range, z_range])
+        ax_3d.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+        ax_3d.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+        ax_3d.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+    _set_axes_equal(ax)
+    # Apply zoom by shrinking displayed ranges around center
+    if zoom_frac is not None and zoom_frac < 1.0:
+        xlim = ax.get_xlim3d(); ylim = ax.get_ylim3d(); zlim = ax.get_zlim3d()
+        cx = 0.5 * (xlim[0] + xlim[1]); cy = 0.5 * (ylim[0] + ylim[1]); cz = 0.5 * (zlim[0] + zlim[1])
+        rx = 0.5 * (xlim[1] - xlim[0]) * zoom_frac
+        ry = 0.5 * (ylim[1] - ylim[0]) * zoom_frac
+        rz = 0.5 * (zlim[1] - zlim[0]) * zoom_frac
+        rx = max(rx, 1e-6); ry = max(ry, 1e-6); rz = max(rz, 1e-6)
+        ax.set_xlim3d(cx - rx, cx + rx)
+        ax.set_ylim3d(cy - ry, cy + ry)
+        ax.set_zlim3d(cz - rz, cz + rz)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    ax.set_title('Spin configuration (3D)')
+    plt.tight_layout()
+    plt.savefig(filename)
     plt.clf()
     plt.close(fig)
 
@@ -1082,12 +1786,55 @@ def parse_spin_config(directory):
     C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
+        print(filename)
         if os.path.isdir(directory + "/" + filename):
             S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
-            plot_spin_config_2d(P, S, directory + "/" + filename + "/spin_config_2d.pdf")
-            magnetic_moment_along(P, S, directory + "/" + filename)
+            base2d = directory + "/" + filename + "/spin_config_2d.pdf"
+            print("Computing 2D spin configuration plot")
+            plot_spin_config_2d(P, S, base2d)
+            # Zoomed 2D projections (50% window around center)
+            plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
+            # 3D orientation plot
+            print("Computing 3D configuration")
+            base3d = directory + "/" + filename + "/spin_config_3d.pdf"
+            plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
+            # Zoomed 3D view (50% window around center)
+            plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
+            # Load energy landscape data (assumes two columns: index and energy)
+            print("Computing chirality plot")
+            plot_chirality_real_space(P, S, directory + "/" + filename + "/chirality")
+            # Continuum chirality on grid + core detection
+            print("Computing coarse grained chirality")
+            cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
+            cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
+            plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
+            regnault_magnetic_moment_reconstruction(P, directory + "/" + filename)
+            energy_landscape_path = os.path.join(directory, filename, "energy_landscape.txt")
+            if os.path.exists(energy_landscape_path):
+                energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
+                # If the file has two columns, use the second as energy
+                if energy_data.ndim == 2 and energy_data.shape[1] >= 2:
+                    energy_landscape = energy_data[:, 1]
+                else:
+                    energy_landscape = energy_data
+                # Plot energy landscape as a heatmap using the 0 and 1 components of P as coordinates
+                plt.figure(figsize=(8, 6))
+                sc = plt.scatter(P[:, 0], P[:, 1], c=energy_landscape, cmap='inferno', s=20)
+                plt.colorbar(sc, label='Energy')
+                plt.xlabel('x position')
+                plt.ylabel('y position')
+                plt.title('Energy Landscape')
+                plt.tight_layout()
+                plt.savefig(directory + "/" + filename + "/energy_landscape_heatmap.pdf")
+                plt.clf()
+                plt.close()
+            else:
+                print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
+                energy_landscape = np.zeros(P.shape[0])
+
+
 
     SSSF = SSSF / len(os.listdir(directory))
     SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")

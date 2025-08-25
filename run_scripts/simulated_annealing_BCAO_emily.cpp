@@ -16,6 +16,15 @@ struct SimulationParams {
     double J3xy = 2.5, J3z = -0.85;
     double h_start = 0.0, h_end = 1.0;
     int num_steps = 50;
+    // Twist matrices (3 blocks of 3x3, each flattened to 9 doubles), optional
+    bool has_twist_matrix = false;
+    array<array<double, 9>, 3> twist_matrix = {{{
+        1,0,0, 0,1,0, 0,0,1
+    },{
+        1,0,0, 0,1,0, 0,0,1
+    },{
+        1,0,0, 0,1,0, 0,0,1
+    }}};
 };
 
 SimulationParams read_parameters(const string& filename) {
@@ -28,6 +37,7 @@ SimulationParams read_parameters(const string& filename) {
     }
     
     string line;
+    array<bool, 3> twist_row_found = {false, false, false};
     while (getline(file, line)) {
         // Skip comments and empty lines
         if (line.empty() || line[0] == '#' || line[0] == '/') continue;
@@ -63,7 +73,30 @@ SimulationParams read_parameters(const string& filename) {
             else if (key == "h_start") params.h_start = stod(value);
             else if (key == "h_end") params.h_end = stod(value);
             else if (key == "num_steps") params.num_steps = stoi(value);
+            else if (key.rfind("twist_matrix_", 0) == 0) {
+                int idx = -1;
+                try {
+                    idx = stoi(key.substr(13));
+                } catch (...) {
+                    idx = -1;
+                }
+                if (idx >= 0 && idx < 3) {
+                    string v = value;
+                    for (char &ch : v) if (ch == ',') ch = ' ';
+                    stringstream vss(v);
+                    for (int j = 0; j < 9; ++j) {
+                        double val; 
+                        if (!(vss >> val)) break; 
+                        params.twist_matrix[idx][j] = val;
+                    }
+                    twist_row_found[idx] = true;
+                }
+            }
         }
+    }
+    
+    if (twist_row_found[0] && twist_row_found[1] && twist_row_found[2]) {
+        params.has_twist_matrix = true;
     }
     
     file.close();
@@ -92,12 +125,16 @@ void create_default_parameter_file(const string& filename) {
     file << "G = 0\n\n";
     file << "# Third nearest neighbor parameters\n";
     file << "J3xy = 2.5\n";
-    file << "J3z = -0.85\n";
+    file << "J3z = -0.85\n\n";
+    file << "# Twist matrices (each 3x3 flattened, comma-separated)\n";
+    file << "twist_matrix_0 = 0,1,0, -1,0,0, 0,0,1\n";
+    file << "twist_matrix_1 = 0.951057,0.309017,0, -0.309017,0.951057,0, 0,0,1\n";
+    file << "twist_matrix_2 = 1,0,0, 0,1,0, 0,0,1\n";
     file.close();
 }
 
 
-void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
+void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr){
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -179,33 +216,6 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         param_file.close();
     }
 
-    auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
-        double c = cos(theta);
-        double s = sin(theta);
-        double t = 1.0 - c;
-        double nx = n[0], ny = n[1], nz = n[2];
-
-        // Rodrigues' rotation formula for rotation around axis n by angle theta
-        double r11 = t * nx * nx + c;
-        double r12 = t * nx * ny - s * nz;
-        double r13 = t * nx * nz + s * ny;
-        double r21 = t * nx * ny + s * nz;
-        double r22 = t * ny * ny + c;
-        double r23 = t * ny * nz - s * nx;
-        double r31 = t * nx * nz - s * ny;
-        double r32 = t * ny * nz + s * nx;
-        double r33 = t * nz * nz + c;
-        return {{{0, 1, 0, 
-                  -1, 0, 0, 
-                  0, 0, 1},
-                  {r11, r12, r13,
-                  r21, r22, r23,
-                  r31, r32, r33},
-                 {1, 0, 0, 
-                  0, 1, 0, 
-                  0, 0, 1}}};
-    };
-
     // Variables for storing local minimum energy
     double local_min_energy = std::numeric_limits<double>::max();
     int local_min_index = -1;
@@ -213,11 +223,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = rank; i < num_trials; i += size){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        double twist_angle = 2*M_PI/num_trials * i;
-        array<array<double, 9>, 3> twist_matrix = generate_twist_matrix(twist_angle, {0, 0, 1});
-
-        lattice<3, 2, 36, 36, 1> MC(&atoms, 1, true, twist_matrix);
-        MC.simulated_annealing(5, 1e-3, 1e6, 100, true);
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 1, true);
+        MC.simulated_annealing(5, 1e-3, 1e5, 2e3, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         for (size_t k = 0; k < 1e7; ++k) {
@@ -232,9 +239,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         energy_file << "Energy Density: " << energy_density << "\n";
         energy_file.close();      
         ofstream twist_file(dir +"/"+std::to_string(i)+ "/twist_matrix.txt");
-        twist_file << "Twist Angle : " << twist_angle << "\n";
         twist_file << "Twist Matrix:\n";
-        for (const auto& row : twist_matrix) {
+        for (const auto& row : MC.twist_matrices) {
             for (const auto& val : row) {
                 twist_file << val << " ";
             }
@@ -301,7 +307,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85){
+void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr){
     filesystem::create_directories(dir);
     HoneyComb<3> atoms;
 
@@ -378,38 +384,9 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
     double min_energy;
     int min_index = 0;
 
-    auto generate_twist_matrix = [](double theta, const array<double, 3>& n) -> array<array<double, 9>, 3> {
-        double c = cos(theta);
-        double s = sin(theta);
-        double t = 1.0 - c;
-        double nx = n[0], ny = n[1], nz = n[2];
-
-        // Rodrigues' rotation formula for rotation around axis n by angle theta
-        double r11 = t * nx * nx + c;
-        double r12 = t * nx * ny - s * nz;
-        double r13 = t * nx * nz + s * ny;
-        double r21 = t * nx * ny + s * nz;
-        double r22 = t * ny * ny + c;
-        double r23 = t * ny * nz - s * nx;
-        double r31 = t * nx * nz - s * ny;
-        double r32 = t * ny * nz + s * nx;
-        double r33 = t * nz * nz + c;
-
-        return {{{r11, r12, r13,
-                  r21, r22, r23,
-                  r31, r32, r33},
-                 {1, 0, 0, 
-                  0, 1, 0, 
-                  0, 0, 1},
-                 {1, 0, 0, 
-                  0, 1, 0, 
-                  0, 0, 1}}};
-    };
-    
-
     for(size_t i=0; i<num_trials;++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 60, 60, 1> MC(&atoms, 1);
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 1, true);
         MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e6, 10, num_trials, num_trials, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
@@ -445,7 +422,7 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
 
 void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
                         double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
-                        double J3xy=2.5, double J3z = -0.85) {
+                        double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -464,7 +441,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         double h = h_values[i];
         string subdir = dir + "/h_" + to_string(h);
         // Each process runs the simulation for its assigned 'h' value, with one trial.
-        sim_BCAO_honeycomb(1, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z);
+        sim_BCAO_honeycomb(1, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist);
     }
 }
 
@@ -536,19 +513,21 @@ int main(int argc, char** argv) {
         cout << "Running on " << size << " MPI processes.\n";
     }
 
+    const array<array<double, 9>, 3>* custom_twist_ptr = params.has_twist_matrix ? &params.twist_matrix : nullptr;
+
     if (do_field_scan) {
         magnetic_field_scan(params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
-                            params.J3xy, params.J3z);
+                            params.J3xy, params.J3z, custom_twist_ptr);
     } else {
         if (use_restart) {
             sim_BCAO_honeycomb_restarted(params.num_trials, params.h, params.field_dir, params.dir, 
                                          params.J1xy, params.J1z, params.D, params.E, params.F, params.G, 
-                                         params.J3xy, params.J3z);
+                                         params.J3xy, params.J3z, custom_twist_ptr);
         } else {
             sim_BCAO_honeycomb(params.num_trials, params.h, params.field_dir, params.dir, 
                                params.J1xy, params.J1z, params.D, params.E, params.F, params.G, 
-                               params.J3xy, params.J3z);
+                               params.J3xy, params.J3z, custom_twist_ptr);
         }
     }
     
