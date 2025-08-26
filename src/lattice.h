@@ -626,8 +626,7 @@ class lattice
 
             // Propose a small rotation update
             double delta = random_double_lehman(0, 2*M_PI);
-            array<double, N> rotation_axis_d = gen_random_spin(1.0);
-            array<double, N*N> R_new = rotation_from_axis_angle(rotation_axis_d, delta);
+            array<double, N*N> R_new = rotation_from_axis_angle(rotation_axis[d], delta);
 
             // Temporarily apply
             auto saved_R = twist_matrices[d];
@@ -828,7 +827,7 @@ class lattice
                     curr_accept += metropolis(spins, T, gaussian_move, sigma);
                 }
             }
-            for (size_t i = 0; i < 1e3; ++i){
+            for (size_t i = 0; i < 1e2; ++i){
                 metropolis_twist_sweep(T);
             }
             if (overrelaxation_rate > 0){
