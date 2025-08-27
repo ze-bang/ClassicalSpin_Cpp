@@ -1066,6 +1066,25 @@ class lattice
         
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
+        // Prepare progress reporting artifacts if an output directory is provided
+        const size_t n_total_iters = n_anneal + n_measure;
+        string progress_log_path;
+        string progress_now_path;
+        if (!dir_name.empty()) {
+            try {
+                filesystem::create_directory(dir_name);
+            } catch (...) {
+                // Best-effort; ignore if directory exists or can't be created
+            }
+            progress_log_path = dir_name + "/progress_rank" + to_string(rank) + ".log";
+            progress_now_path = dir_name + "/progress_rank" + to_string(rank) + ".now";
+            // Initialize the per-rank progress log with a header
+            {
+                ofstream flog(progress_log_path, ios::out | ios::trunc);
+                flog << "# iter total_iters progress temp energy local_accept_est swap_accept_est timestamp" << '\n';
+            }
+        }
+
         for(size_t i=0; i < n_anneal+n_measure; ++i){
 
             // Metropolis with local twist updates
@@ -1188,6 +1207,57 @@ class lattice
                         copy(new_spins.begin(), new_spins.end(), spins.begin());
                         E = E_partner;
                         swap_accept++;
+                    }
+                }
+            }
+
+            // Lightweight, periodic progress reporting that can be tailed during long runs
+            if (!dir_name.empty()) {
+                // Reuse probe_rate as a sensible default cadence; always report on last iteration
+                if ((probe_rate > 0 && (i % probe_rate == 0)) || (i + 1 == n_total_iters)) {
+                    const double denom = static_cast<double>(i + 1);
+                    // Estimate local and swap acceptance per attempt, consistent with end-of-run reporting
+                    const double local_accept_est = (denom > 0.0)
+                        ? (static_cast<double>(curr_accept) / denom) * overrelaxation_flag
+                        : 0.0;
+                    const double swap_accept_est = (denom > 0.0)
+                        ? (static_cast<double>(swap_accept) / denom) * swap_rate * overrelaxation_flag
+                        : 0.0;
+                    const double progress = denom / static_cast<double>(n_total_iters);
+                    const std::time_t ts = std::time(nullptr);
+
+                    // Append a line to the per-rank progress log
+                    {
+                        ofstream flog(progress_log_path, ios::out | ios::app);
+                        flog << i+1 << ' '
+                             << n_total_iters << ' '
+                             << progress << ' '
+                             << curr_Temp << ' '
+                             << E << ' '
+                             << local_accept_est << ' '
+                             << swap_accept_est << ' '
+                             << ts << '\n';
+                    }
+                    // Write the latest status to a small file (overwritten) for quick checks
+                    {
+                        ofstream fnow(progress_now_path, ios::out | ios::trunc);
+                        fnow << "iter=" << i+1
+                            << " total=" << n_total_iters
+                            << " progress=" << progress
+                            << " T=" << curr_Temp
+                            << " E=" << E
+                            << " local_acc_est=" << local_accept_est
+                            << " swap_acc_est=" << swap_accept_est
+                            << " ts=" << ts << '\n';
+                    }
+                    // Rank 0 can also emit a concise console heartbeat
+                    if (rank == 0) {
+                        cout << "[PT] iter " << i+1 << "/" << n_total_iters
+                             << " (" << int(progress * 100.0) << "%)"
+                             << " T0=" << curr_Temp
+                             << " E0=" << E
+                             << " acc_local~" << local_accept_est
+                             << " acc_swap~" << swap_accept_est << endl;
                     }
                 }
             }

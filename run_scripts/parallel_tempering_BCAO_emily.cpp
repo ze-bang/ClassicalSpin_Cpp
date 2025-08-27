@@ -12,6 +12,27 @@
 
 using namespace std;
 
+namespace timing_helpers {
+    inline void log_timing(const string& filepath, const string& label, double seconds, int rank) {
+        if (rank != 0) return;
+        // Ensure parent directory exists
+        try {
+            filesystem::path p(filepath);
+            if (p.has_parent_path()) filesystem::create_directories(p.parent_path());
+        } catch (...) {
+            // best-effort; ignore directory creation errors
+        }
+        ofstream ofs(filepath, ios::app);
+        if (ofs) {
+            ofs.setf(ios::fixed);
+            ofs << label << ": " << setprecision(6) << seconds << " s" << '\n';
+        }
+        // Also echo to stdout for quick visibility
+        cout.setf(ios::fixed);
+        cout << label << ": " << setprecision(6) << seconds << " s" << '\n';
+    }
+}
+
 // Structure to hold all simulation parameters
 struct SimulationParams {
     // Magnetic field and output directory
@@ -26,9 +47,9 @@ struct SimulationParams {
     // Parallel Tempering parameters
     double T_start = 1e-2;
     double T_end = 30.0;
-    size_t thermalization_sweeps = 1000000;
+    size_t thermalization_sweeps = 5000000;
     size_t measurement_sweeps = 1000000;
-    size_t overrelaxation_rate = 10; // Overrelaxation rate for the simulation
+    size_t overrelaxation_rate = 4000; // Overrelaxation rate for the simulation
     size_t swap_interval = 50;
     size_t probe_rate = 2000;
 
@@ -246,6 +267,12 @@ void create_default_parameter_file(const string& filename) {
 void PT_BCAO_honeycomb(const SimulationParams& params){
     filesystem::create_directories(params.dir);
     HoneyComb<3> atoms;
+    int rank = 0, size = 1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    const string timing_file = params.dir + "/timing.log";
+    double t_total = MPI_Wtime();
+    double t_step = MPI_Wtime();
 
     // Define interaction matrices based on Emily's model
     array<array<double,3>, 3> J1z_ = {{{params.J1xy+params.D, params.E, params.F},{params.E, params.J1xy-params.D, params.G},{params.F, params.G, params.J1z}}};
@@ -285,11 +312,11 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     atoms.set_bilinear_interaction(J3_, 0, 1, {1,-2,0});
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
+    MPI_Barrier(MPI_COMM_WORLD);
+    timing_helpers::log_timing(timing_file, "step_1_setup_model_and_fields", MPI_Wtime() - t_step, rank);
 
-    // MPI setup
-    int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    // Reset step timer
+    t_step = MPI_Wtime();
 
     // Temperature schedule
     vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
@@ -298,14 +325,22 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
     
     // Lattice and simulation
     lattice<3, 2, 100, 100, 1> MC(&atoms, 1, true);
+    MPI_Barrier(MPI_COMM_WORLD);
+    timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
+
+    // Parallel tempering run
+    t_step = MPI_Wtime();
     MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0});
+    MPI_Barrier(MPI_COMM_WORLD);
+    timing_helpers::log_timing(timing_file, "step_3_parallel_tempering", MPI_Wtime() - t_step, rank);
     if (rank == 0) {
+        t_step = MPI_Wtime();
         cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
         MC.write_to_file_spin(params.dir + "/spin.txt", MC.spins);
-        for (size_t i = 0; i < 1e7; ++i) {
-            MC.deterministic_sweep();
-        }
-        MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);
+        // for (size_t i = 0; i < 1e7; ++i) {
+        //     MC.deterministic_sweep();
+        // }
+        // MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);
         ofstream param_file(params.dir + "/simulation_parameters.txt");
         param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
         param_file << "==========================================\n";
@@ -332,6 +367,20 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
         }
         energy_file.close();
         cout << "Energy landscape saved to: " << params.dir + "/energy_landscape.txt" << "\n";
+
+        ofstream twist_file(params.dir + "/twist_matrix.txt");
+        twist_file << "Twist Matrix:\n";
+        for (const auto& row : MC.twist_matrices) {
+            for (const auto& val : row) {
+                twist_file << val << " ";
+            }
+            twist_file << "\n";
+        }
+        twist_file.close();
+        cout << "Twist matrix saved to: " << params.dir + "/twist_matrix.txt" << "\n";
+
+        timing_helpers::log_timing(timing_file, "step_4_postprocessing_and_output", MPI_Wtime() - t_step, rank);
+        timing_helpers::log_timing(timing_file, "total_PT_BCAO_honeycomb", MPI_Wtime() - t_total, rank);
     }
     else{
         // Other ranks can perform their own tasks or just wait
@@ -384,11 +433,14 @@ int main(int argc, char** argv) {
         if (field_scan) {
             cout << "Field scan enabled: h from " << params.h_start << " to " << params.h_end << " in " << params.num_steps << " steps\n";
         }
-        filesystem::create_directory(params.dir);
+        filesystem::create_directories(params.dir);
     }
+    const string overview_timing = params.dir + "/timing_overview.log";
+    double t_total_program = MPI_Wtime();
     
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
+        double t_trial = MPI_Wtime();
 
         if (rank == 0) {
             cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
@@ -417,7 +469,12 @@ int main(int argc, char** argv) {
                 }
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
+                double t_field_step = MPI_Wtime();
                 PT_BCAO_honeycomb(trial_params);
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == 0) {
+                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
+                }
             }
         } else {
             trial_params.dir = params.dir + "/trial_" + to_string(i);
@@ -426,6 +483,16 @@ int main(int argc, char** argv) {
             // Run the Parallel Tempering simulation
             PT_BCAO_honeycomb(trial_params);
         }
+        // End of trial
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (rank == 0) {
+            timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_elapsed", MPI_Wtime() - t_trial, rank);
+        }
+    }
+    // Total program time
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        timing_helpers::log_timing(overview_timing, "program_total_elapsed", MPI_Wtime() - t_total_program, rank);
     }
     
     int finalized;

@@ -127,8 +127,8 @@ void create_default_parameter_file(const string& filename) {
     file << "J3xy = 2.5\n";
     file << "J3z = -0.85\n\n";
     file << "# Twist matrices (each 3x3 flattened, comma-separated)\n";
-    file << "twist_matrix_0 = 0,1,0, -1,0,0, 0,0,1\n";
-    file << "twist_matrix_1 = 0.951057,0.309017,0, -0.309017,0.951057,0, 0,0,1\n";
+    file << "twist_matrix_0 = 1,0,0, 0,1,0, 0,0,1\n";
+    file << "twist_matrix_1 = 1,0,0, 0,1,0, 0,0,1\n";
     file << "twist_matrix_2 = 1,0,0, 0,1,0, 0,0,1\n";
     file.close();
 }
