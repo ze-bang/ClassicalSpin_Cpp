@@ -418,14 +418,14 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     MC.write_to_file_pos(dir+"/pos.txt");
     MC.write_to_file_spin(dir+"/spin_0.txt");
 
-    if (rank==0){
-        filesystem::create_directories(dir+"/M_time_0");
-        MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
-        ofstream run_param;
-        run_param.open(dir + "/param.txt");
-        run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
-        run_param.close();
-    }
+    // if (rank==0){
+    //     filesystem::create_directories(dir+"/M_time_0");
+    //     MC.M_B_t(field_drive, 0.0, pulse_amp, pulse_width, pulse_freq, T_start, T_end, T_step_size, dir+"/M_time_0/M0");
+    //     ofstream run_param;
+    //     run_param.open(dir + "/param.txt");
+    //     run_param << tau_start << " " << tau_end << " " << tau_steps  << " " << T_start << " " << T_end << " " << T_steps << endl;
+    //     run_param.close();
+    // }
 
 
     int tau_length = int(tau_steps/size);
