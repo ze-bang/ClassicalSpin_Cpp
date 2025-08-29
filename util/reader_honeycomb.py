@@ -10,9 +10,10 @@ from functools import reduce
 # plt.rcParams['text.usetex'] = True
 import re
 from scipy.optimize import minimize
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, cKDTree
 from scipy.interpolate import griddata
-from scipy.ndimage import gaussian_filter, maximum_filter, minimum_filter, generate_binary_structure
+from scipy.ndimage import gaussian_filter, maximum_filter, minimum_filter, generate_binary_structure, label as ndi_label
+from scipy.stats import zscore
 def honeycomb_reciprocal_basis():
     """
     Calculate reciprocal lattice vectors for a honeycomb lattice.
@@ -327,21 +328,64 @@ def SSSF2D(S, P, nK, dir, gb=False):
     K = hhztoK(A, B).reshape((nK*nK,3))
     SSSF = SSSF_q(K, S, P, gb)
     SSSF = SSSF.reshape((nK, nK, 3, 3))
-    SSSFGraph2D(A, B, contract('ijab->ij', SSSF), dir+"/SSSF_tot")
+    total_SSSF = contract('ijab->ij', SSSF)
+    
+    SSSFGraph2D(A, B, total_SSSF, dir+"/SSSF_tot")
+
+    def save_top_points(SSSF_target, SSSF, dir, file_prefix):
+        # Save the top N points (total SSSF)
+        N_TOP = 1  # Number of top points to save
+        
+        # Get the top N indices
+        flat_indices = np.argpartition(SSSF_target.flatten(), -N_TOP)[-N_TOP:]
+        flat_indices = flat_indices[np.argsort(-SSSF_target.flatten()[flat_indices])]  # Sort by intensity
+        
+        # Convert flat indices to 2D indices
+        top_indices_2d = np.unravel_index(flat_indices, SSSF_target.shape)
+        
+        # Prepare data for all top N points
+        component_labels = ['xx', 'xy', 'xz', 'yx', 'yy', 'yz', 'zx', 'zy', 'zz']
+        header = "Kx Ky Kz Intensity " + " ".join([f"SSSF_{lbl}" for lbl in component_labels])
+        
+        top_points_data = []
+        top_points_rlu_data = []
+        
+        for idx, (i, j) in enumerate(zip(top_indices_2d[0], top_indices_2d[1])):
+            point = K[i * SSSF_target.shape[1] + j]
+            intensity = contract('ijab->ij', SSSF)[i, j]
+            components = SSSF[i, j, :, :].flatten()
+            
+            # Save in Cartesian coordinates (divided by 2pi)
+            row = np.concatenate([point, [intensity], components])
+            top_points_data.append(row)
+            
+            # Convert to RLU
+            point_rlu = np.linalg.solve(KBasis.T, point)
+            row_rlu = np.concatenate([point_rlu, [intensity], components])
+            top_points_rlu_data.append(row_rlu)
+            
+            if idx == 0:  # First point is the maximum
+                print(f"Maximum total SSSF = {intensity:.6f} at H={point[0]:.4f}, K={point[1]:.4f}, L={point[2]:.4f}")
+                print(f"Maximum total SSSF in RLU = {intensity:.6f} at h={point_rlu[0]:.4f}, k={point_rlu[1]:.4f}, l={point_rlu[2]:.4f}")
+        
+        # Save all top N points
+        np.savetxt(dir+f"/SSSF_{file_prefix}_top{N_TOP}_points.txt", 
+                np.array(top_points_data) / (2*np.pi), 
+                header=header)
+        
+        np.savetxt(dir+f"/SSSF_{file_prefix}_top{N_TOP}_points_rlu.txt", 
+                np.array(top_points_rlu_data), 
+                header="h k l Intensity " + " ".join([f"SSSF_{lbl}" for lbl in component_labels]))
+    
+    save_top_points(total_SSSF, SSSF, dir, "total")
 
     # Find and plot the maximum point for each component (xx, yy, zz)
     for i, component in enumerate(['x', 'y', 'z']):
         for j, comp in enumerate(['x', 'y', 'z']):
-            max_idx = np.argmax(SSSF[:,:,i,j])
-            max_point = K[max_idx]/2*np.pi # Cubic 
-            max_intensity = np.max(SSSF[:,:,i,j])
-            np.savetxt(dir+f"/SSSF_max_point_{component}{comp}.txt", 
-                      np.concatenate([max_point, [max_intensity]]), 
-                      header="H K L Intensity")
-            print(f"Maximum SSSF_{component}{comp} = {max_intensity:.6f} at H={max_point[0]:.4f}, K={max_point[1]:.4f}, L={max_point[2]:.4f}")
-
+            save_top_points(SSSF[:,:,i,j], SSSF, dir, f"{component}{comp}")
             SSSFGraph2D(A, B, SSSF[:,:,i,j], dir+f"/SSSF_{component}{comp}")
     
+
     # For yy component
     yy_component = SSSF[:,:,1,1].flatten()
     yy_top_50_indices = np.argsort(yy_component)[-50:][::-1]  # Top 50 indices in descending order
@@ -350,9 +394,9 @@ def SSSF2D(S, P, nK, dir, gb=False):
     xx_intensities_at_yy_top = SSSF.reshape(nK*nK, 3, 3)[yy_top_50_indices, 0, 0]
     
     # Save top 50 yy points with corresponding xx intensities
-    yy_analysis_data = np.column_stack([yy_top_50_points, yy_top_50_intensities, xx_intensities_at_yy_top])
+    yy_analysis_data = np.column_stack([yy_top_50_points/ (2*np.pi), yy_top_50_intensities, xx_intensities_at_yy_top])
     np.savetxt(dir+"/SSSF_yy_top50_analysis.txt", 
-              yy_analysis_data/ (2*np.pi), 
+              yy_analysis_data, 
               header="H K L SSSF_yy SSSF_xx_at_yy_point")
     
     # For xx component
@@ -363,9 +407,9 @@ def SSSF2D(S, P, nK, dir, gb=False):
     yy_intensities_at_xx_top = SSSF.reshape(nK*nK, 3, 3)[xx_top_50_indices, 1, 1]
     
     # Save top 50 xx points with corresponding yy intensities
-    xx_analysis_data = np.column_stack([xx_top_50_points, xx_top_50_intensities, yy_intensities_at_xx_top])
+    xx_analysis_data = np.column_stack([xx_top_50_points/ (2*np.pi), xx_top_50_intensities, yy_intensities_at_xx_top])
     np.savetxt(dir+"/SSSF_xx_top50_analysis.txt", 
-              xx_analysis_data/ (2*np.pi), 
+              xx_analysis_data, 
               header="H K L SSSF_xx SSSF_yy_at_xx_point")
     
     # Create subplot figure showing top points on both xx and yy plots
@@ -379,6 +423,7 @@ def SSSF2D(S, P, nK, dir, gb=False):
         axes[0,0].annotate(f'{i+1}', (yy_top_50_points[i,0], yy_top_50_points[i,1]), 
                           xytext=(5, 5), textcoords='offset points', 
                           fontsize=12, color='red', weight='bold')
+        
     axes[0,0].set_title('SSSF_yy with Top 5 YY Points')
     axes[0,0].set_xlabel('H')
     axes[0,0].set_ylabel('K')
@@ -438,35 +483,6 @@ def SSSF2D(S, P, nK, dir, gb=False):
         h, k, l = xx_top_50_points[i]
         print(f"  {i+1}. H={h:.4f}, K={k:.4f}, L={l:.4f}: SSSF_xx={xx_top_50_intensities[i]:.6f}, SSSF_yy={yy_intensities_at_xx_top[i]:.6f}")
 
-    # Save the overall maximum point (total SSSF)
-    total_sssf = contract('ijab->ij', SSSF)
-    total_max_idx = np.argmax(total_sssf)
-    total_max_point = K[total_max_idx] 
-    total_max_intensity = np.max(total_sssf)
-    # Get all SSSF components at the maximum point
-    total_max_point_idx = np.unravel_index(total_max_idx, total_sssf.shape)
-    i, j = total_max_point_idx
-    SSSF_components_at_max = SSSF[i, j, :, :]  # shape (3,3)
-    # Flatten and label the components for saving
-    component_labels = ['xx', 'xy', 'xz', 'yx', 'yy', 'yz', 'zx', 'zy', 'zz']
-    components_flat = SSSF_components_at_max.flatten()
-    # Prepare header
-    header = "Kx Ky Kz Intensity " + " ".join([f"SSSF_{lbl}" for lbl in component_labels])
-    # Prepare row to save (divide K by 2pi for consistency)
-    row = np.concatenate([total_max_point, [total_max_intensity], components_flat]) / (2*np.pi)
-    np.savetxt(dir+"/SSSF_max_point.txt", 
-               row.reshape(1, -1), 
-               header=header)
-    print(f"Maximum total SSSF = {total_max_intensity:.6f} at H={total_max_point[0]:.4f}, K={total_max_point[1]:.4f}, L={total_max_point[2]:.4f}")
-    
-    # Save the overall maximum point in RLU (reciprocal lattice units)
-    total_max_point_rlu = np.linalg.solve(KBasis.T, total_max_point)
-    max_point_rlu_data = np.concatenate([total_max_point_rlu, [total_max_intensity], components_flat])
-    np.savetxt(dir+"/SSSF_max_point_rlu.txt", 
-               max_point_rlu_data.reshape(1, -1), 
-               header="h k l Intensity " + " ".join([f"SSSF_{lbl}" for lbl in component_labels]))
-    print(f"Maximum total SSSF in RLU = {total_max_intensity:.6f} at h={total_max_point_rlu[0]:.4f}, k={total_max_point_rlu[1]:.4f}, l={total_max_point_rlu[2]:.4f}")
-    
     return SSSF
 
 def ordering_q_SSSF2D(SSSF, K):
@@ -775,19 +791,14 @@ def magnetic_moment_along(P, S, dir):
 
 
 
-def regnault_magnetic_moment_reconstruction(P, SSSF):
+def regnault_magnetic_moment_reconstruction(P, SSSF, Q):
     # Read the SSSF_max_point.txt file and extract Kx, Ky, Kz, and SSSF components
-    file_path = os.path.join(SSSF, "SSSF_max_point.txt")
+    file_path = os.path.join(SSSF, f"SSSF_{Q}_top1_points_rlu.txt")
 
-    with open(file_path, "r") as f:
-        for line in f:
-            if line.strip().startswith("#") or line.strip() == "":
-                continue
-            values = np.array([float(x) for x in line.strip().split()])
-            break  # Only read the first data line
-
+    values = np.loadtxt(file_path, skiprows=1)
     # Extract Kx, Ky, Kz and SSSF components
     Kx, Ky, Kz = values[0:3]
+    print(f"Using K-point: ({Kx:.4f}, {Ky:.4f}, {Kz:.4f})")
     Intensity = values[3]
     SSSF_xx, SSSF_xy, SSSF_xz, SSSF_yx, SSSF_yy, SSSF_yz, SSSF_zx, SSSF_zy, SSSF_zz = values[4:13]
 
@@ -795,8 +806,7 @@ def regnault_magnetic_moment_reconstruction(P, SSSF):
     print(f"\nReconstructing magnetic moment using single-Q ansatz at Q=({Kx:.4f}, {Ky:.4f}, {Kz:.4f})")
     
     # Q in reciprocal space (assuming Kx, Ky are in reduced units)
-    Q_vec = np.array([Kx, Ky]) * 2*np.pi
-    
+    Q_vec = contract('i, ik->k', np.array([Kx, Ky, Kz]), honeycomb_reciprocal_basis())[0:2]  # Use only x,y components for 2D lattice
     # Create SSSF tensor from the components
     SSSF_target = np.array([
         [SSSF_xx, SSSF_xy, SSSF_xz],
@@ -848,7 +858,7 @@ def regnault_magnetic_moment_reconstruction(P, SSSF):
         spins = np.zeros((N, 3))
         
         for i in range(N):
-            pos = positions[i][:2]  # Use only x,y components for 2D lattice
+            pos = positions[i, :2]  # Use only x,y components for 2D lattice
             Q_dot_R = np.dot(Q_vec, pos)
             
             if i % 2 == 0:  # A sublattice (1)
@@ -995,13 +1005,13 @@ def regnault_magnetic_moment_reconstruction(P, SSSF):
         
         # Save results
         save_path = os.path.dirname(file_path) if isinstance(file_path, str) else "."
-        np.savetxt(os.path.join(save_path, "fitted_spins_constrained.txt"), final_spins)
-        np.savetxt(os.path.join(save_path, "fitted_positions_constrained.txt"), P)
+        np.savetxt(os.path.join(save_path, f"fitted_spins_constrained_{Q}.txt"), final_spins)
+        np.savetxt(os.path.join(save_path, f"fitted_spins_constrained_{Q}.txt"), P)
         
         # Save parameters
         full_params = np.array([m_b, m_c, gamma, phi_1_a, phi_1_b, phi_1_c, phi_2_a, phi_2_b, phi_2_c, delta_ba, delta_cb])
         param_names = "m_b m_c gamma phi_1_a phi_1_b phi_1_c phi_2_a phi_2_b phi_2_c delta_ba delta_cb"
-        np.savetxt(os.path.join(save_path, "fitted_parameters_constrained.txt"), 
+        np.savetxt(os.path.join(save_path, f"fitted_parameters_constrained_{Q}.txt"), 
                    full_params.reshape(1, -1),
                    header=param_names)
         
@@ -1017,7 +1027,7 @@ def regnault_magnetic_moment_reconstruction(P, SSSF):
                    header="original_norm fitted_norm normalized_cost absolute_error")
         
         # Plot the fitted spin configuration
-        plot_spin_config_2d(P, final_spins, os.path.join(save_path, "fitted_spin_config_constrained.pdf"))
+        plot_spin_config_2d(P, final_spins, os.path.join(save_path, f"fitted_spin_config_constrained_{Q}.pdf"))
 
         magnetic_moment_along(P, final_spins, save_path)
         print("\nConstrained spin configuration plots saved.")
@@ -1094,6 +1104,469 @@ def plot_chirality_real_space(P, S, out_base):
     with open(out_base + '_Q.txt', 'w') as f:
         f.write(f'{Q_total}\n')
 
+
+def energy_density_by_section(filename, P, energy_landscape, num_sec_x, num_sec_y):
+    """Compute energy density in specified sections of the lattice."""
+    x_edges = np.linspace(np.min(P[:, 0]), np.max(P[:, 0]), num_sec_x + 1)
+    y_edges = np.linspace(np.min(P[:, 1]), np.max(P[:, 1]), num_sec_y + 1)
+    energy_density = np.zeros((num_sec_x, num_sec_y))
+
+    for i in range(num_sec_x):
+        for j in range(num_sec_y):
+            # Define the section boundaries
+            x_mask = (P[:, 0] >= x_edges[i]) & (P[:, 0] < x_edges[i + 1])
+            y_mask = (P[:, 1] >= y_edges[j]) & (P[:, 1] < y_edges[j + 1])
+            mask = x_mask & y_mask
+
+            if np.any(mask):
+                energy_density[i, j] = np.mean(energy_landscape[mask])
+    energy_density[energy_density == 0] = np.nan  # Mark empty sections as NaN
+    # Save the energy density data
+    np.savetxt(filename.replace('.pdf', '.txt'), energy_density)
+
+    # plotting
+    plt.figure(figsize=(8, 6))
+    plt.imshow(energy_density.T, origin='lower', aspect='auto',
+               extent=(x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]),
+               cmap='viridis')
+    plt.colorbar(label='Energy Density')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('Energy Density by Section')
+    plt.savefig(filename)
+    plt.close()
+
+    energy_mean = np.mean(energy_landscape)
+    energy_lower = np.where(energy_density < energy_mean, energy_density, np.nan)
+
+    plt.figure(figsize=(8, 6))
+    plt.imshow(energy_lower.T, origin='lower', aspect='auto',
+               extent=(x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]),
+               cmap='viridis')
+    plt.colorbar(label='Energy Density')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('Energy Density by Section')
+    plt.savefig(filename.replace('.pdf', '_lower.pdf'))
+    plt.close()
+
+
+    return energy_density
+
+
+def _segment_defect_free_region(P, S, grid_res=256, sigma=1.0, q_rel_thresh=0.15, grad_rel_thresh=0.35):
+    """
+    Segment 'defect-free' region via low |q| and low |∇S| on the continuum grid.
+    Returns: dict with grid mask, site mask, and diagnostic data.
+    """
+    cont = compute_continuum_chirality(P, S, grid_res=grid_res, sigma=sigma)  # uses existing compute
+    X, Y, Sxg, Syg, Szg, q, mask = cont['X'], cont['Y'], cont['Sx'], cont['Sy'], cont['Sz'], cont['q'], cont['mask']
+    dy, dx = cont['dy'], cont['dx']
+
+    # Smoothness measure: ||∇S||^2 = sum_c (|∂x S_c|^2 + |∂y S_c|^2)
+    dSx_dy, dSx_dx = np.gradient(Sxg, dy, dx)
+    dSy_dy, dSy_dx = np.gradient(Syg, dy, dx)
+    dSz_dy, dSz_dx = np.gradient(Szg, dy, dx)
+    grad2 = dSx_dx**2 + dSx_dy**2 + dSy_dx**2 + dSy_dy**2 + dSz_dx**2 + dSz_dy**2
+
+    # Relative thresholds w.r.t. valid region
+    absq = np.abs(q)
+    q_max = np.nanmax(absq[mask]) if np.any(mask) else np.nanmax(absq)
+    g_med = np.nanmedian(grad2[mask])
+    g_max = np.nanmax(grad2[mask])
+    g_thr = g_med + grad_rel_thresh * (g_max - g_med)
+
+    free_grid_mask = (mask &
+                      (absq <= q_rel_thresh * (q_max + 1e-12)) &
+                      (grad2 <= g_thr))
+
+    # Keep the largest connected component for robustness
+    labeled, ncomp = ndi_label(free_grid_mask.astype(int))
+    if ncomp > 0:
+        # Find largest
+        sizes = np.bincount(labeled.ravel())
+        sizes[0] = 0
+        keep = np.argmax(sizes)
+        free_grid_mask = (labeled == keep)
+
+    # Map grid mask back to sites using nearest grid cell
+    x0, y0 = X[0, 0], Y[0, 0]
+    nx, ny = X.shape[1], X.shape[0]
+    ix = np.clip(np.floor((P[:, 0] - x0) / dx + 0.5).astype(int), 0, nx - 1)
+    iy = np.clip(np.floor((P[:, 1] - y0) / dy + 0.5).astype(int), 0, ny - 1)
+    site_free_mask = free_grid_mask[iy, ix]
+
+    return {
+        'cont': cont,
+        'free_grid_mask': free_grid_mask,
+        'site_free_mask': site_free_mask,
+        'grad2': grad2,
+    }
+
+
+def energetics_argument(P, S, energy_landscape, out_dir, J=1.0, grid_res=256, sigma=1.0):
+    """
+    Cleave into defect-free vs. rest and compare energies.
+    Assumes energy_landscape is per-site and averages it by region.
+
+    Saves:
+      out_dir/energetics_summary.txt
+      out_dir/region_masks_scatter.pdf
+      out_dir/region_q_overlay.pdf
+    """
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    seg = _segment_defect_free_region(P, S, grid_res=grid_res, sigma=sigma)
+    site_free = seg['site_free_mask']
+    cont = seg['cont']
+    X, Y, q = cont['X'], cont['Y'], cont['q']
+    free_grid_mask = seg['free_grid_mask']
+
+    # Region sizes
+    n_free = int(site_free.sum())
+    n_def = int((~site_free).sum())
+
+    # Energy analysis using provided energy landscape
+    if len(energy_landscape) == len(P):
+        e_free = float(np.nanmean(energy_landscape[site_free])) if n_free else np.nan
+        e_def = float(np.nanmean(energy_landscape[~site_free])) if n_def else np.nan
+        e_boundary = np.nan  # not defined for per-site energy
+        summary_mode = "site_energy"
+    else:
+        # Fallback if energy landscape doesn't match sites
+        e_free = e_def = e_boundary = np.nan
+        summary_mode = "no_matching_energy"
+
+    # Save summary
+    with open(os.path.join(out_dir, "energetics_summary.txt"), "w") as f:
+        f.write(f"mode: {summary_mode}\n")
+        f.write(f"N_sites: {len(P)}\n")
+        f.write(f"N_free: {n_free}\n")
+        f.write(f"N_defective: {n_def}\n")
+        f.write(f"E_free_mean: {e_free}\n")
+        f.write(f"E_def_mean: {e_def}\n")
+        f.write(f"E_boundary_mean: {e_boundary}\n")
+        if summary_mode == "site_energy":
+            f.write(f"E_diff: {e_def - e_free}\n")
+            f.write(f"E_free_std: {float(np.nanstd(energy_landscape[site_free])) if n_free else np.nan}\n")
+            f.write(f"E_def_std: {float(np.nanstd(energy_landscape[~site_free])) if n_def else np.nan}\n")
+
+    # Plot site mask scatter
+    plt.figure(figsize=(7, 6))
+    plt.scatter(P[~site_free, 0], P[~site_free, 1], s=6, c='crimson', label='defective')
+    plt.scatter(P[site_free, 0], P[site_free, 1], s=6, c='royalblue', label='defect-free', alpha=0.7)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.legend()
+    plt.xlabel('x'); plt.ylabel('y'); plt.title('Region segmentation (sites)')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "region_masks_scatter.pdf"))
+    plt.clf(); plt.close()
+
+    # Plot q overlay with free-region contour
+    plt.figure(figsize=(7, 6))
+    im = plt.pcolormesh(X, Y, q, shading='auto', cmap='RdBu_r')
+    plt.colorbar(im, label='q(x,y)')
+    # contour of free region
+    try:
+        plt.contour(X, Y, free_grid_mask.astype(float), levels=[0.5], colors='k', linewidths=1.2)
+    except Exception:
+        pass
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.xlabel('x'); plt.ylabel('y'); plt.title('Continuum chirality and free-region')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "region_q_overlay.pdf"))
+    plt.clf(); plt.close()
+
+    # Plot energy distribution comparison
+    if summary_mode == "site_energy":
+        plt.figure(figsize=(10, 4))
+        
+        plt.subplot(1, 2, 1)
+        plt.hist(energy_landscape[site_free], bins=30, alpha=0.7, label='defect-free', color='royalblue')
+        plt.hist(energy_landscape[~site_free], bins=30, alpha=0.7, label='defective', color='crimson')
+        plt.xlabel('Energy')
+        plt.ylabel('Count')
+        plt.legend()
+        plt.title('Energy distributions')
+        
+        plt.subplot(1, 2, 2)
+        plt.scatter(P[:, 0], P[:, 1], c=energy_landscape, s=4, cmap='viridis')
+        plt.colorbar(label='Energy')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.xlabel('x'); plt.ylabel('y'); plt.title('Energy landscape')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "energy_analysis.pdf"))
+        plt.clf(); plt.close()
+
+    return {
+        'N_free': n_free,
+        'N_def': n_def,
+        'E_free_mean': e_free,
+        'E_def_mean': e_def,
+        'E_boundary_mean': e_boundary,
+        'site_free_mask': site_free,
+    }
+
+
+def _edges_from_triangulation(points):
+    """Build unique undirected edges from Delaunay triangulation of points (N,2)."""
+    tri = Delaunay(points)
+    simplices = tri.simplices
+    edges = set()
+    for a, b, c in simplices:
+        e = [(a, b), (b, c), (c, a)]
+        for i, j in e:
+            if i > j:
+                i, j = j, i
+            edges.add((i, j))
+    edges = np.array(sorted(list(edges)), dtype=int)
+    return edges
+
+
+def _psi6_and_spacing(points, edges):
+    """
+    For each point, compute:
+      - degree (neighbor count from edges)
+      - psi6 complex order parameter using neighbor angles
+      - median neighbor spacing
+    Returns degree (N,), psi6 (N,), spacing (N,)
+    """
+    N = points.shape[0]
+    nbrs = [[] for _ in range(N)]
+    for i, j in edges:
+        nbrs[i].append(j)
+        nbrs[j].append(i)
+    degree = np.array([len(n) for n in nbrs], dtype=int)
+    psi6 = np.zeros(N, dtype=np.complex128)
+    spacing = np.zeros(N, dtype=float)
+    for i in range(N):
+        ns = nbrs[i]
+        if len(ns) == 0:
+            psi6[i] = 0.0
+            spacing[i] = np.nan
+            continue
+        vecs = points[np.array(ns)] - points[i]
+        thetas = np.arctan2(vecs[:, 1], vecs[:, 0])
+        psi6[i] = np.mean(np.exp(1j * 6.0 * thetas))
+        dists = np.linalg.norm(vecs, axis=1)
+        spacing[i] = np.median(dists)
+    return degree, psi6, spacing
+
+
+def _largest_coherent_component(edges, good_mask, psi6, ori_thr_deg=15.0):
+    """
+    Among nodes with good_mask True, build components requiring neighboring psi6 phase
+    difference < ori_thr_deg. Return indices of the largest component.
+    """
+    N = good_mask.size
+    # Build adjacency list filtered by good_mask and orientation similarity
+    adj = [[] for _ in range(N)]
+    thr = np.deg2rad(ori_thr_deg)
+    phases = np.angle(psi6)
+    for i, j in edges:
+        if not (good_mask[i] and good_mask[j]):
+            continue
+        dphi = np.angle(np.exp(1j * (phases[i] - phases[j])))  # wrap to [-pi,pi]
+        if abs(dphi) <= thr:
+            adj[i].append(j)
+            adj[j].append(i)
+    # BFS/DFS to get components
+    visited = np.zeros(N, dtype=bool)
+    best_comp = []
+    for s in range(N):
+        if visited[s] or not (good_mask[s]):
+            continue
+        comp = []
+        stack = [s]
+        visited[s] = True
+        while stack:
+            u = stack.pop()
+            comp.append(u)
+            for v in adj[u]:
+                if not visited[v]:
+                    visited[v] = True
+                    stack.append(v)
+        if len(comp) > len(best_comp):
+            best_comp = comp
+    return np.array(best_comp, dtype=int)
+
+
+def segment_skyrmion_lattice(P, S, grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0):
+    """
+    Skyrmion-lattice-aware segmentation.
+    Steps:
+      1) Detect skyrmion cores from continuum chirality |q| peaks.
+      2) Build Delaunay graph over core positions and compute psi6, spacing.
+      3) Mark cores as 'good' if degree==6, |psi6|>=psi6_thr, spacing close to global median (±sp_rel_thr).
+      4) Keep the largest orientation-coherent connected component as ordered domain.
+      5) Assign lattice sites to nearest core within 0.6*a_skx and inherit ordered/defective label.
+    Returns dict with masks and diagnostics.
+    """
+    cont = compute_continuum_chirality(P, S, grid_res=grid_res, sigma=sigma)
+    X, Y, q, Sz, mask = cont['X'], cont['Y'], cont['q'], cont['Sz'], cont['mask']
+    cores = detect_skyrmion_cores_from_grid(X, Y, Sz, q, mask, q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
+    core_xy = np.array([(x, y) for (x, y, qv, szv, kind) in cores['q_peaks']], dtype=float)
+    if core_xy.shape[0] < 3:
+        # Fallback: no reliable core detection, return everything as ordered
+        site_ordered_mask = np.ones(P.shape[0], dtype=bool)
+        return {
+            'cont': cont,
+            'cores': cores,
+            'core_xy': core_xy,
+            'site_ordered_mask': site_ordered_mask,
+            'core_good_mask': np.ones(core_xy.shape[0], dtype=bool),
+            'psi6': np.array([], dtype=np.complex128),
+            'degree': np.array([], dtype=int),
+            'spacing': np.array([], dtype=float),
+            'a_skx': np.nan,
+            'main_component': np.array([], dtype=int),
+        }
+
+    # Build lattice graph and metrics
+    edges = _edges_from_triangulation(core_xy)
+    degree, psi6, spacing = _psi6_and_spacing(core_xy, edges)
+    a_skx = np.nanmedian(spacing)
+    spacing_ok = np.isfinite(spacing) & (np.abs(spacing - a_skx) <= sp_rel_thr * (a_skx + 1e-12))
+    psi6_ok = (np.abs(psi6) >= psi6_thr)
+    degree_ok = (degree == 6)
+    core_good_mask = spacing_ok & psi6_ok & degree_ok
+
+    # Largest coherent component among good cores
+    main_comp = _largest_coherent_component(edges, core_good_mask, psi6, ori_thr_deg=ori_thr_deg)
+    core_in_main = np.zeros(core_xy.shape[0], dtype=bool)
+    core_in_main[main_comp] = True
+
+    # Assign sites to nearest core and label ordered if nearest core in main component
+    tree = cKDTree(core_xy)
+    dists, idxs = tree.query(P[:, :2], k=1)
+    r_assign = 0.6 * (a_skx if np.isfinite(a_skx) else np.nanmedian(spacing))
+    near_any = dists <= (r_assign if np.isfinite(r_assign) else np.inf)
+    site_ordered_mask = near_any & core_in_main[idxs]
+
+    return {
+        'cont': cont,
+        'cores': cores,
+        'core_xy': core_xy,
+        'edges': edges,
+        'psi6': psi6,
+        'degree': degree,
+        'spacing': spacing,
+        'a_skx': a_skx,
+        'core_good_mask': core_good_mask,
+        'main_component': main_comp,
+        'site_ordered_mask': site_ordered_mask,
+    }
+
+
+def energetics_argument_skyrmion(P, S, energy_landscape, out_dir, grid_res=256, sigma=1.0,
+                                 psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0):
+    """
+    Energetics argument using skyrmion-lattice-aware segmentation.
+    Treat the well-ordered skyrmion lattice domain as 'ordered', and deviations
+    (dislocations, grain boundaries, vacancies/interstitials) as 'defective'.
+    """
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    seg = segment_skyrmion_lattice(P, S, grid_res=grid_res, sigma=sigma,
+                                   psi6_thr=psi6_thr, sp_rel_thr=sp_rel_thr, ori_thr_deg=ori_thr_deg)
+    site_ordered = seg['site_ordered_mask']
+    cont = seg['cont']
+    X, Y, q = cont['X'], cont['Y'], cont['q']
+
+    n_ord = int(site_ordered.sum())
+    n_def = int((~site_ordered).sum())
+
+    if len(energy_landscape) == len(P):
+        e_ord = float(np.nanmean(energy_landscape[site_ordered])) if n_ord else np.nan
+        e_def = float(np.nanmean(energy_landscape[~site_ordered])) if n_def else np.nan
+        mode = 'site_energy'
+    else:
+        e_ord = e_def = np.nan
+        mode = 'no_matching_energy'
+
+    with open(os.path.join(out_dir, 'energetics_summary.txt'), 'w') as f:
+        f.write(f"mode: {mode}\n")
+        f.write(f"N_sites: {len(P)}\n")
+        f.write(f"N_ordered: {n_ord}\n")
+        f.write(f"N_defective: {n_def}\n")
+        f.write(f"E_ordered_mean: {e_ord}\n")
+        f.write(f"E_def_mean: {e_def}\n")
+        if mode == 'site_energy':
+            f.write(f"E_diff: {e_def - e_ord}\n")
+
+    # Plot: site classification
+    plt.figure(figsize=(7, 6))
+    plt.scatter(P[~site_ordered, 0], P[~site_ordered, 1], s=6, c='crimson', label='defective')
+    plt.scatter(P[site_ordered, 0], P[site_ordered, 1], s=6, c='royalblue', label='ordered', alpha=0.7)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.legend()
+    plt.xlabel('x'); plt.ylabel('y'); plt.title('SkX-aware segmentation (sites)')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, 'skx_region_masks_scatter.pdf'))
+    plt.clf(); plt.close()
+
+    # Plot: q overlay
+    plt.figure(figsize=(7, 6))
+    im = plt.pcolormesh(X, Y, q, shading='auto', cmap='RdBu_r')
+    plt.colorbar(im, label='q(x,y)')
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.xlabel('x'); plt.ylabel('y'); plt.title('q(x,y) for SkX segmentation')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, 'skx_q_overlay.pdf'))
+    plt.clf(); plt.close()
+
+    # Plot: cores and psi6
+    core_xy = seg['core_xy']
+    if core_xy.shape[0] >= 3:
+        psi6 = seg['psi6']
+        degree = seg['degree']
+        core_good = seg['core_good_mask']
+        edges = seg.get('edges')
+        plt.figure(figsize=(7, 6))
+        if edges is not None and edges.size:
+            for i, j in edges:
+                xi, yi = core_xy[i]
+                xj, yj = core_xy[j]
+                plt.plot([xi, xj], [yi, yj], color='lightgray', lw=0.5, zorder=1)
+        sc = plt.scatter(core_xy[:, 0], core_xy[:, 1], c=np.abs(psi6), s=25, cmap='viridis', zorder=2)
+        plt.colorbar(sc, label='|psi6|')
+        bad = ~(core_good)
+        if np.any(bad):
+            plt.scatter(core_xy[bad, 0], core_xy[bad, 1], facecolors='none', edgecolors='r', s=60, label='irregular cores', zorder=3)
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.xlabel('x'); plt.ylabel('y'); plt.title('Skyrmion cores and |psi6|')
+        plt.legend(loc='best')
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, 'skx_cores_psi6.pdf'))
+        plt.clf(); plt.close()
+
+    # Energy plots
+    if mode == 'site_energy':
+        plt.figure(figsize=(10, 4))
+        plt.subplot(1, 2, 1)
+        plt.hist(energy_landscape[site_ordered], bins=30, alpha=0.7, label='ordered', color='royalblue')
+        plt.hist(energy_landscape[~site_ordered], bins=30, alpha=0.7, label='defective', color='crimson')
+        plt.xlabel('Energy'); plt.ylabel('Count'); plt.legend(); plt.title('Energy distributions')
+        plt.subplot(1, 2, 2)
+        plt.scatter(P[:, 0], P[:, 1], c=energy_landscape, s=4, cmap='inferno')
+        plt.colorbar(label='Energy')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.xlabel('x'); plt.ylabel('y'); plt.title('Energy landscape')
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, 'skx_energy_analysis.pdf'))
+        plt.clf(); plt.close()
+
+    return {
+        'N_ordered': n_ord,
+        'N_def': n_def,
+        'E_ordered_mean': e_ord,
+        'E_def_mean': e_def,
+        'site_ordered_mask': site_ordered,
+        'a_skx': seg['a_skx'],
+    }
 
 def _interpolate_spins_to_grid(P, S, grid_res=256, method='linear'):
     """Interpolate spins onto a regular XY grid.
@@ -1788,7 +2261,7 @@ def parse_spin_config(directory):
         filename = os.fsdecode(file)
         print(filename)
         if os.path.isdir(directory + "/" + filename):
-            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
+            S = np.loadtxt(directory + "/" + filename + "/spin.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
             base2d = directory + "/" + filename + "/spin_config_2d.pdf"
@@ -1810,7 +2283,8 @@ def parse_spin_config(directory):
             cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
             cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
             plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
-            regnault_magnetic_moment_reconstruction(P, directory + "/" + filename)
+            regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'xx')
+            regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'yy')
             energy_landscape_path = os.path.join(directory, filename, "energy_landscape.txt")
             if os.path.exists(energy_landscape_path):
                 energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
@@ -1830,6 +2304,24 @@ def parse_spin_config(directory):
                 plt.savefig(directory + "/" + filename + "/energy_landscape_heatmap.pdf")
                 plt.clf()
                 plt.close()
+
+                np.savetxt(directory + "/" + filename + "/energy_density.txt", np.array([np.mean(energy_landscape)]))
+
+                energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
+                
+                # Perform energetics argument analysis
+                print("Computing energetics argument (defect-free vs defective regions)")
+                energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
+                                                      J=1.0, grid_res=256, sigma=1.0)
+                print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
+                print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
+
+                # Skyrmion-lattice-aware energetics that does not classify cores as defects
+                print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
+                skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
+                                                       grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
+                print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
+                print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
             else:
                 print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
                 energy_landscape = np.zeros(P.shape[0])
