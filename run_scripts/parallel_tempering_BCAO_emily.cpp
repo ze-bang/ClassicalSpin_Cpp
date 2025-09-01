@@ -264,7 +264,7 @@ void create_default_parameter_file(const string& filename) {
 }
 
 // Main simulation function for Parallel Tempering
-void PT_BCAO_honeycomb(const SimulationParams& params){
+void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     filesystem::create_directories(params.dir);
     HoneyComb<3> atoms;
     int rank = 0, size = 1;
@@ -330,7 +330,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params){
 
     // Parallel tempering run
     t_step = MPI_Wtime();
-    MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0});
+    MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_3_parallel_tempering", MPI_Wtime() - t_step, rank);
     if (rank == 0) {
@@ -470,7 +470,7 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params);
+                PT_BCAO_honeycomb(trial_params, false);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
@@ -481,7 +481,7 @@ int main(int argc, char** argv) {
             // Barrier before the fixed-h run
             MPI_Barrier(MPI_COMM_WORLD);
             // Run the Parallel Tempering simulation
-            PT_BCAO_honeycomb(trial_params);
+            PT_BCAO_honeycomb(trial_params, true);
         }
         // End of trial
         MPI_Barrier(MPI_COMM_WORLD);
