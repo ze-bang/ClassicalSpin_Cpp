@@ -715,6 +715,228 @@ class lattice
         return acceptance_rate;
     }
 
+    // =========================
+    // Cluster Monte Carlo (Wolff & Swendsen–Wang)
+    // =========================
+    // Notes:
+    // - These implementations use an embedded-Ising projection: pick a random unit vector r in R^N,
+    //   define sigma_i = sign(s_i · r). Bonds are activated with probability
+    //       p_ij = 1 - exp(-2 beta K_ij (s_i·r)(s_j·r)) for (s_i·r)(s_j·r) > 0, else 0,
+    //   where K_ij = r^T J_ij r with J_ij the bilinear interaction matrix.
+    // - Only bilinear interactions are used for cluster construction; trilinear, onsite terms,
+    //   and twist matrices are ignored in bond activation and should be disabled for strict detailed balance.
+    // - If twist matrices differ from identity or nonzero fields/onsite/trilinear exist, the methods remain
+    //   usable as heuristic large moves, but strict balance is not guaranteed.
+
+    // Helper: generate a random unit vector in R^N
+    array<double,N> random_unit_vector() const {
+        array<double,N> v = {};
+        // reuse generator that yields on the sphere but scaled by spin_length
+        v = const_cast<lattice*>(this)->gen_random_spin(1.0);
+        // ensure normalization (defensive)
+        double n2 = dot(v, v);
+        if (n2 <= 0) { v[0] = 1.0; return v; }
+        return v * (1.0 / sqrt(n2));
+    }
+
+    // Helper: reflect a spin across the hyperplane perpendicular to r
+    static array<double,N> reflect_across_plane(const array<double,N>& s, const array<double,N>& r_unit){
+        double proj = dot(s, r_unit);
+        return s - r_unit * (2.0 * proj);
+    }
+
+    // Helper: projected coupling along r for edge (i -> neighborIdx)
+    inline double projected_coupling_r(size_t i, size_t neighborIdx, const array<double,N>& r_unit) const {
+        const auto& Jij = bilinear_interaction[i][neighborIdx];
+        // K = r^T J r
+        array<double,N> Jr = multiply<N,N>(Jij, r_unit);
+        return dot(r_unit, Jr);
+    }
+
+    // Check whether twist matrices are identity (within tolerance)
+    bool twist_is_identity(double tol=1e-12) const {
+        for (size_t d=0; d<3; ++d){
+            for (size_t i=0; i<N; ++i){
+                for (size_t j=0; j<N; ++j){
+                    double want = (i==j)?1.0:0.0;
+                    if (fabs(twist_matrices[d][i*N + j] - want) > tol) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Wolff single-cluster update; returns cluster size. If useGhostField is true, approximate field handling by ghost bonds.
+    size_t wolff_update(double T, bool useGhostField=false){
+        if (T <= 0) return 0;
+        const double beta = 1.0 / T;
+        // random seed site
+        size_t seed = random_int_lehman(lattice_size);
+        array<double,N> r = random_unit_vector();
+
+        // Precompute projections s·r for all sites
+        vector<double> proj(lattice_size);
+        for (size_t i=0;i<lattice_size;++i) proj[i] = dot(spins[i], r);
+
+        // BFS stack
+        vector<uint8_t> in_cluster(lattice_size, 0);
+        vector<size_t> stack;
+        stack.reserve(lattice_size/10 + 1);
+        bool attached_to_ghost = false;
+
+        in_cluster[seed] = 1;
+        stack.push_back(seed);
+
+        while(!stack.empty()){
+            size_t i = stack.back(); stack.pop_back();
+            double si = proj[i];
+            // Ghost-field bond (optional, heuristic): do not flip cluster if it attaches to ghost
+            if (useGhostField){
+                double hproj = dot(field[i], r); // Zeeman projection along r
+                double arg = 2.0 * beta * hproj * std::max(0.0, si);
+                if (arg > 0){
+                    double pghost = 1.0 - exp(-arg);
+                    if (random_double_lehman(0,1) < pghost) attached_to_ghost = true;
+                }
+            }
+
+            // Visit neighbors
+            for (size_t n=0; n<bilinear_partners[i].size(); ++n){
+                size_t j = bilinear_partners[i][n];
+                if (in_cluster[j]) continue;
+                double sj = proj[j];
+                if (si * sj <= 0) continue; // only like-signed projections can bond
+                double K = projected_coupling_r(i, n, r);
+                if (K <= 0) continue; // only ferromagnetic along r
+                double p = 1.0 - exp(-2.0 * beta * K * si * sj);
+                if (random_double_lehman(0,1) < p){
+                    in_cluster[j] = 1;
+                    stack.push_back(j);
+                }
+            }
+        }
+
+        // Flip (reflect) cluster spins if not attached to ghost
+        size_t cluster_size = 0;
+        if (!attached_to_ghost){
+            for (size_t i=0;i<lattice_size;++i){
+                if (in_cluster[i]){
+                    spins[i] = reflect_across_plane(spins[i], r);
+                    cluster_size++;
+                }
+            }
+        }
+
+        return cluster_size;
+    }
+
+    // Swendsen–Wang sweep: build all clusters and reflect each with probability 1/2.
+    // Returns the number of clusters flipped.
+    size_t swendsen_wang_sweep(double T, bool useGhostField=false){
+        if (T <= 0) return 0;
+        const double beta = 1.0 / T;
+        array<double,N> r = random_unit_vector();
+
+        // Precompute projections
+        vector<double> proj(lattice_size);
+        for (size_t i=0;i<lattice_size;++i) proj[i] = dot(spins[i], r);
+
+        // Union-Find structures
+        vector<int> parent(lattice_size), sz(lattice_size,1);
+        iota(parent.begin(), parent.end(), 0);
+        auto findp = [&](auto&& self, int x)->int { return parent[x]==x? x : parent[x] = self(self, parent[x]); };
+        auto unite = [&](int a, int b){ a=findp(findp, a); b=findp(findp, b); if (a==b) return; if (sz[a]<sz[b]) swap(a,b); parent[b]=a; sz[a]+=sz[b]; };
+
+        // Build bonds; to avoid double counting, process only j with j>i
+        for (size_t i=0; i<lattice_size; ++i){
+            double si = proj[i];
+            for (size_t n=0; n<bilinear_partners[i].size(); ++n){
+                size_t j = bilinear_partners[i][n];
+                if (j <= i) continue;
+                double sj = proj[j];
+                if (si * sj <= 0) continue;
+                double K = projected_coupling_r(i, n, r);
+                if (K <= 0) continue;
+                double p = 1.0 - exp(-2.0 * beta * K * si * sj);
+                if (random_double_lehman(0,1) < p){
+                    unite((int)i, (int)j);
+                }
+            }
+        }
+
+        // Optional ghost bonds (heuristic): mark cluster roots attached to ghost to prevent flipping
+        vector<uint8_t> forbid_flip(lattice_size, 0);
+        if (useGhostField){
+            for (size_t i=0;i<lattice_size;++i){
+                double si = proj[i];
+                double hproj = dot(field[i], r);
+                double arg = 2.0 * beta * hproj * std::max(0.0, si);
+                if (arg > 0){
+                    double pghost = 1.0 - exp(-arg);
+                    if (random_double_lehman(0,1) < pghost){
+                        int root = findp(findp, (int)i);
+                        forbid_flip[root] = 1;
+                    }
+                }
+            }
+        }
+
+        // Decide flips per cluster root
+        vector<uint8_t> flip_root(lattice_size, 0);
+        for (size_t i=0; i<lattice_size; ++i){
+            int rroot = findp(findp, (int)i);
+            if ((int)i == rroot){
+                if (!forbid_flip[rroot] && random_double_lehman(0,1) < 0.5) flip_root[rroot] = 1;
+            }
+        }
+
+        // Apply reflections
+        size_t flipped_clusters = 0;
+        for (size_t i=0; i<lattice_size; ++i){
+            int rroot = findp(findp, (int)i);
+            if (flip_root[rroot]){
+                spins[i] = reflect_across_plane(spins[i], r);
+            }
+        }
+        for (size_t i=0; i<lattice_size; ++i){
+            if ((int)i == findp(findp, (int)i) && flip_root[i]) flipped_clusters++;
+        }
+    // Energy cache is outdated after flips
+    invalidate_energy_cache();
+    return flipped_clusters;
+    }
+
+    // Convenience: perform k Wolff clusters at temperature T. Returns total flipped spins.
+    size_t wolff_sweep(double T, size_t k=1, bool useGhostField=false){
+        size_t total=0; for(size_t c=0;c<k;++c) total += wolff_update(T, useGhostField); return total; }
+
+    // Convenience: one SW sweep at temperature T. Returns flipped cluster count.
+    size_t sw_sweep(double T, bool useGhostField=false){ return swendsen_wang_sweep(T, useGhostField); }
+
+    // Simple cluster-based annealing (does not include overrelaxation/twist updates)
+    void cluster_annealing(double T_start, double T_end, size_t n_anneal, size_t wolff_per_temp,
+                           bool use_sw=false, bool useGhostField=false, double cooling_rate=0.9,
+                           string out_dir=""){
+        if (!out_dir.empty()) { filesystem::create_directory(out_dir); }
+        double T = T_start;
+        while (T > T_end){
+            if (use_sw){
+                for (size_t i=0;i<n_anneal;++i) { swendsen_wang_sweep(T, useGhostField); }
+                cout << "[Cluster SA] T=" << T << " SW sweeps=" << n_anneal << endl;
+            } else {
+                size_t flipped = 0;
+                for (size_t i=0;i<n_anneal;++i) { flipped += wolff_sweep(T, wolff_per_temp, useGhostField); }
+                cout << "[Cluster SA] T=" << T << " Wolff clusters=" << (n_anneal*wolff_per_temp)
+                     << " flipped_spins~=" << flipped << endl;
+            }
+            T *= cooling_rate;
+        }
+        if (!out_dir.empty()){
+            write_to_file_spin(out_dir + "/spin.txt", spins);
+            write_to_file_pos(out_dir + "/pos.txt");
+        }
+    }
+
 
     void write_to_file_spin(string filename, spin_config towrite){
         ofstream myfile;
