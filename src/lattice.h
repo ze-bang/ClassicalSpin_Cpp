@@ -1030,7 +1030,7 @@ class lattice
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
 
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool boundary_update = false, bool gaussian_move = true){
 
         int swap_accept = 0;
         double curr_accept = 0;
@@ -1099,7 +1099,7 @@ class lattice
             }
             
             // Coordinated twist angle updates
-            if (i % twist_update_interval == 0 && i % overrelaxation_flag == 0) {
+            if (boundary_update && i % twist_update_interval == 0 && i % overrelaxation_flag == 0) {
                 // Strategy 1: Temperature-weighted consensus
                 // Lower temperature processes have more weight in determining global twist
                 if (i % twist_consensus_interval == 0) {
@@ -1140,7 +1140,7 @@ class lattice
                 }
                 
                 // Strategy 2: Stochastic local updates with broadcast from lowest T
-                else if (rank == 0) { // Lowest temperature process leads
+                else if (boundary_update && rank == 0) { // Lowest temperature process leads
                     // Perform twist update only at lowest temperature
                     metropolis_twist_sweep(curr_Temp);
                     
@@ -1185,23 +1185,26 @@ class lattice
                         if (partner_rank % 2 == 0){
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            
-                            // Also exchange twist matrices to maintain consistency
-                            for (size_t d = 0; d < 3; ++d) {
-                                array<double, N*N> temp_twist;
-                                MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD);
-                                MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                twist_matrices[d] = temp_twist;
+                            if (boundary_update){
+                                // Also exchange twist matrices to maintain consistency
+                                for (size_t d = 0; d < 3; ++d) {
+                                    array<double, N*N> temp_twist;
+                                    MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD);
+                                    MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                    twist_matrices[d] = temp_twist;
+                                }
                             }
+                           
                         } else{
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-                            
-                            for (size_t d = 0; d < 3; ++d) {
-                                array<double, N*N> temp_twist;
-                                MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD);
-                                twist_matrices[d] = temp_twist;
+                            if (boundary_update){
+                                for (size_t d = 0; d < 3; ++d) {
+                                    array<double, N*N> temp_twist;
+                                    MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                    MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD);
+                                    twist_matrices[d] = temp_twist;
+                                }
                             }
                         }
                         copy(new_spins.begin(), new_spins.end(), spins.begin());
