@@ -60,11 +60,6 @@ class lattice
 
     // Optimization member variables for energy caching
     private:
-    vector<double> cached_site_energies;
-    bool energy_cache_valid;
-    vector<size_t> site_update_order;
-    size_t current_sweep_index;
-    
     // Pre-allocated temporary arrays to avoid allocations in hot loops
     mutable array<double,N> temp_spin_array;
     mutable array<double,N> temp_local_field;
@@ -304,10 +299,7 @@ class lattice
         cout << "Bilinear interactions: " << num_bi << endl;
         cout << "Trilinear interactions: " << num_tri << endl;
         cout << "Spin dimension: " << num_gen << endl;
-        // Initialize optimization structures
-        initialize_energy_cache();
-        initialize_sweep_order();
-    build_boundary_sites();
+        build_boundary_sites();
     }
 
     lattice(const lattice<N, N_ATOMS, dim1, dim2, dim> *lattice_in){
@@ -342,18 +334,6 @@ class lattice
         num_gen = lattice_in->num_gen;
     };
 
-    // Energy cache management methods
-    void initialize_energy_cache() {
-        cached_site_energies.resize(lattice_size);
-        energy_cache_valid = false;
-        update_energy_cache();
-    }
-    
-    void initialize_sweep_order() {
-        site_update_order.resize(lattice_size);
-        std::iota(site_update_order.begin(), site_update_order.end(), 0);
-        current_sweep_index = 0;
-    }
     
     void build_boundary_sites() {
         // Build boundary site lists based on boundary_thickness and lattice dimensions
@@ -417,35 +397,6 @@ class lattice
         return s;
     }
     
-    void update_energy_cache() {
-        #pragma omp parallel for schedule(static)
-        for(size_t i = 0; i < lattice_size; ++i) {
-            cached_site_energies[i] = site_energy(spins[i], i);
-        }
-        energy_cache_valid = true;
-    }
-    
-    void invalidate_energy_cache() {
-        energy_cache_valid = false;
-    }
-    
-    void update_cached_energy_for_site(size_t site_index, const array<double,N>& new_spin) {
-        if (energy_cache_valid) {
-            cached_site_energies[site_index] = site_energy_internal(new_spin, site_index);
-        }
-    }
-    
-    void shuffle_sweep_order() {
-        // Use a simple linear congruential generator for better performance
-        static size_t seed = 1;
-        for(size_t i = lattice_size - 1; i > 0; --i) {
-            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-            size_t j = seed % (i + 1);
-            std::swap(site_update_order[i], site_update_order[j]);
-        }
-        current_sweep_index = 0;
-    }
-
     void set_pulse(const array<array<double,N>, N_ATOMS> &field_in, double t_B, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
         field_drive_1 = field_in;
         field_drive_2 = field_in_2;
@@ -901,9 +852,7 @@ class lattice
         for (size_t i=0; i<lattice_size; ++i){
             if ((int)i == findp(findp, (int)i) && flip_root[i]) flipped_clusters++;
         }
-    // Energy cache is outdated after flips
-    invalidate_energy_cache();
-    return flipped_clusters;
+        return flipped_clusters;
     }
 
     // Convenience: perform k Wolff clusters at temperature T. Returns total flipped spins.
@@ -1026,7 +975,7 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, double cooling_rate = 0.9, string out_dir = "", bool save_observables = false){    
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, double cooling_rate = 0.9, string out_dir = "", bool boundary_update = false, bool save_observables = false){    
         if (out_dir != ""){
             filesystem::create_directory(out_dir);
         }
@@ -1049,8 +998,10 @@ class lattice
                     curr_accept += metropolis(spins, T, gaussian_move, sigma);
                 }
             }
-            for (size_t i = 0; i < 1e2; ++i){
-                metropolis_twist_sweep(T);
+            if (boundary_update) {
+                for (size_t i = 0; i < 1e2; ++i){
+                    metropolis_twist_sweep(T);
+                }
             }
             if (overrelaxation_rate > 0){
                 acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
@@ -1242,10 +1193,6 @@ class lattice
                 }
             }
         }
-        
-        // Invalidate and update energy cache after changing spins
-        invalidate_energy_cache();
-        update_energy_cache();
 
         cout << "Starting simulated annealing with zigzag initial configuration." << endl;
         // Call the existing simulated annealing method

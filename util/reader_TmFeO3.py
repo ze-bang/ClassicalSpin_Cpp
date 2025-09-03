@@ -638,8 +638,6 @@ def read_2D_nonlinear_adaptive_time_step(dir, fm):
     
     return M_NL_FF_abs
 
-
-
 def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps.
@@ -965,7 +963,7 @@ def full_read_2DCS_TFO(dir, done=False):
     Tstep = 0.01
     freqs = np.fft.fftfreq(int(lenT/Tstep), d=Tstep) * 2 * np.pi
     print(freqs)
-    omega_range = 2
+    omega_range = 5
 
     # Create ordered frequency arrays
     w = freqs[freqs >= 0]  # Positive frequencies only

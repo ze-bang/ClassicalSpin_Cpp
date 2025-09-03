@@ -2250,6 +2250,379 @@ def plot_spin_config_3d(P, S, filename, color_by='z', subsample=None, zoom_frac=
     plt.clf()
     plt.close(fig)
 
+def compute_regional_SSSF(P, S, nK, output_dir, n_regions_x=3, n_regions_y=3, overlap=0.1, gb=False):
+    """
+    Split the spin configuration into regions and compute full analysis for each region.
+    
+    Args:
+        P: Position array (N, 2 or 3)
+        S: Spin array (N, 3)
+        nK: Number of k-points for SSSF grid
+        output_dir: Directory to save results
+        n_regions_x: Number of regions in x direction
+        n_regions_y: Number of regions in y direction
+        overlap: Fraction of overlap between regions (0 to 1)
+        gb: Whether to use global basis for SSSF
+    
+    Returns:
+        Dictionary containing regional SSSF results
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Get spatial extent
+    x_min, x_max = np.min(P[:, 0]), np.max(P[:, 0])
+    y_min, y_max = np.min(P[:, 1]), np.max(P[:, 1])
+    
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    
+    # Calculate region sizes with overlap
+    region_width = x_range / n_regions_x * (1 + overlap)
+    region_height = y_range / n_regions_y * (1 + overlap)
+    
+    # Step size between region centers
+    x_step = x_range / n_regions_x
+    y_step = y_range / n_regions_y
+    
+    # Store results
+    regional_results = {}
+    all_SSSF = []
+    region_info = []
+    all_Q_total = []
+    all_energies = []
+    
+    # Create figure for regional SSSF overview
+    fig_sssf, axes_sssf = plt.subplots(n_regions_y, n_regions_x, 
+                                figsize=(4*n_regions_x, 4*n_regions_y))
+    if n_regions_x == 1 and n_regions_y == 1:
+        axes_sssf = np.array([[axes_sssf]])
+    elif n_regions_x == 1:
+        axes_sssf = axes_sssf.reshape(-1, 1)
+    elif n_regions_y == 1:
+        axes_sssf = axes_sssf.reshape(1, -1)
+    
+    # Create figure for regional chirality overview
+    fig_chir, axes_chir = plt.subplots(n_regions_y, n_regions_x, 
+                                figsize=(4*n_regions_x, 4*n_regions_y))
+    if n_regions_x == 1 and n_regions_y == 1:
+        axes_chir = np.array([[axes_chir]])
+    elif n_regions_x == 1:
+        axes_chir = axes_chir.reshape(-1, 1)
+    elif n_regions_y == 1:
+        axes_chir = axes_chir.reshape(1, -1)
+    
+    # Process each region
+    for i in range(n_regions_y):
+        for j in range(n_regions_x):
+            # Define region boundaries
+            x_center = x_min + (j + 0.5) * x_step
+            y_center = y_min + (i + 0.5) * y_step
+            
+            x_region_min = x_center - region_width / 2
+            x_region_max = x_center + region_width / 2
+            y_region_min = y_center - region_height / 2
+            y_region_max = y_center + region_height / 2
+            
+            # Select spins in this region
+            mask = ((P[:, 0] >= x_region_min) & (P[:, 0] <= x_region_max) &
+                    (P[:, 1] >= y_region_min) & (P[:, 1] <= y_region_max))
+            
+            n_spins = np.sum(mask)
+            
+            if n_spins < 10:  # Skip regions with too few spins
+                print(f"Region ({i},{j}): Too few spins ({n_spins}), skipping")
+                # Clear the subplot
+                axes_sssf[i, j].text(0.5, 0.5, f'Region ({i},{j})\nInsufficient data\nN={n_spins}', 
+                                        ha='center', va='center', transform=axes_sssf[i, j].transAxes)
+                axes_sssf[i, j].set_xticks([])
+                axes_sssf[i, j].set_yticks([])
+                
+                axes_chir[i, j].text(0.5, 0.5, f'Region ({i},{j})\nInsufficient data\nN={n_spins}', 
+                                        ha='center', va='center', transform=axes_chir[i, j].transAxes)
+                axes_chir[i, j].set_xticks([])
+                axes_chir[i, j].set_yticks([])
+                continue
+            
+            P_region = P[mask]
+            S_region = S[mask]
+            
+            # Create region directory
+            region_key = f"region_{i}_{j}"
+            region_dir = os.path.join(output_dir, region_key)
+            if not os.path.exists(region_dir):
+                os.makedirs(region_dir)
+            
+            print(f"\nAnalyzing region ({i},{j}): {n_spins} spins")
+            
+            # 1. Compute SSSF for this region
+            H = np.linspace(-2*np.pi, 2*np.pi, nK)
+            L = np.linspace(-2*np.pi, 2*np.pi, nK)
+            A, B = np.meshgrid(H, L)
+            K = hhztoK(A, B).reshape((nK*nK, 3))
+            
+            SSSF_region = SSSF_q(K, S_region, P_region, gb)
+            SSSF_region = SSSF_region.reshape((nK, nK, 3, 3))
+            
+            # Plot total SSSF for this region
+            total_SSSF = contract('ijab->ij', SSSF_region)
+            im = axes_sssf[i, j].pcolormesh(A, B, total_SSSF, cmap='viridis')
+            axes_sssf[i, j].set_title(f'Region ({i},{j})\nN={n_spins}', fontsize=10)
+            axes_sssf[i, j].set_xlabel('$k_x$')
+            axes_sssf[i, j].set_ylabel('$k_y$')
+            
+            # Save SSSF components
+            for ii, component_i in enumerate(['x', 'y', 'z']):
+                for jj, component_j in enumerate(['x', 'y', 'z']):
+                    np.savetxt(os.path.join(region_dir, f'SSSF_{component_i}{component_j}.txt'), 
+                                SSSF_region[:,:,ii,jj])
+            
+            # 2. Plot 2D spin configuration
+            base2d = os.path.join(region_dir, "spin_config_2d.pdf")
+            plot_spin_config_2d(P_region, S_region, base2d)
+            
+            # 3. Plot 3D spin configuration
+            base3d = os.path.join(region_dir, "spin_config_3d.pdf")
+            plot_spin_config_3d(P_region, S_region, base3d, color_by='z', subsample=None)
+            
+            # 4. Compute and plot chirality
+            plot_chirality_real_space(P_region, S_region, os.path.join(region_dir, "chirality"))
+            
+            # 5. Compute continuum chirality and detect cores
+            cont = compute_continuum_chirality(P_region, S_region, grid_res=128, sigma=1.0)
+            cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], 
+                                                    cont['mask'], q_rel_thresh=0.2, 
+                                                    sz_prominence=0.2, neighborhood=7)
+            plot_continuum_chirality_and_cores(cont, cores, 
+                                                os.path.join(region_dir, "continuum_chirality"))
+            
+            # Plot continuum chirality in overview figure
+            X, Y, q = cont['X'], cont['Y'], cont['q']
+            im_chir = axes_chir[i, j].pcolormesh(X, Y, q, shading='auto', cmap='RdBu_r')
+            axes_chir[i, j].set_title(f'Region ({i},{j})\nQ={cont["Q_total"]:.3f}', fontsize=10)
+            axes_chir[i, j].set_xlabel('x')
+            axes_chir[i, j].set_ylabel('y')
+            axes_chir[i, j].set_aspect('equal')
+            
+            # 6. Compute magnetization
+            M = magnetization(S_region)
+            np.savetxt(os.path.join(region_dir, "magnetization.txt"), M)
+            
+            # 7. Compute ordering wavevector
+            ordering_q_result = ordering_q(S_region, P_region)
+            np.savetxt(os.path.join(region_dir, "ordering_wave.txt"), ordering_q_result)
+            
+            # Store results
+            regional_results[region_key] = {
+                'SSSF': SSSF_region,
+                'n_spins': n_spins,
+                'bounds': (x_region_min, x_region_max, y_region_min, y_region_max),
+                'center': (x_center, y_center),
+                'positions': P_region,
+                'spins': S_region,
+                'magnetization': M,
+                'Q_total': cont['Q_total'],
+                'n_cores': len(cores['q_peaks']),
+                'ordering_q': ordering_q_result
+            }
+            
+            all_SSSF.append(SSSF_region)
+            all_Q_total.append(cont['Q_total'])
+            region_info.append({
+                'i': i, 'j': j,
+                'n_spins': n_spins,
+                'center': (x_center, y_center),
+                'Q_total': cont['Q_total'],
+                'n_cores': len(cores['q_peaks'])
+            })
+            
+            # Save region summary
+            with open(os.path.join(region_dir, 'region_summary.txt'), 'w') as f:
+                f.write(f"Region ({i},{j}) Summary\n")
+                f.write(f"========================\n")
+                f.write(f"Center: ({x_center:.4f}, {y_center:.4f})\n")
+                f.write(f"Bounds: x=[{x_region_min:.4f}, {x_region_max:.4f}], ")
+                f.write(f"y=[{y_region_min:.4f}, {y_region_max:.4f}]\n")
+                f.write(f"Number of spins: {n_spins}\n")
+                f.write(f"Magnetization: [{M[0]:.6f}, {M[1]:.6f}, {M[2]:.6f}]\n")
+                f.write(f"|M|: {np.linalg.norm(M):.6f}\n")
+                f.write(f"Total topological charge Q: {cont['Q_total']:.6f}\n")
+                f.write(f"Number of skyrmion cores: {len(cores['q_peaks'])}\n")
+    
+    # Save overview figures
+    fig_sssf.tight_layout()
+    fig_sssf.savefig(os.path.join(output_dir, 'regional_SSSF_overview.pdf'))
+    plt.close(fig_sssf)
+    
+    fig_chir.tight_layout()
+    fig_chir.savefig(os.path.join(output_dir, 'regional_chirality_overview.pdf'))
+    plt.close(fig_chir)
+    
+    # Compute statistics across regions
+    if all_SSSF:
+        all_SSSF = np.array(all_SSSF)
+        mean_SSSF = np.mean(all_SSSF, axis=0)
+        std_SSSF = np.std(all_SSSF, axis=0)
+        
+        # Plot mean and standard deviation
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        
+        # Mean SSSF
+        total_mean = contract('ijab->ij', mean_SSSF)
+        im1 = axes[0, 0].pcolormesh(A, B, total_mean, cmap='viridis')
+        axes[0, 0].set_title('Mean SSSF across regions')
+        axes[0, 0].set_xlabel('$k_x$')
+        axes[0, 0].set_ylabel('$k_y$')
+        plt.colorbar(im1, ax=axes[0, 0])
+        
+        # Std SSSF
+        total_std = contract('ijab->ij', std_SSSF)
+        im2 = axes[0, 1].pcolormesh(A, B, total_std, cmap='hot')
+        axes[0, 1].set_title('Std Dev of SSSF across regions')
+        axes[0, 1].set_xlabel('$k_x$')
+        axes[0, 1].set_ylabel('$k_y$')
+        plt.colorbar(im2, ax=axes[0, 1])
+        
+        # Q distribution
+        axes[1, 0].hist(all_Q_total, bins=min(10, len(all_Q_total)), edgecolor='black')
+        axes[1, 0].set_xlabel('Topological charge Q')
+        axes[1, 0].set_ylabel('Count')
+        axes[1, 0].set_title(f'Q distribution (mean={np.mean(all_Q_total):.3f})')
+        
+        # Magnetization magnitudes
+        mag_magnitudes = [np.linalg.norm(regional_results[f"region_{info['i']}_{info['j']}"]['magnetization']) 
+                            for info in region_info if f"region_{info['i']}_{info['j']}" in regional_results]
+        axes[1, 1].hist(mag_magnitudes, bins=min(10, len(mag_magnitudes)), edgecolor='black')
+        axes[1, 1].set_xlabel('|M|')
+        axes[1, 1].set_ylabel('Count')
+        axes[1, 1].set_title(f'Magnetization distribution (mean={np.mean(mag_magnitudes):.3f})')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'regional_statistics.pdf'))
+        plt.close()
+        
+        # Save statistics
+        np.savetxt(os.path.join(output_dir, 'SSSF_mean_total.txt'), total_mean)
+        np.savetxt(os.path.join(output_dir, 'SSSF_std_total.txt'), total_std)
+        
+        regional_results['statistics'] = {
+            'mean_SSSF': mean_SSSF,
+            'std_SSSF': std_SSSF,
+            'mean_Q': np.mean(all_Q_total),
+            'std_Q': np.std(all_Q_total),
+            'n_regions': len(all_SSSF)
+        }
+    
+    # Create spatial map showing regions with properties
+    fig, axes = plt.subplots(2, 2, figsize=(16, 16))
+    
+    # Subplot 1: Region boundaries
+    axes[0, 0].scatter(P[:, 0], P[:, 1], c='lightgray', s=1, alpha=0.5)
+    for info in region_info:
+        i, j = info['i'], info['j']
+        key = f"region_{i}_{j}"
+        if key in regional_results:
+            bounds = regional_results[key]['bounds']
+            rect = plt.Rectangle((bounds[0], bounds[2]), 
+                                bounds[1] - bounds[0],
+                                bounds[3] - bounds[2],
+                                linewidth=2, edgecolor='red', 
+                                facecolor='none', alpha=0.7)
+            axes[0, 0].add_patch(rect)
+    axes[0, 0].set_xlabel('x position')
+    axes[0, 0].set_ylabel('y position')
+    axes[0, 0].set_title(f'Regional division: {n_regions_x}×{n_regions_y} regions')
+    axes[0, 0].set_aspect('equal')
+    
+    # Subplot 2: Q values by region
+    axes[0, 1].scatter(P[:, 0], P[:, 1], c='lightgray', s=1, alpha=0.5)
+    for info in region_info:
+        i, j = info['i'], info['j']
+        key = f"region_{i}_{j}"
+        if key in regional_results:
+            center = regional_results[key]['center']
+            Q = regional_results[key]['Q_total']
+            color = 'blue' if Q > 0 else 'red' if Q < 0 else 'gray'
+            size = min(abs(Q) * 1000, 200) + 10
+            axes[0, 1].scatter(center[0], center[1], c=color, s=size, alpha=0.7)
+            axes[0, 1].text(center[0], center[1], f'{Q:.2f}', 
+                            ha='center', va='center', fontsize=8)
+    axes[0, 1].set_xlabel('x position')
+    axes[0, 1].set_ylabel('y position')
+    axes[0, 1].set_title('Topological charge Q by region')
+    axes[0, 1].set_aspect('equal')
+    
+    # Subplot 3: Magnetization by region
+    axes[1, 0].scatter(P[:, 0], P[:, 1], c='lightgray', s=1, alpha=0.5)
+    for info in region_info:
+        i, j = info['i'], info['j']
+        key = f"region_{i}_{j}"
+        if key in regional_results:
+            center = regional_results[key]['center']
+            M = regional_results[key]['magnetization']
+            # Plot magnetization as arrow
+            axes[1, 0].quiver(center[0], center[1], M[0], M[1], 
+                            angles='xy', scale_units='xy', scale=10,
+                            width=0.003, headwidth=3, headlength=4,
+                            color='blue', alpha=0.7)
+            axes[1, 0].text(center[0], center[1], f'|M|={np.linalg.norm(M):.2f}', 
+                            ha='center', va='bottom', fontsize=7)
+    axes[1, 0].set_xlabel('x position')
+    axes[1, 0].set_ylabel('y position')
+    axes[1, 0].set_title('Magnetization by region')
+    axes[1, 0].set_aspect('equal')
+    
+    # Subplot 4: Number of cores by region
+    axes[1, 1].scatter(P[:, 0], P[:, 1], c='lightgray', s=1, alpha=0.5)
+    for info in region_info:
+        i, j = info['i'], info['j']
+        key = f"region_{i}_{j}"
+        if key in regional_results:
+            center = regional_results[key]['center']
+            n_cores = regional_results[key]['n_cores']
+            axes[1, 1].scatter(center[0], center[1], c='purple', s=50 + n_cores*20, alpha=0.7)
+            axes[1, 1].text(center[0], center[1], str(n_cores), 
+                            ha='center', va='center', fontsize=10, color='white')
+    axes[1, 1].set_xlabel('x position')
+    axes[1, 1].set_ylabel('y position')
+    axes[1, 1].set_title('Number of skyrmion cores by region')
+    axes[1, 1].set_aspect('equal')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'regional_properties_map.pdf'))
+    plt.close()
+    
+    # Save comprehensive summary
+    with open(os.path.join(output_dir, 'analysis_summary.txt'), 'w') as f:
+        f.write(f"Regional Analysis Summary\n")
+        f.write(f"=========================\n")
+        f.write(f"Total regions analyzed: {len(region_info)}\n")
+        f.write(f"Grid: {n_regions_x}×{n_regions_y} with {overlap:.1%} overlap\n\n")
+        
+        if regional_results.get('statistics'):
+            f.write(f"Statistical Summary:\n")
+            f.write(f"Mean Q: {regional_results['statistics']['mean_Q']:.6f}\n")
+            f.write(f"Std Q: {regional_results['statistics']['std_Q']:.6f}\n\n")
+        
+        f.write(f"Per-Region Details:\n")
+        f.write(f"{'Region':<12} {'N_spins':<10} {'Q':<10} {'|M|':<10} {'N_cores':<10}\n")
+        f.write("-" * 52 + "\n")
+        for info in region_info:
+            i, j = info['i'], info['j']
+            key = f"region_{i}_{j}"
+            if key in regional_results:
+                data = regional_results[key]
+                f.write(f"{key:<12} {data['n_spins']:<10} ")
+                f.write(f"{data['Q_total']:<10.4f} ")
+                f.write(f"{np.linalg.norm(data['magnetization']):<10.4f} ")
+                f.write(f"{data['n_cores']:<10}\n")
+    
+    print(f"\nRegional analysis complete. Results saved to {output_dir}")
+    print(f"Analyzed {len(region_info)} regions with {n_regions_x}×{n_regions_y} division")
+    
+    return regional_results
+
+
 def parse_spin_config(directory):
     nK = 101
     SSSF = np.zeros((nK, nK, 3, 3))
@@ -2285,46 +2658,47 @@ def parse_spin_config(directory):
             plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
             # regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'xx')
             # regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'yy')
-            # energy_landscape_path = os.path.join(directory, filename, "energy_landscape.txt")
-            # if os.path.exists(energy_landscape_path):
-            #     energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
-            #     # If the file has two columns, use the second as energy
-            #     if energy_data.ndim == 2 and energy_data.shape[1] >= 2:
-            #         energy_landscape = energy_data[:, 1]
-            #     else:
-            #         energy_landscape = energy_data
-            #     # Plot energy landscape as a heatmap using the 0 and 1 components of P as coordinates
-            #     plt.figure(figsize=(8, 6))
-            #     sc = plt.scatter(P[:, 0], P[:, 1], c=energy_landscape, cmap='inferno', s=20)
-            #     plt.colorbar(sc, label='Energy')
-            #     plt.xlabel('x position')
-            #     plt.ylabel('y position')
-            #     plt.title('Energy Landscape')
-            #     plt.tight_layout()
-            #     plt.savefig(directory + "/" + filename + "/energy_landscape_heatmap.pdf")
-            #     plt.clf()
-            #     plt.close()
+            compute_regional_SSSF(P, S, 101, directory + "/" + filename + "/region", 5, 5)
+            energy_landscape_path = os.path.join(directory, filename, "energy_landscape.txt")
+            if os.path.exists(energy_landscape_path):
+                energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
+                # If the file has two columns, use the second as energy
+                if energy_data.ndim == 2 and energy_data.shape[1] >= 2:
+                    energy_landscape = energy_data[:, 1]
+                else:
+                    energy_landscape = energy_data
+                # Plot energy landscape as a heatmap using the 0 and 1 components of P as coordinates
+                plt.figure(figsize=(8, 6))
+                sc = plt.scatter(P[:, 0], P[:, 1], c=energy_landscape, cmap='inferno', s=20)
+                plt.colorbar(sc, label='Energy')
+                plt.xlabel('x position')
+                plt.ylabel('y position')
+                plt.title('Energy Landscape')
+                plt.tight_layout()
+                plt.savefig(directory + "/" + filename + "/energy_landscape_heatmap.pdf")
+                plt.clf()
+                plt.close()
 
-            #     np.savetxt(directory + "/" + filename + "/energy_density.txt", np.array([np.mean(energy_landscape)]))
+                np.savetxt(directory + "/" + filename + "/energy_density.txt", np.array([np.mean(energy_landscape)]))
 
-            #     energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
+                energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
                 
-            #     # Perform energetics argument analysis
-            #     print("Computing energetics argument (defect-free vs defective regions)")
-            #     energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
-            #                                           J=1.0, grid_res=256, sigma=1.0)
-            #     print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
-            #     print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
+                # Perform energetics argument analysis
+                print("Computing energetics argument (defect-free vs defective regions)")
+                energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
+                                                      J=1.0, grid_res=256, sigma=1.0)
+                print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
+                print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
 
-            #     # Skyrmion-lattice-aware energetics that does not classify cores as defects
-            #     print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
-            #     skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
-            #                                            grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
-            #     print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
-            #     print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
-            # else:
-            #     print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
-            #     energy_landscape = np.zeros(P.shape[0])
+                # Skyrmion-lattice-aware energetics that does not classify cores as defects
+                print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
+                skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
+                                                       grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
+                print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
+                print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
+            else:
+                print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
+                energy_landscape = np.zeros(P.shape[0])
 
 
 

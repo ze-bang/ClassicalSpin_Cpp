@@ -101,7 +101,7 @@ void simulated_annealing_pyrochlore(double Tstart, double TargetT, double Jxx, d
     MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, 0.9, dir, save);
 }
 
-void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write, double Jxz=0){
+void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write, double theta=0){
     filesystem::create_directory(dir);
     Pyrochlore<3> atoms;
 
@@ -135,14 +135,14 @@ void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, dou
     x4 /= sqrt(6);
 
 
-    double Jz_Jx = Jzz-Jxx;
-    double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
-    double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
-    double Jy = Jyy;
-    double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
-    double theta = atan(2*Jxz/(Jzz-Jxx));
+    // double Jz_Jx = Jzz-Jxx;
+    // double Jz_Jz_sign = (Jzz-Jxx < 0) ? -1 : 1;
+    // double Jx = (Jxx+Jzz)/2 - Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
+    // double Jy = Jyy;
+    // double Jz = (Jxx+Jzz)/2 + Jz_Jz_sign*sqrt(Jz_Jx*Jz_Jx+4*Jxz*Jxz)/2; 
+    // double theta = atan(2*Jxz/(Jzz-Jxx));
 
-    array<array<double,3>, 3> J = {{{Jx,0,0},{0,Jy,0},{0,0,Jz}}};
+    array<array<double,3>, 3> J = {{{Jxx,0,0},{0,Jyy,0},{0,0,Jzz}}};
     array<double, 3> field = field_dir*h;
 
 

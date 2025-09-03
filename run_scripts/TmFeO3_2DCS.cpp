@@ -764,7 +764,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     // array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
     // array<array<double, 3>,4> field_drive = {{{0,0,1},{0,0,1},{0,0,1},{0,0,1}}};
 
-    double pulse_amp = 1.5;
+    double pulse_amp = 0.8;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
