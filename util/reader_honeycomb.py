@@ -2632,7 +2632,6 @@ def parse_spin_config(directory):
     C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
-        print(filename)
         if os.path.isdir(directory + "/" + filename):
             S = np.loadtxt(directory + "/" + filename + "/spin.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
@@ -2714,22 +2713,22 @@ def parse_spin_config(directory):
 def read_field_scan(directory):
     h_values = []
     m_values = []
-
+    m_stds = []
     for subdir in sorted(os.listdir(directory)):
         full_path = os.path.join(directory, subdir)
         if os.path.isdir(full_path) and subdir.startswith("h_"):
             try:
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
-                spin_file = os.path.join(full_path, "spin.txt")
+                spin_file = os.path.join(full_path, "magnetization0.txt")
                 parse_spin_config(full_path)
                 if os.path.exists(spin_file):
-                    S = np.loadtxt(spin_file)
-                    M = np.mean(S, axis=0)
-                    # m_magnitude = np.linalg.norm(M)
-                    
+                    M = np.loadtxt(spin_file)
+                    M_mean = np.mean(M, axis=0)
+                    M_stdev = np.std(M, axis=0)
                     h_values.append(h)
-                    m_values.append(M)
+                    m_values.append(M_mean)
+                    m_stds.append(M_stdev)
                 else:
                     print(f"Magnetization file not found in {full_path}")
 
@@ -2746,14 +2745,17 @@ def read_field_scan(directory):
     sorted_indices = np.argsort(h_values)
     h_values_sorted = np.array(h_values)[sorted_indices]
     m_values_sorted = np.array(m_values)[sorted_indices]
+    m_stds_sorted = np.array(m_stds)[sorted_indices]
 
     # Save magnetization as a function of h
-    output_data = np.c_[h_values_sorted, m_values_sorted]
+    output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
     output_filename = os.path.join(directory, "magnetization_vs_field.txt")
-    np.savetxt(output_filename, output_data, header="h Mx My Mz", fmt='%f %f %f %f')
+    np.savetxt(output_filename, output_data, header="h Mx My Mz dMx dMy dMz", fmt='%f %f %f %f %f %f %f')
 
     plt.figure(figsize=(10, 6))
-    plt.plot(h_values_sorted, m_values_sorted, marker='o', linestyle='-')
+    plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
+    plt.errorbar(h_values_sorted, m_values_sorted[:,1], yerr=m_stds_sorted[:,1], fmt='-o', label='My')
+    plt.errorbar(h_values_sorted, m_values_sorted[:,2], yerr=m_stds_sorted[:,2], fmt='-o', label='Mz')
     plt.xlabel("Field Strength (h)")
     plt.ylabel("Magnetization Magnitude |M|")
     plt.legend(["Mx", "My", "Mz"], loc='upper right')
