@@ -324,7 +324,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
 
     
     // Lattice and simulation
-    lattice<3, 2, 100, 100, 1> MC(&atoms, 1, true);
+    lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
 
@@ -388,6 +388,14 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     }
 }
 
+const array<double, 3> operator*(const array<double, 3>& vec, double scalar) {
+    return {vec[0] * scalar, vec[1] * scalar, vec[2] * scalar};
+}
+
+const array<double, 3> operator+(const array<double, 3>& a, const array<double, 3>& b) {
+    return {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
+}
+
 int main(int argc, char** argv) {
     string param_file = "bcao_pt_parameters.txt";
 
@@ -413,7 +421,9 @@ int main(int argc, char** argv) {
 
     // Enable field-scan mode only when argv[2] is --field_scan
     bool field_scan = (argc > 2 && string(argv[2]) == "--field_scan");
-    
+    bool magnetotropic = (argc > 2 && string(argv[2]) == "--magnetotropic");
+
+
     SimulationParams params = read_parameters(param_file);
     
     int initialized;
@@ -437,6 +447,7 @@ int main(int argc, char** argv) {
     }
     const string overview_timing = params.dir + "/timing_overview.log";
     double t_total_program = MPI_Wtime();
+    const array<double, 3> c_axis = {{0,0,1}};
     
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
@@ -460,7 +471,7 @@ int main(int argc, char** argv) {
                     ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
                     : params.h_start;
                 trial_params.h = hval;
-                trial_params.num_trials = 3;
+                trial_params.num_trials = 1;
                 ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << hval;
                 trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
 
@@ -470,7 +481,28 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params, false);
+                PT_BCAO_honeycomb(trial_params, true);
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == 0) {
+                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
+                }
+            }
+        } else if (magnetotropic) {
+            size_t steps = params.num_steps;
+            for (size_t s = 0; s < steps; ++s) {
+                trial_params.h = params.h_end;
+                trial_params.num_trials = 1;
+                ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << trial_params.h;
+                trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
+                trial_params.field_dir = c_axis * sin((double)s * M_PI / (double)(steps - 1) - M_PI/2) + array<double,3>{1,0,0} * cos((double)s * M_PI / (double)(steps - 1) - M_PI/2);
+                if (rank == 0) {
+                    cout << "  Field step " << (s + 1) << "/" << steps << ": h = " << trial_params.h << "\n";
+                    cout << "    Field direction: [" << trial_params.field_dir[0] << "," << trial_params.field_dir[1] << "," << trial_params.field_dir[2] << "]\n";
+                }
+                // Barrier before each field step
+                MPI_Barrier(MPI_COMM_WORLD);
+                double t_field_step = MPI_Wtime();
+                PT_BCAO_honeycomb(trial_params, true);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
