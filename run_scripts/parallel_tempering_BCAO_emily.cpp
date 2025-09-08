@@ -9,6 +9,7 @@
 #include <iostream>
 #include <array>
 #include <iomanip>
+#include <cstdlib> // added for getenv / atoi
 
 using namespace std;
 
@@ -435,6 +436,41 @@ int main(int argc, char** argv) {
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+    // ---- SLURM integration start ----
+    // Detect SLURM job/array environment variables to enable external parallelization across trials
+    const char* slurm_job_id_env = getenv("SLURM_JOB_ID");
+    const char* slurm_array_id_env = getenv("SLURM_ARRAY_TASK_ID");
+    const char* slurm_array_min_env = getenv("SLURM_ARRAY_TASK_MIN");
+    const char* slurm_array_max_env = getenv("SLURM_ARRAY_TASK_MAX");
+
+    int slurm_array_task_id = -1;
+    int slurm_array_min = 0;
+    int slurm_array_max = -1;
+    if (slurm_array_id_env) slurm_array_task_id = atoi(slurm_array_id_env);
+    if (slurm_array_min_env) slurm_array_min = atoi(slurm_array_min_env);
+    if (slurm_array_max_env) slurm_array_max = atoi(slurm_array_max_env);
+
+    // Create list of trial indices to execute. If we are in a SLURM array, run only the mapped trial.
+    vector<int> trial_ids;
+    if (slurm_array_task_id >= 0) {
+        int local_trial = slurm_array_task_id - slurm_array_min; // normalize so first array index maps to 0
+        if (local_trial < 0) local_trial = 0;
+        if (local_trial >= static_cast<int>(params.num_trials)) {
+            if (rank == 0) {
+                cerr << "[Warning] SLURM array task maps to trial index " << local_trial
+                     << " which exceeds num_trials=" << params.num_trials << ". Skipping.\n";
+            }
+            // Early finalize MPI and exit
+            int finalized; MPI_Finalized(&finalized); if (!finalized) MPI_Finalize();
+            return 0;
+        }
+        trial_ids.push_back(local_trial);
+    } else {
+        // Default: run all trials locally
+        for (size_t i = 0; i < params.num_trials; ++i) trial_ids.push_back(static_cast<int>(i));
+    }
+    // ---- SLURM integration end ----
+
     if (rank == 0) {
         cout << "Running PT_BCAO_honeycomb with parameters from: " << param_file << "\n";
         cout << "Field: " << params.h << " mu_B, Direction: [" << params.field_dir[0] << "," << params.field_dir[1] << "," << params.field_dir[2] << "]\n";
@@ -443,18 +479,30 @@ int main(int argc, char** argv) {
         if (field_scan) {
             cout << "Field scan enabled: h from " << params.h_start << " to " << params.h_end << " in " << params.num_steps << " steps\n";
         }
+        if (slurm_job_id_env) {
+            cout << "SLURM_JOB_ID=" << slurm_job_id_env << "\n";
+        }
+        if (slurm_array_id_env) {
+            cout << "SLURM_ARRAY_TASK_ID=" << slurm_array_id_env;
+            if (slurm_array_min_env && slurm_array_max_env) {
+                cout << " (range " << slurm_array_min << "-" << slurm_array_max << ")";
+            }
+            cout << ", mapped to local trial index: " << trial_ids.front() << "\n";
+        }
         filesystem::create_directories(params.dir);
     }
     const string overview_timing = params.dir + "/timing_overview.log";
     double t_total_program = MPI_Wtime();
     const array<double, 3> c_axis = {{0,0,1}};
     
-    for (size_t i = 0; i < params.num_trials; ++i) {
+    // Updated trial loop to use trial_ids (SLURM-aware)
+    for (size_t trial_iter = 0; trial_iter < trial_ids.size(); ++trial_iter) {
+        int trial_id = trial_ids[trial_iter];
         SimulationParams trial_params = params;
         double t_trial = MPI_Wtime();
 
         if (rank == 0) {
-            cout << "Starting trial " << i + 1 << " of " << params.num_trials << "\n";
+            cout << "Starting trial " << (trial_iter + 1) << " of " << trial_ids.size() << " (global trial index=" << trial_id << ")\n";
         }
         // Synchronize all processes before starting the next trial
         MPI_Barrier(MPI_COMM_WORLD);
@@ -473,18 +521,18 @@ int main(int argc, char** argv) {
                 trial_params.h = hval;
                 trial_params.num_trials = 1;
                 ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << hval;
-                trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
+                // Directory includes trial_id (global) not sequential index
+                trial_params.dir = params.dir + "/trial_" + to_string(trial_id) + "/h_" + hs.str();
 
                 if (rank == 0) {
                     cout << "  Field step " << (s + 1) << "/" << steps << ": h = " << hval << "\n";
                 }
-                // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
                 PT_BCAO_honeycomb(trial_params, true);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
-                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
+                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(trial_id) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
                 }
             }
         } else if (magnetotropic) {
@@ -493,32 +541,28 @@ int main(int argc, char** argv) {
                 trial_params.h = params.h_end;
                 trial_params.num_trials = 1;
                 ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << trial_params.h;
-                trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
+                trial_params.dir = params.dir + "/trial_" + to_string(trial_id) + "/h_" + hs.str();
                 trial_params.field_dir = c_axis * sin((double)s * M_PI / (double)(steps - 1) - M_PI/2) + array<double,3>{1,0,0} * cos((double)s * M_PI / (double)(steps - 1) - M_PI/2);
                 if (rank == 0) {
                     cout << "  Field step " << (s + 1) << "/" << steps << ": h = " << trial_params.h << "\n";
                     cout << "    Field direction: [" << trial_params.field_dir[0] << "," << trial_params.field_dir[1] << "," << trial_params.field_dir[2] << "]\n";
                 }
-                // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
                 PT_BCAO_honeycomb(trial_params, true);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
-                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
+                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(trial_id) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
                 }
             }
         } else {
-            trial_params.dir = params.dir + "/trial_" + to_string(i);
-            // Barrier before the fixed-h run
+            trial_params.dir = params.dir + "/trial_" + to_string(trial_id);
             MPI_Barrier(MPI_COMM_WORLD);
-            // Run the Parallel Tempering simulation
             PT_BCAO_honeycomb(trial_params, true);
         }
-        // End of trial
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0) {
-            timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_elapsed", MPI_Wtime() - t_trial, rank);
+            timing_helpers::log_timing(overview_timing, "trial_" + to_string(trial_id) + "_elapsed", MPI_Wtime() - t_trial, rank);
         }
     }
     // Total program time

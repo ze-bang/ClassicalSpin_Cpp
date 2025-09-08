@@ -2632,6 +2632,7 @@ def parse_spin_config(directory):
     C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
+        # print(filename)
         if os.path.isdir(directory + "/" + filename):
             S = np.loadtxt(directory + "/" + filename + "/spin.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
@@ -2643,10 +2644,10 @@ def parse_spin_config(directory):
             plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
             # 3D orientation plot
             print("Computing 3D configuration")
-            base3d = directory + "/" + filename + "/spin_config_3d.pdf"
-            plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
+            # base3d = directory + "/" + filename + "/spin_config_3d.pdf"
+            # plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
             # Zoomed 3D view (50% window around center)
-            plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
+            # plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
             # Load energy landscape data (assumes two columns: index and energy)
             print("Computing chirality plot")
             plot_chirality_real_space(P, S, directory + "/" + filename + "/chirality")
@@ -2657,7 +2658,7 @@ def parse_spin_config(directory):
             plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
             # regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'xx')
             # regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'yy')
-            compute_regional_SSSF(P, S, 101, directory + "/" + filename + "/region", 5, 5)
+            # compute_regional_SSSF(P, S, 101, directory + "/" + filename + "/region", 5, 5)
             energy_landscape_path = os.path.join(directory, filename, "energy_landscape.txt")
             if os.path.exists(energy_landscape_path):
                 energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
@@ -2710,6 +2711,81 @@ def parse_spin_config(directory):
             SSSFGraph2D(C, D, SSSF[:,:,i,j], directory + f"/SSSF_{component_i}{component_j}")
 
 
+def parse_spin_config_file(directory):
+    nK = 101
+    SSSF = np.zeros((nK, nK, 3, 3))
+
+    H = np.linspace(-1, 1, nK)
+    L = np.linspace(-1, 1, nK)
+    C, D = np.meshgrid(H, L)
+
+    S = np.loadtxt(directory + "/spin.txt")
+    P = np.loadtxt(directory + "/pos.txt")
+    SSSF += SSSF2D(S, P, nK, directory )
+    base2d = directory + "/spin_config_2d.pdf"
+    print("Computing 2D spin configuration plot")
+    plot_spin_config_2d(P, S, base2d)
+    # Zoomed 2D projections (50% window around center)
+    plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
+    # 3D orientation plot
+    print("Computing 3D configuration")
+    # base3d = directory + "/spin_config_3d.pdf"
+    # plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
+    # Zoomed 3D view (50% window around center)
+    # plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
+    # Load energy landscape data (assumes two columns: index and energy)
+    print("Computing chirality plot")
+    plot_chirality_real_space(P, S, directory + "/chirality")
+    # Continuum chirality on grid + core detection
+    print("Computing coarse grained chirality")
+    cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
+    cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
+    plot_continuum_chirality_and_cores(cont, cores, directory + "/continuum_chirality")
+    # regnault_magnetic_moment_reconstruction(P, directory, 'xx')
+    # regnault_magnetic_moment_reconstruction(P, directory, 'yy')
+    # compute_regional_SSSF(P, S, 101, directory + "/region", 5, 5)
+    energy_landscape_path = os.path.join(directory, "energy_landscape.txt")
+    if os.path.exists(energy_landscape_path):
+        energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
+        # If the file has two columns, use the second as energy
+        if energy_data.ndim == 2 and energy_data.shape[1] >= 2:
+            energy_landscape = energy_data[:, 1]
+        else:
+            energy_landscape = energy_data
+        # Plot energy landscape as a heatmap using the 0 and 1 components of P as coordinates
+        plt.figure(figsize=(8, 6))
+        sc = plt.scatter(P[:, 0], P[:, 1], c=energy_landscape, cmap='inferno', s=20)
+        plt.colorbar(sc, label='Energy')
+        plt.xlabel('x position')
+        plt.ylabel('y position')
+        plt.title('Energy Landscape')
+        plt.tight_layout()
+        plt.savefig(directory + "/energy_landscape_heatmap.pdf")
+        plt.clf()
+        plt.close()
+
+        np.savetxt(directory + "/energy_density.txt", np.array([np.mean(energy_landscape)]))
+
+        energy_density_by_section(directory + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
+        
+        # Perform energetics argument analysis
+        print("Computing energetics argument (defect-free vs defective regions)")
+        energetics_result = energetics_argument(P, S, energy_landscape, directory + "/energetics_analysis", 
+                                                J=1.0, grid_res=256, sigma=1.0)
+        print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
+        print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
+
+        # Skyrmion-lattice-aware energetics that does not classify cores as defects
+        print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
+        skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/energetics_skx",
+                                                grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
+        print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
+        print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
+    else:
+        print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
+        energy_landscape = np.zeros(P.shape[0])
+
+
 def read_field_scan(directory):
     h_values = []
     m_values = []
@@ -2721,7 +2797,7 @@ def read_field_scan(directory):
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
                 spin_file = os.path.join(full_path, "magnetization0.txt")
-                parse_spin_config(full_path)
+                parse_spin_config_file(full_path)
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
                     M_mean = np.mean(M, axis=0)
