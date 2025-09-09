@@ -301,7 +301,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
     array<array<double,3>, 3> J3_ = {{{params.J3xy,0,0},{0,params.J3xy,0},{0,0,params.J3z}}};
 
-    array<double, 3> field = {4.8*params.h*params.field_dir[0], 4.85*params.h*params.field_dir[1], 2.5*params.h*params.field_dir[2]};
+    array<double, 3> field = {params.h*params.field_dir[0], params.h*params.field_dir[1], params.h*params.field_dir[2]};
     
     // Set interactions
     atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
@@ -423,9 +423,19 @@ int main(int argc, char** argv) {
     bool field_scan = (argc > 2 && string(argv[2]) == "--field_scan");
     bool magnetotropic = (argc > 2 && string(argv[2]) == "--magnetotropic");
 
-
     SimulationParams params = read_parameters(param_file);
     
+    int slurm_job_id = getenv("SLURM_JOB_ID") ? stoi(getenv("SLURM_JOB_ID")) : 0;
+    int slurm_job_ind_max = getenv("SLURM_JOB_ARRAY_TASK_MAX") ? stoi(getenv("SLURM_JOB_ARRAY_TASK_MAX")) : 0;
+    int slurm_job_ind_min = getenv("SLURM_JOB_ARRAY_TASK_MIN") ? stoi(getenv("SLURM_JOB_ARRAY_TASK_MIN")) : 0;
+    int slurm_chunk = params.num_trials / (slurm_job_ind_max - slurm_job_ind_min + 1);
+
+
+    std::cout << "SLURM_JOB_ID: " << slurm_job_id << "\n";
+    std::cout << "SLURM_JOB_ARRAY_TASK_MIN: " << slurm_job_ind_min << "\n";
+    std::cout << "SLURM_JOB_ARRAY_TASK_MAX: " << slurm_job_ind_max << "\n";
+    std::cout << "SLURM_CHUNK: " << slurm_chunk << "\n";
+
     int initialized;
     MPI_Initialized(&initialized);
     if (!initialized){
@@ -460,91 +470,52 @@ int main(int argc, char** argv) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         // If field scan is enabled, sweep over h; otherwise, run a single h
-        if (field_scan || magnetotropic) {
+        if (field_scan) {
             size_t steps = params.num_steps;
             if (steps == 0) {
-                if (rank == 0) cout << "Warning: " << (field_scan?"field_scan":"magnetotropic") << " enabled but num_steps==0; nothing to do.\n";
+                if (rank == 0) cout << "Warning: field_scan enabled but num_steps==0; nothing to do.\n";
                 continue;
             }
+            for (size_t s = slurm_job_id; s < steps; ++slurm_chunk) {
+                double hval = (steps > 1)
+                    ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
+                    : params.h_start;
+                trial_params.h = hval;
+                trial_params.num_trials = 1;
+                ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << hval;
+                trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
 
-            // --- SLURM array partitioning (automatic if SLURM env vars exist) ---
-            int array_task_id = -1; // -1 means not an array job
-            int array_task_count = 1;
-            if (const char* tid = getenv("SLURM_ARRAY_TASK_ID")) {
-                array_task_id = atoi(tid);
-                // Try count via MAX/MIN first (works for ranges like 0-23:4 etc.)
-                const char* tmin = getenv("SLURM_ARRAY_TASK_MIN");
-                const char* tmax = getenv("SLURM_ARRAY_TASK_MAX");
-                if (tmin && tmax) {
-                    array_task_count = atoi(tmax) - atoi(tmin) + 1;
-                } else if (const char* tcount = getenv("SLURM_ARRAY_TASK_COUNT")) {
-                    array_task_count = atoi(tcount);
-                } else if (const char* trange = getenv("SLURM_ARRAY_TASK_RANGE")) {
-                    // Fallback heuristic: count commas + 1
-                    int commas = 0; for (const char* p = trange; *p; ++p) if (*p == ',') ++commas; array_task_count = commas + 1; // may under/over-estimate for complex specs
-                }
-            }
-
-            size_t start_step = 0, end_step = steps; // [start,end)
-            if (array_task_id >= 0 && array_task_count > 0) {
-                // Distribute remainder to first r tasks
-                size_t base = steps / (size_t)array_task_count;
-                size_t rem = steps % (size_t)array_task_count;
-                if ((size_t)array_task_id >= (size_t)array_task_count) {
-                    // This task id outside expected range; skip work
-                    start_step = end_step = 0;
-                } else {
-                    start_step = (size_t)array_task_id * base + std::min((size_t)array_task_id, rem);
-                    size_t my_count = base + ((size_t)array_task_id < rem ? 1 : 0);
-                    end_step = start_step + my_count;
-                }
                 if (rank == 0) {
-                    cout << "SLURM array partitioning detected: task " << array_task_id << "/" << array_task_count
-                         << ", assigned steps [" << start_step << ", " << end_step << ") out of " << steps << " total.\n";
+                    cout << "  Field step " << (s + 1) << "/" << steps << ": h = " << hval << "\n";
+                }
+                // Barrier before each field step
+                MPI_Barrier(MPI_COMM_WORLD);
+                double t_field_step = MPI_Wtime();
+                PT_BCAO_honeycomb(trial_params, true);
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == 0) {
+                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
                 }
             }
-
-            if (start_step >= end_step) {
-                if (rank == 0) cout << "No steps assigned to this SLURM task; exiting trial loop early.\n";
-            } else {
-                for (size_t s = start_step; s < end_step; ++s) {
-                    double hval;
-                    if (field_scan) {
-                        hval = (steps > 1)
-                            ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
-                            : params.h_start;
-                        trial_params.h = hval;
-                    } else { // magnetotropic
-                        trial_params.h = params.h_end; // use provided h_end as magnitude
-                        hval = trial_params.h;
-                    }
-
-                    trial_params.num_trials = 1;
-                    ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << hval;
-                    trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
-
-                    if (magnetotropic) {
-                        // Angle sweep in x-c plane (x vs c-axis (z))
-                        trial_params.field_dir = c_axis * sin((double)s * M_PI / (double)(steps - 1) - M_PI/2)
-                                                 + array<double,3>{1,0,0} * cos((double)s * M_PI / (double)(steps - 1) - M_PI/2);
-                    }
-
-                    if (rank == 0) {
-                        cout << "  Step " << (s + 1) << "/" << steps << " (local index " << (s - start_step + 1)
-                             << "/" << (end_step - start_step) << ")";
-                        cout << ": h = " << hval;
-                        if (magnetotropic) {
-                            cout << ", dir = [" << trial_params.field_dir[0] << "," << trial_params.field_dir[1] << "," << trial_params.field_dir[2] << "]";
-                        }
-                        cout << "\n";
-                    }
-                    MPI_Barrier(MPI_COMM_WORLD); // sync before each step
-                    double t_field_step = MPI_Wtime();
-                    PT_BCAO_honeycomb(trial_params, true);
-                    MPI_Barrier(MPI_COMM_WORLD);
-                    if (rank == 0) {
-                        timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + (field_scan?"_field_step_":"_mag_step_") + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
-                    }
+        } else if (magnetotropic) {
+            size_t steps = params.num_steps;
+            for (size_t s = slurm_job_id; s < steps; ++slurm_chunk) {
+                trial_params.h = params.h_end;
+                trial_params.num_trials = 1;
+                ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << trial_params.h;
+                trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
+                trial_params.field_dir = c_axis * sin((double)s * M_PI / (double)(steps - 1) - M_PI/2) + array<double,3>{1,0,0} * cos((double)s * M_PI / (double)(steps - 1) - M_PI/2);
+                if (rank == 0) {
+                    cout << "  Field step " << (s + 1) << "/" << steps << ": h = " << trial_params.h << "\n";
+                    cout << "    Field direction: [" << trial_params.field_dir[0] << "," << trial_params.field_dir[1] << "," << trial_params.field_dir[2] << "]\n";
+                }
+                // Barrier before each field step
+                MPI_Barrier(MPI_COMM_WORLD);
+                double t_field_step = MPI_Wtime();
+                PT_BCAO_honeycomb(trial_params, true);
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == 0) {
+                    timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
                 }
             }
         } else {
