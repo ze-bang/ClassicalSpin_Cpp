@@ -425,16 +425,11 @@ int main(int argc, char** argv) {
 
     SimulationParams params = read_parameters(param_file);
     
-    int slurm_job_id = getenv("SLURM_JOB_ID") ? stoi(getenv("SLURM_JOB_ID")) : 0;
-    int slurm_job_ind_max = getenv("SLURM_JOB_ARRAY_TASK_MAX") ? stoi(getenv("SLURM_JOB_ARRAY_TASK_MAX")) : 0;
-    int slurm_job_ind_min = getenv("SLURM_JOB_ARRAY_TASK_MIN") ? stoi(getenv("SLURM_JOB_ARRAY_TASK_MIN")) : 0;
-    int slurm_chunk = params.num_trials / (slurm_job_ind_max - slurm_job_ind_min + 1);
+    int slurm_job_id = argc > 3 ? stoi(argv[3]) : 0;
+    int slurm_job_range = argc > 4 ? stoi(argv[4]) : 0;
 
+    int slurm_chunk = params.num_steps / slurm_job_range;
 
-    std::cout << "SLURM_JOB_ID: " << slurm_job_id << "\n";
-    std::cout << "SLURM_JOB_ARRAY_TASK_MIN: " << slurm_job_ind_min << "\n";
-    std::cout << "SLURM_JOB_ARRAY_TASK_MAX: " << slurm_job_ind_max << "\n";
-    std::cout << "SLURM_CHUNK: " << slurm_chunk << "\n";
 
     int initialized;
     MPI_Initialized(&initialized);
