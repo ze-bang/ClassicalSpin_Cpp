@@ -1268,7 +1268,7 @@ class lattice
             }
             
             // Coordinated twist angle updates
-            if (boundary_update && i % twist_update_interval == 0 && i % overrelaxation_flag == 0) {
+            if (boundary_update && i % twist_update_interval == 0) {
                 // Strategy 1: Temperature-weighted consensus
                 // Lower temperature processes have more weight in determining global twist
                 if (i % twist_consensus_interval == 0) {
@@ -1327,7 +1327,7 @@ class lattice
             
             E = total_energy(spins);
 
-            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
+            if ((i % swap_rate == 0)){
                 accept = false;
                 if ((i / swap_rate) % 2 ==0){
                     partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
