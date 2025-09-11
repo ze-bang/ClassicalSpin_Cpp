@@ -1200,7 +1200,6 @@ class lattice
     }
 
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool boundary_update = false, bool gaussian_move = true){
-
         int swap_accept = 0;
         double curr_accept = 0;
         int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
@@ -1226,37 +1225,16 @@ class lattice
         vector<double> energies;
         vector<array<double,N>> magnetizations;
         vector<spin_config> spin_configs_at_temp;
-        
-        // Twist angle coordination variables
-        array<array<double, N*N>, 3> shared_twist_matrices = twist_matrices;
-        array<array<double, N>, 3> shared_rotation_axes = rotation_axis;
-        size_t twist_update_interval = 100; // Update twist angles every N iterations
-        size_t twist_consensus_interval = 500; // Global consensus every M iterations
-        
+
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
 
-        // Prepare progress reporting artifacts if an output directory is provided
-        const size_t n_total_iters = n_anneal + n_measure;
-        string progress_log_path;
-        string progress_now_path;
-        if (!dir_name.empty()) {
-            try {
-                filesystem::create_directory(dir_name);
-            } catch (...) {
-                // Best-effort; ignore if directory exists or can't be created
-            }
-            progress_log_path = dir_name + "/progress_rank" + to_string(rank) + ".log";
-            progress_now_path = dir_name + "/progress_rank" + to_string(rank) + ".now";
-            // Initialize the per-rank progress log with a header
-            {
-                ofstream flog(progress_log_path, ios::out | ios::trunc);
-                flog << "# iter total_iters progress temp energy local_accept_est swap_accept_est timestamp" << '\n';
-            }
-        }
+        // Counter for twist boundary updates
+        size_t twist_update_interval = 100; // Perform twist updates every 100 iterations
+        size_t twist_sweeps_per_update = 1; // Number of twist sweeps per update
 
         for(size_t i=0; i < n_anneal+n_measure; ++i){
 
-            // Metropolis with local twist updates
+            // Metropolis
             if(overrelaxation_rate > 0){
                 overrelaxation();
                 if (i%overrelaxation_rate == 0){
@@ -1267,67 +1245,16 @@ class lattice
                 curr_accept += metropolis(spins, curr_Temp, gaussian_move);
             }
             
-            // Coordinated twist angle updates
-            if (boundary_update && i % twist_update_interval == 0) {
-                // Strategy 1: Temperature-weighted consensus
-                // Lower temperature processes have more weight in determining global twist
-                if (i % twist_consensus_interval == 0) {
-                    // Gather all local twist matrices weighted by inverse temperature
-                    array<double, 3*N*N> local_twist_flat;
-                    array<double, 3*N*N> global_twist_sum = {0};
-                    
-                    // Flatten local twist matrices with temperature weighting
-                    double weight = 1.0 / curr_Temp; // Lower T = higher weight
-                    for (size_t d = 0; d < 3; ++d) {
-                        for (size_t j = 0; j < N*N; ++j) {
-                            local_twist_flat[d*N*N + j] = twist_matrices[d][j] * weight;
-                        }
-                    }
-                    
-                    // All-reduce to sum weighted matrices across all processes
-                    MPI_Allreduce(local_twist_flat.data(), global_twist_sum.data(), 
-                                  3*N*N, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-                    
-                    // Compute total weight
-                    double local_weight = weight;
-                    double total_weight = 0;
-                    MPI_Allreduce(&local_weight, &total_weight, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-                    
-                    // Normalize and orthogonalize the consensus matrices
-                    for (size_t d = 0; d < 3; ++d) {
-                        for (size_t j = 0; j < N*N; ++j) {
-                            shared_twist_matrices[d][j] = global_twist_sum[d*N*N + j] / total_weight;
-                        }
-                        // Re-orthogonalize using Gram-Schmidt if needed (for rotation matrices)
-                        if constexpr (N == 3) {
-                            shared_twist_matrices[d] = orthogonalize_rotation_matrix(shared_twist_matrices[d]);
-                        }
-                    }
-                    
-                    // Update local twist matrices to consensus
-                    twist_matrices = shared_twist_matrices;
-                }
-                
-                // Strategy 2: Stochastic local updates with broadcast from lowest T
-                else if (boundary_update && rank == 0) { // Lowest temperature process leads
-                    // Perform twist update only at lowest temperature
+            // Twist boundary condition updates
+            if (boundary_update && (i % twist_update_interval == 0)) {
+                for (size_t tw = 0; tw < twist_sweeps_per_update; ++tw) {
                     metropolis_twist_sweep(curr_Temp);
-                    
-                    // Broadcast the updated twist matrices to all other processes
-                    for (size_t d = 0; d < 3; ++d) {
-                        MPI_Bcast(twist_matrices[d].data(), N*N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-                    }
-                } else {
-                    // Receive broadcast from rank 0
-                    for (size_t d = 0; d < 3; ++d) {
-                        MPI_Bcast(twist_matrices[d].data(), N*N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-                    }
                 }
             }
             
             E = total_energy(spins);
 
-            if ((i % swap_rate == 0)){
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
                 accept = false;
                 if ((i / swap_rate) % 2 ==0){
                     partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
@@ -1350,86 +1277,33 @@ class lattice
                         MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     }
                     if (accept){
-                        // Exchange both spins AND twist matrices during replica exchange
+                        // Exchange both spins AND twist matrices
                         if (partner_rank % 2 == 0){
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            if (boundary_update){
-                                // Also exchange twist matrices to maintain consistency
-                                for (size_t d = 0; d < 3; ++d) {
-                                    array<double, N*N> temp_twist;
-                                    MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD);
-                                    MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                    twist_matrices[d] = temp_twist;
-                                }
+                            
+                            // Also exchange twist matrices if boundary updates are enabled
+                            if (boundary_update) {
+                                array<array<double, N*N>, 3> partner_twist;
+                                MPI_Send(&twist_matrices, 3*N*N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
+                                MPI_Recv(&partner_twist, 3*N*N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                twist_matrices = partner_twist;
                             }
-                           
                         } else{
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-                            if (boundary_update){
-                                for (size_t d = 0; d < 3; ++d) {
-                                    array<double, N*N> temp_twist;
-                                    MPI_Recv(temp_twist.data(), N*N, MPI_DOUBLE, partner_rank, 10+d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                    MPI_Send(twist_matrices[d].data(), N*N, MPI_DOUBLE, partner_rank, 13+d, MPI_COMM_WORLD);
-                                    twist_matrices[d] = temp_twist;
-                                }
+                            
+                            // Also exchange twist matrices if boundary updates are enabled
+                            if (boundary_update) {
+                                array<array<double, N*N>, 3> partner_twist;
+                                MPI_Recv(&partner_twist, 3*N*N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                MPI_Send(&twist_matrices, 3*N*N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
+                                twist_matrices = partner_twist;
                             }
                         }
                         copy(new_spins.begin(), new_spins.end(), spins.begin());
                         E = E_partner;
                         swap_accept++;
-                    }
-                }
-            }
-
-            // Lightweight, periodic progress reporting that can be tailed during long runs
-            if (!dir_name.empty()) {
-                // Reuse probe_rate as a sensible default cadence; always report on last iteration
-                if ((probe_rate > 0 && (i % probe_rate == 0)) || (i + 1 == n_total_iters)) {
-                    const double denom = static_cast<double>(i + 1);
-                    // Estimate local and swap acceptance per attempt, consistent with end-of-run reporting
-                    const double local_accept_est = (denom > 0.0)
-                        ? (static_cast<double>(curr_accept) / denom) * overrelaxation_flag
-                        : 0.0;
-                    const double swap_accept_est = (denom > 0.0)
-                        ? (static_cast<double>(swap_accept) / denom) * swap_rate * overrelaxation_flag
-                        : 0.0;
-                    const double progress = denom / static_cast<double>(n_total_iters);
-                    const std::time_t ts = std::time(nullptr);
-
-                    // Append a line to the per-rank progress log
-                    {
-                        ofstream flog(progress_log_path, ios::out | ios::app);
-                        flog << i+1 << ' '
-                             << n_total_iters << ' '
-                             << progress << ' '
-                             << curr_Temp << ' '
-                             << E << ' '
-                             << local_accept_est << ' '
-                             << swap_accept_est << ' '
-                             << ts << '\n';
-                    }
-                    // Write the latest status to a small file (overwritten) for quick checks
-                    {
-                        ofstream fnow(progress_now_path, ios::out | ios::trunc);
-                        fnow << "iter=" << i+1
-                            << " total=" << n_total_iters
-                            << " progress=" << progress
-                            << " T=" << curr_Temp
-                            << " E=" << E
-                            << " local_acc_est=" << local_accept_est
-                            << " swap_acc_est=" << swap_accept_est
-                            << " ts=" << ts << '\n';
-                    }
-                    // Rank 0 can also emit a concise console heartbeat
-                    if (rank == 0) {
-                        cout << "[PT] iter " << i+1 << "/" << n_total_iters
-                             << " (" << int(progress * 100.0) << "%)"
-                             << " T0=" << curr_Temp
-                             << " E0=" << E
-                             << " acc_local~" << local_accept_est
-                             << " acc_swap~" << swap_accept_est << endl;
                     }
                 }
             }
@@ -1457,6 +1331,9 @@ class lattice
                 if (rank == rank_to_write[i]){
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
+                    //     write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
+                    // }
                 }
             }
             if (rank == 0){
@@ -1469,37 +1346,9 @@ class lattice
                 myfile.close();
             }
         }
+        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
     }
-    
-    // Helper function to orthogonalize rotation matrix (Gram-Schmidt)
-    array<double, N*N> orthogonalize_rotation_matrix(const array<double, N*N>& M) {
-        if constexpr (N == 3) {
-            // Extract columns
-            array<double, 3> c0 = {M[0], M[3], M[6]};
-            array<double, 3> c1 = {M[1], M[4], M[7]};
-            array<double, 3> c2 = {M[2], M[5], M[8]};
-            
-            // Normalize first column
-            double norm0 = sqrt(c0[0]*c0[0] + c0[1]*c0[1] + c0[2]*c0[2]);
-            c0 = c0 * (1.0/norm0);
-            
-            // Make c1 orthogonal to c0 and normalize
-            double dot01 = c0[0]*c1[0] + c0[1]*c1[1] + c0[2]*c1[2];
-            c1 = c1 - c0 * dot01;
-            double norm1 = sqrt(c1[0]*c1[0] + c1[1]*c1[1] + c1[2]*c1[2]);
-            c1 = c1 * (1.0/norm1);
-            
-            // c2 = c0 x c1 (cross product for proper rotation matrix)
-            c2[0] = c0[1]*c1[2] - c0[2]*c1[1];
-            c2[1] = c0[2]*c1[0] - c0[0]*c1[2];
-            c2[2] = c0[0]*c1[1] - c0[1]*c1[0];
-            
-            return {c0[0], c1[0], c2[0],
-                    c0[1], c1[1], c2[1],
-                    c0[2], c1[2], c2[2]};
-        }
-        return M;
-    }
+
 
     void measurement(string toread, double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
         vector<double> energies;
