@@ -1152,7 +1152,7 @@ public:
                 // Write initial magnetization
                 auto mag_f = this->magnetization_local(this->spins);
                 // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
-                auto mag_SU3 = this->magnetization_local_SU3(this->spins);1
+                auto mag_SU3 = this->magnetization_local_SU3(this->spins);
                 // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
                 auto mag = this->magnetization_global(this->spins, basis_vectors_SU2);
                 auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins, basis_vectors_SU3);
