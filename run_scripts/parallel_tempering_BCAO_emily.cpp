@@ -487,8 +487,6 @@ int main(int argc, char** argv) {
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
                 PT_BCAO_honeycomb(trial_params, true);
-<<<<<<< HEAD
-=======
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
@@ -510,7 +508,6 @@ int main(int argc, char** argv) {
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
                 PT_BCAO_honeycomb(trial_params, true);
->>>>>>> eb2b001f0b3bb93b0e0199540755d6be3cdbaaef
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
