@@ -428,7 +428,7 @@ int main(int argc, char** argv) {
     int slurm_job_id = argc > 3 ? stoi(argv[3]) : 0;
     int slurm_job_range = argc > 4 ? stoi(argv[4]) : 0;
 
-    int slurm_chunk = params.num_steps / slurm_job_range;
+    // int slurm_chunk = params.num_steps / slurm_job_range;
 
 
     int initialized;
@@ -471,7 +471,7 @@ int main(int argc, char** argv) {
                 if (rank == 0) cout << "Warning: field_scan enabled but num_steps==0; nothing to do.\n";
                 continue;
             }
-            for (size_t s = slurm_job_id; s < steps; ++slurm_chunk) {
+            for (size_t s = slurm_job_id; s < steps; ++slurm_job_range) {
                 double hval = (steps > 1)
                     ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
                     : params.h_start;
@@ -494,7 +494,7 @@ int main(int argc, char** argv) {
             }
         } else if (magnetotropic) {
             size_t steps = params.num_steps;
-            for (size_t s = slurm_job_id; s < steps; ++slurm_chunk) {
+            for (size_t s = slurm_job_id; s < steps; ++slurm_job_range) {
                 trial_params.h = params.h_end;
                 trial_params.num_trials = 1;
                 ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << trial_params.h;
