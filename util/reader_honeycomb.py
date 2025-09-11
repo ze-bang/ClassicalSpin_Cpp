@@ -2634,7 +2634,7 @@ def parse_spin_config(directory):
         filename = os.fsdecode(file)
         print(filename)
         if os.path.isdir(directory + "/" + filename):
-            S = np.loadtxt(directory + "/" + filename + "/spin.txt")
+            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
             base2d = directory + "/" + filename + "/spin_config_2d.pdf"
@@ -2647,18 +2647,18 @@ def parse_spin_config(directory):
             base3d = directory + "/" + filename + "/spin_config_3d.pdf"
             plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
             # Zoomed 3D view (50% window around center)
-            plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
+            # plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
             # Load energy landscape data (assumes two columns: index and energy)
             print("Computing chirality plot")
-            plot_chirality_real_space(P, S, directory + "/" + filename + "/chirality")
+            # plot_chirality_real_space(P, S, directory + "/" + filename + "/chirality")
             # Continuum chirality on grid + core detection
             print("Computing coarse grained chirality")
-            cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
-            cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
-            plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
+            # cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
+            # cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
+            # plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
             # regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'xx')
             # regnault_magnetic_moment_reconstruction(P, directory + "/" + filename, 'yy')
-            compute_regional_SSSF(P, S, 101, directory + "/" + filename + "/region", 5, 5)
+            # compute_regional_SSSF(P, S, 101, directory + "/" + filename + "/region", 5, 5)
             energy_landscape_path = os.path.join(directory, filename, "energy_landscape.txt")
             if os.path.exists(energy_landscape_path):
                 energy_data = np.loadtxt(energy_landscape_path, comments=['E', '/'])  # skip header lines
@@ -2721,8 +2721,9 @@ def read_field_scan(directory):
             try:
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
-                spin_file = os.path.join(full_path, "spin.txt")
-                parse_spin_config(full_path)
+                spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
+                print(spin_file)
+                # parse_spin_config(full_path)
                 if os.path.exists(spin_file):
                     S = np.loadtxt(spin_file)
                     M = np.mean(S, axis=0)
@@ -2753,7 +2754,7 @@ def read_field_scan(directory):
     np.savetxt(output_filename, output_data, header="h Mx My Mz", fmt='%f %f %f %f')
 
     plt.figure(figsize=(10, 6))
-    plt.plot(h_values_sorted, m_values_sorted, marker='o', linestyle='-')
+    plt.plot(h_values_sorted, m_values_sorted[:,0], marker='o', linestyle='-')
     plt.xlabel("Field Strength (h)")
     plt.ylabel("Magnetization Magnitude |M|")
     plt.legend(["Mx", "My", "Mz"], loc='upper right')

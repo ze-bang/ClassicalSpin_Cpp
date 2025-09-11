@@ -2789,29 +2789,57 @@ class mixed_lattice
         return mag;
     }
 
-    array<double,N_SU2> magnetization_global(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
+    array<double,N_SU2> magnetization_global(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t, array<array<array<double, N_SU2>, N_SU2>, N_ATOMS_SU2> &basis_SU2) {
         array<double,N_SU2> mag = {{0}};
+        
+        // Accumulate per-atom magnetizations
+        array<array<double,N_SU2>, N_ATOMS_SU2> atom_mag = {{0}};
         
         #pragma omp parallel
         {
-            array<double,N_SU2> local_mag = {{0}};
+            // Thread-local accumulator to reduce false sharing
+            array<array<double,N_SU2>, N_ATOMS_SU2> local_atom_mag = {{0}};
             
-            #pragma omp for nowait
+            // Process sites with better memory access pattern
+            #pragma omp for schedule(static)
             for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                const size_t atom_idx = i % N_ATOMS_SU2;
+                
+                // Vectorizable inner loop
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU2; ++j) {
-                    local_mag[j] += spin_t.spins_SU2[i][j];
+                    local_atom_mag[atom_idx][j] += spin_t.spins_SU2[i][j];
                 }
             }
             
+            // Reduce thread-local results - only critical for final accumulation
             #pragma omp critical
             {
-                for (size_t j = 0; j < N_SU2; ++j) {
-                    mag[j] += local_mag[j];
+                for (size_t atom = 0; atom < N_ATOMS_SU2; ++atom) {
+                    #pragma omp simd
+                    for (size_t j = 0; j < N_SU2; ++j) {
+                        atom_mag[atom][j] += local_atom_mag[atom][j];
+                    }
                 }
             }
         }
         
+        // Apply basis transformation outside parallel region (done once)
+        // This avoids redundant calculations in the critical section
+        for (size_t atom = 0; atom < N_ATOMS_SU2; ++atom) {
+            for (size_t j = 0; j < N_SU2; ++j) {
+                double sum = 0.0;
+                #pragma omp simd reduction(+:sum)
+                for (size_t k = 0; k < N_SU2; ++k) {
+                    sum += basis_SU2[atom][k][j] * atom_mag[atom][k];
+                }
+                mag[j] += sum;
+            }
+        }
+        
+        // Normalize
         const double inv_size = 1.0 / double(lattice_size_SU2);
+        #pragma omp simd
         for (size_t j = 0; j < N_SU2; ++j) {
             mag[j] *= inv_size;
         }
@@ -2819,36 +2847,63 @@ class mixed_lattice
         return mag;
     }
 
-    array<double,N_SU3> magnetization_global_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
+    array<double,N_SU3> magnetization_global_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t, array<array<array<double, N_SU3>, N_SU3>, N_ATOMS_SU3> &basis_SU3) {
         array<double,N_SU3> mag = {{0}};
+        
+        // Accumulate per-atom magnetizations
+        array<array<double,N_SU3>, N_ATOMS_SU3> atom_mag = {{0}};
         
         #pragma omp parallel
         {
-            array<double,N_SU3> local_mag = {{0}};
+            // Thread-local accumulator to reduce false sharing
+            array<array<double,N_SU3>, N_ATOMS_SU3> local_atom_mag = {{0}};
             
-            #pragma omp for nowait
+            // Process sites with better memory access pattern
+            #pragma omp for schedule(static)
             for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                const size_t atom_idx = i % N_ATOMS_SU3;
+                
+                // Vectorizable inner loop
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU3; ++j) {
-                    local_mag[j] += spin_t.spins_SU3[i][j];
+                    local_atom_mag[atom_idx][j] += spin_t.spins_SU3[i][j];
                 }
             }
             
+            // Reduce thread-local results - only critical for final accumulation
             #pragma omp critical
             {
-                for (size_t j = 0; j < N_SU3; ++j) {
-                    mag[j] += local_mag[j];
+                for (size_t atom = 0; atom < N_ATOMS_SU3; ++atom) {
+                    #pragma omp simd
+                    for (size_t j = 0; j < N_SU3; ++j) {
+                        atom_mag[atom][j] += local_atom_mag[atom][j];
+                    }
                 }
             }
         }
         
+        // Apply basis transformation outside parallel region (done once)
+        // This avoids redundant calculations in the critical section
+        for (size_t atom = 0; atom < N_ATOMS_SU3; ++atom) {
+            for (size_t j = 0; j < N_SU3; ++j) {
+                double sum = 0.0;
+                #pragma omp simd reduction(+:sum)
+                for (size_t k = 0; k < N_SU3; ++k) {
+                    sum += basis_SU3[atom][k][j] * atom_mag[atom][k];
+                }
+                mag[j] += sum;
+            }
+        }
+        
+        // Normalize
         const double inv_size = 1.0 / double(lattice_size_SU3);
+        #pragma omp simd
         for (size_t j = 0; j < N_SU3; ++j) {
             mag[j] *= inv_size;
         }
         
         return mag;
     }
-
 
     void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name, bool verbose= false) {
         if (dir_name != ""){

@@ -1020,11 +1020,12 @@ def full_read_2DCS_TFO(dir, done=False):
 
     real_range = omega_range
 
-    xtotal = SU2[:, :, 0] + SU3[:, :, 4] + 3*SU3[:, :, 6]
-    ytotal = SU2[:, :, 1] + SU3[:, :, 4] + 3*SU3[:, :, 6]
-    ztotal = SU2[:, :, 2]
-    SU3_contribution = SU3[:, :, 4] + SU3[:, :, 6]
-
+    xtotal = 2* SU2[:, :, 0] + 2.3915 * SU3[:, :, 4] + 0.9128 * SU3[:, :, 6]
+    ytotal = 2* SU2[:, :, 1] + 2.7866 * SU3[:, :, 4] - 0.4655* SU3[:, :, 6]
+    ztotal = 2* SU2[:, :, 2] + 5.264 * SU3[:, :, 1]
+    SU3_contribution_x = 2.3915 * SU3[:, :, 4] + 0.9128 * SU3[:, :, 6]
+    SU3_contribution_y = 2.7866 * SU3[:, :, 4] - 0.4655* SU3[:, :, 6]
+    SU3_contribution_z = 5.264 * SU3[:, :, 1]
     extent = [0, real_range, -real_range, real_range]
 
     # Plotting function to reduce repetition
@@ -1044,7 +1045,9 @@ def full_read_2DCS_TFO(dir, done=False):
     plot_spectrum(xtotal, 'X', 'x')
     plot_spectrum(ytotal, 'Y', 'y')
     plot_spectrum(ztotal, 'Z', 'z')
-    plot_spectrum(SU3_contribution, 'SU3 Contribution', 'su3_contribution')
+    plot_spectrum(SU3_contribution_x, 'SU3 Contribution X', 'su3_contribution_x')
+    plot_spectrum(SU3_contribution_y, 'SU3 Contribution Y', 'su3_contribution_y')
+    plot_spectrum(SU3_contribution_z, 'SU3 Contribution Z', 'su3_contribution_z')
 
 def read_2D_nonlinear_tot(dir):
     directory = os.fsencode(dir)

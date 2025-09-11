@@ -460,7 +460,7 @@ int main(int argc, char** argv) {
                     ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
                     : params.h_start;
                 trial_params.h = hval;
-                trial_params.num_trials = 3;
+                trial_params.num_trials = 1;
                 ostringstream hs; hs.setf(ios::fixed); hs << setprecision(6) << hval;
                 trial_params.dir = params.dir + "/trial_" + to_string(i) + "/h_" + hs.str();
 
@@ -470,7 +470,7 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params, false);
+                PT_BCAO_honeycomb(trial_params, true);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);

@@ -1041,6 +1041,56 @@ public:
         
         double current_time = T_start;
         size_t step_count = 0;
+
+        // Just write the basis vector for TmFeO3 for now
+        array<array<array<double, N_SU2>, N_SU2>, N_ATOMS_SU2> basis_vectors_SU2 = {{
+            {{{1,0,0}, {0,1,0}, {0,0,1}}},
+            {{{1,0,0}, {0,-1,0}, {0,0,-1}}},
+            {{{-1,0,0}, {0,1,0}, {0,0,-1}}},
+            {{{-1,0,0}, {0,-1,0}, {0,0,1}}}
+        }};
+
+        array<array<array<double, N_SU3>, N_SU3>, N_ATOMS_SU3> basis_vectors_SU3 = {{
+            {{{0,0,5.264,0,0,0,0,0}, {0,0,0,0,0,2.3915,0,0.9128}, {0,0,0,0,0,2.7866,0,-0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
+            {{{0,0,5.264,0,0,0,0,0}, {0,0,0,0,0,-2.3915,0,-0.9128}, {0,0,0,0,0,-2.7866,0,0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
+            {{{0,0,-5.264,0,0,0,0,0}, {0,0,0,0,0,2.3915,0,0.9128}, {0,0,0,0,0,-2.7866,0,0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
+            {{{0,0,-5.264,0,0,0,0,0}, {0,0,0,0,0,-2.3915,0,-0.9128}, {0,0,0,0,0,2.7866,0,-0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
+        }};
+
+        // Normalize the basis vectors
+        for (size_t atom = 0; atom < N_ATOMS_SU2; ++atom) {
+            for (size_t vec = 0; vec < N_SU2; ++vec) {
+                double norm = 0.0;
+                for (size_t i = 0; i < N_SU2; ++i) {
+                    norm += basis_vectors_SU2[atom][vec][i] * basis_vectors_SU2[atom][vec][i];
+                }
+                norm = sqrt(norm);
+                if (norm > 1e-10) {
+                    for (size_t i = 0; i < N_SU2; ++i) {
+                    basis_vectors_SU2[atom][vec][i] /= norm;
+                    }
+                }
+            }
+        }
+
+        for (size_t atom = 0; atom < N_ATOMS_SU3; ++atom) {
+            for (size_t vec = 0; vec < N_SU3; ++vec) {
+                double norm = 0.0;
+                for (size_t i = 0; i < N_SU3; ++i) {
+                    norm += basis_vectors_SU3[atom][vec][i] * basis_vectors_SU3[atom][vec][i];
+                }
+                norm = sqrt(norm);
+                if (norm > 1e-10) {
+                    for (size_t i = 0; i < N_SU3; ++i) {
+                    basis_vectors_SU3[atom][vec][i] /= norm;
+                    }
+                }
+            }
+        }
+
+        std::cout << "Starting time evolution from t = " << T_start << " to t = " << T_end 
+                  << " with step size " << step_size << " and output every " 
+                  << output_frequency << " steps." << std::endl;
         
         // Initial magnetization
         if (dir_name != "") {
@@ -1048,10 +1098,12 @@ public:
             
             // Write initial magnetization
             auto mag_f = this->magnetization_local(this->spins);
-            auto mag = this->magnetization_local_antiferromagnetic(this->spins);
+            // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
             auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-            auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-            
+            // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
+            auto mag = this->magnetization_global(this->spins, basis_vectors_SU2);
+            auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins, basis_vectors_SU3);
+
             for (size_t j = 0; j < N_SU2; ++j) {
                 mag_file_f << mag_f[j] << " ";
                 mag_file << mag[j] << " ";
@@ -1097,12 +1149,14 @@ public:
             if (dir_name != "" && step_count % output_frequency == 0) {
                 copy_spins_to_host();
                 
-                // Write output
+                // Write initial magnetization
                 auto mag_f = this->magnetization_local(this->spins);
-                auto mag = this->magnetization_local_antiferromagnetic(this->spins);
-                auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-                auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-                
+                // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
+                auto mag_SU3 = this->magnetization_local_SU3(this->spins);1
+                // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
+                auto mag = this->magnetization_global(this->spins, basis_vectors_SU2);
+                auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins, basis_vectors_SU3);
+
                 for (size_t j = 0; j < N_SU2; ++j) {
                     mag_file_f << mag_f[j] << " ";
                     mag_file << mag[j] << " ";
