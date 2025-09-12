@@ -229,9 +229,9 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         MC.simulated_annealing(5, 1e-3, 1e6, 2e3, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
-        for (size_t k = 0; k < 1e6; ++k) {
-            MC.deterministic_sweep();
-        }
+        // for (size_t k = 0; k < 1e6; ++k) {
+        //     MC.deterministic_sweep();
+        // }
         MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
         // Save the final configuration
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);

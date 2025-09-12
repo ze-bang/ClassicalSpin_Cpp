@@ -791,13 +791,12 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
 
     # Load background data from no_field/0 directory
     background_data = {}
-    background_dir = os.path.join(directory, "no_field", "0")
     
     for group, config in configs.items():
         try:
-            bg_file = os.path.join(background_dir, config['readfile'])
+            bg_file = os.path.join(directory, "M_time_0.000000/M1/", config['readfile'])
             if os.path.exists(bg_file):
-                background_data[group] = np.loadtxt(bg_file)
+                background_data[group] = np.mean(np.loadtxt(bg_file),axis=0)
                 print(f"Loaded background data for {group} from {bg_file}")
             else:
                 background_data[group] = None
@@ -1010,7 +1009,7 @@ def full_read_2DCS_TFO(dir, done=False):
 
         results = {'SU2': SU2, 'SU3': SU3}
     else:
-        results = read_2D_nonlinear_adaptive_time_step_combined(dir, True, w, wp)
+        results = read_2D_nonlinear_adaptive_time_step_combined(dir, False, w, wp)
         SU2 = results['SU2']
         SU3 = results['SU3']
 

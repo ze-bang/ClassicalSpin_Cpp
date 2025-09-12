@@ -1238,7 +1238,7 @@ class mixed_lattice
 
         double z_norm = 0.0;
 
-        z_norm = 5.264*2;
+        z_norm = 5.264;
 
         const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,5.264/z_norm,0,0,0,0,0,0}};
         // Normalize all basis vectors by the norm of z
@@ -2831,7 +2831,7 @@ class mixed_lattice
                 double sum = 0.0;
                 #pragma omp simd reduction(+:sum)
                 for (size_t k = 0; k < N_SU2; ++k) {
-                    sum += basis_SU2[atom][k][j] * atom_mag[atom][k];
+                    sum += basis_SU2[atom][k][j] * atom_mag[atom][j];
                 }
                 mag[j] += sum;
             }
@@ -2889,7 +2889,7 @@ class mixed_lattice
                 double sum = 0.0;
                 #pragma omp simd reduction(+:sum)
                 for (size_t k = 0; k < N_SU3; ++k) {
-                    sum += basis_SU3[atom][k][j] * atom_mag[atom][k];
+                    sum += basis_SU3[atom][k][j] * atom_mag[atom][j];
                 }
                 mag[j] += sum;
             }
