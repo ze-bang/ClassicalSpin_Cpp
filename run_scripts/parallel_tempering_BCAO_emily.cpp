@@ -454,6 +454,10 @@ int main(int argc, char** argv) {
     double t_total_program = MPI_Wtime();
     const array<double, 3> c_axis = {{0,0,1}};
     
+    if (field_scan || magnetotropic) {
+        params.num_trials = 1; // Force single trial in field-scan mode
+    }
+
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
         double t_trial = MPI_Wtime();
@@ -471,6 +475,7 @@ int main(int argc, char** argv) {
                 if (rank == 0) cout << "Warning: field_scan enabled but num_steps==0; nothing to do.\n";
                 continue;
             }
+            std::cout << "SLURM job id: " << slurm_job_id << ", range: " << slurm_job_range << "\n";
             for (size_t s = slurm_job_id; s < steps; ++slurm_job_range) {
                 double hval = (steps > 1)
                     ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))

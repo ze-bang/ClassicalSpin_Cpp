@@ -1198,7 +1198,7 @@ class lattice
         // Call the existing simulated annealing method
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
-
+    
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool boundary_update = false, bool gaussian_move = true){
         int swap_accept = 0;
         double curr_accept = 0;
@@ -1231,6 +1231,12 @@ class lattice
         // Counter for twist boundary updates
         size_t twist_update_interval = 100; // Perform twist updates every 100 iterations
         size_t twist_sweeps_per_update = 1; // Number of twist sweeps per update
+
+        // Progress tracking variables
+        size_t total_iterations = n_anneal + n_measure;
+        size_t progress_interval = max(total_iterations / 100, size_t(1)); // Update every 1%
+        size_t next_progress_update = progress_interval;
+        auto start_time = chrono::steady_clock::now();
 
         for(size_t i=0; i < n_anneal+n_measure; ++i){
 
@@ -1308,6 +1314,29 @@ class lattice
                 }
             }
 
+            // Progress logging
+            if (i >= next_progress_update || i == total_iterations - 1) {
+                double progress = 100.0 * (i + 1) / total_iterations;
+                auto current_time = chrono::steady_clock::now();
+                auto elapsed = chrono::duration_cast<chrono::seconds>(current_time - start_time).count();
+                auto eta = (elapsed > 0) ? static_cast<size_t>(elapsed * (total_iterations - i - 1) / (i + 1)) : 0;
+                
+                string phase = (i < n_anneal) ? "Equilibration" : "Measurement";
+                double current_acceptance = (i > 0) ? double(curr_accept) / double(i + 1) * overrelaxation_flag : 0.0;
+                double swap_acceptance = (swap_rate > 0 && i > swap_rate) ? 
+                    double(swap_accept) / double((i + 1) / swap_rate) : 0.0;
+                
+                cout << "[Rank " << rank << ", T=" << fixed << setprecision(4) << curr_Temp << "] "
+                     << phase << " Progress: " << fixed << setprecision(1) << progress << "% "
+                     << "(" << i + 1 << "/" << total_iterations << "), "
+                     << "E/N=" << fixed << setprecision(6) << E/lattice_size << ", "
+                     << "Accept=" << fixed << setprecision(3) << current_acceptance << ", "
+                     << "Swap=" << fixed << setprecision(3) << swap_acceptance << ", "
+                     << "Elapsed=" << elapsed << "s, ETA=" << eta << "s" << endl;
+                
+                next_progress_update += progress_interval;
+            }
+
             if (i >= n_anneal){
                 if (i % probe_rate == 0){
                     if(dir_name != ""){
@@ -1319,12 +1348,22 @@ class lattice
             }
         }
         
+        cout << "[Rank " << rank << "] Completed simulation. Computing observables..." << endl;
+        
         std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
         double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
         double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
+        
+        cout << "[Rank " << rank << "] Final Statistics - T=" << curr_Temp 
+             << ", Local acceptance=" << fixed << setprecision(4) 
+             << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag 
+             << ", Swap acceptance=" << double(swap_accept)/double((n_anneal+n_measure)/swap_rate) 
+             << ", <E>/N=" << fixed << setprecision(6) 
+             << (energies.size() > 0 ? accumulate(energies.begin(), energies.end(), 0.0)/energies.size()/lattice_size : 0.0)
+             << endl;
+        
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
@@ -1344,6 +1383,7 @@ class lattice
                     myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
                 }
                 myfile.close();
+                cout << "[Rank 0] All data saved to " << dir_name << endl;
             }
         }
         // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
