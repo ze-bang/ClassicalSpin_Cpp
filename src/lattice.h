@@ -983,9 +983,10 @@ class lattice
         double acceptance_rate = 0;
         double sigma = 1000;
         
-        // Convergence tracking variables
-        const size_t convergence_window = 100;  // Number of temperature steps to check for convergence
-        const double energy_tolerance = 1e-8;  // Relative energy change threshold
+        // Calculate expected number of temperature steps and set convergence window accordingly
+        size_t expected_temp_steps = static_cast<size_t>(log(T_end/T_start) / log(cooling_rate)) + 1;
+        const size_t convergence_window = min(size_t(50), max(size_t(10), expected_temp_steps / 10));  // 10% of expected steps, bounded between 10 and 50
+        const double energy_tolerance = 1e-5;  // Relative energy change threshold
         vector<double> energy_history;
         bool converged = false;
         
@@ -996,28 +997,42 @@ class lattice
         const double cooling_adjust_factor = 0.95; // Factor to adjust cooling rate
         size_t steps_since_improvement = 0;
         double best_energy = std::numeric_limits<double>::max();
-        const size_t patience_steps = 20; // Steps to wait before adjusting cooling
+        const size_t patience_steps = max(size_t(5), convergence_window / 5); // Scale patience with convergence window
         
         // Non-convergence strategy variables
         const size_t max_restart_attempts = 3;
         size_t restart_count = 0;
         spin_config best_config = spins;
         double best_config_energy = std::numeric_limits<double>::max();
-        const double restart_temp_factor = 2.0; // Reheat to T_end * factor for restart
+        const double restart_temp_factor = 5.0; // Reheat to T_end * factor for restart
         
         // Time estimation variables
         auto start_time = chrono::steady_clock::now();
         size_t completed_temp_steps = 0;
         
         cout << "Starting simulated annealing with adaptive cooling rate" << endl;
+        cout << "Expected temperature steps: " << expected_temp_steps << endl;
+        cout << "Convergence window size: " << convergence_window << endl;
         cout << "Initial cooling rate: " << fixed << setprecision(6) << adaptive_cooling_rate << endl;
         cout << "Cooling rate range: [" << fixed << setprecision(6) << max_cooling_rate << ", " << fixed << setprecision(6) << min_cooling_rate << "]" << endl;
         cout << "Gaussian Move: " << gaussian_move << endl;
         cout << "Energy convergence tolerance: " << scientific << setprecision(2) << energy_tolerance << endl;
         cout << "Max restart attempts: " << max_restart_attempts << endl;
         
-        srand (time(NULL));
-        seed_lehman(rand()*2+1);
+        {
+            std::random_device rd;
+            std::seed_seq seq{
+            rd(), rd(), rd(), rd(),
+            static_cast<uint32_t>(chrono::high_resolution_clock::now().time_since_epoch().count()),
+            static_cast<uint32_t>(chrono::high_resolution_clock::now().time_since_epoch().count() >> 32),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this) >> 32)
+            };
+            std::mt19937_64 gen(seq);
+            std::uniform_int_distribution<uint64_t> dist;
+            uint64_t seed = dist(gen) | 1ULL; // ensure odd
+            seed_lehman(seed);
+        }
         
         while(restart_count <= max_restart_attempts && !converged){
             if(restart_count > 0){
@@ -1077,7 +1092,7 @@ class lattice
                 }
                 
                 // Adaptive cooling rate adjustment
-                if (energy_history.size() >= 10) { // Need some history before adjusting
+                if (energy_history.size() >= min(size_t(10), convergence_window/2)) { // Need some history before adjusting
                     double recent_change = 0;
                     if (energy_history.size() >= 5) {
                         // Calculate recent energy change rate
@@ -1722,7 +1737,6 @@ class lattice
         return temps;
     }
 
-
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
 
         int swap_accept = 0;
@@ -1751,38 +1765,66 @@ class lattice
         vector<array<double,N>> magnetizations;
         vector<spin_config> spin_configs_at_temp;
 
-        // Convergence diagnostics variables
+        // Enhanced convergence diagnostics variables
         vector<double> energy_history;
         vector<double> acceptance_history;
         vector<double> swap_acceptance_history;
         const size_t convergence_check_interval = 1000;
         const size_t convergence_window = 100;
-        const double convergence_tolerance = 1e-6;
-        bool converged = false;
+        const double energy_convergence_tolerance = 1e-5;
+        const double swap_rate_convergence_tolerance = 0.05; // 5% variation in swap rate
+        const size_t min_converged_rounds = 3; // Number of consecutive converged checks needed
+        
+        // Multi-rank convergence tracking
+        bool local_converged = false;
+        bool global_converged = false;
+        size_t local_converged_rounds = 0;
         size_t convergence_step = 0;
+        
+        // Extension parameters
+        const size_t max_extensions = 10;
+        const size_t extension_steps = n_measure / 2;
+        const size_t min_steps_before_extension = n_anneal + n_measure;
+        size_t current_extensions = 0;
+        size_t total_steps = n_anneal + n_measure;
         
         // Running statistics for convergence
         double running_mean_energy = 0;
         double running_variance_energy = 0;
         size_t stats_count = 0;
         
-        // Autocorrelation tracking
-        vector<double> energy_for_autocorr;
-        const size_t max_autocorr_lag = 100;
-        vector<double> autocorrelation;
+        // Swap rate statistics
+        double running_swap_rate = 0;
+        vector<double> recent_swap_rates;
+        
+        // Round-trip time tracking (for mixing assessment)
+        vector<int> round_trip_counter(size);
+        vector<double> round_trip_times;
+        int original_rank = rank;
+        size_t last_return_step = 0;
+        
+        // Temperature-specific convergence criteria
+        double temp_specific_tolerance = energy_convergence_tolerance;
+        if(curr_Temp > 1.0) {
+            // Higher temperatures need looser tolerance
+            temp_specific_tolerance *= (1.0 + log(curr_Temp));
+        }
         
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
-        cout << "Starting convergence diagnostics tracking..." << endl;
+        cout << "Starting enhanced multi-rank convergence diagnostics..." << endl;
+        cout << "Max extensions allowed: " << max_extensions << " x " << extension_steps << " steps" << endl;
+        cout << "Temperature-specific tolerance: " << scientific << temp_specific_tolerance << endl;
 
         // Open convergence diagnostics file for this rank
         ofstream conv_file;
         if(dir_name != ""){
             filesystem::create_directory(dir_name);
             conv_file.open(dir_name + "/convergence_rank" + to_string(rank) + ".txt");
-            conv_file << "# Step Energy AcceptRate SwapAcceptRate RunningMean RunningVar Converged" << endl;
+            conv_file << "# Step Energy AcceptRate SwapRate RunningMean RunningVar LocalConverged GlobalConverged Extension RoundTrips" << endl;
         }
 
-        for(size_t i=0; i < n_anneal+n_measure; ++i){
+        size_t i = 0;
+        while(i < total_steps && !global_converged){
 
             // Metropolis
             double step_accept = 0;
@@ -1815,16 +1857,9 @@ class lattice
                 energy_history.erase(energy_history.begin());
                 acceptance_history.erase(acceptance_history.begin());
             }
-            
-            // Store for autocorrelation analysis
-            if(i >= n_anneal){
-                energy_for_autocorr.push_back(E);
-                if(energy_for_autocorr.size() > 5000){
-                    energy_for_autocorr.erase(energy_for_autocorr.begin());
-                }
-            }
 
-            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
+            // Replica exchange
+            if (i % swap_rate == 0){
                 accept = false;
                 if ((i / swap_rate) % 2 ==0){
                     partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
@@ -1857,16 +1892,35 @@ class lattice
                         copy(new_spins.begin(), new_spins.end(), spins.begin());
                         E = E_partner;
                         swap_accept++;
+                        
+                        // Track round trips for mixing assessment
+                        if(rank == original_rank && last_return_step > 0){
+                            round_trip_times.push_back(i - last_return_step);
+                            last_return_step = i;
+                        }
                     }
                 }
                 swap_acceptance_history.push_back(accept ? 1.0 : 0.0);
+                
+                // Update recent swap rates
+                if(swap_acceptance_history.size() >= convergence_window){
+                    double recent_rate = 0;
+                    for(size_t j = swap_acceptance_history.size() - convergence_window; j < swap_acceptance_history.size(); ++j){
+                        recent_rate += swap_acceptance_history[j];
+                    }
+                    recent_swap_rates.push_back(recent_rate / convergence_window);
+                    if(recent_swap_rates.size() > convergence_window){
+                        recent_swap_rates.erase(recent_swap_rates.begin());
+                    }
+                }
             }
 
-            // Convergence check at intervals
-            if(i > 0 && i % convergence_check_interval == 0 && !converged){
-                bool local_converged = false;
+            // Enhanced convergence check at intervals
+            if(i > 0 && i % convergence_check_interval == 0 && i >= n_anneal){
+                bool current_check_converged = false;
                 
-                // Check energy convergence using recent history
+                // 1. Energy convergence check
+                bool energy_converged = false;
                 if(energy_history.size() >= convergence_window * 2){
                     double recent_mean = 0, old_mean = 0;
                     size_t hist_size = energy_history.size();
@@ -1881,44 +1935,129 @@ class lattice
                     }
                     old_mean /= convergence_window;
                     
-                    double relative_change = abs((recent_mean - old_mean) / old_mean);
+                    double relative_change = abs((recent_mean - old_mean) / abs(old_mean));
+                    energy_converged = (relative_change < temp_specific_tolerance);
+                }
+                
+                // 2. Swap rate stability check
+                bool swap_rate_stable = false;
+                if(recent_swap_rates.size() >= convergence_window/2){
+                    double mean_swap_rate = 0;
+                    double var_swap_rate = 0;
+                    for(auto& rate : recent_swap_rates) mean_swap_rate += rate;
+                    mean_swap_rate /= recent_swap_rates.size();
                     
-                    // Calculate acceptance rate statistics
-                    double recent_accept_rate = 0;
-                    for(size_t j = max(size_t(0), acceptance_history.size() - convergence_window); j < acceptance_history.size(); ++j){
-                        recent_accept_rate += acceptance_history[j];
+                    for(auto& rate : recent_swap_rates){
+                        var_swap_rate += (rate - mean_swap_rate) * (rate - mean_swap_rate);
                     }
-                    recent_accept_rate /= min(convergence_window, acceptance_history.size());
+                    var_swap_rate /= (recent_swap_rates.size() - 1);
+                    double cv_swap_rate = (mean_swap_rate > 0) ? sqrt(var_swap_rate) / mean_swap_rate : 0;
                     
-                    // Check convergence criteria
-                    if(relative_change < convergence_tolerance && i >= n_anneal){
-                        local_converged = true;
-                        converged = true;
-                        convergence_step = i;
-                    }
-                    
-                    // Output convergence diagnostics every interval
-                    if(rank == 0 || rank == rank_to_write[0]){
-                        cout << "[Rank " << rank << "] Step " << i 
-                             << " | E_mean: " << recent_mean/lattice_size
-                             << " | ΔE/E: " << scientific << relative_change 
-                             << " | Accept: " << fixed << setprecision(3) << recent_accept_rate
-                             << " | Converged: " << (local_converged ? "YES" : "NO") << endl;
+                    swap_rate_stable = (cv_swap_rate < swap_rate_convergence_tolerance);
+                }
+                
+                // 3. Acceptance rate stability
+                double recent_accept_rate = 0;
+                for(size_t j = max(size_t(0), acceptance_history.size() - convergence_window); j < acceptance_history.size(); ++j){
+                    recent_accept_rate += acceptance_history[j];
+                }
+                recent_accept_rate /= min(convergence_window, acceptance_history.size());
+                
+                // Combined local convergence criteria
+                current_check_converged = energy_converged && swap_rate_stable && (recent_accept_rate < 0.3);
+                
+                if(current_check_converged){
+                    local_converged_rounds++;
+                } else {
+                    local_converged_rounds = 0;
+                }
+                
+                // Local convergence achieved after multiple consistent checks
+                if(local_converged_rounds >= min_converged_rounds){
+                    local_converged = true;
+                }
+                
+                // Gather convergence status from all ranks
+                int local_conv_int = local_converged ? 1 : 0;
+                int global_conv_sum = 0;
+                MPI_Allreduce(&local_conv_int, &global_conv_sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+                
+                // Different convergence strategies
+                enum ConvergenceStrategy { ALL_RANKS, MAJORITY, CRITICAL_TEMPS };
+                ConvergenceStrategy strategy = MAJORITY; // Choose strategy
+                
+                switch(strategy){
+                    case ALL_RANKS:
+                        global_converged = (global_conv_sum == size);
+                        break;
+                    case MAJORITY:
+                        global_converged = (global_conv_sum >= (size * 3 / 4)); // 75% of ranks
+                        break;
+                    case CRITICAL_TEMPS:
+                        // Check if critical temperatures (middle range) have converged
+                        if(rank >= size/4 && rank < 3*size/4){
+                            int critical_conv_sum = 0;
+                            MPI_Allreduce(&local_conv_int, &critical_conv_sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+                            global_converged = (critical_conv_sum >= (size/2 * 3/4));
+                        }
+                        break;
+                }
+                
+                if(global_converged){
+                    convergence_step = i;
+                }
+                
+                // Output convergence diagnostics
+                if(rank == 0){
+                    cout << "\n[CONVERGENCE CHECK] Step " << i << endl;
+                    cout << "  Converged ranks: " << global_conv_sum << "/" << size << endl;
+                    cout << "  Global convergence: " << (global_converged ? "YES" : "NO") << endl;
+                    cout << "  Extensions used: " << current_extensions << "/" << max_extensions << endl;
+                }
+                
+                // Check if we need to extend the run
+                if(!global_converged && i >= min_steps_before_extension && i >= total_steps - convergence_check_interval){
+                    if(current_extensions < max_extensions){
+                        // Only extend if making progress (check energy variance reduction)
+                        double current_variance = (stats_count > 1) ? running_variance_energy / (stats_count - 1) : 0;
+                        bool making_progress = true; // Could add more sophisticated progress check
+                        
+                        if(making_progress){
+                            total_steps += extension_steps;
+                            current_extensions++;
+                            
+                            if(rank == 0){
+                                cout << "\n*** EXTENDING RUN *** Extension " << current_extensions 
+                                     << "/" << max_extensions << " | Adding " << extension_steps 
+                                     << " steps | New total: " << total_steps << " ***\n" << endl;
+                            }
+                        }
+                    } else {
+                        if(rank == 0){
+                            cout << "\n*** Maximum extensions reached. Finalizing. ***\n" << endl;
+                        }
                     }
                 }
                 
                 // Write to convergence file
                 if(conv_file.is_open() && stats_count > 0){
                     double current_variance = (stats_count > 1) ? running_variance_energy / (stats_count - 1) : 0;
+                    double current_swap_rate = swap_acceptance_history.empty() ? 0 : 
+                        double(swap_accept) / swap_acceptance_history.size();
+                    
                     conv_file << i << " " << E/lattice_size << " " 
                              << curr_accept/(i+1)*overrelaxation_flag << " "
-                             << (swap_acceptance_history.size() > 0 ? swap_accept/double(swap_acceptance_history.size()) : 0) << " "
+                             << current_swap_rate << " "
                              << running_mean_energy/lattice_size << " "
                              << current_variance/(lattice_size*lattice_size) << " "
-                             << (converged ? 1 : 0) << endl;
+                             << (local_converged ? 1 : 0) << " "
+                             << (global_converged ? 1 : 0) << " "
+                             << current_extensions << " "
+                             << round_trip_times.size() << endl;
                 }
             }
 
+            // Data collection phase
             if (i >= n_anneal){
                 if (i % probe_rate == 0){
                     if(dir_name != ""){
@@ -1928,45 +2067,11 @@ class lattice
                     }
                 }
             }
+            
+            i++;
         }
         
-        // Calculate autocorrelation function
-        if(energy_for_autocorr.size() > max_autocorr_lag){
-            autocorrelation.resize(max_autocorr_lag);
-            double mean_e = 0;
-            for(auto& e : energy_for_autocorr) mean_e += e;
-            mean_e /= energy_for_autocorr.size();
-            
-            for(size_t lag = 0; lag < max_autocorr_lag; ++lag){
-                double corr = 0;
-                double var = 0;
-                for(size_t j = 0; j < energy_for_autocorr.size() - lag; ++j){
-                    corr += (energy_for_autocorr[j] - mean_e) * (energy_for_autocorr[j+lag] - mean_e);
-                    if(lag == 0) var += (energy_for_autocorr[j] - mean_e) * (energy_for_autocorr[j] - mean_e);
-                }
-                autocorrelation[lag] = (var > 0 && lag == 0) ? 1.0 : corr / var;
-            }
-            
-            // Find integrated autocorrelation time
-            double tau_int = 0.5;
-            for(size_t lag = 1; lag < autocorrelation.size() && autocorrelation[lag] > 0.01; ++lag){
-                tau_int += autocorrelation[lag];
-            }
-            
-            if(rank == 0 || rank == rank_to_write[0]){
-                cout << "[Rank " << rank << "] Integrated autocorrelation time: " << tau_int << endl;
-            }
-            
-            // Write autocorrelation to file
-            if(dir_name != "" && (rank == 0 || find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())){
-                ofstream acf_file(dir_name + "/autocorrelation_rank" + to_string(rank) + ".txt");
-                for(size_t lag = 0; lag < autocorrelation.size(); ++lag){
-                    acf_file << lag << " " << autocorrelation[lag] << endl;
-                }
-                acf_file.close();
-            }
-        }
-        
+        // Calculate final statistics
         std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
         double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
         double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
@@ -1974,20 +2079,30 @@ class lattice
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         
         // Final convergence summary
-        cout << "\n=== CONVERGENCE SUMMARY [Rank " << rank << "] ===" << endl;
+        cout << "\n=== FINAL CONVERGENCE REPORT [Rank " << rank << "] ===" << endl;
         cout << "Temperature: " << curr_Temp << endl;
-        cout << "Converged: " << (converged ? "YES at step " + to_string(convergence_step) : "NO") << endl;
+        cout << "Local Convergence: " << (local_converged ? "YES" : "NO") << endl;
+        cout << "Global Convergence: " << (global_converged ? "YES at step " + to_string(convergence_step) : "NO") << endl;
+        cout << "Total steps: " << i << " (Extended " << current_extensions << " times)" << endl;
         cout << "Final Energy/site: " << running_mean_energy/lattice_size << endl;
-        cout << "Energy Variance/site^2: " << ((stats_count > 1) ? running_variance_energy/(stats_count-1)/(lattice_size*lattice_size) : 0) << endl;
-        cout << "Local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << endl;
-        cout << "Swap acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
-        cout << "================================\n" << endl;
+        cout << "Energy Std/site: " << sqrt(running_variance_energy/(stats_count-1))/lattice_size << endl;
+        cout << "Acceptance rate: " << double(curr_accept)/double(i)*overrelaxation_flag << endl;
+        cout << "Swap rate: " << (swap_acceptance_history.empty() ? 0 : double(swap_accept)/swap_acceptance_history.size()) << endl;
+        cout << "Round trips completed: " << round_trip_times.size() << endl;
+        if(!round_trip_times.empty()){
+            double avg_rt = 0;
+            for(auto& rt : round_trip_times) avg_rt += rt;
+            avg_rt /= round_trip_times.size();
+            cout << "Avg round-trip time: " << avg_rt << " steps" << endl;
+        }
+        cout << "==========================================\n" << endl;
         
         if(conv_file.is_open()) conv_file.close();
         
+        // Write output files
         if(dir_name != ""){
-            for(size_t i=0; i<rank_to_write.size(); ++i){
-                if (rank == rank_to_write[i]){
+            for(size_t idx=0; idx<rank_to_write.size(); ++idx){
+                if (rank == rank_to_write[idx]){
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
                 }
@@ -2000,10 +2115,18 @@ class lattice
                     myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
                 }
                 myfile.close();
+                
+                // Write global convergence summary
+                ofstream summary_file;
+                summary_file.open(dir_name + "/convergence_summary.txt");
+                summary_file << "Global Converged: " << (global_converged ? "Yes" : "No") << endl;
+                if(global_converged) summary_file << "Convergence Step: " << convergence_step << endl;
+                summary_file << "Total Extensions: " << current_extensions << endl;
+                summary_file << "Final Steps: " << i << endl;
+                summary_file.close();
             }
         }
     }
-
 
     void measurement(string toread, double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
         vector<double> energies;
