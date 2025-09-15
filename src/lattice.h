@@ -1084,7 +1084,7 @@ class lattice
                 }
                 
                 // Track improvement
-                if (current_energy < best_energy * (1.0 - 1e-6)) { // Significant improvement
+                if (current_energy < best_energy * (1.0 - energy_tolerance)) { // Significant improvement
                     best_energy = current_energy;
                     steps_since_improvement = 0;
                 } else {

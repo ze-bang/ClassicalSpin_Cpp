@@ -2014,7 +2014,7 @@ class mixed_lattice
                 }
                 
                 // Adaptive cooling rate adjustment
-                if(current_energy < best_energy - 1e-10){
+                if(current_energy < best_energy - energy_tolerance){
                     best_energy = current_energy;
                     steps_since_improvement = 0;
                     
