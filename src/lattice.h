@@ -998,6 +998,13 @@ class lattice
         double best_energy = std::numeric_limits<double>::max();
         const size_t patience_steps = 20; // Steps to wait before adjusting cooling
         
+        // Non-convergence strategy variables
+        const size_t max_restart_attempts = 3;
+        size_t restart_count = 0;
+        spin_config best_config = spins;
+        double best_config_energy = std::numeric_limits<double>::max();
+        const double restart_temp_factor = 2.0; // Reheat to T_end * factor for restart
+        
         // Time estimation variables
         auto start_time = chrono::steady_clock::now();
         size_t completed_temp_steps = 0;
@@ -1007,195 +1014,261 @@ class lattice
         cout << "Cooling rate range: [" << fixed << setprecision(6) << max_cooling_rate << ", " << fixed << setprecision(6) << min_cooling_rate << "]" << endl;
         cout << "Gaussian Move: " << gaussian_move << endl;
         cout << "Energy convergence tolerance: " << scientific << setprecision(2) << energy_tolerance << endl;
+        cout << "Max restart attempts: " << max_restart_attempts << endl;
         
         srand (time(NULL));
         seed_lehman(rand()*2+1);
         
-        while(T > T_end && !converged){
-            auto temp_start = chrono::steady_clock::now();
-            
-            double curr_accept = 0;
-            for(size_t i = 0; i<n_anneal; ++i){
-                if(overrelaxation_rate > 0){
-                    overrelaxation();
-                    if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
-                    }
+        while(restart_count <= max_restart_attempts && !converged){
+            if(restart_count > 0){
+                cout << "\n=== RESTART ATTEMPT " << restart_count << "/" << max_restart_attempts << " ===" << endl;
+                // Restart from best configuration with some perturbation
+                spins = best_config;
+                T = min(T_end * restart_temp_factor, T_start/pow(2, restart_count));
+                adaptive_cooling_rate = min(cooling_rate + 0.05 * restart_count, min_cooling_rate);
+                cout << "Restarting from T = " << T << " with cooling rate = " << adaptive_cooling_rate << endl;
+                
+                // Apply random perturbation to escape local minimum
+                for(size_t i = 0; i < lattice_size/10; ++i){
+                    size_t site = random_int_lehman(lattice_size);
+                    spins[site] = gen_random_spin(spin_length);
                 }
-                else{
-                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
-                }
-            }
-            if (boundary_update) {
-                for (size_t i = 0; i < 1e2; ++i){
-                    metropolis_twist_sweep(T);
-                }
-            }
-            
-            // Calculate and store current energy
-            double current_energy = total_energy(spins) / lattice_size;
-            energy_history.push_back(current_energy);
-            
-            // Track improvement
-            if (current_energy < best_energy * (1.0 - 1e-6)) { // Significant improvement
-                best_energy = current_energy;
+                energy_history.clear();
                 steps_since_improvement = 0;
-            } else {
-                steps_since_improvement++;
             }
             
-            // Adaptive cooling rate adjustment
-            if (energy_history.size() >= 10) { // Need some history before adjusting
-                double recent_change = 0;
-                if (energy_history.size() >= 5) {
-                    // Calculate recent energy change rate
-                    size_t hist_size = energy_history.size();
-                    double recent_diff = abs(energy_history[hist_size-1] - energy_history[hist_size-5]);
-                    double old_energy = abs(energy_history[hist_size-5]);
-                    recent_change = (old_energy > 0) ? recent_diff / old_energy : 0;
-                }
+            while(T > T_end && !converged){
+                auto temp_start = chrono::steady_clock::now();
                 
-                // Adjust cooling rate based on convergence behavior
-                if (steps_since_improvement > patience_steps) {
-                    // No improvement for a while - cool slower to explore more
-                    adaptive_cooling_rate = min(min_cooling_rate, 
-                                                adaptive_cooling_rate / cooling_adjust_factor);
-                    steps_since_improvement = 0; // Reset counter
-                    cout << "  >> Slowing cooling rate to " << adaptive_cooling_rate 
-                         << " (no improvement for " << patience_steps << " steps)" << endl;
-                } else if (recent_change < 1e-6 && acceptance_rate < 0.1) {
-                    // System seems stuck - cool slower
-                    adaptive_cooling_rate = min(min_cooling_rate, 
-                                                adaptive_cooling_rate / cooling_adjust_factor);
-                    cout << "  >> System appears stuck. Slowing cooling to " << adaptive_cooling_rate << endl;
-                } else if (recent_change > 1e-3 && acceptance_rate > 0.7) {
-                    // Still making good progress - can cool faster
-                    adaptive_cooling_rate = max(max_cooling_rate, 
-                                                adaptive_cooling_rate * cooling_adjust_factor);
-                    cout << "  >> Good progress. Accelerating cooling to " << adaptive_cooling_rate << endl;
-                }
-            }
-            
-            // Check for convergence
-            if (energy_history.size() >= convergence_window) {
-                double recent_mean = 0, old_mean = 0;
-                size_t hist_size = energy_history.size();
-                
-                // Calculate mean of recent window
-                for (size_t i = hist_size - convergence_window/2; i < hist_size; ++i) {
-                    recent_mean += energy_history[i];
-                }
-                recent_mean /= (convergence_window/2);
-                
-                // Calculate mean of older window
-                for (size_t i = hist_size - convergence_window; i < hist_size - convergence_window/2; ++i) {
-                    old_mean += energy_history[i];
-                }
-                old_mean /= (convergence_window/2);
-                
-                // Check relative change
-                double relative_change = abs((recent_mean - old_mean) / old_mean);
-                if (relative_change < energy_tolerance && acceptance_rate < 0.01) {
-                    converged = true;
-                    cout << "\n*** CONVERGED: Energy change (" << scientific << relative_change 
-                         << ") below tolerance with low acceptance rate ***" << endl;
-                }
-                
-                // Keep energy history from getting too large
-                if (energy_history.size() > 2 * convergence_window) {
-                    energy_history.erase(energy_history.begin());
-                }
-            }
-            
-            completed_temp_steps++;
-            
-            if (overrelaxation_rate > 0){
-                acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
-            }else{
-                acceptance_rate = curr_accept/n_anneal;
-            }
-            
-            // Time estimation
-            auto current_time = chrono::steady_clock::now();
-            auto elapsed_total = chrono::duration_cast<chrono::seconds>(current_time - start_time).count();
-            auto elapsed_this_temp = chrono::duration_cast<chrono::milliseconds>(current_time - temp_start).count();
-            
-            // Estimate remaining steps based on current cooling rate
-            size_t estimated_remaining_steps = 0;
-            double temp_estimate = T;
-            while(temp_estimate > T_end && estimated_remaining_steps < 10000) {
-                temp_estimate *= adaptive_cooling_rate;
-                estimated_remaining_steps++;
-            }
-            
-            double avg_time_per_step = (completed_temp_steps > 0) ? 
-                double(elapsed_total) / double(completed_temp_steps) : 0;
-            size_t eta_seconds = static_cast<size_t>(avg_time_per_step * estimated_remaining_steps);
-            
-            // Format ETA
-            size_t eta_hours = eta_seconds / 3600;
-            size_t eta_mins = (eta_seconds % 3600) / 60;
-            size_t eta_secs = eta_seconds % 60;
-            
-            cout << "T: " << fixed << setprecision(6) << T 
-                 << " | E/N: " << fixed << setprecision(8) << current_energy
-                 << " | Accept: " << fixed << setprecision(4) << acceptance_rate
-                 << " | Cool: " << fixed << setprecision(4) << adaptive_cooling_rate
-                 << " | Step: " << completed_temp_steps
-                 << " | Time: " << elapsed_this_temp << "ms"
-                 << " | ETA: " << setfill('0') << setw(2) << eta_hours << ":"
-                 << setw(2) << eta_mins << ":" << setw(2) << eta_secs;
-            
-            // Add convergence indicator if checking
-            if (energy_history.size() >= convergence_window) {
-                double recent_mean = 0, old_mean = 0;
-                size_t hist_size = energy_history.size();
-                for (size_t i = hist_size - convergence_window/2; i < hist_size; ++i) {
-                    recent_mean += energy_history[i];
-                }
-                recent_mean /= (convergence_window/2);
-                for (size_t i = hist_size - convergence_window; i < hist_size - convergence_window/2; ++i) {
-                    old_mean += energy_history[i];
-                }
-                old_mean /= (convergence_window/2);
-                double relative_change = abs((recent_mean - old_mean) / old_mean);
-                cout << " | ΔE/E: " << scientific << relative_change;
-            }
-            cout << endl;
-            
-            if (gaussian_move && acceptance_rate < 0.5){
-                sigma = sigma * 0.5 / (1-acceptance_rate); 
-                cout << "  >> Sigma adjusted to: " << sigma << endl;   
-            }
-            
-            if(save_observables){
-                vector<double> energies;
-                for(size_t i = 0; i<1e7; ++i){
+                double curr_accept = 0;
+                for(size_t i = 0; i<n_anneal; ++i){
                     if(overrelaxation_rate > 0){
                         overrelaxation();
                         if (i%overrelaxation_rate == 0){
-                            metropolis(spins, T, gaussian_move, sigma);
+                            curr_accept += metropolis(spins, T, gaussian_move, sigma);
                         }
                     }
                     else{
-                        metropolis(spins, T, gaussian_move, sigma);
-                    }
-                    if (i % 1000 == 0){
-                        energies.push_back(total_energy(spins));
+                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
                     }
                 }
-                double k_B = 1.380649e-23;
-                double N_A = 6.02214076e23;
-                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size * 2 * k_B * N_A;
-                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size * 2 * k_B * N_A;
-                ofstream myfile;
-                myfile.open(out_dir + "/specific_heat.txt", ios::app);
-                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
-                myfile << endl;
-                myfile.close();
+                if (boundary_update) {
+                    for (size_t i = 0; i < 1e2; ++i){
+                        metropolis_twist_sweep(T);
+                    }
+                }
+                
+                // Calculate and store current energy
+                double current_energy = total_energy(spins) / lattice_size;
+                energy_history.push_back(current_energy);
+                
+                // Track best configuration
+                if (current_energy < best_config_energy) {
+                    best_config_energy = current_energy;
+                    best_config = spins;
+                }
+                
+                // Track improvement
+                if (current_energy < best_energy * (1.0 - 1e-6)) { // Significant improvement
+                    best_energy = current_energy;
+                    steps_since_improvement = 0;
+                } else {
+                    steps_since_improvement++;
+                }
+                
+                // Adaptive cooling rate adjustment
+                if (energy_history.size() >= 10) { // Need some history before adjusting
+                    double recent_change = 0;
+                    if (energy_history.size() >= 5) {
+                        // Calculate recent energy change rate
+                        size_t hist_size = energy_history.size();
+                        double recent_diff = abs(energy_history[hist_size-1] - energy_history[hist_size-5]);
+                        double old_energy = abs(energy_history[hist_size-5]);
+                        recent_change = (old_energy > 0) ? recent_diff / old_energy : 0;
+                    }
+                    
+                    // Adjust cooling rate based on convergence behavior
+                    if (steps_since_improvement > patience_steps) {
+                        // No improvement for a while - cool slower to explore more
+                        adaptive_cooling_rate = min(min_cooling_rate, 
+                                                    adaptive_cooling_rate / cooling_adjust_factor);
+                        steps_since_improvement = 0; // Reset counter
+                        cout << "  >> Slowing cooling rate to " << adaptive_cooling_rate 
+                             << " (no improvement for " << patience_steps << " steps)" << endl;
+                    } else if (recent_change < 1e-6 && acceptance_rate < 0.1) {
+                        // System seems stuck - cool slower
+                        adaptive_cooling_rate = min(min_cooling_rate, 
+                                                    adaptive_cooling_rate / cooling_adjust_factor);
+                        cout << "  >> System appears stuck. Slowing cooling to " << adaptive_cooling_rate << endl;
+                    } else if (recent_change > 1e-3 && acceptance_rate > 0.7) {
+                        // Still making good progress - can cool faster
+                        adaptive_cooling_rate = max(max_cooling_rate, 
+                                                    adaptive_cooling_rate * cooling_adjust_factor);
+                        cout << "  >> Good progress. Accelerating cooling to " << adaptive_cooling_rate << endl;
+                    }
+                }
+                
+                // Check for convergence
+                if (energy_history.size() >= convergence_window) {
+                    double recent_mean = 0, old_mean = 0;
+                    size_t hist_size = energy_history.size();
+                    
+                    // Calculate mean of recent window
+                    for (size_t i = hist_size - convergence_window/2; i < hist_size; ++i) {
+                        recent_mean += energy_history[i];
+                    }
+                    recent_mean /= (convergence_window/2);
+                    
+                    // Calculate mean of older window
+                    for (size_t i = hist_size - convergence_window; i < hist_size - convergence_window/2; ++i) {
+                        old_mean += energy_history[i];
+                    }
+                    old_mean /= (convergence_window/2);
+                    
+                    // Check relative change
+                    double relative_change = abs((recent_mean - old_mean) / old_mean);
+                    if (relative_change < energy_tolerance && acceptance_rate < 0.01) {
+                        converged = true;
+                        cout << "\n*** CONVERGED: Energy change (" << scientific << relative_change 
+                             << ") below tolerance with low acceptance rate ***" << endl;
+                    }
+                    
+                    // Keep energy history from getting too large
+                    if (energy_history.size() > 2 * convergence_window) {
+                        energy_history.erase(energy_history.begin());
+                    }
+                }
+                
+                completed_temp_steps++;
+                
+                if (overrelaxation_rate > 0){
+                    acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
+                }else{
+                    acceptance_rate = curr_accept/n_anneal;
+                }
+                
+                // Time estimation
+                auto current_time = chrono::steady_clock::now();
+                auto elapsed_total = chrono::duration_cast<chrono::seconds>(current_time - start_time).count();
+                auto elapsed_this_temp = chrono::duration_cast<chrono::milliseconds>(current_time - temp_start).count();
+                
+                // Estimate remaining steps based on current cooling rate
+                size_t estimated_remaining_steps = 0;
+                double temp_estimate = T;
+                while(temp_estimate > T_end && estimated_remaining_steps < 10000) {
+                    temp_estimate *= adaptive_cooling_rate;
+                    estimated_remaining_steps++;
+                }
+                
+                double avg_time_per_step = (completed_temp_steps > 0) ? 
+                    double(elapsed_total) / double(completed_temp_steps) : 0;
+                size_t eta_seconds = static_cast<size_t>(avg_time_per_step * estimated_remaining_steps);
+                
+                // Format ETA
+                size_t eta_hours = eta_seconds / 3600;
+                size_t eta_mins = (eta_seconds % 3600) / 60;
+                size_t eta_secs = eta_seconds % 60;
+                
+                cout << "T: " << fixed << setprecision(6) << T 
+                     << " | E/N: " << fixed << setprecision(8) << current_energy
+                     << " | Accept: " << fixed << setprecision(4) << acceptance_rate
+                     << " | Cool: " << fixed << setprecision(4) << adaptive_cooling_rate
+                     << " | Step: " << completed_temp_steps
+                     << " | Time: " << elapsed_this_temp << "ms"
+                     << " | ETA: " << setfill('0') << setw(2) << eta_hours << ":"
+                     << setw(2) << eta_mins << ":" << setw(2) << eta_secs;
+                
+                // Add convergence indicator if checking
+                if (energy_history.size() >= convergence_window) {
+                    double recent_mean = 0, old_mean = 0;
+                    size_t hist_size = energy_history.size();
+                    for (size_t i = hist_size - convergence_window/2; i < hist_size; ++i) {
+                        recent_mean += energy_history[i];
+                    }
+                    recent_mean /= (convergence_window/2);
+                    for (size_t i = hist_size - convergence_window; i < hist_size - convergence_window/2; ++i) {
+                        old_mean += energy_history[i];
+                    }
+                    old_mean /= (convergence_window/2);
+                    double relative_change = abs((recent_mean - old_mean) / old_mean);
+                    cout << " | ΔE/E: " << scientific << relative_change;
+                }
+                if(restart_count > 0) cout << " [R" << restart_count << "]";
+                cout << endl;
+                
+                if (gaussian_move && acceptance_rate < 0.5){
+                    sigma = sigma * 0.5 / (1-acceptance_rate); 
+                    cout << "  >> Sigma adjusted to: " << sigma << endl;   
+                }
+                
+                if(save_observables){
+                    vector<double> energies;
+                    for(size_t i = 0; i<1e7; ++i){
+                        if(overrelaxation_rate > 0){
+                            overrelaxation();
+                            if (i%overrelaxation_rate == 0){
+                                metropolis(spins, T, gaussian_move, sigma);
+                            }
+                        }
+                        else{
+                            metropolis(spins, T, gaussian_move, sigma);
+                        }
+                        if (i % 1000 == 0){
+                            energies.push_back(total_energy(spins));
+                        }
+                    }
+                    double k_B = 1.380649e-23;
+                    double N_A = 6.02214076e23;
+                    std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
+                    double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size * 2 * k_B * N_A;
+                    double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size * 2 * k_B * N_A;
+                    ofstream myfile;
+                    myfile.open(out_dir + "/specific_heat.txt", ios::app);
+                    myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
+                    myfile << endl;
+                    myfile.close();
+                }
+                T *= adaptive_cooling_rate;
             }
-            T *= adaptive_cooling_rate;
+            
+            if(!converged && T <= T_end){
+                restart_count++;
+            }
+        }
+        
+        // Non-convergence refinement strategy
+        if(!converged){
+            cout << "\n=== APPLYING REFINEMENT STRATEGY ===" << endl;
+            spins = best_config;
+            
+            // Try local optimization methods
+            cout << "1. Attempting deterministic sweeps..." << endl;
+            for(size_t i = 0; i < 10; ++i){
+                deterministic_sweep();
+            }
+            
+            // Try cluster updates if available
+            // if constexpr(N == 3){
+            //     cout << "2. Attempting cluster updates..." << endl;
+            //     for(size_t i = 0; i < 100; ++i){
+            //         wolff_update(T_end, false);
+            //     }
+            // }
+            
+            // Final low-temperature refinement
+            cout << "3. Final low-temperature refinement..." << endl;
+            for(size_t i = 0; i < n_anneal; ++i){
+                metropolis(spins, T_end/2, gaussian_move, sigma/10);
+            }
+            
+            // Check if refinement improved result
+            double refined_energy = total_energy(spins) / lattice_size;
+            if(refined_energy < best_config_energy){
+                cout << "Refinement improved energy: " << best_config_energy << " -> " << refined_energy << endl;
+            } else {
+                spins = best_config;
+                cout << "Refinement did not improve. Using best found configuration." << endl;
+            }
         }
         
         auto final_time = chrono::steady_clock::now();
@@ -1205,9 +1278,11 @@ class lattice
         if (converged) {
             cout << "Simulated annealing CONVERGED at T = " << T << endl;
         } else {
-            cout << "Simulated annealing reached T_end = " << T_end << endl;
+            cout << "Simulated annealing DID NOT CONVERGE" << endl;
+            cout << "Applied refinement strategies after " << restart_count << " restart attempts" << endl;
         }
         cout << "Final energy per site: " << fixed << setprecision(10) << total_energy(spins)/lattice_size << endl;
+        cout << "Best energy found: " << fixed << setprecision(10) << best_config_energy << endl;
         cout << "Final cooling rate: " << adaptive_cooling_rate << endl;
         cout << "Total steps: " << completed_temp_steps << endl;
         cout << "Total time: " << total_elapsed << " seconds" << endl;
@@ -1221,8 +1296,10 @@ class lattice
             ofstream conv_file;
             conv_file.open(out_dir + "/convergence_info.txt");
             conv_file << "Converged: " << (converged ? "Yes" : "No") << endl;
+            conv_file << "Restart Attempts: " << restart_count << endl;
             conv_file << "Final Temperature: " << T << endl;
             conv_file << "Final Energy/Site: " << fixed << setprecision(10) << total_energy(spins)/lattice_size << endl;
+            conv_file << "Best Energy/Site: " << fixed << setprecision(10) << best_config_energy << endl;
             conv_file << "Final Cooling Rate: " << adaptive_cooling_rate << endl;
             conv_file << "Total Steps: " << completed_temp_steps << endl;
             conv_file << "Total Time (s): " << total_elapsed << endl;

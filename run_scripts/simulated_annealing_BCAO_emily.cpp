@@ -226,7 +226,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     for(size_t i = start; i < num_trials; i += size){
         filesystem::create_directories(dir + "/" + std::to_string(i));
         lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
-        MC.simulated_annealing(5, 1e-2, 1e6, 2e2, true, true);
+        MC.simulated_annealing(5, 1e-2, 1e5, 1e1, true, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         // for (size_t k = 0; k < 1e6; ++k) {
