@@ -491,7 +491,7 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params, true);
+                PT_BCAO_honeycomb(trial_params, false);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
@@ -512,7 +512,7 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params, true);
+                PT_BCAO_honeycomb(trial_params, false);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
