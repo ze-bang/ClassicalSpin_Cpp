@@ -1737,7 +1737,7 @@ class lattice
         return temps;
     }
 
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = false){
 
         int swap_accept = 0;
         double curr_accept = 0;
@@ -2124,6 +2124,368 @@ class lattice
                 summary_file << "Total Extensions: " << current_extensions << endl;
                 summary_file << "Final Steps: " << i << endl;
                 summary_file.close();
+            }
+        }
+    }
+
+
+    void parallel_tempering_with_twist(vector<double> temp, size_t n_anneal, size_t n_measure, 
+                                       size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                                       size_t twist_update_rate, string dir_name, 
+                                       const vector<int> rank_to_write, bool gaussian_move = false) {
+        
+        int swap_accept = 0;
+        int twist_swap_accept = 0;
+        double curr_accept = 0;
+        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
+        
+        int initialized;
+        MPI_Initialized(&initialized);
+        if (!initialized) {
+            MPI_Init(NULL, NULL);
+        }
+        
+        int rank, size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        
+        // Initialize random seed per rank
+        srand(time(NULL) + rank * 1000);
+        seed_lehman(rand() * 2 + 1);
+        
+        double E, T_partner, E_partner;
+        bool accept;
+        spin_config new_spins;
+        double curr_Temp = temp[rank];
+        
+        // Initialize twist parameters per replica
+        // Each replica has its own set of twist angles for each dimension
+        array<double, 3> twist_angles = {0, 0, 0}; // Initial angles for x,y,z directions
+        array<double, 3> twist_angle_step = {M_PI/20, M_PI/20, M_PI/20}; // Step size for twist updates
+        
+        // Set initial twist matrices based on rank to diversify replicas
+        for (size_t d = 0; d < 3; ++d) {
+            size_t Ld = (d == 0 ? dim1 : (d == 1 ? dim2 : dim));
+            if (Ld > 1) {
+                // Initialize with different twist angles for different replicas
+                twist_angles[d] = (2.0 * M_PI * rank / size) * (d == 0 ? 1.0 : (d == 1 ? 0.5 : 0.25));
+                twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], twist_angles[d]);
+            }
+        }
+        
+        vector<double> heat_capacity, dHeat;
+        if (rank == 0) {
+            heat_capacity.resize(size);
+            dHeat.resize(size);
+        }
+        
+        vector<double> energies;
+        vector<array<double, N>> magnetizations;
+        vector<spin_config> spin_configs_at_temp;
+        vector<array<double, 3>> twist_history; // Track twist angle evolution
+        
+        // Convergence tracking
+        vector<double> energy_history;
+        const size_t convergence_window = 100;
+        const double energy_tolerance = 1e-5;
+        bool converged = false;
+        
+        cout << "Process " << rank << " initialized with T=" << curr_Temp 
+             << " and twist angles=(" << twist_angles[0] << ", " 
+             << twist_angles[1] << ", " << twist_angles[2] << ")" << endl;
+        
+        if (dir_name != "") {
+            filesystem::create_directory(dir_name);
+        }
+        
+        // Main parallel tempering loop with twist
+        for (size_t i = 0; i < n_anneal + n_measure; ++i) {
+            
+            // Standard Metropolis updates
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+                }
+            } else {
+                curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+            }
+            
+            // Update twist angles with Metropolis acceptance
+            if (i % twist_update_rate == 0) {
+                for (size_t d = 0; d < 3; ++d) {
+                    size_t Ld = (d == 0 ? dim1 : (d == 1 ? dim2 : dim));
+                    if (Ld <= 1) continue;
+                    
+                    // Current energy with boundary contribution
+                    double E_before = 0.0;
+                    for (size_t idx : boundary_sites_per_dim[d]) {
+                        E_before += site_energy(spins[idx], idx);
+                    }
+                    
+                    // Propose new twist angle
+                    double delta_twist = random_double_lehman(-twist_angle_step[d], twist_angle_step[d]);
+                    double new_angle = twist_angles[d] + delta_twist;
+                    
+                    // Keep angles in [-2π, 2π] for numerical stability
+                    while (new_angle > 2 * M_PI) new_angle -= 2 * M_PI;
+                    while (new_angle < -2 * M_PI) new_angle += 2 * M_PI;
+                    
+                    // Temporarily apply new twist
+                    auto saved_matrix = twist_matrices[d];
+                    twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], new_angle);
+                    
+                    // Calculate energy change
+                    double E_after = 0.0;
+                    for (size_t idx : boundary_sites_per_dim[d]) {
+                        E_after += site_energy(spins[idx], idx);
+                    }
+                    
+                    double dE = E_after - E_before;
+                    
+                    // Metropolis acceptance for twist update
+                    if (dE < 0 || random_double_lehman(0, 1) < exp(-dE / curr_Temp)) {
+                        twist_angles[d] = new_angle;
+                        // Keep the new twist matrix
+                    } else {
+                        twist_matrices[d] = saved_matrix;
+                        // Reject the move
+                    }
+                }
+            }
+            
+            E = total_energy(spins);
+            
+            // Temperature swap attempts
+            if (i % swap_rate == 0) {
+                accept = false;
+                int partner_rank;
+                
+                // Alternating even-odd pairing for temperature swaps
+                if ((i / swap_rate) % 2 == 0) {
+                    partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
+                } else {
+                    partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
+                }
+                
+                if (partner_rank >= 0 && partner_rank < size) {
+                    T_partner = temp[partner_rank];
+                    
+                    // Exchange energies
+                    if (partner_rank % 2 == 0) {
+                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
+                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    } else {
+                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
+                    }
+                    
+                    // Metropolis criterion for temperature swap
+                    double delta = (1/curr_Temp - 1/T_partner) * (E - E_partner);
+                    
+                    if (partner_rank % 2 == 0) {
+                        accept = min(1.0, exp(delta)) > random_double_lehman(0, 1);
+                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
+                    } else {
+                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    }
+                    
+                    if (accept) {
+                        // Exchange configurations
+                        if (partner_rank % 2 == 0) {
+                            MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
+                            MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        } else {
+                            MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                            MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
+                        }
+                        copy(new_spins.begin(), new_spins.end(), spins.begin());
+                        E = E_partner;
+                        swap_accept++;
+                    }
+                }
+            }
+            
+            // Twist parameter exchange attempts (orthogonal to temperature swaps)
+            if (i % (swap_rate * 2) == swap_rate) {  // Offset from temperature swaps
+                accept = false;
+                int twist_partner_rank;
+                
+                // Different pairing scheme for twist swaps to enhance mixing
+                twist_partner_rank = (rank + size/2) % size;
+                
+                if (twist_partner_rank != rank) {
+                    // Exchange twist angles and calculate acceptance
+                    array<double, 3> partner_twist_angles;
+                    
+                    MPI_Sendrecv(&twist_angles, 3, MPI_DOUBLE, twist_partner_rank, 10,
+                                &partner_twist_angles, 3, MPI_DOUBLE, twist_partner_rank, 10,
+                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    
+                    // Calculate energy with current twist
+                    double E_current_twist = 0.0;
+                    for (size_t d = 0; d < 3; ++d) {
+                        for (size_t idx : boundary_sites_per_dim[d]) {
+                            E_current_twist += site_energy(spins[idx], idx);
+                        }
+                    }
+                    
+                    // Temporarily apply partner's twist
+                    auto saved_matrices = twist_matrices;
+                    for (size_t d = 0; d < 3; ++d) {
+                        size_t Ld = (d == 0 ? dim1 : (d == 1 ? dim2 : dim));
+                        if (Ld > 1) {
+                            twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], partner_twist_angles[d]);
+                        }
+                    }
+                    
+                    // Calculate energy with partner's twist
+                    double E_partner_twist = 0.0;
+                    for (size_t d = 0; d < 3; ++d) {
+                        for (size_t idx : boundary_sites_per_dim[d]) {
+                            E_partner_twist += site_energy(spins[idx], idx);
+                        }
+                    }
+                    
+                    // Metropolis criterion for twist exchange
+                    double dE_twist = E_partner_twist - E_current_twist;
+                    
+                    if (rank < twist_partner_rank) {
+                        accept = (dE_twist < 0) || (random_double_lehman(0, 1) < exp(-dE_twist / curr_Temp));
+                        MPI_Send(&accept, 1, MPI_C_BOOL, twist_partner_rank, 11, MPI_COMM_WORLD);
+                    } else {
+                        MPI_Recv(&accept, 1, MPI_C_BOOL, twist_partner_rank, 11, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    }
+                    
+                    if (accept) {
+                        twist_angles = partner_twist_angles;
+                        // Keep the new twist matrices
+                        twist_swap_accept++;
+                    } else {
+                        twist_matrices = saved_matrices;
+                    }
+                }
+            }
+            
+            // Adaptive twist step size based on acceptance
+            if (i % (twist_update_rate * 100) == 0 && i > 0) {
+                for (size_t d = 0; d < 3; ++d) {
+                    // Adjust step size to maintain ~25% acceptance
+                    // This is a simple heuristic; could be more sophisticated
+                    twist_angle_step[d] *= 1.1; // Simplified adaptation
+                    twist_angle_step[d] = min(M_PI/2, max(M_PI/100, twist_angle_step[d]));
+                }
+            }
+            
+            // Data collection phase
+            if (i >= n_anneal) {
+                if (i % probe_rate == 0) {
+                    energies.push_back(E);
+                    magnetizations.push_back(magnetization_local(spins));
+                    spin_configs_at_temp.push_back(spins);
+                    twist_history.push_back(twist_angles);
+                }
+                
+                // Track energy history for convergence
+                energy_history.push_back(E);
+                if (energy_history.size() > convergence_window * 2) {
+                    energy_history.erase(energy_history.begin());
+                }
+            }
+            
+            // Convergence check
+            if (i % 1000 == 0 && energy_history.size() >= convergence_window * 2) {
+                double recent_mean = 0, old_mean = 0;
+                size_t hist_size = energy_history.size();
+                
+                for (size_t j = hist_size - convergence_window; j < hist_size; ++j) {
+                    recent_mean += energy_history[j];
+                }
+                recent_mean /= convergence_window;
+                
+                for (size_t j = hist_size - 2*convergence_window; j < hist_size - convergence_window; ++j) {
+                    old_mean += energy_history[j];
+                }
+                old_mean /= convergence_window;
+                
+                double relative_change = abs((recent_mean - old_mean) / old_mean);
+                if (relative_change < energy_tolerance) {
+                    converged = true;
+                }
+            }
+            
+            // Progress output
+            if (i % 1000 == 0) {
+                double acceptance_rate = overrelaxation_flag * curr_accept / (i + 1);
+                double swap_rate_actual = double(swap_accept) / (i / swap_rate + 1);
+                double twist_swap_rate_actual = double(twist_swap_accept) / (i / (swap_rate * 2) + 1);
+                
+                cout << "Rank " << rank << " Step " << i 
+                     << " | T=" << curr_Temp 
+                     << " | E/N=" << E/lattice_size
+                     << " | Accept=" << acceptance_rate
+                     << " | TSwap=" << swap_rate_actual
+                     << " | TWSwap=" << twist_swap_rate_actual
+                     << " | Twist=(" << twist_angles[0] << "," << twist_angles[1] << "," << twist_angles[2] << ")"
+                     << (converged ? " [CONVERGED]" : "") << endl;
+            }
+        }
+        
+        // Calculate final statistics
+        std::tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double curr_heat_capacity = 1 / (curr_Temp * curr_Temp) * get<0>(varE) / lattice_size;
+        double curr_dHeat = 1 / (curr_Temp * curr_Temp) * get<1>(varE) / lattice_size;
+        
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
+        // Final output
+        cout << "\n=== Final Statistics [Rank " << rank << "] ===" << endl;
+        cout << "Temperature: " << curr_Temp << endl;
+        cout << "Final Energy/site: " << E/lattice_size << endl;
+        cout << "Acceptance rate: " << double(curr_accept) / double(n_anneal + n_measure) * overrelaxation_flag << endl;
+        cout << "Temperature swap rate: " << double(swap_accept) / ((n_anneal + n_measure) / swap_rate) << endl;
+        cout << "Twist swap rate: " << double(twist_swap_accept) / ((n_anneal + n_measure) / (swap_rate * 2)) << endl;
+        cout << "Final twist angles: (" << twist_angles[0] << ", " << twist_angles[1] << ", " << twist_angles[2] << ")" << endl;
+        cout << "Converged: " << (converged ? "Yes" : "No") << endl;
+        
+        // Write output files
+        if (dir_name != "") {
+            for (size_t idx = 0; idx < rank_to_write.size(); ++idx) {
+                if (rank == rank_to_write[idx]) {
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    
+                    // Write twist angle history
+                    ofstream twist_file;
+                    twist_file.open(dir_name + "/twist_history" + to_string(rank) + ".txt");
+                    for (const auto& angles : twist_history) {
+                        twist_file << angles[0] << " " << angles[1] << " " << angles[2] << endl;
+                    }
+                    twist_file.close();
+                }
+            }
+            
+            if (rank == 0) {
+                write_to_file_pos(dir_name + "/pos.txt");
+                
+                ofstream myfile;
+                myfile.open(dir_name + "/heat_capacity.txt");
+                for (size_t j = 0; j < size; ++j) {
+                    myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
+                }
+                myfile.close();
+                
+                // Write convergence summary
+                ofstream conv_file;
+                conv_file.open(dir_name + "/convergence_summary.txt");
+                conv_file << "Parallel Tempering with Twisted Boundary Conditions" << endl;
+                conv_file << "Number of replicas: " << size << endl;
+                conv_file << "Annealing steps: " << n_anneal << endl;
+                conv_file << "Measurement steps: " << n_measure << endl;
+                conv_file << "Temperature swap attempts: " << (n_anneal + n_measure) / swap_rate << endl;
+                conv_file << "Twist swap attempts: " << (n_anneal + n_measure) / (swap_rate * 2) << endl;
+                conv_file.close();
             }
         }
     }

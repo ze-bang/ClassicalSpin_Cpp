@@ -319,18 +319,19 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     t_step = MPI_Wtime();
 
     // Temperature schedule
-    vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
 
 
     
     // Lattice and simulation
     lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true);
+    vector<double> temps = MC.generate_optimal_temperature_ladder(params.T_start, params.T_end, size);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
 
     // Parallel tempering run
     t_step = MPI_Wtime();
-    MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
+    // MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
+    MC.parallel_tempering_with_twist(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, 100, params.dir, {0}, boundary_update);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_3_parallel_tempering", MPI_Wtime() - t_step, rank);
     if (rank == 0) {
