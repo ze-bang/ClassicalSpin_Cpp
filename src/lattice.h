@@ -975,17 +975,45 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, double cooling_rate = 0.9, string out_dir = "", bool boundary_update = false, bool save_observables = false){    
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, bool boundary_update = false, double cooling_rate = 0.9, string out_dir = "", bool save_observables = false){    
         if (out_dir != ""){
             filesystem::create_directory(out_dir);
         }
         double T = T_start;
         double acceptance_rate = 0;
         double sigma = 1000;
-        // cout << "Gaussian Move: " << gaussian_move << endl;
+        
+        // Convergence tracking variables
+        const size_t convergence_window = 100;  // Number of temperature steps to check for convergence
+        const double energy_tolerance = 1e-8;  // Relative energy change threshold
+        vector<double> energy_history;
+        bool converged = false;
+        
+        // Adaptive cooling rate variables
+        double adaptive_cooling_rate = cooling_rate;
+        const double min_cooling_rate = 0.999;  // Slowest cooling (near 1.0)
+        const double max_cooling_rate = 0.7;    // Fastest cooling
+        const double cooling_adjust_factor = 0.95; // Factor to adjust cooling rate
+        size_t steps_since_improvement = 0;
+        double best_energy = std::numeric_limits<double>::max();
+        const size_t patience_steps = 20; // Steps to wait before adjusting cooling
+        
+        // Time estimation variables
+        auto start_time = chrono::steady_clock::now();
+        size_t completed_temp_steps = 0;
+        
+        cout << "Starting simulated annealing with adaptive cooling rate" << endl;
+        cout << "Initial cooling rate: " << fixed << setprecision(6) << adaptive_cooling_rate << endl;
+        cout << "Cooling rate range: [" << fixed << setprecision(6) << max_cooling_rate << ", " << fixed << setprecision(6) << min_cooling_rate << "]" << endl;
+        cout << "Gaussian Move: " << gaussian_move << endl;
+        cout << "Energy convergence tolerance: " << scientific << setprecision(2) << energy_tolerance << endl;
+        
         srand (time(NULL));
         seed_lehman(rand()*2+1);
-        while(T > T_end){
+        
+        while(T > T_end && !converged){
+            auto temp_start = chrono::steady_clock::now();
+            
             double curr_accept = 0;
             for(size_t i = 0; i<n_anneal; ++i){
                 if(overrelaxation_rate > 0){
@@ -1003,17 +1031,143 @@ class lattice
                     metropolis_twist_sweep(T);
                 }
             }
+            
+            // Calculate and store current energy
+            double current_energy = total_energy(spins) / lattice_size;
+            energy_history.push_back(current_energy);
+            
+            // Track improvement
+            if (current_energy < best_energy * (1.0 - 1e-6)) { // Significant improvement
+                best_energy = current_energy;
+                steps_since_improvement = 0;
+            } else {
+                steps_since_improvement++;
+            }
+            
+            // Adaptive cooling rate adjustment
+            if (energy_history.size() >= 10) { // Need some history before adjusting
+                double recent_change = 0;
+                if (energy_history.size() >= 5) {
+                    // Calculate recent energy change rate
+                    size_t hist_size = energy_history.size();
+                    double recent_diff = abs(energy_history[hist_size-1] - energy_history[hist_size-5]);
+                    double old_energy = abs(energy_history[hist_size-5]);
+                    recent_change = (old_energy > 0) ? recent_diff / old_energy : 0;
+                }
+                
+                // Adjust cooling rate based on convergence behavior
+                if (steps_since_improvement > patience_steps) {
+                    // No improvement for a while - cool slower to explore more
+                    adaptive_cooling_rate = min(min_cooling_rate, 
+                                                adaptive_cooling_rate / cooling_adjust_factor);
+                    steps_since_improvement = 0; // Reset counter
+                    cout << "  >> Slowing cooling rate to " << adaptive_cooling_rate 
+                         << " (no improvement for " << patience_steps << " steps)" << endl;
+                } else if (recent_change < 1e-6 && acceptance_rate < 0.1) {
+                    // System seems stuck - cool slower
+                    adaptive_cooling_rate = min(min_cooling_rate, 
+                                                adaptive_cooling_rate / cooling_adjust_factor);
+                    cout << "  >> System appears stuck. Slowing cooling to " << adaptive_cooling_rate << endl;
+                } else if (recent_change > 1e-3 && acceptance_rate > 0.7) {
+                    // Still making good progress - can cool faster
+                    adaptive_cooling_rate = max(max_cooling_rate, 
+                                                adaptive_cooling_rate * cooling_adjust_factor);
+                    cout << "  >> Good progress. Accelerating cooling to " << adaptive_cooling_rate << endl;
+                }
+            }
+            
+            // Check for convergence
+            if (energy_history.size() >= convergence_window) {
+                double recent_mean = 0, old_mean = 0;
+                size_t hist_size = energy_history.size();
+                
+                // Calculate mean of recent window
+                for (size_t i = hist_size - convergence_window/2; i < hist_size; ++i) {
+                    recent_mean += energy_history[i];
+                }
+                recent_mean /= (convergence_window/2);
+                
+                // Calculate mean of older window
+                for (size_t i = hist_size - convergence_window; i < hist_size - convergence_window/2; ++i) {
+                    old_mean += energy_history[i];
+                }
+                old_mean /= (convergence_window/2);
+                
+                // Check relative change
+                double relative_change = abs((recent_mean - old_mean) / old_mean);
+                if (relative_change < energy_tolerance && acceptance_rate < 0.01) {
+                    converged = true;
+                    cout << "\n*** CONVERGED: Energy change (" << scientific << relative_change 
+                         << ") below tolerance with low acceptance rate ***" << endl;
+                }
+                
+                // Keep energy history from getting too large
+                if (energy_history.size() > 2 * convergence_window) {
+                    energy_history.erase(energy_history.begin());
+                }
+            }
+            
+            completed_temp_steps++;
+            
             if (overrelaxation_rate > 0){
                 acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
-                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }else{
                 acceptance_rate = curr_accept/n_anneal;
-                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
             }
+            
+            // Time estimation
+            auto current_time = chrono::steady_clock::now();
+            auto elapsed_total = chrono::duration_cast<chrono::seconds>(current_time - start_time).count();
+            auto elapsed_this_temp = chrono::duration_cast<chrono::milliseconds>(current_time - temp_start).count();
+            
+            // Estimate remaining steps based on current cooling rate
+            size_t estimated_remaining_steps = 0;
+            double temp_estimate = T;
+            while(temp_estimate > T_end && estimated_remaining_steps < 10000) {
+                temp_estimate *= adaptive_cooling_rate;
+                estimated_remaining_steps++;
+            }
+            
+            double avg_time_per_step = (completed_temp_steps > 0) ? 
+                double(elapsed_total) / double(completed_temp_steps) : 0;
+            size_t eta_seconds = static_cast<size_t>(avg_time_per_step * estimated_remaining_steps);
+            
+            // Format ETA
+            size_t eta_hours = eta_seconds / 3600;
+            size_t eta_mins = (eta_seconds % 3600) / 60;
+            size_t eta_secs = eta_seconds % 60;
+            
+            cout << "T: " << fixed << setprecision(6) << T 
+                 << " | E/N: " << fixed << setprecision(8) << current_energy
+                 << " | Accept: " << fixed << setprecision(4) << acceptance_rate
+                 << " | Cool: " << fixed << setprecision(4) << adaptive_cooling_rate
+                 << " | Step: " << completed_temp_steps
+                 << " | Time: " << elapsed_this_temp << "ms"
+                 << " | ETA: " << setfill('0') << setw(2) << eta_hours << ":"
+                 << setw(2) << eta_mins << ":" << setw(2) << eta_secs;
+            
+            // Add convergence indicator if checking
+            if (energy_history.size() >= convergence_window) {
+                double recent_mean = 0, old_mean = 0;
+                size_t hist_size = energy_history.size();
+                for (size_t i = hist_size - convergence_window/2; i < hist_size; ++i) {
+                    recent_mean += energy_history[i];
+                }
+                recent_mean /= (convergence_window/2);
+                for (size_t i = hist_size - convergence_window; i < hist_size - convergence_window/2; ++i) {
+                    old_mean += energy_history[i];
+                }
+                old_mean /= (convergence_window/2);
+                double relative_change = abs((recent_mean - old_mean) / old_mean);
+                cout << " | ΔE/E: " << scientific << relative_change;
+            }
+            cout << endl;
+            
             if (gaussian_move && acceptance_rate < 0.5){
                 sigma = sigma * 0.5 / (1-acceptance_rate); 
-                cout << "Sigma is adjusted to: " << sigma << endl;   
+                cout << "  >> Sigma adjusted to: " << sigma << endl;   
             }
+            
             if(save_observables){
                 vector<double> energies;
                 for(size_t i = 0; i<1e7; ++i){
@@ -1041,11 +1195,38 @@ class lattice
                 myfile << endl;
                 myfile.close();
             }
-            T *= cooling_rate;
+            T *= adaptive_cooling_rate;
         }
+        
+        auto final_time = chrono::steady_clock::now();
+        auto total_elapsed = chrono::duration_cast<chrono::seconds>(final_time - start_time).count();
+        
+        cout << "\n========================================" << endl;
+        if (converged) {
+            cout << "Simulated annealing CONVERGED at T = " << T << endl;
+        } else {
+            cout << "Simulated annealing reached T_end = " << T_end << endl;
+        }
+        cout << "Final energy per site: " << fixed << setprecision(10) << total_energy(spins)/lattice_size << endl;
+        cout << "Final cooling rate: " << adaptive_cooling_rate << endl;
+        cout << "Total steps: " << completed_temp_steps << endl;
+        cout << "Total time: " << total_elapsed << " seconds" << endl;
+        cout << "========================================" << endl;
+        
         if(out_dir != ""){
             write_to_file_spin(out_dir + "/spin.txt", spins);
             write_to_file_pos(out_dir + "/pos.txt");
+            
+            // Write convergence info
+            ofstream conv_file;
+            conv_file.open(out_dir + "/convergence_info.txt");
+            conv_file << "Converged: " << (converged ? "Yes" : "No") << endl;
+            conv_file << "Final Temperature: " << T << endl;
+            conv_file << "Final Energy/Site: " << fixed << setprecision(10) << total_energy(spins)/lattice_size << endl;
+            conv_file << "Final Cooling Rate: " << adaptive_cooling_rate << endl;
+            conv_file << "Total Steps: " << completed_temp_steps << endl;
+            conv_file << "Total Time (s): " << total_elapsed << endl;
+            conv_file.close();
         }
     }
 
@@ -1199,7 +1380,274 @@ class lattice
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
     
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool boundary_update = false, bool gaussian_move = true){
+
+    // Advanced temperature ladder spacing algorithm using heat capacity and acceptance rate optimization
+    vector<double> generate_optimal_temperature_ladder(double T_min, double T_max, size_t n_temps, 
+                                                       size_t n_test_sweeps = 1000, 
+                                                       double target_swap_rate = 0.23) {
+        cout << "=== Generating Optimal Temperature Ladder ===" << endl;
+        cout << "Target temperature range: [" << T_min << ", " << T_max << "]" << endl;
+        cout << "Number of temperatures: " << n_temps << endl;
+        cout << "Target swap acceptance rate: " << target_swap_rate << endl;
+        
+        // Initialize with geometric spacing as starting point
+        vector<double> temps(n_temps);
+        double ratio = pow(T_max/T_min, 1.0/(n_temps-1));
+        for(size_t i = 0; i < n_temps; ++i) {
+            temps[i] = T_min * pow(ratio, i);
+        }
+        
+        // Adaptive refinement based on energy overlap
+        cout << "\nPhase 1: Energy-based refinement..." << endl;
+        
+        // Estimate energy distributions at each temperature
+        vector<double> mean_energies(n_temps);
+        vector<double> energy_variances(n_temps);
+        vector<spin_config> test_configs(n_temps);
+        
+        // Initialize test configurations
+        for(size_t t = 0; t < n_temps; ++t) {
+            test_configs[t] = spins;
+            // Pre-equilibrate at each temperature
+            for(size_t s = 0; s < n_test_sweeps/10; ++s) {
+                metropolis(test_configs[t], temps[t], false);
+            }
+        }
+        
+        // Collect energy statistics
+        for(size_t t = 0; t < n_temps; ++t) {
+            vector<double> energies;
+            for(size_t s = 0; s < n_test_sweeps; ++s) {
+                metropolis(test_configs[t], temps[t], false);
+                if(s % 10 == 0) {
+                    energies.push_back(total_energy(test_configs[t]));
+                }
+            }
+            
+            // Calculate mean and variance
+            double mean = 0, var = 0;
+            for(auto e : energies) mean += e;
+            mean /= energies.size();
+            for(auto e : energies) var += (e - mean) * (e - mean);
+            var /= (energies.size() - 1);
+            
+            mean_energies[t] = mean;
+            energy_variances[t] = var;
+            
+            cout << "  T[" << t << "] = " << fixed << setprecision(4) << temps[t] 
+                 << " | <E>/N = " << mean/lattice_size 
+                 << " | σ²(E)/N² = " << var/(lattice_size*lattice_size) << endl;
+        }
+        
+        // Calculate overlap integrals and adjust spacing
+        cout << "\nPhase 2: Overlap optimization..." << endl;
+        
+        auto gaussian_overlap = [](double E1, double var1, double E2, double var2) -> double {
+            // Estimate overlap between two Gaussian distributions
+            double sigma1 = sqrt(var1);
+            double sigma2 = sqrt(var2);
+            double sigma_sum = sigma1*sigma1 + sigma2*sigma2;
+            if(sigma_sum <= 0) return 0;
+            
+            double overlap = exp(-(E1-E2)*(E1-E2)/(2*sigma_sum));
+            return overlap;
+        };
+        
+        // Iterative temperature adjustment
+        const size_t max_iterations = 10;
+        for(size_t iter = 0; iter < max_iterations; ++iter) {
+            vector<double> swap_probs(n_temps-1);
+            vector<double> new_temps = temps;
+            
+            // Calculate expected swap acceptance rates
+            for(size_t t = 0; t < n_temps-1; ++t) {
+                double overlap = gaussian_overlap(mean_energies[t], energy_variances[t],
+                                                 mean_energies[t+1], energy_variances[t+1]);
+                
+                // Estimate swap probability using detailed balance
+                double beta1 = 1.0/temps[t];
+                double beta2 = 1.0/temps[t+1];
+                double dE = mean_energies[t+1] - mean_energies[t];
+                swap_probs[t] = min(1.0, exp((beta1-beta2)*dE)) * overlap;
+            }
+            
+            // Adjust temperatures to equalize swap probabilities
+            double avg_swap_prob = 0;
+            for(auto p : swap_probs) avg_swap_prob += p;
+            avg_swap_prob /= swap_probs.size();
+            
+            cout << "  Iteration " << iter+1 << " | Avg swap prob: " << avg_swap_prob << endl;
+            
+            // Stop if close enough to target
+            if(fabs(avg_swap_prob - target_swap_rate) < 0.02) break;
+            
+            // Redistribute temperatures
+            for(size_t t = 1; t < n_temps-1; ++t) {
+                double local_prob = (swap_probs[t-1] + swap_probs[t])/2;
+                double adjustment = 1.0;
+                
+                if(local_prob < target_swap_rate) {
+                    // Temperatures too far apart, bring closer
+                    adjustment = 1.0 - 0.1*(target_swap_rate - local_prob)/target_swap_rate;
+                } else if(local_prob > target_swap_rate) {
+                    // Temperatures too close, spread apart
+                    adjustment = 1.0 + 0.1*(local_prob - target_swap_rate)/target_swap_rate;
+                }
+                
+                // Interpolate between neighbors with adjustment
+                double t_prev = (t > 0) ? new_temps[t-1] : new_temps[t];
+                double t_next = (t < n_temps-1) ? new_temps[t+1] : new_temps[t];
+                new_temps[t] = temps[t] * adjustment;
+                
+                // Ensure monotonicity
+                new_temps[t] = max(t_prev * 1.01, min(new_temps[t], t_next * 0.99));
+            }
+            
+            temps = new_temps;
+            
+            // Re-equilibrate and update statistics for changed temperatures
+            for(size_t t = 1; t < n_temps-1; ++t) {
+                vector<double> energies;
+                for(size_t s = 0; s < n_test_sweeps/2; ++s) {
+                    metropolis(test_configs[t], temps[t], false);
+                    if(s % 10 == 0) {
+                        energies.push_back(total_energy(test_configs[t]));
+                    }
+                }
+                
+                double mean = 0, var = 0;
+                for(auto e : energies) mean += e;
+                mean /= energies.size();
+                for(auto e : energies) var += (e - mean) * (e - mean);
+                var /= (energies.size() - 1);
+                
+                mean_energies[t] = mean;
+                energy_variances[t] = var;
+            }
+        }
+        
+        // Phase 3: Critical point detection and refinement
+        cout << "\nPhase 3: Critical point refinement..." << endl;
+        
+        // Estimate specific heat to find critical regions
+        vector<double> specific_heats(n_temps);
+        for(size_t t = 0; t < n_temps; ++t) {
+            specific_heats[t] = energy_variances[t]/(temps[t]*temps[t]*lattice_size);
+        }
+        
+        // Find peak in specific heat (critical point)
+        size_t critical_idx = 0;
+        double max_cv = 0;
+        for(size_t t = 1; t < n_temps-1; ++t) {
+            if(specific_heats[t] > max_cv) {
+                max_cv = specific_heats[t];
+                critical_idx = t;
+            }
+        }
+        
+        if(critical_idx > 0 && critical_idx < n_temps-1) {
+            cout << "  Critical region detected around T = " << temps[critical_idx] << endl;
+            
+            // Increase density around critical point
+            vector<double> final_temps;
+            final_temps.push_back(temps[0]);
+            
+            for(size_t t = 1; t < n_temps-1; ++t) {
+                double distance_to_critical = fabs(double(t) - double(critical_idx));
+                double weight = exp(-distance_to_critical*distance_to_critical/(n_temps*n_temps/9.0));
+                
+                // Add extra point near critical region
+                if(distance_to_critical < n_temps/4 && final_temps.size() < n_temps-1) {
+                    double t_interp = (temps[t-1] + temps[t])/2;
+                    if(weight > 0.5 && t_interp > final_temps.back()*1.001) {
+                        final_temps.push_back(t_interp);
+                    }
+                }
+                
+                if(final_temps.size() < n_temps) {
+                    final_temps.push_back(temps[t]);
+                }
+            }
+            
+            // Ensure we have exactly n_temps
+            if(final_temps.size() < n_temps) {
+                final_temps.push_back(temps.back());
+            }
+            while(final_temps.size() > n_temps) {
+                // Remove points with smallest gaps
+                size_t min_gap_idx = 0;
+                double min_gap = final_temps[1] - final_temps[0];
+                for(size_t i = 1; i < final_temps.size()-2; ++i) {
+                    double gap = final_temps[i+1] - final_temps[i];
+                    if(gap < min_gap) {
+                        min_gap = gap;
+                        min_gap_idx = i;
+                    }
+                }
+                final_temps.erase(final_temps.begin() + min_gap_idx);
+            }
+            
+            temps = final_temps;
+        }
+        
+        // Final output
+        cout << "\n=== Optimized Temperature Ladder ===" << endl;
+        for(size_t t = 0; t < temps.size(); ++t) {
+            cout << "  T[" << setw(2) << t << "] = " << fixed << setprecision(6) << temps[t];
+            if(t > 0) {
+                cout << " | ΔT/T = " << setprecision(4) << (temps[t]-temps[t-1])/temps[t];
+            }
+            if(t == critical_idx) {
+                cout << " [*critical*]";
+            }
+            cout << endl;
+        }
+        
+        return temps;
+    }
+    
+    // Simplified interface using exponential spacing with automatic critical point detection
+    vector<double> generate_temperature_ladder_exponential(double T_min, double T_max, size_t n_temps,
+                                                          double critical_enhancement = 1.5) {
+        vector<double> temps(n_temps);
+        
+        // Estimate critical temperature (geometric mean as first guess)
+        double T_crit_estimate = sqrt(T_min * T_max);
+        
+        // Use a modified exponential spacing that's denser near T_crit
+        double log_min = log(T_min);
+        double log_max = log(T_max);
+        double log_crit = log(T_crit_estimate);
+        
+        for(size_t i = 0; i < n_temps; ++i) {
+            double x = double(i)/(n_temps-1); // 0 to 1
+            
+            // Standard exponential
+            double log_T = log_min + x*(log_max - log_min);
+            
+            // Add Gaussian enhancement near critical point
+            double crit_x = (log_crit - log_min)/(log_max - log_min);
+            double enhancement = critical_enhancement * exp(-20*(x-crit_x)*(x-crit_x));
+            
+            // Modify spacing
+            log_T = log_T - 0.1*enhancement*(log_T - log_crit);
+            
+            temps[i] = exp(log_T);
+        }
+        
+        // Ensure strict ordering and bounds
+        temps[0] = T_min;
+        temps[n_temps-1] = T_max;
+        for(size_t i = 1; i < n_temps-1; ++i) {
+            temps[i] = max(temps[i-1]*1.001, min(temps[i], temps[i+1]*0.999));
+        }
+        
+        return temps;
+    }
+
+
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = true){
+
         int swap_accept = 0;
         double curr_accept = 0;
         int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
@@ -1226,39 +1674,78 @@ class lattice
         vector<array<double,N>> magnetizations;
         vector<spin_config> spin_configs_at_temp;
 
+        // Convergence diagnostics variables
+        vector<double> energy_history;
+        vector<double> acceptance_history;
+        vector<double> swap_acceptance_history;
+        const size_t convergence_check_interval = 1000;
+        const size_t convergence_window = 100;
+        const double convergence_tolerance = 1e-6;
+        bool converged = false;
+        size_t convergence_step = 0;
+        
+        // Running statistics for convergence
+        double running_mean_energy = 0;
+        double running_variance_energy = 0;
+        size_t stats_count = 0;
+        
+        // Autocorrelation tracking
+        vector<double> energy_for_autocorr;
+        const size_t max_autocorr_lag = 100;
+        vector<double> autocorrelation;
+        
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
+        cout << "Starting convergence diagnostics tracking..." << endl;
 
-        // Counter for twist boundary updates
-        size_t twist_update_interval = 100; // Perform twist updates every 100 iterations
-        size_t twist_sweeps_per_update = 1; // Number of twist sweeps per update
-
-        // Progress tracking variables
-        size_t total_iterations = n_anneal + n_measure;
-        size_t progress_interval = max(total_iterations / 100, size_t(1)); // Update every 1%
-        size_t next_progress_update = progress_interval;
-        auto start_time = chrono::steady_clock::now();
+        // Open convergence diagnostics file for this rank
+        ofstream conv_file;
+        if(dir_name != ""){
+            filesystem::create_directory(dir_name);
+            conv_file.open(dir_name + "/convergence_rank" + to_string(rank) + ".txt");
+            conv_file << "# Step Energy AcceptRate SwapAcceptRate RunningMean RunningVar Converged" << endl;
+        }
 
         for(size_t i=0; i < n_anneal+n_measure; ++i){
 
             // Metropolis
+            double step_accept = 0;
             if(overrelaxation_rate > 0){
                 overrelaxation();
                 if (i%overrelaxation_rate == 0){
-                    curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+                    step_accept = metropolis(spins, curr_Temp, gaussian_move);
+                    curr_accept += step_accept;
                 }
             }
             else{
-                curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+                step_accept = metropolis(spins, curr_Temp, gaussian_move);
+                curr_accept += step_accept;
+            }
+            E = total_energy(spins);
+            
+            // Update running statistics (Welford's online algorithm)
+            stats_count++;
+            double delta = E - running_mean_energy;
+            running_mean_energy += delta / stats_count;
+            double delta2 = E - running_mean_energy;
+            running_variance_energy += delta * delta2;
+
+            // Track energy and acceptance history
+            energy_history.push_back(E);
+            acceptance_history.push_back(step_accept);
+            
+            // Keep history size manageable
+            if(energy_history.size() > 10000){
+                energy_history.erase(energy_history.begin());
+                acceptance_history.erase(acceptance_history.begin());
             }
             
-            // Twist boundary condition updates
-            if (boundary_update && (i % twist_update_interval == 0)) {
-                for (size_t tw = 0; tw < twist_sweeps_per_update; ++tw) {
-                    metropolis_twist_sweep(curr_Temp);
+            // Store for autocorrelation analysis
+            if(i >= n_anneal){
+                energy_for_autocorr.push_back(E);
+                if(energy_for_autocorr.size() > 5000){
+                    energy_for_autocorr.erase(energy_for_autocorr.begin());
                 }
             }
-            
-            E = total_energy(spins);
 
             if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
                 accept = false;
@@ -1283,58 +1770,76 @@ class lattice
                         MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     }
                     if (accept){
-                        // Exchange both spins AND twist matrices
                         if (partner_rank % 2 == 0){
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            
-                            // Also exchange twist matrices if boundary updates are enabled
-                            if (boundary_update) {
-                                array<array<double, N*N>, 3> partner_twist;
-                                MPI_Send(&twist_matrices, 3*N*N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
-                                MPI_Recv(&partner_twist, 3*N*N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                twist_matrices = partner_twist;
-                            }
                         } else{
                             MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                             MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-                            
-                            // Also exchange twist matrices if boundary updates are enabled
-                            if (boundary_update) {
-                                array<array<double, N*N>, 3> partner_twist;
-                                MPI_Recv(&partner_twist, 3*N*N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                MPI_Send(&twist_matrices, 3*N*N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
-                                twist_matrices = partner_twist;
-                            }
                         }
                         copy(new_spins.begin(), new_spins.end(), spins.begin());
                         E = E_partner;
                         swap_accept++;
                     }
                 }
+                swap_acceptance_history.push_back(accept ? 1.0 : 0.0);
             }
 
-            // Progress logging
-            if (i >= next_progress_update || i == total_iterations - 1) {
-                double progress = 100.0 * (i + 1) / total_iterations;
-                auto current_time = chrono::steady_clock::now();
-                auto elapsed = chrono::duration_cast<chrono::seconds>(current_time - start_time).count();
-                auto eta = (elapsed > 0) ? static_cast<size_t>(elapsed * (total_iterations - i - 1) / (i + 1)) : 0;
+            // Convergence check at intervals
+            if(i > 0 && i % convergence_check_interval == 0 && !converged){
+                bool local_converged = false;
                 
-                string phase = (i < n_anneal) ? "Equilibration" : "Measurement";
-                double current_acceptance = (i > 0) ? double(curr_accept) / double(i + 1) * overrelaxation_flag : 0.0;
-                double swap_acceptance = (swap_rate > 0 && i > swap_rate) ? 
-                    double(swap_accept) / double((i + 1) / swap_rate) : 0.0;
+                // Check energy convergence using recent history
+                if(energy_history.size() >= convergence_window * 2){
+                    double recent_mean = 0, old_mean = 0;
+                    size_t hist_size = energy_history.size();
+                    
+                    for(size_t j = hist_size - convergence_window; j < hist_size; ++j){
+                        recent_mean += energy_history[j];
+                    }
+                    recent_mean /= convergence_window;
+                    
+                    for(size_t j = hist_size - 2*convergence_window; j < hist_size - convergence_window; ++j){
+                        old_mean += energy_history[j];
+                    }
+                    old_mean /= convergence_window;
+                    
+                    double relative_change = abs((recent_mean - old_mean) / old_mean);
+                    
+                    // Calculate acceptance rate statistics
+                    double recent_accept_rate = 0;
+                    for(size_t j = max(size_t(0), acceptance_history.size() - convergence_window); j < acceptance_history.size(); ++j){
+                        recent_accept_rate += acceptance_history[j];
+                    }
+                    recent_accept_rate /= min(convergence_window, acceptance_history.size());
+                    
+                    // Check convergence criteria
+                    if(relative_change < convergence_tolerance && i >= n_anneal){
+                        local_converged = true;
+                        converged = true;
+                        convergence_step = i;
+                    }
+                    
+                    // Output convergence diagnostics every interval
+                    if(rank == 0 || rank == rank_to_write[0]){
+                        cout << "[Rank " << rank << "] Step " << i 
+                             << " | E_mean: " << recent_mean/lattice_size
+                             << " | ΔE/E: " << scientific << relative_change 
+                             << " | Accept: " << fixed << setprecision(3) << recent_accept_rate
+                             << " | Converged: " << (local_converged ? "YES" : "NO") << endl;
+                    }
+                }
                 
-                cout << "[Rank " << rank << ", T=" << fixed << setprecision(4) << curr_Temp << "] "
-                     << phase << " Progress: " << fixed << setprecision(1) << progress << "% "
-                     << "(" << i + 1 << "/" << total_iterations << "), "
-                     << "E/N=" << fixed << setprecision(6) << E/lattice_size << ", "
-                     << "Accept=" << fixed << setprecision(3) << current_acceptance << ", "
-                     << "Swap=" << fixed << setprecision(3) << swap_acceptance << ", "
-                     << "Elapsed=" << elapsed << "s, ETA=" << eta << "s" << endl;
-                
-                next_progress_update += progress_interval;
+                // Write to convergence file
+                if(conv_file.is_open() && stats_count > 0){
+                    double current_variance = (stats_count > 1) ? running_variance_energy / (stats_count - 1) : 0;
+                    conv_file << i << " " << E/lattice_size << " " 
+                             << curr_accept/(i+1)*overrelaxation_flag << " "
+                             << (swap_acceptance_history.size() > 0 ? swap_accept/double(swap_acceptance_history.size()) : 0) << " "
+                             << running_mean_energy/lattice_size << " "
+                             << current_variance/(lattice_size*lattice_size) << " "
+                             << (converged ? 1 : 0) << endl;
+                }
             }
 
             if (i >= n_anneal){
@@ -1348,7 +1853,42 @@ class lattice
             }
         }
         
-        cout << "[Rank " << rank << "] Completed simulation. Computing observables..." << endl;
+        // Calculate autocorrelation function
+        if(energy_for_autocorr.size() > max_autocorr_lag){
+            autocorrelation.resize(max_autocorr_lag);
+            double mean_e = 0;
+            for(auto& e : energy_for_autocorr) mean_e += e;
+            mean_e /= energy_for_autocorr.size();
+            
+            for(size_t lag = 0; lag < max_autocorr_lag; ++lag){
+                double corr = 0;
+                double var = 0;
+                for(size_t j = 0; j < energy_for_autocorr.size() - lag; ++j){
+                    corr += (energy_for_autocorr[j] - mean_e) * (energy_for_autocorr[j+lag] - mean_e);
+                    if(lag == 0) var += (energy_for_autocorr[j] - mean_e) * (energy_for_autocorr[j] - mean_e);
+                }
+                autocorrelation[lag] = (var > 0 && lag == 0) ? 1.0 : corr / var;
+            }
+            
+            // Find integrated autocorrelation time
+            double tau_int = 0.5;
+            for(size_t lag = 1; lag < autocorrelation.size() && autocorrelation[lag] > 0.01; ++lag){
+                tau_int += autocorrelation[lag];
+            }
+            
+            if(rank == 0 || rank == rank_to_write[0]){
+                cout << "[Rank " << rank << "] Integrated autocorrelation time: " << tau_int << endl;
+            }
+            
+            // Write autocorrelation to file
+            if(dir_name != "" && (rank == 0 || find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())){
+                ofstream acf_file(dir_name + "/autocorrelation_rank" + to_string(rank) + ".txt");
+                for(size_t lag = 0; lag < autocorrelation.size(); ++lag){
+                    acf_file << lag << " " << autocorrelation[lag] << endl;
+                }
+                acf_file.close();
+            }
+        }
         
         std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
         double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
@@ -1356,23 +1896,23 @@ class lattice
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         
-        cout << "[Rank " << rank << "] Final Statistics - T=" << curr_Temp 
-             << ", Local acceptance=" << fixed << setprecision(4) 
-             << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag 
-             << ", Swap acceptance=" << double(swap_accept)/double((n_anneal+n_measure)/swap_rate) 
-             << ", <E>/N=" << fixed << setprecision(6) 
-             << (energies.size() > 0 ? accumulate(energies.begin(), energies.end(), 0.0)/energies.size()/lattice_size : 0.0)
-             << endl;
+        // Final convergence summary
+        cout << "\n=== CONVERGENCE SUMMARY [Rank " << rank << "] ===" << endl;
+        cout << "Temperature: " << curr_Temp << endl;
+        cout << "Converged: " << (converged ? "YES at step " + to_string(convergence_step) : "NO") << endl;
+        cout << "Final Energy/site: " << running_mean_energy/lattice_size << endl;
+        cout << "Energy Variance/site^2: " << ((stats_count > 1) ? running_variance_energy/(stats_count-1)/(lattice_size*lattice_size) : 0) << endl;
+        cout << "Local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << endl;
+        cout << "Swap acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
+        cout << "================================\n" << endl;
+        
+        if(conv_file.is_open()) conv_file.close();
         
         if(dir_name != ""){
-            filesystem::create_directory(dir_name);
             for(size_t i=0; i<rank_to_write.size(); ++i){
                 if (rank == rank_to_write[i]){
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
-                    //     write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
-                    // }
                 }
             }
             if (rank == 0){
@@ -1383,10 +1923,8 @@ class lattice
                     myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
                 }
                 myfile.close();
-                cout << "[Rank 0] All data saved to " << dir_name << endl;
             }
         }
-        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
     }
 
 

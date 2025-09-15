@@ -796,7 +796,7 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
         try:
             bg_file = os.path.join(directory, "M_time_0.000000/M1/", config['readfile'])
             if os.path.exists(bg_file):
-                background_data[group] = np.mean(np.loadtxt(bg_file),axis=0)
+                background_data[group] = np.loadtxt(bg_file)[0]
                 print(f"Loaded background data for {group} from {bg_file}")
             else:
                 background_data[group] = None

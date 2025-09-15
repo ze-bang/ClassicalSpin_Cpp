@@ -8,7 +8,7 @@
 using namespace std;
 
 struct SimulationParams {
-    size_t num_trials = 5;
+    size_t num_trials = 1;
     double h = 0.0;
     array<double, 3> field_dir = {0, 1, 0};
     string dir = "BCAO_simulation";
@@ -225,8 +225,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = start; i < num_trials; i += size){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true);
-        MC.simulated_annealing(5, 1e-3, 1e6, 2e3, true);
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
+        MC.simulated_annealing(5, 1e-2, 1e6, 2e2, true, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         // for (size_t k = 0; k < 1e6; ++k) {
@@ -392,9 +392,9 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
         MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e6, 10, num_trials, num_trials, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
-        for (size_t k = 0; k < 1e7; ++k) {
-            MC.deterministic_sweep();
-        }
+        // for (size_t k = 0; k < 1e7; ++k) {
+        //     MC.deterministic_sweep();
+        // }
         MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
         // Save the final configuration
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);

@@ -2634,7 +2634,7 @@ def parse_spin_config(directory):
         filename = os.fsdecode(file)
         # print(filename)
         if os.path.isdir(directory + "/" + filename):
-            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
+            S = np.loadtxt(directory + "/" + filename + "/spin_0.001T.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
             base2d = directory + "/" + filename + "/spin_config_2d.pdf"
@@ -2796,18 +2796,15 @@ def read_field_scan(directory):
             try:
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
-                # spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
-                # print(spin_file)
-                # parse_spin_config(full_path)
-                spin_file = os.path.join(full_path, "magnetization0.txt")
-                parse_spin_config_file(full_path)
+                spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
+                print(spin_file)
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
                     M_mean = np.mean(M, axis=0)
-                    M_stdev = np.std(M, axis=0)
+                    # M_stdev = np.std(M, axis=0)
                     h_values.append(h)
                     m_values.append(M_mean)
-                    m_stds.append(M_stdev)
+                    # m_stds.append(M_stdev)
                 else:
                     print(f"Magnetization file not found in {full_path}")
 
@@ -2824,21 +2821,21 @@ def read_field_scan(directory):
     sorted_indices = np.argsort(h_values)
     h_values_sorted = np.array(h_values)[sorted_indices]
     m_values_sorted = np.array(m_values)[sorted_indices]
-    m_stds_sorted = np.array(m_stds)[sorted_indices]
+    # m_stds_sorted = np.array(m_stds)[sorted_indices]
 
     # Save magnetization as a function of h
-    output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
+    # output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
+    output_data = np.c_[h_values_sorted, m_values_sorted]
     output_filename = os.path.join(directory, "magnetization_vs_field.txt")
-    np.savetxt(output_filename, output_data, header="h Mx My Mz dMx dMy dMz", fmt='%f %f %f %f %f %f %f')
+    np.savetxt(output_filename, output_data, header="h Mx My Mz", fmt='%f %f %f %f')
 
     plt.figure(figsize=(10, 6))
-<<<<<<< HEAD
-    plt.plot(h_values_sorted, m_values_sorted[:,0], marker='o', linestyle='-')
-=======
-    plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
-    plt.errorbar(h_values_sorted, m_values_sorted[:,1], yerr=m_stds_sorted[:,1], fmt='-o', label='My')
-    plt.errorbar(h_values_sorted, m_values_sorted[:,2], yerr=m_stds_sorted[:,2], fmt='-o', label='Mz')
->>>>>>> eb2b001f0b3bb93b0e0199540755d6be3cdbaaef
+    # plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
+    # plt.errorbar(h_values_sorted, m_values_sorted[:,1], yerr=m_stds_sorted[:,1], fmt='-o', label='My')
+    # plt.errorbar(h_values_sorted, m_values_sorted[:,2], yerr=m_stds_sorted[:,2], fmt='-o', label='Mz')
+    plt.plot(h_values_sorted, m_values_sorted[:,0], '-o', label='Mx')
+    plt.plot(h_values_sorted, m_values_sorted[:,1], '-o', label='My')
+    plt.plot(h_values_sorted, m_values_sorted[:,2], '-o', label='Mz')
     plt.xlabel("Field Strength (h)")
     plt.ylabel("Magnetization Magnitude |M|")
     plt.legend(["Mx", "My", "Mz"], loc='upper right')
