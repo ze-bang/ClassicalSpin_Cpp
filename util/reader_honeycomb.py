@@ -2626,10 +2626,6 @@ def compute_regional_SSSF(P, S, nK, output_dir, n_regions_x=3, n_regions_y=3, ov
 def parse_spin_config(directory):
     nK = 101
     SSSF = np.zeros((nK, nK, 3, 3))
-
-    H = np.linspace(-1, 1, nK)
-    L = np.linspace(-1, 1, nK)
-    C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
         # print(filename)
@@ -2641,18 +2637,18 @@ def parse_spin_config(directory):
             print("Computing 2D spin configuration plot")
             plot_spin_config_2d(P, S, base2d)
             # Zoomed 2D projections (50% window around center)
-            plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
+            # plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
             # 3D orientation plot
-            print("Computing 3D configuration")
+            # print("Computing 3D configuration")
             # base3d = directory + "/" + filename + "/spin_config_3d.pdf"
             # plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
             # Zoomed 3D view (50% window around center)
             # plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
             # Load energy landscape data (assumes two columns: index and energy)
-            print("Computing chirality plot")
+            # print("Computing chirality plot")
             # plot_chirality_real_space(P, S, directory + "/" + filename + "/chirality")
             # Continuum chirality on grid + core detection
-            print("Computing coarse grained chirality")
+            # print("Computing coarse grained chirality")
             # cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
             # cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
             # plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
@@ -2681,34 +2677,36 @@ def parse_spin_config(directory):
 
                 np.savetxt(directory + "/" + filename + "/energy_density.txt", np.array([np.mean(energy_landscape)]))
 
-                energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
+                # energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
                 
                 # Perform energetics argument analysis
-                print("Computing energetics argument (defect-free vs defective regions)")
-                energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
-                                                      J=1.0, grid_res=256, sigma=1.0)
-                print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
-                print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
+                # print("Computing energetics argument (defect-free vs defective regions)")
+                # energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
+                #                                       J=1.0, grid_res=256, sigma=1.0)
+                # print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
+                # print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
 
-                # Skyrmion-lattice-aware energetics that does not classify cores as defects
-                print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
-                skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
-                                                       grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
-                print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
-                print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
+                # # Skyrmion-lattice-aware energetics that does not classify cores as defects
+                # print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
+                # skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
+                #                                        grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
+                # print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
+                # print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
             else:
                 print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
                 energy_landscape = np.zeros(P.shape[0])
 
-
+    H = np.linspace(-2*np.pi, 2*np.pi, nK)
+    L = np.linspace(-2*np.pi, 2*np.pi, nK)
+    A, B = np.meshgrid(H, L)
 
     SSSF = SSSF / len(os.listdir(directory))
-    SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
+    SSSFGraph2D(A, B, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
 
     # Plot each component of SSSF
     for i, component_i in enumerate(['x', 'y', 'z']):
         for j, component_j in enumerate(['x', 'y', 'z']):
-            SSSFGraph2D(C, D, SSSF[:,:,i,j], directory + f"/SSSF_{component_i}{component_j}")
+            SSSFGraph2D(A, B, SSSF[:,:,i,j], directory + f"/SSSF_{component_i}{component_j}")
 
 
 def parse_spin_config_file(directory):
