@@ -2634,7 +2634,7 @@ def parse_spin_config(directory):
         filename = os.fsdecode(file)
         # print(filename)
         if os.path.isdir(directory + "/" + filename):
-            S = np.loadtxt(directory + "/" + filename + "/spin_0.001T.txt")
+            S = np.loadtxt(directory + "/" + filename + "/spin.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
             base2d = directory + "/" + filename + "/spin_config_2d.pdf"
@@ -2796,7 +2796,7 @@ def read_field_scan(directory):
             try:
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
-                spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
+                spin_file = os.path.join(full_path, "0/spin.txt")
                 print(spin_file)
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
@@ -2849,20 +2849,20 @@ if __name__ == "__main__":
 
     base_dir = sys.argv[1] if len(sys.argv) > 1 else "."
     field_scan = sys.argv[2] if len(sys.argv) > 2 else "field_scan"
-    if os.path.isdir(base_dir):
-        for subdir in sorted(os.listdir(base_dir)):
-            full_path = os.path.join(base_dir, subdir)
-            if os.path.isdir(full_path):
-                print(f"Processing directory: {full_path}")
-                try:
-                    if field_scan.lower() == "true":
-                        read_field_scan(full_path)
-                    else:
+    if field_scan.lower() == "true":
+        read_field_scan(base_dir)
+    else:
+        if os.path.isdir(base_dir):
+            for subdir in sorted(os.listdir(base_dir)):
+                full_path = os.path.join(base_dir, subdir)
+                if os.path.isdir(full_path):
+                    print(f"Processing directory: {full_path}")
+                    try:
                         print("Computing spin configuration information...")
                         parse_spin_config(full_path)
-                    # read_MD_tot(full_path)
-                except Exception as e:
-                    print(f"Could not process {full_path}: {e}")
+                        # read_MD_tot(full_path)
+                    except Exception as e:
+                        print(f"Could not process {full_path}: {e}")
 
 
 

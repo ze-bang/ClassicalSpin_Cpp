@@ -12,8 +12,8 @@ struct SimulationParams {
     double h = 0.0;
     array<double, 3> field_dir = {0, 1, 0};
     string dir = "BCAO_simulation";
-    double J1xy = -7.6, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
-    double J3xy = 2.5, J3z = -0.85;
+    double J1xy = -7.65, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
+    double J3xy = 2.64, J3z = -0.81;
     double h_start = 0.0, h_end = 1.0;
     int num_steps = 50;
     // Twist matrices (3 blocks of 3x3, each flattened to 9 doubles), optional
@@ -38,6 +38,9 @@ SimulationParams read_parameters(const string& filename) {
     
     string line;
     array<bool, 3> twist_row_found = {false, false, false};
+    const double k_B = 0.08620689655; // meV/K
+    const double mu_B = 0.05788; // meV/T
+    const double mu_B_k_B = mu_B / k_B; // K/T
     while (getline(file, line)) {
         // Skip comments and empty lines
         if (line.empty() || line[0] == '#' || line[0] == '/') continue;
@@ -165,7 +168,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         }
         return C;
     };
-
+    const double mu_B = 0.05788; // meV/T
     array<array<double,3>, 3> J1x_ = multiply(multiply(U_2pi_3, J1z_), transpose(U_2pi_3));
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
 
@@ -174,8 +177,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     if (rank == 0) {
         std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
     }
-    array<double, 3> field = {h*field_dir[0],h*field_dir[1],h*field_dir[2]};
-    
+    array<double, 3> field = {5*h*mu_B*field_dir[0],5*h*mu_B*field_dir[1],2.5*h*mu_B*field_dir[2]};
+
     //nearest neighbour
     atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1y_, 0, 1, {0,-1,0});
@@ -226,15 +229,15 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     for(size_t i = start; i < num_trials; i += size){
         filesystem::create_directories(dir + "/" + std::to_string(i));
         lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
-        MC.simulated_annealing(5, 1e-2, 1e5, 1e1, false, true);
-        MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
+        MC.simulated_annealing(5, 1e-2, 1e4, 1e1, false, true, 0.9, dir +"/"+std::to_string(i));
+        // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         // for (size_t k = 0; k < 1e6; ++k) {
         //     MC.deterministic_sweep();
         // }
-        MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
+        // MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
         // Save the final configuration
-        MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);
+        // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);
         // Calculate and save the energy density
         double energy_density = MC.energy_density(MC.spins);
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");

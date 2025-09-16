@@ -1176,7 +1176,7 @@ class lattice
                 }
                 
                 double avg_time_per_step = (completed_temp_steps > 0) ? 
-                    double(elapsed_total) / double(completed_temp_steps) : 0;
+                    double(elapsed_this_temp) / double(completed_temp_steps) : 0;
                 size_t eta_seconds = static_cast<size_t>(avg_time_per_step * estimated_remaining_steps);
                 
                 // Format ETA
@@ -2364,16 +2364,6 @@ class lattice
                     } else {
                         twist_matrices = saved_matrices;
                     }
-                }
-            }
-            
-            // Adaptive twist step size based on acceptance
-            if (i % (twist_update_rate * 100) == 0 && i > 0) {
-                for (size_t d = 0; d < 3; ++d) {
-                    // Adjust step size to maintain ~25% acceptance
-                    // This is a simple heuristic; could be more sophisticated
-                    twist_angle_step[d] *= 1.1; // Simplified adaptation
-                    twist_angle_step[d] = min(M_PI/2, max(M_PI/100, twist_angle_step[d]));
                 }
             }
             

@@ -301,8 +301,10 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
     array<array<double,3>, 3> J3_ = {{{params.J3xy,0,0},{0,params.J3xy,0},{0,0,params.J3z}}};
 
-    array<double, 3> field = {params.h*params.field_dir[0], params.h*params.field_dir[1], params.h*params.field_dir[2]};
-    
+    const double mu_B = 0.05788; // meV/T
+
+    array<double, 3> field = {5*mu_B*params.h*params.field_dir[0], 5*mu_B*params.h*params.field_dir[1], 2.5*mu_B*params.h*params.field_dir[2]};
+
     // Set interactions
     atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1y_, 0, 1, {0,-1,0});
