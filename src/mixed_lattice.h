@@ -928,7 +928,7 @@ class mixed_lattice
             }
         }
         
-        return field_energy + onsite_energy + bilinear_energy/2 + bilinear_energy_mixed/2 + trilinear_energy_SU2/3 + trilinear_energy_mixed/3;
+        return field_energy + onsite_energy + bilinear_energy + bilinear_energy_mixed + trilinear_energy_SU2 + trilinear_energy_mixed;
     }
 
     double site_energy_SU3_diff(const array<double, N_SU3> &new_spin, const array<double, N_SU3> &old_spin, const size_t site_index) const {
@@ -1065,7 +1065,7 @@ class mixed_lattice
             }
         }
         
-        return field_energy + onsite_energy + bilinear_energy/2 + bilinear_energy_mixed/2 + trilinear_energy_SU3/3 + trilinear_energy_mixed/3;
+        return field_energy + onsite_energy + bilinear_energy + bilinear_energy_mixed + trilinear_energy_SU3 + trilinear_energy_mixed;
     }
 
     double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {
@@ -1546,7 +1546,7 @@ class mixed_lattice
 
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field = {{0.0}};
-        local_field += multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]);
+        local_field += multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]) * 2;
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply<N_SU2, N_SU2>(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
@@ -1576,7 +1576,7 @@ class mixed_lattice
 
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU3> local_field = {{0.0}};
-        local_field += multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]);
+        local_field += multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]) * 2;
         #pragma omp simd
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);

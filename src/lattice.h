@@ -496,7 +496,7 @@ class lattice
             triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[p1], spins[p2])
                      - contract_trilinear(trilinear_interaction[site_index][i], old_spins, spins[p1], spins[p2]);
         }
-        return single_site_energy + double_site_energy/2 + triple_site_energy/3;
+        return single_site_energy + double_site_energy + triple_site_energy;
     }
 
     double total_energy(spin_config &curr_spins){
@@ -987,12 +987,12 @@ class lattice
         // Enhanced convergence parameters
         size_t expected_temp_steps = static_cast<size_t>(log(T_end/T_start) / log(cooling_rate)) + 1;
         const size_t convergence_window = min(size_t(100), max(size_t(20), expected_temp_steps / 5));
-        const double energy_tolerance = 1e-6;
-        const double gradient_tolerance = 1e-7;
-        const double variance_tolerance = 1e-8;
+        const double energy_tolerance = 1e-5;
+        const double gradient_tolerance = 1e-4;
+        const double variance_tolerance = 1e-4;
         
         // Ground state search parameters
-        const size_t ground_state_checks = 10;
+        const size_t ground_state_checks = 5;
         const size_t final_optimization_sweeps = n_anneal * 10;
         const double ground_state_temp_factor = 0.1; // Search at T_end * factor
         
@@ -1012,8 +1012,8 @@ class lattice
         
         // Adaptive parameters
         double adaptive_cooling_rate = cooling_rate;
-        const double min_cooling_rate = 0.9999;
-        const double max_cooling_rate = 0.5;
+        const double min_cooling_rate = 0.98;
+        const double max_cooling_rate = 0.6;
         size_t plateau_count = 0;
         const size_t max_plateau_count = 5;
         
@@ -1117,7 +1117,7 @@ class lattice
             double gradient = 0;
             if(energy_history.size() >= 10){
                 size_t n = energy_history.size();
-                gradient = abs(energy_history[n-1] - energy_history[n-10]) / 10;
+                gradient = (energy_history[n-1] - energy_history[n-10]) / 10;
                 gradient_history.push_back(gradient);
             }
             
@@ -1163,7 +1163,7 @@ class lattice
             
             if(energy_history.size() >= convergence_window/4){
                 // Adjust cooling based on energy landscape
-                if(variance < variance_tolerance && gradient < gradient_tolerance){
+                if(variance < variance_tolerance && abs(gradient) < variance){
                     // Very stable - can cool faster
                     adaptive_cooling_rate = max(max_cooling_rate, adaptive_cooling_rate * 0.95);
                 } else if(variance > 1e-4 || acceptance_rate > 0.5){
@@ -1204,7 +1204,8 @@ class lattice
                         avg_gradient += gradient_history[i];
                     }
                     avg_gradient /= count;
-                    gradient_small = (avg_gradient < gradient_tolerance);
+                    avg_gradient = abs(avg_gradient);
+                    gradient_small = (avg_gradient < variance);
                 }
                 
                 // Check variance

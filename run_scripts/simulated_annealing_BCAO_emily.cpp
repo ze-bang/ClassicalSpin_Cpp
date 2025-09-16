@@ -12,8 +12,8 @@ struct SimulationParams {
     double h = 0.0;
     array<double, 3> field_dir = {0, 1, 0};
     string dir = "BCAO_simulation";
-    double J1xy = -7.65, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
-    double J3xy = 2.64, J3z = -0.81;
+    double J1xy = -7.6, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
+    double J3xy = 2.5, J3z = -0.85  ;
     double h_start = 0.0, h_end = 2.0;
     int num_steps = 50;
     // Twist matrices (3 blocks of 3x3, each flattened to 9 doubles), optional
@@ -194,7 +194,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     double k_B = 0.08620689655;
 
     // Save simulation parameters (only rank 0)
-    if (rank == 0) {
+    if (rank == 0 || field_scan) {
         ofstream param_file(dir + "/simulation_parameters.txt");
         param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
         param_file << "==========================================\n";
@@ -226,8 +226,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
-        MC.simulated_annealing(5, 1e-2, 1e4, 1e1, false, true, 0.9, dir +"/"+std::to_string(i));
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5, true);
+        MC.simulated_annealing(5, 1e-2, 1e3, 1e1, false, true, 0.9, dir +"/"+std::to_string(i));
         // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         // for (size_t k = 0; k < 1e6; ++k) {
