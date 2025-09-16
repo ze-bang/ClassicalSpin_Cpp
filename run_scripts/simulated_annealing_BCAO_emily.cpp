@@ -14,7 +14,7 @@ struct SimulationParams {
     string dir = "BCAO_simulation";
     double J1xy = -7.65, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
     double J3xy = 2.64, J3z = -0.81;
-    double h_start = 0.0, h_end = 1.0;
+    double h_start = 0.0, h_end = 2.0;
     int num_steps = 50;
     // Twist matrices (3 blocks of 3x3, each flattened to 9 doubles), optional
     bool has_twist_matrix = false;
@@ -223,10 +223,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     double local_min_energy = std::numeric_limits<double>::max();
     int local_min_index = -1;
 
-    int start = field_scan ? 0 : rank;
-
     // Each process handles a subset of trials
-    for(size_t i = start; i < num_trials; i += size){
+    for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
         lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
         MC.simulated_annealing(5, 1e-2, 1e4, 1e1, false, true, 0.9, dir +"/"+std::to_string(i));
@@ -267,46 +265,58 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
             local_min_index = i;
         }
     }
+    // Only perform MPI collective operations if not in field_scan mode
+    // or if there are multiple trials to aggregate
+    if (!field_scan && num_trials > 1) {
+        // Gather all minimum energies to rank 0
+        struct {
+            double energy;
+            int index;
+            int rank;
+        } local_min = {local_min_energy, local_min_index, rank}, global_min;
 
-    // Gather all minimum energies to rank 0
-    struct {
-        double energy;
-        int index;
-        int rank;
-    } local_min = {local_min_energy, local_min_index, rank}, global_min;
-
-    MPI_Reduce(&local_min.energy, &global_min.energy, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
-    
-    // Find which process has the global minimum
-    if (rank == 0) {
-        double *all_energies = new double[size];
-        int *all_indices = new int[size];
+        MPI_Reduce(&local_min.energy, &global_min.energy, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
         
-        MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, all_energies, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Gather(&local_min_index, 1, MPI_INT, all_indices, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        
-        double min_energy = all_energies[0];
-        int min_index = all_indices[0];
-        
-        for (int i = 1; i < size; ++i) {
-            if (all_energies[i] < min_energy) {
-                min_energy = all_energies[i];
-                min_index = all_indices[i];
+        // Find which process has the global minimum
+        if (rank == 0) {
+            double *all_energies = new double[size];
+            int *all_indices = new int[size];
+            
+            MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, all_energies, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            MPI_Gather(&local_min_index, 1, MPI_INT, all_indices, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            
+            double min_energy = all_energies[0];
+            int min_index = all_indices[0];
+            
+            for (int i = 1; i < size; ++i) {
+                if (all_energies[i] < min_energy) {
+                    min_energy = all_energies[i];
+                    min_index = all_indices[i];
+                }
             }
+            
+            // Output the information about the best configuration to a file
+            ofstream best_config_file(dir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            best_config_file << "Trial Index: " << min_index << "\n";
+            best_config_file << "Minimum Energy Density: " << min_energy << "\n";
+            best_config_file.close();
+            
+            delete[] all_energies;
+            delete[] all_indices;
+        } else {
+            MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            MPI_Gather(&local_min_index, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
         }
-        
-        // Output the information about the best configuration to a file
-        ofstream best_config_file(dir + "/best_configuration.txt");
-        best_config_file << "Best Configuration Found:\n";
-        best_config_file << "Trial Index: " << min_index << "\n";
-        best_config_file << "Minimum Energy Density: " << min_energy << "\n";
-        best_config_file.close();
-        
-        delete[] all_energies;
-        delete[] all_indices;
-    } else {
-        MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Gather(&local_min_index, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
+    } else if (local_min_index >= 0) {
+        // For single trial or field_scan mode, just output the local result if we have one
+        if (rank == 0 || field_scan) {
+            ofstream best_config_file(dir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            best_config_file << "Trial Index: " << local_min_index << "\n";
+            best_config_file << "Minimum Energy Density: " << local_min_energy << "\n";
+            best_config_file.close();
+        }
     }
     
     MPI_Barrier(MPI_COMM_WORLD);
