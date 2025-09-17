@@ -985,39 +985,55 @@ class lattice
         double sigma = 1000;
         
         // Enhanced convergence parameters
-        const size_t expected_temp_steps = static_cast<size_t>(log(T_end/T_start) / log(cooling_rate)) + 1;
+        const double log_cooling = log(cooling_rate);
+        const double log_temp_ratio = log(T_end/T_start);
+        size_t expected_temp_steps = static_cast<size_t>(log_temp_ratio / log_cooling) + 1;
         const size_t convergence_window = min(size_t(100), max(size_t(20), expected_temp_steps / 5));
-        constexpr double energy_tolerance = 1e-5;
-        constexpr double gradient_tolerance = 1e-4;
-        constexpr double variance_tolerance = 1e-4;
+        const double energy_tolerance = 1e-5;
+        const double gradient_tolerance = 1e-3;
+        const double variance_tolerance = 1e-3;
+        
+        // Autocorrelation-aware sampling parameters
+        size_t autocorrelation_length = 1; // Initial guess
+        const size_t max_autocorr_length = n_anneal / 10; // Prevent runaway
+        size_t energy_sample_interval = autocorrelation_length;
+        const size_t min_samples_for_statistics = 10;
+        const size_t autocorr_update_interval = 10; // Update autocorrelation estimate every N temperature steps
         
         // Ground state search parameters
-        constexpr size_t ground_state_checks = 10;
+        const size_t ground_state_checks = 10;
         const size_t final_optimization_sweeps = n_anneal * 10;
-        constexpr double ground_state_temp_factor = 0.1;
-        
-        // Tracking variables - reserve capacity to avoid reallocation
+        const double ground_state_temp_factor = 0.1;
+        const double ground_state_temp_threshold = T_end * ground_state_temp_factor;
+
+        // Pre-allocate tracking variables
         vector<double> energy_history;
-        energy_history.reserve(expected_temp_steps * 2);
         vector<double> variance_history;
-        variance_history.reserve(expected_temp_steps);
         vector<double> gradient_history;
-        gradient_history.reserve(expected_temp_steps);
         deque<double> recent_energies;
+        vector<double> sampled_energies; // For autocorrelation calculation
+        
+        energy_history.reserve(expected_temp_steps * 2);
+        variance_history.reserve(expected_temp_steps);
+        gradient_history.reserve(expected_temp_steps);
+        sampled_energies.reserve(1000);
+        recent_energies.clear();
+        
         bool converged = false;
         bool ground_state_found = false;
         
         // Best configuration tracking
         spin_config best_config = spins;
         double best_energy = std::numeric_limits<double>::max();
+        size_t steps_at_best = 0;
         size_t steps_since_improvement = 0;
         
         // Adaptive parameters
         double adaptive_cooling_rate = cooling_rate;
-        constexpr double min_cooling_rate = 0.98;
-        constexpr double max_cooling_rate = 0.6;
+        const double min_cooling_rate = 0.98;
+        const double max_cooling_rate = 0.6;
         size_t plateau_count = 0;
-        constexpr size_t max_plateau_count = 5;
+        const size_t max_plateau_count = 5;
         
         // Energy landscape analysis
         vector<double> local_minima_energies;
@@ -1027,118 +1043,216 @@ class lattice
         size_t total_metropolis_steps = 0;
         size_t total_accepted_moves = 0;
         
+        // Pre-compute temperature thresholds
+        const double low_temp_threshold = T_start * 0.1;
+        const double very_low_temp_threshold = T_end * 10;
+        const double ground_state_verify_temp = T_end * 2;
+        
         cout << "\n=== Enhanced Simulated Annealing for Ground State Search ===" << endl;
         cout << "Temperature range: [" << T_start << ", " << T_end << "]" << endl;
         cout << "Expected steps: " << expected_temp_steps << endl;
+        cout << "Initial autocorrelation length estimate: " << autocorrelation_length << endl;
+        cout << "Convergence window: " << convergence_window << endl;
+        cout << "Energy tolerance: " << scientific << energy_tolerance << endl;
+        cout << "Gradient tolerance: " << scientific << gradient_tolerance << endl;
+        cout << "Variance tolerance: " << scientific << variance_tolerance << endl;
+        cout << "Ground state verification: " << ground_state_checks << " checks" << endl;
         cout << "=========================================================\n" << endl;
         
         // Initialize random seed more efficiently
         {
             std::random_device rd;
-            seed_lehman(rd() | 1ULL);
+            auto time_val = chrono::high_resolution_clock::now().time_since_epoch().count();
+            seed_lehman((rd() ^ static_cast<uint64_t>(time_val) ^ reinterpret_cast<uintptr_t>(this)) | 1ULL);
         }
+        
+        // Helper function to estimate autocorrelation time
+        auto estimate_autocorrelation = [](const vector<double>& data, size_t max_lag = 100) -> size_t {
+            if (data.size() < 50) return 10; // Default for insufficient data
+            
+            double mean = 0;
+            for (const auto& x : data) mean += x;
+            mean /= data.size();
+            
+            double c0 = 0;
+            for (const auto& x : data) {
+                double diff = x - mean;
+                c0 += diff * diff;
+            }
+            c0 /= data.size();
+            
+            if (c0 < 1e-10) return 1;
+            
+            size_t tau_int = 1;
+            for (size_t lag = 1; lag < min(max_lag, data.size()/4); ++lag) {
+                double c_lag = 0;
+                size_t count = 0;
+                for (size_t i = 0; i < data.size() - lag; ++i) {
+                    c_lag += (data[i] - mean) * (data[i+lag] - mean);
+                    count++;
+                }
+                if (count > 0) {
+                    c_lag /= count;
+                    double autocorr = c_lag / c0;
+                    if (autocorr < 0.1) break; // Autocorrelation below threshold
+                    tau_int = lag * 2; // Conservative estimate
+                }
+            }
+            return max(size_t(1), tau_int);
+        };
         
         auto start_time = chrono::steady_clock::now();
         size_t temp_step = 0;
+        const size_t progress_interval = max(size_t(1), expected_temp_steps/100);
         
-        // Pre-calculate temperature thresholds
-        const double low_temp_threshold = T_start * 0.1;
-        const double near_ground_threshold = T_end * 10;
-        const double ground_verify_threshold = T_end * 2;
-        const double final_temp = T_end * ground_state_temp_factor;
+        // Pre-allocate work arrays for variance calculation
+        double running_mean = 0.0;
+        double running_sum = 0.0;
+        double running_sum_sq = 0.0;
         
         // Main annealing loop
-        while(T > final_temp && !ground_state_found){
+        while(T > ground_state_temp_threshold && !ground_state_found){
             temp_step++;
             double curr_accept = 0;
             size_t curr_total = 0;
             
             // Adaptive number of sweeps based on temperature
             size_t adaptive_n_anneal = n_anneal;
-            if(T < near_ground_threshold){
-                adaptive_n_anneal *= 5;
-            } else if(T < low_temp_threshold){
-                adaptive_n_anneal *= 2;
+            if(T < low_temp_threshold){
+                adaptive_n_anneal = n_anneal << 1; // *= 2
+            }
+            if(T < very_low_temp_threshold){
+                adaptive_n_anneal = n_anneal * 5;
             }
             
-            // Metropolis/Overrelaxation sweeps
+            // Collect energy samples for autocorrelation analysis
+            vector<double> temp_energy_samples;
+            temp_energy_samples.reserve(adaptive_n_anneal / 10);
+            
+            // Metropolis/Overrelaxation sweeps with energy sampling
             if(overrelaxation_rate > 0){
-                for(size_t i = 0; i < adaptive_n_anneal; ++i){
+                const size_t overrelax_cycles = adaptive_n_anneal / overrelaxation_rate;
+                for(size_t cycle = 0; cycle < overrelax_cycles; ++cycle){
                     overrelaxation();
-                    if(i % overrelaxation_rate == 0){
-                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
-                        curr_total++;
+                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                    curr_total++;
+                    
+                    // Sample energy for autocorrelation analysis
+                    if (cycle % 10 == 0) {
+                        temp_energy_samples.push_back(total_energy(spins) / lattice_size);
                     }
+                }
+                // Handle remainder
+                for(size_t i = overrelax_cycles * overrelaxation_rate; i < adaptive_n_anneal; ++i){
+                    overrelaxation();
                 }
             } else {
                 for(size_t i = 0; i < adaptive_n_anneal; ++i){
                     curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                    curr_total++;
+                    
+                    // Sample energy for autocorrelation analysis
+                    if (i % 10 == 0) {
+                        temp_energy_samples.push_back(total_energy(spins) / lattice_size);
+                    }
                 }
-                curr_total = adaptive_n_anneal;
             }
             
             total_metropolis_steps += curr_total;
             total_accepted_moves += static_cast<size_t>(curr_accept * lattice_size);
             
+            // Update autocorrelation estimate periodically
+            if (temp_step % autocorr_update_interval == 0 && !temp_energy_samples.empty()) {
+                sampled_energies.insert(sampled_energies.end(), temp_energy_samples.begin(), temp_energy_samples.end());
+                if (sampled_energies.size() > 1000) {
+                    sampled_energies.erase(sampled_energies.begin(), sampled_energies.begin() + 500);
+                }
+                
+                size_t new_autocorr = estimate_autocorrelation(sampled_energies);
+                if (new_autocorr != autocorrelation_length) {
+                    autocorrelation_length = min(new_autocorr, max_autocorr_length);
+                    energy_sample_interval = max(size_t(1), autocorrelation_length);
+                    cout << "  >> Autocorrelation length updated to: " << autocorrelation_length << endl;
+                }
+            }
+            
             // Boundary updates if requested
             if(boundary_update){
-                const size_t boundary_updates = min(size_t(100), adaptive_n_anneal/10);
-                for(size_t i = 0; i < boundary_updates; ++i){
+                const size_t boundary_sweeps = min(size_t(100), adaptive_n_anneal/10);
+                for(size_t i = 0; i < boundary_sweeps; ++i){
                     metropolis_twist_sweep(T);
                 }
             }
             
-            // Calculate current energy
-            const double current_energy = total_energy(spins) / lattice_size;
+            // Calculate current energy and statistics
+            double current_energy = total_energy(spins) / lattice_size;
             energy_history.push_back(current_energy);
-            recent_energies.push_back(current_energy);
-            if(recent_energies.size() > convergence_window){
-                recent_energies.pop_front();
+            
+            // Update recent energies with proper spacing for independence
+            if (energy_history.size() % energy_sample_interval == 0) {
+                recent_energies.push_back(current_energy);
+                size_t max_samples = convergence_window / max(size_t(1), autocorrelation_length);
+                if(recent_energies.size() > max_samples){
+                    recent_energies.pop_front();
+                }
             }
             
-            // Calculate variance efficiently using online algorithm
+            // Calculate variance using properly spaced samples
             double variance = 0;
-            if(recent_energies.size() >= 10){
-                double mean = 0;
-                double m2 = 0;
-                size_t n = 0;
+            if(recent_energies.size() >= min_samples_for_statistics){
+                double sum = 0, sum_sq = 0;
                 for(const auto& e : recent_energies){
-                    n++;
-                    double delta = e - mean;
-                    mean += delta / n;
-                    m2 += delta * (e - mean);
+                    sum += e;
+                    sum_sq += e * e;
                 }
-                variance = (n > 1) ? m2 / (n - 1) : 0;
+                double mean = sum / recent_energies.size();
+                variance = (sum_sq - sum * mean) / (recent_energies.size() - 1);
                 variance_history.push_back(variance);
+            }
+            
+            // Calculate gradient using properly spaced samples
+            double gradient = 0;
+            if(energy_history.size() >= 10 * autocorrelation_length){
+                size_t n = energy_history.size();
+                size_t spacing = autocorrelation_length;
+                size_t idx_recent = n - 1;
+                size_t idx_old = n - min(10 * spacing, n);
+                gradient = (energy_history[idx_recent] - energy_history[idx_old]) / double(idx_recent - idx_old);
+                gradient_history.push_back(gradient);
             }
             
             // Track best configuration
             if(current_energy < best_energy){
-                const double improvement = best_energy - current_energy;
+                double improvement = best_energy - current_energy;
                 best_energy = current_energy;
                 best_config = spins;
+                steps_at_best = temp_step;
                 steps_since_improvement = 0;
                 
-                if(improvement > energy_tolerance * abs(best_energy)){
-                    cout << "  >>> NEW BEST: E/N = " << fixed << setprecision(10) << best_energy << endl;
+                // Significant improvement detection
+                if(improvement > energy_tolerance * fabs(best_energy)){
+                    cout << "  >>> NEW BEST: E/N = " << fixed << setprecision(10) << best_energy 
+                         << " (improvement: " << scientific << improvement << ")" << endl;
                 }
             } else {
                 steps_since_improvement++;
             }
             
-            // Detect plateau
-            if(steps_since_improvement > convergence_window/2 && variance < variance_tolerance){
+            // Detect plateau (possible local minimum)
+            if(steps_since_improvement > convergence_window / 2 && variance < variance_tolerance){
                 plateau_count++;
                 if(plateau_count > max_plateau_count){
                     cout << "  >> Plateau detected. Attempting escape..." << endl;
                     local_minima_energies.push_back(current_energy);
                     
-                    // Escape strategy
-                    const double escape_temp = min(T * 2, T_start * 0.1);
-                    for(size_t i = 0; i < n_anneal/2; ++i){
+                    // Escape strategy: temporary temperature boost
+                    double escape_temp = min(T * 2, T_start * 0.1);
+                    const size_t escape_sweeps = n_anneal >> 1;
+                    for(size_t i = 0; i < escape_sweeps; ++i){
                         metropolis(spins, escape_temp, gaussian_move, sigma * 2);
                     }
                     plateau_count = 0;
+                    sampled_energies.clear(); // Reset autocorrelation data after escape
                 }
             } else {
                 plateau_count = 0;
@@ -1149,45 +1263,109 @@ class lattice
                 acceptance_rate = curr_accept / curr_total;
             }
             
-            // Adjust cooling based on acceptance rate
-            if(acceptance_rate > 0.5){
-                adaptive_cooling_rate = min(min_cooling_rate, adaptive_cooling_rate / 0.95);
-            } else if(acceptance_rate < 0.01 && variance < variance_tolerance){
-                adaptive_cooling_rate = max(max_cooling_rate, adaptive_cooling_rate * 0.95);
+            if(recent_energies.size() >= min_samples_for_statistics){
+                // Adjust cooling based on energy landscape
+                if(variance < variance_tolerance && fabs(gradient) < variance){
+                    adaptive_cooling_rate = max(max_cooling_rate, adaptive_cooling_rate * 0.95);
+                } else if(variance > 1e-4 || acceptance_rate > 0.5){
+                    adaptive_cooling_rate = min(min_cooling_rate, adaptive_cooling_rate / 0.95);
+                } else if(steps_since_improvement > convergence_window){
+                    adaptive_cooling_rate = min(min_cooling_rate, adaptive_cooling_rate / 0.9);
+                    cout << "  >> No improvement for " << steps_since_improvement 
+                         << " steps. Cooling rate -> " << adaptive_cooling_rate << endl;
+                }
+            }
+            
+            // Multi-criteria convergence check with proper statistical independence
+            bool energy_stable = false, gradient_small = false, variance_small = false;
+            
+            if(recent_energies.size() >= min_samples_for_statistics){
+                // Check energy stability using independent samples
+                const size_t n_samples = recent_energies.size();
+                const size_t half = n_samples / 2;
+                
+                double recent_mean = 0, old_mean = 0;
+                for(size_t i = half; i < n_samples; ++i){
+                    recent_mean += recent_energies[i];
+                }
+                recent_mean /= (n_samples - half);
+                
+                for(size_t i = 0; i < half; ++i){
+                    old_mean += recent_energies[i];
+                }
+                old_mean /= half;
+                
+                double relative_change = fabs((recent_mean - old_mean) / fabs(old_mean));
+                energy_stable = (relative_change < energy_tolerance);
+                
+                // Check gradient
+                if(!gradient_history.empty()){
+                    double avg_gradient = 0;
+                    size_t count = min(size_t(10), gradient_history.size());
+                    size_t start_idx = gradient_history.size() - count;
+                    for(size_t i = start_idx; i < gradient_history.size(); ++i){
+                        avg_gradient += fabs(gradient_history[i]);
+                    }
+                    avg_gradient /= count;
+                    gradient_small = (avg_gradient < gradient_tolerance * fabs(recent_mean));
+                }
+                
+                // Check variance
+                variance_small = !variance_history.empty() && (variance < variance_tolerance);
+                
+                converged = energy_stable && gradient_small && variance_small && (acceptance_rate < 0.01);
+            }
+            
+            // Output progress
+            if(temp_step % progress_interval == 0 || converged){
+                cout << "Step " << setw(5) << temp_step 
+                     << " | T=" << fixed << setprecision(6) << T
+                     << " | E/N=" << setprecision(10) << current_energy
+                     << " | Best=" << setprecision(10) << best_energy
+                     << " | Accept=" << setprecision(4) << acceptance_rate
+                     << " | τ=" << setw(3) << autocorrelation_length
+                     << " | Samples=" << setw(3) << recent_energies.size();
+                if(!variance_history.empty()){
+                    cout << " | Var=" << scientific << setprecision(2) << variance;
+                }
+                if(!gradient_history.empty()){
+                    cout << " | Grad=" << scientific << setprecision(2) << gradient_history.back();
+                }
+                if(converged) cout << " [CONVERGED]";
+                cout << endl;
             }
             
             // Ground state verification at very low temperature
-            if(T <= ground_verify_threshold && !ground_state_found){
+            if(T <= ground_state_verify_temp && !ground_state_found){
                 cout << "\n>>> Entering ground state verification phase <<<" << endl;
                 
                 vector<double> verification_energies;
                 verification_energies.reserve(ground_state_checks);
                 
-                // Multiple independent searches
+                // Multiple independent searches from current best
                 for(size_t check = 0; check < ground_state_checks; ++check){
                     spins = best_config;
                     
                     // Apply small random perturbations
-                    const size_t perturb_sites = max(size_t(1), lattice_size/100);
-                    for(size_t i = 0; i < perturb_sites; ++i){
-                        const size_t site = random_int_lehman(lattice_size);
+                    const size_t perturbation_sites = lattice_size / 100;
+                    for(size_t i = 0; i < perturbation_sites; ++i){
+                        size_t site = random_int_lehman(lattice_size);
                         array<double,N> perturbation = gen_random_spin(spin_length * 0.01);
                         spins[site] = spins[site] + perturbation;
-                        const double norm = sqrt(dot(spins[site], spins[site]));
-                        if(norm > 1e-10){
-                            spins[site] = spins[site] * (spin_length / norm);
-                        }
+                        double norm = sqrt(dot(spins[site], spins[site]));
+                        spins[site] = spins[site] * (spin_length / norm);
                     }
                     
                     // Intensive local search
+                    const double search_temp = T_end * ground_state_temp_factor;
                     for(size_t i = 0; i < final_optimization_sweeps; ++i){
-                        metropolis(spins, final_temp, false, sigma/100);
-                        if(i % 100 == 0){
+                        metropolis(spins, search_temp, false, sigma/100);
+                        if((i & 0x63) == 0){ // i % 100 == 0
                             overrelaxation();
                         }
                     }
                     
-                    const double check_energy = total_energy(spins) / lattice_size;
+                    double check_energy = total_energy(spins) / lattice_size;
                     verification_energies.push_back(check_energy);
                     
                     if(check_energy < best_energy){
@@ -1195,64 +1373,106 @@ class lattice
                         best_config = spins;
                         cout << "  Check " << check+1 << ": Found lower energy = " 
                              << fixed << setprecision(12) << best_energy << endl;
+                    } else {
+                        cout << "  Check " << check+1 << ": Energy = " 
+                             << fixed << setprecision(12) << check_energy << endl;
                     }
                 }
                 
-                // Check consistency
-                double mean_verification = 0;
+                // Check consistency of verification energies
+                double mean_verification = 0, var_verification = 0;
                 for(const auto& e : verification_energies) mean_verification += e;
                 mean_verification /= verification_energies.size();
-                
-                double var_verification = 0;
                 for(const auto& e : verification_energies){
-                    var_verification += (e - mean_verification) * (e - mean_verification);
+                    double diff = e - mean_verification;
+                    var_verification += diff * diff;
                 }
                 var_verification /= (verification_energies.size() - 1);
                 
-                ground_state_found = (sqrt(var_verification) < energy_tolerance * abs(mean_verification))
-                                    && (abs(best_energy - mean_verification) < energy_tolerance * abs(mean_verification));
+                cout << "Verification statistics:" << endl;
+                cout << "  Mean E/N = " << fixed << setprecision(12) << mean_verification << endl;
+                cout << "  Std Dev = " << scientific << setprecision(4) << sqrt(var_verification) << endl;
+                cout << "  Best E/N = " << fixed << setprecision(12) << best_energy << endl;
+                
+                // Determine if ground state is found
+                double mean_tolerance = energy_tolerance * fabs(mean_verification);
+                ground_state_found = (sqrt(var_verification) < mean_tolerance)
+                                    && (fabs(best_energy - mean_verification) < mean_tolerance);
                 
                 if(ground_state_found){
                     cout << ">>> GROUND STATE FOUND <<<" << endl;
                     spins = best_config;
                     break;
+                } else {
+                    cout << "Ground state not yet confirmed. Continuing search..." << endl;
+                    spins = best_config;
                 }
-                spins = best_config;
             }
             
             T *= adaptive_cooling_rate;
         }
         
-        // Final intensive optimization if not found
+        // Final intensive optimization
         if(!ground_state_found){
             cout << "\n=== FINAL GROUND STATE OPTIMIZATION ===" << endl;
+            
             spins = best_config;
+            const double final_T = T_end * ground_state_temp_factor;
             
             // Phase 1: Deterministic sweeps
-            for(size_t i = 0; i < 100; i += 10){
-                for(size_t j = 0; j < 10; ++j){
-                    deterministic_sweep();
+            cout << "Phase 1: Deterministic optimization..." << endl;
+            for(size_t i = 0; i < 100; ++i){
+                deterministic_sweep();
+                if((i % 10) == 0){
+                    double e = total_energy(spins) / lattice_size;
+                    cout << "  Deterministic " << i << ": E/N = " << fixed << setprecision(12) << e << endl;
+                    if(e < best_energy){
+                        best_energy = e;
+                        best_config = spins;
+                    }
                 }
-                const double e = total_energy(spins) / lattice_size;
+            }
+            
+            // Phase 2: Very low temperature Monte Carlo
+            cout << "Phase 2: Ultra-low temperature Monte Carlo..." << endl;
+            spins = best_config;
+            const size_t ultra_low_sweeps = n_anneal * 10;
+            for(size_t cycle = 0; cycle < 10; ++cycle){
+                double cycle_temp = final_T / (cycle + 1);
+                for(size_t i = 0; i < ultra_low_sweeps; ++i){
+                    metropolis(spins, cycle_temp, false, sigma/1000);
+                    if((i & 0x63) == 0) overrelaxation(); // i % 100 == 0
+                }
+                double e = total_energy(spins) / lattice_size;
+                cout << "  Cycle " << cycle+1 << ": E/N = " << fixed << setprecision(12) << e << endl;
                 if(e < best_energy){
                     best_energy = e;
                     best_config = spins;
                 }
             }
             
-            // Phase 2: Ultra-low temperature Monte Carlo
+            // Phase 3: Gradient descent-like moves
+            cout << "Phase 3: Gradient-based refinement..." << endl;
             spins = best_config;
-            for(size_t cycle = 0; cycle < 10; ++cycle){
-                const size_t cycle_sweeps = n_anneal * 10;
-                for(size_t i = 0; i < cycle_sweeps; ++i){
-                    metropolis(spins, final_temp / (cycle + 1), false, sigma/1000);
-                    if(i % 100 == 0) overrelaxation();
+            const size_t gradient_steps = lattice_size * 10;
+            for(size_t i = 0; i < gradient_steps; ++i){
+                size_t site = i % lattice_size;
+                array<double,N> local_field = get_local_field(site);
+                double norm = sqrt(dot(local_field, local_field));
+                if(norm > 1e-10){
+                    array<double,N> new_spin = local_field * (-spin_length / norm);
+                    double dE = site_energy_diff(new_spin, spins[site], site);
+                    if(dE < 0){
+                        spins[site] = new_spin;
+                    }
                 }
-                const double e = total_energy(spins) / lattice_size;
-                if(e < best_energy){
-                    best_energy = e;
-                    best_config = spins;
-                }
+            }
+            
+            double final_energy = total_energy(spins) / lattice_size;
+            if(final_energy < best_energy){
+                best_energy = final_energy;
+                best_config = spins;
+                cout << "  Gradient descent improved: E/N = " << fixed << setprecision(12) << best_energy << endl;
             }
         }
         
@@ -1263,9 +1483,25 @@ class lattice
         auto end_time = chrono::steady_clock::now();
         auto elapsed = chrono::duration_cast<chrono::seconds>(end_time - start_time).count();
         
-        cout << "\n=== SIMULATED ANNEALING COMPLETE ===" << endl;
+        cout << "\n==========================================================" << endl;
+        cout << "=== SIMULATED ANNEALING COMPLETE ===" << endl;
+        cout << "Ground State Found: " << (ground_state_found ? "YES" : "ATTEMPTED") << endl;
         cout << "Final Energy/Site: " << fixed << setprecision(12) << best_energy << endl;
+        cout << "Final Autocorrelation Length: " << autocorrelation_length << endl;
+        cout << "Total Temperature Steps: " << temp_step << endl;
+        cout << "Total Metropolis Steps: " << total_metropolis_steps * lattice_size << endl;
+        cout << "Total Accepted Moves: " << total_accepted_moves << endl;
+        cout << "Overall Acceptance Rate: " << fixed << setprecision(4) 
+             << double(total_accepted_moves) / (total_metropolis_steps * lattice_size) << endl;
         cout << "Total Time: " << elapsed << " seconds" << endl;
+        cout << "==========================================================" << endl;
+        
+        // Verify final energy
+        double verification_energy = total_energy(spins) / lattice_size;
+        if(fabs(verification_energy - best_energy) > 1e-10){
+            cout << "WARNING: Verification energy differs from best: " 
+                 << fixed << setprecision(12) << verification_energy << endl;
+        }
         
         // Save results
         if(!out_dir.empty()){
@@ -1273,17 +1509,30 @@ class lattice
             write_to_file_pos(out_dir + "/pos.txt");
             
             ofstream info_file(out_dir + "/annealing_info.txt");
+            info_file << "Ground State Found: " << (ground_state_found ? "Yes" : "Attempted") << endl;
             info_file << "Final Energy/Site: " << fixed << setprecision(15) << best_energy << endl;
+            info_file << "Final Autocorrelation Length: " << autocorrelation_length << endl;
             info_file << "Temperature Steps: " << temp_step << endl;
             info_file << "Total Time (s): " << elapsed << endl;
-            info_file.close();
+            info_file << "Final Cooling Rate: " << adaptive_cooling_rate << endl;
+            info_file << "Acceptance Rate: " << double(total_accepted_moves) / (total_metropolis_steps * lattice_size) << endl;
             
-            if(!energy_history.empty()){
-                ofstream energy_file(out_dir + "/energy_history.txt");
-                for(const auto& e : energy_history){
-                    energy_file << fixed << setprecision(12) << e << endl;
+            // Write energy landscape analysis
+            if(!local_minima_energies.empty()){
+                info_file << "\nLocal Minima Detected:" << endl;
+                for(size_t i = 0; i < local_minima_energies.size(); ++i){
+                    info_file << "  " << i+1 << ": " << fixed << setprecision(12) 
+                             << local_minima_energies[i] << endl;
                 }
             }
+            info_file.close();
+            
+            // Save energy history
+            ofstream energy_file(out_dir + "/energy_history.txt");
+            for(const auto& e : energy_history){
+                energy_file << fixed << setprecision(12) << e << endl;
+            }
+            energy_file.close();
         }
     }
 
