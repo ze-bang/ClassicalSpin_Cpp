@@ -226,7 +226,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 12, 12, 1> MC(&atoms, 0.5, true);
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 0.5, true);
         MC.simulated_annealing(5, 1e-2, 1e5, 10, false, true, 0.9, dir +"/"+std::to_string(i));
         // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
@@ -267,7 +267,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     }
     // Only perform MPI collective operations if not in field_scan mode
     // or if there are multiple trials to aggregate
-    if (!field_scan && num_trials > 1) {
+    if (num_trials > 1) {
         // Gather all minimum energies to rank 0
         struct {
             double energy;

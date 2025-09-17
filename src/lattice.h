@@ -989,7 +989,6 @@ class lattice
         const size_t expected_temp_steps = static_cast<size_t>(log_temp_ratio / log_cooling) + 1;
         const size_t convergence_window = min(size_t(100), max(size_t(20), expected_temp_steps / 5));
         const double energy_tolerance = 1e-5;
-        const double gradient_tolerance = 1e-3;
         const double variance_tolerance = 1e-3;
         
         // Ground state search parameters
@@ -1001,7 +1000,6 @@ class lattice
         // Pre-allocate tracking variables with reserve
         vector<double> energy_history;
         vector<double> variance_history;
-        vector<double> gradient_history;
         deque<double> recent_energies;
         
         // Autocorrelation tracking
@@ -1013,7 +1011,6 @@ class lattice
         
         energy_history.reserve(expected_temp_steps * 2);
         variance_history.reserve(expected_temp_steps);
-        gradient_history.reserve(expected_temp_steps);
         energy_samples_for_autocorr.reserve(max_samples_for_autocorr);
         
         bool converged = false;
@@ -1099,7 +1096,6 @@ class lattice
         cout << "Expected steps: " << expected_temp_steps << endl;
         cout << "Convergence window: " << convergence_window << endl;
         cout << "Energy tolerance: " << scientific << energy_tolerance << endl;
-        cout << "Gradient tolerance: " << scientific << gradient_tolerance << endl;
         cout << "Variance tolerance: " << scientific << variance_tolerance << endl;
         cout << "Ground state verification: " << ground_state_checks << " checks" << endl;
         cout << "==================================================================\n" << endl;
@@ -1220,13 +1216,6 @@ class lattice
                 recent_energies.pop_front();
             }
             
-            double gradient = 0;
-            if(energy_history.size() >= 2){
-                const size_t n = energy_history.size();
-                gradient = (energy_history[n-1] - energy_history[n-3])/2.0;
-                gradient_history.push_back(gradient);
-            }
-            
             if(current_energy < best_energy){
                 const double improvement = best_energy - current_energy;
                 best_energy = current_energy;
@@ -1271,7 +1260,7 @@ class lattice
 
             
             // Multi-criteria convergence check
-            bool energy_stable = false, gradient_small = false, variance_small = false;
+            bool energy_stable = false, variance_small = false;
             
             if(energy_history.size() >= convergence_window && effective_samples >= 10){
                 const size_t n = energy_history.size();
@@ -1293,23 +1282,12 @@ class lattice
                     old_mean /= half_window;
                     
                     const double relative_change = fabs((recent_mean - old_mean) / fabs(old_mean));
-                    energy_stable = (relative_change < energy_tolerance * sqrt(2 * tau_int));
-                }
-                
-                if(!gradient_history.empty()){
-                    double avg_gradient = 0;
-                    const size_t count = min(size_t(10), gradient_history.size());
-                    const size_t start_idx = gradient_history.size() - count;
-                    for(size_t i = start_idx; i < gradient_history.size(); ++i){
-                        avg_gradient += gradient_history[i];
-                    }
-                    avg_gradient = fabs(avg_gradient / count);
-                    gradient_small = (avg_gradient < sqrt(unbiased_variance / effective_samples));
+                    energy_stable = (relative_change < unbiased_variance);
                 }
                 
                 variance_small = (unbiased_variance < variance_tolerance);
                 
-                converged = energy_stable && gradient_small && variance_small && 
+                converged = energy_stable && variance_small && 
                            (acceptance_rate < 0.01) && (effective_samples >= 20);
             }
             
@@ -1324,9 +1302,6 @@ class lattice
                      << " | Cool=" << setprecision(4) << adaptive_cooling_rate;
                 if(unbiased_variance > 0){
                     cout << " | Var=" << scientific << setprecision(2) << unbiased_variance;
-                }
-                if(!gradient_history.empty()){
-                    cout << " | Grad=" << scientific << setprecision(2) << gradient_history.back();
                 }
                 if(converged) cout << " [CONVERGED]";
                 cout << endl;
@@ -1439,29 +1414,6 @@ class lattice
                     best_energy = e;
                     best_config = spins;
                 }
-            }
-            
-            cout << "Phase 3: Gradient-based refinement..." << endl;
-            spins = best_config;
-            const size_t gradient_steps = lattice_size * 10;
-            for(size_t i = 0; i < gradient_steps; ++i){
-                const size_t site = i % lattice_size;
-                const array<double,N> local_field = get_local_field(site);
-                const double norm = sqrt(dot(local_field, local_field));
-                if(norm > 1e-10){
-                    const array<double,N> new_spin = local_field * (-spin_length / norm);
-                    const double dE = site_energy_diff(new_spin, spins[site], site);
-                    if(dE < 0){
-                        spins[site] = new_spin;
-                    }
-                }
-            }
-            
-            const double final_energy = total_energy(spins) * inv_lattice_size;
-            if(final_energy < best_energy){
-                best_energy = final_energy;
-                best_config = spins;
-                cout << "  Gradient descent improved: E/N = " << fixed << setprecision(12) << best_energy << endl;
             }
         }
         
