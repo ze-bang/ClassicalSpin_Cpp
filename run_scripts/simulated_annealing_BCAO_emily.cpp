@@ -226,7 +226,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 48, 48, 1> MC(&atoms, 0.5, true);
+        lattice<3, 2, 12, 12, 1> MC(&atoms, 0.5, true);
         MC.simulated_annealing(5, 1e-2, 1e5, 10, false, true, 0.9, dir +"/"+std::to_string(i));
         // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
@@ -457,7 +457,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         string subdir = dir + "/h_" + to_string(h);
         // Each process runs the simulation for its assigned 'h' value, with one trial.
         std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
-        sim_BCAO_honeycomb(1, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
+        sim_BCAO_honeycomb(5, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
     }
 }
 

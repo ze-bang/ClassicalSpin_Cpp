@@ -325,7 +325,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
 
     
     // Lattice and simulation
-    lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true);
+    lattice<3, 2, 60, 60, 1> MC(&atoms, 0.5, true);
     vector<double> temps = MC.generate_optimal_temperature_ladder(params.T_start, params.T_end, size);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);

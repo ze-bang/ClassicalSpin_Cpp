@@ -993,7 +993,7 @@ class lattice
         const double variance_tolerance = 1e-3;
         
         // Ground state search parameters
-        const size_t ground_state_checks = 4;
+        const size_t ground_state_checks = 3;
         const size_t final_optimization_sweeps = n_anneal * 10;
         const double ground_state_temp_factor = 0.1;
         const double ground_state_temp_threshold = T_end * ground_state_temp_factor;
