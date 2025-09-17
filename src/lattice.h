@@ -1223,7 +1223,7 @@ class lattice
             double gradient = 0;
             if(energy_history.size() >= 2){
                 const size_t n = energy_history.size();
-                gradient = (energy_history[n-1] - energy_history[n-2]) / ((adaptive_cooling_rate-1) * T);
+                gradient = (energy_history[n-1] - energy_history[n-3])/2.0;
                 gradient_history.push_back(gradient);
             }
             
@@ -1243,7 +1243,7 @@ class lattice
                 ++steps_since_improvement;
             }
             
-            const bool is_plateau = (steps_since_improvement > convergence_window * tau_int * 0.5) && 
+            const bool is_plateau = (steps_since_improvement > convergence_window) && 
                                    (unbiased_variance < variance_tolerance);
             
             if(is_plateau){
@@ -1268,15 +1268,7 @@ class lattice
                 acceptance_rate = curr_accept / curr_total;
             }
             
-            if(energy_history.size() >= (convergence_window >> 2)){
-                if(unbiased_variance < 1e-3 || acceptance_rate > 0.5){
-                    adaptive_cooling_rate = min(min_cooling_rate, adaptive_cooling_rate * 0.9);
-                    // Moving well, cool faster
-                } else if(unbiased_variance > 1e-2 || acceptance_rate < 0.1){
-                    adaptive_cooling_rate = max(max_cooling_rate, adaptive_cooling_rate / 0.9);
-                    // Struggling, cool slower
-                } 
-            }
+
             
             // Multi-criteria convergence check
             bool energy_stable = false, gradient_small = false, variance_small = false;
