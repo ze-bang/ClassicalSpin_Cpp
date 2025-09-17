@@ -993,30 +993,21 @@ class lattice
         const double gradient_tolerance = 1e-3;
         const double variance_tolerance = 1e-3;
         
-        // Autocorrelation-aware sampling parameters
-        size_t autocorrelation_length = 1; // Initial guess
-        const size_t max_autocorr_length = n_anneal / 10; // Prevent runaway
-        size_t energy_sample_interval = autocorrelation_length;
-        const size_t min_samples_for_statistics = 10;
-        const size_t autocorr_update_interval = 10; // Update autocorrelation estimate every N temperature steps
-        
         // Ground state search parameters
         const size_t ground_state_checks = 10;
         const size_t final_optimization_sweeps = n_anneal * 10;
         const double ground_state_temp_factor = 0.1;
         const double ground_state_temp_threshold = T_end * ground_state_temp_factor;
-
+        
         // Pre-allocate tracking variables
         vector<double> energy_history;
         vector<double> variance_history;
         vector<double> gradient_history;
         deque<double> recent_energies;
-        vector<double> sampled_energies; // For autocorrelation calculation
         
         energy_history.reserve(expected_temp_steps * 2);
         variance_history.reserve(expected_temp_steps);
         gradient_history.reserve(expected_temp_steps);
-        sampled_energies.reserve(1000);
         recent_energies.clear();
         
         bool converged = false;
@@ -1051,7 +1042,6 @@ class lattice
         cout << "\n=== Enhanced Simulated Annealing for Ground State Search ===" << endl;
         cout << "Temperature range: [" << T_start << ", " << T_end << "]" << endl;
         cout << "Expected steps: " << expected_temp_steps << endl;
-        cout << "Initial autocorrelation length estimate: " << autocorrelation_length << endl;
         cout << "Convergence window: " << convergence_window << endl;
         cout << "Energy tolerance: " << scientific << energy_tolerance << endl;
         cout << "Gradient tolerance: " << scientific << gradient_tolerance << endl;
@@ -1065,41 +1055,6 @@ class lattice
             auto time_val = chrono::high_resolution_clock::now().time_since_epoch().count();
             seed_lehman((rd() ^ static_cast<uint64_t>(time_val) ^ reinterpret_cast<uintptr_t>(this)) | 1ULL);
         }
-        
-        // Helper function to estimate autocorrelation time
-        auto estimate_autocorrelation = [](const vector<double>& data, size_t max_lag = 100) -> size_t {
-            if (data.size() < 50) return 10; // Default for insufficient data
-            
-            double mean = 0;
-            for (const auto& x : data) mean += x;
-            mean /= data.size();
-            
-            double c0 = 0;
-            for (const auto& x : data) {
-                double diff = x - mean;
-                c0 += diff * diff;
-            }
-            c0 /= data.size();
-            
-            if (c0 < 1e-10) return 1;
-            
-            size_t tau_int = 1;
-            for (size_t lag = 1; lag < min(max_lag, data.size()/4); ++lag) {
-                double c_lag = 0;
-                size_t count = 0;
-                for (size_t i = 0; i < data.size() - lag; ++i) {
-                    c_lag += (data[i] - mean) * (data[i+lag] - mean);
-                    count++;
-                }
-                if (count > 0) {
-                    c_lag /= count;
-                    double autocorr = c_lag / c0;
-                    if (autocorr < 0.1) break; // Autocorrelation below threshold
-                    tau_int = lag * 2; // Conservative estimate
-                }
-            }
-            return max(size_t(1), tau_int);
-        };
         
         auto start_time = chrono::steady_clock::now();
         size_t temp_step = 0;
@@ -1125,22 +1080,13 @@ class lattice
                 adaptive_n_anneal = n_anneal * 5;
             }
             
-            // Collect energy samples for autocorrelation analysis
-            vector<double> temp_energy_samples;
-            temp_energy_samples.reserve(adaptive_n_anneal / 10);
-            
-            // Metropolis/Overrelaxation sweeps with energy sampling
+            // Metropolis/Overrelaxation sweeps
             if(overrelaxation_rate > 0){
                 const size_t overrelax_cycles = adaptive_n_anneal / overrelaxation_rate;
                 for(size_t cycle = 0; cycle < overrelax_cycles; ++cycle){
                     overrelaxation();
                     curr_accept += metropolis(spins, T, gaussian_move, sigma);
                     curr_total++;
-                    
-                    // Sample energy for autocorrelation analysis
-                    if (cycle % 10 == 0) {
-                        temp_energy_samples.push_back(total_energy(spins) / lattice_size);
-                    }
                 }
                 // Handle remainder
                 for(size_t i = overrelax_cycles * overrelaxation_rate; i < adaptive_n_anneal; ++i){
@@ -1150,31 +1096,11 @@ class lattice
                 for(size_t i = 0; i < adaptive_n_anneal; ++i){
                     curr_accept += metropolis(spins, T, gaussian_move, sigma);
                     curr_total++;
-                    
-                    // Sample energy for autocorrelation analysis
-                    if (i % 10 == 0) {
-                        temp_energy_samples.push_back(total_energy(spins) / lattice_size);
-                    }
                 }
             }
             
             total_metropolis_steps += curr_total;
             total_accepted_moves += static_cast<size_t>(curr_accept * lattice_size);
-            
-            // Update autocorrelation estimate periodically
-            if (temp_step % autocorr_update_interval == 0 && !temp_energy_samples.empty()) {
-                sampled_energies.insert(sampled_energies.end(), temp_energy_samples.begin(), temp_energy_samples.end());
-                if (sampled_energies.size() > 1000) {
-                    sampled_energies.erase(sampled_energies.begin(), sampled_energies.begin() + 500);
-                }
-                
-                size_t new_autocorr = estimate_autocorrelation(sampled_energies);
-                if (new_autocorr != autocorrelation_length) {
-                    autocorrelation_length = min(new_autocorr, max_autocorr_length);
-                    energy_sample_interval = max(size_t(1), autocorrelation_length);
-                    cout << "  >> Autocorrelation length updated to: " << autocorrelation_length << endl;
-                }
-            }
             
             // Boundary updates if requested
             if(boundary_update){
@@ -1187,19 +1113,14 @@ class lattice
             // Calculate current energy and statistics
             double current_energy = total_energy(spins) / lattice_size;
             energy_history.push_back(current_energy);
-            
-            // Update recent energies with proper spacing for independence
-            if (energy_history.size() % energy_sample_interval == 0) {
-                recent_energies.push_back(current_energy);
-                size_t max_samples = convergence_window / max(size_t(1), autocorrelation_length);
-                if(recent_energies.size() > max_samples){
-                    recent_energies.pop_front();
-                }
+            recent_energies.push_back(current_energy);
+            if(recent_energies.size() > convergence_window){
+                recent_energies.pop_front();
             }
             
-            // Calculate variance using properly spaced samples
+            // Efficient variance calculation using running statistics
             double variance = 0;
-            if(recent_energies.size() >= min_samples_for_statistics){
+            if(recent_energies.size() >= 10){
                 double sum = 0, sum_sq = 0;
                 for(const auto& e : recent_energies){
                     sum += e;
@@ -1210,14 +1131,11 @@ class lattice
                 variance_history.push_back(variance);
             }
             
-            // Calculate gradient using properly spaced samples
+            // Calculate energy gradient
             double gradient = 0;
-            if(energy_history.size() >= 10 * autocorrelation_length){
+            if(energy_history.size() >= 10){
                 size_t n = energy_history.size();
-                size_t spacing = autocorrelation_length;
-                size_t idx_recent = n - 1;
-                size_t idx_old = n - min(10 * spacing, n);
-                gradient = (energy_history[idx_recent] - energy_history[idx_old]) / double(idx_recent - idx_old);
+                gradient = (energy_history[n-1] - energy_history[n-10]) * 0.1; // / 10
                 gradient_history.push_back(gradient);
             }
             
@@ -1239,7 +1157,7 @@ class lattice
             }
             
             // Detect plateau (possible local minimum)
-            if(steps_since_improvement > convergence_window / 2 && variance < variance_tolerance){
+            if(steps_since_improvement > (convergence_window >> 1) && variance < variance_tolerance){
                 plateau_count++;
                 if(plateau_count > max_plateau_count){
                     cout << "  >> Plateau detected. Attempting escape..." << endl;
@@ -1252,7 +1170,6 @@ class lattice
                         metropolis(spins, escape_temp, gaussian_move, sigma * 2);
                     }
                     plateau_count = 0;
-                    sampled_energies.clear(); // Reset autocorrelation data after escape
                 }
             } else {
                 plateau_count = 0;
@@ -1263,7 +1180,7 @@ class lattice
                 acceptance_rate = curr_accept / curr_total;
             }
             
-            if(recent_energies.size() >= min_samples_for_statistics){
+            if(energy_history.size() >= (convergence_window >> 2)){
                 // Adjust cooling based on energy landscape
                 if(variance < variance_tolerance && fabs(gradient) < variance){
                     adaptive_cooling_rate = max(max_cooling_rate, adaptive_cooling_rate * 0.95);
@@ -1276,24 +1193,24 @@ class lattice
                 }
             }
             
-            // Multi-criteria convergence check with proper statistical independence
+            // Multi-criteria convergence check
             bool energy_stable = false, gradient_small = false, variance_small = false;
             
-            if(recent_energies.size() >= min_samples_for_statistics){
-                // Check energy stability using independent samples
-                const size_t n_samples = recent_energies.size();
-                const size_t half = n_samples / 2;
-                
+            if(energy_history.size() >= convergence_window){
+                // Check energy stability
+                const size_t n = energy_history.size();
+                const size_t half_window = convergence_window >> 1;
                 double recent_mean = 0, old_mean = 0;
-                for(size_t i = half; i < n_samples; ++i){
-                    recent_mean += recent_energies[i];
-                }
-                recent_mean /= (n_samples - half);
                 
-                for(size_t i = 0; i < half; ++i){
-                    old_mean += recent_energies[i];
+                for(size_t i = n - half_window; i < n; ++i){
+                    recent_mean += energy_history[i];
                 }
-                old_mean /= half;
+                recent_mean /= half_window;
+                
+                for(size_t i = n - convergence_window; i < n - half_window; ++i){
+                    old_mean += energy_history[i];
+                }
+                old_mean /= half_window;
                 
                 double relative_change = fabs((recent_mean - old_mean) / fabs(old_mean));
                 energy_stable = (relative_change < energy_tolerance);
@@ -1304,10 +1221,10 @@ class lattice
                     size_t count = min(size_t(10), gradient_history.size());
                     size_t start_idx = gradient_history.size() - count;
                     for(size_t i = start_idx; i < gradient_history.size(); ++i){
-                        avg_gradient += fabs(gradient_history[i]);
+                        avg_gradient += gradient_history[i];
                     }
-                    avg_gradient /= count;
-                    gradient_small = (avg_gradient < gradient_tolerance * fabs(recent_mean));
+                    avg_gradient = fabs(avg_gradient / count);
+                    gradient_small = (avg_gradient < variance);
                 }
                 
                 // Check variance
@@ -1323,8 +1240,7 @@ class lattice
                      << " | E/N=" << setprecision(10) << current_energy
                      << " | Best=" << setprecision(10) << best_energy
                      << " | Accept=" << setprecision(4) << acceptance_rate
-                     << " | τ=" << setw(3) << autocorrelation_length
-                     << " | Samples=" << setw(3) << recent_energies.size();
+                     << " | Cool=" << setprecision(4) << adaptive_cooling_rate;
                 if(!variance_history.empty()){
                     cout << " | Var=" << scientific << setprecision(2) << variance;
                 }
@@ -1487,7 +1403,6 @@ class lattice
         cout << "=== SIMULATED ANNEALING COMPLETE ===" << endl;
         cout << "Ground State Found: " << (ground_state_found ? "YES" : "ATTEMPTED") << endl;
         cout << "Final Energy/Site: " << fixed << setprecision(12) << best_energy << endl;
-        cout << "Final Autocorrelation Length: " << autocorrelation_length << endl;
         cout << "Total Temperature Steps: " << temp_step << endl;
         cout << "Total Metropolis Steps: " << total_metropolis_steps * lattice_size << endl;
         cout << "Total Accepted Moves: " << total_accepted_moves << endl;
@@ -1511,7 +1426,6 @@ class lattice
             ofstream info_file(out_dir + "/annealing_info.txt");
             info_file << "Ground State Found: " << (ground_state_found ? "Yes" : "Attempted") << endl;
             info_file << "Final Energy/Site: " << fixed << setprecision(15) << best_energy << endl;
-            info_file << "Final Autocorrelation Length: " << autocorrelation_length << endl;
             info_file << "Temperature Steps: " << temp_step << endl;
             info_file << "Total Time (s): " << elapsed << endl;
             info_file << "Final Cooling Rate: " << adaptive_cooling_rate << endl;
