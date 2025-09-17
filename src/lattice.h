@@ -1272,7 +1272,7 @@ class lattice
                 if(unbiased_variance < 1e-3 || acceptance_rate > 0.5){
                     adaptive_cooling_rate = min(min_cooling_rate, adaptive_cooling_rate * 0.9);
                     // Moving well, cool faster
-                } else if(unbiased_variance > 1e-2 || acceptance_rate < 0.05){
+                } else if(unbiased_variance > 1e-2 || acceptance_rate < 0.1){
                     adaptive_cooling_rate = max(max_cooling_rate, adaptive_cooling_rate / 0.9);
                     // Struggling, cool slower
                 } 
