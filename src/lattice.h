@@ -1001,7 +1001,7 @@ class lattice
         const size_t autocorr_update_interval = 10; // Update autocorrelation estimate every N temperature steps
         
         // Ground state search parameters
-        const size_t ground_state_checks = 10;
+        const size_t ground_state_checks = 4;
         const size_t final_optimization_sweeps = n_anneal * 10;
         const double ground_state_temp_factor = 0.1;
         const double ground_state_temp_threshold = T_end * ground_state_temp_factor;
