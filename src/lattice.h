@@ -616,6 +616,17 @@ class lattice
             count++;
         }
     }
+
+    // New: zero-temperature quench with early stopping on energy convergence
+    void greedy_quench(double rel_tol=1e-12, size_t max_sweeps=10000){
+        double E_prev = total_energy(spins);
+        for(size_t s=0; s<max_sweeps; ++s){
+            deterministic_sweep();
+            double E = total_energy(spins);
+            if (fabs(E - E_prev) <= rel_tol * (fabs(E_prev) + 1e-18)) break;
+            E_prev = E;
+        }
+    }
     
     array<double,N> gaussian_move(const array<double,N> &current_spin, double sigma=60){
         array<double,N> new_spin;
@@ -665,6 +676,30 @@ class lattice
 
         double acceptance_rate = double(accept)/double(lattice_size);
         return acceptance_rate;
+    }
+
+    // New: Metropolis that also accumulates total energy change dE_sum for the sweep
+    double metropolis_with_energy_change(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60, double *dE_out=nullptr){
+        double dE;
+        int i;
+        array<double,N> new_spin;
+        int accept = 0;
+        size_t count = 0;
+        double dE_sum = 0.0;
+        while(count < lattice_size){
+            i = random_int_lehman(lattice_size);
+            new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
+                                : gen_random_spin(spin_length);
+            dE = site_energy_diff(new_spin, curr_spin[i], i);
+            if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
+                curr_spin[i] = new_spin;
+                dE_sum += dE;
+                accept++;
+            }
+            count++;
+        }
+        if (dE_out) *dE_out += dE_sum;
+        return double(accept)/double(lattice_size);
     }
 
     // =========================
@@ -975,6 +1010,12 @@ class lattice
         myfile << T_end << " " << num_steps << " " << lattice_size << endl;
         myfile.close();
     }
+
+    // Enhanced simulated annealing with adaptive update strategy:
+    // - Uses Metropolis updates when acceptance rate is reasonable
+    // - Automatically switches to deterministic updates when acceptance rate drops below threshold
+    // - Threshold: < 1% always uses deterministic, < 5% at low temperatures uses deterministic
+    // - This improves convergence at low temperatures where Metropolis becomes inefficient
     void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, bool boundary_update = false, double cooling_rate = 0.9, string out_dir = "", bool save_observables = false){    
         if (!out_dir.empty()){
             filesystem::create_directory(out_dir);
@@ -986,10 +1027,11 @@ class lattice
         // Enhanced convergence parameters
         const double log_cooling = log(cooling_rate);
         const double log_temp_ratio = log(T_end/T_start);
-        const size_t expected_temp_steps = static_cast<size_t>(log_temp_ratio / log_cooling) + 1;
+        const size_t expected_temp_steps = static_cast<size_t>(log_cooling != 0 ? log_temp_ratio / log_cooling : 0) + 1;
         const size_t convergence_window = min(size_t(100), max(size_t(20), expected_temp_steps / 5));
         const double energy_tolerance = 1e-5;
         const double variance_tolerance = 1e-3;
+        const double variance_tolerance_rel = 1e-4; // relative SEM threshold
         
         // Ground state search parameters
         const size_t ground_state_checks = 3;
@@ -1004,8 +1046,8 @@ class lattice
         
         // Autocorrelation tracking
         vector<double> energy_samples_for_autocorr;
-        const size_t min_samples_for_autocorr = 100;
-        const size_t max_samples_for_autocorr = 1000;
+        const size_t min_samples_for_autocorr = n_anneal / 100;
+        const size_t max_samples_for_autocorr = n_anneal / 10;
         double tau_int = 1.0;
         size_t effective_samples = 0;
         
@@ -1022,10 +1064,13 @@ class lattice
         size_t steps_at_best = 0;
         size_t steps_since_improvement = 0;
         
-        // Adaptive parameters
+        // Adaptive cooling parameters
         double adaptive_cooling_rate = cooling_rate;
-        const double min_cooling_rate = 0.98;
-        const double max_cooling_rate = 0.6;
+        // min -> fastest cooling, max -> slowest cooling
+        const double min_cooling_rate = 0.60;
+        const double max_cooling_rate = 0.995;
+        const auto clampd = [](double x, double lo, double hi){ return x < lo ? lo : (x > hi ? hi : x); };
+        
         size_t plateau_count = 0;
         const size_t max_plateau_count = 5;
         
@@ -1036,11 +1081,16 @@ class lattice
         // Statistics
         size_t total_metropolis_steps = 0;
         size_t total_accepted_moves = 0;
+        size_t total_deterministic_steps = 0;
         
         // Pre-compute temperature thresholds
         const double low_temp_threshold = T_start * 0.1;
         const double very_low_temp_threshold = T_end * 10;
         const double ground_state_verify_temp = T_end * 2;
+        
+        // Deterministic update parameters
+        const double low_acceptance_threshold = 0.05; // Switch to deterministic below 5% acceptance
+        const double very_low_acceptance_threshold = 0.01; // Always use deterministic below 1%
         
         // Helper lambda for autocorrelation - capture by reference for efficiency
         auto compute_autocorrelation = [](const vector<double>& data, size_t max_lag) -> vector<double> {
@@ -1119,6 +1169,9 @@ class lattice
         // Pre-calculate inverse lattice size for efficiency
         const double inv_lattice_size = 1.0 / lattice_size;
         
+        // New: track current total energy incrementally
+        double E_current_total = total_energy(spins);
+        
         // Main annealing loop
         while(T > ground_state_temp_threshold && !ground_state_found){
             ++temp_step;
@@ -1137,19 +1190,41 @@ class lattice
             }
             
             // Adjust sampling rate based on estimated autocorrelation
-            const size_t sample_interval = max(size_t(1), static_cast<size_t>(tau_int));
+            const size_t sample_interval = max(size_t(1), static_cast<size_t>(ceil(tau_int)));
             
-            // Metropolis/Overrelaxation sweeps with energy sampling
+            // Determine update method based on acceptance rate from previous step
+            bool use_deterministic_this_step = false;
+            if (temp_step > 1) { // Only consider after first step when we have acceptance data
+                use_deterministic_this_step = (acceptance_rate < very_low_acceptance_threshold) ||
+                                            (acceptance_rate < low_acceptance_threshold && T < low_temp_threshold);
+            }
+            
+            // Metropolis/Overrelaxation/Deterministic sweeps with energy sampling
             if(overrelaxation_rate > 0){
                 const size_t overrelax_cycles = adaptive_n_anneal / overrelaxation_rate;
                 for(size_t cycle = 0; cycle < overrelax_cycles; ++cycle){
                     overrelaxation();
-                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                    
+                    if(use_deterministic_this_step){
+                        // Use deterministic sweep instead of Metropolis
+                        deterministic_sweep();
+                        total_deterministic_steps++;
+                        // For deterministic sweeps, acceptance rate is always 1.0
+                        curr_accept += 1.0;
+                        // Energy change tracking for deterministic sweeps
+                        double E_after_det = total_energy(spins);
+                        double dE_acc = E_after_det - E_current_total;
+                        E_current_total = E_after_det;
+                    } else {
+                        double dE_acc = 0.0;
+                        curr_accept += metropolis_with_energy_change(spins, T, gaussian_move, sigma, &dE_acc);
+                        E_current_total += dE_acc;
+                    }
                     ++curr_total;
                     
                     if ((cycle % sample_interval == 0) && 
                         (energy_samples_for_autocorr.size() < max_samples_for_autocorr)) {
-                        energy_samples_for_autocorr.push_back(total_energy(spins) * inv_lattice_size);
+                        energy_samples_for_autocorr.push_back(E_current_total * inv_lattice_size);
                     }
                 }
                 for(size_t i = overrelax_cycles * overrelaxation_rate; i < adaptive_n_anneal; ++i){
@@ -1157,59 +1232,76 @@ class lattice
                 }
             } else {
                 for(size_t i = 0; i < adaptive_n_anneal; ++i){
-                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
+                    if(use_deterministic_this_step){
+                        // Use deterministic sweep instead of Metropolis
+                        deterministic_sweep();
+                        total_deterministic_steps++;
+                        // For deterministic sweeps, acceptance rate is always 1.0
+                        curr_accept += 1.0;
+                        // Energy change tracking for deterministic sweeps
+                        double E_after_det = total_energy(spins);
+                        double dE_acc = E_after_det - E_current_total;
+                        E_current_total = E_after_det;
+                    } else {
+                        double dE_acc = 0.0;
+                        curr_accept += metropolis_with_energy_change(spins, T, gaussian_move, sigma, &dE_acc);
+                        E_current_total += dE_acc;
+                    }
                     ++curr_total;
                     
                     if ((i % sample_interval == 0) && 
                         (energy_samples_for_autocorr.size() < max_samples_for_autocorr)) {
-                        energy_samples_for_autocorr.push_back(total_energy(spins) * inv_lattice_size);
+                        energy_samples_for_autocorr.push_back(E_current_total * inv_lattice_size);
                     }
                 }
             }
             
             total_metropolis_steps += curr_total;
             total_accepted_moves += static_cast<size_t>(curr_accept * lattice_size);
-            
+
             if(boundary_update){
                 const size_t boundary_sweeps = min(size_t(100), adaptive_n_anneal/10);
                 for(size_t i = 0; i < boundary_sweeps; ++i){
                     metropolis_twist_sweep(T);
                 }
+                // Resync energy after twist updates
+                E_current_total = total_energy(spins);
             }
             
             // Compute autocorrelation if we have enough samples
-            double unbiased_variance = 0;
-            double unbiased_mean = 0;
-            if (energy_samples_for_autocorr.size() >= min_samples_for_autocorr) {
-                const size_t max_lag = min(size_t(50), energy_samples_for_autocorr.size() >> 2);
+            double sem = 0.0;           // standard error of the mean (τ_int corrected)
+            double sample_var = 0.0;    // sample variance of energy per site (uncorrected)
+            double sample_mean = 0.0;
+            bool have_stats = false;
+            if (energy_samples_for_autocorr.size() >= max<size_t>(min_samples_for_autocorr, 10)) {
+                have_stats = true;
+                const size_t nS = energy_samples_for_autocorr.size();
+                const size_t max_lag = min(size_t(50), nS >> 2);
                 const vector<double> autocorr = compute_autocorrelation(energy_samples_for_autocorr, max_lag);
                 
                 tau_int = compute_tau_int(autocorr);
-                effective_samples = energy_samples_for_autocorr.size() / (2 * tau_int);
+                effective_samples = static_cast<size_t>(nS / (2 * tau_int));
                 
-                unbiased_mean = 0;
-                for (const auto& e : energy_samples_for_autocorr) {
-                    unbiased_mean += e;
-                }
-                unbiased_mean /= energy_samples_for_autocorr.size();
+                // mean and variance
+                for (const auto& e : energy_samples_for_autocorr) sample_mean += e;
+                sample_mean /= nS;
                 
                 double sum_sq_diff = 0;
                 for (const auto& e : energy_samples_for_autocorr) {
-                    const double diff = e - unbiased_mean;
+                    const double diff = e - sample_mean;
                     sum_sq_diff += diff * diff;
                 }
+                sample_var = (nS > 1) ? sum_sq_diff / (nS - 1) : 0.0;
                 
-                if (effective_samples > 1) {
-                    unbiased_variance = (sum_sq_diff / energy_samples_for_autocorr.size()) * 
-                                       (2 * tau_int / (1 - 1.0/effective_samples));
-                } else {
-                    unbiased_variance = sum_sq_diff / max(1.0, static_cast<double>(energy_samples_for_autocorr.size() - 1));
-                }
+                // τ_int-corrected SEM of the mean
+                const double var_mean = (nS > 0) ? sample_var * (2.0 * tau_int / nS) : 0.0;
+                sem = sqrt(max(0.0, var_mean));
                 
-                variance_history.push_back(unbiased_variance);
+                variance_history.push_back(var_mean);
             }
             
-            const double current_energy = (unbiased_mean > 0) ? unbiased_mean : (total_energy(spins) * inv_lattice_size);
+            // Use the tracked energy always
+            const double current_energy = E_current_total * inv_lattice_size;
             energy_history.push_back(current_energy);
             recent_energies.push_back(current_energy);
             if(recent_energies.size() > convergence_window){
@@ -1233,7 +1325,8 @@ class lattice
             }
             
             const bool is_plateau = (steps_since_improvement > convergence_window) && 
-                                   (unbiased_variance < variance_tolerance);
+                                   (have_stats ? (sem / (fabs(sample_mean) + 1e-12) < variance_tolerance_rel)
+                                               : false);
             
             if(is_plateau){
                 ++plateau_count;
@@ -1256,13 +1349,43 @@ class lattice
             if(curr_total > 0){
                 acceptance_rate = curr_accept / curr_total;
             }
-            
 
+            // Smart adaptive cooling rate (acceptance-, autocorr- and variance-aware)
+            {
+                // Build a score in [-1, 1]: -1 => cool fast, +1 => cool slow
+                double score = 0.0;
+                // Acceptance heuristics
+                if (acceptance_rate < 0.10) score += 1.0;
+                else if (acceptance_rate < 0.20) score += 0.5;
+                else if (acceptance_rate > 0.85) score -= 0.6;
+                else if (acceptance_rate > 0.60) score -= 0.3;
+                // Autocorrelation heuristics
+                if (tau_int > 30.0) score += 0.6;
+                else if (tau_int > 10.0) score += 0.3;
+                else if (tau_int < 2.0) score -= 0.2;
+                // Variance heuristics
+                if (sample_var > 0 && sample_var > variance_tolerance * 10.0) score += 0.2;
+                else if (sample_var > 0 && sample_var < variance_tolerance * 0.1) score -= 0.2;
+                // Plateau -> slow down
+                if (is_plateau) score += 0.4;
+                // Near final temperatures, slow down
+                if (T < T_end * 5.0) score += 0.3;
+
+                score = clampd(score, -1.0, 1.0);
+                const double target_rate = min_cooling_rate + (0.5 * (score + 1.0)) * (max_cooling_rate - min_cooling_rate);
+
+                // Smooth with EMA to avoid oscillations
+                const double alpha = 0.3;
+                adaptive_cooling_rate = alpha * target_rate + (1.0 - alpha) * adaptive_cooling_rate;
+
+                // Safety clamps
+                adaptive_cooling_rate = clampd(adaptive_cooling_rate, min_cooling_rate, max_cooling_rate);
+            }
             
             // Multi-criteria convergence check
             bool energy_stable = false, variance_small = false;
             
-            if(energy_history.size() >= convergence_window && effective_samples >= 10){
+            if(energy_history.size() >= convergence_window && effective_samples >= 10 && have_stats){
                 const size_t n = energy_history.size();
                 const size_t effective_window = max(size_t(2), 
                     min(convergence_window, static_cast<size_t>(effective_samples)));
@@ -1281,11 +1404,13 @@ class lattice
                     }
                     old_mean /= half_window;
                     
-                    const double relative_change = fabs((recent_mean - old_mean) / fabs(old_mean));
-                    energy_stable = (relative_change < unbiased_variance);
+                    const double relative_change = fabs((recent_mean - old_mean) / (fabs(old_mean) + 1e-12));
+                    const double rel_sem = sem / (fabs(sample_mean) + 1e-12);
+                    energy_stable = (relative_change < 2.0 * rel_sem);
                 }
                 
-                variance_small = (unbiased_variance < variance_tolerance);
+                const double rel_sem = sem / (fabs(sample_mean) + 1e-12);
+                variance_small = (rel_sem < variance_tolerance_rel);
                 
                 converged = energy_stable && variance_small && 
                            (acceptance_rate < 0.01) && (effective_samples >= 20);
@@ -1300,9 +1425,21 @@ class lattice
                      << " | τ_int=" << setprecision(2) << tau_int
                      << " | N_eff=" << setw(4) << effective_samples
                      << " | Cool=" << setprecision(4) << adaptive_cooling_rate;
-                if(unbiased_variance > 0){
-                    cout << " | Var=" << scientific << setprecision(2) << unbiased_variance;
+                if(have_stats){
+                    cout << " | SEM=" << scientific << setprecision(2) << sem;
                 }
+                // Determine if deterministic was used this step
+                bool used_deterministic_this_step = false;
+                if (temp_step > 1) {
+                    // Check previous acceptance rate to see if deterministic was used
+                    size_t prev_step_idx = energy_history.size() - 2;
+                    if (prev_step_idx < energy_history.size() - 1) {
+                        // Use the same logic as in the sweep section
+                        used_deterministic_this_step = (acceptance_rate < very_low_acceptance_threshold) ||
+                                                     (acceptance_rate < low_acceptance_threshold && T < low_temp_threshold);
+                    }
+                }
+                if(used_deterministic_this_step) cout << " [DET]";
                 if(converged) cout << " [CONVERGED]";
                 cout << endl;
             }
@@ -1387,15 +1524,14 @@ class lattice
             const double final_T = T_end * ground_state_temp_factor;
             
             cout << "Phase 1: Deterministic optimization..." << endl;
-            for(size_t i = 0; i < 100; ++i){
-                deterministic_sweep();
-                if((i % 10) == 0){
-                    const double e = total_energy(spins) * inv_lattice_size;
-                    cout << "  Deterministic " << i << ": E/N = " << fixed << setprecision(12) << e << endl;
-                    if(e < best_energy){
-                        best_energy = e;
-                        best_config = spins;
-                    }
+            // New: robust quench with early stop
+            greedy_quench(1e-12, 100);
+            {
+                const double e = total_energy(spins) * inv_lattice_size;
+                cout << "  Quench done: E/N = " << fixed << setprecision(12) << e << endl;
+                if(e < best_energy){
+                    best_energy = e;
+                    best_config = spins;
                 }
             }
             
@@ -1429,9 +1565,16 @@ class lattice
         cout << "Final τ_int: " << fixed << setprecision(2) << tau_int << endl;
         cout << "Total Temperature Steps: " << temp_step << endl;
         cout << "Total Metropolis Steps: " << total_metropolis_steps * lattice_size << endl;
+        cout << "Total Deterministic Steps: " << total_deterministic_steps * lattice_size << endl;
         cout << "Total Accepted Moves: " << total_accepted_moves << endl;
         cout << "Overall Acceptance Rate: " << fixed << setprecision(4) 
              << double(total_accepted_moves) / (total_metropolis_steps * lattice_size) << endl;
+        if(total_deterministic_steps > 0) {
+            cout << "Deterministic Steps Used: " << total_deterministic_steps 
+                 << " (" << fixed << setprecision(2) 
+                 << 100.0 * total_deterministic_steps / (total_metropolis_steps + total_deterministic_steps) 
+                 << "% of total)" << endl;
+        }
         cout << "Total Time: " << elapsed << " seconds" << endl;
         cout << "==========================================================" << endl;
         
@@ -1453,6 +1596,13 @@ class lattice
             info_file << "Total Time (s): " << elapsed << endl;
             info_file << "Final Cooling Rate: " << adaptive_cooling_rate << endl;
             info_file << "Acceptance Rate: " << double(total_accepted_moves) / (total_metropolis_steps * lattice_size) << endl;
+            info_file << "Metropolis Steps: " << total_metropolis_steps * lattice_size << endl;
+            info_file << "Deterministic Steps: " << total_deterministic_steps * lattice_size << endl;
+            if(total_deterministic_steps > 0) {
+                info_file << "Deterministic Usage: " << fixed << setprecision(2) 
+                         << 100.0 * total_deterministic_steps / (total_metropolis_steps + total_deterministic_steps) 
+                         << "%" << endl;
+            }
             
             if(!local_minima_energies.empty()){
                 info_file << "\nLocal Minima Detected:" << endl;
