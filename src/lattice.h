@@ -1035,7 +1035,7 @@ class lattice
         
         // Ground state search parameters
         const size_t ground_state_checks = 3;
-        const size_t final_optimization_sweeps = n_anneal * 10;
+        const size_t final_optimization_sweeps = n_anneal/10;
         const double ground_state_temp_factor = 0.1;
         const double ground_state_temp_threshold = T_end * ground_state_temp_factor;
         
@@ -1537,7 +1537,7 @@ class lattice
             
             cout << "Phase 2: Ultra-low temperature Monte Carlo..." << endl;
             spins = best_config;
-            const size_t ultra_low_sweeps = static_cast<size_t>(n_anneal * 10 * max(1.0, tau_int));
+            const size_t ultra_low_sweeps = static_cast<size_t>(n_anneal / 10 * max(1.0, tau_int));
             for(size_t cycle = 0; cycle < 10; ++cycle){
                 const double cycle_temp = final_T / (cycle + 1);
                 for(size_t i = 0; i < ultra_low_sweeps; ++i){
