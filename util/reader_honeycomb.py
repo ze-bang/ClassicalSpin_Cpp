@@ -2791,71 +2791,23 @@ def read_field_scan(directory):
     for subdir in sorted(os.listdir(directory)):
         full_path = os.path.join(directory, subdir)
         if os.path.isdir(full_path) and subdir.startswith("h_"):
-            try:
-                h_str = subdir.split('_')[1]
-                h = float(h_str)
-                best_config_file = os.path.join(full_path, "best_configuration.txt")
-                best_trial = 0
-                # try: 
-                #     with open(best_config_file, 'r') as f:
-                #         lines = f.readlines()
-                #         for line in lines:
-                #             if line.startswith("Trial:"):
-                #                 best_trial = int(line.split(':')[1].strip())
-                #                 break
-                # except:
-                best_energy = float('inf')
-                for dir in os.listdir(full_path):
-                    # Skip non-directory entries and non-numeric directory names
-                    dir_path = os.path.join(full_path, dir)
-                    if not os.path.isdir(dir_path):
-                        continue
-                    try:
-                        trial_num = int(dir)
-                    except ValueError:
-                        # Skip directories that don't have numeric names
-                        continue
-                    
-                    try:
-                        energy_file_path = os.path.join(full_path, dir, "energy_density.txt")
-                        if not os.path.exists(energy_file_path):
-                            print(f"Skipping {energy_file_path}: file does not exist")
-                            continue
-                        energy_file = open(energy_file_path, "r")
-                        energy_string = energy_file.read()
-                        energy_file.close()
-                        energy = float(energy_string.strip().split(":")[1])
-                        # print(trial_num, energy)
-                        if best_energy > energy:
-                            best_energy = energy
-                            best_trial = trial_num 
-                    except (FileNotFoundError, IndexError, ValueError) as e:
-                        # Skip directories that don't have valid energy files
-                        print(f"Skipping trial {trial_num} in {full_path}: {e}")
-                        continue
-
-                # Check if we found any valid trials
-                if best_energy == float('inf'):
-                    print(f"No valid energy files found in {full_path}")
-                    continue
-
-                spin_file = os.path.join(full_path, f"{best_trial}/spin.txt")
-                print(spin_file, best_trial)
+            h_str = subdir.split('_')[1]
+            h = float(h_str)
+            print(f"Processing field strength directory: {full_path} h = {h}")
+            M_mean = np.zeros(3)
+            M_stdev = np.zeros(3)
+            count = 0
+            for dir in os.listdir(full_path):
+                # Skip non-directory entries and non-numeric directory names
+                spin_file = os.path.join(full_path, dir, "local_magnetization.txt")
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
-                    norm = np.linalg.norm(M[0])
-                    M_mean = np.mean(M, axis=0)/norm
-                    # M_stdev = np.std(M, axis=0)
-                    h_values.append(h)
-                    m_values.append(M_mean)
-                    # m_stds.append(M_stdev)
-                else:
-                    print(f"Magnetization file not found in {full_path}")
-
-            except (IndexError, ValueError) as e:
-                print(f"Could not parse field value from directory {subdir}: {e}")
-            except Exception as e:
-                print(f"An error occurred while processing {full_path}: {e}")
+                    M_mean += np.mean(M, axis=0)
+                    M_stdev += np.std(M, axis=0)
+                    count += 1
+            h_values.append(h)
+            m_values.append(M_mean/count*2)
+            m_stds.append(M_stdev/count*4)
 
     if not h_values:
         print(f"No magnetization data found in {directory}")
@@ -2865,7 +2817,7 @@ def read_field_scan(directory):
     sorted_indices = np.argsort(h_values)
     h_values_sorted = np.array(h_values)[sorted_indices]
     m_values_sorted = np.array(m_values)[sorted_indices]
-    # m_stds_sorted = np.array(m_stds)[sorted_indices]
+    m_stds_sorted = np.array(m_stds)[sorted_indices]
 
     # Save magnetization as a function of h
     # output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
@@ -2874,12 +2826,12 @@ def read_field_scan(directory):
     np.savetxt(output_filename, output_data, header="h Mx My Mz", fmt='%f %f %f %f')
 
     plt.figure(figsize=(10, 6))
-    # plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
-    # plt.errorbar(h_values_sorted, m_values_sorted[:,1], yerr=m_stds_sorted[:,1], fmt='-o', label='My')
-    # plt.errorbar(h_values_sorted, m_values_sorted[:,2], yerr=m_stds_sorted[:,2], fmt='-o', label='Mz')
-    plt.plot(h_values_sorted, m_values_sorted[:,0], '-o', label='Mx')
-    plt.plot(h_values_sorted, m_values_sorted[:,1], '-o', label='My')
-    plt.plot(h_values_sorted, m_values_sorted[:,2], '-o', label='Mz')
+    plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
+    plt.errorbar(h_values_sorted, m_values_sorted[:,1], yerr=m_stds_sorted[:,1], fmt='-o', label='My')
+    plt.errorbar(h_values_sorted, m_values_sorted[:,2], yerr=m_stds_sorted[:,2], fmt='-o', label='Mz')
+    # plt.plot(h_values_sorted, m_values_sorted[:,0], '-o', label='Mx')
+    # plt.plot(h_values_sorted, m_values_sorted[:,1], '-o', label='My')
+    # plt.plot(h_values_sorted, m_values_sorted[:,2], '-o', label='Mz')
     plt.xlabel("Field Strength (h)")
     plt.ylabel("Magnetization Magnitude |M|")
     plt.legend(["Mx", "My", "Mz"], loc='upper right')

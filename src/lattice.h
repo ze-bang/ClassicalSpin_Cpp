@@ -1106,7 +1106,7 @@ class lattice
         double sigma = 1000;
         
         // Main annealing loop
-        cout << "Starting simulated annealing from T=" << T_start << " to T=" << T_end << endl;
+        cout << "Starting simulated annealing from T=" << fixed << setprecision(6) << T_start << " to T=" << setprecision(6) << T_end << endl;
         while (T > T_end) {
             double curr_accept = 0;
             
@@ -1125,7 +1125,7 @@ class lattice
                 curr_accept / n_anneal * overrelaxation_rate : 
                 curr_accept / n_anneal;
             
-            cout << "T=" << T << ", Acceptance=" << acceptance_rate;
+            cout << "T=" << fixed << setprecision(6) << T << ", Acceptance=" << fixed << setprecision(6) << acceptance_rate;
             
             // Adaptive sigma adjustment for gaussian moves
             if (gaussian_move && acceptance_rate < 0.5) {
@@ -1179,7 +1179,7 @@ class lattice
         perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma, overrelaxation_rate);
         
         // Step 4: Main measurement phase
-        size_t n_samples = 1e3;
+        size_t n_samples = 1e4;
         size_t n_measure = n_samples * acf_result.sampling_interval;
         cout << "Step 3: Collecting " << n_samples << " independent samples..." << endl;
         
@@ -1433,6 +1433,7 @@ class lattice
             if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
                 swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
             }
+            cout << "Rank " << rank << ": Equilibration step " << i+1 << "/" << n_anneal << " with acceptance " << curr_accept / (i+1) << " and swap acceptance " << (swap_accept > 0 ? double(swap_accept) / (i / swap_rate + 1) : 0) << endl;
         }
         
         cout << "Rank " << rank << ": Equilibration complete. Computing autocorrelation time..." << endl;
@@ -1660,6 +1661,7 @@ class lattice
             if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
                 swap_accept += attempt_replica_exchange_tbc(rank, size, temp, curr_Temp, i / swap_rate);
             }
+            cout << "Rank " << rank << ": Equilibration step " << i+1 << "/" << n_anneal << " with acceptance " << curr_accept / (i+1) << " and swap acceptance " << (swap_accept > 0 ? double(swap_accept) / (i / swap_rate + 1) : 0) << endl;
         }
         
         cout << "Rank " << rank << ": Equilibration complete. Computing autocorrelation time..." << endl;
