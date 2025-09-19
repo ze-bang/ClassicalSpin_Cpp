@@ -12,9 +12,9 @@ struct SimulationParams {
     double h = 0.0;
     array<double, 3> field_dir = {0, 1, 0};
     string dir = "BCAO_simulation";
-    double J1xy = -7.6, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
-    double J3xy = 2.5, J3z = -0.85  ;
-    double h_start = 0.0, h_end = 2.0;
+    double J1xy = -7.65, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
+    double J3xy = 2.64, J3z = -0.81;
+    double h_start = 0.0, h_end = 1.0;
     int num_steps = 50;
     // Twist matrices (3 blocks of 3x3, each flattened to 9 doubles), optional
     bool has_twist_matrix = false;
@@ -227,7 +227,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
         lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5, true);
-        MC.simulated_annealing(5, 1e-2, 1e4, 10, false, true, 0.9, dir +"/"+std::to_string(i));
+        MC.simulated_annealing(5, 0.1, 1e5, 10, false, true, 0.9, dir +"/"+std::to_string(i));
         // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
         // for (size_t k = 0; k < 1e2; ++k) {
@@ -267,7 +267,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     }
     // Only perform MPI collective operations if not in field_scan mode
     // or if there are multiple trials to aggregate
-    if (num_trials > 1) {
+    if (num_trials > 1 && !field_scan) {
         // Gather all minimum energies to rank 0
         struct {
             double energy;
@@ -435,6 +435,36 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
     best_config_file.close();
 }
 
+void F_scan(size_t num_steps, double h_start, double h_end, double F_start, double F_end, array<double, 3> field_dir, string dir, 
+                        double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double G=0,
+                        double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    vector<double> h_values;
+    if (num_steps > 0) {
+        double step = (h_end - h_start) / num_steps;
+        for (size_t i = 0; i <= num_steps; ++i) {
+            h_values.push_back(h_start + i * step);
+        }
+    } else {
+        h_values.push_back(h_start);
+    }
+
+    for (size_t i = rank; i < h_values.size(); i += size) {
+        for (size_t j = 0; j < num_steps; ++j) {
+            double F = F_start + j * (F_end - F_start) / num_steps;
+            filesystem::create_directories(dir + "/F_" + to_string(F));
+            string subdir = dir + "/F_" + to_string(F) + "/h_" + to_string(h_values[i]);
+            // Each process runs the simulation for its assigned 'h' value, with one trial.
+            std::cout << "Running simulation for h = " << h_values[i] << ", F = " << F << " on process " << rank << std::endl;
+            sim_BCAO_honeycomb(3, h_values[i], field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
+        }
+    }
+}
+
+
 void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
                         double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
                         double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr) {
@@ -457,7 +487,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         string subdir = dir + "/h_" + to_string(h);
         // Each process runs the simulation for its assigned 'h' value, with one trial.
         std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
-        sim_BCAO_honeycomb(5, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
+        sim_BCAO_honeycomb(10, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
     }
 }
 
@@ -468,7 +498,7 @@ int main(int argc, char** argv) {
     string param_file = "bcao_parameters.txt";
     bool use_restart = false;
     bool do_field_scan = false;
-    
+    bool do_f_scan = false;
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         string arg = argv[i];
@@ -492,7 +522,9 @@ int main(int argc, char** argv) {
             use_restart = true;
         } else if (arg == "--field-scan") {
             do_field_scan = true;
-        } else {
+        } else if (arg == "--f-scan"){
+            do_f_scan = true;
+        }else {
             // Assume the last non-flag argument is the parameter file
             param_file = arg;
         }
@@ -535,7 +567,12 @@ int main(int argc, char** argv) {
         magnetic_field_scan(params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
                             params.J3xy, params.J3z, custom_twist_ptr);
-    } else {
+    } else if (do_f_scan){
+        F_scan(params.num_steps, params.h_start, params.h_end, 0, -1, params.field_dir, params.dir,
+                            params.J1xy, params.J1z, params.D, params.E, params.G,
+                            params.J3xy, params.J3z, custom_twist_ptr);
+    }    
+    else {
         if (use_restart) {
             sim_BCAO_honeycomb_restarted(params.num_trials, params.h, params.field_dir, params.dir, 
                                          params.J1xy, params.J1z, params.D, params.E, params.F, params.G, 

@@ -20,6 +20,15 @@
 #include <cstdint>
 #include <deque>
 
+
+// Helper struct to store autocorrelation analysis results
+struct AutocorrelationResult {
+    double tau_int;
+    size_t sampling_interval;
+    vector<double> correlation_function;
+};
+
+
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim>
 class lattice
 {   
@@ -1011,616 +1020,220 @@ class lattice
         myfile.close();
     }
 
-    // Enhanced simulated annealing with adaptive update strategy:
-    // - Uses Metropolis updates when acceptance rate is reasonable
-    // - Automatically switches to deterministic updates when acceptance rate drops below threshold
-    // - Threshold: < 1% always uses deterministic, < 5% at low temperatures uses deterministic
-    // - This improves convergence at low temperatures where Metropolis becomes inefficient
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, bool boundary_update = false, double cooling_rate = 0.9, string out_dir = "", bool save_observables = false){    
-        if (!out_dir.empty()){
-            filesystem::create_directory(out_dir);
+    // Perform autocorrelation analysis on energy measurements
+    AutocorrelationResult compute_autocorrelation(const vector<double>& energies, size_t base_interval = 10) {
+        AutocorrelationResult result;
+        
+        // Calculate mean and variance
+        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
+        double variance = 0;
+        for (double e : energies) {
+            variance += (e - mean) * (e - mean);
         }
-        double T = T_start;
-        double acceptance_rate = 0;
-        double sigma = 1000;
+        variance /= energies.size();
         
-        // Enhanced convergence parameters
-        const double log_cooling = log(cooling_rate);
-        const double log_temp_ratio = log(T_end/T_start);
-        const size_t expected_temp_steps = static_cast<size_t>(log_cooling != 0 ? log_temp_ratio / log_cooling : 0) + 1;
-        const size_t convergence_window = min(size_t(100), max(size_t(20), expected_temp_steps / 5));
-        const double energy_tolerance = 1e-5;
-        const double variance_tolerance = 1e-3;
-        const double variance_tolerance_rel = 1e-4; // relative SEM threshold
+        // Compute autocorrelation function
+        size_t max_lag = energies.size() / 4;
+        result.correlation_function.resize(max_lag);
         
-        // Ground state search parameters
-        const size_t ground_state_checks = 3;
-        const size_t final_optimization_sweeps = n_anneal/10;
-        const double ground_state_temp_factor = 0.1;
-        const double ground_state_temp_threshold = T_end * ground_state_temp_factor;
-        
-        // Pre-allocate tracking variables with reserve
-        vector<double> energy_history;
-        vector<double> variance_history;
-        deque<double> recent_energies;
-        
-        // Autocorrelation tracking
-        vector<double> energy_samples_for_autocorr;
-        const size_t min_samples_for_autocorr = n_anneal / 100;
-        const size_t max_samples_for_autocorr = n_anneal / 10;
-        double tau_int = 1.0;
-        size_t effective_samples = 0;
-        
-        energy_history.reserve(expected_temp_steps * 2);
-        variance_history.reserve(expected_temp_steps);
-        energy_samples_for_autocorr.reserve(max_samples_for_autocorr);
-        
-        bool converged = false;
-        bool ground_state_found = false;
-        
-        // Best configuration tracking
-        spin_config best_config = spins;
-        double best_energy = std::numeric_limits<double>::max();
-        size_t steps_at_best = 0;
-        size_t steps_since_improvement = 0;
-        
-        // Adaptive cooling parameters
-        double adaptive_cooling_rate = cooling_rate;
-        // min -> fastest cooling, max -> slowest cooling
-        const double min_cooling_rate = 0.60;
-        const double max_cooling_rate = 0.995;
-        const auto clampd = [](double x, double lo, double hi){ return x < lo ? lo : (x > hi ? hi : x); };
-        
-        size_t plateau_count = 0;
-        const size_t max_plateau_count = 5;
-        
-        // Energy landscape analysis
-        vector<double> local_minima_energies;
-        local_minima_energies.reserve(20);
-        
-        // Statistics
-        size_t total_metropolis_steps = 0;
-        size_t total_accepted_moves = 0;
-        size_t total_deterministic_steps = 0;
-        
-        // Pre-compute temperature thresholds
-        const double low_temp_threshold = T_start * 0.1;
-        const double very_low_temp_threshold = T_end * 10;
-        const double ground_state_verify_temp = T_end * 2;
-        
-        // Deterministic update parameters
-        const double low_acceptance_threshold = 0.05; // Switch to deterministic below 5% acceptance
-        const double very_low_acceptance_threshold = 0.01; // Always use deterministic below 1%
-        
-        // Helper lambda for autocorrelation - capture by reference for efficiency
-        auto compute_autocorrelation = [](const vector<double>& data, size_t max_lag) -> vector<double> {
-            const size_t n = data.size();
-            if (n < 2) return vector<double>(1, 1.0);
-            
-            double mean = 0;
-            for (const auto& x : data) mean += x;
-            mean /= n;
-            
-            double c0 = 0;
-            for (const auto& x : data) {
-                const double diff = x - mean;
-                c0 += diff * diff;
+        for (size_t lag = 0; lag < max_lag; ++lag) {
+            double sum = 0;
+            for (size_t i = 0; i < energies.size() - lag; ++i) {
+                sum += (energies[i] - mean) * (energies[i+lag] - mean);
             }
-            c0 /= n;
-            
-            if (c0 < 1e-10) return vector<double>(1, 1.0);
-            
-            const size_t actual_max_lag = min(max_lag, n >> 2); // n/4
-            vector<double> autocorr(actual_max_lag + 1);
-            autocorr[0] = 1.0;
-            
-            for (size_t lag = 1; lag <= actual_max_lag; ++lag) {
-                double c_lag = 0;
-                const size_t n_minus_lag = n - lag;
-                for (size_t i = 0; i < n_minus_lag; ++i) {
-                    c_lag += (data[i] - mean) * (data[i + lag] - mean);
-                }
-                autocorr[lag] = (c_lag / n_minus_lag) / c0;
-            }
-            
-            return autocorr;
-        };
-        
-        // Helper lambda for tau_int computation
-        auto compute_tau_int = [](const vector<double>& autocorr) -> double {
-            if (autocorr.size() < 2) return 1.0;
-            
-            double tau = 0.5;
-            const size_t size = autocorr.size();
-            
-            for (size_t i = 1; i < size; ++i) {
-                if (autocorr[i] < 0.05 || i >= 5 * tau) break;
-                tau += autocorr[i];
-            }
-            
-            return max(1.0, tau);
-        };
-        
-        cout << "\n=== Enhanced Simulated Annealing with Autocorrelation Analysis ===" << endl;
-        cout << "Temperature range: [" << T_start << ", " << T_end << "]" << endl;
-        cout << "Expected steps: " << expected_temp_steps << endl;
-        cout << "Convergence window: " << convergence_window << endl;
-        cout << "Energy tolerance: " << scientific << energy_tolerance << endl;
-        cout << "Variance tolerance: " << scientific << variance_tolerance << endl;
-        cout << "Ground state verification: " << ground_state_checks << " checks" << endl;
-        cout << "==================================================================\n" << endl;
-        
-        // Initialize random seed more efficiently
-        {
-            std::random_device rd;
-            const auto time_val = chrono::high_resolution_clock::now().time_since_epoch().count();
-            seed_lehman((rd() ^ static_cast<uint64_t>(time_val) ^ reinterpret_cast<uintptr_t>(this)) | 1ULL);
+            result.correlation_function[lag] = sum / ((energies.size() - lag) * variance);
         }
         
-        const auto start_time = chrono::steady_clock::now();
-        size_t temp_step = 0;
-        const size_t progress_interval = max(size_t(1), expected_temp_steps/100);
+        // Calculate integrated autocorrelation time
+        result.tau_int = 0.5;
+        for (size_t lag = 1; lag < max_lag; ++lag) {
+            if (result.correlation_function[lag] < 0.05) break;  // Cutoff when correlation is small
+            result.tau_int += result.correlation_function[lag];
+        }
         
-        // Pre-allocate work arrays for variance calculation
-        double running_mean = 0.0;
-        double running_sum = 0.0;
-        double running_sum_sq = 0.0;
+        // Determine sampling interval (at least 2*tau_int sweeps)
+        result.sampling_interval = max(size_t(2 * result.tau_int * base_interval), size_t(100));
         
-        // Pre-calculate inverse lattice size for efficiency
-        const double inv_lattice_size = 1.0 / lattice_size;
-        
-        // New: track current total energy incrementally
-        double E_current_total = total_energy(spins);
-        
-        // Main annealing loop
-        while(T > ground_state_temp_threshold && !ground_state_found){
-            ++temp_step;
-            double curr_accept = 0;
-            size_t curr_total = 0;
-            
-            energy_samples_for_autocorr.clear();
-            
-            // Adaptive number of sweeps based on temperature
-            size_t adaptive_n_anneal = n_anneal;
-            if(T < low_temp_threshold){
-                adaptive_n_anneal <<= 1; // *= 2
-            }
-            if(T < very_low_temp_threshold){
-                adaptive_n_anneal *= 5;
-            }
-            
-            // Adjust sampling rate based on estimated autocorrelation
-            const size_t sample_interval = max(size_t(1), static_cast<size_t>(ceil(tau_int)));
-            
-            // Determine update method based on acceptance rate from previous step
-            bool use_deterministic_this_step = false;
-            if (temp_step > 1) { // Only consider after first step when we have acceptance data
-                use_deterministic_this_step = (acceptance_rate < very_low_acceptance_threshold) ||
-                                            (acceptance_rate < low_acceptance_threshold && T < low_temp_threshold);
-            }
-            
-            // Metropolis/Overrelaxation/Deterministic sweeps with energy sampling
-            if(overrelaxation_rate > 0){
-                const size_t overrelax_cycles = adaptive_n_anneal / overrelaxation_rate;
-                for(size_t cycle = 0; cycle < overrelax_cycles; ++cycle){
-                    overrelaxation();
-                    
-                    if(use_deterministic_this_step){
-                        // Use deterministic sweep instead of Metropolis
-                        deterministic_sweep();
-                        total_deterministic_steps++;
-                        // For deterministic sweeps, acceptance rate is always 1.0
-                        curr_accept += 1.0;
-                        // Energy change tracking for deterministic sweeps
-                        double E_after_det = total_energy(spins);
-                        double dE_acc = E_after_det - E_current_total;
-                        E_current_total = E_after_det;
-                    } else {
-                        double dE_acc = 0.0;
-                        curr_accept += metropolis_with_energy_change(spins, T, gaussian_move, sigma, &dE_acc);
-                        E_current_total += dE_acc;
-                    }
-                    ++curr_total;
-                    
-                    if ((cycle % sample_interval == 0) && 
-                        (energy_samples_for_autocorr.size() < max_samples_for_autocorr)) {
-                        energy_samples_for_autocorr.push_back(E_current_total * inv_lattice_size);
-                    }
-                }
-                for(size_t i = overrelax_cycles * overrelaxation_rate; i < adaptive_n_anneal; ++i){
-                    overrelaxation();
+        return result;
+    }
+
+    // Perform Monte Carlo sweeps with metropolis and optional overrelaxation
+    void perform_mc_sweeps(size_t n_sweeps, double T, bool gaussian_move, double& sigma, 
+                          size_t overrelaxation_rate, double* acceptance_sum = nullptr) {
+        for (size_t i = 0; i < n_sweeps; ++i) {
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    double acc = metropolis(spins, T, gaussian_move, sigma);
+                    if (acceptance_sum) *acceptance_sum += acc;
                 }
             } else {
-                for(size_t i = 0; i < adaptive_n_anneal; ++i){
-                    if(use_deterministic_this_step){
-                        // Use deterministic sweep instead of Metropolis
-                        deterministic_sweep();
-                        total_deterministic_steps++;
-                        // For deterministic sweeps, acceptance rate is always 1.0
-                        curr_accept += 1.0;
-                        // Energy change tracking for deterministic sweeps
-                        double E_after_det = total_energy(spins);
-                        double dE_acc = E_after_det - E_current_total;
-                        E_current_total = E_after_det;
-                    } else {
-                        double dE_acc = 0.0;
-                        curr_accept += metropolis_with_energy_change(spins, T, gaussian_move, sigma, &dE_acc);
-                        E_current_total += dE_acc;
-                    }
-                    ++curr_total;
-                    
-                    if ((i % sample_interval == 0) && 
-                        (energy_samples_for_autocorr.size() < max_samples_for_autocorr)) {
-                        energy_samples_for_autocorr.push_back(E_current_total * inv_lattice_size);
-                    }
-                }
+                double acc = metropolis(spins, T, gaussian_move, sigma);
+                if (acceptance_sum) *acceptance_sum += acc;
             }
-            
-            total_metropolis_steps += curr_total;
-            total_accepted_moves += static_cast<size_t>(curr_accept * lattice_size);
-
-            if(boundary_update){
-                const size_t boundary_sweeps = min(size_t(100), adaptive_n_anneal/10);
-                for(size_t i = 0; i < boundary_sweeps; ++i){
-                    metropolis_twist_sweep(T);
-                }
-                // Resync energy after twist updates
-                E_current_total = total_energy(spins);
-            }
-            
-            // Compute autocorrelation if we have enough samples
-            double sem = 0.0;           // standard error of the mean (τ_int corrected)
-            double sample_var = 0.0;    // sample variance of energy per site (uncorrected)
-            double sample_mean = 0.0;
-            bool have_stats = false;
-            if (energy_samples_for_autocorr.size() >= max<size_t>(min_samples_for_autocorr, 10)) {
-                have_stats = true;
-                const size_t nS = energy_samples_for_autocorr.size();
-                const size_t max_lag = min(size_t(50), nS >> 2);
-                const vector<double> autocorr = compute_autocorrelation(energy_samples_for_autocorr, max_lag);
-                
-                tau_int = compute_tau_int(autocorr);
-                effective_samples = static_cast<size_t>(nS / (2 * tau_int));
-                
-                // mean and variance
-                for (const auto& e : energy_samples_for_autocorr) sample_mean += e;
-                sample_mean /= nS;
-                
-                double sum_sq_diff = 0;
-                for (const auto& e : energy_samples_for_autocorr) {
-                    const double diff = e - sample_mean;
-                    sum_sq_diff += diff * diff;
-                }
-                sample_var = (nS > 1) ? sum_sq_diff / (nS - 1) : 0.0;
-                
-                // τ_int-corrected SEM of the mean
-                const double var_mean = (nS > 0) ? sample_var * (2.0 * tau_int / nS) : 0.0;
-                sem = sqrt(max(0.0, var_mean));
-                
-                variance_history.push_back(var_mean);
-            }
-            
-            // Use the tracked energy always
-            const double current_energy = E_current_total * inv_lattice_size;
-            energy_history.push_back(current_energy);
-            recent_energies.push_back(current_energy);
-            if(recent_energies.size() > convergence_window){
-                recent_energies.pop_front();
-            }
-            
-            if(current_energy < best_energy){
-                const double improvement = best_energy - current_energy;
-                best_energy = current_energy;
-                best_config = spins;
-                steps_at_best = temp_step;
-                steps_since_improvement = 0;
-                
-                if(improvement > energy_tolerance * fabs(best_energy)){
-                    cout << "  >>> NEW BEST: E/N = " << fixed << setprecision(10) << best_energy 
-                         << " (improvement: " << scientific << improvement 
-                         << ", τ_int = " << fixed << setprecision(2) << tau_int << ")" << endl;
-                }
-            } else {
-                ++steps_since_improvement;
-            }
-            
-            const bool is_plateau = (steps_since_improvement > convergence_window) && 
-                                   (have_stats ? (sem / (fabs(sample_mean) + 1e-12) < variance_tolerance_rel)
-                                               : false);
-            
-            if(is_plateau){
-                ++plateau_count;
-                if(plateau_count > max_plateau_count){
-                    cout << "  >> Plateau detected (τ_int=" << fixed << setprecision(2) << tau_int 
-                         << ", eff_samples=" << effective_samples << "). Attempting escape..." << endl;
-                    local_minima_energies.push_back(current_energy);
-                    
-                    const double escape_temp = min(T * 2, T_start * 0.1);
-                    const size_t escape_sweeps = n_anneal >> 1;
-                    for(size_t i = 0; i < escape_sweeps; ++i){
-                        metropolis(spins, escape_temp, gaussian_move, sigma * 2);
-                    }
-                    plateau_count = 0;
-                }
-            } else {
-                plateau_count = 0;
-            }
-            
-            if(curr_total > 0){
-                acceptance_rate = curr_accept / curr_total;
-            }
-
-            // Smart adaptive cooling rate (acceptance-, autocorr- and variance-aware)
-            {
-                // Build a score in [-1, 1]: -1 => cool fast, +1 => cool slow
-                double score = 0.0;
-                // Acceptance heuristics
-                if (acceptance_rate < 0.10) score += 1.0;
-                else if (acceptance_rate < 0.20) score += 0.5;
-                else if (acceptance_rate > 0.85) score -= 0.6;
-                else if (acceptance_rate > 0.60) score -= 0.3;
-                // Autocorrelation heuristics
-                if (tau_int > 30.0) score += 0.6;
-                else if (tau_int > 10.0) score += 0.3;
-                else if (tau_int < 2.0) score -= 0.2;
-                // Variance heuristics
-                if (sample_var > 0 && sample_var > variance_tolerance * 10.0) score += 0.2;
-                else if (sample_var > 0 && sample_var < variance_tolerance * 0.1) score -= 0.2;
-                // Plateau -> slow down
-                if (is_plateau) score += 0.4;
-                // Near final temperatures, slow down
-                if (T < T_end * 5.0) score += 0.3;
-
-                score = clampd(score, -1.0, 1.0);
-                const double target_rate = min_cooling_rate + (0.5 * (score + 1.0)) * (max_cooling_rate - min_cooling_rate);
-
-                // Smooth with EMA to avoid oscillations
-                const double alpha = 0.3;
-                adaptive_cooling_rate = alpha * target_rate + (1.0 - alpha) * adaptive_cooling_rate;
-
-                // Safety clamps
-                adaptive_cooling_rate = clampd(adaptive_cooling_rate, min_cooling_rate, max_cooling_rate);
-            }
-            
-            // Multi-criteria convergence check
-            bool energy_stable = false, variance_small = false;
-            
-            if(energy_history.size() >= convergence_window && effective_samples >= 10 && have_stats){
-                const size_t n = energy_history.size();
-                const size_t effective_window = max(size_t(2), 
-                    min(convergence_window, static_cast<size_t>(effective_samples)));
-                const size_t half_window = effective_window >> 1;
-                
-                if (n >= effective_window) {
-                    double recent_mean = 0, old_mean = 0;
-                    
-                    for(size_t i = n - half_window; i < n; ++i){
-                        recent_mean += energy_history[i];
-                    }
-                    recent_mean /= half_window;
-                    
-                    for(size_t i = n - effective_window; i < n - half_window; ++i){
-                        old_mean += energy_history[i];
-                    }
-                    old_mean /= half_window;
-                    
-                    const double relative_change = fabs((recent_mean - old_mean) / (fabs(old_mean) + 1e-12));
-                    const double rel_sem = sem / (fabs(sample_mean) + 1e-12);
-                    energy_stable = (relative_change < 2.0 * rel_sem);
-                }
-                
-                const double rel_sem = sem / (fabs(sample_mean) + 1e-12);
-                variance_small = (rel_sem < variance_tolerance_rel);
-                
-                converged = energy_stable && variance_small && 
-                           (acceptance_rate < 0.01) && (effective_samples >= 20);
-            }
-            
-            if(temp_step % progress_interval == 0 || converged){
-                cout << "Step " << setw(5) << temp_step 
-                     << " | T=" << fixed << setprecision(6) << T
-                     << " | E/N=" << setprecision(10) << current_energy
-                     << " | Best=" << setprecision(10) << best_energy
-                     << " | Accept=" << setprecision(4) << acceptance_rate
-                     << " | τ_int=" << setprecision(2) << tau_int
-                     << " | N_eff=" << setw(4) << effective_samples
-                     << " | Cool=" << setprecision(4) << adaptive_cooling_rate;
-                if(have_stats){
-                    cout << " | SEM=" << scientific << setprecision(2) << sem;
-                }
-                // Determine if deterministic was used this step
-                bool used_deterministic_this_step = false;
-                if (temp_step > 1) {
-                    // Check previous acceptance rate to see if deterministic was used
-                    size_t prev_step_idx = energy_history.size() - 2;
-                    if (prev_step_idx < energy_history.size() - 1) {
-                        // Use the same logic as in the sweep section
-                        used_deterministic_this_step = (acceptance_rate < very_low_acceptance_threshold) ||
-                                                     (acceptance_rate < low_acceptance_threshold && T < low_temp_threshold);
-                    }
-                }
-                if(used_deterministic_this_step) cout << " [DET]";
-                if(converged) cout << " [CONVERGED]";
-                cout << endl;
-            }
-            
-            if(T <= ground_state_verify_temp && !ground_state_found){
-                cout << "\n>>> Entering ground state verification phase <<<" << endl;
-                cout << "Current τ_int = " << tau_int << ", effective samples = " << effective_samples << endl;
-                
-                vector<double> verification_energies;
-                verification_energies.reserve(ground_state_checks);
-                
-                for(size_t check = 0; check < ground_state_checks; ++check){
-                    spins = best_config;
-                    
-                    const size_t perturbation_sites = lattice_size / 100;
-                    for(size_t i = 0; i < perturbation_sites; ++i){
-                        const size_t site = random_int_lehman(lattice_size);
-                        const array<double,N> perturbation = gen_random_spin(spin_length * 0.01);
-                        spins[site] = spins[site] + perturbation;
-                        const double norm = sqrt(dot(spins[site], spins[site]));
-                        spins[site] = spins[site] * (spin_length / norm);
-                    }
-                    
-                    const double search_temp = T_end * ground_state_temp_factor;
-                    const size_t search_sweeps = static_cast<size_t>(final_optimization_sweeps * tau_int);
-                    for(size_t i = 0; i < search_sweeps; ++i){
-                        metropolis(spins, search_temp, false, sigma/100);
-                        if((i & 0x63) == 0){
-                            overrelaxation();
-                        }
-                    }
-                    
-                    const double check_energy = total_energy(spins) * inv_lattice_size;
-                    verification_energies.push_back(check_energy);
-                    
-                    if(check_energy < best_energy){
-                        best_energy = check_energy;
-                        best_config = spins;
-                        cout << "  Check " << check+1 << ": Found lower energy = " 
-                             << fixed << setprecision(12) << best_energy << endl;
-                    } else {
-                        cout << "  Check " << check+1 << ": Energy = " 
-                             << fixed << setprecision(12) << check_energy << endl;
-                    }
-                }
-                
-                double mean_verification = 0, var_verification = 0;
-                for(const auto& e : verification_energies) mean_verification += e;
-                mean_verification /= verification_energies.size();
-                for(const auto& e : verification_energies){
-                    const double diff = e - mean_verification;
-                    var_verification += diff * diff;
-                }
-                var_verification /= (verification_energies.size() - 1);
-                
-                cout << "Verification statistics:" << endl;
-                cout << "  Mean E/N = " << fixed << setprecision(12) << mean_verification << endl;
-                cout << "  Std Dev = " << scientific << setprecision(4) << sqrt(var_verification) << endl;
-                cout << "  Best E/N = " << fixed << setprecision(12) << best_energy << endl;
-                
-                const double mean_tolerance = energy_tolerance * fabs(mean_verification) * sqrt(2 * tau_int);
-                ground_state_found = (sqrt(var_verification) < mean_tolerance)
-                                    && (fabs(best_energy - mean_verification) < mean_tolerance);
-                
-                if(ground_state_found){
-                    cout << ">>> GROUND STATE FOUND (within tolerance corrected for τ_int) <<<" << endl;
-                    spins = best_config;
-                    break;
-                } else {
-                    cout << "Ground state not yet confirmed. Continuing search..." << endl;
-                    spins = best_config;
-                }
-            }
-            
-            T *= adaptive_cooling_rate;
-        }
-        
-        if(!ground_state_found){
-            cout << "\n=== FINAL GROUND STATE OPTIMIZATION ===" << endl;
-            
-            spins = best_config;
-            const double final_T = T_end * ground_state_temp_factor;
-            
-            cout << "Phase 1: Deterministic optimization..." << endl;
-            // New: robust quench with early stop
-            greedy_quench(1e-12, 100);
-            {
-                const double e = total_energy(spins) * inv_lattice_size;
-                cout << "  Quench done: E/N = " << fixed << setprecision(12) << e << endl;
-                if(e < best_energy){
-                    best_energy = e;
-                    best_config = spins;
-                }
-            }
-            
-            cout << "Phase 2: Ultra-low temperature Monte Carlo..." << endl;
-            spins = best_config;
-            const size_t ultra_low_sweeps = static_cast<size_t>(n_anneal / 10 * max(1.0, tau_int));
-            for(size_t cycle = 0; cycle < 10; ++cycle){
-                const double cycle_temp = final_T / (cycle + 1);
-                for(size_t i = 0; i < ultra_low_sweeps; ++i){
-                    metropolis(spins, cycle_temp, false, sigma/1000);
-                    if((i & 0x63) == 0) overrelaxation();
-                }
-                const double e = total_energy(spins) * inv_lattice_size;
-                cout << "  Cycle " << cycle+1 << ": E/N = " << fixed << setprecision(12) << e << endl;
-                if(e < best_energy){
-                    best_energy = e;
-                    best_config = spins;
-                }
-            }
-        }
-        
-        spins = best_config;
-        
-        const auto end_time = chrono::steady_clock::now();
-        const auto elapsed = chrono::duration_cast<chrono::seconds>(end_time - start_time).count();
-        
-        cout << "\n==========================================================" << endl;
-        cout << "=== SIMULATED ANNEALING COMPLETE ===" << endl;
-        cout << "Ground State Found: " << (ground_state_found ? "YES" : "ATTEMPTED") << endl;
-        cout << "Final Energy/Site: " << fixed << setprecision(12) << best_energy << endl;
-        cout << "Final τ_int: " << fixed << setprecision(2) << tau_int << endl;
-        cout << "Total Temperature Steps: " << temp_step << endl;
-        cout << "Total Metropolis Steps: " << total_metropolis_steps * lattice_size << endl;
-        cout << "Total Deterministic Steps: " << total_deterministic_steps * lattice_size << endl;
-        cout << "Total Accepted Moves: " << total_accepted_moves << endl;
-        cout << "Overall Acceptance Rate: " << fixed << setprecision(4) 
-             << double(total_accepted_moves) / (total_metropolis_steps * lattice_size) << endl;
-        if(total_deterministic_steps > 0) {
-            cout << "Deterministic Steps Used: " << total_deterministic_steps 
-                 << " (" << fixed << setprecision(2) 
-                 << 100.0 * total_deterministic_steps / (total_metropolis_steps + total_deterministic_steps) 
-                 << "% of total)" << endl;
-        }
-        cout << "Total Time: " << elapsed << " seconds" << endl;
-        cout << "==========================================================" << endl;
-        
-        const double verification_energy = total_energy(spins) * inv_lattice_size;
-        if(fabs(verification_energy - best_energy) > 1e-10){
-            cout << "WARNING: Verification energy differs from best: " 
-                 << fixed << setprecision(12) << verification_energy << endl;
-        }
-        
-        if(!out_dir.empty()){
-            write_to_file_spin(out_dir + "/spin.txt", spins);
-            write_to_file_pos(out_dir + "/pos.txt");
-            
-            ofstream info_file(out_dir + "/annealing_info.txt");
-            info_file << "Ground State Found: " << (ground_state_found ? "Yes" : "Attempted") << endl;
-            info_file << "Final Energy/Site: " << fixed << setprecision(15) << best_energy << endl;
-            info_file << "Final Integrated Autocorrelation Time: " << fixed << setprecision(3) << tau_int << endl;
-            info_file << "Temperature Steps: " << temp_step << endl;
-            info_file << "Total Time (s): " << elapsed << endl;
-            info_file << "Final Cooling Rate: " << adaptive_cooling_rate << endl;
-            info_file << "Acceptance Rate: " << double(total_accepted_moves) / (total_metropolis_steps * lattice_size) << endl;
-            info_file << "Metropolis Steps: " << total_metropolis_steps * lattice_size << endl;
-            info_file << "Deterministic Steps: " << total_deterministic_steps * lattice_size << endl;
-            if(total_deterministic_steps > 0) {
-                info_file << "Deterministic Usage: " << fixed << setprecision(2) 
-                         << 100.0 * total_deterministic_steps / (total_metropolis_steps + total_deterministic_steps) 
-                         << "%" << endl;
-            }
-            
-            if(!local_minima_energies.empty()){
-                info_file << "\nLocal Minima Detected:" << endl;
-                for(size_t i = 0; i < local_minima_energies.size(); ++i){
-                    info_file << "  " << i+1 << ": " << fixed << setprecision(12) 
-                             << local_minima_energies[i] << endl;
-                }
-            }
-            info_file.close();
-            
-            ofstream energy_file(out_dir + "/energy_history.txt");
-            for(const auto& e : energy_history){
-                energy_file << fixed << setprecision(12) << e << endl;
-            }
-            energy_file.close();
         }
     }
 
+    // Save autocorrelation analysis results to file
+    void save_autocorrelation_results(const string& out_dir, const AutocorrelationResult& acf_result) {
+        ofstream acf_file(out_dir + "/autocorrelation.txt");
+        acf_file << "# lag autocorrelation" << endl;
+        acf_file << "# tau_int = " << acf_result.tau_int << endl;
+        acf_file << "# sampling_interval = " << acf_result.sampling_interval << endl;
+        
+        size_t max_output = min(size_t(100), acf_result.correlation_function.size());
+        for (size_t lag = 0; lag < max_output; ++lag) {
+            acf_file << lag * 10 << " " << acf_result.correlation_function[lag] << endl;
+        }
+        acf_file.close();
+    }
+
+    // Main simulated annealing function
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, 
+                            size_t overrelaxation_rate, bool boundary_update = false, 
+                            bool gaussian_move = false, double cooling_rate = 0.9, 
+                            string out_dir = "", bool save_observables = false) {
+        
+        // Setup output directory and random seed
+        if (!out_dir.empty()) {
+            filesystem::create_directory(out_dir);
+        }
+        srand(time(NULL));
+        seed_lehman(rand() * 2 + 1);
+        
+        // Annealing parameters
+        double T = T_start;
+        double sigma = 1000;
+        
+        // Main annealing loop
+        cout << "Starting simulated annealing from T=" << T_start << " to T=" << T_end << endl;
+        while (T > T_end) {
+            double curr_accept = 0;
+            
+            // Perform MC sweeps at current temperature
+            perform_mc_sweeps(n_anneal, T, gaussian_move, sigma, overrelaxation_rate, &curr_accept);
+            
+            // Optional boundary twist updates
+            if (boundary_update) {
+                for (size_t i = 0; i < 100; ++i) {
+                    metropolis_twist_sweep(T);
+                }
+            }
+            
+            // Calculate and report acceptance rate
+            double acceptance_rate = (overrelaxation_rate > 0) ? 
+                curr_accept / n_anneal * overrelaxation_rate : 
+                curr_accept / n_anneal;
+            
+            cout << "T=" << T << ", Acceptance=" << acceptance_rate;
+            
+            // Adaptive sigma adjustment for gaussian moves
+            if (gaussian_move && acceptance_rate < 0.5) {
+                sigma = sigma * 0.5 / (1 - acceptance_rate);
+                cout << ", Sigma adjusted to " << sigma;
+            }
+            cout << endl;
+            
+            // Cool down
+            T *= cooling_rate;
+        }
+        
+        // Perform detailed measurements at final temperature if requested
+        if (save_observables) {
+            perform_final_measurements(T_end, sigma, gaussian_move, overrelaxation_rate, out_dir);
+        }
+        
+        // Save final configuration
+        if (!out_dir.empty()) {
+            write_to_file_spin(out_dir + "/spin.txt", spins);
+            write_to_file_pos(out_dir + "/pos.txt");
+        }
+    }
+
+    // Perform detailed measurements at final temperature
+    void perform_final_measurements(double T_final, double sigma, bool gaussian_move, 
+                                   size_t overrelaxation_rate, const string& out_dir) {
+        cout << "\n=== Performing final measurements at T=" << T_final << " ===" << endl;
+        
+        // Step 1: Preliminary sampling to estimate autocorrelation time
+        cout << "Step 1: Estimating autocorrelation time..." << endl;
+        vector<double> prelim_energies;
+        size_t prelim_samples = 10000;
+        size_t prelim_interval = 10;
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            perform_mc_sweeps(1, T_final, gaussian_move, sigma, overrelaxation_rate);
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy(spins));
+            }
+        }
+        
+        // Step 2: Analyze autocorrelation
+        AutocorrelationResult acf_result = compute_autocorrelation(prelim_energies, prelim_interval);
+        cout << "  Integrated autocorrelation time: " << acf_result.tau_int << endl;
+        cout << "  Using sampling interval: " << acf_result.sampling_interval << " sweeps" << endl;
+        
+        // Step 3: Equilibration
+        size_t equilibration = 10 * acf_result.sampling_interval;
+        cout << "Step 2: Equilibrating for " << equilibration << " sweeps..." << endl;
+        perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma, overrelaxation_rate);
+        
+        // Step 4: Main measurement phase
+        size_t n_samples = 1e3;
+        size_t n_measure = n_samples * acf_result.sampling_interval;
+        cout << "Step 3: Collecting " << n_samples << " independent samples..." << endl;
+        
+        vector<double> energies;
+        vector<array<double, N>> local_mags;
+        energies.reserve(n_samples);
+        local_mags.reserve(n_samples);
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            perform_mc_sweeps(1, T_final, gaussian_move, sigma, overrelaxation_rate);
+            
+            if (i % acf_result.sampling_interval == 0) {
+                energies.push_back(total_energy(spins));
+                local_mags.push_back(magnetization_local(spins));
+            }
+        }
+        
+        cout << "  Collected " << energies.size() << " samples" << endl;
+        
+        // Step 5: Compute and save observables
+        cout << "Step 4: Computing observables..." << endl;
+        compute_and_save_observables(energies, local_mags, T_final, out_dir);
+        
+        // Save autocorrelation analysis
+        save_autocorrelation_results(out_dir, acf_result);
+    }
+
+    // Compute thermodynamic observables and save to files
+    void compute_and_save_observables(const vector<double>& energies, 
+                                     const vector<array<double, N>>& local_mags,
+                                     double T, const string& out_dir) {
+        // Physical constants
+        const double k_B = 1.380649e-23;  // Boltzmann constant
+        const double N_A = 6.02214076e23; // Avogadro's number
+        
+        // Compute specific heat using binning analysis
+        std::tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double specific_heat = get<0>(varE) / (T * T * lattice_size) * 2 * k_B * N_A;
+        double specific_heat_error = get<1>(varE) / (T * T * lattice_size) * 2 * k_B * N_A;
+        
+        // Save specific heat
+        ofstream heat_file(out_dir + "/specific_heat.txt", ios::app);
+        heat_file << T << " " << specific_heat << " " << specific_heat_error << endl;
+        heat_file.close();
+        
+        // Save other observables
+        write_to_file_2d_vector_array(out_dir + "/local_magnetization.txt", local_mags);
+        write_column_vector(out_dir + "/energy.txt", energies);
+        
+        cout << "  Specific heat: " << specific_heat << " +/- " << specific_heat_error << endl;
+    }
+
+
+    
     void simulated_annealing_deterministic(double T_start, double T_end, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name, bool gaussian_move = false){
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move);
         for(size_t i = 0; i<n_deterministics; ++i){
@@ -1770,620 +1383,12 @@ class lattice
         // Call the existing simulated annealing method
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
-    
 
-    // Advanced temperature ladder spacing algorithm using heat capacity and acceptance rate optimization
-    vector<double> generate_optimal_temperature_ladder(double T_min, double T_max, size_t n_temps, 
-                                                       size_t n_test_sweeps = 1000, 
-                                                       double target_swap_rate = 0.23) {
-        cout << "=== Generating Optimal Temperature Ladder ===" << endl;
-        cout << "Target temperature range: [" << T_min << ", " << T_max << "]" << endl;
-        cout << "Number of temperatures: " << n_temps << endl;
-        cout << "Target swap acceptance rate: " << target_swap_rate << endl;
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, 
+                           size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, 
+                           string dir_name, const vector<int> rank_to_write, bool gaussian_move = true) {
         
-        // Initialize with geometric spacing as starting point
-        vector<double> temps(n_temps);
-        double ratio = pow(T_max/T_min, 1.0/(n_temps-1));
-        for(size_t i = 0; i < n_temps; ++i) {
-            temps[i] = T_min * pow(ratio, i);
-        }
-        
-        // Adaptive refinement based on energy overlap
-        cout << "\nPhase 1: Energy-based refinement..." << endl;
-        
-        // Estimate energy distributions at each temperature
-        vector<double> mean_energies(n_temps);
-        vector<double> energy_variances(n_temps);
-        vector<spin_config> test_configs(n_temps);
-        
-        // Initialize test configurations
-        for(size_t t = 0; t < n_temps; ++t) {
-            test_configs[t] = spins;
-            // Pre-equilibrate at each temperature
-            for(size_t s = 0; s < n_test_sweeps/10; ++s) {
-                metropolis(test_configs[t], temps[t], false);
-            }
-        }
-        
-        // Collect energy statistics
-        for(size_t t = 0; t < n_temps; ++t) {
-            vector<double> energies;
-            for(size_t s = 0; s < n_test_sweeps; ++s) {
-                metropolis(test_configs[t], temps[t], false);
-                if(s % 10 == 0) {
-                    energies.push_back(total_energy(test_configs[t]));
-                }
-            }
-            
-            // Calculate mean and variance
-            double mean = 0, var = 0;
-            for(auto e : energies) mean += e;
-            mean /= energies.size();
-            for(auto e : energies) var += (e - mean) * (e - mean);
-            var /= (energies.size() - 1);
-            
-            mean_energies[t] = mean;
-            energy_variances[t] = var;
-            
-            cout << "  T[" << t << "] = " << fixed << setprecision(4) << temps[t] 
-                 << " | <E>/N = " << mean/lattice_size 
-                 << " | σ²(E)/N² = " << var/(lattice_size*lattice_size) << endl;
-        }
-        
-        // Calculate overlap integrals and adjust spacing
-        cout << "\nPhase 2: Overlap optimization..." << endl;
-        
-        auto gaussian_overlap = [](double E1, double var1, double E2, double var2) -> double {
-            // Estimate overlap between two Gaussian distributions
-            double sigma1 = sqrt(var1);
-            double sigma2 = sqrt(var2);
-            double sigma_sum = sigma1*sigma1 + sigma2*sigma2;
-            if(sigma_sum <= 0) return 0;
-            
-            double overlap = exp(-(E1-E2)*(E1-E2)/(2*sigma_sum));
-            return overlap;
-        };
-        
-        // Iterative temperature adjustment
-        const size_t max_iterations = 10;
-        for(size_t iter = 0; iter < max_iterations; ++iter) {
-            vector<double> swap_probs(n_temps-1);
-            vector<double> new_temps = temps;
-            
-            // Calculate expected swap acceptance rates
-            for(size_t t = 0; t < n_temps-1; ++t) {
-                double overlap = gaussian_overlap(mean_energies[t], energy_variances[t],
-                                                 mean_energies[t+1], energy_variances[t+1]);
-                
-                // Estimate swap probability using detailed balance
-                double beta1 = 1.0/temps[t];
-                double beta2 = 1.0/temps[t+1];
-                double dE = mean_energies[t+1] - mean_energies[t];
-                swap_probs[t] = min(1.0, exp((beta1-beta2)*dE)) * overlap;
-            }
-            
-            // Adjust temperatures to equalize swap probabilities
-            double avg_swap_prob = 0;
-            for(auto p : swap_probs) avg_swap_prob += p;
-            avg_swap_prob /= swap_probs.size();
-            
-            cout << "  Iteration " << iter+1 << " | Avg swap prob: " << avg_swap_prob << endl;
-            
-            // Stop if close enough to target
-            if(fabs(avg_swap_prob - target_swap_rate) < 0.02) break;
-            
-            // Redistribute temperatures
-            for(size_t t = 1; t < n_temps-1; ++t) {
-                double local_prob = (swap_probs[t-1] + swap_probs[t])/2;
-                double adjustment = 1.0;
-                
-                if(local_prob < target_swap_rate) {
-                    // Temperatures too far apart, bring closer
-                    adjustment = 1.0 - 0.1*(target_swap_rate - local_prob)/target_swap_rate;
-                } else if(local_prob > target_swap_rate) {
-                    // Temperatures too close, spread apart
-                    adjustment = 1.0 + 0.1*(local_prob - target_swap_rate)/target_swap_rate;
-                }
-                
-                // Interpolate between neighbors with adjustment
-                double t_prev = (t > 0) ? new_temps[t-1] : new_temps[t];
-                double t_next = (t < n_temps-1) ? new_temps[t+1] : new_temps[t];
-                new_temps[t] = temps[t] * adjustment;
-                
-                // Ensure monotonicity
-                new_temps[t] = max(t_prev * 1.01, min(new_temps[t], t_next * 0.99));
-            }
-            
-            temps = new_temps;
-            
-            // Re-equilibrate and update statistics for changed temperatures
-            for(size_t t = 1; t < n_temps-1; ++t) {
-                vector<double> energies;
-                for(size_t s = 0; s < n_test_sweeps/2; ++s) {
-                    metropolis(test_configs[t], temps[t], false);
-                    if(s % 10 == 0) {
-                        energies.push_back(total_energy(test_configs[t]));
-                    }
-                }
-                
-                double mean = 0, var = 0;
-                for(auto e : energies) mean += e;
-                mean /= energies.size();
-                for(auto e : energies) var += (e - mean) * (e - mean);
-                var /= (energies.size() - 1);
-                
-                mean_energies[t] = mean;
-                energy_variances[t] = var;
-            }
-        }
-        
-        // Phase 3: Critical point detection and refinement
-        cout << "\nPhase 3: Critical point refinement..." << endl;
-        
-        // Estimate specific heat to find critical regions
-        vector<double> specific_heats(n_temps);
-        for(size_t t = 0; t < n_temps; ++t) {
-            specific_heats[t] = energy_variances[t]/(temps[t]*temps[t]*lattice_size);
-        }
-        
-        // Find peak in specific heat (critical point)
-        size_t critical_idx = 0;
-        double max_cv = 0;
-        for(size_t t = 1; t < n_temps-1; ++t) {
-            if(specific_heats[t] > max_cv) {
-                max_cv = specific_heats[t];
-                critical_idx = t;
-            }
-        }
-        
-        if(critical_idx > 0 && critical_idx < n_temps-1) {
-            cout << "  Critical region detected around T = " << temps[critical_idx] << endl;
-            
-            // Increase density around critical point
-            vector<double> final_temps;
-            final_temps.push_back(temps[0]);
-            
-            for(size_t t = 1; t < n_temps-1; ++t) {
-                double distance_to_critical = fabs(double(t) - double(critical_idx));
-                double weight = exp(-distance_to_critical*distance_to_critical/(n_temps*n_temps/9.0));
-                
-                // Add extra point near critical region
-                if(distance_to_critical < n_temps/4 && final_temps.size() < n_temps-1) {
-                    double t_interp = (temps[t-1] + temps[t])/2;
-                    if(weight > 0.5 && t_interp > final_temps.back()*1.001) {
-                        final_temps.push_back(t_interp);
-                    }
-                }
-                
-                if(final_temps.size() < n_temps) {
-                    final_temps.push_back(temps[t]);
-                }
-            }
-            
-            // Ensure we have exactly n_temps
-            if(final_temps.size() < n_temps) {
-                final_temps.push_back(temps.back());
-            }
-            while(final_temps.size() > n_temps) {
-                // Remove points with smallest gaps
-                size_t min_gap_idx = 0;
-                double min_gap = final_temps[1] - final_temps[0];
-                for(size_t i = 1; i < final_temps.size()-2; ++i) {
-                    double gap = final_temps[i+1] - final_temps[i];
-                    if(gap < min_gap) {
-                        min_gap = gap;
-                        min_gap_idx = i;
-                    }
-                }
-                final_temps.erase(final_temps.begin() + min_gap_idx);
-            }
-            
-            temps = final_temps;
-        }
-        
-        // Final output
-        cout << "\n=== Optimized Temperature Ladder ===" << endl;
-        for(size_t t = 0; t < temps.size(); ++t) {
-            cout << "  T[" << setw(2) << t << "] = " << fixed << setprecision(6) << temps[t];
-            if(t > 0) {
-                cout << " | ΔT/T = " << setprecision(4) << (temps[t]-temps[t-1])/temps[t];
-            }
-            if(t == critical_idx) {
-                cout << " [*critical*]";
-            }
-            cout << endl;
-        }
-        
-        return temps;
-    }
-    
-    // Simplified interface using exponential spacing with automatic critical point detection
-    vector<double> generate_temperature_ladder_exponential(double T_min, double T_max, size_t n_temps,
-                                                          double critical_enhancement = 1.5) {
-        vector<double> temps(n_temps);
-        
-        // Estimate critical temperature (geometric mean as first guess)
-        double T_crit_estimate = sqrt(T_min * T_max);
-        
-        // Use a modified exponential spacing that's denser near T_crit
-        double log_min = log(T_min);
-        double log_max = log(T_max);
-        double log_crit = log(T_crit_estimate);
-        
-        for(size_t i = 0; i < n_temps; ++i) {
-            double x = double(i)/(n_temps-1); // 0 to 1
-            
-            // Standard exponential
-            double log_T = log_min + x*(log_max - log_min);
-            
-            // Add Gaussian enhancement near critical point
-            double crit_x = (log_crit - log_min)/(log_max - log_min);
-            double enhancement = critical_enhancement * exp(-20*(x-crit_x)*(x-crit_x));
-            
-            // Modify spacing
-            log_T = log_T - 0.1*enhancement*(log_T - log_crit);
-            
-            temps[i] = exp(log_T);
-        }
-        
-        // Ensure strict ordering and bounds
-        temps[0] = T_min;
-        temps[n_temps-1] = T_max;
-        for(size_t i = 1; i < n_temps-1; ++i) {
-            temps[i] = max(temps[i-1]*1.001, min(temps[i], temps[i+1]*0.999));
-        }
-        
-        return temps;
-    }
-
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool gaussian_move = false){
-
-        int swap_accept = 0;
-        double curr_accept = 0;
-        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
-        int initialized;
-        MPI_Initialized(&initialized);
-        if (!initialized){
-            MPI_Init(NULL, NULL);
-        }
-        int rank, size;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
-        
-        // Improved random seeding
-        std::random_device rd;
-        seed_lehman((rd() + rank * 1000) | 1);
-        
-        double E, T_partner, E_partner;
-        bool accept;        
-        spin_config new_spins;
-        double curr_Temp = temp[rank];
-        vector<double> heat_capacity, dHeat;
-        if (rank == 0){
-            heat_capacity.resize(size);
-            dHeat.resize(size);
-        }   
-        
-        // Pre-allocate data collection vectors with reserve
-        vector<double> energies;
-        vector<array<double,N>> magnetizations;
-        vector<spin_config> spin_configs_at_temp;
-        const size_t expected_samples = n_measure / probe_rate;
-        energies.reserve(expected_samples);
-        magnetizations.reserve(expected_samples);
-        spin_configs_at_temp.reserve(expected_samples);
-
-        // Use circular buffers for history tracking
-        const size_t convergence_window = 100;
-        const size_t max_history = 1000; // Reduced from 10000
-        std::deque<double> energy_history;
-        std::deque<double> acceptance_history;
-        std::deque<double> swap_acceptance_history;
-        
-        const size_t convergence_check_interval = 1000;
-        const double energy_convergence_tolerance = 1e-5;
-        const double swap_rate_convergence_tolerance = 0.05;
-        const size_t min_converged_rounds = 3;
-        
-        bool local_converged = false;
-        bool global_converged = false;
-        size_t local_converged_rounds = 0;
-        size_t convergence_step = 0;
-        
-        const size_t max_extensions = 10;
-        const size_t extension_steps = n_measure / 2;
-        const size_t min_steps_before_extension = n_anneal + n_measure;
-        size_t current_extensions = 0;
-        size_t total_steps = n_anneal + n_measure;
-        
-        // Optimized running statistics (Welford's algorithm)
-        double running_mean_energy = 0;
-        double M2_energy = 0; // Sum of squares of differences from current mean
-        size_t stats_count = 0;
-        
-        // Recent swap rates with fixed-size circular buffer
-        std::deque<double> recent_swap_rates;
-        
-        // Temperature-specific convergence criteria
-        double temp_specific_tolerance = energy_convergence_tolerance;
-        if(curr_Temp > 1.0) {
-            temp_specific_tolerance *= (1.0 + log(curr_Temp));
-        }
-        
-        cout << "Process " << rank << " initialized with T=" << curr_Temp << endl;
-
-        // Convergence diagnostics file
-        ofstream conv_file;
-        if(!dir_name.empty()){
-            filesystem::create_directory(dir_name);
-            conv_file.open(dir_name + "/convergence_rank" + to_string(rank) + ".txt");
-            conv_file << "# Step Energy AcceptRate SwapRate RunningMean RunningVar LocalConverged GlobalConverged Extension\n";
-        }
-
-        size_t i = 0;
-        while(i < total_steps && !global_converged){
-
-            // Metropolis with optimized acceptance tracking
-            double step_accept = 0;
-            if(overrelaxation_rate > 0 && i % overrelaxation_rate == 0){
-                overrelaxation();
-                step_accept = metropolis(spins, curr_Temp, gaussian_move);
-                curr_accept += step_accept;
-            }
-            else if(overrelaxation_rate == 0){
-                step_accept = metropolis(spins, curr_Temp, gaussian_move);
-                curr_accept += step_accept;
-            }
-            else{
-                overrelaxation();
-            }
-            
-            E = total_energy(spins);
-            
-            // Optimized Welford's online algorithm
-            ++stats_count;
-            double delta = E - running_mean_energy;
-            running_mean_energy += delta / stats_count;
-            M2_energy += delta * (E - running_mean_energy);
-
-            // Maintain circular buffers efficiently
-            energy_history.push_back(E);
-            if(energy_history.size() > max_history){
-                energy_history.pop_front();
-            }
-            
-            if(step_accept > 0){
-                acceptance_history.push_back(step_accept);
-                if(acceptance_history.size() > convergence_window){
-                    acceptance_history.pop_front();
-                }
-            }
-
-            // Replica exchange with optimized MPI communication
-            if (i % swap_rate == 0){
-                accept = false;
-                const bool even_swap = ((i / swap_rate) & 1) == 0;
-                const int partner_rank = even_swap ? 
-                    (rank & 1 ? rank - 1 : rank + 1) : 
-                    (rank & 1 ? rank + 1 : rank - 1);
-                
-                if (partner_rank >= 0 && partner_rank < size){
-                    T_partner = temp[partner_rank];
-                    
-                    // Optimized MPI communication pattern
-                    if ((partner_rank & 1) == 0){
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    } else{
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
-                    }
-                    
-                    // Metropolis criterion
-                    const double delta_beta = 1.0/curr_Temp - 1.0/T_partner;
-                    const double delta_E = E - E_partner;
-                    
-                    if ((partner_rank & 1) == 0){
-                        accept = (delta_beta * delta_E < 0) || (random_double_lehman(0,1) < exp(delta_beta * delta_E));
-                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
-                    } else{
-                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    }
-                    
-                    if (accept){
-                        // Exchange configurations
-                        if ((partner_rank & 1) == 0){
-                            MPI_Sendrecv(spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 4,
-                                        new_spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 3,
-                                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        } else{
-                            MPI_Sendrecv(spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 3,
-                                        new_spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 4,
-                                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        }
-                        spins = std::move(new_spins);
-                        E = E_partner;
-                        ++swap_accept;
-                    }
-                }
-                
-                swap_acceptance_history.push_back(accept ? 1.0 : 0.0);
-                if(swap_acceptance_history.size() > convergence_window){
-                    swap_acceptance_history.pop_front();
-                }
-                
-                // Update recent swap rates
-                if(swap_acceptance_history.size() >= convergence_window){
-                    double recent_rate = std::accumulate(swap_acceptance_history.begin(), 
-                                                        swap_acceptance_history.end(), 0.0) / swap_acceptance_history.size();
-                    recent_swap_rates.push_back(recent_rate);
-                    if(recent_swap_rates.size() > convergence_window/2){
-                        recent_swap_rates.pop_front();
-                    }
-                }
-            }
-
-            // Optimized convergence check
-            if(i > n_anneal && (i % convergence_check_interval) == 0){
-                bool current_check_converged = false;
-                
-                // Energy convergence check using circular buffer
-                bool energy_converged = false;
-                if(energy_history.size() >= convergence_window * 2){
-                    double recent_sum = 0, old_sum = 0;
-                    auto it = energy_history.rbegin();
-                    
-                    // Recent window
-                    for(size_t j = 0; j < convergence_window && it != energy_history.rend(); ++j, ++it){
-                        recent_sum += *it;
-                    }
-                    // Old window
-                    for(size_t j = 0; j < convergence_window && it != energy_history.rend(); ++j, ++it){
-                        old_sum += *it;
-                    }
-                    
-                    double recent_mean = recent_sum / convergence_window;
-                    double old_mean = old_sum / convergence_window;
-                    double relative_change = fabs((recent_mean - old_mean) / old_mean);
-                    energy_converged = (relative_change < temp_specific_tolerance);
-                }
-                
-                // Swap rate stability check
-                bool swap_rate_stable = false;
-                if(recent_swap_rates.size() >= convergence_window/4){
-                    double mean_rate = std::accumulate(recent_swap_rates.begin(), recent_swap_rates.end(), 0.0) 
-                                      / recent_swap_rates.size();
-                    
-                    if(mean_rate > 0){
-                        double variance = 0;
-                        for(const auto& rate : recent_swap_rates){
-                            double diff = rate - mean_rate;
-                            variance += diff * diff;
-                        }
-                        variance /= (recent_swap_rates.size() - 1);
-                        double cv = sqrt(variance) / mean_rate;
-                        swap_rate_stable = (cv < swap_rate_convergence_tolerance);
-                    }
-                }
-                
-                // Acceptance rate check
-                double recent_accept_rate = acceptance_history.empty() ? 0 : 
-                    std::accumulate(acceptance_history.begin(), acceptance_history.end(), 0.0) / acceptance_history.size();
-                
-                // Combined criteria
-                current_check_converged = energy_converged && swap_rate_stable && (recent_accept_rate < 0.3);
-                
-                local_converged_rounds = current_check_converged ? local_converged_rounds + 1 : 0;
-                local_converged = (local_converged_rounds >= min_converged_rounds);
-                
-                // Global convergence check
-                int local_conv_int = local_converged ? 1 : 0;
-                int global_conv_sum = 0;
-                MPI_Allreduce(&local_conv_int, &global_conv_sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-                
-                // Majority convergence (75% of ranks)
-                global_converged = (global_conv_sum >= (size * 3 / 4));
-                
-                if(global_converged){
-                    convergence_step = i;
-                }
-                
-                // Output diagnostics
-                if(rank == 0 && (i % (convergence_check_interval * 5)) == 0){
-                    cout << "[Step " << i << "] Converged: " << global_conv_sum << "/" << size 
-                         << " | Extensions: " << current_extensions << "/" << max_extensions << endl;
-                }
-                
-                // Extension logic
-                if(!global_converged && i >= min_steps_before_extension && i >= total_steps - convergence_check_interval){
-                    if(current_extensions < max_extensions){
-                        total_steps += extension_steps;
-                        ++current_extensions;
-                        
-                        if(rank == 0){
-                            cout << "*** Extension " << current_extensions << "/" << max_extensions 
-                                 << " | New total: " << total_steps << " ***" << endl;
-                        }
-                    }
-                }
-                
-                // Write convergence data
-                if(conv_file.is_open() && stats_count > 1){
-                    double variance = M2_energy / (stats_count - 1);
-                    double current_swap_rate = swap_accept / double(i/swap_rate + 1);
-                    
-                    conv_file << i << " " << E/lattice_size << " " 
-                             << curr_accept/(i+1)*overrelaxation_flag << " "
-                             << current_swap_rate << " "
-                             << running_mean_energy/lattice_size << " "
-                             << variance/(lattice_size*lattice_size) << " "
-                             << local_converged << " "
-                             << global_converged << " "
-                             << current_extensions << "\n";
-                }
-            }
-
-            // Data collection (optimized)
-            if (i >= n_anneal && (i % probe_rate) == 0 && !dir_name.empty()){
-                energies.push_back(E);
-                magnetizations.push_back(magnetization_local(spins));
-                spin_configs_at_temp.push_back(spins);
-            }
-            
-            ++i;
-        }
-        
-        // Final statistics and output
-        if(!energies.empty()){
-            auto [varE, dVarE] = binning_analysis(energies, max(1, int(energies.size()/10)));
-            double curr_heat_capacity = varE / (curr_Temp * curr_Temp * lattice_size);
-            double curr_dHeat = dVarE / (curr_Temp * curr_Temp * lattice_size);
-            
-            MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-            MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        }
-        
-        // Final output
-        double final_variance = stats_count > 1 ? M2_energy / (stats_count - 1) : 0;
-        cout << "\n=== Rank " << rank << " Summary ===" << endl;
-        cout << "T=" << curr_Temp << " | Steps=" << i << " | E/N=" << running_mean_energy/lattice_size 
-             << " | σ(E)/N=" << sqrt(final_variance)/lattice_size << endl;
-        cout << "Accept=" << curr_accept/i*overrelaxation_flag 
-             << " | Swap=" << double(swap_accept)/(i/swap_rate) 
-             << " | Converged=" << (global_converged ? "Yes" : "No") << endl;
-        
-        if(conv_file.is_open()) conv_file.close();
-        
-        // Write output files
-        if(!dir_name.empty()){
-            for(const auto& r : rank_to_write){
-                if (rank == r){
-                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
-                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                }
-            }
-            
-            if (rank == 0){
-                write_to_file_pos(dir_name + "/pos.txt");
-                ofstream myfile(dir_name + "/heat_capacity.txt", ios::app);
-                for(size_t j = 0; j < size; ++j){
-                    myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << "\n";
-                }
-            }
-        }
-    }
-
-
-    void parallel_tempering_with_twist(vector<double> temp, size_t n_anneal, size_t n_measure, 
-                                       size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
-                                       size_t twist_update_rate, string dir_name, 
-                                       const vector<int> rank_to_write, bool gaussian_move = false) {
-        
-        int swap_accept = 0;
-        int twist_swap_accept = 0;
-        double curr_accept = 0;
-        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
-        
+        // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
         if (!initialized) {
@@ -2394,29 +1399,16 @@ class lattice
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &size);
         
-        // Improved random seeding
-        std::random_device rd;
-        seed_lehman((rd() + rank * 1000) | 1);
+        // Set up random seed
+        srand(time(NULL));
+        seed_lehman((rand() + rank * 1000) * 2 + 1);
         
-        double E, T_partner, E_partner;
-        bool accept;
-        spin_config new_spins;
+        // Initialize variables
         double curr_Temp = temp[rank];
-        
-        // Initialize twist parameters per replica
-        array<double, 3> twist_angles = {0, 0, 0};
-        array<double, 3> twist_angle_step = {M_PI/20, M_PI/20, M_PI/20};
-        
-        // Pre-calculate which dimensions are active
-        array<bool, 3> active_dim = {dim1 > 1, dim2 > 1, dim > 1};
-        
-        // Set initial twist matrices based on rank
-        for (size_t d = 0; d < 3; ++d) {
-            if (active_dim[d]) {
-                twist_angles[d] = (2.0 * M_PI * rank / size) * (d == 0 ? 1.0 : (d == 1 ? 0.5 : 0.25));
-                twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], twist_angles[d]);
-            }
-        }
+        double sigma = 1000.0;
+        int swap_accept = 0;
+        double curr_accept = 0;
+        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
         
         vector<double> heat_capacity, dHeat;
         if (rank == 0) {
@@ -2424,251 +1416,485 @@ class lattice
             dHeat.resize(size);
         }
         
-        // Pre-allocate data collection vectors
-        const size_t expected_samples = n_measure / probe_rate;
         vector<double> energies;
         vector<array<double, N>> magnetizations;
-        vector<spin_config> spin_configs_at_temp;
-        vector<array<double, 3>> twist_history;
         
-        energies.reserve(expected_samples);
-        magnetizations.reserve(expected_samples);
-        spin_configs_at_temp.reserve(expected_samples);
-        twist_history.reserve(expected_samples);
+        cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
         
-        // Use circular buffer for convergence tracking
-        std::deque<double> energy_history;
-        const size_t convergence_window = 100;
-        const size_t max_history = 1000;
-        const double energy_tolerance = 1e-5;
-        bool converged = false;
-        
-        // Running statistics (Welford's algorithm)
-        double running_mean_energy = 0;
-        double M2_energy = 0;
-        size_t stats_count = 0;
-        
-        cout << "Process " << rank << " initialized with T=" << curr_Temp 
-             << " and twist angles=(" << twist_angles[0] << ", " 
-             << twist_angles[1] << ", " << twist_angles[2] << ")" << endl;
-        
-        if (!dir_name.empty()) {
-            filesystem::create_directory(dir_name);
+        // ===== Equilibration Phase =====
+        cout << "Rank " << rank << ": Starting equilibration..." << endl;
+        for (size_t i = 0; i < n_anneal; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Attempt replica exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+            }
         }
         
-        // Cache frequently used values
-        const size_t total_steps = n_anneal + n_measure;
-        const size_t convergence_check_interval = 1000;
-        const size_t progress_interval = 1000;
-        const double inv_temp = 1.0 / curr_Temp;
+        cout << "Rank " << rank << ": Equilibration complete. Computing autocorrelation time..." << endl;
         
-        // Pre-compute partner ranks for different swap schemes
-        const int temp_partner_even = (rank & 1) ? rank - 1 : rank + 1;
-        const int temp_partner_odd = (rank & 1) ? rank + 1 : rank - 1;
-        const int twist_partner = (rank + size/2) % size;
+        // ===== Autocorrelation Analysis =====
+        probe_rate = estimate_sampling_interval(curr_Temp, gaussian_move, sigma, 
+                                               overrelaxation_rate, n_measure, probe_rate, rank);
         
-        // Main parallel tempering loop
-        for (size_t i = 0; i < total_steps; ++i) {
+        // ===== Main Measurement Phase =====
+        cout << "Rank " << rank << ": Starting measurement phase..." << endl;
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
             
-            // Standard Metropolis updates
-            double step_accept = 0;
-            if (overrelaxation_rate == 0) {
-                step_accept = metropolis(spins, curr_Temp, gaussian_move);
-                curr_accept += step_accept;
-            } else if (i % overrelaxation_rate == 0) {
-                overrelaxation();
-                step_accept = metropolis(spins, curr_Temp, gaussian_move);
-                curr_accept += step_accept;
-            } else {
-                overrelaxation();
+            // Attempt replica exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
             }
             
-            // Update twist angles with reduced boundary calculations
-            if (i % twist_update_rate == 0) {
-                for (size_t d = 0; d < 3; ++d) {
-                    if (!active_dim[d]) continue;
-                    
-                    // Use metropolis_twist_sweep for efficiency
-                    metropolis_twist_sweep(curr_Temp);
-                    break; // Update only one dimension per cycle to reduce overhead
-                }
-            }
-            
-            E = total_energy(spins);
-            
-            // Update running statistics
-            ++stats_count;
-            double delta = E - running_mean_energy;
-            running_mean_energy += delta / stats_count;
-            M2_energy += delta * (E - running_mean_energy);
-            
-            // Temperature swap attempts with pre-computed partners
-            if (i % swap_rate == 0) {
-                const bool even_swap = ((i / swap_rate) & 1) == 0;
-                const int partner_rank = even_swap ? temp_partner_even : temp_partner_odd;
-                
-                if (partner_rank >= 0 && partner_rank < size) {
-                    T_partner = temp[partner_rank];
-                    
-                    // Optimized MPI communication pattern
-                    if ((partner_rank & 1) == 0) {
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    } else {
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
-                    }
-                    
-                    // Metropolis criterion
-                    const double delta_beta = inv_temp - 1.0/T_partner;
-                    const double delta_E = E - E_partner;
-                    
-                    if ((partner_rank & 1) == 0) {
-                        accept = (delta_beta * delta_E < 0) || (random_double_lehman(0, 1) < exp(delta_beta * delta_E));
-                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
-                    } else {
-                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    }
-                    
-                    if (accept) {
-                        // Use MPI_Sendrecv for atomic exchange
-                        if ((partner_rank & 1) == 0) {
-                            MPI_Sendrecv(spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 4,
-                                        new_spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 3,
-                                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        } else {
-                            MPI_Sendrecv(spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 3,
-                                        new_spins.data(), N*lattice_size, MPI_DOUBLE, partner_rank, 4,
-                                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        }
-                        spins = std::move(new_spins);
-                        E = E_partner;
-                        ++swap_accept;
-                    }
-                }
-            }
-            
-            // Simplified twist parameter exchange (less frequent)
-            if (i % (swap_rate * 4) == swap_rate && twist_partner != rank) {
-                array<double, 3> partner_twist_angles;
-                
-                MPI_Sendrecv(twist_angles.data(), 3, MPI_DOUBLE, twist_partner, 10,
-                            partner_twist_angles.data(), 3, MPI_DOUBLE, twist_partner, 10,
-                            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                
-                // Simplified acceptance: always accept if partner has lower energy twist
-                if (rank < twist_partner) {
-                    accept = random_double_lehman(0, 1) < 0.5; // 50% acceptance for mixing
-                    MPI_Send(&accept, 1, MPI_C_BOOL, twist_partner, 11, MPI_COMM_WORLD);
-                } else {
-                    MPI_Recv(&accept, 1, MPI_C_BOOL, twist_partner, 11, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                }
-                
-                if (accept) {
-                    for (size_t d = 0; d < 3; ++d) {
-                        if (active_dim[d]) {
-                            twist_angles[d] = partner_twist_angles[d];
-                            twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], twist_angles[d]);
-                        }
-                    }
-                    ++twist_swap_accept;
-                }
-            }
-            
-            // Data collection phase
-            if (i >= n_anneal && (i % probe_rate) == 0) {
+            // Sample observables
+            if (i % probe_rate == 0) {
+                double E = total_energy(spins);
                 energies.push_back(E);
                 magnetizations.push_back(magnetization_local(spins));
-                spin_configs_at_temp.push_back(spins);
-                twist_history.push_back(twist_angles);
-            }
-            
-            // Efficient convergence check using circular buffer
-            if (i >= n_anneal) {
-                energy_history.push_back(E);
-                if (energy_history.size() > max_history) {
-                    energy_history.pop_front();
-                }
-                
-                if ((i % convergence_check_interval) == 0 && energy_history.size() >= convergence_window * 2) {
-                    double recent_sum = 0, old_sum = 0;
-                    auto it = energy_history.rbegin();
-                    
-                    for (size_t j = 0; j < convergence_window && it != energy_history.rend(); ++j, ++it) {
-                        recent_sum += *it;
-                    }
-                    for (size_t j = 0; j < convergence_window && it != energy_history.rend(); ++j, ++it) {
-                        old_sum += *it;
-                    }
-                    
-                    double recent_mean = recent_sum / convergence_window;
-                    double old_mean = old_sum / convergence_window;
-                    converged = (fabs((recent_mean - old_mean) / old_mean) < energy_tolerance);
-                }
-            }
-            
-            // Progress output
-            if ((i % progress_interval) == 0 && i > 0) {
-                double acceptance_rate = overrelaxation_flag * curr_accept / i;
-                double swap_rate_actual = double(swap_accept) / (i / swap_rate + 1);
-                double twist_swap_rate_actual = double(twist_swap_accept) / (i / (swap_rate * 4) + 1);
-                
-                cout << "Rank " << rank << " Step " << i 
-                     << " | T=" << curr_Temp 
-                     << " | E/N=" << E/lattice_size
-                     << " | Accept=" << acceptance_rate
-                     << " | TSwap=" << swap_rate_actual
-                     << " | TWSwap=" << twist_swap_rate_actual
-                     << (converged ? " [CONVERGED]" : "") << endl;
             }
         }
         
-        // Calculate final statistics
-        if (!energies.empty()) {
-            auto [varE, dVarE] = binning_analysis(energies, max(1, int(energies.size() / 10)));
-            double curr_heat_capacity = varE / (curr_Temp * curr_Temp * lattice_size);
-            double curr_dHeat = dVarE / (curr_Temp * curr_Temp * lattice_size);
-            
-            MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-            MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        cout << "Rank " << rank << ": Collected " << energies.size() << " independent samples" << endl;
+        
+        // ===== Compute and Gather Statistics =====
+        gather_and_save_statistics(rank, size, curr_Temp, energies, magnetizations, 
+                                  heat_capacity, dHeat, temp, dir_name, rank_to_write,
+                                  n_anneal, n_measure, curr_accept, swap_accept, 
+                                  swap_rate, overrelaxation_flag, probe_rate);
+    }
+    
+
+    // Helper: Attempt replica exchange between neighboring temperatures
+    int attempt_replica_exchange(int rank, int size, const vector<double>& temp, 
+                                double curr_Temp, size_t swap_parity) {
+        // Determine partner based on checkerboard pattern
+        int partner_rank;
+        if (swap_parity % 2 == 0) {
+            partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
+        } else {
+            partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
         }
         
-        // Final output
-        double final_variance = stats_count > 1 ? M2_energy / (stats_count - 1) : 0;
-        cout << "\n=== Final Statistics [Rank " << rank << "] ===" << endl;
-        cout << "Temperature: " << curr_Temp << endl;
-        cout << "Final Energy/site: " << running_mean_energy/lattice_size << endl;
-        cout << "σ(E)/site: " << sqrt(final_variance)/lattice_size << endl;
-        cout << "Acceptance rate: " << curr_accept/total_steps*overrelaxation_flag << endl;
-        cout << "Temperature swap rate: " << double(swap_accept)/(total_steps/swap_rate) << endl;
-        cout << "Twist swap rate: " << double(twist_swap_accept)/(total_steps/(swap_rate*4)) << endl;
-        cout << "Converged: " << (converged ? "Yes" : "No") << endl;
+        if (partner_rank < 0 || partner_rank >= size) {
+            return 0;
+        }
         
-        // Write output files
+        // Exchange energies
+        double E = total_energy(spins);
+        double E_partner, T_partner = temp[partner_rank];
+        
+        if (rank < partner_rank) {
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else {
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
+        }
+        
+        // Decide acceptance using Metropolis criterion
+        bool accept = false;
+        if (rank < partner_rank) {
+            double delta = (1.0/curr_Temp - 1.0/T_partner) * (E - E_partner);
+            accept = (delta <= 0) || (random_double_lehman(0, 1) < exp(-delta));
+            MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+        
+        // Exchange configurations if accepted
+        if (accept) {
+            spin_config new_spins;
+            if (rank < partner_rank) {
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            } else {
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
+            }
+            spins = new_spins;
+            return 1;
+        }
+        return 0;
+    }
+    
+    // Helper: Estimate optimal sampling interval using autocorrelation
+    size_t estimate_sampling_interval(double curr_Temp, bool gaussian_move, double& sigma,
+                                     size_t overrelaxation_rate, size_t n_measure, 
+                                     size_t probe_rate, int rank) {
+        // Preliminary sampling
+        vector<double> prelim_energies;
+        size_t prelim_samples = min(size_t(10000), n_measure / 10);
+        size_t prelim_interval = max(size_t(1), size_t(overrelaxation_rate > 0 ? overrelaxation_rate : 1));
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate);
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy(spins));
+            }
+        }
+        
+        // Compute autocorrelation
+        AutocorrelationResult acf_result = compute_autocorrelation(prelim_energies, prelim_interval);
+        
+        // Determine effective sampling interval
+        size_t effective_interval = max(acf_result.sampling_interval, probe_rate);
+        
+        cout << "Rank " << rank << ": tau_int = " << acf_result.tau_int 
+             << ", using sampling interval = " << effective_interval << " sweeps" << endl;
+        
+        return effective_interval;
+    }
+    
+    // Helper: Gather statistics and save results
+    void gather_and_save_statistics(int rank, int size, double curr_Temp,
+                                   const vector<double>& energies,
+                                   const vector<array<double, N>>& magnetizations,
+                                   vector<double>& heat_capacity, vector<double>& dHeat,
+                                   const vector<double>& temp, const string& dir_name,
+                                   const vector<int>& rank_to_write,
+                                   size_t n_anneal, size_t n_measure,
+                                   double curr_accept, int swap_accept,
+                                   size_t swap_rate, int overrelaxation_flag,
+                                   size_t probe_rate) {
+        // Compute heat capacity
+        tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double curr_heat_capacity = get<0>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        double curr_dHeat = get<1>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        
+        // Gather to root
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
+        // Report statistics
+        double total_steps = n_anneal + n_measure;
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp 
+             << " with local acceptance rate: " << curr_accept / total_steps * overrelaxation_flag 
+             << " Swap Acceptance rate: " << double(swap_accept) / total_steps * swap_rate * overrelaxation_flag << endl;
+        
+        // Save results if requested
         if (!dir_name.empty()) {
-            for (const auto& r : rank_to_write) {
-                if (rank == r) {
+            filesystem::create_directory(dir_name);
+            
+            // Save per-rank data
+            for (int write_rank : rank_to_write) {
+                if (rank == write_rank) {
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    
-                    // Write twist angle history
-                    ofstream twist_file(dir_name + "/twist_history" + to_string(rank) + ".txt");
-                    for (const auto& angles : twist_history) {
-                        twist_file << angles[0] << " " << angles[1] << " " << angles[2] << "\n";
-                    }
                 }
             }
             
+            // Save global data from root
             if (rank == 0) {
                 write_to_file_pos(dir_name + "/pos.txt");
                 
-                ofstream myfile(dir_name + "/heat_capacity.txt");
+                ofstream heat_file(dir_name + "/heat_capacity.txt", ios::app);
                 for (size_t j = 0; j < size; ++j) {
-                    myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << "\n";
+                    heat_file << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
                 }
+                heat_file.close();
             }
         }
     }
+    void parallel_tempering_tbc(vector<double> temp, size_t n_anneal, size_t n_measure, 
+                                size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, 
+                                size_t twist_update_rate, string dir_name, const vector<int> rank_to_write, 
+                                bool gaussian_move = true) {
+        
+        // Initialize MPI
+        int initialized;
+        MPI_Initialized(&initialized);
+        if (!initialized) {
+            MPI_Init(NULL, NULL);
+        }
+        
+        int rank, size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        
+        // Set up random seed
+        srand(time(NULL));
+        seed_lehman((rand() + rank * 1000) * 2 + 1);
+        
+        // Initialize variables
+        double curr_Temp = temp[rank];
+        double sigma = 1000.0;
+        int swap_accept = 0;
+        double curr_accept = 0;
+        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
+        
+        vector<double> heat_capacity, dHeat;
+        if (rank == 0) {
+            heat_capacity.resize(size);
+            dHeat.resize(size);
+        }
+        
+        vector<double> energies;
+        vector<array<double, N>> magnetizations;
+        vector<double> autocorr;  // Store for later file output
+        
+        cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
+        
+        // ===== Equilibration Phase with Twist Updates =====
+        cout << "Rank " << rank << ": Starting equilibration..." << endl;
+        for (size_t i = 0; i < n_anneal; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Update twist matrices periodically
+            if (twist_update_rate > 0 && i % twist_update_rate == 0) {
+                metropolis_twist_sweep(curr_Temp);
+            }
+            
+            // Attempt replica exchange with twist matrix exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange_tbc(rank, size, temp, curr_Temp, i / swap_rate);
+            }
+        }
+        
+        cout << "Rank " << rank << ": Equilibration complete. Computing autocorrelation time..." << endl;
+        
+        // ===== Autocorrelation Analysis with Twist Updates =====
+        probe_rate = estimate_sampling_interval_tbc(curr_Temp, gaussian_move, sigma, 
+                                                     overrelaxation_rate, n_measure, probe_rate, 
+                                                     twist_update_rate, rank, autocorr);
+        
+        // ===== Main Measurement Phase =====
+        cout << "Rank " << rank << ": Starting measurement phase..." << endl;
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Update twist matrices periodically
+            if (twist_update_rate > 0 && i % twist_update_rate == 0) {
+                metropolis_twist_sweep(curr_Temp);
+            }
+            
+            // Attempt replica exchange with twist matrix exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange_tbc(rank, size, temp, curr_Temp, i / swap_rate);
+            }
+            
+            // Sample observables
+            if (i % probe_rate == 0) {
+                double E = total_energy(spins);
+                energies.push_back(E);
+                magnetizations.push_back(magnetization_local(spins));
+            }
+        }
+        
+        cout << "Rank " << rank << ": Collected " << energies.size() << " independent samples" << endl;
+        
+        // ===== Compute and Gather Statistics =====
+        gather_and_save_statistics_tbc(rank, size, curr_Temp, energies, magnetizations, 
+                                       heat_capacity, dHeat, temp, dir_name, rank_to_write,
+                                       n_anneal, n_measure, curr_accept, swap_accept, 
+                                       swap_rate, overrelaxation_flag, probe_rate,
+                                       twist_update_rate, autocorr);
+    }
+
+    // Helper: Attempt replica exchange including twist matrices
+    int attempt_replica_exchange_tbc(int rank, int size, const vector<double>& temp, 
+                                     double curr_Temp, size_t swap_parity) {
+        // Determine partner based on checkerboard pattern
+        int partner_rank;
+        if (swap_parity % 2 == 0) {
+            partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
+        } else {
+            partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
+        }
+        
+        if (partner_rank < 0 || partner_rank >= size) {
+            return 0;
+        }
+        
+        // Exchange energies
+        double E = total_energy(spins);
+        double E_partner, T_partner = temp[partner_rank];
+        
+        if (rank < partner_rank) {
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else {
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
+        }
+        
+        // Decide acceptance using Metropolis criterion
+        bool accept = false;
+        if (rank < partner_rank) {
+            double delta = (1.0/curr_Temp - 1.0/T_partner) * (E - E_partner);
+            accept = (delta <= 0) || (random_double_lehman(0, 1) < exp(-delta));
+            MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+        
+        // Exchange configurations and twist matrices if accepted
+        if (accept) {
+            spin_config new_spins;
+            array<array<double, N*N>, 3> new_twist_matrices;
+            
+            if (rank < partner_rank) {
+                // Send spins and twist matrices
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
+                MPI_Recv(&new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            } else {
+                // Receive spins and twist matrices
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
+                MPI_Recv(&new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD);
+            }
+            
+            spins = new_spins;
+            twist_matrices = new_twist_matrices;
+            return 1;
+        }
+        return 0;
+    }
+
+    // Helper: Estimate optimal sampling interval with twist updates
+    size_t estimate_sampling_interval_tbc(double curr_Temp, bool gaussian_move, double& sigma,
+                                          size_t overrelaxation_rate, size_t n_measure, 
+                                          size_t probe_rate, size_t twist_update_rate, int rank,
+                                          vector<double>& autocorr_out) {
+        // Preliminary sampling with twist updates
+        vector<double> prelim_energies;
+        size_t prelim_samples = min(size_t(10000), n_measure / 10);
+        size_t prelim_interval = max(size_t(1), size_t(overrelaxation_rate > 0 ? overrelaxation_rate : 1));
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate);
+            
+            // Include twist updates
+            if (twist_update_rate > 0 && i % twist_update_rate == 0) {
+                metropolis_twist_sweep(curr_Temp);
+            }
+            
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy(spins));
+            }
+        }
+        
+        // Compute autocorrelation
+        AutocorrelationResult acf_result = compute_autocorrelation(prelim_energies, prelim_interval);
+        
+        // Store autocorrelation function for output
+        autocorr_out = acf_result.correlation_function;
+        
+        // Determine effective sampling interval
+        size_t effective_interval = max(acf_result.sampling_interval, probe_rate);
+        
+        cout << "Rank " << rank << ": tau_int = " << acf_result.tau_int 
+             << ", using sampling interval = " << effective_interval << " sweeps" << endl;
+        
+        return effective_interval;
+    }
+
+    // Helper: Gather statistics and save results including twist matrix info
+    void gather_and_save_statistics_tbc(int rank, int size, double curr_Temp,
+                                        const vector<double>& energies,
+                                        const vector<array<double, N>>& magnetizations,
+                                        vector<double>& heat_capacity, vector<double>& dHeat,
+                                        const vector<double>& temp, const string& dir_name,
+                                        const vector<int>& rank_to_write,
+                                        size_t n_anneal, size_t n_measure,
+                                        double curr_accept, int swap_accept,
+                                        size_t swap_rate, int overrelaxation_flag,
+                                        size_t probe_rate, size_t twist_update_rate,
+                                        const vector<double>& autocorr) {
+        // Compute heat capacity
+        tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double curr_heat_capacity = get<0>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        double curr_dHeat = get<1>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        
+        // Gather to root
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
+        // Report statistics
+        double total_steps = n_anneal + n_measure;
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp 
+             << " with local acceptance rate: " << curr_accept / total_steps * overrelaxation_flag 
+             << " Swap Acceptance rate: " << double(swap_accept) / total_steps * swap_rate * overrelaxation_flag << endl;
+        
+        // Save results if requested
+        if (!dir_name.empty()) {
+            filesystem::create_directory(dir_name);
+            
+            // Save per-rank data
+            for (int write_rank : rank_to_write) {
+                if (rank == write_rank) {
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    
+                    // Save autocorrelation info
+                    ofstream acf_file(dir_name + "/autocorr_rank" + to_string(rank) + ".txt");
+                    acf_file << "# Autocorrelation analysis" << endl;
+                    acf_file << "# Temperature = " << curr_Temp << endl;
+                    acf_file << "# Twist update rate = " << twist_update_rate << " sweeps" << endl;
+                    acf_file << "# Sampling interval = " << probe_rate << " sweeps" << endl;
+                    acf_file << "# lag autocorrelation" << endl;
+                    size_t max_output = min(size_t(100), autocorr.size());
+                    for (size_t lag = 0; lag < max_output; ++lag) {
+                        acf_file << lag << " " << autocorr[lag] << endl;
+                    }
+                    acf_file.close();
+                    
+                    // Save twist matrices
+                    save_twist_matrices(dir_name + "/twist_matrices_rank" + to_string(rank) + ".txt");
+                }
+            }
+            
+            // Save global data from root
+            if (rank == 0) {
+                write_to_file_pos(dir_name + "/pos.txt");
+                
+                ofstream heat_file(dir_name + "/heat_capacity.txt", ios::app);
+                for (size_t j = 0; j < size; ++j) {
+                    heat_file << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
+                }
+                heat_file.close();
+            }
+        }
+    }
+
+    // Helper: Save twist matrices to file
+    void save_twist_matrices(const string& filename) {
+        ofstream twist_file(filename);
+        twist_file << "# Twist matrices for each dimension" << endl;
+        for (size_t d = 0; d < 3; ++d) {
+            twist_file << "# Dimension " << d << " (axis: ";
+            for (size_t i = 0; i < N; ++i) {
+                twist_file << rotation_axis[d][i] << " ";
+            }
+            twist_file << ")" << endl;
+            for (size_t i = 0; i < N; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    twist_file << twist_matrices[d][i*N + j] << " ";
+                }
+                twist_file << endl;
+            }
+        }
+        twist_file.close();
+    }
+
 
     void measurement(string toread, double T, size_t n_measure, size_t prob_rate, size_t overrelaxation_rate, bool gaussian_move, const vector<int> rank_to_write , string dir_name){
         vector<double> energies;

@@ -2794,11 +2794,57 @@ def read_field_scan(directory):
             try:
                 h_str = subdir.split('_')[1]
                 h = float(h_str)
-                spin_file = os.path.join(full_path, "0/spin.txt")
-                print(spin_file)
+                best_config_file = os.path.join(full_path, "best_configuration.txt")
+                best_trial = 0
+                # try: 
+                #     with open(best_config_file, 'r') as f:
+                #         lines = f.readlines()
+                #         for line in lines:
+                #             if line.startswith("Trial:"):
+                #                 best_trial = int(line.split(':')[1].strip())
+                #                 break
+                # except:
+                best_energy = float('inf')
+                for dir in os.listdir(full_path):
+                    # Skip non-directory entries and non-numeric directory names
+                    dir_path = os.path.join(full_path, dir)
+                    if not os.path.isdir(dir_path):
+                        continue
+                    try:
+                        trial_num = int(dir)
+                    except ValueError:
+                        # Skip directories that don't have numeric names
+                        continue
+                    
+                    try:
+                        energy_file_path = os.path.join(full_path, dir, "energy_density.txt")
+                        if not os.path.exists(energy_file_path):
+                            print(f"Skipping {energy_file_path}: file does not exist")
+                            continue
+                        energy_file = open(energy_file_path, "r")
+                        energy_string = energy_file.read()
+                        energy_file.close()
+                        energy = float(energy_string.strip().split(":")[1])
+                        # print(trial_num, energy)
+                        if best_energy > energy:
+                            best_energy = energy
+                            best_trial = trial_num 
+                    except (FileNotFoundError, IndexError, ValueError) as e:
+                        # Skip directories that don't have valid energy files
+                        print(f"Skipping trial {trial_num} in {full_path}: {e}")
+                        continue
+
+                # Check if we found any valid trials
+                if best_energy == float('inf'):
+                    print(f"No valid energy files found in {full_path}")
+                    continue
+
+                spin_file = os.path.join(full_path, f"{best_trial}/spin.txt")
+                print(spin_file, best_trial)
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
-                    M_mean = np.mean(M, axis=0)
+                    norm = np.linalg.norm(M[0])
+                    M_mean = np.mean(M, axis=0)/norm
                     # M_stdev = np.std(M, axis=0)
                     h_values.append(h)
                     m_values.append(M_mean)
