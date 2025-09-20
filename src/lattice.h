@@ -1127,6 +1127,12 @@ class lattice
             
             cout << "T=" << fixed << setprecision(6) << T << ", Acceptance=" << fixed << setprecision(6) << acceptance_rate;
             
+            // Mix in deterministic updates when acceptance rate is very low
+            if (acceptance_rate < 0.02) {
+                deterministic_sweep();
+                cout << ", Mixed in deterministic sweep due to low acceptance";
+            }
+            
             // Adaptive sigma adjustment for gaussian moves
             if (gaussian_move && acceptance_rate < 0.5) {
                 sigma = sigma * 0.5 / (1 - acceptance_rate);
@@ -1179,7 +1185,7 @@ class lattice
         perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma, overrelaxation_rate);
         
         // Step 4: Main measurement phase
-        size_t n_samples = 1e4;
+        size_t n_samples = 1e3;
         size_t n_measure = n_samples * acf_result.sampling_interval;
         cout << "Step 3: Collecting " << n_samples << " independent samples..." << endl;
         
@@ -1217,9 +1223,9 @@ class lattice
         
         // Compute specific heat using binning analysis
         std::tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
-        double specific_heat = get<0>(varE) / (T * T * lattice_size) * 2 * k_B * N_A;
-        double specific_heat_error = get<1>(varE) / (T * T * lattice_size) * 2 * k_B * N_A;
-        
+        double specific_heat = get<0>(varE) / (T * T * lattice_size);
+        double specific_heat_error = get<1>(varE) / (T * T * lattice_size);
+
         // Save specific heat
         ofstream heat_file(out_dir + "/specific_heat.txt", ios::app);
         heat_file << T << " " << specific_heat << " " << specific_heat_error << endl;
@@ -1382,6 +1388,209 @@ class lattice
         cout << "Starting simulated annealing with zigzag initial configuration." << endl;
         // Call the existing simulated annealing method
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
+    }
+
+    // Generate optimal temperature ladder based on round-trip time optimization
+    vector<double> generate_optimal_temperature_ladder(double T_min, double T_max, size_t n_temps,
+                                                       size_t n_test_sweeps = 10000,
+                                                       size_t n_swaps_per_test = 100) {
+        cout << "Generating optimal temperature ladder from T=" << T_min << " to T=" << T_max 
+             << " with " << n_temps << " temperatures" << endl;
+        
+        // Start with geometric spacing as initial guess
+        vector<double> temps(n_temps);
+        double ratio = pow(T_max / T_min, 1.0 / (n_temps - 1));
+        for (size_t i = 0; i < n_temps; ++i) {
+            temps[i] = T_min * pow(ratio, i);
+        }
+        
+        // Iteratively optimize based on acceptance rates
+        size_t max_iterations = 10;
+        for (size_t iter = 0; iter < max_iterations; ++iter) {
+            cout << "Optimization iteration " << iter + 1 << "/" << max_iterations << endl;
+            
+            // Estimate swap acceptance rates between adjacent temperatures
+            vector<double> swap_rates(n_temps - 1);
+            for (size_t i = 0; i < n_temps - 1; ++i) {
+                swap_rates[i] = estimate_swap_acceptance(temps[i], temps[i+1], n_test_sweeps);
+                cout << "  T[" << i << "]=" << temps[i] << " <-> T[" << i+1 << "]=" << temps[i+1] 
+                     << " : acceptance = " << swap_rates[i] << endl;
+            }
+            
+            // Check if all rates are in acceptable range (0.2 - 0.8)
+            bool all_good = true;
+            for (double rate : swap_rates) {
+                if (rate < 0.2 || rate > 0.8) {
+                    all_good = false;
+                    break;
+                }
+            }
+            if (all_good) {
+                cout << "Temperature ladder optimized successfully!" << endl;
+                break;
+            }
+            
+            // Adjust temperatures based on swap rates
+            vector<double> new_temps(n_temps);
+            new_temps[0] = T_min;
+            new_temps[n_temps-1] = T_max;
+            
+            for (size_t i = 1; i < n_temps - 1; ++i) {
+                // Adjust based on neighboring swap rates
+                double left_rate = swap_rates[i-1];
+                double right_rate = swap_rates[i];
+                
+                // Move temperature to balance swap rates
+                double adjustment = 0.0;
+                if (left_rate < 0.3 && right_rate < 0.3) {
+                    // Both rates too low, need bigger gap
+                    adjustment = 0.1 * (temps[i+1] - temps[i-1]);
+                } else if (left_rate > 0.7 && right_rate > 0.7) {
+                    // Both rates too high, need smaller gap
+                    adjustment = -0.05 * (temps[i+1] - temps[i-1]);
+                } else if (left_rate < right_rate - 0.2) {
+                    // Left rate too low, move closer to left neighbor
+                    adjustment = -0.05 * (temps[i] - temps[i-1]);
+                } else if (right_rate < left_rate - 0.2) {
+                    // Right rate too low, move closer to right neighbor
+                    adjustment = 0.05 * (temps[i+1] - temps[i]);
+                }
+                
+                new_temps[i] = temps[i] + adjustment;
+                // Ensure monotonicity
+                new_temps[i] = max(new_temps[i], temps[i-1] * 1.01);
+                new_temps[i] = min(new_temps[i], temps[i+1] * 0.99);
+            }
+            
+            temps = new_temps;
+        }
+        
+        // Final round-trip time estimation
+        double round_trip_time = estimate_round_trip_time(temps, n_swaps_per_test);
+        cout << "Estimated round-trip time: " << round_trip_time << " swap attempts" << endl;
+        
+        return temps;
+    }
+    
+    // Estimate swap acceptance rate between two temperatures
+    double estimate_swap_acceptance(double T1, double T2, size_t n_test_sweeps) {
+        // Create temporary configurations at each temperature
+        spin_config config1 = spins;
+        spin_config config2 = spins;
+        
+        // Equilibrate at respective temperatures
+        double sigma = 1000;
+        for (size_t i = 0; i < n_test_sweeps / 2; ++i) {
+            metropolis(config1, T1, false, sigma);
+            metropolis(config2, T2, false, sigma);
+        }
+        
+        // Test swap acceptance
+        size_t n_attempts = n_test_sweeps / 2;
+        size_t n_accepted = 0;
+        
+        for (size_t i = 0; i < n_attempts; ++i) {
+            // Evolve configurations
+            metropolis(config1, T1, false, sigma);
+            metropolis(config2, T2, false, sigma);
+            
+            // Calculate energies
+            double E1 = total_energy(config1);
+            double E2 = total_energy(config2);
+            
+            // Metropolis criterion for swap
+            double delta = (1.0/T1 - 1.0/T2) * (E1 - E2);
+            if (delta <= 0 || random_double_lehman(0, 1) < exp(-delta)) {
+                // Swap accepted
+                swap(config1, config2);
+                n_accepted++;
+            }
+        }
+        
+        return double(n_accepted) / double(n_attempts);
+    }
+    
+    // Estimate round-trip time using a random walker
+    double estimate_round_trip_time(const vector<double>& temps, size_t n_swaps) {
+        size_t n_temps = temps.size();
+        if (n_temps < 2) return 0;
+        
+        // Track round trips from lowest to highest temperature and back
+        size_t round_trips = 0;
+        size_t total_swaps = 0;
+        size_t walker_position = 0; // Start at lowest temperature
+        bool going_up = true;
+        
+        // Create configurations at each temperature
+        vector<spin_config> configs(n_temps);
+        for (size_t i = 0; i < n_temps; ++i) {
+            configs[i] = spins;
+            // Quick equilibration
+            double sigma = 1000;
+            for (size_t j = 0; j < 100; ++j) {
+                metropolis(configs[i], temps[i], false, sigma);
+            }
+        }
+        
+        // Simulate replica exchange dynamics
+        for (size_t swap_attempt = 0; swap_attempt < n_swaps * n_temps; ++swap_attempt) {
+            // Evolve all replicas
+            double sigma = 1000;
+            for (size_t i = 0; i < n_temps; ++i) {
+                metropolis(configs[i], temps[i], false, sigma);
+            }
+            
+            // Attempt swaps (alternating even/odd pairs)
+            bool even_pairs = (swap_attempt % 2 == 0);
+            for (size_t i = even_pairs ? 0 : 1; i + 1 < n_temps; i += 2) {
+                double E1 = total_energy(configs[i]);
+                double E2 = total_energy(configs[i+1]);
+                double delta = (1.0/temps[i] - 1.0/temps[i+1]) * (E1 - E2);
+                
+                if (delta <= 0 || random_double_lehman(0, 1) < exp(-delta)) {
+                    // Swap accepted - track walker movement
+                    if (walker_position == i) {
+                        walker_position = i + 1;
+                        if (walker_position == n_temps - 1 && going_up) {
+                            going_up = false;
+                        }
+                    } else if (walker_position == i + 1) {
+                        walker_position = i;
+                        if (walker_position == 0 && !going_up) {
+                            round_trips++;
+                            going_up = true;
+                        }
+                    }
+                    swap(configs[i], configs[i+1]);
+                }
+            }
+            
+            total_swaps++;
+            if (round_trips >= 5) break; // Stop after observing a few round trips
+        }
+        
+        if (round_trips > 0) {
+            return double(total_swaps) / double(round_trips);
+        } else {
+            return INFINITY; // No round trips observed
+        }
+    }
+    
+    // Convenience function to generate and save temperature ladder
+    void generate_and_save_temperature_ladder(double T_min, double T_max, size_t n_temps,
+                                             const string& filename = "temperature_ladder.txt") {
+        vector<double> temps = generate_optimal_temperature_ladder(T_min, T_max, n_temps);
+        
+        // Save to file
+        ofstream file(filename);
+        file << "# Optimized temperature ladder for parallel tempering" << endl;
+        file << "# Index Temperature" << endl;
+        for (size_t i = 0; i < temps.size(); ++i) {
+            file << i << " " << temps[i] << endl;
+        }
+        file.close();
+        
+        cout << "Temperature ladder saved to " << filename << endl;
     }
 
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, 

@@ -2788,6 +2788,8 @@ def read_field_scan(directory):
     h_values = []
     m_values = []
     m_stds = []
+    e_values = []
+    e_stds = []
     for subdir in sorted(os.listdir(directory)):
         full_path = os.path.join(directory, subdir)
         if os.path.isdir(full_path) and subdir.startswith("h_"):
@@ -2795,7 +2797,9 @@ def read_field_scan(directory):
             h = float(h_str)
             print(f"Processing field strength directory: {full_path} h = {h}")
             M_mean = np.zeros(3)
-            M_stdev = np.zeros(3)
+            M_var = np.zeros(3)
+            E_mean = 0.0
+            E_var = 0.0
             count = 0
             for dir in os.listdir(full_path):
                 # Skip non-directory entries and non-numeric directory names
@@ -2803,12 +2807,36 @@ def read_field_scan(directory):
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
                     M_mean += np.mean(M, axis=0)
-                    M_stdev += np.std(M, axis=0)
+                    M_var += np.var(M, axis=0)
                     count += 1
-            h_values.append(h)
-            m_values.append(M_mean/count*2)
-            m_stds.append(M_stdev/count*4)
+                e_file = os.path.join(full_path, dir, "energy.txt")
+                if os.path.exists(e_file):
+                    E = np.loadtxt(e_file)/(24*24*2)
+                    E_mean += np.mean(E)
+                    E_var += np.var(E)
+            if count != 0:
+                h_values.append(h)
+                m_values.append(M_mean/count)
+                m_stds.append(np.sqrt(M_var/count))
+                e_values.append(E_mean/count)
+                e_stds.append(np.sqrt(E_var/count))
 
+            # M_best = np.zeros(3)
+            # E_best = float("inf")
+            # for dir in os.listdir(full_path):
+            #     # Skip non-directory entries and non-numeric directory names
+            #     spin_file = os.path.join(full_path, dir, "local_magnetization.txt")
+            #     e_file = os.path.join(full_path, dir, "energy.txt")
+            #     if os.path.exists(e_file):
+            #         if E_best > np.mean(np.loadtxt(e_file))/(24*24*2):
+            #             E_best = np.mean(np.loadtxt(e_file))/(24*24*2)
+            #             if os.path.exists(spin_file):
+            #                 M_best = np.mean(np.loadtxt(spin_file), axis=0)
+            # h_values.append(h)
+            # m_values.append(M_best)
+            # m_stds.append([0.0, 0.0, 0.0])
+            # e_values.append(E_best)
+            # e_stds.append(0.0)
     if not h_values:
         print(f"No magnetization data found in {directory}")
         return
@@ -2821,9 +2849,9 @@ def read_field_scan(directory):
 
     # Save magnetization as a function of h
     # output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
-    output_data = np.c_[h_values_sorted, m_values_sorted]
+    output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
     output_filename = os.path.join(directory, "magnetization_vs_field.txt")
-    np.savetxt(output_filename, output_data, header="h Mx My Mz", fmt='%f %f %f %f')
+    np.savetxt(output_filename, output_data, header="h Mx My Mz dMx dMy dMz", fmt='%f %f %f %f %f %f %f')
 
     plt.figure(figsize=(10, 6))
     plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
@@ -2838,6 +2866,24 @@ def read_field_scan(directory):
     plt.title(f"Magnetization vs. Field Strength in {os.path.basename(directory)}")
     plt.grid(True)
     plt.savefig(os.path.join(directory, "magnetization_vs_field.pdf"))
+    plt.clf()
+    plt.close()
+
+    e_values_sorted = np.array(e_values)[sorted_indices]
+    e_stds_sorted = np.array(e_stds)[sorted_indices]
+
+    output_data = np.c_[h_values_sorted, e_values_sorted, e_stds_sorted]
+    output_filename = os.path.join(directory, "energy_vs_field.txt")
+    np.savetxt(output_filename, output_data, header="h E dE", fmt='%f %f %f')
+
+    plt.figure(figsize=(10, 6))
+    plt.errorbar(h_values_sorted, e_values_sorted, yerr=e_stds_sorted, fmt='-o', label='E')
+    plt.xlabel("Field Strength (h)")
+    plt.ylabel("Energy per Site (E)")
+    plt.legend(["E"], loc='upper right')
+    plt.title(f"Energy vs. Field Strength in {os.path.basename(directory)}")
+    plt.grid(True)
+    plt.savefig(os.path.join(directory, "energy_vs_field.pdf"))
     plt.clf()
     plt.close()
     
