@@ -25,6 +25,7 @@ struct SimulationParams {
     },{
         1,0,0, 0,1,0, 0,0,1
     }}};
+    bool tbc = false; // Whether to apply twist boundary conditions
 };
 
 SimulationParams read_parameters(const string& filename) {
@@ -95,6 +96,15 @@ SimulationParams read_parameters(const string& filename) {
                     twist_row_found[idx] = true;
                 }
             }
+            else if (key == "tbc") {
+                if (value == "1" || value == "true" || value == "True") {
+                    params.tbc = true;
+                } else if (value == "0" || value == "false" || value == "False") {
+                    params.tbc = false;
+                } else {
+                    cout << "Warning: Invalid value for tbc; expected 0/1 or true/false. Keeping default (" << (params.tbc ? "true" : "false") << ").\n";
+                }
+            }
         }
     }
     
@@ -137,7 +147,7 @@ void create_default_parameter_file(const string& filename) {
 }
 
 
-void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool field_scan = false){
+void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool field_scan = false, bool tbc = false) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -226,17 +236,20 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 36, 36, 1> MC(&atoms, 0.5, true);
-        MC.simulated_annealing(5, 1e-2, 1e5, 10, true, false, 0.9, dir +"/"+std::to_string(i), true);
-        // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
-        // Additional sweeps for convergence
-        // for (size_t k = 0; k < 1e2; ++k) {
-        //     MC.deterministic_sweep();
-        // }
-        // MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
-        // Save the final configuration
-        // MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);
-        // Calculate and save the energy density
+        lattice<3, 2, 36, 36, 1> MC(&atoms, 1, true);
+        auto SA_params = MC.tune_simulated_annealing(0.5, 20.0);
+        {
+            std::ostringstream oss;
+            oss.setf(std::ios::fixed);
+            oss.precision(10);
+            oss << "Process " << rank << " Trial " << i
+            << " SA params: T_start=" << SA_params.T_start
+            << ", T_end=" << SA_params.T_end
+            << ", sweeps_per_temp=" << SA_params.sweeps_per_temp
+            << ", cooling_rate=" << SA_params.cooling_rate << "\n";
+            cout << oss.str();
+        }
+        MC.simulated_annealing(SA_params.T_start, SA_params.T_end, SA_params.sweeps_per_temp*100, 20, tbc, false, SA_params.cooling_rate, dir +"/"+std::to_string(i), true);
         double energy_density = MC.energy_density(MC.spins);
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";
@@ -319,7 +332,11 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         }
     }
     
-    MPI_Barrier(MPI_COMM_WORLD);
+    // Only call barrier if not in field_scan mode
+    // In field_scan mode, the barrier should be called in magnetic_field_scan function
+    if (!field_scan) {
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
 }
 
 void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr){
@@ -467,7 +484,7 @@ void F_scan(size_t num_steps, double h_start, double h_end, double F_start, doub
 
 void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
                         double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
-                        double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr) {
+                        double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool tbc = false) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -487,8 +504,11 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         string subdir = dir + "/h_" + to_string(h);
         // Each process runs the simulation for its assigned 'h' value, with one trial.
         std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
-        sim_BCAO_honeycomb(10, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
+        sim_BCAO_honeycomb(20, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true, tbc);
     }
+    
+    // Synchronize all processes after field scan is complete
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 int main(int argc, char** argv) {
@@ -566,7 +586,7 @@ int main(int argc, char** argv) {
     if (do_field_scan) {
         magnetic_field_scan(params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
-                            params.J3xy, params.J3z, custom_twist_ptr);
+                            params.J3xy, params.J3z, custom_twist_ptr, params.tbc);
     } else if (do_f_scan){
         F_scan(params.num_steps, params.h_start, params.h_end, 0, -1, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.G,
