@@ -1543,81 +1543,58 @@ class lattice
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
 
-    // Feedback-optimized temperature ladder (round-trip based, single-process calibration)
-    // Trebst et al., PRL 96, 220201 (2006): place temperatures so that the
-    // replica-flow fraction f(i) is linear along the ladder. Implementation uses
-    // visit-based estimate of f(i) and density η ∝ 1/sqrt(f(1-f)) to redistribute betas.
+    // Optimize temperature ladder for parallel tempering using round-trip feedback (Trebst et al., PRL 96, 220201)
+    // Returns a vector of temperatures (ascending) that maximize replica diffusion.
     vector<double> optimize_temperature_ladder_roundtrip(
         double Tmin, double Tmax, size_t R,
-        size_t warmup_sweeps = 200,         // per temperature, pre-equilibration
-        size_t sweeps_per_iter = 200,       // per feedback iteration
-        size_t feedback_iters = 10,         // number of feedback rounds
+        size_t warmup_sweeps = 200,
+        size_t sweeps_per_iter = 200,
+        size_t feedback_iters = 10,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0)
     {
-        if (R < 3) {
-            // need at least 3 temperatures to make sense
-            return {Tmin, Tmax};
-        }
+        if (R < 3) return {Tmin, Tmax};
 
-        auto linspace = [](double a, double b, size_t n){
+        auto linspace = [](double a, double b, size_t n) {
             vector<double> v(n);
             if (n == 1) { v[0] = a; return v; }
-            for (size_t i = 0; i < n; ++i) v[i] = a + (b - a) * double(i) / double(n - 1);
+            for (size_t i = 0; i < n; ++i)
+                v[i] = a + (b - a) * double(i) / double(n - 1);
             return v;
         };
 
-        // Initialize ladder (linear in inverse temperature for better first guess)
-        vector<double> beta(R);
-        {
-            double bmin = 1.0 / Tmax;
-            double bmax = 1.0 / Tmin;
-            vector<double> blin = linspace(bmin, bmax, R);
-            for (size_t i = 0; i < R; ++i) beta[i] = blin[i];
-        }
-        auto temps_from_beta = [](const vector<double>& b){
+        // Initial inverse temperature grid (linear in beta)
+        vector<double> beta = linspace(1.0 / Tmax, 1.0 / Tmin, R);
+
+        auto temps_from_beta = [](const vector<double>& b) {
             vector<double> t(b.size());
             for (size_t i = 0; i < b.size(); ++i) t[i] = 1.0 / b[i];
             return t;
         };
 
-        // Replica storage (config-per-replica)
-        vector<spin_config> reps(R);
-        // Start all replicas from current state, then warm up per temperature
-        for (size_t k = 0; k < R; ++k) {
-            reps[k] = spins;
-        }
-
-        // Map "slot k (temperature index) -> replica id"
+        // Replica configs and mapping
+        vector<spin_config> reps(R, spins);
         vector<size_t> rep_at(R);
         iota(rep_at.begin(), rep_at.end(), 0);
 
-        // Warm-up sweeps
+        // Warmup
         double dummy_acc = 0.0;
         for (size_t k = 0; k < R; ++k) {
             spins = reps[rep_at[k]];
             double Tk = 1.0 / beta[k];
-            perform_mc_sweeps(warmup_sweeps, Tk, gaussian_move, /*sigma*/dummy_acc /*unused holder*/,
-                                overrelaxation_rate, nullptr);
+            perform_mc_sweeps(warmup_sweeps, Tk, gaussian_move, dummy_acc, overrelaxation_rate, nullptr);
             reps[rep_at[k]] = spins;
         }
 
-        // Each replica carries a "direction" label (+1 means last seen at cold end, moving up;
-        // -1 means last seen at hot end, moving down). Used to estimate f(i).
         vector<int8_t> dir_rep(R, +1);
-        // Count round-trips per replica
         vector<size_t> rt_count(R, 0);
 
-        // Feedback iterations
         for (size_t it = 0; it < feedback_iters; ++it) {
             vector<size_t> visits(R, 0), visits_up(R, 0);
-
-            // Simple local sigma used by gaussian_move if enabled (auto-tuned elsewhere)
             double sigma = 1000.0;
 
-            // Perform diffusion and swaps; collect visit stats
             for (size_t sweep = 0; sweep < sweeps_per_iter; ++sweep) {
-                // Local updates at each temperature slot
+                // Local moves
                 for (size_t k = 0; k < R; ++k) {
                     size_t r = rep_at[k];
                     spins = reps[r];
@@ -1625,27 +1602,23 @@ class lattice
                     double acc = 0.0;
                     perform_mc_sweeps(1, Tk, gaussian_move, sigma, overrelaxation_rate, &acc);
                     reps[r] = spins;
-
-                    visits[k] += 1;
-                    if (dir_rep[r] > 0) visits_up[k] += 1;
+                    visits[k]++;
+                    if (dir_rep[r] > 0) visits_up[k]++;
                 }
 
-                // Compute energies per slot (configs currently in slots)
+                // Energies for swaps
                 vector<double> Eslot(R, 0.0);
                 for (size_t k = 0; k < R; ++k) {
                     spins = reps[rep_at[k]];
                     Eslot[k] = total_energy(spins);
                 }
 
-                // Neighbor exchanges (checkerboard)
+                // Neighbor swaps (checkerboard)
                 for (int parity = 0; parity < 2; ++parity) {
                     for (size_t k = parity; k + 1 < R; k += 2) {
-                        size_t r1 = rep_at[k];
-                        size_t r2 = rep_at[k + 1];
+                        size_t r1 = rep_at[k], r2 = rep_at[k + 1];
                         double b1 = beta[k], b2 = beta[k + 1];
                         double E1 = Eslot[k], E2 = Eslot[k + 1];
-
-                        // Metropolis criterion for swapping configs between fixed temperatures
                         double delta = (b1 - b2) * (E2 - E1);
                         bool accept = (delta <= 0.0) || (random_double_lehman(0, 1) < exp(-delta));
                         if (accept) {
@@ -1655,7 +1628,7 @@ class lattice
                     }
                 }
 
-                // Update direction labels at the boundaries and count round-trips
+                // Update direction labels and round-trip count
                 if (rep_at[0] < R) {
                     size_t r0 = rep_at[0];
                     if (dir_rep[r0] < 0) { dir_rep[r0] = +1; rt_count[r0]++; }
@@ -1668,13 +1641,12 @@ class lattice
                 }
             }
 
-            // Compute flow fraction f(k) = visits_up / visits
+            // Compute flow fraction f(k)
             vector<double> f(R, 0.0);
-            for (size_t k = 0; k < R; ++k) {
+            for (size_t k = 0; k < R; ++k)
                 if (visits[k] > 0) f[k] = double(visits_up[k]) / double(visits[k]);
-            }
 
-            // Build density η(β) ∝ 1/sqrt(f(1-f)) and redistribute β using cumulative integral
+            // Density eta(beta) ~ 1/sqrt(f(1-f))
             const double eps = 1e-6;
             vector<double> w(R, 0.0);
             for (size_t k = 0; k < R; ++k) {
@@ -1682,7 +1654,7 @@ class lattice
                 w[k] = 1.0 / sqrt(fk * (1.0 - fk));
             }
 
-            // Current β-grid cumulative "arc-length" under density w
+            // Cumulative arc-length S
             vector<double> S(R, 0.0);
             for (size_t k = 1; k < R; ++k) {
                 double db = beta[k] - beta[k - 1];
@@ -1690,19 +1662,19 @@ class lattice
             }
             double Stot = (R > 1) ? S.back() : 1.0;
             if (Stot <= eps) {
-                // Degenerate stats; fall back to linear-in-beta
+                // Fallback: linear in beta
                 double bmin = beta.front(), bmax = beta.back();
-                for (size_t k = 0; k < R; ++k) beta[k] = bmin + (bmax - bmin) * double(k) / double(R - 1);
+                for (size_t k = 0; k < R; ++k)
+                    beta[k] = bmin + (bmax - bmin) * double(k) / double(R - 1);
                 continue;
             }
 
-            // Target uniform S-grid; invert S(β) by linear interpolation
+            // Invert S to get new beta grid
             vector<double> beta_new(R);
             beta_new.front() = beta.front();
-            beta_new.back()  = beta.back();
+            beta_new.back() = beta.back();
             for (size_t i = 1; i + 1 < R; ++i) {
                 double Si = S.back() * double(i) / double(R - 1);
-                // find k with S[k] <= Si <= S[k+1]
                 auto itS = upper_bound(S.begin(), S.end(), Si);
                 size_t k1 = (itS == S.begin()) ? 0 : size_t(itS - S.begin() - 1);
                 size_t k2 = min(k1 + 1, R - 1);
@@ -1710,27 +1682,29 @@ class lattice
                 beta_new[i] = beta[k1] + t * (beta[k2] - beta[k1]);
             }
 
-            // Enforce monotonicity and minimal spacing
-            for (size_t i = 1; i < R; ++i) {
-                if (!(beta_new[i] > beta_new[i - 1])) {
+            // Enforce monotonicity
+            for (size_t i = 1; i < R; ++i)
+                if (!(beta_new[i] > beta_new[i - 1]))
                     beta_new[i] = nextafter(beta_new[i - 1], numeric_limits<double>::infinity());
-                }
-            }
             beta.swap(beta_new);
 
-            // Report progress
+            // Progress report
             double rt_sum = 0.0;
             for (size_t r = 0; r < R; ++r) rt_sum += double(rt_count[r]);
             double mean_rt = rt_sum / double(R) / double(max<size_t>(1, sweeps_per_iter));
-            cout << "[RoundTrip-PT] iter=" << it+1
-                    << " mean_roundtrips_per_sweep=" << mean_rt
-                    << " Tmin=" << 1.0 / beta.back()
-                    << " Tmax=" << 1.0 / beta.front() << endl;
+            auto old_flags = cout.flags();
+            std::streamsize old_prec = cout.precision();
+            cout.setf(std::ios::fixed, std::ios::floatfield);
+            cout << setprecision(6)
+                 << "[RoundTrip-PT] iter=" << it + 1
+                 << " mean_roundtrips_per_sweep=" << mean_rt
+                 << " Tmin=" << 1.0 / beta.back()
+                 << " Tmax=" << 1.0 / beta.front() << endl;
+            cout.flags(old_flags);
+            cout.precision(old_prec);
         }
 
-        // Return temperatures (ascending)
         vector<double> T = temps_from_beta(beta);
-        // Ensure ascending order
         sort(T.begin(), T.end());
         return T;
     }
@@ -1848,9 +1822,9 @@ class lattice
     vector<double> autotune_temperature_ladder(
         double Tmin_init, double Tmax_init, size_t R_init,
         // Targets and limits
-        double acc_lo = 0.15, double acc_hi = 0.5,
-        double target_roundtrip_per_sweep = 5e-4,
-        size_t R_min = 3, size_t R_max = 1024,
+        double acc_lo = 0.05, double acc_hi = 0.7,
+        double target_roundtrip_per_sweep = 5e-3,
+        size_t R_min = 24, size_t R_max = 192,
         // Work parameters
         size_t outer_iters = 8,
         size_t warmup_sweeps = 200,
@@ -1858,7 +1832,7 @@ class lattice
         size_t fb_iters = 6,
         size_t pilot_sweeps = 1000,
         bool gaussian_move = false,
-        size_t overrelaxation_rate = 0)
+        size_t overrelaxation_rate = 20)
     {
         double Tmin = Tmin_init, Tmax = Tmax_init;
         size_t R = max(R_min, min(R_init, R_max));

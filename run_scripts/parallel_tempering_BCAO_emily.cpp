@@ -324,7 +324,7 @@ void generate_optimal_ladder(const SimulationParams& params){
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     lattice<3, 2, 24, 24, 1> MC = set_up_MC_runs<3, 2, 24, 24, 1>(params);
     MPI_Barrier(MPI_COMM_WORLD);
-    vector<double> temps = MC.optimize_temperature_ladder_roundtrip(params.T_start, params.T_end, size);
+    vector<double> temps = MC.autotune_temperature_ladder(params.T_start, params.T_end, 96);
     if (rank == 0) {
         cout << "Optimized temperature ladder for " << size << " replicas:\n";
         for (double T : temps) {
@@ -489,7 +489,7 @@ int main(int argc, char** argv) {
     double t_total_program = MPI_Wtime();
     const array<double, 3> c_axis = {{0,0,1}};
     
-    if (field_scan || magnetotropic) {
+    if (field_scan || magnetotropic || temp_ladder_only) {
         params.num_trials = 1; // Force single trial in field-scan mode
     }
 
