@@ -1722,10 +1722,16 @@ class lattice
             double rt_sum = 0.0;
             for (size_t r = 0; r < R; ++r) rt_sum += double(rt_count[r]);
             double mean_rt = rt_sum / double(R) / double(max<size_t>(1, sweeps_per_iter));
-            cout << "[RoundTrip-PT] iter=" << it+1
-                    << " mean_roundtrips_per_sweep=" << mean_rt
-                    << " Tmin=" << 1.0 / beta.back()
-                    << " Tmax=" << 1.0 / beta.front() << endl;
+            {
+                ios oldState(nullptr);
+                oldState.copyfmt(cout);
+                cout << "[RoundTrip-PT] iter=" << (it + 1)
+                     << " mean_roundtrips_per_sweep=" << scientific << setprecision(6) << mean_rt
+                     << " Tmin=" << fixed << setprecision(8) << (1.0 / beta.back())
+                     << " Tmax=" << (1.0 / beta.front())
+                     << endl;
+                cout.copyfmt(oldState);
+            }
         }
 
         // Return temperatures (ascending)

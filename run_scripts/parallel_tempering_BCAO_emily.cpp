@@ -326,6 +326,11 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
     vector<double> temps = MC.optimize_temperature_ladder_roundtrip(params.T_start, params.T_end, size);
+    if (rank == 0) {
+        cout << "Using temperatures (K): ";
+        for (double T : temps) cout << T << " ";
+        cout << "\n";
+    }
     // Parallel tempering run
     t_step = MPI_Wtime();
     // MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
