@@ -236,8 +236,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 36, 36, 1> MC(&atoms, 1, true);
-        auto SA_params = MC.tune_simulated_annealing(0.5, 20.0);
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
+        auto SA_params = MC.tune_simulated_annealing(0.5, 10.0, false, 20, 1000, 0.7, 0.05);
         {
             std::ostringstream oss;
             oss.setf(std::ios::fixed);
