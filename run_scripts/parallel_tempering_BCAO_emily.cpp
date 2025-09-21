@@ -325,7 +325,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     lattice<3, 2, 60, 60, 1> MC(&atoms, 0.5, true);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
-    vector<double> temps = MC.generate_optimal_temperature_ladder(params.T_start, params.T_end, size);
+    vector<double> temps = MC.optimize_temperature_ladder_roundtrip(params.T_start, params.T_end, size);
     // Parallel tempering run
     t_step = MPI_Wtime();
     // MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
@@ -336,10 +336,6 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
         t_step = MPI_Wtime();
         cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
         MC.write_to_file_spin(params.dir + "/spin.txt", MC.spins);
-        // for (size_t i = 0; i < 1e7; ++i) {
-        //     MC.deterministic_sweep();
-        // }
-        // MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);
         ofstream param_file(params.dir + "/simulation_parameters.txt");
         param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
         param_file << "==========================================\n";

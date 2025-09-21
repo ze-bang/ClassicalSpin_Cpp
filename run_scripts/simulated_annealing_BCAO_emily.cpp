@@ -237,7 +237,19 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
         lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
-        MC.simulated_annealing(10, 0.5, 2e4, 20, tbc, false, 0.9, dir +"/"+std::to_string(i), true);
+        auto SA_params = MC.tune_simulated_annealing(0.5, 20.0);
+        {
+            std::ostringstream oss;
+            oss.setf(std::ios::fixed);
+            oss.precision(10);
+            oss << "Process " << rank << " Trial " << i
+            << " SA params: T_start=" << SA_params.T_start
+            << ", T_end=" << SA_params.T_end
+            << ", sweeps_per_temp=" << SA_params.sweeps_per_temp
+            << ", cooling_rate=" << SA_params.cooling_rate << "\n";
+            cout << oss.str();
+        }
+        MC.simulated_annealing(SA_params.T_start, SA_params.T_end, SA_params.sweeps_per_temp*100, 20, tbc, false, SA_params.cooling_rate, dir +"/"+std::to_string(i), true);
         double energy_density = MC.energy_density(MC.spins);
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";

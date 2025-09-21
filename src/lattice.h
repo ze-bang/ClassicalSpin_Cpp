@@ -29,6 +29,27 @@ struct AutocorrelationResult {
 };
 
 
+// Pilot evaluation of a given ladder T: returns edge acceptance and round-trip rate
+struct LadderEval {
+    double mean_accept = 0.0;
+    double min_accept = 0.0;
+    double roundtrip_rate = 0.0; // per sweep per replica
+    vector<double> edge_accept;  // size R-1
+    size_t sweeps = 0;
+};
+
+
+// Auto-tuning for simulated annealing schedule
+struct SAParams {
+    double T_start = 1.0;
+    double T_end = 1e-3;
+    double cooling_rate = 0.9;
+    size_t sweeps_per_temp = 100;
+    vector<double> probe_T;
+    vector<double> probe_acc;
+    vector<double> probe_tau;
+};
+
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim>
 class lattice
 {   
@@ -1088,6 +1109,138 @@ class lattice
         acf_file.close();
     }
 
+
+    SAParams tune_simulated_annealing(double Tmin_guess = 0.0,
+                                      double Tmax_guess = 0.0,
+                                      bool gaussian_move = false,
+                                      size_t overrelaxation_rate = 0,
+                                      size_t pilot_sweeps = 300,
+                                      double acc_hi_target = 0.7,
+                                      double acc_lo_target = 0.02)
+    {
+        SAParams out;
+        // Backup the state
+        spin_config spins_backup = spins;
+
+        auto probe_once = [&](double T, size_t sweeps, double base_interval,
+                              double& acc_out, double& tau_out) {
+            // Work on a fresh copy of spins for comparability
+            spins = spins_backup;
+
+            double sigma = 1000.0;
+            double acc_sum = 0.0;
+
+            // Warmup
+            perform_mc_sweeps(sweeps / 3, T, gaussian_move, sigma, overrelaxation_rate);
+
+            // Measure acceptance over pilot window
+            size_t measure_sweeps = max<size_t>(sweeps, 50);
+            perform_mc_sweeps(measure_sweeps, T, gaussian_move, sigma, overrelaxation_rate, &acc_sum);
+
+            // Normalize acceptance like the main SA loop does
+            double acc_rate = (overrelaxation_rate > 0)
+                                ? (acc_sum / double(measure_sweeps) * overrelaxation_rate)
+                                : (acc_sum / double(measure_sweeps));
+            acc_out = std::clamp(acc_rate, 0.0, 1.0);
+
+            // Short ACF estimate on energy
+            vector<double> e;
+            e.reserve(measure_sweeps / base_interval + 1);
+            for (size_t i = 0; i < measure_sweeps / 2; ++i) {
+                perform_mc_sweeps(1, T, gaussian_move, sigma, overrelaxation_rate);
+                if (i % size_t(base_interval) == 0) e.push_back(total_energy(spins));
+            }
+            if (e.size() < 5) { tau_out = 1.0; return; }
+            AutocorrelationResult acf = compute_autocorrelation(e, size_t(base_interval));
+            tau_out = std::max(1.0, acf.tau_int);
+        };
+
+        auto energy_converged = [&](double T) {
+            spins = spins_backup;
+            double sigma = 1000.0;
+            double E0 = total_energy(spins);
+            double dE_sum = 0.0;
+            size_t sweeps = 20;
+            for (size_t i = 0; i < sweeps; ++i) {
+                metropolis_with_energy_change(spins, T, gaussian_move, sigma, &dE_sum);
+                if (overrelaxation_rate > 0 && (i % overrelaxation_rate) == 0) overrelaxation();
+            }
+            double En = total_energy(spins);
+            double rel = fabs(En - E0) / (fabs(E0) + 1e-12);
+            double per_sweep = fabs(dE_sum) / (fabs(En) + 1.0) / double(sweeps);
+            return (rel < 1e-5) || (per_sweep < 1e-6);
+        };
+
+        // Calibrate T_start by finding T with high acceptance
+        {
+            double T = (Tmax_guess > 0.0) ? Tmax_guess : 1.0;
+            double acc = 0.0, tau = 1.0;
+            size_t it = 0;
+            // Expand up if needed
+            while (it < 25) {
+                double a = 0.0, t = 1.0;
+                probe_once(T, pilot_sweeps, 10, a, t);
+                out.probe_T.push_back(T); out.probe_acc.push_back(a); out.probe_tau.push_back(t);
+                if (a >= acc_hi_target) { acc = a; tau = t; break; }
+                T *= 1.5;
+                ++it;
+            }
+            if (it == 25) { // fallback
+                acc = out.probe_acc.back();
+                tau = out.probe_tau.back();
+            }
+            // If too high, binary search down to center inside target band
+            double Thigh = (out.probe_T.empty() ? T : out.probe_T.back());
+            double Tlow = Thigh / 100.0;
+            for (size_t k = 0; k < 20; ++k) {
+                double Tmid = 0.5 * (Thigh + Tlow);
+                double a = 0.0, t = 1.0;
+                probe_once(Tmid, pilot_sweeps, 10, a, t);
+                out.probe_T.push_back(Tmid); out.probe_acc.push_back(a); out.probe_tau.push_back(t);
+                if (a >= acc_hi_target) { Thigh = Tmid; acc = a; tau = t; }
+                else { Tlow = Tmid; }
+            }
+            out.T_start = Thigh;
+        }
+
+        // Calibrate T_end by driving acceptance down and checking energy convergence
+        {
+            double T = (Tmin_guess > 0.0 && Tmin_guess < out.T_start) ? Tmin_guess : out.T_start * 1e-3;
+            T = max(T, out.T_start * 1e-6); // guard
+            double acc = 1.0, tau = 1.0;
+            size_t it = 0;
+            // Start near T_start and go down
+            double cur = out.T_start;
+            while (cur > T && it < 40) {
+                double a = 0.0, t = 1.0;
+                probe_once(cur, pilot_sweeps, 10, a, t);
+                out.probe_T.push_back(cur); out.probe_acc.push_back(a); out.probe_tau.push_back(t);
+                if (a <= acc_lo_target && energy_converged(cur)) { acc = a; tau = t; break; }
+                cur *= 0.7;
+                ++it;
+            }
+            if (it == 40) {
+                // fallback to the last probed cur
+            }
+            out.T_end = max(1e-12, min(cur, out.T_start / 1e3));
+        }
+
+        // Choose sweeps_per_temp and cooling_rate from tau(T)
+        double tau_max = 1.0;
+        for (double t : out.probe_tau) tau_max = max(tau_max, t);
+        out.sweeps_per_temp = max<size_t>(100, size_t(10.0 * tau_max));
+
+        // Number of temperature steps
+        size_t K = max<size_t>(50, size_t(10.0 * sqrt(tau_max)));
+        K = min<size_t>(2000, K);
+        out.cooling_rate = pow(out.T_end / out.T_start, 1.0 / double(K));
+        out.cooling_rate = std::clamp(out.cooling_rate, 0.85, 0.995);
+
+        // Restore original spins
+        spins = spins_backup;
+        return out;
+    }
+
     // Main simulated annealing function
     void simulated_annealing(double T_start, double T_end, size_t n_anneal, 
                             size_t overrelaxation_rate, bool boundary_update = false, 
@@ -1390,208 +1543,401 @@ class lattice
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
 
-    // Generate optimal temperature ladder based on round-trip time optimization
-    vector<double> generate_optimal_temperature_ladder(double T_min, double T_max, size_t n_temps,
-                                                       size_t n_test_sweeps = 10000,
-                                                       size_t n_swaps_per_test = 100) {
-        cout << "Generating optimal temperature ladder from T=" << T_min << " to T=" << T_max 
-             << " with " << n_temps << " temperatures" << endl;
-        
-        // Start with geometric spacing as initial guess
-        vector<double> temps(n_temps);
-        double ratio = pow(T_max / T_min, 1.0 / (n_temps - 1));
-        for (size_t i = 0; i < n_temps; ++i) {
-            temps[i] = T_min * pow(ratio, i);
+    // Feedback-optimized temperature ladder (round-trip based, single-process calibration)
+    // Trebst et al., PRL 96, 220201 (2006): place temperatures so that the
+    // replica-flow fraction f(i) is linear along the ladder. Implementation uses
+    // visit-based estimate of f(i) and density η ∝ 1/sqrt(f(1-f)) to redistribute betas.
+    vector<double> optimize_temperature_ladder_roundtrip(
+        double Tmin, double Tmax, size_t R,
+        size_t warmup_sweeps = 200,         // per temperature, pre-equilibration
+        size_t sweeps_per_iter = 200,       // per feedback iteration
+        size_t feedback_iters = 10,         // number of feedback rounds
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0)
+    {
+        if (R < 3) {
+            // need at least 3 temperatures to make sense
+            return {Tmin, Tmax};
         }
-        
-        // Iteratively optimize based on acceptance rates
-        size_t max_iterations = 10;
-        for (size_t iter = 0; iter < max_iterations; ++iter) {
-            cout << "Optimization iteration " << iter + 1 << "/" << max_iterations << endl;
-            
-            // Estimate swap acceptance rates between adjacent temperatures
-            vector<double> swap_rates(n_temps - 1);
-            for (size_t i = 0; i < n_temps - 1; ++i) {
-                swap_rates[i] = estimate_swap_acceptance(temps[i], temps[i+1], n_test_sweeps);
-                cout << "  T[" << i << "]=" << temps[i] << " <-> T[" << i+1 << "]=" << temps[i+1] 
-                     << " : acceptance = " << swap_rates[i] << endl;
-            }
-            
-            // Check if all rates are in acceptable range (0.2 - 0.8)
-            bool all_good = true;
-            for (double rate : swap_rates) {
-                if (rate < 0.2 || rate > 0.8) {
-                    all_good = false;
-                    break;
+
+        auto linspace = [](double a, double b, size_t n){
+            vector<double> v(n);
+            if (n == 1) { v[0] = a; return v; }
+            for (size_t i = 0; i < n; ++i) v[i] = a + (b - a) * double(i) / double(n - 1);
+            return v;
+        };
+
+        // Initialize ladder (linear in inverse temperature for better first guess)
+        vector<double> beta(R);
+        {
+            double bmin = 1.0 / Tmax;
+            double bmax = 1.0 / Tmin;
+            vector<double> blin = linspace(bmin, bmax, R);
+            for (size_t i = 0; i < R; ++i) beta[i] = blin[i];
+        }
+        auto temps_from_beta = [](const vector<double>& b){
+            vector<double> t(b.size());
+            for (size_t i = 0; i < b.size(); ++i) t[i] = 1.0 / b[i];
+            return t;
+        };
+
+        // Replica storage (config-per-replica)
+        vector<spin_config> reps(R);
+        // Start all replicas from current state, then warm up per temperature
+        for (size_t k = 0; k < R; ++k) {
+            reps[k] = spins;
+        }
+
+        // Map "slot k (temperature index) -> replica id"
+        vector<size_t> rep_at(R);
+        iota(rep_at.begin(), rep_at.end(), 0);
+
+        // Warm-up sweeps
+        double dummy_acc = 0.0;
+        for (size_t k = 0; k < R; ++k) {
+            spins = reps[rep_at[k]];
+            double Tk = 1.0 / beta[k];
+            perform_mc_sweeps(warmup_sweeps, Tk, gaussian_move, /*sigma*/dummy_acc /*unused holder*/,
+                                overrelaxation_rate, nullptr);
+            reps[rep_at[k]] = spins;
+        }
+
+        // Each replica carries a "direction" label (+1 means last seen at cold end, moving up;
+        // -1 means last seen at hot end, moving down). Used to estimate f(i).
+        vector<int8_t> dir_rep(R, +1);
+        // Count round-trips per replica
+        vector<size_t> rt_count(R, 0);
+
+        // Feedback iterations
+        for (size_t it = 0; it < feedback_iters; ++it) {
+            vector<size_t> visits(R, 0), visits_up(R, 0);
+
+            // Simple local sigma used by gaussian_move if enabled (auto-tuned elsewhere)
+            double sigma = 1000.0;
+
+            // Perform diffusion and swaps; collect visit stats
+            for (size_t sweep = 0; sweep < sweeps_per_iter; ++sweep) {
+                // Local updates at each temperature slot
+                for (size_t k = 0; k < R; ++k) {
+                    size_t r = rep_at[k];
+                    spins = reps[r];
+                    double Tk = 1.0 / beta[k];
+                    double acc = 0.0;
+                    perform_mc_sweeps(1, Tk, gaussian_move, sigma, overrelaxation_rate, &acc);
+                    reps[r] = spins;
+
+                    visits[k] += 1;
+                    if (dir_rep[r] > 0) visits_up[k] += 1;
                 }
-            }
-            if (all_good) {
-                cout << "Temperature ladder optimized successfully!" << endl;
-                break;
-            }
-            
-            // Adjust temperatures based on swap rates
-            vector<double> new_temps(n_temps);
-            new_temps[0] = T_min;
-            new_temps[n_temps-1] = T_max;
-            
-            for (size_t i = 1; i < n_temps - 1; ++i) {
-                // Adjust based on neighboring swap rates
-                double left_rate = swap_rates[i-1];
-                double right_rate = swap_rates[i];
-                
-                // Move temperature to balance swap rates
-                double adjustment = 0.0;
-                if (left_rate < 0.3 && right_rate < 0.3) {
-                    // Both rates too low, need bigger gap
-                    adjustment = 0.1 * (temps[i+1] - temps[i-1]);
-                } else if (left_rate > 0.7 && right_rate > 0.7) {
-                    // Both rates too high, need smaller gap
-                    adjustment = -0.05 * (temps[i+1] - temps[i-1]);
-                } else if (left_rate < right_rate - 0.2) {
-                    // Left rate too low, move closer to left neighbor
-                    adjustment = -0.05 * (temps[i] - temps[i-1]);
-                } else if (right_rate < left_rate - 0.2) {
-                    // Right rate too low, move closer to right neighbor
-                    adjustment = 0.05 * (temps[i+1] - temps[i]);
+
+                // Compute energies per slot (configs currently in slots)
+                vector<double> Eslot(R, 0.0);
+                for (size_t k = 0; k < R; ++k) {
+                    spins = reps[rep_at[k]];
+                    Eslot[k] = total_energy(spins);
                 }
-                
-                new_temps[i] = temps[i] + adjustment;
-                // Ensure monotonicity
-                new_temps[i] = max(new_temps[i], temps[i-1] * 1.01);
-                new_temps[i] = min(new_temps[i], temps[i+1] * 0.99);
-            }
-            
-            temps = new_temps;
-        }
-        
-        // Final round-trip time estimation
-        double round_trip_time = estimate_round_trip_time(temps, n_swaps_per_test);
-        cout << "Estimated round-trip time: " << round_trip_time << " swap attempts" << endl;
-        
-        return temps;
-    }
-    
-    // Estimate swap acceptance rate between two temperatures
-    double estimate_swap_acceptance(double T1, double T2, size_t n_test_sweeps) {
-        // Create temporary configurations at each temperature
-        spin_config config1 = spins;
-        spin_config config2 = spins;
-        
-        // Equilibrate at respective temperatures
-        double sigma = 1000;
-        for (size_t i = 0; i < n_test_sweeps / 2; ++i) {
-            metropolis(config1, T1, false, sigma);
-            metropolis(config2, T2, false, sigma);
-        }
-        
-        // Test swap acceptance
-        size_t n_attempts = n_test_sweeps / 2;
-        size_t n_accepted = 0;
-        
-        for (size_t i = 0; i < n_attempts; ++i) {
-            // Evolve configurations
-            metropolis(config1, T1, false, sigma);
-            metropolis(config2, T2, false, sigma);
-            
-            // Calculate energies
-            double E1 = total_energy(config1);
-            double E2 = total_energy(config2);
-            
-            // Metropolis criterion for swap
-            double delta = (1.0/T1 - 1.0/T2) * (E1 - E2);
-            if (delta <= 0 || random_double_lehman(0, 1) < exp(-delta)) {
-                // Swap accepted
-                swap(config1, config2);
-                n_accepted++;
-            }
-        }
-        
-        return double(n_accepted) / double(n_attempts);
-    }
-    
-    // Estimate round-trip time using a random walker
-    double estimate_round_trip_time(const vector<double>& temps, size_t n_swaps) {
-        size_t n_temps = temps.size();
-        if (n_temps < 2) return 0;
-        
-        // Track round trips from lowest to highest temperature and back
-        size_t round_trips = 0;
-        size_t total_swaps = 0;
-        size_t walker_position = 0; // Start at lowest temperature
-        bool going_up = true;
-        
-        // Create configurations at each temperature
-        vector<spin_config> configs(n_temps);
-        for (size_t i = 0; i < n_temps; ++i) {
-            configs[i] = spins;
-            // Quick equilibration
-            double sigma = 1000;
-            for (size_t j = 0; j < 100; ++j) {
-                metropolis(configs[i], temps[i], false, sigma);
-            }
-        }
-        
-        // Simulate replica exchange dynamics
-        for (size_t swap_attempt = 0; swap_attempt < n_swaps * n_temps; ++swap_attempt) {
-            // Evolve all replicas
-            double sigma = 1000;
-            for (size_t i = 0; i < n_temps; ++i) {
-                metropolis(configs[i], temps[i], false, sigma);
-            }
-            
-            // Attempt swaps (alternating even/odd pairs)
-            bool even_pairs = (swap_attempt % 2 == 0);
-            for (size_t i = even_pairs ? 0 : 1; i + 1 < n_temps; i += 2) {
-                double E1 = total_energy(configs[i]);
-                double E2 = total_energy(configs[i+1]);
-                double delta = (1.0/temps[i] - 1.0/temps[i+1]) * (E1 - E2);
-                
-                if (delta <= 0 || random_double_lehman(0, 1) < exp(-delta)) {
-                    // Swap accepted - track walker movement
-                    if (walker_position == i) {
-                        walker_position = i + 1;
-                        if (walker_position == n_temps - 1 && going_up) {
-                            going_up = false;
-                        }
-                    } else if (walker_position == i + 1) {
-                        walker_position = i;
-                        if (walker_position == 0 && !going_up) {
-                            round_trips++;
-                            going_up = true;
+
+                // Neighbor exchanges (checkerboard)
+                for (int parity = 0; parity < 2; ++parity) {
+                    for (size_t k = parity; k + 1 < R; k += 2) {
+                        size_t r1 = rep_at[k];
+                        size_t r2 = rep_at[k + 1];
+                        double b1 = beta[k], b2 = beta[k + 1];
+                        double E1 = Eslot[k], E2 = Eslot[k + 1];
+
+                        // Metropolis criterion for swapping configs between fixed temperatures
+                        double delta = (b1 - b2) * (E2 - E1);
+                        bool accept = (delta <= 0.0) || (random_double_lehman(0, 1) < exp(-delta));
+                        if (accept) {
+                            swap(rep_at[k], rep_at[k + 1]);
+                            swap(Eslot[k], Eslot[k + 1]);
                         }
                     }
-                    swap(configs[i], configs[i+1]);
+                }
+
+                // Update direction labels at the boundaries and count round-trips
+                if (rep_at[0] < R) {
+                    size_t r0 = rep_at[0];
+                    if (dir_rep[r0] < 0) { dir_rep[r0] = +1; rt_count[r0]++; }
+                    else { dir_rep[r0] = +1; }
+                }
+                if (rep_at[R - 1] < R) {
+                    size_t rN = rep_at[R - 1];
+                    if (dir_rep[rN] > 0) { dir_rep[rN] = -1; rt_count[rN]++; }
+                    else { dir_rep[rN] = -1; }
                 }
             }
-            
-            total_swaps++;
-            if (round_trips >= 5) break; // Stop after observing a few round trips
+
+            // Compute flow fraction f(k) = visits_up / visits
+            vector<double> f(R, 0.0);
+            for (size_t k = 0; k < R; ++k) {
+                if (visits[k] > 0) f[k] = double(visits_up[k]) / double(visits[k]);
+            }
+
+            // Build density η(β) ∝ 1/sqrt(f(1-f)) and redistribute β using cumulative integral
+            const double eps = 1e-6;
+            vector<double> w(R, 0.0);
+            for (size_t k = 0; k < R; ++k) {
+                double fk = std::clamp(f[k], eps, 1.0 - eps);
+                w[k] = 1.0 / sqrt(fk * (1.0 - fk));
+            }
+
+            // Current β-grid cumulative "arc-length" under density w
+            vector<double> S(R, 0.0);
+            for (size_t k = 1; k < R; ++k) {
+                double db = beta[k] - beta[k - 1];
+                S[k] = S[k - 1] + 0.5 * (w[k] + w[k - 1]) * fabs(db);
+            }
+            double Stot = (R > 1) ? S.back() : 1.0;
+            if (Stot <= eps) {
+                // Degenerate stats; fall back to linear-in-beta
+                double bmin = beta.front(), bmax = beta.back();
+                for (size_t k = 0; k < R; ++k) beta[k] = bmin + (bmax - bmin) * double(k) / double(R - 1);
+                continue;
+            }
+
+            // Target uniform S-grid; invert S(β) by linear interpolation
+            vector<double> beta_new(R);
+            beta_new.front() = beta.front();
+            beta_new.back()  = beta.back();
+            for (size_t i = 1; i + 1 < R; ++i) {
+                double Si = S.back() * double(i) / double(R - 1);
+                // find k with S[k] <= Si <= S[k+1]
+                auto itS = upper_bound(S.begin(), S.end(), Si);
+                size_t k1 = (itS == S.begin()) ? 0 : size_t(itS - S.begin() - 1);
+                size_t k2 = min(k1 + 1, R - 1);
+                double t = (Si - S[k1]) / max(eps, (S[k2] - S[k1]));
+                beta_new[i] = beta[k1] + t * (beta[k2] - beta[k1]);
+            }
+
+            // Enforce monotonicity and minimal spacing
+            for (size_t i = 1; i < R; ++i) {
+                if (!(beta_new[i] > beta_new[i - 1])) {
+                    beta_new[i] = nextafter(beta_new[i - 1], numeric_limits<double>::infinity());
+                }
+            }
+            beta.swap(beta_new);
+
+            // Report progress
+            double rt_sum = 0.0;
+            for (size_t r = 0; r < R; ++r) rt_sum += double(rt_count[r]);
+            double mean_rt = rt_sum / double(R) / double(max<size_t>(1, sweeps_per_iter));
+            cout << "[RoundTrip-PT] iter=" << it+1
+                    << " mean_roundtrips_per_sweep=" << mean_rt
+                    << " Tmin=" << 1.0 / beta.back()
+                    << " Tmax=" << 1.0 / beta.front() << endl;
         }
-        
-        if (round_trips > 0) {
-            return double(total_swaps) / double(round_trips);
-        } else {
-            return INFINITY; // No round trips observed
-        }
+
+        // Return temperatures (ascending)
+        vector<double> T = temps_from_beta(beta);
+        // Ensure ascending order
+        sort(T.begin(), T.end());
+        return T;
     }
-    
-    // Convenience function to generate and save temperature ladder
-    void generate_and_save_temperature_ladder(double T_min, double T_max, size_t n_temps,
-                                             const string& filename = "temperature_ladder.txt") {
-        vector<double> temps = generate_optimal_temperature_ladder(T_min, T_max, n_temps);
-        
-        // Save to file
-        ofstream file(filename);
-        file << "# Optimized temperature ladder for parallel tempering" << endl;
-        file << "# Index Temperature" << endl;
-        for (size_t i = 0; i < temps.size(); ++i) {
-            file << i << " " << temps[i] << endl;
+
+    LadderEval pilot_evaluate_ladder(const vector<double>& T,
+                                        size_t warmup_sweeps,
+                                        size_t pilot_sweeps,
+                                        bool gaussian_move,
+                                        size_t overrelaxation_rate)
+    {
+        LadderEval ev;
+        size_t R = T.size();
+        if (R < 2) return ev;
+
+        // Backup/restore spins
+        spin_config spins_backup = spins;
+
+        // Store replicas
+        vector<spin_config> reps(R, spins);
+
+        // Warmup at each T
+        double sigma = 1000.0;
+        for (size_t k = 0; k < R; ++k) {
+            spins = reps[k];
+            double acc = 0.0;
+            perform_mc_sweeps(warmup_sweeps, T[k], gaussian_move, sigma, overrelaxation_rate, &acc);
+            reps[k] = spins;
         }
-        file.close();
-        
-        cout << "Temperature ladder saved to " << filename << endl;
+
+        // Slot->rep map
+        vector<size_t> rep_at(R);
+        iota(rep_at.begin(), rep_at.end(), 0);
+
+        // Round-trip bookkeeping
+        vector<int8_t> dir_rep(R, +1);
+        vector<size_t> rt_count(R, 0);
+
+        // Edge acceptance counters
+        vector<size_t> att(R > 0 ? R - 1 : 0, 0), acc(R > 0 ? R - 1 : 0, 0);
+
+        // Pilot diffusion
+        for (size_t sweep = 0; sweep < pilot_sweeps; ++sweep) {
+            // local moves
+            for (size_t k = 0; k < R; ++k) {
+                size_t r = rep_at[k];
+                spins = reps[r];
+                double a = 0.0;
+                perform_mc_sweeps(1, T[k], gaussian_move, sigma, overrelaxation_rate, &a);
+                reps[r] = spins;
+            }
+
+            // energies per slot
+            vector<double> Eslot(R, 0.0);
+            for (size_t k = 0; k < R; ++k) {
+                spins = reps[rep_at[k]];
+                Eslot[k] = total_energy(spins);
+            }
+
+            // neighbor swaps
+            for (int parity = 0; parity < 2; ++parity) {
+                for (size_t k = parity; k + 1 < R; k += 2) {
+                    size_t r1 = rep_at[k];
+                    size_t r2 = rep_at[k + 1];
+                    double b1 = 1.0 / T[k], b2 = 1.0 / T[k + 1];
+                    double E1 = Eslot[k], E2 = Eslot[k + 1];
+                    double delta = (b1 - b2) * (E2 - E1);
+                    bool accepted = (delta <= 0.0) || (random_double_lehman(0, 1) < exp(-delta));
+                    att[k] += 1;
+                    if (accepted) {
+                        acc[k] += 1;
+                        swap(rep_at[k], rep_at[k + 1]);
+                        swap(Eslot[k], Eslot[k + 1]);
+                    }
+                }
+            }
+
+            // boundary labels for round-trip counting
+            if (rep_at[0] < R) {
+                size_t r0 = rep_at[0];
+                if (dir_rep[r0] < 0) { dir_rep[r0] = +1; rt_count[r0]++; }
+                else { dir_rep[r0] = +1; }
+            }
+            if (rep_at[R - 1] < R) {
+                size_t rN = rep_at[R - 1];
+                if (dir_rep[rN] > 0) { dir_rep[rN] = -1; rt_count[rN]++; }
+                else { dir_rep[rN] = -1; }
+            }
+        }
+
+        // Aggregate stats
+        ev.sweeps = pilot_sweeps;
+        ev.edge_accept.resize(att.size(), 0.0);
+        double meanA = 0.0, minA = 1.0;
+        for (size_t e = 0; e < att.size(); ++e) {
+            double a = (att[e] ? double(acc[e]) / double(att[e]) : 0.0);
+            ev.edge_accept[e] = a;
+            meanA += a;
+            minA = min(minA, a);
+        }
+        ev.mean_accept = (att.empty() ? 0.0 : meanA / double(att.size()));
+        ev.min_accept = (att.empty() ? 0.0 : minA);
+
+        double rt_sum = 0.0;
+        for (size_t r = 0; r < R; ++r) rt_sum += double(rt_count[r]);
+        ev.roundtrip_rate = (R > 0 && pilot_sweeps > 0) ? rt_sum / double(R) / double(pilot_sweeps) : 0.0;
+
+        // restore spins
+        spins = spins_backup;
+        return ev;
     }
+
+    // Autotune Tmin, Tmax, and R:
+    // Iteratively (1) optimize ladder for fixed bounds and R, (2) pilot-evaluate,
+    // (3) adjust R to hit acceptance window, and (4) adjust Tmax/Tmin to improve round-trip rate.
+    vector<double> autotune_temperature_ladder(
+        double Tmin_init, double Tmax_init, size_t R_init,
+        // Targets and limits
+        double acc_lo = 0.15, double acc_hi = 0.5,
+        double target_roundtrip_per_sweep = 5e-4,
+        size_t R_min = 3, size_t R_max = 1024,
+        // Work parameters
+        size_t outer_iters = 8,
+        size_t warmup_sweeps = 200,
+        size_t fb_sweeps_per_iter = 200,
+        size_t fb_iters = 6,
+        size_t pilot_sweeps = 1000,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0)
+    {
+        double Tmin = Tmin_init, Tmax = Tmax_init;
+        size_t R = max(R_min, min(R_init, R_max));
+
+        vector<double> T_best;
+        double score_best = -1.0;
+
+        for (size_t it = 0; it < outer_iters; ++it) {
+            // 1) Optimize ladder (betas) for current bounds and R
+            vector<double> T = optimize_temperature_ladder_roundtrip(
+                Tmin, Tmax, R, warmup_sweeps, fb_sweeps_per_iter, fb_iters, gaussian_move, overrelaxation_rate);
+
+            // 2) Pilot evaluate
+            LadderEval ev = pilot_evaluate_ladder(T, warmup_sweeps/2, pilot_sweeps, gaussian_move, overrelaxation_rate);
+
+            // Quality score: prioritize min_accept in window and round-trip rate
+            double acc_penalty = 0.0;
+            if (ev.min_accept < acc_lo) acc_penalty += (acc_lo - ev.min_accept);
+            if (ev.mean_accept > acc_hi) acc_penalty += (ev.mean_accept - acc_hi);
+            double score = ev.roundtrip_rate - 0.5 * acc_penalty;
+
+            if (score > score_best) { score_best = score; T_best = T; }
+
+            cout << "[PT-Autotune] it=" << (it+1)
+                    << " R=" << R
+                    << " Tmin=" << Tmin << " Tmax=" << Tmax
+                    << " acc_mean=" << ev.mean_accept
+                    << " acc_min=" << ev.min_accept
+                    << " rt_rate=" << ev.roundtrip_rate << endl;
+
+            bool changed = false;
+
+            // 3) Adjust R based on acceptance window
+            if (ev.min_accept < acc_lo && R < R_max) {
+                size_t R_new = min(R_max, R + max<size_t>(1, R / 5));
+                if (R_new != R) { R = R_new; changed = true; }
+            } else if (ev.mean_accept > acc_hi && R > R_min) {
+                size_t R_new = max(R_min, R - max<size_t>(1, R / 10));
+                if (R_new != R) { R = R_new; changed = true; }
+            }
+
+            // 4) Adjust temperature bounds to improve diffusion
+            if (!changed) {
+                // If round-trips too slow, increase Tmax to help decorrelate
+                if (ev.roundtrip_rate < target_roundtrip_per_sweep) {
+                    Tmax *= 1.2;
+                    // If cold edge acceptance is too low, raise Tmin slightly as well
+                    if (!ev.edge_accept.empty() && ev.edge_accept.front() < acc_lo) {
+                        Tmin *= 1.1;
+                    }
+                    changed = true;
+                } else {
+                    // If everything is easy (high accept), we can try tightening bounds
+                    if (ev.mean_accept > 0.4 && ev.roundtrip_rate > 2.0 * target_roundtrip_per_sweep) {
+                        Tmax = max(Tmin * 1.05, Tmax * 0.9);
+                        if (!ev.edge_accept.empty() && ev.edge_accept.front() > acc_hi) {
+                            Tmin = min(Tmax / 1.05, Tmin * 0.95);
+                        }
+                        changed = true;
+                    }
+                }
+            }
+
+            // Keep bounds sane
+            if (Tmin < 1e-12) Tmin = 1e-12;
+            if (Tmax <= Tmin * 1.01) Tmax = Tmin * 1.01;
+
+            if (!changed) {
+                // Converged
+                return T_best.empty() ? T : T;
+            }
+        }
+
+        return T_best.empty() ? optimize_temperature_ladder_roundtrip(
+                    Tmin, Tmax, R, warmup_sweeps, fb_sweeps_per_iter, fb_iters, gaussian_move, overrelaxation_rate)
+                                : T_best;
+    }
+
+
 
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, 
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, 
