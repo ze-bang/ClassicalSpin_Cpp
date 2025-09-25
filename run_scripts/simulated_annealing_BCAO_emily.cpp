@@ -515,12 +515,6 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
         sim_BCAO_honeycomb(20, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true, tbc);
     }
-<<<<<<< HEAD
-    
-    // Synchronize all processes after field scan is complete
-    // MPI_Barrier(MPI_COMM_WORLD);
-=======
->>>>>>> be1b43ff5c0811e06073a66bff5bb42dbbdfc0d4
 }
 
 int main(int argc, char** argv) {
