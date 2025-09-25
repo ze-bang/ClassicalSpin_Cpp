@@ -249,7 +249,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
             << ", cooling_rate=" << SA_params.cooling_rate << "\n";
             cout << oss.str();
         }
-        MC.simulated_annealing(SA_params.T_start, SA_params.T_end, SA_params.sweeps_per_temp*100, 20, tbc, false, SA_params.cooling_rate, dir +"/"+std::to_string(i), true);
+        MC.simulated_annealing(10, 0.5, 1e5, 20, tbc, false, 0.9, dir +"/"+std::to_string(i), true);
         double energy_density = MC.energy_density(MC.spins);
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";
@@ -508,7 +508,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
     }
     
     // Synchronize all processes after field scan is complete
-    MPI_Barrier(MPI_COMM_WORLD);
+    // MPI_Barrier(MPI_COMM_WORLD);
 }
 
 int main(int argc, char** argv) {

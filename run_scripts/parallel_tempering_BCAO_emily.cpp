@@ -322,7 +322,7 @@ void generate_optimal_ladder(const SimulationParams& params){
     int rank = 0, size = 1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    lattice<3, 2, 24, 24, 1> MC = set_up_MC_runs<3, 2, 24, 24, 1>(params);
+    lattice<3, 2, 36, 36, 1> MC = set_up_MC_runs<3, 2, 36, 36, 1>(params);
     MPI_Barrier(MPI_COMM_WORLD);
     vector<double> temps = MC.autotune_temperature_ladder(params.T_start, params.T_end, 96);
     if (rank == 0) {
@@ -360,11 +360,11 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     // Reset step timer
     t_step = MPI_Wtime();
 
-    // vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
+    vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
     // Lattice and simulation
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
-    vector<double> temps = MC.optimize_temperature_ladder_roundtrip(params.T_start, params.T_end, size);
+    // vector<double> temps = MC.optimize_temperature_ladder_roundtrip(params.T_start, params.T_end, size);
     if (rank == 0) {
         cout << "Using temperatures (K): ";
         for (double T : temps) cout << T << " ";
