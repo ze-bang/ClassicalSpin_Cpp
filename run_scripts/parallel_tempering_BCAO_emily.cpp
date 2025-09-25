@@ -365,7 +365,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     double t_step = MPI_Wtime();
     const double k_B = 0.08620689655;
 
-    lattice<3, 2, 36, 36, 1> MC = set_up_MC_runs<3, 2, 36, 36, 1>(params);
+    lattice<3, 2, 18, 18, 1> MC = set_up_MC_runs<3, 2, 18, 18, 1>(params);
 
     timing_helpers::log_timing(timing_file, "step_1_setup_model_and_fields", MPI_Wtime() - t_step, rank);
 
