@@ -363,6 +363,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     const string timing_file = params.dir + "/timing.log";
     double t_total = MPI_Wtime();
     double t_step = MPI_Wtime();
+    const double k_B = 0.08620689655;
 
     lattice<3, 2, 36, 36, 1> MC = set_up_MC_runs<3, 2, 36, 36, 1>(params);
 
@@ -371,7 +372,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     // Reset step timer
     t_step = MPI_Wtime();
 
-    vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
+    vector<double> temps = logspace(log10(params.T_start * k_B), log10(params.T_end * k_B), size);
     // Lattice and simulation
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
