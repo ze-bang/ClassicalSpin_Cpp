@@ -270,8 +270,21 @@ lattice<N, N_ATOMS, dim1, dim2, dim> set_up_MC_runs(const SimulationParams& para
     int rank = 0, size = 1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+    const double k_B = 0.08620689655;
+    const double mu_B = 0.05788; // meV/T
+    // Scale parameters to meV
+    double J1xy = params.J1xy * k_B;
+    double J1z = params.J1z * k_B;
+    double D = params.D * k_B;
+    double E = params.E * k_B;
+    double F = params.F * k_B;
+    double G = params.G * k_B;
+    double J3xy = params.J3xy * k_B;
+    double J3z = params.J3z * k_B;
+
+
     // Define interaction matrices based on Emily's model
-    array<array<double,3>, 3> J1z_ = {{{params.J1xy+params.D, params.E, params.F},{params.E, params.J1xy-params.D, params.G},{params.F, params.G, params.J1z}}};
+    array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},{E, J1xy-D, G},{F, G, J1z}}};
     array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), sin(2*M_PI/3), 0},{-sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
 
     auto transpose = [](const array<array<double,3>, 3>& m) {
@@ -295,9 +308,7 @@ lattice<N, N_ATOMS, dim1, dim2, dim> set_up_MC_runs(const SimulationParams& para
 
     array<array<double,3>, 3> J1x_ = multiply(multiply(U_2pi_3, J1z_), transpose(U_2pi_3));
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
-    array<array<double,3>, 3> J3_ = {{{params.J3xy,0,0},{0,params.J3xy,0},{0,0,params.J3z}}};
-
-    const double mu_B = 0.05788; // meV/T
+    array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
 
     array<double, 3> field = {5*mu_B*params.h*params.field_dir[0], 5*mu_B*params.h*params.field_dir[1], 2.5*mu_B*params.h*params.field_dir[2]};
 
