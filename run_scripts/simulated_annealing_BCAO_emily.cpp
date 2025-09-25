@@ -151,9 +151,19 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    
+    const double k_B = 0.08620689655;
+    const double mu_B = 0.05788; // meV/T
     filesystem::create_directories(dir);
     HoneyComb<3> atoms;
+
+    J1xy *= k_B;
+    J1z *= k_B;
+    D *= k_B;
+    E *= k_B;
+    F *= k_B;
+    G *= k_B;
+    J3xy *= k_B;
+    J3z *= k_B;
 
     array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},
                                         {E, J1xy-D, G},
@@ -178,7 +188,6 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         }
         return C;
     };
-    const double mu_B = 0.05788; // meV/T
     array<array<double,3>, 3> J1x_ = multiply(multiply(U_2pi_3, J1z_), transpose(U_2pi_3));
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
 
@@ -201,7 +210,6 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
 
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
-    double k_B = 0.08620689655;
 
     // Save simulation parameters (only rank 0)
     if (rank == 0 || field_scan) {
@@ -236,20 +244,21 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Each process handles a subset of trials
     for(size_t i = 0; i < num_trials; ++i){
         filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 1, true);
-        auto SA_params = MC.tune_simulated_annealing(0.5, 10.0, false, 20, 1000, 0.7, 0.05);
-        {
-            std::ostringstream oss;
-            oss.setf(std::ios::fixed);
-            oss.precision(10);
-            oss << "Process " << rank << " Trial " << i
-            << " SA params: T_start=" << SA_params.T_start
-            << ", T_end=" << SA_params.T_end
-            << ", sweeps_per_temp=" << SA_params.sweeps_per_temp
-            << ", cooling_rate=" << SA_params.cooling_rate << "\n";
-            cout << oss.str();
-        }
-        MC.simulated_annealing(10, 0.5, 1e5, 20, tbc, false, 0.9, dir +"/"+std::to_string(i), true);
+        lattice<3, 2, 18, 18, 1> MC(&atoms, 0.5, true);
+        // auto SA_params = MC.tune_simulated_annealing(0.5, 10.0, false, 20, 1000, 0.7, 0.05);
+        // {
+        //     std::ostringstream oss;
+        //     oss.setf(std::ios::fixed);
+        //     oss.precision(10);
+        //     oss << "Process " << rank << " Trial " << i
+        //     << " SA params: T_start=" << SA_params.T_start
+        //     << ", T_end=" << SA_params.T_end
+        //     << ", sweeps_per_temp=" << SA_params.sweeps_per_temp
+        //     << ", cooling_rate=" << SA_params.cooling_rate << "\n";
+        //     cout << oss.str();
+        // }
+        // MC.simulated_annealing(SA_params.T_start, SA_params.T_end, SA_params.sweeps_per_temp*100, 20, tbc, false, SA_params.cooling_rate, dir +"/"+std::to_string(i), true);
+        MC.simulated_annealing(14*k_B, 0.1*k_B, 1e6, 10, tbc, false, 0.9, dir +"/"+std::to_string(i), true);
         double energy_density = MC.energy_density(MC.spins);
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";
@@ -506,9 +515,12 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
         std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
         sim_BCAO_honeycomb(20, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true, tbc);
     }
+<<<<<<< HEAD
     
     // Synchronize all processes after field scan is complete
     // MPI_Barrier(MPI_COMM_WORLD);
+=======
+>>>>>>> be1b43ff5c0811e06073a66bff5bb42dbbdfc0d4
 }
 
 int main(int argc, char** argv) {
