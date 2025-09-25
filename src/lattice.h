@@ -497,7 +497,7 @@ class lattice
             // Extend here if trilinear twist is needed.
             triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[p1], spins[p2]);
         }
-        return single_site_energy + double_site_energy/2 + triple_site_energy/3;
+        return single_site_energy + double_site_energy + triple_site_energy;
     }
 
     array<double, dim1*dim2*dim*N_ATOMS> local_energy_densities(spin_config &curr_spins){
