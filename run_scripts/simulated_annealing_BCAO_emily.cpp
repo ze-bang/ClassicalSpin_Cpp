@@ -151,7 +151,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    const double k_B = 0.08620689655;
+    const double k_B = 1;
     const double mu_B = 0.05788; // meV/T
     filesystem::create_directories(dir);
     HoneyComb<3> atoms;
