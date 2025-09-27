@@ -258,7 +258,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         //     cout << oss.str();
         // }
         // MC.simulated_annealing(SA_params.T_start, SA_params.T_end, SA_params.sweeps_per_temp*100, 20, tbc, false, SA_params.cooling_rate, dir +"/"+std::to_string(i), true);
-        MC.simulated_annealing(14*k_B, 0.1*k_B, 1e6, 10, tbc, false, 0.9, dir +"/"+std::to_string(i), true);
+        MC.simulated_annealing(10*k_B, 0.1*k_B, 1e6, 10, tbc, false, 0.9, dir +"/"+std::to_string(i), true);
         double energy_density = MC.energy_density(MC.spins);
         ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";

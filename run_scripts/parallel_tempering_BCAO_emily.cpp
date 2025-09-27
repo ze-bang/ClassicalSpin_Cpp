@@ -270,7 +270,7 @@ lattice<N, N_ATOMS, dim1, dim2, dim> set_up_MC_runs(const SimulationParams& para
     int rank = 0, size = 1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    const double k_B = 0.08620689655;
+    const double k_B = 1;
     const double mu_B = 0.05788; // meV/T
     // Scale parameters to meV
     double J1xy = params.J1xy * k_B;
@@ -372,7 +372,7 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     // Reset step timer
     t_step = MPI_Wtime();
 
-    vector<double> temps = logspace(log10(params.T_start * k_B), log10(params.T_end * k_B), size);
+    vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
     // Lattice and simulation
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
