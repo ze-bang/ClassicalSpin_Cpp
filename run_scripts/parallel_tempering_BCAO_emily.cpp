@@ -263,19 +263,28 @@ void create_default_parameter_file(const string& filename) {
     file.close();
 }
 
-// Main simulation function for Parallel Tempering
-void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
+template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim>
+lattice<N, N_ATOMS, dim1, dim2, dim> set_up_MC_runs(const SimulationParams& params){
     filesystem::create_directories(params.dir);
     HoneyComb<3> atoms;
     int rank = 0, size = 1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    const string timing_file = params.dir + "/timing.log";
-    double t_total = MPI_Wtime();
-    double t_step = MPI_Wtime();
+    const double k_B = 1;
+    const double mu_B = 0.05788; // meV/T
+    // Scale parameters to meV
+    double J1xy = params.J1xy * k_B;
+    double J1z = params.J1z * k_B;
+    double D = params.D * k_B;
+    double E = params.E * k_B;
+    double F = params.F * k_B;
+    double G = params.G * k_B;
+    double J3xy = params.J3xy * k_B;
+    double J3z = params.J3z * k_B;
+
 
     // Define interaction matrices based on Emily's model
-    array<array<double,3>, 3> J1z_ = {{{params.J1xy+params.D, params.E, params.F},{params.E, params.J1xy-params.D, params.G},{params.F, params.G, params.J1z}}};
+    array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},{E, J1xy-D, G},{F, G, J1z}}};
     array<array<double,3>, 3> U_2pi_3 = {{{cos(2*M_PI/3), sin(2*M_PI/3), 0},{-sin(2*M_PI/3), cos(2*M_PI/3), 0},{0, 0, 1}}};
 
     auto transpose = [](const array<array<double,3>, 3>& m) {
@@ -299,10 +308,10 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
 
     array<array<double,3>, 3> J1x_ = multiply(multiply(U_2pi_3, J1z_), transpose(U_2pi_3));
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
-    array<array<double,3>, 3> J3_ = {{{params.J3xy,0,0},{0,params.J3xy,0},{0,0,params.J3z}}};
+    array<array<double,3>, 3> J3_ = {{{J3xy,0,0},{0,J3xy,0},{0,0,J3z}}};
 
-    array<double, 3> field = {params.h*params.field_dir[0], params.h*params.field_dir[1], params.h*params.field_dir[2]};
-    
+    array<double, 3> field = {5*mu_B*params.h*params.field_dir[0], 5*mu_B*params.h*params.field_dir[1], 2.5*mu_B*params.h*params.field_dir[2]};
+
     // Set interactions
     atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1y_, 0, 1, {0,-1,0});
@@ -313,34 +322,76 @@ void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
     MPI_Barrier(MPI_COMM_WORLD);
+    lattice<N, N_ATOMS, dim1, dim2, dim> MC(&atoms, 0.5, true);
+    MPI_Barrier(MPI_COMM_WORLD);
+    return MC;
+}
+
+
+void generate_optimal_ladder(const SimulationParams& params){
+    HoneyComb<3> atoms;
+    int rank = 0, size = 1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    lattice<3, 2, 36, 36, 1> MC = set_up_MC_runs<3, 2, 36, 36, 1>(params);
+    MPI_Barrier(MPI_COMM_WORLD);
+    vector<double> temps = MC.autotune_temperature_ladder(params.T_start, params.T_end, 96);
+    if (rank == 0) {
+        cout << "Optimized temperature ladder for " << size << " replicas:\n";
+        for (double T : temps) {
+            cout << T << "\n";
+        }
+    }
+    if (rank == 0) {
+        ofstream ladder_file(params.dir + "/optimized_temperature_ladder.txt");
+        ladder_file << "# Optimized temperature ladder for " << size << " replicas\n";
+        for (double T : temps) {
+            ladder_file << T << "\n";
+        }
+        ladder_file.close();
+        cout << "Optimized temperature ladder saved to: " << params.dir + "/optimized_temperature_ladder.txt" << "\n";
+    }
+}
+
+// Main simulation function for Parallel Tempering
+void PT_BCAO_honeycomb(const SimulationParams& params, bool boundary_update){
+    filesystem::create_directories(params.dir);
+    HoneyComb<3> atoms;
+    int rank = 0, size = 1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    const string timing_file = params.dir + "/timing.log";
+    double t_total = MPI_Wtime();
+    double t_step = MPI_Wtime();
+    const double k_B = 0.08620689655;
+
+    lattice<3, 2, 18, 18, 1> MC = set_up_MC_runs<3, 2, 18, 18, 1>(params);
+
     timing_helpers::log_timing(timing_file, "step_1_setup_model_and_fields", MPI_Wtime() - t_step, rank);
 
     // Reset step timer
     t_step = MPI_Wtime();
 
-    // Temperature schedule
     vector<double> temps = logspace(log10(params.T_start), log10(params.T_end), size);
-
-
-    
     // Lattice and simulation
-    lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_2_setup_temps_and_lattice", MPI_Wtime() - t_step, rank);
-
+    // vector<double> temps = MC.optimize_temperature_ladder_roundtrip(params.T_start, params.T_end, size);
+    if (rank == 0) {
+        cout << "Using temperatures (K): ";
+        for (double T : temps) cout << T << " ";
+        cout << "\n";
+    }
     // Parallel tempering run
     t_step = MPI_Wtime();
-    MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
+    // MC.parallel_tempering(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, params.dir, {0}, boundary_update);
+    MC.parallel_tempering_tbc(temps, params.thermalization_sweeps, params.measurement_sweeps, params.overrelaxation_rate, params.swap_interval, params.probe_rate, 100, params.dir, {0}, boundary_update);
     MPI_Barrier(MPI_COMM_WORLD);
     timing_helpers::log_timing(timing_file, "step_3_parallel_tempering", MPI_Wtime() - t_step, rank);
     if (rank == 0) {
         t_step = MPI_Wtime();
         cout << "Parallel Tempering simulation completed. Results saved in: " << params.dir << "\n";
         MC.write_to_file_spin(params.dir + "/spin.txt", MC.spins);
-        // for (size_t i = 0; i < 1e7; ++i) {
-        //     MC.deterministic_sweep();
-        // }
-        // MC.write_to_file_spin(params.dir + "/spin_zero.txt", MC.spins);
         ofstream param_file(params.dir + "/simulation_parameters.txt");
         param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
         param_file << "==========================================\n";
@@ -407,6 +458,7 @@ int main(int argc, char** argv) {
             cout << "  --help, -h        Show this help message\n";
             cout << "  --create-params   Create default parameter file\n";
             cout << "  --field_scan      Enable field-scan mode (must be passed as argv[2])\n\n";
+            cout << " --temperature_ladder  Generate optimized temperature ladder and exit\n\n";
             cout << "If parameter file doesn't exist, default parameters will be used.\n";
             return 0;
         } else if (arg == "--create-params") {
@@ -422,7 +474,7 @@ int main(int argc, char** argv) {
     // Enable field-scan mode only when argv[2] is --field_scan
     bool field_scan = (argc > 2 && string(argv[2]) == "--field_scan");
     bool magnetotropic = (argc > 2 && string(argv[2]) == "--magnetotropic");
-
+    bool temp_ladder_only = (argc > 2 && string(argv[2]) == "--temperature_ladder");
     SimulationParams params = read_parameters(param_file);
     
     int slurm_job_id = argc > 3 ? stoi(argv[3]) : 0;
@@ -454,6 +506,10 @@ int main(int argc, char** argv) {
     double t_total_program = MPI_Wtime();
     const array<double, 3> c_axis = {{0,0,1}};
     
+    if (field_scan || magnetotropic || temp_ladder_only) {
+        params.num_trials = 1; // Force single trial in field-scan mode
+    }
+
     for (size_t i = 0; i < params.num_trials; ++i) {
         SimulationParams trial_params = params;
         double t_trial = MPI_Wtime();
@@ -471,6 +527,7 @@ int main(int argc, char** argv) {
                 if (rank == 0) cout << "Warning: field_scan enabled but num_steps==0; nothing to do.\n";
                 continue;
             }
+            std::cout << "SLURM job id: " << slurm_job_id << ", range: " << slurm_job_range << "\n";
             for (size_t s = slurm_job_id; s < steps; ++slurm_job_range) {
                 double hval = (steps > 1)
                     ? (params.h_start + (double)s * (params.h_end - params.h_start) / (double)(steps - 1))
@@ -486,7 +543,7 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params, true);
+                PT_BCAO_honeycomb(trial_params, false);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
@@ -507,13 +564,15 @@ int main(int argc, char** argv) {
                 // Barrier before each field step
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t_field_step = MPI_Wtime();
-                PT_BCAO_honeycomb(trial_params, true);
+                PT_BCAO_honeycomb(trial_params, false);
                 MPI_Barrier(MPI_COMM_WORLD);
                 if (rank == 0) {
                     timing_helpers::log_timing(overview_timing, "trial_" + to_string(i) + "_field_step_" + to_string(s) + "_elapsed", MPI_Wtime() - t_field_step, rank);
                 }
             }
-        } else {
+        } else if (temp_ladder_only){
+            generate_optimal_ladder(params);
+        }else {
             trial_params.dir = params.dir + "/trial_" + to_string(i);
             // Barrier before the fixed-h run
             MPI_Barrier(MPI_COMM_WORLD);

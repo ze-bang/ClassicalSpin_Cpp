@@ -160,9 +160,9 @@ void MD_TmFeO3_Fe_2DCS(double Temp_start, double Temp_end, double tau_start, dou
 
     array<array<double, 3>,4> field_drive = {{{0,1,0},{0,1,0},{0,1,0},{0,1,0}}};
 
-    double pulse_amp = 0.9;
-    double pulse_width = 0.38;
-    double pulse_freq = 0.33;
+    double pulse_amp = 0.6;
+    double pulse_width = 0.2;
+    double pulse_freq = 0.4;
 
     int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
     int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
@@ -618,7 +618,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
         chi[6] = {{0.9128*chii,-0.4655*chii,0}};
 
         array<array<double,3>,8> chi_inv = {{{0}}};
-        chi_inv[1] = {{0, 0, 5.264*chii}};
+        chi_inv[1] = {{0, 0, -5.264*chii}};
         chi_inv[4] = {{-2.3915*chii,-2.7866*chii,0}};
         chi_inv[6] = {{-0.9128*chii,0.4655*chii,0}};
 
@@ -764,8 +764,8 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     // array<array<double, 3>,4> field_drive = {{{1,0,0},{1,0,0},{1,0,0},{1,0,0}}};
     // array<array<double, 3>,4> field_drive = {{{0,0,1},{0,0,1},{0,0,1},{0,0,1}}};
 
-    double pulse_amp = 1.0;
-    double pulse_width = 0.3;
+    double pulse_amp = 0.6;
+    double pulse_width = 0.1;
     double pulse_freq = 0.2;
 
     int T_steps = abs(int((T_end-T_start)/T_step_size))+1;
@@ -802,7 +802,7 @@ void MD_TmFeO3_2DCS_cuda(double Temp_start, double Temp_end, double tau_start, d
     MC.write_to_file_spin(dir+"/spin_zero");
     spin_config = dir+"/spin_zero";
 
-    MC.write_to_file_pos(dir+"/pos.txt");
+    MC.write_to_file_pos(dir+"/pos");
 
 
     cout << "Starting calculations..." << endl;

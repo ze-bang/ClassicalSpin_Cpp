@@ -18,6 +18,37 @@
 #include "binning_analysis.h"
 #include <sstream>
 #include <cstdint>
+#include <deque>
+
+
+// Helper struct to store autocorrelation analysis results
+struct AutocorrelationResult {
+    double tau_int;
+    size_t sampling_interval;
+    vector<double> correlation_function;
+};
+
+
+// Pilot evaluation of a given ladder T: returns edge acceptance and round-trip rate
+struct LadderEval {
+    double mean_accept = 0.0;
+    double min_accept = 0.0;
+    double roundtrip_rate = 0.0; // per sweep per replica
+    vector<double> edge_accept;  // size R-1
+    size_t sweeps = 0;
+};
+
+
+// Auto-tuning for simulated annealing schedule
+struct SAParams {
+    double T_start = 1.0;
+    double T_end = 1e-3;
+    double cooling_rate = 0.9;
+    size_t sweeps_per_temp = 100;
+    vector<double> probe_T;
+    vector<double> probe_acc;
+    vector<double> probe_tau;
+};
 
 template<size_t N, size_t N_ATOMS, size_t dim1, size_t dim2, size_t dim>
 class lattice
@@ -466,7 +497,7 @@ class lattice
             // Extend here if trilinear twist is needed.
             triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], spin_here, spins[p1], spins[p2]);
         }
-        return single_site_energy + double_site_energy/2 + triple_site_energy/3;
+        return single_site_energy + double_site_energy + triple_site_energy;
     }
 
     array<double, dim1*dim2*dim*N_ATOMS> local_energy_densities(spin_config &curr_spins){
@@ -495,7 +526,7 @@ class lattice
             triple_site_energy += contract_trilinear(trilinear_interaction[site_index][i], new_spins, spins[p1], spins[p2])
                      - contract_trilinear(trilinear_interaction[site_index][i], old_spins, spins[p1], spins[p2]);
         }
-        return single_site_energy + double_site_energy/2 + triple_site_energy/3;
+        return single_site_energy + double_site_energy + triple_site_energy;
     }
 
     double total_energy(spin_config &curr_spins){
@@ -615,6 +646,17 @@ class lattice
             count++;
         }
     }
+
+    // New: zero-temperature quench with early stopping on energy convergence
+    void greedy_quench(double rel_tol=1e-12, size_t max_sweeps=10000){
+        double E_prev = total_energy(spins);
+        for(size_t s=0; s<max_sweeps; ++s){
+            deterministic_sweep();
+            double E = total_energy(spins);
+            if (fabs(E - E_prev) <= rel_tol * (fabs(E_prev) + 1e-18)) break;
+            E_prev = E;
+        }
+    }
     
     array<double,N> gaussian_move(const array<double,N> &current_spin, double sigma=60){
         array<double,N> new_spin;
@@ -664,6 +706,30 @@ class lattice
 
         double acceptance_rate = double(accept)/double(lattice_size);
         return acceptance_rate;
+    }
+
+    // New: Metropolis that also accumulates total energy change dE_sum for the sweep
+    double metropolis_with_energy_change(spin_config &curr_spin, double T, bool gaussian=false, double sigma=60, double *dE_out=nullptr){
+        double dE;
+        int i;
+        array<double,N> new_spin;
+        int accept = 0;
+        size_t count = 0;
+        double dE_sum = 0.0;
+        while(count < lattice_size){
+            i = random_int_lehman(lattice_size);
+            new_spin = gaussian ? gaussian_move(curr_spin[i], sigma) 
+                                : gen_random_spin(spin_length);
+            dE = site_energy_diff(new_spin, curr_spin[i], i);
+            if(dE < 0 || random_double_lehman(0,1) < exp(-dE/T)){
+                curr_spin[i] = new_spin;
+                dE_sum += dE;
+                accept++;
+            }
+            count++;
+        }
+        if (dE_out) *dE_out += dE_sum;
+        return double(accept)/double(lattice_size);
     }
 
     // =========================
@@ -975,80 +1041,358 @@ class lattice
         myfile.close();
     }
 
-    void simulated_annealing(double T_start, double T_end, size_t n_anneal, size_t overrelaxation_rate, bool gaussian_move = false, double cooling_rate = 0.9, string out_dir = "", bool boundary_update = false, bool save_observables = false){    
-        if (out_dir != ""){
+    // Perform autocorrelation analysis on energy measurements
+    AutocorrelationResult compute_autocorrelation(const vector<double>& energies, size_t base_interval = 10) {
+        AutocorrelationResult result;
+        
+        // Calculate mean and variance
+        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
+        double variance = 0;
+        for (double e : energies) {
+            variance += (e - mean) * (e - mean);
+        }
+        variance /= energies.size();
+        
+        // Compute autocorrelation function
+        size_t max_lag = energies.size() / 4;
+        result.correlation_function.resize(max_lag);
+        
+        for (size_t lag = 0; lag < max_lag; ++lag) {
+            double sum = 0;
+            for (size_t i = 0; i < energies.size() - lag; ++i) {
+                sum += (energies[i] - mean) * (energies[i+lag] - mean);
+            }
+            result.correlation_function[lag] = sum / ((energies.size() - lag) * variance);
+        }
+        
+        // Calculate integrated autocorrelation time
+        result.tau_int = 0.5;
+        for (size_t lag = 1; lag < max_lag; ++lag) {
+            if (result.correlation_function[lag] < 0.05) break;  // Cutoff when correlation is small
+            result.tau_int += result.correlation_function[lag];
+        }
+        
+        // Determine sampling interval (at least 2*tau_int sweeps)
+        result.sampling_interval = max(size_t(2 * result.tau_int * base_interval), size_t(100));
+        
+        return result;
+    }
+
+    // Perform Monte Carlo sweeps with metropolis and optional overrelaxation
+    void perform_mc_sweeps(size_t n_sweeps, double T, bool gaussian_move, double& sigma, 
+                          size_t overrelaxation_rate, double* acceptance_sum = nullptr) {
+        for (size_t i = 0; i < n_sweeps; ++i) {
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    double acc = metropolis(spins, T, gaussian_move, sigma);
+                    if (acceptance_sum) *acceptance_sum += acc;
+                }
+            } else {
+                double acc = metropolis(spins, T, gaussian_move, sigma);
+                if (acceptance_sum) *acceptance_sum += acc;
+            }
+        }
+    }
+
+    // Save autocorrelation analysis results to file
+    void save_autocorrelation_results(const string& out_dir, const AutocorrelationResult& acf_result) {
+        ofstream acf_file(out_dir + "/autocorrelation.txt");
+        acf_file << "# lag autocorrelation" << endl;
+        acf_file << "# tau_int = " << acf_result.tau_int << endl;
+        acf_file << "# sampling_interval = " << acf_result.sampling_interval << endl;
+        
+        size_t max_output = min(size_t(100), acf_result.correlation_function.size());
+        for (size_t lag = 0; lag < max_output; ++lag) {
+            acf_file << lag * 10 << " " << acf_result.correlation_function[lag] << endl;
+        }
+        acf_file.close();
+    }
+
+
+    SAParams tune_simulated_annealing(double Tmin_guess = 0.0,
+                                      double Tmax_guess = 0.0,
+                                      bool gaussian_move = false,
+                                      size_t overrelaxation_rate = 0,
+                                      size_t pilot_sweeps = 300,
+                                      double acc_hi_target = 0.7,
+                                      double acc_lo_target = 0.02)
+    {
+        SAParams out;
+        // Backup the state
+        spin_config spins_backup = spins;
+
+        auto probe_once = [&](double T, size_t sweeps, double base_interval,
+                              double& acc_out, double& tau_out) {
+            // Work on a fresh copy of spins for comparability
+            spins = spins_backup;
+
+            double sigma = 1000.0;
+            double acc_sum = 0.0;
+
+            // Warmup
+            perform_mc_sweeps(sweeps / 3, T, gaussian_move, sigma, overrelaxation_rate);
+
+            // Measure acceptance over pilot window
+            size_t measure_sweeps = max<size_t>(sweeps, 50);
+            perform_mc_sweeps(measure_sweeps, T, gaussian_move, sigma, overrelaxation_rate, &acc_sum);
+
+            // Normalize acceptance like the main SA loop does
+            double acc_rate = (overrelaxation_rate > 0)
+                                ? (acc_sum / double(measure_sweeps) * overrelaxation_rate)
+                                : (acc_sum / double(measure_sweeps));
+            acc_out = std::clamp(acc_rate, 0.0, 1.0);
+
+            // Short ACF estimate on energy
+            vector<double> e;
+            e.reserve(measure_sweeps / base_interval + 1);
+            for (size_t i = 0; i < measure_sweeps / 2; ++i) {
+                perform_mc_sweeps(1, T, gaussian_move, sigma, overrelaxation_rate);
+                if (i % size_t(base_interval) == 0) e.push_back(total_energy(spins));
+            }
+            if (e.size() < 5) { tau_out = 1.0; return; }
+            AutocorrelationResult acf = compute_autocorrelation(e, size_t(base_interval));
+            tau_out = std::max(1.0, acf.tau_int);
+        };
+
+        auto energy_converged = [&](double T) {
+            spins = spins_backup;
+            double sigma = 1000.0;
+            double E0 = total_energy(spins);
+            double dE_sum = 0.0;
+            size_t sweeps = 20;
+            for (size_t i = 0; i < sweeps; ++i) {
+                metropolis_with_energy_change(spins, T, gaussian_move, sigma, &dE_sum);
+                if (overrelaxation_rate > 0 && (i % overrelaxation_rate) == 0) overrelaxation();
+            }
+            double En = total_energy(spins);
+            double rel = fabs(En - E0) / (fabs(E0) + 1e-12);
+            double per_sweep = fabs(dE_sum) / (fabs(En) + 1.0) / double(sweeps);
+            return (rel < 1e-5) || (per_sweep < 1e-6);
+        };
+
+        // Calibrate T_start by finding T with high acceptance
+        {
+            double T = (Tmax_guess > 0.0) ? Tmax_guess : 1.0;
+            double acc = 0.0, tau = 1.0;
+            size_t it = 0;
+            // Expand up if needed
+            while (it < 25) {
+                double a = 0.0, t = 1.0;
+                probe_once(T, pilot_sweeps, 10, a, t);
+                out.probe_T.push_back(T); out.probe_acc.push_back(a); out.probe_tau.push_back(t);
+                if (a >= acc_hi_target) { acc = a; tau = t; break; }
+                T *= 1.5;
+                ++it;
+            }
+            if (it == 25) { // fallback
+                acc = out.probe_acc.back();
+                tau = out.probe_tau.back();
+            }
+            // If too high, binary search down to center inside target band
+            double Thigh = (out.probe_T.empty() ? T : out.probe_T.back());
+            double Tlow = Thigh / 100.0;
+            for (size_t k = 0; k < 20; ++k) {
+                double Tmid = 0.5 * (Thigh + Tlow);
+                double a = 0.0, t = 1.0;
+                probe_once(Tmid, pilot_sweeps, 10, a, t);
+                out.probe_T.push_back(Tmid); out.probe_acc.push_back(a); out.probe_tau.push_back(t);
+                if (a >= acc_hi_target) { Thigh = Tmid; acc = a; tau = t; }
+                else { Tlow = Tmid; }
+            }
+            out.T_start = Thigh;
+        }
+
+        // Calibrate T_end by driving acceptance down and checking energy convergence
+        {
+            double T = (Tmin_guess > 0.0 && Tmin_guess < out.T_start) ? Tmin_guess : out.T_start * 1e-3;
+            T = max(T, out.T_start * 1e-6); // guard
+            double acc = 1.0, tau = 1.0;
+            size_t it = 0;
+            // Start near T_start and go down
+            double cur = out.T_start;
+            while (cur > T && it < 40) {
+                double a = 0.0, t = 1.0;
+                probe_once(cur, pilot_sweeps, 10, a, t);
+                out.probe_T.push_back(cur); out.probe_acc.push_back(a); out.probe_tau.push_back(t);
+                if (a <= acc_lo_target && energy_converged(cur)) { acc = a; tau = t; break; }
+                cur *= 0.7;
+                ++it;
+            }
+            if (it == 40) {
+                // fallback to the last probed cur
+            }
+            out.T_end = max(1e-12, min(cur, out.T_start / 1e3));
+        }
+
+        // Choose sweeps_per_temp and cooling_rate from tau(T)
+        double tau_max = 1.0;
+        for (double t : out.probe_tau) tau_max = max(tau_max, t);
+        out.sweeps_per_temp = max<size_t>(100, size_t(10.0 * tau_max));
+
+        // Number of temperature steps
+        size_t K = max<size_t>(50, size_t(10.0 * sqrt(tau_max)));
+        K = min<size_t>(2000, K);
+        out.cooling_rate = pow(out.T_end / out.T_start, 1.0 / double(K));
+        out.cooling_rate = std::clamp(out.cooling_rate, 0.85, 0.995);
+
+        // Restore original spins
+        spins = spins_backup;
+        return out;
+    }
+
+    // Main simulated annealing function
+    void simulated_annealing(double T_start, double T_end, size_t n_anneal, 
+                            size_t overrelaxation_rate, bool boundary_update = false, 
+                            bool gaussian_move = false, double cooling_rate = 0.9, 
+                            string out_dir = "", bool save_observables = false) {
+        
+        // Setup output directory and random seed
+        if (!out_dir.empty()) {
             filesystem::create_directory(out_dir);
         }
+        srand(time(NULL));
+        seed_lehman(rand() * 2 + 1);
+        
+        // Annealing parameters
         double T = T_start;
-        double acceptance_rate = 0;
         double sigma = 1000;
-        // cout << "Gaussian Move: " << gaussian_move << endl;
-        srand (time(NULL));
-        seed_lehman(rand()*2+1);
-        while(T > T_end){
+        
+        // Main annealing loop
+        cout << "Starting simulated annealing from T=" << fixed << setprecision(6) << T_start << " to T=" << setprecision(6) << T_end << endl;
+        while (T > T_end) {
             double curr_accept = 0;
-            for(size_t i = 0; i<n_anneal; ++i){
-                if(overrelaxation_rate > 0){
-                    overrelaxation();
-                    if (i%overrelaxation_rate == 0){
-                        curr_accept += metropolis(spins, T, gaussian_move, sigma);
-                    }
-                }
-                else{
-                    curr_accept += metropolis(spins, T, gaussian_move, sigma);
-                }
-            }
+            
+            // Perform MC sweeps at current temperature
+            perform_mc_sweeps(n_anneal, T, gaussian_move, sigma, overrelaxation_rate, &curr_accept);
+            
+            // Optional boundary twist updates
             if (boundary_update) {
-                for (size_t i = 0; i < 1e2; ++i){
+                for (size_t i = 0; i < 100; ++i) {
                     metropolis_twist_sweep(T);
                 }
             }
-            if (overrelaxation_rate > 0){
-                acceptance_rate = curr_accept/n_anneal*overrelaxation_rate;
-                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
-            }else{
-                acceptance_rate = curr_accept/n_anneal;
-                cout << "Temperature: " << T << " Acceptance rate: " << acceptance_rate << endl;
+            
+            // Calculate and report acceptance rate
+            double acceptance_rate = (overrelaxation_rate > 0) ? 
+                curr_accept / n_anneal * overrelaxation_rate : 
+                curr_accept / n_anneal;
+            
+            cout << "T=" << fixed << setprecision(6) << T << ", Acceptance=" << fixed << setprecision(6) << acceptance_rate;
+            
+            // Mix in deterministic updates when acceptance rate is very low
+            if (acceptance_rate < 0.02) {
+                deterministic_sweep();
+                cout << ", Mixed in deterministic sweep due to low acceptance";
             }
-            if (gaussian_move && acceptance_rate < 0.5){
-                sigma = sigma * 0.5 / (1-acceptance_rate); 
-                cout << "Sigma is adjusted to: " << sigma << endl;   
+            
+            // Adaptive sigma adjustment for gaussian moves
+            if (gaussian_move && acceptance_rate < 0.5) {
+                sigma = sigma * 0.5 / (1 - acceptance_rate);
+                cout << ", Sigma adjusted to " << sigma;
             }
-            if(save_observables){
-                vector<double> energies;
-                for(size_t i = 0; i<1e7; ++i){
-                    if(overrelaxation_rate > 0){
-                        overrelaxation();
-                        if (i%overrelaxation_rate == 0){
-                            metropolis(spins, T, gaussian_move, sigma);
-                        }
-                    }
-                    else{
-                        metropolis(spins, T, gaussian_move, sigma);
-                    }
-                    if (i % 1000 == 0){
-                        energies.push_back(total_energy(spins));
-                    }
-                }
-                double k_B = 1.380649e-23;
-                double N_A = 6.02214076e23;
-                std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-                double curr_heat_capacity = 1/(T*T)*get<0>(varE)/lattice_size * 2 * k_B * N_A;
-                double curr_dHeat = 1/(T*T)*get<1>(varE)/lattice_size * 2 * k_B * N_A;
-                ofstream myfile;
-                myfile.open(out_dir + "/specific_heat.txt", ios::app);
-                myfile << T << " " << curr_heat_capacity << " " << curr_dHeat;
-                myfile << endl;
-                myfile.close();
-            }
+            cout << endl;
+            
+            // Cool down
             T *= cooling_rate;
         }
-        if(out_dir != ""){
+        
+        // Perform detailed measurements at final temperature if requested
+        if (save_observables) {
+            perform_final_measurements(T_end, sigma, gaussian_move, overrelaxation_rate, out_dir);
+        }
+        
+        // Save final configuration
+        if (!out_dir.empty()) {
             write_to_file_spin(out_dir + "/spin.txt", spins);
             write_to_file_pos(out_dir + "/pos.txt");
         }
     }
 
+    // Perform detailed measurements at final temperature
+    void perform_final_measurements(double T_final, double sigma, bool gaussian_move, 
+                                   size_t overrelaxation_rate, const string& out_dir) {
+        cout << "\n=== Performing final measurements at T=" << T_final << " ===" << endl;
+        
+        // Step 1: Preliminary sampling to estimate autocorrelation time
+        cout << "Step 1: Estimating autocorrelation time..." << endl;
+        vector<double> prelim_energies;
+        size_t prelim_samples = 10000;
+        size_t prelim_interval = 10;
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            perform_mc_sweeps(1, T_final, gaussian_move, sigma, overrelaxation_rate);
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy(spins));
+            }
+        }
+        
+        // Step 2: Analyze autocorrelation
+        AutocorrelationResult acf_result = compute_autocorrelation(prelim_energies, prelim_interval);
+        cout << "  Integrated autocorrelation time: " << acf_result.tau_int << endl;
+        cout << "  Using sampling interval: " << acf_result.sampling_interval << " sweeps" << endl;
+        
+        // Step 3: Equilibration
+        size_t equilibration = 10 * acf_result.sampling_interval;
+        cout << "Step 2: Equilibrating for " << equilibration << " sweeps..." << endl;
+        perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma, overrelaxation_rate);
+        
+        // Step 4: Main measurement phase
+        size_t n_samples = 1e3;
+        size_t n_measure = n_samples * acf_result.sampling_interval;
+        cout << "Step 3: Collecting " << n_samples << " independent samples..." << endl;
+        
+        vector<double> energies;
+        vector<array<double, N>> local_mags;
+        energies.reserve(n_samples);
+        local_mags.reserve(n_samples);
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            perform_mc_sweeps(1, T_final, gaussian_move, sigma, overrelaxation_rate);
+            
+            if (i % acf_result.sampling_interval == 0) {
+                energies.push_back(total_energy(spins));
+                local_mags.push_back(magnetization_local(spins));
+            }
+        }
+        
+        cout << "  Collected " << energies.size() << " samples" << endl;
+        
+        // Step 5: Compute and save observables
+        cout << "Step 4: Computing observables..." << endl;
+        compute_and_save_observables(energies, local_mags, T_final, out_dir);
+        
+        // Save autocorrelation analysis
+        save_autocorrelation_results(out_dir, acf_result);
+    }
+
+    // Compute thermodynamic observables and save to files
+    void compute_and_save_observables(const vector<double>& energies, 
+                                     const vector<array<double, N>>& local_mags,
+                                     double T, const string& out_dir) {
+        // Physical constants
+        const double k_B = 1.380649e-23;  // Boltzmann constant
+        const double N_A = 6.02214076e23; // Avogadro's number
+        
+        // Compute specific heat using binning analysis
+        std::tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double specific_heat = get<0>(varE) / (T * T * lattice_size);
+        double specific_heat_error = get<1>(varE) / (T * T * lattice_size);
+
+        // Save specific heat
+        ofstream heat_file(out_dir + "/specific_heat.txt", ios::app);
+        heat_file << T << " " << specific_heat << " " << specific_heat_error << endl;
+        heat_file.close();
+        
+        // Save other observables
+        write_to_file_2d_vector_array(out_dir + "/local_magnetization.txt", local_mags);
+        write_column_vector(out_dir + "/energy.txt", energies);
+        
+        cout << "  Specific heat: " << specific_heat << " +/- " << specific_heat_error << endl;
+    }
+
+
+    
     void simulated_annealing_deterministic(double T_start, double T_end, size_t n_anneal, size_t n_deterministics, size_t overrelaxation_rate, string dir_name, bool gaussian_move = false){
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move);
         for(size_t i = 0; i<n_deterministics; ++i){
@@ -1199,154 +1543,887 @@ class lattice
         simulated_annealing(T_start, T_end, n_anneal, overrelaxation_rate, gaussian_move, cooling_rate, out_dir, save_observables);
     }
 
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, string dir_name, const vector<int> rank_to_write, bool boundary_update = false, bool gaussian_move = true){
+    // Optimize temperature ladder for parallel tempering using round-trip feedback (Trebst et al., PRL 96, 220201)
+    // Returns a vector of temperatures (ascending) that maximize replica diffusion.
+    vector<double> optimize_temperature_ladder_roundtrip(
+        double Tmin, double Tmax, size_t R,
+        size_t warmup_sweeps = 200,
+        size_t sweeps_per_iter = 200,
+        size_t feedback_iters = 10,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0)
+    {
+        if (R < 3) return {Tmin, Tmax};
+
+        auto linspace = [](double a, double b, size_t n) {
+            vector<double> v(n);
+            if (n == 1) { v[0] = a; return v; }
+            for (size_t i = 0; i < n; ++i)
+                v[i] = a + (b - a) * double(i) / double(n - 1);
+            return v;
+        };
+
+        // Initial inverse temperature grid (linear in beta)
+        vector<double> beta = linspace(1.0 / Tmax, 1.0 / Tmin, R);
+
+        auto temps_from_beta = [](const vector<double>& b) {
+            vector<double> t(b.size());
+            for (size_t i = 0; i < b.size(); ++i) t[i] = 1.0 / b[i];
+            return t;
+        };
+
+        // Replica configs and mapping
+        vector<spin_config> reps(R, spins);
+        vector<size_t> rep_at(R);
+        iota(rep_at.begin(), rep_at.end(), 0);
+
+        // Warmup
+        double dummy_acc = 0.0;
+        for (size_t k = 0; k < R; ++k) {
+            spins = reps[rep_at[k]];
+            double Tk = 1.0 / beta[k];
+            perform_mc_sweeps(warmup_sweeps, Tk, gaussian_move, dummy_acc, overrelaxation_rate, nullptr);
+            reps[rep_at[k]] = spins;
+        }
+
+        vector<int8_t> dir_rep(R, +1);
+        vector<size_t> rt_count(R, 0);
+
+        for (size_t it = 0; it < feedback_iters; ++it) {
+            vector<size_t> visits(R, 0), visits_up(R, 0);
+            double sigma = 1000.0;
+
+            for (size_t sweep = 0; sweep < sweeps_per_iter; ++sweep) {
+                // Local moves
+                for (size_t k = 0; k < R; ++k) {
+                    size_t r = rep_at[k];
+                    spins = reps[r];
+                    double Tk = 1.0 / beta[k];
+                    double acc = 0.0;
+                    perform_mc_sweeps(1, Tk, gaussian_move, sigma, overrelaxation_rate, &acc);
+                    reps[r] = spins;
+                    visits[k]++;
+                    if (dir_rep[r] > 0) visits_up[k]++;
+                }
+
+                // Energies for swaps
+                vector<double> Eslot(R, 0.0);
+                for (size_t k = 0; k < R; ++k) {
+                    spins = reps[rep_at[k]];
+                    Eslot[k] = total_energy(spins);
+                }
+
+                // Neighbor swaps (checkerboard)
+                for (int parity = 0; parity < 2; ++parity) {
+                    for (size_t k = parity; k + 1 < R; k += 2) {
+                        size_t r1 = rep_at[k], r2 = rep_at[k + 1];
+                        double b1 = beta[k], b2 = beta[k + 1];
+                        double E1 = Eslot[k], E2 = Eslot[k + 1];
+                        double delta = (b1 - b2) * (E2 - E1);
+                        bool accept = (delta <= 0.0) || (random_double_lehman(0, 1) < exp(-delta));
+                        if (accept) {
+                            swap(rep_at[k], rep_at[k + 1]);
+                            swap(Eslot[k], Eslot[k + 1]);
+                        }
+                    }
+                }
+
+                // Update direction labels and round-trip count
+                if (rep_at[0] < R) {
+                    size_t r0 = rep_at[0];
+                    if (dir_rep[r0] < 0) { dir_rep[r0] = +1; rt_count[r0]++; }
+                    else { dir_rep[r0] = +1; }
+                }
+                if (rep_at[R - 1] < R) {
+                    size_t rN = rep_at[R - 1];
+                    if (dir_rep[rN] > 0) { dir_rep[rN] = -1; rt_count[rN]++; }
+                    else { dir_rep[rN] = -1; }
+                }
+            }
+
+            // Compute flow fraction f(k)
+            vector<double> f(R, 0.0);
+            for (size_t k = 0; k < R; ++k)
+                if (visits[k] > 0) f[k] = double(visits_up[k]) / double(visits[k]);
+
+            // Density eta(beta) ~ 1/sqrt(f(1-f))
+            const double eps = 1e-6;
+            vector<double> w(R, 0.0);
+            for (size_t k = 0; k < R; ++k) {
+                double fk = std::clamp(f[k], eps, 1.0 - eps);
+                w[k] = 1.0 / sqrt(fk * (1.0 - fk));
+            }
+
+            // Cumulative arc-length S
+            vector<double> S(R, 0.0);
+            for (size_t k = 1; k < R; ++k) {
+                double db = beta[k] - beta[k - 1];
+                S[k] = S[k - 1] + 0.5 * (w[k] + w[k - 1]) * fabs(db);
+            }
+            double Stot = (R > 1) ? S.back() : 1.0;
+            if (Stot <= eps) {
+                // Fallback: linear in beta
+                double bmin = beta.front(), bmax = beta.back();
+                for (size_t k = 0; k < R; ++k)
+                    beta[k] = bmin + (bmax - bmin) * double(k) / double(R - 1);
+                continue;
+            }
+
+            // Invert S to get new beta grid
+            vector<double> beta_new(R);
+            beta_new.front() = beta.front();
+            beta_new.back() = beta.back();
+            for (size_t i = 1; i + 1 < R; ++i) {
+                double Si = S.back() * double(i) / double(R - 1);
+                auto itS = upper_bound(S.begin(), S.end(), Si);
+                size_t k1 = (itS == S.begin()) ? 0 : size_t(itS - S.begin() - 1);
+                size_t k2 = min(k1 + 1, R - 1);
+                double t = (Si - S[k1]) / max(eps, (S[k2] - S[k1]));
+                beta_new[i] = beta[k1] + t * (beta[k2] - beta[k1]);
+            }
+
+            // Enforce monotonicity
+            for (size_t i = 1; i < R; ++i)
+                if (!(beta_new[i] > beta_new[i - 1]))
+                    beta_new[i] = nextafter(beta_new[i - 1], numeric_limits<double>::infinity());
+            beta.swap(beta_new);
+
+            // Progress report
+            double rt_sum = 0.0;
+            for (size_t r = 0; r < R; ++r) rt_sum += double(rt_count[r]);
+            double mean_rt = rt_sum / double(R) / double(max<size_t>(1, sweeps_per_iter));
+            auto old_flags = cout.flags();
+            std::streamsize old_prec = cout.precision();
+            cout.setf(std::ios::fixed, std::ios::floatfield);
+            cout << setprecision(6)
+                 << "[RoundTrip-PT] iter=" << it + 1
+                 << " mean_roundtrips_per_sweep=" << mean_rt
+                 << " Tmin=" << 1.0 / beta.back()
+                 << " Tmax=" << 1.0 / beta.front() << endl;
+            cout.flags(old_flags);
+            cout.precision(old_prec);
+        }
+
+        vector<double> T = temps_from_beta(beta);
+        sort(T.begin(), T.end());
+        return T;
+    }
+
+    LadderEval pilot_evaluate_ladder(const vector<double>& T,
+                                        size_t warmup_sweeps,
+                                        size_t pilot_sweeps,
+                                        bool gaussian_move,
+                                        size_t overrelaxation_rate)
+    {
+        LadderEval ev;
+        size_t R = T.size();
+        if (R < 2) return ev;
+
+        // Backup/restore spins
+        spin_config spins_backup = spins;
+
+        // Store replicas
+        vector<spin_config> reps(R, spins);
+
+        // Warmup at each T
+        double sigma = 1000.0;
+        for (size_t k = 0; k < R; ++k) {
+            spins = reps[k];
+            double acc = 0.0;
+            perform_mc_sweeps(warmup_sweeps, T[k], gaussian_move, sigma, overrelaxation_rate, &acc);
+            reps[k] = spins;
+        }
+
+        // Slot->rep map
+        vector<size_t> rep_at(R);
+        iota(rep_at.begin(), rep_at.end(), 0);
+
+        // Round-trip bookkeeping
+        vector<int8_t> dir_rep(R, +1);
+        vector<size_t> rt_count(R, 0);
+
+        // Edge acceptance counters
+        vector<size_t> att(R > 0 ? R - 1 : 0, 0), acc(R > 0 ? R - 1 : 0, 0);
+
+        // Pilot diffusion
+        for (size_t sweep = 0; sweep < pilot_sweeps; ++sweep) {
+            // local moves
+            for (size_t k = 0; k < R; ++k) {
+                size_t r = rep_at[k];
+                spins = reps[r];
+                double a = 0.0;
+                perform_mc_sweeps(1, T[k], gaussian_move, sigma, overrelaxation_rate, &a);
+                reps[r] = spins;
+            }
+
+            // energies per slot
+            vector<double> Eslot(R, 0.0);
+            for (size_t k = 0; k < R; ++k) {
+                spins = reps[rep_at[k]];
+                Eslot[k] = total_energy(spins);
+            }
+
+            // neighbor swaps
+            for (int parity = 0; parity < 2; ++parity) {
+                for (size_t k = parity; k + 1 < R; k += 2) {
+                    size_t r1 = rep_at[k];
+                    size_t r2 = rep_at[k + 1];
+                    double b1 = 1.0 / T[k], b2 = 1.0 / T[k + 1];
+                    double E1 = Eslot[k], E2 = Eslot[k + 1];
+                    double delta = (b1 - b2) * (E2 - E1);
+                    bool accepted = (delta <= 0.0) || (random_double_lehman(0, 1) < exp(-delta));
+                    att[k] += 1;
+                    if (accepted) {
+                        acc[k] += 1;
+                        swap(rep_at[k], rep_at[k + 1]);
+                        swap(Eslot[k], Eslot[k + 1]);
+                    }
+                }
+            }
+
+            // boundary labels for round-trip counting
+            if (rep_at[0] < R) {
+                size_t r0 = rep_at[0];
+                if (dir_rep[r0] < 0) { dir_rep[r0] = +1; rt_count[r0]++; }
+                else { dir_rep[r0] = +1; }
+            }
+            if (rep_at[R - 1] < R) {
+                size_t rN = rep_at[R - 1];
+                if (dir_rep[rN] > 0) { dir_rep[rN] = -1; rt_count[rN]++; }
+                else { dir_rep[rN] = -1; }
+            }
+        }
+
+        // Aggregate stats
+        ev.sweeps = pilot_sweeps;
+        ev.edge_accept.resize(att.size(), 0.0);
+        double meanA = 0.0, minA = 1.0;
+        for (size_t e = 0; e < att.size(); ++e) {
+            double a = (att[e] ? double(acc[e]) / double(att[e]) : 0.0);
+            ev.edge_accept[e] = a;
+            meanA += a;
+            minA = min(minA, a);
+        }
+        ev.mean_accept = (att.empty() ? 0.0 : meanA / double(att.size()));
+        ev.min_accept = (att.empty() ? 0.0 : minA);
+
+        double rt_sum = 0.0;
+        for (size_t r = 0; r < R; ++r) rt_sum += double(rt_count[r]);
+        ev.roundtrip_rate = (R > 0 && pilot_sweeps > 0) ? rt_sum / double(R) / double(pilot_sweeps) : 0.0;
+
+        // restore spins
+        spins = spins_backup;
+        return ev;
+    }
+
+    // Autotune Tmin, Tmax, and R:
+    // Iteratively (1) optimize ladder for fixed bounds and R, (2) pilot-evaluate,
+    // (3) adjust R to hit acceptance window, and (4) adjust Tmax/Tmin to improve round-trip rate.
+    vector<double> autotune_temperature_ladder(
+        double Tmin_init, double Tmax_init, size_t R_init,
+        // Targets and limits
+        double acc_lo = 0.05, double acc_hi = 0.7,
+        double target_roundtrip_per_sweep = 5e-3,
+        size_t R_min = 24, size_t R_max = 192,
+        // Work parameters
+        size_t outer_iters = 8,
+        size_t warmup_sweeps = 200,
+        size_t fb_sweeps_per_iter = 200,
+        size_t fb_iters = 6,
+        size_t pilot_sweeps = 1000,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 20)
+    {
+        double Tmin = Tmin_init, Tmax = Tmax_init;
+        size_t R = max(R_min, min(R_init, R_max));
+
+        vector<double> T_best;
+        double score_best = -1.0;
+
+        for (size_t it = 0; it < outer_iters; ++it) {
+            // 1) Optimize ladder (betas) for current bounds and R
+            vector<double> T = optimize_temperature_ladder_roundtrip(
+                Tmin, Tmax, R, warmup_sweeps, fb_sweeps_per_iter, fb_iters, gaussian_move, overrelaxation_rate);
+
+            // 2) Pilot evaluate
+            LadderEval ev = pilot_evaluate_ladder(T, warmup_sweeps/2, pilot_sweeps, gaussian_move, overrelaxation_rate);
+
+            // Quality score: prioritize min_accept in window and round-trip rate
+            double acc_penalty = 0.0;
+            if (ev.min_accept < acc_lo) acc_penalty += (acc_lo - ev.min_accept);
+            if (ev.mean_accept > acc_hi) acc_penalty += (ev.mean_accept - acc_hi);
+            double score = ev.roundtrip_rate - 0.5 * acc_penalty;
+
+            if (score > score_best) { score_best = score; T_best = T; }
+
+            cout << "[PT-Autotune] it=" << (it+1)
+                    << " R=" << R
+                    << " Tmin=" << Tmin << " Tmax=" << Tmax
+                    << " acc_mean=" << ev.mean_accept
+                    << " acc_min=" << ev.min_accept
+                    << " rt_rate=" << ev.roundtrip_rate << endl;
+
+            bool changed = false;
+
+            // 3) Adjust R based on acceptance window
+            if (ev.min_accept < acc_lo && R < R_max) {
+                size_t R_new = min(R_max, R + max<size_t>(1, R / 5));
+                if (R_new != R) { R = R_new; changed = true; }
+            } else if (ev.mean_accept > acc_hi && R > R_min) {
+                size_t R_new = max(R_min, R - max<size_t>(1, R / 10));
+                if (R_new != R) { R = R_new; changed = true; }
+            }
+
+            // 4) Adjust temperature bounds to improve diffusion
+            if (!changed) {
+                // If round-trips too slow, increase Tmax to help decorrelate
+                if (ev.roundtrip_rate < target_roundtrip_per_sweep) {
+                    Tmax *= 1.2;
+                    // If cold edge acceptance is too low, raise Tmin slightly as well
+                    if (!ev.edge_accept.empty() && ev.edge_accept.front() < acc_lo) {
+                        Tmin *= 1.1;
+                    }
+                    changed = true;
+                } else {
+                    // If everything is easy (high accept), we can try tightening bounds
+                    if (ev.mean_accept > 0.4 && ev.roundtrip_rate > 2.0 * target_roundtrip_per_sweep) {
+                        Tmax = max(Tmin * 1.05, Tmax * 0.9);
+                        if (!ev.edge_accept.empty() && ev.edge_accept.front() > acc_hi) {
+                            Tmin = min(Tmax / 1.05, Tmin * 0.95);
+                        }
+                        changed = true;
+                    }
+                }
+            }
+
+            // Keep bounds sane
+            if (Tmin < 1e-12) Tmin = 1e-12;
+            if (Tmax <= Tmin * 1.01) Tmax = Tmin * 1.01;
+
+            if (!changed) {
+                // Converged
+                return T_best.empty() ? T : T;
+            }
+        }
+
+        return T_best.empty() ? optimize_temperature_ladder_roundtrip(
+                    Tmin, Tmax, R, warmup_sweeps, fb_sweeps_per_iter, fb_iters, gaussian_move, overrelaxation_rate)
+                                : T_best;
+    }
+
+
+
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure, 
+                           size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, 
+                           string dir_name, const vector<int> rank_to_write, bool gaussian_move = true) {
+        
+        // Initialize MPI
+        int initialized;
+        MPI_Initialized(&initialized);
+        if (!initialized) {
+            MPI_Init(NULL, NULL);
+        }
+        
+        int rank, size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        
+        // Set up random seed
+        srand(time(NULL));
+        seed_lehman((rand() + rank * 1000) * 2 + 1);
+        
+        // Initialize variables
+        double curr_Temp = temp[rank];
+        double sigma = 1000.0;
         int swap_accept = 0;
         double curr_accept = 0;
         int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
-        int initialized;
-        MPI_Initialized(&initialized);
-        if (!initialized){
-            MPI_Init(NULL, NULL);
-        }
-        int rank, size, partner_rank;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
-        srand (time(NULL));
-        seed_lehman(rand()*2+1);
-        double E, T_partner, E_partner;
-        bool accept;        
-        spin_config new_spins;
-        double curr_Temp = temp[rank];
+        
         vector<double> heat_capacity, dHeat;
-        if (rank == 0){
+        if (rank == 0) {
             heat_capacity.resize(size);
             dHeat.resize(size);
-        }   
+        }
+        
         vector<double> energies;
-        vector<array<double,N>> magnetizations;
-        vector<spin_config> spin_configs_at_temp;
-
+        vector<array<double, N>> magnetizations;
+        
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
-
-        // Counter for twist boundary updates
-        size_t twist_update_interval = 100; // Perform twist updates every 100 iterations
-        size_t twist_sweeps_per_update = 1; // Number of twist sweeps per update
-
-        for(size_t i=0; i < n_anneal+n_measure; ++i){
-
-            // Metropolis
-            if(overrelaxation_rate > 0){
-                overrelaxation();
-                if (i%overrelaxation_rate == 0){
-                    curr_accept += metropolis(spins, curr_Temp, gaussian_move);
-                }
+        
+        // ===== Equilibration Phase =====
+        cout << "Rank " << rank << ": Starting equilibration..." << endl;
+        for (size_t i = 0; i < n_anneal; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Attempt replica exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
             }
-            else{
-                curr_accept += metropolis(spins, curr_Temp, gaussian_move);
+            cout << "Rank " << rank << ": Equilibration step " << i+1 << "/" << n_anneal << " with acceptance " << curr_accept / (i+1) << " and swap acceptance " << (swap_accept > 0 ? double(swap_accept) / (i / swap_rate + 1) : 0) << endl;
+        }
+        
+        cout << "Rank " << rank << ": Equilibration complete. Computing autocorrelation time..." << endl;
+        
+        // ===== Autocorrelation Analysis =====
+        probe_rate = estimate_sampling_interval(curr_Temp, gaussian_move, sigma, 
+                                               overrelaxation_rate, n_measure, probe_rate, rank);
+        
+        // ===== Main Measurement Phase =====
+        cout << "Rank " << rank << ": Starting measurement phase..." << endl;
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Attempt replica exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
             }
             
-            // Twist boundary condition updates
-            if (boundary_update && (i % twist_update_interval == 0)) {
-                for (size_t tw = 0; tw < twist_sweeps_per_update; ++tw) {
-                    metropolis_twist_sweep(curr_Temp);
-                }
-            }
-            
-            E = total_energy(spins);
-
-            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)){
-                accept = false;
-                if ((i / swap_rate) % 2 ==0){
-                    partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
-                }else{
-                    partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
-                }
-                if ((partner_rank >= 0) && (partner_rank < size)){
-                    T_partner = temp[partner_rank];
-                    if (partner_rank % 2 == 0){
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    } else{
-                        MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
-                    }
-                    if (partner_rank % 2 == 0){
-                        accept = min(double(1.0), exp((1/curr_Temp-1/T_partner)*(E - E_partner))) > random_double_lehman(0,1);
-                        MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
-                    } else{
-                        MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    }
-                    if (accept){
-                        // Exchange both spins AND twist matrices
-                        if (partner_rank % 2 == 0){
-                            MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
-                            MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            
-                            // Also exchange twist matrices if boundary updates are enabled
-                            if (boundary_update) {
-                                array<array<double, N*N>, 3> partner_twist;
-                                MPI_Send(&twist_matrices, 3*N*N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
-                                MPI_Recv(&partner_twist, 3*N*N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                twist_matrices = partner_twist;
-                            }
-                        } else{
-                            MPI_Recv(&new_spins, N*lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                            MPI_Send(&spins, N*lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-                            
-                            // Also exchange twist matrices if boundary updates are enabled
-                            if (boundary_update) {
-                                array<array<double, N*N>, 3> partner_twist;
-                                MPI_Recv(&partner_twist, 3*N*N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                                MPI_Send(&twist_matrices, 3*N*N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
-                                twist_matrices = partner_twist;
-                            }
-                        }
-                        copy(new_spins.begin(), new_spins.end(), spins.begin());
-                        E = E_partner;
-                        swap_accept++;
-                    }
-                }
-            }
-
-            if (i >= n_anneal){
-                if (i % probe_rate == 0){
-                    if(dir_name != ""){
-                        magnetizations.push_back(magnetization_local(spins));
-                        spin_configs_at_temp.push_back(spins);
-                        energies.push_back(E);
-                    }
-                }
+            // Sample observables
+            if (i % probe_rate == 0) {
+                double E = total_energy(spins);
+                energies.push_back(E);
+                magnetizations.push_back(magnetization_local(spins));
             }
         }
         
-        std::tuple<double,double> varE = binning_analysis(energies, int(energies.size()/10));
-        double curr_heat_capacity = 1/(curr_Temp*curr_Temp)*get<0>(varE)/lattice_size;
-        double curr_dHeat = 1/(curr_Temp*curr_Temp)*get<1>(varE)/lattice_size;
-        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp << " with local acceptance rate: " << double(curr_accept)/double(n_anneal+n_measure)*overrelaxation_flag << " Swap Acceptance rate: " << double(swap_accept)/double(n_anneal+n_measure)*swap_rate*overrelaxation_flag << endl;
-        if(dir_name != ""){
-            filesystem::create_directory(dir_name);
-            for(size_t i=0; i<rank_to_write.size(); ++i){
-                if (rank == rank_to_write[i]){
-                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
-                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
-                    // for(size_t a=0; a<spin_configs_at_temp.size(); ++a){
-                    //     write_to_file_spin(dir_name + "/spin" + to_string(rank) + "_T" + to_string(temp[a]) + ".txt", spin_configs_at_temp[a]);
-                    // }
-                }
+        cout << "Rank " << rank << ": Collected " << energies.size() << " independent samples" << endl;
+        
+        // ===== Compute and Gather Statistics =====
+        gather_and_save_statistics(rank, size, curr_Temp, energies, magnetizations, 
+                                  heat_capacity, dHeat, temp, dir_name, rank_to_write,
+                                  n_anneal, n_measure, curr_accept, swap_accept, 
+                                  swap_rate, overrelaxation_flag, probe_rate);
+    }
+    
+
+    // Helper: Attempt replica exchange between neighboring temperatures
+    int attempt_replica_exchange(int rank, int size, const vector<double>& temp, 
+                                double curr_Temp, size_t swap_parity) {
+        // Determine partner based on checkerboard pattern
+        int partner_rank;
+        if (swap_parity % 2 == 0) {
+            partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
+        } else {
+            partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
+        }
+        
+        if (partner_rank < 0 || partner_rank >= size) {
+            return 0;
+        }
+        
+        // Exchange energies
+        double E = total_energy(spins);
+        double E_partner, T_partner = temp[partner_rank];
+        
+        if (rank < partner_rank) {
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else {
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
+        }
+        
+        // Decide acceptance using Metropolis criterion
+        bool accept = false;
+        if (rank < partner_rank) {
+            double delta = (1.0/curr_Temp - 1.0/T_partner) * (E - E_partner);
+            accept = (delta <= 0) || (random_double_lehman(0, 1) < exp(-delta));
+            MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+        
+        // Exchange configurations if accepted
+        if (accept) {
+            spin_config new_spins;
+            if (rank < partner_rank) {
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            } else {
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
             }
-            if (rank == 0){
-                write_to_file_pos(dir_name + "/pos.txt");
-                ofstream myfile;
-                myfile.open(dir_name + "/heat_capacity.txt", ios::app);
-                for(size_t j = 0; j<size; ++j){
-                    myfile << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
-                }
-                myfile.close();
+            spins = new_spins;
+            return 1;
+        }
+        return 0;
+    }
+    
+    // Helper: Estimate optimal sampling interval using autocorrelation
+    size_t estimate_sampling_interval(double curr_Temp, bool gaussian_move, double& sigma,
+                                     size_t overrelaxation_rate, size_t n_measure, 
+                                     size_t probe_rate, int rank) {
+        // Preliminary sampling
+        vector<double> prelim_energies;
+        size_t prelim_samples = min(size_t(10000), n_measure / 10);
+        size_t prelim_interval = max(size_t(1), size_t(overrelaxation_rate > 0 ? overrelaxation_rate : 1));
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate);
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy(spins));
             }
         }
-        // measurement("spin0.txt", temp[0], n_measure, probe_rate, overrelaxation_rate, gaussian_move, rank_to_write, dir_name);
+        
+        // Compute autocorrelation
+        AutocorrelationResult acf_result = compute_autocorrelation(prelim_energies, prelim_interval);
+        
+        // Determine effective sampling interval
+        size_t effective_interval = max(acf_result.sampling_interval, probe_rate);
+        
+        cout << "Rank " << rank << ": tau_int = " << acf_result.tau_int 
+             << ", using sampling interval = " << effective_interval << " sweeps" << endl;
+        
+        return effective_interval;
+    }
+    
+    // Helper: Gather statistics and save results
+    void gather_and_save_statistics(int rank, int size, double curr_Temp,
+                                   const vector<double>& energies,
+                                   const vector<array<double, N>>& magnetizations,
+                                   vector<double>& heat_capacity, vector<double>& dHeat,
+                                   const vector<double>& temp, const string& dir_name,
+                                   const vector<int>& rank_to_write,
+                                   size_t n_anneal, size_t n_measure,
+                                   double curr_accept, int swap_accept,
+                                   size_t swap_rate, int overrelaxation_flag,
+                                   size_t probe_rate) {
+        // Compute heat capacity
+        tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double curr_heat_capacity = get<0>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        double curr_dHeat = get<1>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        
+        // Gather to root
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
+        // Report statistics
+        double total_steps = n_anneal + n_measure;
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp 
+             << " with local acceptance rate: " << curr_accept / total_steps * overrelaxation_flag 
+             << " Swap Acceptance rate: " << double(swap_accept) / total_steps * swap_rate * overrelaxation_flag << endl;
+        
+        // Save results if requested
+        if (!dir_name.empty()) {
+            filesystem::create_directory(dir_name);
+            
+            // Save per-rank data
+            for (int write_rank : rank_to_write) {
+                if (rank == write_rank) {
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                }
+            }
+            
+            // Save global data from root
+            if (rank == 0) {
+                write_to_file_pos(dir_name + "/pos.txt");
+                
+                ofstream heat_file(dir_name + "/heat_capacity.txt", ios::app);
+                for (size_t j = 0; j < size; ++j) {
+                    heat_file << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
+                }
+                heat_file.close();
+            }
+        }
+    }
+    void parallel_tempering_tbc(vector<double> temp, size_t n_anneal, size_t n_measure, 
+                                size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate, 
+                                size_t twist_update_rate, string dir_name, const vector<int> rank_to_write, 
+                                bool gaussian_move = true) {
+        
+        // Initialize MPI
+        int initialized;
+        MPI_Initialized(&initialized);
+        if (!initialized) {
+            MPI_Init(NULL, NULL);
+        }
+        
+        int rank, size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        
+        // Set up random seed
+        srand(time(NULL));
+        seed_lehman((rand() + rank * 1000) * 2 + 1);
+        
+        // Initialize variables
+        double curr_Temp = temp[rank];
+        double sigma = 1000.0;
+        int swap_accept = 0;
+        double curr_accept = 0;
+        int overrelaxation_flag = overrelaxation_rate > 0 ? overrelaxation_rate : 1;
+        
+        vector<double> heat_capacity, dHeat;
+        if (rank == 0) {
+            heat_capacity.resize(size);
+            dHeat.resize(size);
+        }
+        
+        vector<double> energies;
+        vector<array<double, N>> magnetizations;
+        vector<double> autocorr;  // Store for later file output
+        
+        cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
+        
+        // ===== Equilibration Phase with Twist Updates =====
+        cout << "Rank " << rank << ": Starting equilibration..." << endl;
+        for (size_t i = 0; i < n_anneal; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Update twist matrices periodically
+            if (twist_update_rate > 0 && i % twist_update_rate == 0) {
+                metropolis_twist_sweep(curr_Temp);
+            }
+            
+            // Attempt replica exchange with twist matrix exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange_tbc(rank, size, temp, curr_Temp, i / swap_rate);
+            }
+            cout << "Rank " << rank << ": Equilibration step " << i+1 << "/" << n_anneal << " with acceptance " << curr_accept / (i+1) << " and swap acceptance " << (swap_accept > 0 ? double(swap_accept) / (i / swap_rate + 1) : 0) << endl;
+        }
+        
+        cout << "Rank " << rank << ": Equilibration complete. Computing autocorrelation time..." << endl;
+        
+        // ===== Autocorrelation Analysis with Twist Updates =====
+        probe_rate = estimate_sampling_interval_tbc(curr_Temp, gaussian_move, sigma, 
+                                                     overrelaxation_rate, n_measure, probe_rate, 
+                                                     twist_update_rate, rank, autocorr);
+        
+        // ===== Main Measurement Phase =====
+        cout << "Rank " << rank << ": Starting measurement phase..." << endl;
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            // Perform MC sweep
+            double acc = 0;
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate, &acc);
+            curr_accept += acc;
+            
+            // Update twist matrices periodically
+            if (twist_update_rate > 0 && i % twist_update_rate == 0) {
+                metropolis_twist_sweep(curr_Temp);
+            }
+            
+            // Attempt replica exchange with twist matrix exchange
+            if ((i % swap_rate == 0) && (i % overrelaxation_flag == 0)) {
+                swap_accept += attempt_replica_exchange_tbc(rank, size, temp, curr_Temp, i / swap_rate);
+            }
+            
+            // Sample observables
+            if (i % probe_rate == 0) {
+                double E = total_energy(spins);
+                energies.push_back(E);
+                magnetizations.push_back(magnetization_local(spins));
+            }
+        }
+        
+        cout << "Rank " << rank << ": Collected " << energies.size() << " independent samples" << endl;
+        
+        // ===== Compute and Gather Statistics =====
+        gather_and_save_statistics_tbc(rank, size, curr_Temp, energies, magnetizations, 
+                                       heat_capacity, dHeat, temp, dir_name, rank_to_write,
+                                       n_anneal, n_measure, curr_accept, swap_accept, 
+                                       swap_rate, overrelaxation_flag, probe_rate,
+                                       twist_update_rate, autocorr);
+    }
+
+    // Helper: Attempt replica exchange including twist matrices
+    int attempt_replica_exchange_tbc(int rank, int size, const vector<double>& temp, 
+                                     double curr_Temp, size_t swap_parity) {
+        // Determine partner based on checkerboard pattern
+        int partner_rank;
+        if (swap_parity % 2 == 0) {
+            partner_rank = rank % 2 == 0 ? rank + 1 : rank - 1;
+        } else {
+            partner_rank = rank % 2 == 0 ? rank - 1 : rank + 1;
+        }
+        
+        if (partner_rank < 0 || partner_rank >= size) {
+            return 0;
+        }
+        
+        // Exchange energies
+        double E = total_energy(spins);
+        double E_partner, T_partner = temp[partner_rank];
+        
+        if (rank < partner_rank) {
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else {
+            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
+        }
+        
+        // Decide acceptance using Metropolis criterion
+        bool accept = false;
+        if (rank < partner_rank) {
+            double delta = (1.0/curr_Temp - 1.0/T_partner) * (E - E_partner);
+            accept = (delta <= 0) || (random_double_lehman(0, 1) < exp(-delta));
+            MPI_Send(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+        
+        // Exchange configurations and twist matrices if accepted
+        if (accept) {
+            spin_config new_spins;
+            array<array<double, N*N>, 3> new_twist_matrices;
+            
+            if (rank < partner_rank) {
+                // Send spins and twist matrices
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
+                MPI_Recv(&new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            } else {
+                // Receive spins and twist matrices
+                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
+                MPI_Recv(&new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD);
+            }
+            
+            spins = new_spins;
+            twist_matrices = new_twist_matrices;
+            return 1;
+        }
+        return 0;
+    }
+
+    // Helper: Estimate optimal sampling interval with twist updates
+    size_t estimate_sampling_interval_tbc(double curr_Temp, bool gaussian_move, double& sigma,
+                                          size_t overrelaxation_rate, size_t n_measure, 
+                                          size_t probe_rate, size_t twist_update_rate, int rank,
+                                          vector<double>& autocorr_out) {
+        // Preliminary sampling with twist updates
+        vector<double> prelim_energies;
+        size_t prelim_samples = min(size_t(10000), n_measure / 10);
+        size_t prelim_interval = max(size_t(1), size_t(overrelaxation_rate > 0 ? overrelaxation_rate : 1));
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate);
+            
+            // Include twist updates
+            if (twist_update_rate > 0 && i % twist_update_rate == 0) {
+                metropolis_twist_sweep(curr_Temp);
+            }
+            
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy(spins));
+            }
+        }
+        
+        // Compute autocorrelation
+        AutocorrelationResult acf_result = compute_autocorrelation(prelim_energies, prelim_interval);
+        
+        // Store autocorrelation function for output
+        autocorr_out = acf_result.correlation_function;
+        
+        // Determine effective sampling interval
+        size_t effective_interval = max(acf_result.sampling_interval, probe_rate);
+        
+        cout << "Rank " << rank << ": tau_int = " << acf_result.tau_int 
+             << ", using sampling interval = " << effective_interval << " sweeps" << endl;
+        
+        return effective_interval;
+    }
+
+    // Helper: Gather statistics and save results including twist matrix info
+    void gather_and_save_statistics_tbc(int rank, int size, double curr_Temp,
+                                        const vector<double>& energies,
+                                        const vector<array<double, N>>& magnetizations,
+                                        vector<double>& heat_capacity, vector<double>& dHeat,
+                                        const vector<double>& temp, const string& dir_name,
+                                        const vector<int>& rank_to_write,
+                                        size_t n_anneal, size_t n_measure,
+                                        double curr_accept, int swap_accept,
+                                        size_t swap_rate, int overrelaxation_flag,
+                                        size_t probe_rate, size_t twist_update_rate,
+                                        const vector<double>& autocorr) {
+        // Compute heat capacity
+        tuple<double, double> varE = binning_analysis(energies, int(energies.size() / 10));
+        double curr_heat_capacity = get<0>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        double curr_dHeat = get<1>(varE) / (curr_Temp * curr_Temp * lattice_size);
+        
+        // Gather to root
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
+        // Report statistics
+        double total_steps = n_anneal + n_measure;
+        cout << "Process finished on rank: " << rank << " with temperature: " << curr_Temp 
+             << " with local acceptance rate: " << curr_accept / total_steps * overrelaxation_flag 
+             << " Swap Acceptance rate: " << double(swap_accept) / total_steps * swap_rate * overrelaxation_flag << endl;
+        
+        // Save results if requested
+        if (!dir_name.empty()) {
+            filesystem::create_directory(dir_name);
+            
+            // Save per-rank data
+            for (int write_rank : rank_to_write) {
+                if (rank == write_rank) {
+                    write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
+                    write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    
+                    // Save autocorrelation info
+                    ofstream acf_file(dir_name + "/autocorr_rank" + to_string(rank) + ".txt");
+                    acf_file << "# Autocorrelation analysis" << endl;
+                    acf_file << "# Temperature = " << curr_Temp << endl;
+                    acf_file << "# Twist update rate = " << twist_update_rate << " sweeps" << endl;
+                    acf_file << "# Sampling interval = " << probe_rate << " sweeps" << endl;
+                    acf_file << "# lag autocorrelation" << endl;
+                    size_t max_output = min(size_t(100), autocorr.size());
+                    for (size_t lag = 0; lag < max_output; ++lag) {
+                        acf_file << lag << " " << autocorr[lag] << endl;
+                    }
+                    acf_file.close();
+                    
+                    // Save twist matrices
+                    save_twist_matrices(dir_name + "/twist_matrices_rank" + to_string(rank) + ".txt");
+                }
+            }
+            
+            // Save global data from root
+            if (rank == 0) {
+                write_to_file_pos(dir_name + "/pos.txt");
+                
+                ofstream heat_file(dir_name + "/heat_capacity.txt", ios::app);
+                for (size_t j = 0; j < size; ++j) {
+                    heat_file << temp[j] << " " << heat_capacity[j] << " " << dHeat[j] << endl;
+                }
+                heat_file.close();
+            }
+        }
+    }
+
+    // Helper: Save twist matrices to file
+    void save_twist_matrices(const string& filename) {
+        ofstream twist_file(filename);
+        twist_file << "# Twist matrices for each dimension" << endl;
+        for (size_t d = 0; d < 3; ++d) {
+            twist_file << "# Dimension " << d << " (axis: ";
+            for (size_t i = 0; i < N; ++i) {
+                twist_file << rotation_axis[d][i] << " ";
+            }
+            twist_file << ")" << endl;
+            for (size_t i = 0; i < N; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    twist_file << twist_matrices[d][i*N + j] << " ";
+                }
+                twist_file << endl;
+            }
+        }
+        twist_file.close();
     }
 
 

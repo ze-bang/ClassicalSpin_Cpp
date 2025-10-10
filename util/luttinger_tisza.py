@@ -497,7 +497,7 @@ def get_bond_vectors(a1, a2):
     delta2 = -a2 + delta3                          # Y bond
     delta1 = a1 - a2 + delta3                      # X bond
     nn_vectors = [delta1, delta2, delta3]
-    print("Nearest neighbor vectors:", nn_vectors)
+    # print("Nearest neighbor vectors:", nn_vectors)
     
     # Second nearest neighbor vectors (A to A or B to B)
     nnn_vectors = [a1, a2, a1-a2, -a1, -a2, a2-a1]

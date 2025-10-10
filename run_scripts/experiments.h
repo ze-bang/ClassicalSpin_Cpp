@@ -98,7 +98,7 @@ void simulated_annealing_pyrochlore(double Tstart, double TargetT, double Jxx, d
 
     lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
     // MC.simulated_annealing_deterministic(5, 1e-7, 10000, 10000, 0, dir);
-    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, 0.9, dir, save);
+    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e2, true, false, 0.9, dir, save);
 }
 
 void parallel_tempering_pyrochlore(double T_start, double T_end, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, const vector<int> &rank_to_write, double theta=0){
@@ -385,7 +385,7 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
     atoms.set_field(field3, 3);
 
     lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
-    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e1, true, 0.9, dir, save);
+    MC.simulated_annealing(Tstart, TargetT, 1e5, 1e1, true, false, 0.9, dir, save);
 
     // for (size_t i = 0; i < 1e4; ++i){
     //     MC.deterministic_sweep();

@@ -2626,33 +2626,29 @@ def compute_regional_SSSF(P, S, nK, output_dir, n_regions_x=3, n_regions_y=3, ov
 def parse_spin_config(directory):
     nK = 101
     SSSF = np.zeros((nK, nK, 3, 3))
-
-    H = np.linspace(-1, 1, nK)
-    L = np.linspace(-1, 1, nK)
-    C, D = np.meshgrid(H, L)
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
         # print(filename)
         if os.path.isdir(directory + "/" + filename):
-            S = np.loadtxt(directory + "/" + filename + "/spin_zero.txt")
+            S = np.loadtxt(directory + "/" + filename + "/spin.txt")
             P = np.loadtxt(directory + "/" + filename + "/pos.txt")
             SSSF += SSSF2D(S, P, nK, directory + "/" + filename )
             base2d = directory + "/" + filename + "/spin_config_2d.pdf"
             print("Computing 2D spin configuration plot")
             plot_spin_config_2d(P, S, base2d)
             # Zoomed 2D projections (50% window around center)
-            plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
+            # plot_spin_config_2d(P, S, base2d.replace('.pdf', '_zoom.pdf'), zoom_frac=0.5)
             # 3D orientation plot
-            print("Computing 3D configuration")
+            # print("Computing 3D configuration")
             # base3d = directory + "/" + filename + "/spin_config_3d.pdf"
             # plot_spin_config_3d(P, S, base3d, color_by='z', subsample=None)
             # Zoomed 3D view (50% window around center)
             # plot_spin_config_3d(P, S, base3d.replace('.pdf', '_zoom.pdf'), color_by='z', subsample=None, zoom_frac=0.5)
             # Load energy landscape data (assumes two columns: index and energy)
-            print("Computing chirality plot")
+            # print("Computing chirality plot")
             # plot_chirality_real_space(P, S, directory + "/" + filename + "/chirality")
             # Continuum chirality on grid + core detection
-            print("Computing coarse grained chirality")
+            # print("Computing coarse grained chirality")
             # cont = compute_continuum_chirality(P, S, grid_res=256, sigma=1.0)
             # cores = detect_skyrmion_cores_from_grid(cont['X'], cont['Y'], cont['Sz'], cont['q'], cont['mask'], q_rel_thresh=0.2, sz_prominence=0.2, neighborhood=9)
             # plot_continuum_chirality_and_cores(cont, cores, directory + "/" + filename + "/continuum_chirality")
@@ -2681,34 +2677,36 @@ def parse_spin_config(directory):
 
                 np.savetxt(directory + "/" + filename + "/energy_density.txt", np.array([np.mean(energy_landscape)]))
 
-                energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
+                # energy_density_by_section(directory + "/" + filename + "/energy_coarse_grained.pdf", P, energy_landscape, 5, 5)
                 
                 # Perform energetics argument analysis
-                print("Computing energetics argument (defect-free vs defective regions)")
-                energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
-                                                      J=1.0, grid_res=256, sigma=1.0)
-                print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
-                print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
+                # print("Computing energetics argument (defect-free vs defective regions)")
+                # energetics_result = energetics_argument(P, S, energy_landscape, directory + "/" + filename + "/energetics_analysis", 
+                #                                       J=1.0, grid_res=256, sigma=1.0)
+                # print(f"Found {energetics_result['N_free']} defect-free sites and {energetics_result['N_def']} defective sites")
+                # print(f"Average energy: defect-free = {energetics_result['E_free_mean']:.6f}, defective = {energetics_result['E_def_mean']:.6f}")
 
-                # Skyrmion-lattice-aware energetics that does not classify cores as defects
-                print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
-                skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
-                                                       grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
-                print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
-                print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
+                # # Skyrmion-lattice-aware energetics that does not classify cores as defects
+                # print("Computing skyrmion-lattice-aware energetics (ordered vs defective)")
+                # skx_res = energetics_argument_skyrmion(P, S, energy_landscape, directory + "/" + filename + "/energetics_skx",
+                #                                        grid_res=256, sigma=1.0, psi6_thr=0.75, sp_rel_thr=0.20, ori_thr_deg=15.0)
+                # print(f"SkX ordered: {skx_res['N_ordered']} sites; defective: {skx_res['N_def']} sites")
+                # print(f"Energy means: ordered = {skx_res['E_ordered_mean']:.6f}, defective = {skx_res['E_def_mean']:.6f}")
             else:
                 print(f"Warning: {energy_landscape_path} not found, skipping energy landscape plot.")
                 energy_landscape = np.zeros(P.shape[0])
 
-
+    H = np.linspace(-2*np.pi, 2*np.pi, nK)
+    L = np.linspace(-2*np.pi, 2*np.pi, nK)
+    A, B = np.meshgrid(H, L)
 
     SSSF = SSSF / len(os.listdir(directory))
-    SSSFGraph2D(C, D, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
+    SSSFGraph2D(A, B, contract('ijab->ij', SSSF), directory + "/SSSF_tot")
 
     # Plot each component of SSSF
     for i, component_i in enumerate(['x', 'y', 'z']):
         for j, component_j in enumerate(['x', 'y', 'z']):
-            SSSFGraph2D(C, D, SSSF[:,:,i,j], directory + f"/SSSF_{component_i}{component_j}")
+            SSSFGraph2D(A, B, SSSF[:,:,i,j], directory + f"/SSSF_{component_i}{component_j}")
 
 
 def parse_spin_config_file(directory):
@@ -2790,32 +2788,55 @@ def read_field_scan(directory):
     h_values = []
     m_values = []
     m_stds = []
+    e_values = []
+    e_stds = []
     for subdir in sorted(os.listdir(directory)):
         full_path = os.path.join(directory, subdir)
         if os.path.isdir(full_path) and subdir.startswith("h_"):
-            try:
-                h_str = subdir.split('_')[1]
-                h = float(h_str)
-                # spin_file = os.path.join(full_path, "0/spin_0.001T.txt")
-                # print(spin_file)
-                # parse_spin_config(full_path)
-                spin_file = os.path.join(full_path, "magnetization0.txt")
-                parse_spin_config_file(full_path)
+            h_str = subdir.split('_')[1]
+            h = float(h_str)
+            print(f"Processing field strength directory: {full_path} h = {h}")
+            M_mean = np.zeros(3)
+            M_var = np.zeros(3)
+            E_mean = 0.0
+            E_var = 0.0
+            count = 0
+            for dir in os.listdir(full_path):
+                # Skip non-directory entries and non-numeric directory names
+                spin_file = os.path.join(full_path, dir, "local_magnetization.txt")
                 if os.path.exists(spin_file):
                     M = np.loadtxt(spin_file)
-                    M_mean = np.mean(M, axis=0)
-                    M_stdev = np.std(M, axis=0)
-                    h_values.append(h)
-                    m_values.append(M_mean)
-                    m_stds.append(M_stdev)
-                else:
-                    print(f"Magnetization file not found in {full_path}")
+                    M_mean += np.mean(M, axis=0)
+                    M_var += np.var(M, axis=0)
+                    count += 1
+                e_file = os.path.join(full_path, dir, "energy.txt")
+                if os.path.exists(e_file):
+                    E = np.loadtxt(e_file)/(24*24*2)
+                    E_mean += np.mean(E)
+                    E_var += np.var(E)
+            if count != 0:
+                h_values.append(h)
+                m_values.append(M_mean/count)
+                m_stds.append(np.sqrt(M_var/count))
+                e_values.append(E_mean/count)
+                e_stds.append(np.sqrt(E_var/count))
 
-            except (IndexError, ValueError) as e:
-                print(f"Could not parse field value from directory {subdir}: {e}")
-            except Exception as e:
-                print(f"An error occurred while processing {full_path}: {e}")
-
+            # M_best = np.zeros(3)
+            # E_best = float("inf")
+            # for dir in os.listdir(full_path):
+            #     # Skip non-directory entries and non-numeric directory names
+            #     spin_file = os.path.join(full_path, dir, "local_magnetization.txt")
+            #     e_file = os.path.join(full_path, dir, "energy.txt")
+            #     if os.path.exists(e_file):
+            #         if E_best > np.mean(np.loadtxt(e_file))/(24*24*2):
+            #             E_best = np.mean(np.loadtxt(e_file))/(24*24*2)
+            #             if os.path.exists(spin_file):
+            #                 M_best = np.mean(np.loadtxt(spin_file), axis=0)
+            # h_values.append(h)
+            # m_values.append(M_best)
+            # m_stds.append([0.0, 0.0, 0.0])
+            # e_values.append(E_best)
+            # e_stds.append(0.0)
     if not h_values:
         print(f"No magnetization data found in {directory}")
         return
@@ -2827,18 +2848,18 @@ def read_field_scan(directory):
     m_stds_sorted = np.array(m_stds)[sorted_indices]
 
     # Save magnetization as a function of h
+    # output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
     output_data = np.c_[h_values_sorted, m_values_sorted, m_stds_sorted]
     output_filename = os.path.join(directory, "magnetization_vs_field.txt")
     np.savetxt(output_filename, output_data, header="h Mx My Mz dMx dMy dMz", fmt='%f %f %f %f %f %f %f')
 
     plt.figure(figsize=(10, 6))
-<<<<<<< HEAD
-    plt.plot(h_values_sorted, m_values_sorted[:,0], marker='o', linestyle='-')
-=======
     plt.errorbar(h_values_sorted, m_values_sorted[:,0], yerr=m_stds_sorted[:,0], fmt='-o', label='Mx')
     plt.errorbar(h_values_sorted, m_values_sorted[:,1], yerr=m_stds_sorted[:,1], fmt='-o', label='My')
     plt.errorbar(h_values_sorted, m_values_sorted[:,2], yerr=m_stds_sorted[:,2], fmt='-o', label='Mz')
->>>>>>> eb2b001f0b3bb93b0e0199540755d6be3cdbaaef
+    # plt.plot(h_values_sorted, m_values_sorted[:,0], '-o', label='Mx')
+    # plt.plot(h_values_sorted, m_values_sorted[:,1], '-o', label='My')
+    # plt.plot(h_values_sorted, m_values_sorted[:,2], '-o', label='Mz')
     plt.xlabel("Field Strength (h)")
     plt.ylabel("Magnetization Magnitude |M|")
     plt.legend(["Mx", "My", "Mz"], loc='upper right')
@@ -2847,25 +2868,43 @@ def read_field_scan(directory):
     plt.savefig(os.path.join(directory, "magnetization_vs_field.pdf"))
     plt.clf()
     plt.close()
+
+    e_values_sorted = np.array(e_values)[sorted_indices]
+    e_stds_sorted = np.array(e_stds)[sorted_indices]
+
+    output_data = np.c_[h_values_sorted, e_values_sorted, e_stds_sorted]
+    output_filename = os.path.join(directory, "energy_vs_field.txt")
+    np.savetxt(output_filename, output_data, header="h E dE", fmt='%f %f %f')
+
+    plt.figure(figsize=(10, 6))
+    plt.errorbar(h_values_sorted, e_values_sorted, yerr=e_stds_sorted, fmt='-o', label='E')
+    plt.xlabel("Field Strength (h)")
+    plt.ylabel("Energy per Site (E)")
+    plt.legend(["E"], loc='upper right')
+    plt.title(f"Energy vs. Field Strength in {os.path.basename(directory)}")
+    plt.grid(True)
+    plt.savefig(os.path.join(directory, "energy_vs_field.pdf"))
+    plt.clf()
+    plt.close()
     
 if __name__ == "__main__":
 
     base_dir = sys.argv[1] if len(sys.argv) > 1 else "."
     field_scan = sys.argv[2] if len(sys.argv) > 2 else "field_scan"
-    if os.path.isdir(base_dir):
-        for subdir in sorted(os.listdir(base_dir)):
-            full_path = os.path.join(base_dir, subdir)
-            if os.path.isdir(full_path):
-                print(f"Processing directory: {full_path}")
-                try:
-                    if field_scan.lower() == "true":
-                        read_field_scan(full_path)
-                    else:
+    if field_scan.lower() == "true":
+        read_field_scan(base_dir)
+    else:
+        if os.path.isdir(base_dir):
+            for subdir in sorted(os.listdir(base_dir)):
+                full_path = os.path.join(base_dir, subdir)
+                if os.path.isdir(full_path):
+                    print(f"Processing directory: {full_path}")
+                    try:
                         print("Computing spin configuration information...")
                         parse_spin_config(full_path)
-                    # read_MD_tot(full_path)
-                except Exception as e:
-                    print(f"Could not process {full_path}: {e}")
+                        # read_MD_tot(full_path)
+                    except Exception as e:
+                        print(f"Could not process {full_path}: {e}")
 
 
 

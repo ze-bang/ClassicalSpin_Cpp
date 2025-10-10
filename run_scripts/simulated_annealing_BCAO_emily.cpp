@@ -4,16 +4,22 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
+#include <limits>
+#include <numeric>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 using namespace std;
 
 struct SimulationParams {
-    size_t num_trials = 5;
+    size_t num_trials = 1;
     double h = 0.0;
     array<double, 3> field_dir = {0, 1, 0};
     string dir = "BCAO_simulation";
-    double J1xy = -7.6, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
-    double J3xy = 2.5, J3z = -0.85;
+    double J1xy = -7.65, J1z = -1.2, D = 0.1, E = -0.1, F = 0, G = 0;
+    double J3xy = 2.64, J3z = -0.81;
     double h_start = 0.0, h_end = 1.0;
     int num_steps = 50;
     // Twist matrices (3 blocks of 3x3, each flattened to 9 doubles), optional
@@ -25,6 +31,7 @@ struct SimulationParams {
     },{
         1,0,0, 0,1,0, 0,0,1
     }}};
+    bool tbc = false; // Whether to apply twist boundary conditions
 };
 
 SimulationParams read_parameters(const string& filename) {
@@ -38,6 +45,9 @@ SimulationParams read_parameters(const string& filename) {
     
     string line;
     array<bool, 3> twist_row_found = {false, false, false};
+    const double k_B = 0.08620689655; // meV/K
+    const double mu_B = 0.05788; // meV/T
+    const double mu_B_k_B = mu_B / k_B; // K/T
     while (getline(file, line)) {
         // Skip comments and empty lines
         if (line.empty() || line[0] == '#' || line[0] == '/') continue;
@@ -92,6 +102,15 @@ SimulationParams read_parameters(const string& filename) {
                     twist_row_found[idx] = true;
                 }
             }
+            else if (key == "tbc") {
+                if (value == "1" || value == "true" || value == "True") {
+                    params.tbc = true;
+                } else if (value == "0" || value == "false" || value == "False") {
+                    params.tbc = false;
+                } else {
+                    cout << "Warning: Invalid value for tbc; expected 0/1 or true/false. Keeping default (" << (params.tbc ? "true" : "false") << ").\n";
+                }
+            }
         }
     }
     
@@ -134,13 +153,23 @@ void create_default_parameter_file(const string& filename) {
 }
 
 
-void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool field_scan = false){
+void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool field_scan = false, bool tbc = false, const vector<size_t>* trial_indices = nullptr, vector<pair<size_t, double>>* trial_results = nullptr) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    
+    const double k_B = 1;
+    const double mu_B = 0.05788; // meV/T
     filesystem::create_directories(dir);
     HoneyComb<3> atoms;
+
+    J1xy *= k_B;
+    J1z *= k_B;
+    D *= k_B;
+    E *= k_B;
+    F *= k_B;
+    G *= k_B;
+    J3xy *= k_B;
+    J3z *= k_B;
 
     array<array<double,3>, 3> J1z_ = {{{J1xy+D, E, F},
                                         {E, J1xy-D, G},
@@ -165,7 +194,6 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         }
         return C;
     };
-
     array<array<double,3>, 3> J1x_ = multiply(multiply(U_2pi_3, J1z_), transpose(U_2pi_3));
     array<array<double,3>, 3> J1y_ = multiply(multiply(transpose(U_2pi_3), J1z_), U_2pi_3);
 
@@ -174,8 +202,8 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     if (rank == 0) {
         std::cout << field_dir[0] << " " << field_dir[1] << " " << field_dir[2] << std::endl;
     }
-    array<double, 3> field = {h*field_dir[0],h*field_dir[1],h*field_dir[2]};
-    
+    array<double, 3> field = {5*h*mu_B*field_dir[0],5*h*mu_B*field_dir[1],2.5*h*mu_B*field_dir[2]};
+
     //nearest neighbour
     atoms.set_bilinear_interaction(J1x_, 0, 1, {1,-1,0});
     atoms.set_bilinear_interaction(J1y_, 0, 1, {0,-1,0});
@@ -188,14 +216,29 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
 
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
-    double k_B = 0.08620689655;
+
+    vector<size_t> generated_indices;
+    const vector<size_t>* indices_ptr = trial_indices;
+    if (!indices_ptr || indices_ptr->empty()) {
+        generated_indices.resize(num_trials);
+        std::iota(generated_indices.begin(), generated_indices.end(), 0);
+        indices_ptr = &generated_indices;
+    }
+    const vector<size_t>& trials_to_run = *indices_ptr;
+    const size_t actual_trial_count = trials_to_run.size();
+
+    if (trial_results) {
+        trial_results->clear();
+        trial_results->reserve(actual_trial_count);
+    }
 
     // Save simulation parameters (only rank 0)
-    if (rank == 0) {
+    if (rank == 0 || field_scan) {
         ofstream param_file(dir + "/simulation_parameters.txt");
         param_file << "Simulation Parameters for BCAO Honeycomb MD\n";
         param_file << "==========================================\n";
-        param_file << "Number of trials: " << num_trials << "\n";
+        param_file << "Number of trials requested: " << num_trials << "\n";
+        param_file << "Trials executed in this call: " << actual_trial_count << "\n";
         param_file << "Magnetic field strength (h): " << h << "\n";
         param_file << "Field direction: [" << field_dir[0] << ", " << field_dir[1] << ", " << field_dir[2] << "]\n";
         param_file << "Applied field: [" << field[0] << ", " << field[1] << ", " << field[2] << "]\n";
@@ -220,27 +263,29 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     double local_min_energy = std::numeric_limits<double>::max();
     int local_min_index = -1;
 
-    int start = field_scan ? 0 : rank;
-
-    // Each process handles a subset of trials
-    for(size_t i = start; i < num_trials; i += size){
-        filesystem::create_directories(dir + "/" + std::to_string(i));
-        lattice<3, 2, 60, 60, 1> MC(&atoms, 1, true);
-        MC.simulated_annealing(5, 1e-3, 1e6, 2e3, true);
-        MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
-        // Additional sweeps for convergence
-        for (size_t k = 0; k < 1e6; ++k) {
-            MC.deterministic_sweep();
-        }
-        MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
-        // Save the final configuration
-        MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);
-        // Calculate and save the energy density
+    // Run requested trials
+    for (size_t trial_id : trials_to_run) {
+        filesystem::create_directories(dir + "/" + std::to_string(trial_id));
+        lattice<3, 2, 18, 18, 1> MC(&atoms, 0.5, true);
+        // auto SA_params = MC.tune_simulated_annealing(0.5, 10.0, false, 20, 1000, 0.7, 0.05);
+        // {
+        //     std::ostringstream oss;
+        //     oss.setf(std::ios::fixed);
+        //     oss.precision(10);
+        //     oss << "Process " << rank << " Trial " << trial_id
+        //     << " SA params: T_start=" << SA_params.T_start
+        //     << ", T_end=" << SA_params.T_end
+        //     << ", sweeps_per_temp=" << SA_params.sweeps_per_temp
+        //     << ", cooling_rate=" << SA_params.cooling_rate << "\n";
+        //     cout << oss.str();
+        // }
+        // MC.simulated_annealing(SA_params.T_start, SA_params.T_end, SA_params.sweeps_per_temp*100, 20, tbc, false, SA_params.cooling_rate, dir +"/"+std::to_string(trial_id), true);
+        MC.simulated_annealing(10*k_B, 0.1*k_B, 1e6, 10, tbc, false, 0.9, dir +"/"+std::to_string(trial_id), true);
         double energy_density = MC.energy_density(MC.spins);
-        ofstream energy_file(dir +"/"+std::to_string(i)+ "/energy_density.txt");
+        ofstream energy_file(dir +"/"+std::to_string(trial_id)+ "/energy_density.txt");
         energy_file << "Energy Density: " << energy_density << "\n";
         energy_file.close();      
-        ofstream twist_file(dir +"/"+std::to_string(i)+ "/twist_matrix.txt");
+        ofstream twist_file(dir +"/"+std::to_string(trial_id)+ "/twist_matrix.txt");
         twist_file << "Twist Matrix:\n";
         for (const auto& row : MC.twist_matrices) {
             for (const auto& val : row) {
@@ -251,62 +296,82 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
         twist_file.close();
 
         const auto energy_langscape = MC.local_energy_densities(MC.spins);
-        ofstream landscape_file(dir +"/"+std::to_string(i)+ "/energy_landscape.txt");
+        ofstream landscape_file(dir +"/"+std::to_string(trial_id)+ "/energy_landscape.txt");
         landscape_file << "Energy Landscape:\n";
         for (size_t j = 0; j < energy_langscape.size(); ++j) {
             landscape_file << j << " " << energy_langscape[j] << "\n";
         }
         landscape_file.close();
 
+        if (trial_results) {
+            trial_results->emplace_back(trial_id, energy_density);
+        }
+
         // Update local minimum
         if (energy_density < local_min_energy) {
             local_min_energy = energy_density;
-            local_min_index = i;
+            local_min_index = static_cast<int>(trial_id);
         }
     }
+    // Only perform MPI collective operations if not in field_scan mode
+    // or if there are multiple trials to aggregate
+    if (!field_scan && actual_trial_count > 1) {
+        // Gather all minimum energies to rank 0
+        struct {
+            double energy;
+            int index;
+            int rank;
+        } local_min = {local_min_energy, local_min_index, rank}, global_min;
 
-    // Gather all minimum energies to rank 0
-    struct {
-        double energy;
-        int index;
-        int rank;
-    } local_min = {local_min_energy, local_min_index, rank}, global_min;
-
-    MPI_Reduce(&local_min.energy, &global_min.energy, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
-    
-    // Find which process has the global minimum
-    if (rank == 0) {
-        double *all_energies = new double[size];
-        int *all_indices = new int[size];
+        MPI_Reduce(&local_min.energy, &global_min.energy, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
         
-        MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, all_energies, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Gather(&local_min_index, 1, MPI_INT, all_indices, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        
-        double min_energy = all_energies[0];
-        int min_index = all_indices[0];
-        
-        for (int i = 1; i < size; ++i) {
-            if (all_energies[i] < min_energy) {
-                min_energy = all_energies[i];
-                min_index = all_indices[i];
+        // Find which process has the global minimum
+        if (rank == 0) {
+            double *all_energies = new double[size];
+            int *all_indices = new int[size];
+            
+            MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, all_energies, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            MPI_Gather(&local_min_index, 1, MPI_INT, all_indices, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            
+            double min_energy = all_energies[0];
+            int min_index = all_indices[0];
+            
+            for (int i = 1; i < size; ++i) {
+                if (all_energies[i] < min_energy) {
+                    min_energy = all_energies[i];
+                    min_index = all_indices[i];
+                }
             }
+            
+            // Output the information about the best configuration to a file
+            ofstream best_config_file(dir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            best_config_file << "Trial Index: " << min_index << "\n";
+            best_config_file << "Minimum Energy Density: " << min_energy << "\n";
+            best_config_file.close();
+            
+            delete[] all_energies;
+            delete[] all_indices;
+        } else {
+            MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            MPI_Gather(&local_min_index, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
         }
-        
-        // Output the information about the best configuration to a file
-        ofstream best_config_file(dir + "/best_configuration.txt");
-        best_config_file << "Best Configuration Found:\n";
-        best_config_file << "Trial Index: " << min_index << "\n";
-        best_config_file << "Minimum Energy Density: " << min_energy << "\n";
-        best_config_file.close();
-        
-        delete[] all_energies;
-        delete[] all_indices;
-    } else {
-        MPI_Gather(&local_min_energy, 1, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Gather(&local_min_index, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
+    } else if (!field_scan && local_min_index >= 0) {
+        // For single trial, just output the local result if we have one
+        if (rank == 0) {
+            ofstream best_config_file(dir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            best_config_file << "Trial Index: " << local_min_index << "\n";
+            best_config_file << "Minimum Energy Density: " << local_min_energy << "\n";
+            best_config_file.close();
+        }
     }
     
-    MPI_Barrier(MPI_COMM_WORLD);
+    // Only call barrier if not in field_scan mode
+    // In field_scan mode, the barrier should be called in magnetic_field_scan function
+    if (!field_scan) {
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
 }
 
 void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> field_dir, string dir, double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0, double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr){
@@ -392,9 +457,9 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
         MC.adaptive_restarted_simulated_annealing(20, 1e-3, 1e6, 10, num_trials, num_trials, true);
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_0.001T.txt", MC.spins);        
         // Additional sweeps for convergence
-        for (size_t k = 0; k < 1e7; ++k) {
-            MC.deterministic_sweep();
-        }
+        // for (size_t k = 0; k < 1e7; ++k) {
+        //     MC.deterministic_sweep();
+        // }
         MC.write_to_file_pos(dir +"/"+std::to_string(i)+ "/pos.txt");
         // Save the final configuration
         MC.write_to_file_spin(dir +"/"+std::to_string(i)+ "/spin_zero.txt", MC.spins);
@@ -422,8 +487,8 @@ void sim_BCAO_honeycomb_restarted(size_t num_trials, double h, array<double, 3> 
     best_config_file.close();
 }
 
-void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
-                        double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
+void F_scan(size_t num_steps, double h_start, double h_end, double F_start, double F_end, array<double, 3> field_dir, string dir, 
+                        double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double G=0,
                         double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -440,12 +505,109 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
     }
 
     for (size_t i = rank; i < h_values.size(); i += size) {
-        double h = h_values[i];
-        string subdir = dir + "/h_" + to_string(h);
-        // Each process runs the simulation for its assigned 'h' value, with one trial.
-        std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
-        sim_BCAO_honeycomb(1, h, field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
+        for (size_t j = 0; j < num_steps; ++j) {
+            double F = F_start + j * (F_end - F_start) / num_steps;
+            filesystem::create_directories(dir + "/F_" + to_string(F));
+            string subdir = dir + "/F_" + to_string(F) + "/h_" + to_string(h_values[i]);
+            // Each process runs the simulation for its assigned 'h' value, with one trial.
+            std::cout << "Running simulation for h = " << h_values[i] << ", F = " << F << " on process " << rank << std::endl;
+            sim_BCAO_honeycomb(3, h_values[i], field_dir, subdir, J1xy, J1z, D, E, F, G, J3xy, J3z, custom_twist, true);
+        }
     }
+}
+
+
+void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
+                        double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
+                        double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool tbc = false, size_t num_trials=5) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    vector<double> h_values;
+    if (num_steps > 0) {
+        double step = (h_end - h_start) / num_steps;
+        for (size_t i = 0; i <= num_steps; ++i) {
+            h_values.push_back(h_start + i * step);
+        }
+    } else {
+        h_values.push_back(h_start);
+    }
+
+    size_t total_tasks = h_values.size() * num_trials;
+    unordered_map<size_t, vector<size_t>> assignments;
+    for (size_t task = rank; task < total_tasks; task += static_cast<size_t>(size)) {
+        size_t h_idx = task / num_trials;
+        size_t trial_idx = task % num_trials;
+        assignments[h_idx].push_back(trial_idx);
+    }
+
+    vector<double> local_best_energy(h_values.size(), std::numeric_limits<double>::max());
+    vector<int> local_best_trial(h_values.size(), -1);
+
+    for (auto &entry : assignments) {
+        size_t h_idx = entry.first;
+        auto &trial_list = entry.second;
+        std::sort(trial_list.begin(), trial_list.end());
+        double h = h_values[h_idx];
+        string subdir = dir + "/h_" + to_string(h);
+
+        for (size_t trial_id : trial_list) {
+            std::cout << "Running simulation for h = " << h << ", trial = " << trial_id
+                      << " on process " << rank << std::endl;
+        }
+
+        vector<pair<size_t, double>> trial_outcomes;
+        sim_BCAO_honeycomb(num_trials, h, field_dir, subdir, J1xy, J1z, D, E, F, G,
+                           J3xy, J3z, custom_twist, true, tbc, &trial_list, &trial_outcomes);
+
+        for (const auto &outcome : trial_outcomes) {
+            if (outcome.second < local_best_energy[h_idx]) {
+                local_best_energy[h_idx] = outcome.second;
+                local_best_trial[h_idx] = static_cast<int>(outcome.first);
+            }
+        }
+    }
+
+    struct MinResult {
+        double energy;
+        int trial;
+    };
+
+    vector<MinResult> local_minima(h_values.size());
+    for (size_t idx = 0; idx < h_values.size(); ++idx) {
+        local_minima[idx].energy = local_best_energy[idx];
+        local_minima[idx].trial = local_best_trial[idx];
+    }
+
+    vector<MinResult> global_minima;
+    if (rank == 0) {
+        global_minima.resize(h_values.size());
+    }
+
+    MPI_Reduce(local_minima.data(), rank == 0 ? global_minima.data() : nullptr,
+               static_cast<int>(h_values.size()), MPI_DOUBLE_INT, MPI_MINLOC, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        for (size_t idx = 0; idx < h_values.size(); ++idx) {
+            double h = h_values[idx];
+            string subdir = dir + "/h_" + to_string(h);
+            filesystem::create_directories(subdir);
+
+            ofstream best_config_file(subdir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            if (global_minima[idx].trial >= 0) {
+                best_config_file << "Trial Index: " << global_minima[idx].trial << "\n";
+                best_config_file << "Minimum Energy Density: " << global_minima[idx].energy << "\n";
+            } else {
+                best_config_file << "Trial Index: N/A\n";
+                best_config_file << "Minimum Energy Density: N/A\n";
+            }
+            best_config_file.close();
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 int main(int argc, char** argv) {
@@ -455,7 +617,7 @@ int main(int argc, char** argv) {
     string param_file = "bcao_parameters.txt";
     bool use_restart = false;
     bool do_field_scan = false;
-    
+    bool do_f_scan = false;
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         string arg = argv[i];
@@ -479,7 +641,9 @@ int main(int argc, char** argv) {
             use_restart = true;
         } else if (arg == "--field-scan") {
             do_field_scan = true;
-        } else {
+        } else if (arg == "--f-scan"){
+            do_f_scan = true;
+        }else {
             // Assume the last non-flag argument is the parameter file
             param_file = arg;
         }
@@ -521,8 +685,13 @@ int main(int argc, char** argv) {
     if (do_field_scan) {
         magnetic_field_scan(params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
+                            params.J3xy, params.J3z, custom_twist_ptr, params.tbc);
+    } else if (do_f_scan){
+        F_scan(params.num_steps, params.h_start, params.h_end, 0, -1, params.field_dir, params.dir,
+                            params.J1xy, params.J1z, params.D, params.E, params.G,
                             params.J3xy, params.J3z, custom_twist_ptr);
-    } else {
+    }    
+    else {
         if (use_restart) {
             sim_BCAO_honeycomb_restarted(params.num_trials, params.h, params.field_dir, params.dir, 
                                          params.J1xy, params.J1z, params.D, params.E, params.F, params.G, 
