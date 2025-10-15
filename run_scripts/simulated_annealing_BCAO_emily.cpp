@@ -266,7 +266,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Run requested trials
     for (size_t trial_id : trials_to_run) {
         filesystem::create_directories(dir + "/" + std::to_string(trial_id));
-        lattice<3, 2, 18, 18, 1> MC(&atoms, 0.5, true);
+        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5, true);
         // auto SA_params = MC.tune_simulated_annealing(0.5, 10.0, false, 20, 1000, 0.7, 0.05);
         // {
         //     std::ostringstream oss;
@@ -516,6 +516,68 @@ void F_scan(size_t num_steps, double h_start, double h_end, double F_start, doub
     }
 }
 
+void J1xy_mag_field_phase_diagram(size_t J1_steps, double J1_start, double J1_end,
+                        size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
+                        double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
+                        double J3xy=2.5, double J3z = -0.85, const array<array<double, 9>, 3>* custom_twist = nullptr, bool tbc = false, size_t num_trials=5) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    vector<double> J1xy_values;
+    if (J1_steps > 0) {
+        double step = (J1_end - J1_start) / J1_steps;
+        for (size_t i = 0; i <= J1_steps; ++i) {
+            J1xy_values.push_back(J1_start + i * step);
+        }
+    } else {
+        J1xy_values.push_back(J1_start);
+    }
+    vector<double> h_values;
+    if (num_steps > 0) {
+        double step = (h_end - h_start) / num_steps;
+        for (size_t i = 0; i <= num_steps; ++i) {
+            h_values.push_back(h_start + i * step);
+        }
+    } else {
+        h_values.push_back(h_start);
+    }
+    size_t total_tasks = J1xy_values.size() * h_values.size() * num_trials;
+    unordered_map<tuple<size_t, size_t>, vector<size_t>> assignments;
+    for (size_t task = rank; task < total_tasks; task += static_cast<size_t>(size)) {
+        size_t J1_idx = task / (h_values.size() * num_trials);
+        size_t h_idx = (task / num_trials) % h_values.size();
+        size_t trial_idx = task % num_trials;
+        assignments[make_tuple(J1_idx, h_idx)].push_back(trial_idx);
+    }
+
+    for (auto &entry : assignments) {
+        size_t J1_idx = get<0>(entry.first);
+        size_t h_idx = get<1>(entry.first);
+        auto &trial_list = entry.second;
+        std::sort(trial_list.begin(), trial_list.end());
+        double h = h_values[h_idx];
+        double J1xy = J1xy_values[J1_idx];
+        string subdir = dir + "/J1_" + to_string(J1xy) + "/h_" + to_string(h);
+
+        for (size_t trial_id : trial_list) {
+            std::cout << "Running simulation for h = " << h << ", trial = " << trial_id
+                      << " on process " << rank << std::endl;
+        }
+
+        vector<pair<size_t, double>> trial_outcomes;
+        sim_BCAO_honeycomb(num_trials, h, field_dir, subdir, J1xy, J1z, D, E, F, G,
+                           J3xy, J3z, custom_twist, true, tbc, &trial_list, &trial_outcomes);
+
+        for (const auto &outcome : trial_outcomes) {
+            if (outcome.second < local_best_energy[h_idx]) {
+                local_best_energy[h_idx] = outcome.second;
+                local_best_trial[h_idx] = static_cast<int>(outcome.first);
+            }
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
 
 void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
                         double J1xy=-7.6, double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
@@ -523,7 +585,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
+    num_trials = 20; // Fixed number of trials for field scan
     vector<double> h_values;
     if (num_steps > 0) {
         double step = (h_end - h_start) / num_steps;
@@ -618,6 +680,7 @@ int main(int argc, char** argv) {
     bool use_restart = false;
     bool do_field_scan = false;
     bool do_f_scan = false;
+    bool do_J1xy_scan = false;
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         string arg = argv[i];
@@ -628,6 +691,7 @@ int main(int argc, char** argv) {
             cout << "  --create-params     Create default parameter file (bcao_parameters.txt)\n";
             cout << "  --restart           Use the adaptive restarted simulated annealing method\n";
             cout << "  --field-scan        Perform a magnetic field scan instead of a single run\n\n";
+            cout << "  --J1xy-scan         Perform a J1xy vs Magnetic field phase diagram scan\n\n";
             cout << "Arguments:\n";
             cout << "  parameter_file      Path to parameter file (default: bcao_parameters.txt)\n\n";
             cout << "If parameter file doesn't exist, default parameters will be used.\n";
@@ -643,7 +707,10 @@ int main(int argc, char** argv) {
             do_field_scan = true;
         } else if (arg == "--f-scan"){
             do_f_scan = true;
-        }else {
+        } else if (arg == "--J1xy-scan"){
+            do_J1xy_scan = true;
+        } 
+        else {
             // Assume the last non-flag argument is the parameter file
             param_file = arg;
         }
@@ -690,7 +757,12 @@ int main(int argc, char** argv) {
         F_scan(params.num_steps, params.h_start, params.h_end, 0, -1, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.G,
                             params.J3xy, params.J3z, custom_twist_ptr);
-    }    
+    } else if (do_J1xy_scan){
+        J1xy_mag_field_phase_diagram(5, params.J1xy,  params.J1xy-1,
+                        params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
+                        params.J1z, params.D, params.E, params.F, params.G,
+                        params.J3xy, params.J3z, custom_twist_ptr, params.tbc);
+    }
     else {
         if (use_restart) {
             sim_BCAO_honeycomb_restarted(params.num_trials, params.h, params.field_dir, params.dir, 

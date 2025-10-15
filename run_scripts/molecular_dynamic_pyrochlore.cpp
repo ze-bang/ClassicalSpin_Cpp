@@ -1,7 +1,17 @@
 #include "experiments.h"
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <numeric>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
-void MD_pyrochlore(double T_target, size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=false, bool field_scan=false){
-    filesystem::create_directory(dir);
+void MD_pyrochlore(double T_target, size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, double h, array<double, 3> field_dir, string dir, double theta=0, bool theta_or_Jxz=false, bool field_scan=false, const vector<size_t>* trial_indices=nullptr, vector<pair<size_t, double>>* trial_results=nullptr){
+    if (!dir.empty()) {
+        filesystem::create_directories(dir);
+    }
     Pyrochlore<3> atoms;
 
     array<double,3> z1 = {1, 1, 1};
@@ -95,29 +105,83 @@ void MD_pyrochlore(double T_target, size_t num_trials, double Jxx, double Jyy, d
     int size;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    int start = rank*num_trials/size;
-    int end = (rank+1)*num_trials/size;
-    double k_B = 0.08620689655;
-    for(int i=start; i<end;++i){
+    vector<size_t> generated_indices;
+    const vector<size_t>* indices_ptr = trial_indices;
+
+    if (!indices_ptr || indices_ptr->empty()) {
+        size_t start = 0;
+        size_t end = num_trials;
+        if (!field_scan) {
+            start = rank * num_trials / size;
+            end = (rank + 1) * num_trials / size;
+        }
+        if (end > start) {
+            generated_indices.resize(end - start);
+            iota(generated_indices.begin(), generated_indices.end(), start);
+        }
+        indices_ptr = &generated_indices;
+    }
+
+    const vector<size_t>& trials_to_run = *indices_ptr;
+
+    if (trial_results) {
+        trial_results->clear();
+        trial_results->reserve(trials_to_run.size());
+    }
+
+    double local_min_energy = numeric_limits<double>::max();
+    int local_min_index = -1;
+
+    for (size_t trial_id : trials_to_run) {
+        string trial_dir = dir.empty() ? to_string(trial_id) : dir + "/" + to_string(trial_id);
+        filesystem::create_directories(trial_dir);
+
         lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
-        MC.simulated_annealing(5, T_target, 1e5, 10, true);
-        MC.molecular_dynamics(0, 600, 0.01, dir+"/"+std::to_string(i));
-        if(dir != ""){
-            filesystem::create_directory(dir);
-            ofstream myfile;
-            myfile.open(dir+"/"+std::to_string(i)+"/spin_0.txt");
-            for(size_t i = 0; i<MC.lattice_size; ++i){
-                for(size_t j = 0; j<3; ++j){
-                    myfile << MC.spins[i][j] << " ";
-                }
-                myfile << endl;
+        MC.simulated_annealing(5, T_target, 1e5, 10, false);
+        MC.molecular_dynamics(0, 600, 0.01, trial_dir);
+
+        ofstream myfile(trial_dir + "/spin_0.txt");
+        for(size_t idx = 0; idx<MC.lattice_size; ++idx){
+            for(size_t comp = 0; comp<3; ++comp){
+                myfile << MC.spins[idx][comp] << " ";
             }
-            myfile.close();
+            myfile << endl;
+        }
+        myfile.close();
+
+        double energy_density = MC.energy_density(MC.spins);
+
+        if (trial_results) {
+            trial_results->emplace_back(trial_id, energy_density);
+        }
+
+        if (energy_density < local_min_energy) {
+            local_min_energy = energy_density;
+            local_min_index = static_cast<int>(trial_id);
         }
     }
-    
-    // Only call barrier if not in field_scan mode
+
     if (!field_scan) {
+        struct {
+            double energy;
+            int trial;
+        } local_result{local_min_energy, local_min_index}, global_result;
+
+        MPI_Reduce(&local_result, &global_result, 1, MPI_DOUBLE_INT, MPI_MINLOC, 0, MPI_COMM_WORLD);
+
+        if (rank == 0 && !dir.empty()) {
+            ofstream best_config_file(dir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            if (global_result.trial >= 0) {
+                best_config_file << "Trial Index: " << global_result.trial << "\n";
+                best_config_file << "Minimum Energy Density: " << global_result.energy << "\n";
+            } else {
+                best_config_file << "Trial Index: N/A\n";
+                best_config_file << "Minimum Energy Density: N/A\n";
+            }
+            best_config_file.close();
+        }
+
         int finalized;
         MPI_Finalized(&finalized);
         if (!finalized){
@@ -126,7 +190,7 @@ void MD_pyrochlore(double T_target, size_t num_trials, double Jxx, double Jyy, d
     }
 }
 
-void magnetic_field_scan(double T_target, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, 
+void magnetic_field_scan(double T_target, size_t num_trials, double Jxx, double Jyy, double Jzz, double gxx, double gyy, double gzz, 
                         size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, 
                         string dir, double theta=0, bool theta_or_Jxz=false) {
     int rank, size;
@@ -143,18 +207,87 @@ void magnetic_field_scan(double T_target, double Jxx, double Jyy, double Jzz, do
         h_values.push_back(h_start);
     }
 
-    // Distribute field values across MPI processes
-    for (size_t i = rank; i < h_values.size(); i += size) {
-        double h = h_values[i];
-        string subdir = dir + "/h_" + to_string(h);
-        filesystem::create_directory(subdir);
-        
-        if (rank == 0 || true) {  // All ranks can print their assigned work
-            std::cout << "Running simulation for h = " << h << " on process " << rank << std::endl;
+    if (!dir.empty()) {
+        filesystem::create_directories(dir);
+    }
+
+    size_t trials_per_field = max<size_t>(size_t(1), num_trials);
+    size_t total_tasks = h_values.size() * trials_per_field;
+    unordered_map<size_t, vector<size_t>> assignments;
+    for (size_t task = rank; task < total_tasks; task += size_t(size)) {
+        size_t h_idx = task / trials_per_field;
+        size_t trial_idx = task % trials_per_field;
+        if (trial_idx < num_trials) {
+            assignments[h_idx].push_back(trial_idx);
         }
-        
-        // Run single trial (no multiple trials in field scan mode)
-        MD_pyrochlore(T_target, 1, Jxx, Jyy, Jzz, gxx, gyy, gzz, h, field_dir, subdir, theta, theta_or_Jxz, true);
+    }
+
+    vector<double> local_best_energy(h_values.size(), numeric_limits<double>::max());
+    vector<int> local_best_trial(h_values.size(), -1);
+
+    for (auto &entry : assignments) {
+        size_t h_idx = entry.first;
+        auto &trial_list = entry.second;
+        sort(trial_list.begin(), trial_list.end());
+        double h = h_values[h_idx];
+        string subdir = dir + "/h_" + to_string(h);
+        if (!subdir.empty()) {
+            filesystem::create_directories(subdir);
+        }
+
+        for (size_t trial_id : trial_list) {
+            cout << "Running simulation for h = " << h << ", trial = " << trial_id
+                 << " on process " << rank << endl;
+        }
+
+        vector<pair<size_t, double>> trial_outcomes;
+        MD_pyrochlore(T_target, num_trials, Jxx, Jyy, Jzz, gxx, gyy, gzz, h, field_dir, subdir, theta, theta_or_Jxz, true, &trial_list, &trial_outcomes);
+
+        for (const auto &outcome : trial_outcomes) {
+            if (outcome.second < local_best_energy[h_idx]) {
+                local_best_energy[h_idx] = outcome.second;
+                local_best_trial[h_idx] = static_cast<int>(outcome.first);
+            }
+        }
+    }
+
+    struct MinResult {
+        double energy;
+        int trial;
+    };
+
+    vector<MinResult> local_minima(h_values.size());
+    for (size_t idx = 0; idx < h_values.size(); ++idx) {
+        local_minima[idx].energy = local_best_energy[idx];
+        local_minima[idx].trial = local_best_trial[idx];
+    }
+
+    vector<MinResult> global_minima;
+    if (rank == 0) {
+        global_minima.resize(h_values.size());
+    }
+
+    MPI_Reduce(local_minima.data(), rank == 0 ? global_minima.data() : nullptr,
+               static_cast<int>(h_values.size()), MPI_DOUBLE_INT, MPI_MINLOC, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        for (size_t idx = 0; idx < h_values.size(); ++idx) {
+            double h = h_values[idx];
+            string subdir = dir + "/h_" + to_string(h);
+            if (!subdir.empty()) {
+                filesystem::create_directories(subdir);
+            }
+            ofstream best_config_file(subdir + "/best_configuration.txt");
+            best_config_file << "Best Configuration Found:\n";
+            if (global_minima[idx].trial >= 0) {
+                best_config_file << "Trial Index: " << global_minima[idx].trial << "\n";
+                best_config_file << "Minimum Energy Density: " << global_minima[idx].energy << "\n";
+            } else {
+                best_config_file << "Trial Index: N/A\n";
+                best_config_file << "Minimum Energy Density: N/A\n";
+            }
+            best_config_file.close();
+        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -238,7 +371,7 @@ int main(int argc, char** argv) {
             std::cout << "  Output directory: " << dir_name << endl;
         }
         
-        magnetic_field_scan(T_target, Jxx, Jyy, Jzz, 0.0, 0.0, 1, num_steps, h_start, h_end, field_dir, dir_name, Jxz);
+        magnetic_field_scan(T_target, num_trials, Jxx, Jyy, Jzz, 0.0, 0.0, 1, num_steps, h_start, h_end, field_dir, dir_name, Jxz);
     } else {
         if (rank == 0) {
             std::cout << "Initializing molecular dynamic calculation with parameters: Jxx: " << Jxx << " Jyy: " << Jyy << " Jzz: " << Jzz << " Jxz: " << Jxz << " H: " << h << " field direction : " << dir_string << " at Temperature: " << T_target << " saving to: " << dir_name << endl;

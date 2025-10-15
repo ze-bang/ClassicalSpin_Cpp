@@ -2814,6 +2814,7 @@ def read_field_scan(directory):
                     E = np.loadtxt(e_file)/(24*24*2)
                     E_mean += np.mean(E)
                     E_var += np.var(E)
+
             if count != 0:
                 h_values.append(h)
                 m_values.append(M_mean/count)
@@ -2823,20 +2824,24 @@ def read_field_scan(directory):
 
             # M_best = np.zeros(3)
             # E_best = float("inf")
+            # M_std = np.zeros(3)
+            # E_std = 0.0
             # for dir in os.listdir(full_path):
             #     # Skip non-directory entries and non-numeric directory names
             #     spin_file = os.path.join(full_path, dir, "local_magnetization.txt")
             #     e_file = os.path.join(full_path, dir, "energy.txt")
             #     if os.path.exists(e_file):
-            #         if E_best > np.mean(np.loadtxt(e_file))/(24*24*2):
-            #             E_best = np.mean(np.loadtxt(e_file))/(24*24*2)
+            #         if E_best > np.mean(np.loadtxt(e_file)):
+            #             E_best = np.mean(np.loadtxt(e_file))
+            #             E_std = np.var(np.loadtxt(e_file))
             #             if os.path.exists(spin_file):
             #                 M_best = np.mean(np.loadtxt(spin_file), axis=0)
+            #                 M_var = np.var(np.loadtxt(spin_file), axis=0)
             # h_values.append(h)
             # m_values.append(M_best)
-            # m_stds.append([0.0, 0.0, 0.0])
+            # m_stds.append(np.sqrt(M_var))
             # e_values.append(E_best)
-            # e_stds.append(0.0)
+            # e_stds.append(np.sqrt(E_std))
     if not h_values:
         print(f"No magnetization data found in {directory}")
         return
