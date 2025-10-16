@@ -515,7 +515,6 @@ void F_scan(size_t num_steps, double h_start, double h_end, double F_start, doub
         }
     }
 }
-
 void J1xy_mag_field_phase_diagram(size_t J1_steps, double J1_start, double J1_end,
                         size_t num_steps, double h_start, double h_end, array<double, 3> field_dir, string dir, 
                         double J1z=-1.2, double D=0.1, double E=-0.1, double F=0, double G=0,
@@ -542,14 +541,24 @@ void J1xy_mag_field_phase_diagram(size_t J1_steps, double J1_start, double J1_en
         h_values.push_back(h_start);
     }
     size_t total_tasks = J1xy_values.size() * h_values.size() * num_trials;
-    unordered_map<tuple<size_t, size_t>, vector<size_t>> assignments;
+    
+    // Custom hash function for tuple<size_t, size_t>
+    struct TupleHash {
+        size_t operator()(const tuple<size_t, size_t>& t) const {
+            auto h1 = std::hash<size_t>{}(get<0>(t));
+            auto h2 = std::hash<size_t>{}(get<1>(t));
+            return h1 ^ (h2 << 1);
+        }
+    };
+    
+    unordered_map<tuple<size_t, size_t>, vector<size_t>, TupleHash> assignments;
+    
     for (size_t task = rank; task < total_tasks; task += static_cast<size_t>(size)) {
         size_t J1_idx = task / (h_values.size() * num_trials);
         size_t h_idx = (task / num_trials) % h_values.size();
         size_t trial_idx = task % num_trials;
         assignments[make_tuple(J1_idx, h_idx)].push_back(trial_idx);
     }
-
     for (auto &entry : assignments) {
         size_t J1_idx = get<0>(entry.first);
         size_t h_idx = get<1>(entry.first);
@@ -567,13 +576,6 @@ void J1xy_mag_field_phase_diagram(size_t J1_steps, double J1_start, double J1_en
         vector<pair<size_t, double>> trial_outcomes;
         sim_BCAO_honeycomb(num_trials, h, field_dir, subdir, J1xy, J1z, D, E, F, G,
                            J3xy, J3z, custom_twist, true, tbc, &trial_list, &trial_outcomes);
-
-        for (const auto &outcome : trial_outcomes) {
-            if (outcome.second < local_best_energy[h_idx]) {
-                local_best_energy[h_idx] = outcome.second;
-                local_best_trial[h_idx] = static_cast<int>(outcome.first);
-            }
-        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
