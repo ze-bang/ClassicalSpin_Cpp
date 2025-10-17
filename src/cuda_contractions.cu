@@ -191,4 +191,6 @@ void tensorContract(
 // Explicitly instantiate the templates for the sizes used in the project
 template void tensorContract<double, 2048, 3>(const double*, const double*, const double*, double*, cudaStream_t);
 template void tensorContract<double, 2048, 8>(const double*, const double*, const double*, double*, cudaStream_t);
+template void tensorContract<double, 256, 3>(const double*, const double*, const double*, double*, cudaStream_t);
+template void tensorContract<double, 256, 8>(const double*, const double*, const double*, double*, cudaStream_t);
 

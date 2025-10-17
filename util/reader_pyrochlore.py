@@ -1,3 +1,4 @@
+import argparse
 import h5py
 import numpy as np
 from opt_einsum import contract
@@ -194,7 +195,7 @@ def DSSF(w, k, S, P, T, gb=False):
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
         Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.abs(contract('wnia, wmib, inmab, w->winmab', Somega, np.conj(Somega), gg(k), w))
+        read = np.abs(contract('wnia, wmib, inm, w->winmab', Somega, np.conj(Somega), gg(k)[:,:,:,2,2], w))
         read = np.where(read <= 1e-8, 1e-8, read)
         return read
 
@@ -704,9 +705,13 @@ def read_MD_tot(dir, mag, SSSFGraph):
     DSSF_all_spin_components(contract('ijxyab->ijab',DSSF_global), dir_to_save + "/DSSF_global/")
 
 def generate_K_points_pengcheng_dai(H_range_min, H_range_max, nH, K_range_min, K_range_max, nK, L_range_min, L_range_max, nL):
-    H_vector = 2*np.pi*np.array([1, 1, -2])
-    K_vector = 2*np.pi*np.array([1, -1, 0])
-    L_vector = 2*np.pi*np.array([1, 1, 1])
+    # H_vector = 2*np.pi*np.array([1, 1, -2])
+    # K_vector = 2*np.pi*np.array([1, -1, 0])
+    # L_vector = 2*np.pi*np.array([1, 1, 1])
+
+    H_vector = 2*np.pi*np.array([1, 0, 0])
+    K_vector = 2*np.pi*np.array([0, 1, 0])
+    L_vector = 2*np.pi*np.array([0, 0, 1])
 
     # Create coefficient ranges
     h_values = np.linspace(H_range_min, H_range_max, nH)
@@ -753,12 +758,12 @@ def gaussian_resolution(energy, intensity, resolution_fwhm):
 
 
 
-def read_MD_int(dir, mag, SSSFGraph):
+def read_MD_int(dir, mag, SSSFGraph=None, run_ids=None):
     directory = os.fsencode(dir)
     w0 = 0.03
     wmax = 8
     w = np.linspace(w0, wmax, 2000)
-    K_, dV = generate_K_points_pengcheng_dai(-0.1, 0.1, 5, 0.739, 0.839, 3, -0.1, 0.1, 5)
+    K_, dV = generate_K_points_pengcheng_dai(0, 0, 1, 0, 0, 1, 1, 1, 1)
 
     DSSF_local = np.zeros((len(w), len(K_),4,4,3,3))
     DSSF_global = np.zeros((len(w), len(K_),4,4,3,3))
@@ -772,22 +777,40 @@ def read_MD_int(dir, mag, SSSFGraph):
     L = np.linspace(-2.5, 2.5, nK)
     A, B = np.meshgrid(H, L)
 
-    for file in sorted(os.listdir(directory)):
-        filename = os.fsdecode(file)
-        if os.path.isdir(dir + "/" + filename) and filename != "results":
-            P = np.loadtxt(dir + "/" + filename + "/pos.txt")
-            T = np.loadtxt(dir + "/" + filename + "/Time_steps.txt")
-            S = np.loadtxt(dir + "/" + filename + "/spin_t.txt").reshape((len(T), len(P), 3))
-            DSSF_local = DSSF_local +  DSSF(w, K_, S, P, T, False)
-            DSSF_global = DSSF_global +  DSSF(w, K_, S, P, T, True)
-            S0 = np.loadtxt(dir + "/" + filename + "/spin_0.txt").reshape((len(P), 3))
-            SSSF_local = SSSF_local + SSSFHnHn(S0, P, 50, dir + "/" + filename, False)
-            SSSF_global = SSSF_global + SSSFHnHn(S0, P, 50, dir + "/" + filename, True)
+    processed_runs = 0
+    run_filter = None
+    if run_ids is not None:
+        run_filter = {str(r) for r in run_ids}
 
-    SSSF_local = SSSF_local / len(os.listdir(directory))
-    SSSF_global = SSSF_global / len(os.listdir(directory))
-    DSSF_local = DSSF_local / len(os.listdir(directory))
-    DSSF_global = DSSF_global / len(os.listdir(directory))
+    for entry in sorted(os.listdir(directory)):
+        run_dir = os.fsdecode(entry)
+        run_path = os.path.join(dir, run_dir)
+        if run_dir == "results" or not os.path.isdir(run_path):
+            continue
+        if run_filter is not None and run_dir not in run_filter:
+            continue
+        try:
+            P = np.loadtxt(os.path.join(run_path, "pos.txt"))
+            T = np.loadtxt(os.path.join(run_path, "Time_steps.txt"))
+            S = np.loadtxt(os.path.join(run_path, "spin_t.txt")).reshape((len(T), len(P), 3))
+            S0 = np.loadtxt(os.path.join(run_path, "spin_0.txt")).reshape((len(P), 3))
+        except OSError as exc:
+            print(f"[read_MD_int] Failed to read data for run {run_dir} in {dir}: {exc}")
+            continue
+
+        DSSF_local = DSSF_local + DSSF(w, K_, S, P, T, False)
+        DSSF_global = DSSF_global + DSSF(w, K_, S, P, T, True)
+        SSSF_local = SSSF_local + SSSFHnHn(S0, P, 50, run_path, False)
+        SSSF_global = SSSF_global + SSSFHnHn(S0, P, 50, run_path, True)
+        processed_runs += 1
+
+    if processed_runs == 0:
+        raise RuntimeError(f"No simulation data could be processed in {dir}.")
+
+    SSSF_local = SSSF_local / processed_runs
+    SSSF_global = SSSF_global / processed_runs
+    DSSF_local = DSSF_local / processed_runs
+    DSSF_global = DSSF_global / processed_runs
 
     DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global), axis=1) * dV
     DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local), axis=1) * dV
@@ -831,6 +854,19 @@ def read_MD_int(dir, mag, SSSFGraph):
                 convolved_DSSF_component = gaussian_resolution(w_extended, DSSF_extended[:, i, j], 0.04)
                 np.savetxt(f"{dir_to_save}/DSSF_{name}_{com_string[i]}{com_string[j]}.txt", np.column_stack((w_extended, convolved_DSSF_component)))
 
+        DSSF_spinon_photon = DSSF_extended[:, 0, 0] + DSSF_extended[:, 2, 2]
+        convolved_DSSF_spinon_photon = gaussian_resolution(w_extended, DSSF_spinon_photon, 0.04)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(w_extended, convolved_DSSF_spinon_photon, 'r-', label='S_xx + S_zz')
+        ax.plot(w_extended, gaussian_resolution(w_extended, DSSF_extended[:, 0, 0], 0.04), 'b--', label='S_xx')
+        ax.plot(w_extended, gaussian_resolution(w_extended, DSSF_extended[:, 2, 2], 0.04), 'g--', label='S_zz')
+        ax.set_xlabel('ω')
+        ax.set_ylabel('DSSF Spinon + Photon')
+        ax.legend()
+        ax.grid(True)
+        plt.savefig(dir + "/DSSF_spinon_photon_{}.pdf".format(name))
+        plt.close()
+
         DSSF_sum = np.sum(DSSF_extended, axis=(1, 2))
         convolved_DSSF_sum = gaussian_resolution(w_extended, DSSF_sum, 0.04)
 
@@ -857,6 +893,27 @@ def read_MD_int(dir, mag, SSSFGraph):
     plot_DSSF_components(DSSF_global, w, dir, "global")
     plot_DSSF_components(DSSF_local, w, dir, "local")
     # SSSF_helper(contract('ijxyab->ijab', SSSF_local), contract('ijxyab->ijab', SSSF_global), dir + "/results/SSSF")
+
+
+def read_MD_pi_flux_all(root_dir, mag="HnHn", SSSFGraph=None, verbose=True, run_ids=None):
+    """Run read_MD_int for every field directory, averaging over all available trials."""
+    base_dir = os.path.abspath(root_dir)
+    if not os.path.isdir(base_dir):
+        raise ValueError(f"Provided root_dir {root_dir} is not a directory.")
+
+    field_dirs = sorted(
+        entry for entry in os.listdir(base_dir)
+        if os.path.isdir(os.path.join(base_dir, entry))
+    )
+
+    if not field_dirs:
+        raise RuntimeError(f"No field directories found in {root_dir}.")
+
+    for field_dir in field_dirs:
+        field_path = os.path.join(base_dir, field_dir)
+        if verbose:
+            print(f"[read_MD_pi_flux_all] Processing {field_dir} with average over trials.")
+        read_MD_int(field_path, mag, SSSFGraph, run_ids=run_ids)
 
 
 def read_MD(dir, mag, w):
@@ -1085,41 +1142,57 @@ def plot_all_specific_heat(root_dir, make_combined_plot=False):
         print(f"Combined plot saved to {os.path.join(root_dir, 'combined_heat_capacity.pdf')}")
 
 
-plot_all_specific_heat("Asim_BCAO_param")
-
-# obenton_to_xx_zz()
-#
-# dir = "CZO_h=4T"
-# dir = "CZO_MD_h1-10=8"
-# read_MD_tot("CZO_0_field", "111", SSSFGraphHnHn)
-# read_MD_tot("CZO_0.1_field", "111", SSSFGraphHnHn)
-# read_MD_tot("CZO_0.2_field", "111", SSSFGraphHnHn)
-# read_MD_tot("CZO_0.5_field", "111", SSSFGraphHnHn)
-# QFI("CZO_0_field", np.array([[0,0,0]]), 1000)
-# QFI("CZO_0_field", np.array([[0,0,2*np.pi]]), 1000)
-# read_MD_tot("0_flux_T=1e-1", "111", SSSFGraphHnHL)
-# read_MD_tot("0_flux_T=1e-2", "111", SSSFGraphHnHL)
-# read_MD_tot("0_flux_T=1e-3", "111", SSSFGraphHnHL)
-
-# QFI("0_flux_T=1e-1", np.array([[0,0,0]]), 10)
-# QFI("0_flux_T=1e-1", np.array([[0,0,2*np.pi]]), 10)
-# QFI("0_flux_T=1e-2", np.array([[0,0,0]]), 100)
-# QFI("0_flux_T=1e-2", np.array([[0,0,2*np.pi]]), 100)
-# QFI("0_flux_T=1e-3", np.array([[0,0,0]]), 1000)
-# QFI("0_flux_T=1e-3", np.array([[0,0,2*np.pi]]), 1000)
-# read_MD_int("CZO_0_field", "111", SSSFGraphHHL)
-# read_MD_int("CZO_0.1_field", "111", SSSFGraphHHL)
-# read_MD_int("CZO_0.2_field", "111", SSSFGraphHHL)
-# read_MD_int("CZO_0.5_field", "111", SSSFGraphHHL)
+def _select_sssf_graph(mag):
+    """Return the SSSF graphing helper that matches the chosen magnetization label."""
+    mapping = {
+        "001": SSSFGraphHK0,
+        "1-10": SSSFGraphHHL,
+        "110": SSSFGraphHnHL,
+        "111": SSSFGraphHnHn,
+        "HnHn": SSSFGraphHnHn,
+        "HK0": SSSFGraphHK0,
+        "HHL": SSSFGraphHHL,
+        "HnHL": SSSFGraphHnHL,
+    }
+    return mapping.get(mag)
 
 
-# parseDSSF(dir)
-# fullread(dir, False, "111")
-# fullread(dir, True, "111")
-# parseSSSF(dir)
-# parseDSSF(dir)
-# read_0_field(70, "/scratch/y/ybkim/zhouzb79/MC_Phase_Diagram_0_field")
-# A = np.loadtxt("test_Jpm=0.3/specific_heat.txt", unpack=True)
-# plt.plot(A[0], A[1])
-# plt.xscale('log')
-# plt.savefig("test_Jpm=0.3/specific_heat.pdf")
+def main():
+    parser = argparse.ArgumentParser(description="Process MD pi-flux simulation outputs.")
+    parser.add_argument("root", help="Path to the MD_pi_flux directory to process.")
+    parser.add_argument("--mag", default="HnHn", help="Magnetization direction label (e.g. HnHn, 001).")
+    parser.add_argument("--quiet", action="store_true", help="Suppress progress information.")
+    parser.add_argument(
+        "--run-ids",
+        nargs="+",
+        help="Optional list of specific run indices to include (default uses all).",
+    )
+
+    args = parser.parse_args()
+
+    run_ids = None
+    if args.run_ids is not None:
+        try:
+            run_ids = [str(int(run_id)) for run_id in args.run_ids]
+        except ValueError as exc:
+            raise SystemExit(f"Invalid run id provided: {exc}") from exc
+
+    graph_fn = _select_sssf_graph(args.mag)
+
+    try:
+        read_MD_pi_flux_all(
+            args.root,
+            mag=args.mag,
+            SSSFGraph=graph_fn,
+            verbose=not args.quiet,
+            run_ids=run_ids,
+        )
+    except Exception as exc:
+        if args.quiet:
+            raise SystemExit(str(exc)) from exc
+        raise
+
+
+if __name__ == "__main__":
+    main()
+
