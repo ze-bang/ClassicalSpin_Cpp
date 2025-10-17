@@ -5,6 +5,7 @@ from opt_einsum import contract
 import matplotlib.pyplot as plt
 import os
 from scipy.ndimage import gaussian_filter1d
+from scipy.interpolate import interp1d
 # plt.rcParams['text.usetex'] = True
 
 
@@ -117,7 +118,9 @@ localframe = np.array([x,y,z])
 #     return tS
 
 def Spin(k, S, P):
-    ffact = np.exp(1j*contract('ik,jk->ij', k, P))
+    # Compute k·P more efficiently using numpy's matrix multiplication
+    kP = np.dot(k, P.T)  # shape: (len(k), len(P))
+    ffact = np.exp(1j * kP)
     N = len(S)
     return contract('js, ij->is', S, ffact)/np.sqrt(N)
 
@@ -126,7 +129,10 @@ def Spin_global_pyrochlore_t(k,S,P):
     size = int(len(P))
     tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
     for i in range(4):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
+        # Compute k·P more efficiently
+        P_sub = P[i::4]
+        kP = np.dot(k, P_sub.T)  # shape: (len(k), len(P_sub))
+        ffact = np.exp(1j * kP)
         tS[:,i,:,:] = contract('tjs, ij->tis', S[:,i::4], ffact)/np.sqrt(size)
     return tS
 
@@ -134,13 +140,18 @@ def Spin_global_pyrochlore(k,S,P):
     size = int(len(P))
     tS = np.zeros((4, len(k),3), dtype=np.complex128)
     for i in range(4):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i::4]))
+        # Compute k·P more efficiently
+        P_sub = P[i::4]
+        kP = np.dot(k, P_sub.T)  # shape: (len(k), len(P_sub))
+        ffact = np.exp(1j * kP)
         tS[i,:,:] = contract('js, ij->is', S[i::4], ffact)/np.sqrt(size)
     return tS
 
 
 def Spin_t(k, S, P):
-    ffact = np.exp(1j*contract('ik,jk->ij', k, P))
+    # Compute k·P more efficiently using numpy's matrix multiplication
+    kP = np.dot(k, P.T)  # shape: (len(k), len(P))
+    ffact = np.exp(1j * kP)
     N = len(S)
     return contract('tjs, ij->tis', S, ffact)/np.sqrt(N)
 
@@ -178,6 +189,17 @@ def gg(q):
                             M[k, i, j,a,b] = np.dot(localframe[a][i], localframe[b][j])
     return M
 
+def gb(q):
+    M = np.zeros((len(q),4,4))
+    for k in range(len(q)):
+        for a in range(4):
+            for b in range(4):
+                if not np.dot(q[k],q[k]) == 0:
+                    M[k, a, b] = np.dot(localframe[2][a], localframe[2][b]) - np.dot(localframe[2][a],q[k]) * np.dot(localframe[2][b],q[k])/ np.dot(q[k],q[k])
+                else:
+                    M[k, a, b] = np.dot(localframe[2][a], localframe[2][b])
+    return M
+
 def SSSF_q(k, S, P, gb=False):
     if gb:
         A = Spin_global_pyrochlore(k, S, P)
@@ -191,17 +213,36 @@ def SSSF_q(k, S, P, gb=False):
         return read
 
 def DSSF(w, k, S, P, T, gb=False):
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))
+    dT = T[1]-T[0]
+    A = Spin_global_pyrochlore_t(k, S, P)  # shape: (time, 4, k_points, 3)
+    
+    # Use FFT for time transform
+    # Pad to next power of 2 for efficiency
+    nT = len(T)
+    nT_padded = 2**int(np.ceil(np.log2(nT)))
+    
+    # FFT along time axis
+    A_fft = np.fft.fft(A, n=nT_padded, axis=0)
+    freq = np.fft.fftfreq(nT_padded, d=dT)
+    
+    # Interpolate FFT result to desired frequency grid
+    Somega = np.zeros((len(w), A.shape[1], A.shape[2], A.shape[3]), dtype=np.complex128)
+    for i in range(A.shape[1]):
+        for j in range(A.shape[2]):
+            for l in range(A.shape[3]):
+                # Sort frequencies for interpolation
+                idx = np.argsort(freq)
+                interp_real = interp1d(freq[idx], A_fft[idx, i, j, l].real, kind='cubic', fill_value=0, bounds_error=False)
+                interp_imag = interp1d(freq[idx], A_fft[idx, i, j, l].imag, kind='cubic', fill_value=0, bounds_error=False)
+                Somega[:, i, j, l] = interp_real(w) + 1j * interp_imag(w)
+    
+    Somega = dT / (2*np.pi) * Somega / np.sqrt(nT)
+    
     if gb:
-        A = Spin_global_pyrochlore_t(k, S, P)
-        Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
-        read = np.abs(contract('wnia, wmib, inm, w->winmab', Somega, np.conj(Somega), gg(k)[:,:,:,2,2], w))
+        read = np.abs(contract('wnia, wmib, inm, w->winmab', Somega, np.conj(Somega), gb(k), w))
         read = np.where(read <= 1e-8, 1e-8, read)
         return read
-
     else:
-        A = Spin_global_pyrochlore_t(k, S, P)
-        Somega = contract('tnis, wt->wnis', A, ffactt)/np.sqrt(len(T))
         read = np.abs(contract('wnia, wmib, w->winmab', Somega, np.conj(Somega), w))
         read = np.where(read <= 1e-8, 1e-8, read)
         return read
@@ -761,7 +802,7 @@ def gaussian_resolution(energy, intensity, resolution_fwhm):
 def read_MD_int(dir, mag, SSSFGraph=None, run_ids=None):
     directory = os.fsencode(dir)
     w0 = 0.03
-    wmax = 8
+    wmax = 15
     w = np.linspace(w0, wmax, 2000)
     K_, dV = generate_K_points_pengcheng_dai(0, 0, 1, 0, 0, 1, 1, 1, 1)
 
@@ -972,11 +1013,12 @@ def read_2D_nonlinear(dir):
     domain = int(len(M0)/2)
     omega_range = 15
     M_NL = np.zeros((int(tau_step), domain))
-    w = np.arange(-omega_range, omega_range, 1/abs(tau_end-tau_start))
+    dT = (time_end - time_start) / int(time_step)
     T = np.linspace(time_start, time_end, int(time_step)) 
     T = T[-domain:]
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
+    dtau = (tau_end - tau_start) / int(tau_step)
     tau = np.linspace(tau_start, tau_end, int(tau_step))
+    
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
@@ -984,16 +1026,29 @@ def read_2D_nonlinear(dir):
             M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,2]
             M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,2]
             M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:] 
-    # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
-    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
-    # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
-    M_NL_FF = M_NL
-    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
-    M_NL_FF = np.log(M_NL_FF)
-    # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
+    
+    # Use 2D FFT for both tau and time transforms
+    # Pad to next power of 2 for efficiency
+    n_tau_padded = 2**int(np.ceil(np.log2(len(tau))))
+    n_T_padded = 2**int(np.ceil(np.log2(len(T))))
+    
+    # 2D FFT
+    M_NL_fft = np.fft.fft2(M_NL, s=(n_tau_padded, n_T_padded))
+    M_NL_fft = np.fft.fftshift(M_NL_fft)
+    
+    # Generate frequency grids
+    freq_tau = np.fft.fftshift(np.fft.fftfreq(n_tau_padded, d=dtau))
+    freq_T = np.fft.fftshift(np.fft.fftfreq(n_T_padded, d=dT))
+    
+    # Find indices corresponding to the desired omega_range
+    idx_tau = (freq_tau >= -omega_range) & (freq_tau <= omega_range)
+    idx_T = (freq_T >= -omega_range) & (freq_T <= omega_range)
+    
+    M_NL_FF = np.abs(M_NL_fft[np.ix_(idx_tau, idx_T)])
+    M_NL_FF = np.log(np.maximum(M_NL_FF, 1e-10))
+    
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
     plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
-    # plt.pcolormesh(w, w, np.log(M_NL_FF))
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
