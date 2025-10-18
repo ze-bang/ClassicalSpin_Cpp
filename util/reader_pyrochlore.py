@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import os
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
+from matplotlib.animation import FuncAnimation, PillowWriter
+import re
 # plt.rcParams['text.usetex'] = True
 
 
@@ -189,7 +191,7 @@ def gg(q):
                             M[k, i, j,a,b] = np.dot(localframe[a][i], localframe[b][j])
     return M
 
-def gb(q):
+def ggz(q):
     M = np.zeros((len(q),4,4))
     for k in range(len(q)):
         for a in range(4):
@@ -217,15 +219,35 @@ def DSSF(w, k, S, P, T, gb=False):
     A = Spin_global_pyrochlore_t(k, S, P)  # shape: (time, 4, k_points, 3)
     
     # Use FFT for time transform
-    # Pad to next power of 2 for efficiency
+    # If T spans from -t to +t, need to shift data for proper FFT
     nT = len(T)
     nT_padded = 2**int(np.ceil(np.log2(nT)))
     
-    # FFT along time axis
-    A_fft = np.fft.fft(A, n=nT_padded, axis=0)
-    freq = np.fft.fftfreq(nT_padded, d=dT)
+    # Check if time array includes negative times (spans from -t to +t)
+    # If so, shift the data so t=0 is at the beginning for FFT
+    if T[0] < 0 and T[-1] > 0:
+        # Data spans from -t to +t, use fftshift/ifftshift
+        A_shifted = np.fft.ifftshift(A, axes=0)
+        A_fft = np.fft.fft(A_shifted, n=nT_padded, axis=0)
+        A_fft = np.fft.fftshift(A_fft, axes=0)
+        freq = np.fft.fftshift(np.fft.fftfreq(nT_padded, d=dT))
+    else:
+        # Data starts from t=0 or is all positive, use standard FFT
+        A_fft = np.fft.fft(A, n=nT_padded, axis=0)
+        freq = np.fft.fftfreq(nT_padded, d=dT)
     
-    # Interpolate FFT result to desired frequency grid
+    # If w is None, return the FFT result with corresponding frequencies (no interpolation)
+    if w is None:
+        Somega = dT / (2*np.pi) * A_fft / np.sqrt(nT)
+        if gb:
+            read = np.abs(contract('wnia, wmib, inm->winmab', Somega, np.conj(Somega), ggz(k)))
+            read = np.where(read <= 1e-8, 1e-8, read)
+        else:
+            read = np.abs(contract('wnia, wmib->winmab', Somega, np.conj(Somega)))
+            read = np.where(read <= 1e-8, 1e-8, read)
+        return freq, read
+    
+    # Otherwise, interpolate to the desired frequency grid
     Somega = np.zeros((len(w), A.shape[1], A.shape[2], A.shape[3]), dtype=np.complex128)
     for i in range(A.shape[1]):
         for j in range(A.shape[2]):
@@ -236,10 +258,10 @@ def DSSF(w, k, S, P, T, gb=False):
                 interp_imag = interp1d(freq[idx], A_fft[idx, i, j, l].imag, kind='cubic', fill_value=0, bounds_error=False)
                 Somega[:, i, j, l] = interp_real(w) + 1j * interp_imag(w)
     
-    Somega = dT / (2*np.pi) * Somega / np.sqrt(nT)
+    Somega = dT / (2*np.pi) * Somega / np.sqrt(nT) 
     
     if gb:
-        read = np.abs(contract('wnia, wmib, inm, w->winmab', Somega, np.conj(Somega), gb(k), w))
+        read = np.abs(contract('wnia, wmib, inm, w->winmab', Somega, np.conj(Somega), ggz(k), w))
         read = np.where(read <= 1e-8, 1e-8, read)
         return read
     else:
@@ -759,6 +781,40 @@ def generate_K_points_pengcheng_dai(H_range_min, H_range_max, nH, K_range_min, K
     k_values = np.linspace(K_range_min, K_range_max, nK)
     l_values = np.linspace(L_range_min, L_range_max, nL)
 
+    print(f"Generating K points with H from {H_range_min} to {H_range_max} ({nH} points), "
+          f"K from {K_range_min} to {K_range_max} ({nK} points), "
+          f"L from {L_range_min} to {L_range_max} ({nL} points).")
+    
+    # Calculate the actual k-space range covered
+    # Get corner points of the box in HKL space
+    corners_hkl = [
+        [H_range_min, K_range_min, L_range_min],
+        [H_range_min, K_range_min, L_range_max],
+        [H_range_min, K_range_max, L_range_min],
+        [H_range_min, K_range_max, L_range_max],
+        [H_range_max, K_range_min, L_range_min],
+        [H_range_max, K_range_min, L_range_max],
+        [H_range_max, K_range_max, L_range_min],
+        [H_range_max, K_range_max, L_range_max]
+    ]
+    
+    # Transform corners to k-space
+    k_corners = []
+    for h, k, l in corners_hkl:
+        k_point = h * H_vector + k * K_vector + l * L_vector
+        k_corners.append(k_point)
+    
+    k_corners = np.array(k_corners)
+    
+    # Find min and max in each k-space direction
+    k_min = np.min(k_corners, axis=0)
+    k_max = np.max(k_corners, axis=0)
+    
+    print(f"Actual k-space range:")
+    print(f"  kx: [{k_min[0]:.4f}, {k_max[0]:.4f}]")
+    print(f"  ky: [{k_min[1]:.4f}, {k_max[1]:.4f}]")
+    print(f"  kz: [{k_min[2]:.4f}, {k_max[2]:.4f}]")
+
     # Create a grid of all possible combinations
     h_grid, k_grid, l_grid = np.meshgrid(h_values, k_values, l_values, indexing='ij')
     h_grid = h_grid.flatten()
@@ -803,11 +859,10 @@ def read_MD_int(dir, mag, SSSFGraph=None, run_ids=None):
     directory = os.fsencode(dir)
     w0 = 0.03
     wmax = 15
-    w = np.linspace(w0, wmax, 2000)
     K_, dV = generate_K_points_pengcheng_dai(0, 0, 1, 0, 0, 1, 1, 1, 1)
 
-    DSSF_local = np.zeros((len(w), len(K_),4,4,3,3))
-    DSSF_global = np.zeros((len(w), len(K_),4,4,3,3))
+    DSSF_local = []
+    DSSF_global = []
     nK = 50
 
 
@@ -839,8 +894,12 @@ def read_MD_int(dir, mag, SSSFGraph=None, run_ids=None):
             print(f"[read_MD_int] Failed to read data for run {run_dir} in {dir}: {exc}")
             continue
 
-        DSSF_local = DSSF_local + DSSF(w, K_, S, P, T, False)
-        DSSF_global = DSSF_global + DSSF(w, K_, S, P, T, True)
+        # Compute DSSF for this run (returns data with frequency from FFT)
+        dssf_local_run = DSSF(None, K_, S, P, T, False)  # Returns (freq, K, 4, 4, 3, 3) with freq
+        dssf_global_run = DSSF(None, K_, S, P, T, True)
+        
+        DSSF_local.append(dssf_local_run)
+        DSSF_global.append(dssf_global_run)
         SSSF_local = SSSF_local + SSSFHnHn(S0, P, 50, run_path, False)
         SSSF_global = SSSF_global + SSSFHnHn(S0, P, 50, run_path, True)
         processed_runs += 1
@@ -850,11 +909,34 @@ def read_MD_int(dir, mag, SSSFGraph=None, run_ids=None):
 
     SSSF_local = SSSF_local / processed_runs
     SSSF_global = SSSF_global / processed_runs
-    DSSF_local = DSSF_local / processed_runs
-    DSSF_global = DSSF_global / processed_runs
-
-    DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global), axis=1) * dV
-    DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local), axis=1) * dV
+    
+    # Average DSSF data and filter to [w0, wmax] window
+    # Each element in DSSF_local/global is (freq, K, 4, 4, 3, 3)
+    # Average across all runs
+    freq_arrays = []
+    dssf_local_arrays = []
+    dssf_global_arrays = []
+    
+    for freq, dssf_data in DSSF_local:
+        freq_arrays.append(freq)
+        dssf_local_arrays.append(dssf_data)
+    
+    for freq, dssf_data in DSSF_global:
+        dssf_global_arrays.append(dssf_data)
+    
+    # Use the frequency array from the first run (all should be the same)
+    freq = freq_arrays[0]
+    
+    # Filter to the window [w0, wmax]
+    freq_mask = (freq >= w0) & (freq <= wmax)
+    w = freq[freq_mask]
+    
+    # Average and filter the DSSF data
+    DSSF_local_filtered = np.mean([data[freq_mask] for data in dssf_local_arrays], axis=0)
+    DSSF_global_filtered = np.mean([data[freq_mask] for data in dssf_global_arrays], axis=0)
+    
+    DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global_filtered), axis=1) * dV
+    DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local_filtered), axis=1) * dV
 
     # Plot all components of DSSF_global, DSSF_local and their sum
     def plot_DSSF_components(DSSF, w, dir, name):
@@ -942,9 +1024,12 @@ def read_MD_pi_flux_all(root_dir, mag="HnHn", SSSFGraph=None, verbose=True, run_
     if not os.path.isdir(base_dir):
         raise ValueError(f"Provided root_dir {root_dir} is not a directory.")
 
+    # Directories to skip (output/metadata directories, not field data)
+    skip_dirs = {'animations', 'comparison_plots', 'results', '__pycache__', '.git'}
+    
     field_dirs = sorted(
         entry for entry in os.listdir(base_dir)
-        if os.path.isdir(os.path.join(base_dir, entry))
+        if os.path.isdir(os.path.join(base_dir, entry)) and entry not in skip_dirs
     )
 
     if not field_dirs:
@@ -954,7 +1039,260 @@ def read_MD_pi_flux_all(root_dir, mag="HnHn", SSSFGraph=None, verbose=True, run_
         field_path = os.path.join(base_dir, field_dir)
         if verbose:
             print(f"[read_MD_pi_flux_all] Processing {field_dir} with average over trials.")
-        read_MD_int(field_path, mag, SSSFGraph, run_ids=run_ids)
+        try:
+            read_MD_int(field_path, mag, SSSFGraph, run_ids=run_ids)
+        except RuntimeError as e:
+            if verbose:
+                print(f"[read_MD_pi_flux_all] Warning: Skipping {field_dir}: {e}")
+            continue
+
+
+def extract_field_value(field_dir):
+    """Extract numerical field value from directory name like 'field_0.1' or 'h=0.1'"""
+    # Try different patterns
+    patterns = [r'field[_=]([0-9.]+)', r'h[_=]([0-9.]+)', r'B[_=]([0-9.]+)']
+    for pattern in patterns:
+        match = re.search(pattern, field_dir)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def collect_DSSF_data_all_fields(root_dir, verbose=True):
+    """
+    Collect DSSF spinon+photon data (local and global) from all field directories.
+    Returns: field_values, w_data, dssf_spinon_photon_local_data, dssf_spinon_photon_global_data
+    """
+    base_dir = os.path.abspath(root_dir)
+    if not os.path.isdir(base_dir):
+        raise ValueError(f"Provided root_dir {root_dir} is not a directory.")
+
+    # Directories to skip (output/metadata directories, not field data)
+    skip_dirs = {'animations', 'comparison_plots', 'results', '__pycache__', '.git'}
+    
+    field_dirs = sorted(
+        entry for entry in os.listdir(base_dir)
+        if os.path.isdir(os.path.join(base_dir, entry)) and entry not in skip_dirs
+    )
+
+    if not field_dirs:
+        raise RuntimeError(f"No field directories found in {root_dir}.")
+
+    # Collect data from all fields
+    field_data = []
+    
+    for field_dir in field_dirs:
+        field_path = os.path.join(base_dir, field_dir)
+        results_dir = os.path.join(field_path, "results")
+        
+        # Extract field value
+        field_val = extract_field_value(field_dir)
+        if field_val is None:
+            if verbose:
+                print(f"[collect_DSSF_data] Could not extract field value from {field_dir}, skipping.")
+            continue
+        
+        # Look for DSSF data files
+        local_file = os.path.join(results_dir, "DSSF_local_xx.txt")
+        local_zz_file = os.path.join(results_dir, "DSSF_local_zz.txt")
+        global_file = os.path.join(results_dir, "DSSF_global_xx.txt")
+        global_zz_file = os.path.join(results_dir, "DSSF_global_zz.txt")
+        
+        if not (os.path.exists(local_file) and os.path.exists(local_zz_file) and 
+                os.path.exists(global_file) and os.path.exists(global_zz_file)):
+            if verbose:
+                print(f"[collect_DSSF_data] Missing DSSF files in {field_dir}, skipping.")
+            continue
+        
+        try:
+            # Read the data
+            data_local_xx = np.loadtxt(local_file)
+            data_local_zz = np.loadtxt(local_zz_file)
+            data_global_xx = np.loadtxt(global_file)
+            data_global_zz = np.loadtxt(global_zz_file)
+            
+            w = data_local_xx[:, 0]  # frequency/energy axis
+            
+            # Compute spinon+photon (S_xx + S_zz)
+            dssf_local_spinon_photon = data_local_xx[:, 1] + data_local_zz[:, 1]
+            dssf_global_spinon_photon = data_global_xx[:, 1] + data_global_zz[:, 1]
+            
+            field_data.append({
+                'field': field_val,
+                'w': w,
+                'dssf_local_spinon_photon': dssf_local_spinon_photon,
+                'dssf_global_spinon_photon': dssf_global_spinon_photon,
+                'dssf_local_xx': data_local_xx[:, 1],
+                'dssf_local_zz': data_local_zz[:, 1],
+                'dssf_global_xx': data_global_xx[:, 1],
+                'dssf_global_zz': data_global_zz[:, 1]
+            })
+            
+            if verbose:
+                print(f"[collect_DSSF_data] Loaded data for {field_dir} (field={field_val})")
+                
+        except Exception as e:
+            if verbose:
+                print(f"[collect_DSSF_data] Error reading data from {field_dir}: {e}")
+            continue
+    
+    if not field_data:
+        raise RuntimeError(f"No valid DSSF data found in {root_dir}")
+    
+    # Sort by field value
+    field_data.sort(key=lambda x: x['field'])
+    
+    return field_data
+
+
+def animate_DSSF_spinon_photon(root_dir, output_dir=None, fps=0.5, energy_conversion=0.063):
+    """
+    Create animations for DSSF spinon+photon (S_xx + S_zz) across all magnetic field strengths.
+    Creates separate animations for local and global channels.
+    
+    Parameters:
+    -----------
+    root_dir : str
+        Root directory containing field subdirectories
+    output_dir : str, optional
+        Directory to save animations (default: root_dir/animations)
+    fps : int
+        Frames per second for animation
+    energy_conversion : float
+        Conversion factor to real energy units (meV), default 0.063
+    """
+    # Collect all data
+    print("[animate_DSSF_spinon_photon] Collecting data from all field directories...")
+    field_data = collect_DSSF_data_all_fields(root_dir, verbose=True)
+    
+    # Setup output directory
+    if output_dir is None:
+        output_dir = os.path.join(root_dir, "animations")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract data arrays
+    field_values = np.array([d['field'] for d in field_data]) * energy_conversion / (2.5 * 0.0578) # Convert to meV
+    n_fields = len(field_values)
+    
+    # Check if all w arrays have the same length; if not, interpolate to a common grid
+    w_lengths = [len(d['w']) for d in field_data]
+    if len(set(w_lengths)) > 1:
+        print(f"[animate_DSSF_spinon_photon] Warning: Different frequency grid sizes detected: {set(w_lengths)}")
+        print("[animate_DSSF_spinon_photon] Interpolating all data to common frequency grid...")
+        
+        # Use the longest w array as the reference
+        max_idx = np.argmax(w_lengths)
+        w_common = field_data[max_idx]['w']
+        
+        # Interpolate all data to common grid
+        for i, data in enumerate(field_data):
+            if len(data['w']) != len(w_common):
+                # Create interpolation functions
+                data['dssf_local_spinon_photon'] = np.interp(w_common, data['w'], data['dssf_local_spinon_photon'])
+                data['dssf_global_spinon_photon'] = np.interp(w_common, data['w'], data['dssf_global_spinon_photon'])
+                data['dssf_local_xx'] = np.interp(w_common, data['w'], data['dssf_local_xx'])
+                data['dssf_local_zz'] = np.interp(w_common, data['w'], data['dssf_local_zz'])
+                data['dssf_global_xx'] = np.interp(w_common, data['w'], data['dssf_global_xx'])
+                data['dssf_global_zz'] = np.interp(w_common, data['w'], data['dssf_global_zz'])
+                data['w'] = w_common
+        
+        w = w_common * energy_conversion  # Convert to meV
+    else:
+        # All have same w array
+        w = field_data[0]['w'] * energy_conversion  # Convert to meV
+    
+    # Stack all DSSF data (now they all have the same length)
+    dssf_local_stack = np.array([d['dssf_local_spinon_photon'] for d in field_data])
+    dssf_global_stack = np.array([d['dssf_global_spinon_photon'] for d in field_data])
+    dssf_local_xx_stack = np.array([d['dssf_local_xx'] for d in field_data])
+    dssf_local_zz_stack = np.array([d['dssf_local_zz'] for d in field_data])
+    dssf_global_xx_stack = np.array([d['dssf_global_xx'] for d in field_data])
+    dssf_global_zz_stack = np.array([d['dssf_global_zz'] for d in field_data])
+    
+    # Determine global y-axis limits for consistency
+    y_max_local = np.max(dssf_local_stack) * 1.1
+    y_max_global = np.max(dssf_global_stack) * 1.1
+    
+    # Animation for LOCAL channel
+    print("[animate_DSSF_spinon_photon] Creating animation for LOCAL channel...")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    line_total, = ax.plot([], [], 'r-', linewidth=2, label='S_xx + S_zz (Total)')
+    line_xx, = ax.plot([], [], 'b--', linewidth=1.5, label='S_xx')
+    line_zz, = ax.plot([], [], 'g--', linewidth=1.5, label='S_zz')
+    
+    ax.set_xlabel('ω (meV)', fontsize=12)
+    ax.set_ylabel('DSSF (Local)', fontsize=12)
+    ax.set_xlim(w.min(), w.max())
+    ax.set_ylim(0, y_max_local)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right')
+    title_text = ax.text(0.5, 0.95, '', transform=ax.transAxes, 
+                         ha='center', va='top', fontsize=14, fontweight='bold')
+    
+    def init_local():
+        line_total.set_data([], [])
+        line_xx.set_data([], [])
+        line_zz.set_data([], [])
+        title_text.set_text('')
+        return line_total, line_xx, line_zz, title_text
+    
+    def animate_local(frame):
+        line_total.set_data(w, dssf_local_stack[frame])
+        line_xx.set_data(w, dssf_local_xx_stack[frame])
+        line_zz.set_data(w, dssf_local_zz_stack[frame])
+        title_text.set_text(f'DSSF Spinon+Photon (Local) | Field = {field_values[frame]:.3f}')
+        return line_total, line_xx, line_zz, title_text
+    
+    anim_local = FuncAnimation(fig, animate_local, init_func=init_local,
+                               frames=n_fields, interval=1000//fps, blit=True, repeat=True)
+    
+    output_file_local = os.path.join(output_dir, 'DSSF_spinon_photon_local.gif')
+    anim_local.save(output_file_local, writer=PillowWriter(fps=fps))
+    print(f"[animate_DSSF_spinon_photon] Saved: {output_file_local}")
+    plt.close(fig)
+    
+    # Animation for GLOBAL channel
+    print("[animate_DSSF_spinon_photon] Creating animation for GLOBAL channel...")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    line_total, = ax.plot([], [], 'r-', linewidth=2, label='S_xx + S_zz (Total)')
+    line_xx, = ax.plot([], [], 'b--', linewidth=1.5, label='S_xx')
+    line_zz, = ax.plot([], [], 'g--', linewidth=1.5, label='S_zz')
+    
+    ax.set_xlabel('ω (meV)', fontsize=12)
+    ax.set_ylabel('DSSF (Global)', fontsize=12)
+    ax.set_xlim(w.min(), w.max())
+    ax.set_ylim(0, y_max_global)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right')
+    title_text = ax.text(0.5, 0.95, '', transform=ax.transAxes, 
+                         ha='center', va='top', fontsize=14, fontweight='bold')
+    
+    def init_global():
+        line_total.set_data([], [])
+        line_xx.set_data([], [])
+        line_zz.set_data([], [])
+        title_text.set_text('')
+        return line_total, line_xx, line_zz, title_text
+    
+    def animate_global(frame):
+        line_total.set_data(w, dssf_global_stack[frame])
+        line_xx.set_data(w, dssf_global_xx_stack[frame])
+        line_zz.set_data(w, dssf_global_zz_stack[frame])
+        title_text.set_text(f'DSSF Spinon+Photon (Global) | Field = {field_values[frame]:.3f}')
+        return line_total, line_xx, line_zz, title_text
+    
+    anim_global = FuncAnimation(fig, animate_global, init_func=init_global,
+                                frames=n_fields, interval=1000//fps, blit=True, repeat=True)
+    
+    output_file_global = os.path.join(output_dir, 'DSSF_spinon_photon_global.gif')
+    anim_global.save(output_file_global, writer=PillowWriter(fps=fps))
+    print(f"[animate_DSSF_spinon_photon] Saved: {output_file_global}")
+    plt.close(fig)
+    
+    print("[animate_DSSF_spinon_photon] Animation creation complete!")
+    return output_file_local, output_file_global
 
 
 def read_MD(dir, mag, w):
@@ -1222,6 +1560,21 @@ def main():
         nargs="+",
         help="Optional list of specific run indices to include (default uses all).",
     )
+    parser.add_argument(
+        "--animate",
+        action="store_true",
+        help="Create animations for DSSF spinon+photon data across all field strengths.",
+    )
+    parser.add_argument(
+        "--animation-fps",
+        type=int,
+        default=0.5,
+        help="Frames per second for animations (default: 5).",
+    )
+    parser.add_argument(
+        "--animation-output",
+        help="Output directory for animations (default: root/animations).",
+    )
 
     args = parser.parse_args()
 
@@ -1235,13 +1588,24 @@ def main():
     graph_fn = _select_sssf_graph(args.mag)
 
     try:
-        read_MD_pi_flux_all(
-            args.root,
-            mag=args.mag,
-            SSSFGraph=graph_fn,
-            verbose=not args.quiet,
-            run_ids=run_ids,
-        )
+        if args.animate:
+            # Create animations
+            print("Creating animations for DSSF spinon+photon data...")
+            output_dir = args.animation_output if args.animation_output else None
+            animate_DSSF_spinon_photon(
+                args.root,
+                output_dir=output_dir,
+                fps=args.animation_fps
+            )
+        else:
+            # Regular processing
+            read_MD_pi_flux_all(
+                args.root,
+                mag=args.mag,
+                SSSFGraph=graph_fn,
+                verbose=not args.quiet,
+                run_ids=run_ids,
+            )
     except Exception as exc:
         if args.quiet:
             raise SystemExit(str(exc)) from exc
