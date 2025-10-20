@@ -136,7 +136,7 @@ void MD_pyrochlore(double T_target, size_t num_trials, double Jxx, double Jyy, d
         string trial_dir = dir.empty() ? to_string(trial_id) : dir + "/" + to_string(trial_id);
         filesystem::create_directories(trial_dir);
 
-        lattice<3, 4, 8, 8, 8> MC(&atoms, 0.5);
+        lattice<3, 4, 2, 2, 2> MC(&atoms, 0.5);
         MC.simulated_annealing(5, T_target, 1e5, 10, false);
         MC.molecular_dynamics(0, 600, 0.01, trial_dir);
 

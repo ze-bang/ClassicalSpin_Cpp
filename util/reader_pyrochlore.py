@@ -924,16 +924,66 @@ def read_MD_int(dir, mag, SSSFGraph=None, run_ids=None):
     for freq, dssf_data in DSSF_global:
         dssf_global_arrays.append(dssf_data)
     
-    # Use the frequency array from the first run (all should be the same)
-    freq = freq_arrays[0]
+    # Create a common frequency grid for interpolation
+    # Find the union of all frequency points in the [w0, wmax] window
+    all_freqs = []
+    for freq in freq_arrays:
+        freq_mask = (freq >= w0) & (freq <= wmax)
+        all_freqs.extend(freq[freq_mask])
     
-    # Filter to the window [w0, wmax]
-    freq_mask = (freq >= w0) & (freq <= wmax)
-    w = freq[freq_mask]
+    # Create a uniform frequency grid spanning [w0, wmax]
+    # Use the median spacing to determine the number of points
+    all_freqs = np.sort(np.unique(all_freqs))
+    if len(all_freqs) > 1:
+        median_spacing = np.median(np.diff(all_freqs))
+        n_points = int((wmax - w0) / median_spacing) + 1
+    else:
+        n_points = 1024  # default fallback
     
-    # Average and filter the DSSF data
-    DSSF_local_filtered = np.mean([data[freq_mask] for data in dssf_local_arrays], axis=0)
-    DSSF_global_filtered = np.mean([data[freq_mask] for data in dssf_global_arrays], axis=0)
+    w = np.linspace(w0, wmax, n_points)
+    
+    # Interpolate each run's data to the common frequency grid
+    dssf_local_filtered_list = []
+    dssf_global_filtered_list = []
+    
+    for freq, dssf_data in DSSF_local:
+        freq_mask = (freq >= w0) & (freq <= wmax)
+        freq_filtered = freq[freq_mask]
+        dssf_filtered = dssf_data[freq_mask]
+        
+        # Interpolate to common grid
+        # dssf_data shape: (freq, 4, k_points, 4, 3, 3)
+        dssf_interp = np.zeros((len(w),) + dssf_filtered.shape[1:])
+        for i in range(dssf_filtered.shape[1]):
+            for j in range(dssf_filtered.shape[2]):
+                for k in range(dssf_filtered.shape[3]):
+                    for a in range(dssf_filtered.shape[4]):
+                        for b in range(dssf_filtered.shape[5]):
+                            interp_func = interp1d(freq_filtered, dssf_filtered[:, i, j, k, a, b], 
+                                                   kind='linear', fill_value='extrapolate', bounds_error=False)
+                            dssf_interp[:, i, j, k, a, b] = interp_func(w)
+        dssf_local_filtered_list.append(dssf_interp)
+    
+    for freq, dssf_data in DSSF_global:
+        freq_mask = (freq >= w0) & (freq <= wmax)
+        freq_filtered = freq[freq_mask]
+        dssf_filtered = dssf_data[freq_mask]
+        
+        # Interpolate to common grid
+        dssf_interp = np.zeros((len(w),) + dssf_filtered.shape[1:])
+        for i in range(dssf_filtered.shape[1]):
+            for j in range(dssf_filtered.shape[2]):
+                for k in range(dssf_filtered.shape[3]):
+                    for a in range(dssf_filtered.shape[4]):
+                        for b in range(dssf_filtered.shape[5]):
+                            interp_func = interp1d(freq_filtered, dssf_filtered[:, i, j, k, a, b], 
+                                                   kind='linear', fill_value='extrapolate', bounds_error=False)
+                            dssf_interp[:, i, j, k, a, b] = interp_func(w)
+        dssf_global_filtered_list.append(dssf_interp)
+    
+    # Average the interpolated DSSF data
+    DSSF_local_filtered = np.mean(dssf_local_filtered_list, axis=0)
+    DSSF_global_filtered = np.mean(dssf_global_filtered_list, axis=0)
     
     DSSF_global = np.sum(contract('ijxyab->ijab', DSSF_global_filtered), axis=1) * dV
     DSSF_local = np.sum(contract('ijxyab->ijab', DSSF_local_filtered), axis=1) * dV
