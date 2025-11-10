@@ -32,6 +32,23 @@ struct SimulationParams {
         1,0,0, 0,1,0, 0,0,1
     }}};
     bool tbc = false; // Whether to apply twist boundary conditions
+    
+    // Phase diagram parameters (legacy 2D support)
+    string param1_name = "";  // e.g., "h", "J1xy", "D", "E", etc.
+    double param1_start = 0.0;
+    double param1_end = 1.0;
+    int param1_steps = 10;
+    
+    string param2_name = "";  // e.g., "h", "J1xy", "D", "E", etc.
+    double param2_start = 0.0;
+    double param2_end = 1.0;
+    int param2_steps = 10;
+    
+    // N-dimensional phase diagram parameters
+    vector<string> scan_params;      // List of parameter names to scan
+    vector<double> scan_starts;      // Starting values for each parameter
+    vector<double> scan_ends;        // Ending values for each parameter
+    vector<int> scan_steps;          // Number of steps for each parameter
 };
 
 SimulationParams read_parameters(const string& filename) {
@@ -83,6 +100,44 @@ SimulationParams read_parameters(const string& filename) {
             else if (key == "h_start") params.h_start = stod(value);
             else if (key == "h_end") params.h_end = stod(value);
             else if (key == "num_steps") params.num_steps = stoi(value);
+            else if (key == "param1_name") params.param1_name = value;
+            else if (key == "param1_start") params.param1_start = stod(value);
+            else if (key == "param1_end") params.param1_end = stod(value);
+            else if (key == "param1_steps") params.param1_steps = stoi(value);
+            else if (key == "param2_name") params.param2_name = value;
+            else if (key == "param2_start") params.param2_start = stod(value);
+            else if (key == "param2_end") params.param2_end = stod(value);
+            else if (key == "param2_steps") params.param2_steps = stoi(value);
+            else if (key == "scan_params") {
+                stringstream ss(value);
+                string item;
+                while (getline(ss, item, ',')) {
+                    item.erase(0, item.find_first_not_of(" \t"));
+                    item.erase(item.find_last_not_of(" \t") + 1);
+                    if (!item.empty()) params.scan_params.push_back(item);
+                }
+            }
+            else if (key == "scan_starts") {
+                stringstream ss(value);
+                string item;
+                while (getline(ss, item, ',')) {
+                    params.scan_starts.push_back(stod(item));
+                }
+            }
+            else if (key == "scan_ends") {
+                stringstream ss(value);
+                string item;
+                while (getline(ss, item, ',')) {
+                    params.scan_ends.push_back(stod(item));
+                }
+            }
+            else if (key == "scan_steps") {
+                stringstream ss(value);
+                string item;
+                while (getline(ss, item, ',')) {
+                    params.scan_steps.push_back(stoi(item));
+                }
+            }
             else if (key.rfind("twist_matrix_", 0) == 0) {
                 int idx = -1;
                 try {
@@ -145,6 +200,33 @@ void create_default_parameter_file(const string& filename) {
     file << "# Third nearest neighbor parameters\n";
     file << "J3xy = 2.5\n";
     file << "J3z = -0.85\n\n";
+    file << "# Field scan parameters (for --field-scan mode)\n";
+    file << "h_start = 0.0\n";
+    file << "h_end = 1.0\n";
+    file << "num_steps = 50\n\n";
+    file << "# Generic phase diagram parameters (for --phase-diagram mode)\n";
+    file << "# Available parameter names: h, J1xy, J1z, D, E, F, G, J3xy, J3z\n";
+    file << "param1_name = h\n";
+    file << "param1_start = 0.0\n";
+    file << "param1_end = 1.0\n";
+    file << "param1_steps = 10\n\n";
+    file << "param2_name = J1xy\n";
+    file << "param2_start = -8.0\n";
+    file << "param2_end = -7.0\n";
+    file << "param2_steps = 10\n\n";
+    file << "# N-dimensional phase diagram (for --ndim-scan mode)\n";
+    file << "# Comma-separated lists - all must have same length\n";
+    file << "# Examples:\n";
+    file << "#   1D: scan_params = h\n";
+    file << "#   2D: scan_params = h,D\n";
+    file << "#   3D: scan_params = h,D,J1xy\n";
+    file << "#   4D: scan_params = h,D,E,J3xy\n";
+    file << "# scan_params = h,D,E\n";
+    file << "# scan_starts = 0.0,-0.2,-0.3\n";
+    file << "# scan_ends = 1.0,0.5,0.2\n";
+    file << "# scan_steps = 10,10,10\n\n";
+    file << "# Twist boundary conditions (0 or 1)\n";
+    file << "tbc = 0\n\n";
     file << "# Twist matrices (each 3x3 flattened, comma-separated)\n";
     file << "twist_matrix_0 = 1,0,0, 0,1,0, 0,0,1\n";
     file << "twist_matrix_1 = 1,0,0, 0,1,0, 0,0,1\n";
@@ -674,6 +756,295 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// Generic 2D phase diagram scanner for any two parameters
+void generic_phase_diagram(const string& param1_name, double param1_start, double param1_end, int param1_steps,
+                          const string& param2_name, double param2_start, double param2_end, int param2_steps,
+                          size_t num_trials, array<double, 3> field_dir, string dir,
+                          double h, double J1xy, double J1z, double D, double E, double F, double G,
+                          double J3xy, double J3z, const array<array<double, 9>, 3>* custom_twist = nullptr, bool tbc = false) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    // Generate parameter grids
+    vector<double> param1_values, param2_values;
+    if (param1_steps > 0) {
+        double step = (param1_end - param1_start) / param1_steps;
+        for (int i = 0; i <= param1_steps; ++i) {
+            param1_values.push_back(param1_start + i * step);
+        }
+    } else {
+        param1_values.push_back(param1_start);
+    }
+    
+    if (param2_steps > 0) {
+        double step = (param2_end - param2_start) / param2_steps;
+        for (int i = 0; i <= param2_steps; ++i) {
+            param2_values.push_back(param2_start + i * step);
+        }
+    } else {
+        param2_values.push_back(param2_start);
+    }
+    
+    size_t total_tasks = param1_values.size() * param2_values.size() * num_trials;
+    
+    // Custom hash function for tuple<size_t, size_t>
+    struct TupleHash {
+        size_t operator()(const tuple<size_t, size_t>& t) const {
+            auto h1 = std::hash<size_t>{}(get<0>(t));
+            auto h2 = std::hash<size_t>{}(get<1>(t));
+            return h1 ^ (h2 << 1);
+        }
+    };
+    
+    unordered_map<tuple<size_t, size_t>, vector<size_t>, TupleHash> assignments;
+    
+    // Distribute tasks across MPI processes
+    for (size_t task = rank; task < total_tasks; task += static_cast<size_t>(size)) {
+        size_t p1_idx = task / (param2_values.size() * num_trials);
+        size_t p2_idx = (task / num_trials) % param2_values.size();
+        size_t trial_idx = task % num_trials;
+        assignments[make_tuple(p1_idx, p2_idx)].push_back(trial_idx);
+    }
+    
+    // Lambda to get pointer to parameter by name
+    auto get_param_ptr = [&](const string& name, double& h_ref, double& J1xy_ref, double& J1z_ref,
+                             double& D_ref, double& E_ref, double& F_ref, double& G_ref,
+                             double& J3xy_ref, double& J3z_ref) -> double* {
+        if (name == "h") return &h_ref;
+        else if (name == "J1xy") return &J1xy_ref;
+        else if (name == "J1z") return &J1z_ref;
+        else if (name == "D") return &D_ref;
+        else if (name == "E") return &E_ref;
+        else if (name == "F") return &F_ref;
+        else if (name == "G") return &G_ref;
+        else if (name == "J3xy") return &J3xy_ref;
+        else if (name == "J3z") return &J3z_ref;
+        return nullptr;
+    };
+    
+    // Run simulations for assigned parameter combinations
+    for (auto &entry : assignments) {
+        size_t p1_idx = get<0>(entry.first);
+        size_t p2_idx = get<1>(entry.first);
+        auto &trial_list = entry.second;
+        std::sort(trial_list.begin(), trial_list.end());
+        
+        double p1_val = param1_values[p1_idx];
+        double p2_val = param2_values[p2_idx];
+        
+        // Create local copies of all parameters
+        double h_local = h, J1xy_local = J1xy, J1z_local = J1z;
+        double D_local = D, E_local = E, F_local = F, G_local = G;
+        double J3xy_local = J3xy, J3z_local = J3z;
+        
+        // Update the relevant parameters
+        double* param1_ptr = get_param_ptr(param1_name, h_local, J1xy_local, J1z_local,
+                                           D_local, E_local, F_local, G_local, J3xy_local, J3z_local);
+        double* param2_ptr = get_param_ptr(param2_name, h_local, J1xy_local, J1z_local,
+                                           D_local, E_local, F_local, G_local, J3xy_local, J3z_local);
+        
+        if (param1_ptr) *param1_ptr = p1_val;
+        if (param2_ptr) *param2_ptr = p2_val;
+        
+        // Create subdirectory with parameter names
+        string subdir = dir + "/" + param1_name + "_" + to_string(p1_val) + "_" + param2_name + "_" + to_string(p2_val);
+        
+        if (rank == 0 || trial_list.size() > 0) {
+            std::cout << "Running simulation for " << param1_name << " = " << p1_val 
+                      << ", " << param2_name << " = " << p2_val
+                      << " with " << trial_list.size() << " trials on process " << rank << std::endl;
+        }
+        
+        vector<pair<size_t, double>> trial_outcomes;
+        sim_BCAO_honeycomb(num_trials, h_local, field_dir, subdir, 
+                           J1xy_local, J1z_local, D_local, E_local, F_local, G_local,
+                           J3xy_local, J3z_local, custom_twist, true, tbc, &trial_list, &trial_outcomes);
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        // Save phase diagram metadata
+        ofstream meta_file(dir + "/phase_diagram_info.txt");
+        meta_file << "Generic Phase Diagram Scan\n";
+        meta_file << "==========================\n";
+        meta_file << "Parameter 1: " << param1_name << "\n";
+        meta_file << "  Range: " << param1_start << " to " << param1_end << "\n";
+        meta_file << "  Steps: " << param1_steps << "\n";
+        meta_file << "\nParameter 2: " << param2_name << "\n";
+        meta_file << "  Range: " << param2_start << " to " << param2_end << "\n";
+        meta_file << "  Steps: " << param2_steps << "\n";
+        meta_file << "\nTrials per point: " << num_trials << "\n";
+        meta_file << "Total points: " << param1_values.size() * param2_values.size() << "\n";
+        meta_file.close();
+    }
+}
+
+// N-dimensional phase diagram scanner for arbitrary number of parameters
+void ndim_phase_diagram(const vector<string>& param_names, 
+                        const vector<double>& param_starts,
+                        const vector<double>& param_ends, 
+                        const vector<int>& param_steps,
+                        size_t num_trials, array<double, 3> field_dir, string dir,
+                        double h, double J1xy, double J1z, double D, double E, double F, double G,
+                        double J3xy, double J3z, const array<array<double, 9>, 3>* custom_twist = nullptr, bool tbc = false) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    size_t ndim = param_names.size();
+    
+    if (ndim == 0) {
+        if (rank == 0) {
+            cerr << "Error: No parameters specified for N-dimensional scan\n";
+        }
+        return;
+    }
+    
+    // Generate grids for each parameter
+    vector<vector<double>> param_grids(ndim);
+    for (size_t i = 0; i < ndim; ++i) {
+        if (param_steps[i] > 0) {
+            double step = (param_ends[i] - param_starts[i]) / param_steps[i];
+            for (int j = 0; j <= param_steps[i]; ++j) {
+                param_grids[i].push_back(param_starts[i] + j * step);
+            }
+        } else {
+            param_grids[i].push_back(param_starts[i]);
+        }
+    }
+    
+    // Calculate total number of grid points
+    size_t total_points = 1;
+    for (size_t i = 0; i < ndim; ++i) {
+        total_points *= param_grids[i].size();
+    }
+    
+    size_t total_tasks = total_points * num_trials;
+    
+    if (rank == 0) {
+        cout << "N-dimensional phase diagram scan:\n";
+        cout << "  Dimensions: " << ndim << "\n";
+        cout << "  Total grid points: " << total_points << "\n";
+        cout << "  Trials per point: " << num_trials << "\n";
+        cout << "  Total simulations: " << total_tasks << "\n";
+        for (size_t i = 0; i < ndim; ++i) {
+            cout << "  " << param_names[i] << ": " << param_starts[i] << " to " 
+                 << param_ends[i] << " (" << param_grids[i].size() << " values)\n";
+        }
+    }
+    
+    // Lambda to convert flat index to multi-dimensional indices
+    auto index_to_coords = [&](size_t flat_idx) -> vector<size_t> {
+        vector<size_t> coords(ndim);
+        for (int i = ndim - 1; i >= 0; --i) {
+            coords[i] = flat_idx % param_grids[i].size();
+            flat_idx /= param_grids[i].size();
+        }
+        return coords;
+    };
+    
+    // Lambda to get pointer to parameter by name
+    auto get_param_ptr = [&](const string& name, double& h_ref, double& J1xy_ref, double& J1z_ref,
+                             double& D_ref, double& E_ref, double& F_ref, double& G_ref,
+                             double& J3xy_ref, double& J3z_ref) -> double* {
+        if (name == "h") return &h_ref;
+        else if (name == "J1xy") return &J1xy_ref;
+        else if (name == "J1z") return &J1z_ref;
+        else if (name == "D") return &D_ref;
+        else if (name == "E") return &E_ref;
+        else if (name == "F") return &F_ref;
+        else if (name == "G") return &G_ref;
+        else if (name == "J3xy") return &J3xy_ref;
+        else if (name == "J3z") return &J3z_ref;
+        return nullptr;
+    };
+    
+    // Hash function for vector<size_t>
+    struct VectorHash {
+        size_t operator()(const vector<size_t>& v) const {
+            size_t seed = v.size();
+            for (auto& i : v) {
+                seed ^= i + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            }
+            return seed;
+        }
+    };
+    
+    // Group tasks by parameter combination
+    unordered_map<vector<size_t>, vector<size_t>, VectorHash> assignments;
+    
+    for (size_t task = rank; task < total_tasks; task += static_cast<size_t>(size)) {
+        size_t point_idx = task / num_trials;
+        size_t trial_idx = task % num_trials;
+        vector<size_t> coords = index_to_coords(point_idx);
+        assignments[coords].push_back(trial_idx);
+    }
+    
+    // Run simulations for assigned parameter combinations
+    for (auto &entry : assignments) {
+        const vector<size_t>& coords = entry.first;
+        auto &trial_list = entry.second;
+        std::sort(trial_list.begin(), trial_list.end());
+        
+        // Create local copies of all parameters
+        double h_local = h, J1xy_local = J1xy, J1z_local = J1z;
+        double D_local = D, E_local = E, F_local = F, G_local = G;
+        double J3xy_local = J3xy, J3z_local = J3z;
+        
+        // Build directory name and update parameters
+        stringstream subdir_ss;
+        subdir_ss << dir;
+        
+        for (size_t i = 0; i < ndim; ++i) {
+            double param_val = param_grids[i][coords[i]];
+            subdir_ss << "/" << param_names[i] << "_" << param_val;
+            
+            double* param_ptr = get_param_ptr(param_names[i], h_local, J1xy_local, J1z_local,
+                                             D_local, E_local, F_local, G_local, J3xy_local, J3z_local);
+            if (param_ptr) *param_ptr = param_val;
+        }
+        
+        string subdir = subdir_ss.str();
+        
+        if (rank == 0 || trial_list.size() > 0) {
+            cout << "Process " << rank << " running: ";
+            for (size_t i = 0; i < ndim; ++i) {
+                cout << param_names[i] << "=" << param_grids[i][coords[i]];
+                if (i < ndim - 1) cout << ", ";
+            }
+            cout << " (" << trial_list.size() << " trials)\n";
+        }
+        
+        vector<pair<size_t, double>> trial_outcomes;
+        sim_BCAO_honeycomb(num_trials, h_local, field_dir, subdir, 
+                           J1xy_local, J1z_local, D_local, E_local, F_local, G_local,
+                           J3xy_local, J3z_local, custom_twist, true, tbc, &trial_list, &trial_outcomes);
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        // Save phase diagram metadata
+        ofstream meta_file(dir + "/phase_diagram_info.txt");
+        meta_file << "N-Dimensional Phase Diagram Scan\n";
+        meta_file << "=================================\n";
+        meta_file << "Dimensions: " << ndim << "\n";
+        meta_file << "Total grid points: " << total_points << "\n";
+        meta_file << "Trials per point: " << num_trials << "\n";
+        meta_file << "Total simulations: " << total_tasks << "\n\n";
+        
+        for (size_t i = 0; i < ndim; ++i) {
+            meta_file << "Parameter " << (i+1) << ": " << param_names[i] << "\n";
+            meta_file << "  Range: " << param_starts[i] << " to " << param_ends[i] << "\n";
+            meta_file << "  Steps: " << param_steps[i] << "\n";
+            meta_file << "  Values: " << param_grids[i].size() << "\n\n";
+        }
+        meta_file.close();
+    }
+}
+
 int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
     
@@ -683,6 +1054,8 @@ int main(int argc, char** argv) {
     bool do_field_scan = false;
     bool do_f_scan = false;
     bool do_J1xy_scan = false;
+    bool do_phase_diagram = false;
+    bool do_ndim_scan = false;
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         string arg = argv[i];
@@ -692,10 +1065,24 @@ int main(int argc, char** argv) {
             cout << "  --help, -h          Show this help message\n";
             cout << "  --create-params     Create default parameter file (bcao_parameters.txt)\n";
             cout << "  --restart           Use the adaptive restarted simulated annealing method\n";
-            cout << "  --field-scan        Perform a magnetic field scan instead of a single run\n\n";
-            cout << "  --J1xy-scan         Perform a J1xy vs Magnetic field phase diagram scan\n\n";
+            cout << "  --field-scan        Perform a magnetic field scan instead of a single run\n";
+            cout << "  --J1xy-scan         Perform a J1xy vs Magnetic field phase diagram scan\n";
+            cout << "  --phase-diagram     Perform a generic 2D phase diagram scan\n";
+            cout << "                      Uses param1_name, param1_start, param1_end, param1_steps\n";
+            cout << "                      and param2_name, param2_start, param2_end, param2_steps\n";
+            cout << "                      from parameter file\n";
+            cout << "  --ndim-scan         Perform an N-dimensional phase diagram scan\n";
+            cout << "                      Uses scan_params, scan_starts, scan_ends, scan_steps\n";
+            cout << "                      from parameter file (comma-separated lists)\n\n";
             cout << "Arguments:\n";
             cout << "  parameter_file      Path to parameter file (default: bcao_parameters.txt)\n\n";
+            cout << "Available parameters for phase diagram:\n";
+            cout << "  h, J1xy, J1z, D, E, F, G, J3xy, J3z\n\n";
+            cout << "Examples:\n";
+            cout << "  1D scan: scan_params = h\n";
+            cout << "  2D scan: scan_params = h,D\n";
+            cout << "  3D scan: scan_params = h,D,J1xy\n";
+            cout << "  4D scan: scan_params = h,D,E,J3xy\n\n";
             cout << "If parameter file doesn't exist, default parameters will be used.\n";
             return 0;
         } else if (arg == "--create-params") {
@@ -711,7 +1098,11 @@ int main(int argc, char** argv) {
             do_f_scan = true;
         } else if (arg == "--J1xy-scan"){
             do_J1xy_scan = true;
-        } 
+        } else if (arg == "--phase-diagram"){
+            do_phase_diagram = true;
+        } else if (arg == "--ndim-scan"){
+            do_ndim_scan = true;
+        }
         else {
             // Assume the last non-flag argument is the parameter file
             param_file = arg;
@@ -733,12 +1124,23 @@ int main(int argc, char** argv) {
     
     if (rank == 0) {
         cout << "Running simulation with parameters from: " << param_file << "\n";
-        if (do_field_scan) {
+        if (do_ndim_scan) {
+            cout << "Mode: N-Dimensional Phase Diagram\n";
+            cout << "Scanning " << params.scan_params.size() << " parameters:\n";
+            for (size_t i = 0; i < params.scan_params.size(); ++i) {
+                cout << "  " << params.scan_params[i] << ": " << params.scan_starts[i] 
+                     << " to " << params.scan_ends[i] << " (" << params.scan_steps[i] << " steps)\n";
+            }
+        } else if (do_phase_diagram) {
+            cout << "Mode: Generic Phase Diagram (2D)\n";
+            cout << "Parameter 1: " << params.param1_name << " from " << params.param1_start 
+                 << " to " << params.param1_end << " (" << params.param1_steps << " steps)\n";
+            cout << "Parameter 2: " << params.param2_name << " from " << params.param2_start 
+                 << " to " << params.param2_end << " (" << params.param2_steps << " steps)\n";
+        } else if (do_field_scan) {
             cout << "Mode: Magnetic Field Scan\n";
-            // Assuming h_start, h_end, num_steps are part of SimulationParams and read_parameters
-            // If not, they need to be added. For now, we'll use hardcoded or default values.
-            // Let's assume they are in params.
-            // cout << "Field scan from " << params.h_start << " to " << params.h_end << " in " << params.num_steps << " steps.\n";
+        } else if (do_J1xy_scan) {
+            cout << "Mode: J1xy vs Magnetic Field Phase Diagram\n";
         } else {
             cout << "Mode: Single Simulation\n";
             cout << "Restarted Annealing: " << (use_restart ? "Yes" : "No") << "\n";
@@ -751,7 +1153,70 @@ int main(int argc, char** argv) {
 
     const array<array<double, 9>, 3>* custom_twist_ptr = params.has_twist_matrix ? &params.twist_matrix : nullptr;
 
-    if (do_field_scan) {
+    if (do_ndim_scan) {
+        // Validate N-dimensional scan parameters
+        vector<string> valid_params = {"h", "J1xy", "J1z", "D", "E", "F", "G", "J3xy", "J3z"};
+        
+        if (params.scan_params.empty()) {
+            if (rank == 0) {
+                cerr << "Error: No parameters specified for N-dimensional scan.\n";
+                cerr << "Set scan_params in parameter file (e.g., scan_params = h,D,E)\n";
+            }
+            MPI_Finalize();
+            return 1;
+        }
+        
+        if (params.scan_params.size() != params.scan_starts.size() ||
+            params.scan_params.size() != params.scan_ends.size() ||
+            params.scan_params.size() != params.scan_steps.size()) {
+            if (rank == 0) {
+                cerr << "Error: Mismatched array sizes for N-dimensional scan.\n";
+                cerr << "scan_params size: " << params.scan_params.size() << "\n";
+                cerr << "scan_starts size: " << params.scan_starts.size() << "\n";
+                cerr << "scan_ends size: " << params.scan_ends.size() << "\n";
+                cerr << "scan_steps size: " << params.scan_steps.size() << "\n";
+            }
+            MPI_Finalize();
+            return 1;
+        }
+        
+        for (const auto& param : params.scan_params) {
+            if (find(valid_params.begin(), valid_params.end(), param) == valid_params.end()) {
+                if (rank == 0) {
+                    cerr << "Error: Invalid parameter name '" << param << "' in scan_params\n";
+                    cerr << "Valid parameters: h, J1xy, J1z, D, E, F, G, J3xy, J3z\n";
+                }
+                MPI_Finalize();
+                return 1;
+            }
+        }
+        
+        ndim_phase_diagram(params.scan_params, params.scan_starts, params.scan_ends, params.scan_steps,
+                          params.num_trials, params.field_dir, params.dir,
+                          params.h, params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
+                          params.J3xy, params.J3z, custom_twist_ptr, params.tbc);
+    } else if (do_phase_diagram) {
+        // Validate parameter names
+        vector<string> valid_params = {"h", "J1xy", "J1z", "D", "E", "F", "G", "J3xy", "J3z"};
+        bool param1_valid = find(valid_params.begin(), valid_params.end(), params.param1_name) != valid_params.end();
+        bool param2_valid = find(valid_params.begin(), valid_params.end(), params.param2_name) != valid_params.end();
+        
+        if (!param1_valid || !param2_valid || params.param1_name.empty() || params.param2_name.empty()) {
+            if (rank == 0) {
+                cerr << "Error: Invalid parameter names for phase diagram.\n";
+                cerr << "param1_name = '" << params.param1_name << "', param2_name = '" << params.param2_name << "'\n";
+                cerr << "Valid parameters: h, J1xy, J1z, D, E, F, G, J3xy, J3z\n";
+            }
+            MPI_Finalize();
+            return 1;
+        }
+        
+        generic_phase_diagram(params.param1_name, params.param1_start, params.param1_end, params.param1_steps,
+                             params.param2_name, params.param2_start, params.param2_end, params.param2_steps,
+                             params.num_trials, params.field_dir, params.dir,
+                             params.h, params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
+                             params.J3xy, params.J3z, custom_twist_ptr, params.tbc);
+    } else if (do_field_scan) {
         magnetic_field_scan(params.num_steps, params.h_start, params.h_end, params.field_dir, params.dir,
                             params.J1xy, params.J1z, params.D, params.E, params.F, params.G,
                             params.J3xy, params.J3z, custom_twist_ptr, params.tbc);

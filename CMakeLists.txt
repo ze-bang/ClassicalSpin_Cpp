@@ -95,10 +95,17 @@ file(GLOB CUDA_HEADER_FILES
     "src/*.cuh"
 )
 
-# Collect all C++ source files in results directory
+# Option to build legacy individual executables
+option(BUILD_LEGACY_EXECUTABLES "Build individual executables for each simulation script" OFF)
+
+# Collect all C++ source files in run_scripts directory
 file(GLOB CPP_SOURCE_FILES 
     "run_scripts/*.cpp"
 )
+
+# Separate unified simulation from legacy scripts
+list(FILTER CPP_SOURCE_FILES EXCLUDE REGEX ".*unified_simulation\\.cpp$")
+set(UNIFIED_SIM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/run_scripts/unified_simulation.cpp")
 
 # Create a modern header-only interface library
 add_library(headers INTERFACE)
@@ -162,8 +169,59 @@ if(CUDA_SOURCE_FILES)
     target_link_libraries(cuda_headers INTERFACE cuda_lib)
 endif()
 
-# Create optimized executables for each C++ file in run_scripts
-foreach(cpp_file ${CPP_SOURCE_FILES})
+# ============================================================================
+# Build Unified Simulation (NEW APPROACH - RECOMMENDED)
+# ============================================================================
+message(STATUS "Building unified simulation executable")
+
+add_executable(unified_simulation ${UNIFIED_SIM_SOURCE})
+
+# Set modern C++ features
+target_compile_features(unified_simulation PRIVATE cxx_std_20)
+
+# Link with header libraries
+target_link_libraries(unified_simulation PRIVATE headers)
+
+# Link with CUDA libraries if CUDA source files exist
+if(CUDA_SOURCE_FILES)
+    target_link_libraries(unified_simulation PRIVATE cuda_headers)
+    set_target_properties(unified_simulation PROPERTIES
+        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+    )
+endif()
+
+# Set include directories
+target_include_directories(unified_simulation PRIVATE src run_scripts)
+
+# Apply optimized compiler flags
+target_compile_options(unified_simulation PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPTIMIZATION_FLAGS}>
+    $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
+    $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
+)
+
+# Link-time optimization for Release builds
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_target_properties(unified_simulation PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION TRUE
+    )
+endif()
+
+# Add debug information for profiling
+target_compile_options(unified_simulation PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-g1>
+    $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+)
+
+message(STATUS "Unified simulation will be built (recommended)")
+
+# ============================================================================
+# Build Legacy Individual Executables (OPTIONAL - FOR BACKWARDS COMPATIBILITY)
+# ============================================================================
+if(BUILD_LEGACY_EXECUTABLES)
+    message(STATUS "Building legacy individual executables (BUILD_LEGACY_EXECUTABLES=ON)")
+    
+    foreach(cpp_file ${CPP_SOURCE_FILES})
     # Get the filename without extension
     get_filename_component(exec_name ${cpp_file} NAME_WE)
     
@@ -206,7 +264,17 @@ foreach(cpp_file ${CPP_SOURCE_FILES})
         $<$<COMPILE_LANGUAGE:CXX>:-g1>  # Minimal debug info for profiling
         $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
     )
-endforeach()
+    endforeach()
+    
+    # Create a target to build all legacy executables
+    add_custom_target(all_legacy_executables)
+    foreach(cpp_file ${CPP_SOURCE_FILES})
+        get_filename_component(exec_name ${cpp_file} NAME_WE)
+        add_dependencies(all_legacy_executables ${exec_name})
+    endforeach()
+else()
+    message(STATUS "Skipping legacy executables (use -DBUILD_LEGACY_EXECUTABLES=ON to build them)")
+endif()
 
 # Enable parallel builds
 if(NOT DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
@@ -225,11 +293,14 @@ message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "CUDA Standard: ${CMAKE_CUDA_STANDARD}")
 message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 message(STATUS "Parallel Build Jobs: ${CMAKE_BUILD_PARALLEL_LEVEL}")
+message(STATUS "Build legacy executables: ${BUILD_LEGACY_EXECUTABLES}")
 message(STATUS "Found ${CMAKE_CURRENT_LIST_DIR}")
 message(STATUS "Header files: ${HEADER_FILES}")
 message(STATUS "CUDA source files: ${CUDA_SOURCE_FILES}")
 message(STATUS "CUDA header files: ${CUDA_HEADER_FILES}")
-message(STATUS "C++ source files: ${CPP_SOURCE_FILES}")
+if(BUILD_LEGACY_EXECUTABLES)
+    message(STATUS "Legacy C++ source files: ${CPP_SOURCE_FILES}")
+endif()
 
 # Print dependency status with versions
 if(OpenMP_CXX_FOUND)
@@ -258,12 +329,23 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     message(STATUS "CUDA Optimization Flags: ${CUDA_OPTIMIZATION_FLAGS}")
 endif()
 
-# Create a target to build all executables with optimized parallel build
-add_custom_target(all_executables)
-foreach(cpp_file ${CPP_SOURCE_FILES})
-    get_filename_component(exec_name ${cpp_file} NAME_WE)
-    add_dependencies(all_executables ${exec_name})
-endforeach()
+# Usage instructions
+message(STATUS "")
+message(STATUS "==================== Usage Instructions ====================")
+message(STATUS "Build the unified simulation:")
+message(STATUS "  cd build && cmake .. && make unified_simulation")
+message(STATUS "")
+message(STATUS "Run a simulation:")
+message(STATUS "  mpirun -np 4 ./unified_simulation ../configs/bcao_sa.conf")
+message(STATUS "  ./unified_simulation ../configs/pyrochlore_sa.conf")
+message(STATUS "")
+message(STATUS "Create your own config file based on examples in configs/")
+message(STATUS "See configs/README.md for documentation")
+message(STATUS "")
+if(NOT BUILD_LEGACY_EXECUTABLES)
+    message(STATUS "To build legacy executables: cmake -DBUILD_LEGACY_EXECUTABLES=ON ..")
+endif()
+message(STATUS "===========================================================")
 
 # Add a custom target for ninja builds to show build progress
 if(CMAKE_GENERATOR STREQUAL "Ninja")
