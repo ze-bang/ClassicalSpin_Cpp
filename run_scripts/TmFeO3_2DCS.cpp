@@ -383,146 +383,85 @@ void MD_TmFeO3_2DCS(double Temp_start, double Temp_end, double tau_start, double
     // Bilinear coupling (chii parameter)
     if (chii != 0.0){
         array<array<double,3>,8> chi = {{{0}}};
-        chi[1] = {{0, 0, 5.264*chii}};
-        chi[4] = {{2.3915*chii,2.7866*chii,0}};
-        chi[6] = {{0.9128*chii,-0.4655*chii,0}};
+        // chi[1] = {{0, 0, 5.264*chii}};
+        // chi[4] = {{2.3915*chii,2.7866*chii,0}};
+        // chi[6] = {{0.9128*chii,-0.4655*chii,0}};
+        chi[1] = {{chii, chii, chii}};
+        chi[4] = {{chii, chii, chii}};
+        chi[6] = {{chii, chii, chii}};
 
         array<array<double,3>,8> chi_inv = {{{0}}};
-        chi_inv[1] = {{0, 0, -5.264*chii}};
-        chi_inv[4] = {{-2.3915*chii,-2.7866*chii,0}};
-        chi_inv[6] = {{-0.9128*chii,0.4655*chii,0}};
+        // chi_inv[1] = {{0, 0, -5.264*chii}};
+        // chi_inv[4] = {{-2.3915*chii,-2.7866*chii,0}};
+        // chi_inv[6] = {{-0.9128*chii,0.4655*chii,0}};
+        chi[1] = {{chii, chii, chii}};
+        chi[4] = {{-chii, -chii, -chii}};
+        chi[6] = {{-chii, -chii, -chii}};
 
-        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0,1,0});
-        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0,1,0});
+        // Structure is SU(3) sites then SU(2) sites then unitcell offset        
+        // Fe site 0 - 8 nearest Tm neighbors
+        // Fe position: (0.00000, 0.50000, 0.50000)
+        // Inversion pair 1 (distance: 0.4965):
+        TFO.set_mix_bilinear_interaction(chi, 3, 0, {-1, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 0, {0, 0, 0});
+        // Inversion pair 2 (distance: 0.5449):
+        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 0, {-1, 0, 0});
+        // Inversion pair 3 (distance: 0.5824):
+        TFO.set_mix_bilinear_interaction(chi, 1, 0, {0, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 0, {-1, 0, 0});
+        // Inversion pair 4 (distance: 0.6242):
+        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0, -1, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 0, {-1, 1, 0});
 
-        TFO.set_mix_bilinear_interaction(chi_inv, 1, 2, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 1, 3, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 1, 1, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 1, 0, {1,0,0});
+        // Fe site 1 - 8 nearest Tm neighbors
+        // Fe position: (0.50000, 0.00000, 0.50000)
+        // Inversion pair 1 (distance: 0.4965):
+        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 1, {0, -1, 0});
+        // Inversion pair 2 (distance: 0.5449):
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0, -1, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 1, {0, 0, 0});
+        // Inversion pair 3 (distance: 0.5824):
+        TFO.set_mix_bilinear_interaction(chi, 0, 1, {1, -1, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 1, {-1, 0, 0});
+        // Inversion pair 4 (distance: 0.6242):
+        TFO.set_mix_bilinear_interaction(chi, 1, 1, {0, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 1, {0, -1, 0});
 
-        ///////////////
-        TFO.set_mix_bilinear_interaction(chi, 0, 0, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0,0,1});
-        TFO.set_mix_bilinear_interaction(chi, 0, 1, {0,1,0});
-        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0,1,1});
+        // Fe site 2 - 8 nearest Tm neighbors
+        // Fe position: (0.50000, 0.00000, 0.00000)
+        // Inversion pair 1 (distance: 0.4965):
+        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0, 0, -1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 2, {0, -1, 0});
+        // Inversion pair 2 (distance: 0.5449):
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {0, -1, -1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 2, {0, 0, 0});
+        // Inversion pair 3 (distance: 0.5824):
+        TFO.set_mix_bilinear_interaction(chi, 0, 2, {1, -1, -1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 2, {-1, 0, 0});
+        // Inversion pair 4 (distance: 0.6242):
+        TFO.set_mix_bilinear_interaction(chi, 1, 2, {0, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 2, {0, -1, -1});
 
-        TFO.set_mix_bilinear_interaction(chi_inv, 0, 2, {-1,1,1});
-        TFO.set_mix_bilinear_interaction(chi_inv, 0, 3, {0,1,1});
-        TFO.set_mix_bilinear_interaction(chi_inv, 0, 1, {-1,1,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 0, 0, {0,1,0});
+        // Fe site 3 - 8 nearest Tm neighbors
+        // Fe position: (0.00000, 0.50000, 0.00000)
+        // Inversion pair 1 (distance: 0.4965):
+        TFO.set_mix_bilinear_interaction(chi, 3, 3, {-1, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 0, 3, {0, 0, -1});
+        // Inversion pair 2 (distance: 0.5449):
+        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0, 0, -1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 1, 3, {-1, 0, 0});
+        // Inversion pair 3 (distance: 0.5824):
+        TFO.set_mix_bilinear_interaction(chi, 1, 3, {0, 0, 0});
+        TFO.set_mix_bilinear_interaction(chi_inv, 2, 3, {-1, 0, -1});
+        // Inversion pair 4 (distance: 0.6242):
+        TFO.set_mix_bilinear_interaction(chi, 0, 3, {0, -1, -1});
+        TFO.set_mix_bilinear_interaction(chi_inv, 3, 3, {-1, 1, 0});
 
-        ///////////////
-        TFO.set_mix_bilinear_interaction(chi, 2, 0, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 2, 3, {0,0,1});
-        TFO.set_mix_bilinear_interaction(chi, 2, 1, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 2, 2, {0,0,1});
-
-        TFO.set_mix_bilinear_interaction(chi_inv, 2, 2, {0,1,1});
-        TFO.set_mix_bilinear_interaction(chi_inv, 2, 3, {1,0,1});
-        TFO.set_mix_bilinear_interaction(chi_inv, 2, 1, {0,1,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 2, 0, {1,0,0});
-
-        ///////////////
-        TFO.set_mix_bilinear_interaction(chi, 3, 0, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 3, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 1, {0,0,0});
-        TFO.set_mix_bilinear_interaction(chi, 3, 2, {0,0,0});
-
-        TFO.set_mix_bilinear_interaction(chi_inv, 3, 2, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 3, 3, {1,-1,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 3, 1, {1,0,0});
-        TFO.set_mix_bilinear_interaction(chi_inv, 3, 0, {1,-1,0});
     }
 
-    // Trilinear coupling (xii parameter)
-    if (xii != 0.0){
-        array<array<array<double,3>,3>,8> xi = {{{0}}};
-        xi[0] = {{{xii,0,0},{0,xii,0},{0,0,xii}}};
 
-        ////////// Trilinear coupling/Oxygen pathway
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 1, 2, {0,1,0}, {0,1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 1, 2, 3, {0,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 1, 0, {0,0,0}, {1,0,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 1, 1, 0, {0,1,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 2, 3, {0,1,0}, {1,0,0});
-
-        //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 2, 2, 3, {0,0,1}, {0,0,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {0,0,0}, {0,1,0});
-        TFO.set_mix_trilinear_interaction(xi, 2, 2, 3, {0,1,1}, {0,0,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,0,0}, {0,0,1});
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {1,0,0}, {1,0,1});
-        //////////////////
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {0,1,0});
-        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {0,1,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {-1,1,0}, {-1,1,1});
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,0,0}, {0,0,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {0,1,0});
-        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {0,1,1});
-
-        //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {0,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {0,0,0}, {1,0,0});
-        
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {0,0,0}, {1,-1,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {0,0,0}, {1,-1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {1,0,0}, {1,0,0});
-
-        ///////////// Trilinear Interaction - Nearest neighbours
-
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 1, {1,0,0}, {0,1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,0,1});
-        TFO.set_mix_trilinear_interaction(xi, 2, 3, 2, {1,0,1}, {0,1,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 2, 0, 3, {0,0,0}, {0,0,1});
-        TFO.set_mix_trilinear_interaction(xi, 2, 1, 2, {0,1,0}, {0,1,1});
-
-        //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,0,0}, {-1,1,0});
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 1, {0,1,0}, {-1,1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,0,1}, {-1,1,1});
-        TFO.set_mix_trilinear_interaction(xi, 0, 3, 2, {0,1,1}, {-1,1,1});
-
-        TFO.set_mix_trilinear_interaction(xi, 0, 0, 3, {0,1,0}, {0,1,1});
-        TFO.set_mix_trilinear_interaction(xi, 0, 1, 2, {0,1,0}, {0,1,1});
-
-        //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 3, 2, {0,0,0}, {0,1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 1, {0,0,0}, {0,1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 1, 0, 3, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 1, 2, 1, {0,0,0}, {0,0,0});
-
-        //////////////////
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 0, {1,0,0}, {1,-1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 2, 3, {1,0,0}, {1,-1,0});
-
-        TFO.set_mix_trilinear_interaction(xi, 3, 1, 2, {0,0,0}, {0,0,0});
-        TFO.set_mix_trilinear_interaction(xi, 3, 0, 3, {1,-1,0}, {1,-1,0});
-    }
-    
     cout << "Finished setting up TmFeO3 model." << endl;
     cout << "Starting calculations..." << endl;
 

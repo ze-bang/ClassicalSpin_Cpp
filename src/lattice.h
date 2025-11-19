@@ -20,6 +20,19 @@
 #include <cstdint>
 #include <deque>
 
+// Optional profiling instrumentation (compile with -DENABLE_PROFILING to enable)
+#ifdef ENABLE_PROFILING
+    #define PROFILE_START(name) auto __profile_start_##name = std::chrono::high_resolution_clock::now()
+    #define PROFILE_END(name) do { \
+        auto __profile_end_##name = std::chrono::high_resolution_clock::now(); \
+        auto __profile_duration_##name = std::chrono::duration_cast<std::chrono::microseconds>(__profile_end_##name - __profile_start_##name).count(); \
+        std::cout << "[PROFILE] " << #name << ": " << __profile_duration_##name << " us" << std::endl; \
+    } while(0)
+#else
+    #define PROFILE_START(name)
+    #define PROFILE_END(name)
+#endif
+
 
 // Helper struct to store autocorrelation analysis results
 struct AutocorrelationResult {
@@ -179,7 +192,7 @@ class lattice
         unit_vector = UC.lattice_vectors;
         spin_length = spin_l;
 
-    set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
+        set_pulse({{0}}, 0, {{0}}, 0, 0, 1, 0);
         srand (time(NULL));
         seed_lehman(rand()*2+1);
 
@@ -412,7 +425,8 @@ class lattice
         }
     }
     
-    array<double,N> apply_twist_to_partner_spin(const array<double,N>& partner_spin,
+    // Optimized version with inline hint to reduce call overhead
+    inline array<double,N> apply_twist_to_partner_spin(const array<double,N>& partner_spin,
                                                 const array<int8_t,3>& wrap) const {
         array<double,N> s = partner_spin;
         for (size_t d=0; d<3; ++d){
@@ -426,6 +440,23 @@ class lattice
             }
         }
         return s;
+    }
+    
+    // Alternative version: write result to output parameter to avoid return copy
+    inline void apply_twist_to_partner_spin_inplace(const array<double,N>& partner_spin,
+                                                     const array<int8_t,3>& wrap,
+                                                     array<double,N>& result) const {
+        result = partner_spin;
+        for (size_t d=0; d<3; ++d){
+            int8_t w = wrap[d];
+            if (w == 0) continue;
+            if (w > 0) {
+                result = multiply<N,N>(twist_matrices[d], result);
+            } else {
+                // inverse (transpose) for rotations
+                result = multiply<N,N>(transpose2D<N,N>(twist_matrices[d]), result);
+            }
+        }
     }
     
     void set_pulse(const array<array<double,N>, N_ATOMS> &field_in, double t_B, const array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
@@ -483,12 +514,12 @@ class lattice
         double single_site_energy = 0, double_site_energy = 0, triple_site_energy = 0;
         single_site_energy -= dot(spin_here, field[site_index]);
         single_site_energy += contract(spin_here, onsite_interaction[site_index], spin_here);
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls (apply_twist_to_partner_spin, contract) prevent vectorization
         for (size_t i=0; i< num_bi; ++i) {
             array<double,N> partner_spin_eff = apply_twist_to_partner_spin(spins[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
             double_site_energy += contract(spin_here, bilinear_interaction[site_index][i], partner_spin_eff);
         }
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i < num_tri; ++i){
             // For trilinear, approximate by applying twists from current site to both partners when they wrap.
             size_t p1 = trilinear_partners[site_index][i][0];
@@ -502,7 +533,7 @@ class lattice
 
     array<double, dim1*dim2*dim*N_ATOMS> local_energy_densities(spin_config &curr_spins){
         array<double, dim1*dim2*dim*N_ATOMS> local_energies;
-        #pragma omp simd
+        // Removed #pragma omp simd - site_energy() function call prevents vectorization
         for(size_t i = 0; i < dim1*dim2*dim*N_ATOMS; ++i){
             local_energies[i] = site_energy(curr_spins[i], i);
         }
@@ -513,13 +544,13 @@ class lattice
         double single_site_energy = 0, double_site_energy = 0, triple_site_energy = 0;
         single_site_energy -= dot(new_spins - old_spins, field[site_index]);
         single_site_energy += contract(new_spins, onsite_interaction[site_index], new_spins) - contract(old_spins, onsite_interaction[site_index], old_spins);
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i< num_bi; ++i) {
             array<double,N> partner_spin_eff = apply_twist_to_partner_spin(spins[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
             double_site_energy += contract(new_spins, bilinear_interaction[site_index][i], partner_spin_eff)
                      - contract(old_spins, bilinear_interaction[site_index][i], partner_spin_eff);
         }
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i < num_tri; ++i){
             size_t p1 = trilinear_partners[site_index][i][0];
             size_t p2 = trilinear_partners[site_index][i][1];
@@ -536,20 +567,20 @@ class lattice
         double trilinear_energy = 0.0;
         
         size_t test_site_index = 0; // Define a test site index, e.g., 0
-        #pragma omp simd
+        // Removed #pragma omp simd - nested loops and function calls prevent vectorization
         for(size_t i = 0; i < lattice_size; ++i){
             field_energy -= dot(curr_spins[i], field[i]);
             onsite_energy += contract(curr_spins[i], onsite_interaction[i], curr_spins[i]);
-            #pragma omp simd
+            // Removed nested #pragma omp simd - function calls prevent vectorization
             for (size_t j=0; j< num_bi; ++j) {
-            size_t partner_idx = bilinear_partners[i][j];
-            array<double,N> partner_spin_eff = apply_twist_to_partner_spin(curr_spins[partner_idx], bilinear_wrap_dir[i][j]);
-            bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], partner_spin_eff);
+                size_t partner_idx = bilinear_partners[i][j];
+                array<double,N> partner_spin_eff = apply_twist_to_partner_spin(curr_spins[partner_idx], bilinear_wrap_dir[i][j]);
+                bilinear_energy += contract(curr_spins[i], bilinear_interaction[i][j], partner_spin_eff);
             }
 
-            #pragma omp simd
+            // Removed nested #pragma omp simd - function calls prevent vectorization
             for (size_t j=0; j < num_tri; ++j){
-            trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
+                trilinear_energy += contract_trilinear(trilinear_interaction[i][j], curr_spins[i], curr_spins[trilinear_partners[i][j][0]], curr_spins[trilinear_partners[i][j][1]]);
             }
         }
         return field_energy + onsite_energy + bilinear_energy/2 + trilinear_energy/3;
@@ -562,12 +593,12 @@ class lattice
     array<double, N>  get_local_field(size_t site_index){
         array<double,N> local_field;
         local_field = multiply<N, N>(onsite_interaction[site_index], spins[site_index])*2;
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i< num_bi; ++i) {
             array<double,N> partner_spin_eff = apply_twist_to_partner_spin(spins[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
             local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], partner_spin_eff);
         }
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i < num_tri; ++i){
             array<double, N> current_spin_SU2_partner1 = spins[trilinear_partners[site_index][i][0]];
             array<double, N> current_spin_SU2_partner2 = spins[trilinear_partners[site_index][i][1]];
@@ -579,12 +610,12 @@ class lattice
     array<double, N>  get_local_field_lattice(size_t site_index, const spin_config &current_spin){
         array<double,N> local_field;
         local_field =  multiply<N, N>(onsite_interaction[site_index], spins[site_index]);
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i< num_bi; ++i) {
             array<double,N> partner_spin_eff = apply_twist_to_partner_spin(current_spin[bilinear_partners[site_index][i]], bilinear_wrap_dir[site_index][i]);
             local_field = local_field + multiply<N, N>(bilinear_interaction[site_index][i], partner_spin_eff);
         }
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls prevent vectorization
         for (size_t i=0; i < num_tri; ++i){
             array<double, N> current_spin_SU2_partner1 = spins[trilinear_partners[site_index][i][0]];
             array<double, N> current_spin_SU2_partner2 = spins[trilinear_partners[site_index][i][1]];
@@ -732,20 +763,6 @@ class lattice
         return double(accept)/double(lattice_size);
     }
 
-    // =========================
-    // Cluster Monte Carlo (Wolff & Swendsen–Wang)
-    // =========================
-    // Notes:
-    // - These implementations use an embedded-Ising projection: pick a random unit vector r in R^N,
-    //   define sigma_i = sign(s_i · r). Bonds are activated with probability
-    //       p_ij = 1 - exp(-2 beta K_ij (s_i·r)(s_j·r)) for (s_i·r)(s_j·r) > 0, else 0,
-    //   where K_ij = r^T J_ij r with J_ij the bilinear interaction matrix.
-    // - Only bilinear interactions are used for cluster construction; trilinear, onsite terms,
-    //   and twist matrices are ignored in bond activation and should be disabled for strict detailed balance.
-    // - If twist matrices differ from identity or nonzero fields/onsite/trilinear exist, the methods remain
-    //   usable as heuristic large moves, but strict balance is not guaranteed.
-
-    // Helper: generate a random unit vector in R^N
     array<double,N> random_unit_vector() const {
         array<double,N> v = {};
         // reuse generator that yields on the sphere but scaled by spin_length
@@ -1319,6 +1336,7 @@ class lattice
         vector<double> prelim_energies;
         size_t prelim_samples = 10000;
         size_t prelim_interval = 10;
+        prelim_energies.reserve(prelim_samples / prelim_interval + 1);  // Pre-allocate to avoid reallocations
         
         for (size_t i = 0; i < prelim_samples; ++i) {
             perform_mc_sweeps(1, T_final, gaussian_move, sigma, overrelaxation_rate);
@@ -1344,8 +1362,8 @@ class lattice
         
         vector<double> energies;
         vector<array<double, N>> local_mags;
-        energies.reserve(n_samples);
-        local_mags.reserve(n_samples);
+        energies.reserve(n_samples + 10);  // Pre-allocate with small buffer
+        local_mags.reserve(n_samples + 10);
         
         for (size_t i = 0; i < n_measure; ++i) {
             perform_mc_sweeps(1, T_final, gaussian_move, sigma, overrelaxation_rate);
@@ -1947,6 +1965,10 @@ class lattice
         
         vector<double> energies;
         vector<array<double, N>> magnetizations;
+        // Pre-allocate based on expected samples to avoid reallocations
+        size_t expected_samples = n_measure / probe_rate + 100;  // Add buffer
+        energies.reserve(expected_samples);
+        magnetizations.reserve(expected_samples);
         
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
         
@@ -2018,17 +2040,13 @@ class lattice
             return 0;
         }
         
-        // Exchange energies
+        // Exchange energies using MPI_Sendrecv (more efficient than separate Send/Recv)
         double E = total_energy(spins);
         double E_partner, T_partner = temp[partner_rank];
         
-        if (rank < partner_rank) {
-            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
-            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        } else {
-            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
-        }
+        MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
+                     &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         // Decide acceptance using Metropolis criterion
         bool accept = false;
@@ -2040,16 +2058,12 @@ class lattice
             MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
         
-        // Exchange configurations if accepted
+        // Exchange configurations if accepted using MPI_Sendrecv
         if (accept) {
             spin_config new_spins;
-            if (rank < partner_rank) {
-                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
-                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            } else {
-                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-            }
+            MPI_Sendrecv(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3,
+                         &new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3,
+                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             spins = new_spins;
             return 1;
         }
@@ -2064,6 +2078,7 @@ class lattice
         vector<double> prelim_energies;
         size_t prelim_samples = min(size_t(10000), n_measure / 10);
         size_t prelim_interval = max(size_t(1), size_t(overrelaxation_rate > 0 ? overrelaxation_rate : 1));
+        prelim_energies.reserve(prelim_samples / prelim_interval + 1);  // Pre-allocate
         
         for (size_t i = 0; i < prelim_samples; ++i) {
             perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate);
@@ -2170,6 +2185,10 @@ class lattice
         vector<double> energies;
         vector<array<double, N>> magnetizations;
         vector<double> autocorr;  // Store for later file output
+        // Pre-allocate based on expected samples to avoid reallocations
+        size_t expected_samples = n_measure / probe_rate + 100;  // Add buffer
+        energies.reserve(expected_samples);
+        magnetizations.reserve(expected_samples);
         
         cout << "Initialized Process on rank: " << rank << " with temperature: " << curr_Temp << endl;
         
@@ -2252,17 +2271,13 @@ class lattice
             return 0;
         }
         
-        // Exchange energies
+        // Exchange energies using MPI_Sendrecv (more efficient than separate Send/Recv)
         double E = total_energy(spins);
         double E_partner, T_partner = temp[partner_rank];
         
-        if (rank < partner_rank) {
-            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD);
-            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        } else {
-            MPI_Recv(&E_partner, 1, MPI_DOUBLE, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(&E, 1, MPI_DOUBLE, partner_rank, 1, MPI_COMM_WORLD);
-        }
+        MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
+                     &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         // Decide acceptance using Metropolis criterion
         bool accept = false;
@@ -2274,24 +2289,18 @@ class lattice
             MPI_Recv(&accept, 1, MPI_C_BOOL, partner_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
         
-        // Exchange configurations and twist matrices if accepted
+        // Exchange configurations and twist matrices if accepted using MPI_Sendrecv
         if (accept) {
             spin_config new_spins;
             array<array<double, N*N>, 3> new_twist_matrices;
             
-            if (rank < partner_rank) {
-                // Send spins and twist matrices
-                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD);
-                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Send(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD);
-                MPI_Recv(&new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            } else {
-                // Receive spins and twist matrices
-                MPI_Recv(&new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Send(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3, MPI_COMM_WORLD);
-                MPI_Recv(&new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Send(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5, MPI_COMM_WORLD);
-            }
+            // Exchange spins and twist matrices simultaneously with MPI_Sendrecv
+            MPI_Sendrecv(&spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3,
+                         &new_spins, N * lattice_size, MPI_DOUBLE, partner_rank, 3,
+                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Sendrecv(&twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5,
+                         &new_twist_matrices, 3 * N * N, MPI_DOUBLE, partner_rank, 5,
+                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             
             spins = new_spins;
             twist_matrices = new_twist_matrices;
@@ -2309,6 +2318,7 @@ class lattice
         vector<double> prelim_energies;
         size_t prelim_samples = min(size_t(10000), n_measure / 10);
         size_t prelim_interval = max(size_t(1), size_t(overrelaxation_rate > 0 ? overrelaxation_rate : 1));
+        prelim_energies.reserve(prelim_samples / prelim_interval + 1);  // Pre-allocate
         
         for (size_t i = 0; i < prelim_samples; ++i) {
             perform_mc_sweeps(1, curr_Temp, gaussian_move, sigma, overrelaxation_rate);
@@ -2504,7 +2514,7 @@ class lattice
 
     spin_config landau_lifshitz(const spin_config &current_spin, const double &curr_time, cross_product_method cross_prod){
         spin_config dS;
-        #pragma omp simd
+        // Removed #pragma omp simd - function calls (get_local_field_lattice, cross_prod) prevent vectorization
         for(size_t i = 0; i<lattice_size; ++i){
             dS[i] = cross_prod(get_local_field_lattice(i, current_spin)- drive_field_T(curr_time, i % N_ATOMS), current_spin[i]);
         }
