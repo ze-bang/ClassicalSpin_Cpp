@@ -51,38 +51,43 @@ def magnitude_bi(vector1, vector2):
     return np.linalg.norm(temp1-temp2)
 
 
-P1 = 2*np.pi * np.array([1, 0, 3])
-P2 = 2*np.pi * np.array([3, 0, 3])
-P3 = 2*np.pi * np.array([3, 0, 1])
-P4 = 2*np.pi * np.array([3, 2, 1])
-# P1 = 2*np.pi * np.array([-1, 1, 1])
-# P2 = 2*np.pi * np.array([0, 1, 1])
-# P3 = 2*np.pi * np.array([1, 1, 1])
-# P4 = 2*np.pi * np.array([1, 1, 1])
+def get_reciprocal_lattice_from_unitcell(unitcell_path):
+    """
+    Read unit cell information and compute reciprocal lattice vectors.
+    For TmFeO3, the lattice vectors are orthorhombic: a1=(1,0,0), a2=(0,1,0), a3=(0,0,1)
+    in units of lattice constants.
+    
+    Returns:
+        3x3 array of reciprocal lattice vectors (as rows)
+    """
+    # For orthorhombic lattice with a1=(1,0,0), a2=(0,1,0), a3=(0,0,1)
+    # The reciprocal lattice vectors are simply:
+    # b1 = 2π(1,0,0), b2 = 2π(0,1,0), b3 = 2π(0,0,1)
+    return np.array([
+        [2*np.pi, 0, 0],
+        [0, 2*np.pi, 0],
+        [0, 0, 2*np.pi]
+    ])
 
+# Get reciprocal lattice from unit cell info
+reciprocal_lattice = get_reciprocal_lattice_from_unitcell("unitcell_info.txt")
 
-# P1 = 2*np.pi * np.array([2, 0, 1])
-# P2 = 2*np.pi * np.array([2, 1, 1])
-# P3 = 2*np.pi * np.array([2, 2, 1])
+# Define high symmetry points in reciprocal lattice units (fractional coordinates)
+# For orthorhombic lattice: Gamma=(0,0,0), X=(1,0,0), Y=(0,1,0), Z=(0,0,1), etc.
+P1_frac = np.array([1, 0, 3])
+P2_frac = np.array([3, 0, 3])
+P3_frac = np.array([3, 0, 1])
+P4_frac = np.array([3, 2, 1])
 
-# P1 = 2*np.pi * np.array([2, 1, 0])
-# P2 = 2*np.pi * np.array([2, 1, 1])
-# P3 = 2*np.pi * np.array([2, 1, 2])
-# P4 = 2*np.pi * np.array([2, 1, 2])
+# Convert to Cartesian k-space coordinates using reciprocal lattice
+P1 = contract('i,ij->j', P1_frac, reciprocal_lattice)
+P2 = contract('i,ij->j', P2_frac, reciprocal_lattice)
+P3 = contract('i,ij->j', P3_frac, reciprocal_lattice)
+P4 = contract('i,ij->j', P4_frac, reciprocal_lattice)
 
+graphres = 4
 
-# P1 = 2*np.pi * np.array([0, 1, -1])
-# P2 = 2*np.pi * np.array([0, 1, 0])
-# P3 = 2*np.pi * np.array([0, 1, 1])
-
-# P1 = 2*np.pi * np.array([0, -1, 1])
-# P2 = 2*np.pi * np.array([0, 0, 1])
-# P3 = 2*np.pi * np.array([0, 1, 1])
-
-graphres = 8
-
-
-#Path to 1-10
+#Path through high-symmetry points
 P12 = np.linspace(P1, P2, calcNumSites(P1, P2, graphres))[1:-1]
 P23 = np.linspace(P2, P3, calcNumSites(P2, P3, graphres))[1:-1]
 P34 = np.linspace(P3, P4, calcNumSites(P3, P4, graphres))[1:-1]
@@ -91,10 +96,7 @@ g2 = g1 + len(P12)
 g3 = g2 + len(P23)
 g4 = g3 + len(P34)
 
-# DSSF_K = np.concatenate((GammaX, XW, WK, KGamma, GammaL, LU, UW1, W1X1, X1Gamma))
-
 DSSF_K = np.concatenate((P12, P23, P34))
-# DSSF_K = np.concatenate((P12, P23))
 
 x = np.array([[1, 0, 0], [1, 0, 0], [-1, 0, 0], [-1, 0, 0]])
 y = np.array([[0, 1, 0], [0, -1, 0], [0, 1, 0], [0, -1, 0]])
@@ -158,6 +160,9 @@ def DSSF(w, k, S, P, T, gb=False):
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
         # A shape: (len(S), 4, len(k), 3)
+        # Subtract mean configuration before FFT
+        A_mean = np.mean(A, axis=0, keepdims=True)
+        A = A - A_mean
         # FFT over time dimension
         dt = T[1] - T[0] if len(T) > 1 else 1.0
         A_fft = np.fft.fft(A, axis=0)
@@ -168,11 +173,14 @@ def DSSF(w, k, S, P, T, gb=False):
         indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
         Somega = A_fft[indices] / np.sqrt(len(T))
         
-        read = np.real(contract('wnia, wnib->wniab', Somega, np.conj(Somega)))
+        read = np.real(contract('wnia, wnib->wiab', Somega, np.conj(Somega)))
         return read
     else:
         A = Spin_t(k, S, P)
         # A shape: (len(S), len(k), S.shape[2])
+        # Subtract mean configuration before FFT
+        A_mean = np.mean(A, axis=0, keepdims=True)
+        A = A - A_mean
         # FFT over time dimension
         dt = T[1] - T[0] if len(T) > 1 else 1.0
         A_fft = np.fft.fft(A, axis=0)
@@ -284,32 +292,99 @@ def SSSFHK0(S, P, nK, filename, gb=False):
     np.savetxt(f4 + '.txt', S[:,:,0,1])
     np.savetxt(f5 + '.txt', S[:,:,0,2])
     np.savetxt(f6 + '.txt', S[:,:,1,2])
-    # SSSFGraphHK0(A, B, S[:,:,0,0], f1)
-    # SSSFGraphHK0(A, B, S[:,:,1,1], f2)
-    # SSSFGraphHK0(A, B, S[:,:,2,2], f3)
-    # SSSFGraphHK0(A, B, S[:, :, 0, 1], f4)
-    # SSSFGraphHK0(A, B, S[:, :, 0, 2], f5)
-    # SSSFGraphHK0(A, B, S[:, :, 1, 2], f6)
+
+
+def compute_reciprocal_lattice(positions):
+    """
+    Compute reciprocal lattice vectors from real-space positions.
+    
+    Args:
+        positions: Nx3 array of atomic positions
+        
+    Returns:
+        3x3 array of reciprocal lattice vectors (as rows)
+    """
+    # Find the lattice vectors by analyzing the positions
+    # Assume positions are in units where lattice constants are embedded
+    pos = positions.copy()
+    
+    # Find unique position components to infer lattice constants
+    unique_x = np.unique(pos[:, 0])
+    unique_y = np.unique(pos[:, 1])
+    unique_z = np.unique(pos[:, 2])
+    
+    # Get lattice constants from spacing
+    if len(unique_x) > 1:
+        dx = np.min(np.diff(np.sort(unique_x))[np.diff(np.sort(unique_x)) > 1e-10])
+        Lx = np.max(unique_x) + dx
+    else:
+        Lx = 1.0
+        
+    if len(unique_y) > 1:
+        dy = np.min(np.diff(np.sort(unique_y))[np.diff(np.sort(unique_y)) > 1e-10])
+        Ly = np.max(unique_y) + dy
+    else:
+        Ly = 1.0
+        
+    if len(unique_z) > 1:
+        dz = np.min(np.diff(np.sort(unique_z))[np.diff(np.sort(unique_z)) > 1e-10])
+        Lz = np.max(unique_z) + dz
+    else:
+        Lz = 1.0
+    
+    # Real space lattice vectors
+    a1 = np.array([Lx, 0, 0])
+    a2 = np.array([0, Ly, 0])
+    a3 = np.array([0, 0, Lz])
+    
+    # Compute reciprocal lattice vectors
+    volume = np.dot(a1, np.cross(a2, a3))
+    b1 = 2 * np.pi * np.cross(a2, a3) / volume
+    b2 = 2 * np.pi * np.cross(a3, a1) / volume
+    b3 = 2 * np.pi * np.cross(a1, a2) / volume
+    
+    return np.array([b1, b2, b3])
 
 def genALLSymPointsBare():
     d = 9 * 1j
     b = np.mgrid[0:1:d, 0:1:d, 0:1:d].reshape(3, -1).T
     return b
+
+# Legacy BasisBZA definitions (kept for backward compatibility, but prefer using reciprocal_lattice)
 BasisBZA = np.array([2*np.pi*np.array([-1,1,1]),2*np.pi*np.array([1,-1,1]),2*np.pi*np.array([1,1,-1])])
 BasisBZA_reverse = np.array([np.array([0,1,1]),np.array([1,0,1]),np.array([1,1,0])])/2
 
 BasisBZA_reverse_honeycomb = np.array([[1,1/2],[0, np.sqrt(3)/2]])
 
-def genBZ(d, m=1):
+def genBZ(d, m=1, reciprocal_lattice_arg=None):
+    """
+    Generate Brillouin zone k-points.
+    
+    Args:
+        d: Number of divisions along each direction
+        m: Multiplier for the range
+        reciprocal_lattice_arg: 3x3 array of reciprocal lattice vectors (optional)
+                          If None, uses reciprocal_lattice from unit cell or BasisBZA
+    
+    Returns:
+        Array of k-points
+    """
     dj = d*1j
     b = np.mgrid[0:m:dj, 0:m:dj, 0:m:dj].reshape(3,-1).T
     b = np.concatenate((b,genALLSymPointsBare()))
-    b = contract('ij, jk->ik', b, BasisBZA)
+    
+    if reciprocal_lattice_arg is not None:
+        b = contract('ij, jk->ik', b, reciprocal_lattice_arg)
+    elif 'reciprocal_lattice' in globals():
+        b = contract('ij, jk->ik', b, reciprocal_lattice)
+    else:
+        b = contract('ij, jk->ik', b, BasisBZA)
     return b
 
 
 def ordering_q_slice(S, P, ind):
-    K = genBZ(101)
+    reciprocal_lattice_local = compute_reciprocal_lattice(P)
+    K = genBZ(101, reciprocal_lattice_arg=reciprocal_lattice_local)
     S = np.abs(SSSF_q(K, S, P))
     Szz = S[:,ind,ind]
     max = np.max(Szz)
@@ -379,7 +454,7 @@ def read_MD(dir,isglobal=False):
     wmax = 15
     t_evolved = 100
     SU2 = read_MD_SU2(dir, w0, wmax, t_evolved, isglobal)
-    SU3 = read_MD_SU3(dir, w0, wmax, t_evolved, isglobal)
+    SU3 = read_MD_SU3(dir, w0, wmax, t_evolved, False)
     A = contract('wiab->wi',SU2) + contract('wiab->wi',SU3)
     np.savetxt(dir + "/DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
@@ -407,7 +482,7 @@ def read_MD_tot(dir, isglobal=False):
 
 def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     directory = os.fsencode(dir)
-    P = np.loadtxt(dir + "/pos_SU2.txt")
+    P = np.loadtxt(os.path.join(os.path.dirname(dir), "pos_SU2.txt"))
     T = np.loadtxt(dir + "/Time_steps.txt")
     S = np.loadtxt(dir + "/spin_t_SU2.txt")
     Slength = int(len(S)/len(P))
@@ -422,6 +497,12 @@ def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     w = fft_freqs[w_mask]
     
     A = DSSF(w, DSSF_K, S, P, T, isglobal)
+    
+    # Compute DSSF at Gamma point (0,0,0) for gap analysis
+    Gamma_point = np.array([[0, 0, 0]])
+    A_Gamma = DSSF(w, Gamma_point, S, P, T, isglobal)
+    DSSF_sum_Gamma = contract('wiab->wi', A_Gamma)
+    
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
         C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
@@ -446,7 +527,7 @@ def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     DSSF_graph(DSSF_sum, 'sum', '')
 
     fig, ax = plt.subplots(figsize=(10,4))
-    ax.plot(w, np.log(DSSF_sum[:,0]))
+    ax.plot(w, np.log(DSSF_sum_Gamma[:,0]))
     ax.set_xlim([0, 3])
     plt.savefig(dir+"DSSF_SU2_gap_Gamma.pdf")
     plt.clf()
@@ -455,7 +536,7 @@ def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
 
 def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     directory = os.fsencode(dir)
-    P = np.loadtxt(dir + "/pos_SU3.txt")
+    P = np.loadtxt(os.path.join(os.path.dirname(dir), "pos_SU3.txt"))    
     T = np.loadtxt(dir + "/Time_steps.txt")
     S = np.loadtxt(dir + "/spin_t_SU3.txt")
     Slength = int(len(S)/len(P))
@@ -470,6 +551,12 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     w = fft_freqs[w_mask]
     
     A = DSSF(w, DSSF_K, S, P, T, isglobal)
+    
+    # Compute DSSF at Gamma point (0,0,0) for gap analysis
+    Gamma_point = np.array([[0, 0, 0]])
+    A_Gamma = DSSF(w, Gamma_point, S, P, T, isglobal)
+    DSSF_sum_Gamma = contract('wiab->wi', A_Gamma)
+    
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
         C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
@@ -482,7 +569,7 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
 
         ax.set_xticks(xlabpos, labels)
         ax.set_xlim([0, g4])
-        ax.set_ylim([0, 3])
+        ax.set_ylim([-3, 3])
         fig.colorbar(C)
         plt.savefig(dir+"DSSF_SU3_{}_{}.pdf".format(i, j))
         plt.clf()
@@ -495,7 +582,7 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     DSSF_graph(DSSF_sum, 'sum', '')
 
     fig, ax = plt.subplots(figsize=(10,4))
-    ax.plot(w, np.log(DSSF_sum[:,0]))
+    ax.plot(w, np.log(DSSF_sum_Gamma[:,0]))
     ax.set_xlim([0, 3])
     plt.savefig(dir+"DSSF_SU3_gap_Gamma.pdf")
     plt.clf()
@@ -861,6 +948,10 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
                 M0[:bg_length] -= background_data[group][-bg_length:]
                 print(f"Background subtracted for {group} M0 data")
             
+            # Subtract mean configuration before FFT
+            M0_mean = np.mean(M0, axis=0, keepdims=True)
+            M0 = M0 - M0_mean
+            
             # Use FFT with natural grid
             dt = M0_T[1] - M0_T[0] if len(M0_T) > 1 else 1.0
             M0_fft = np.fft.fft(M0, axis=0)
@@ -912,6 +1003,12 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
                         M1[:bg_length] -= background_data[group][-bg_length:]
                         M01[:bg_length] -= background_data[group][-bg_length:]
                     
+                    # Subtract mean configuration before FFT
+                    M1_mean = np.mean(M1, axis=0, keepdims=True)
+                    M1 = M1 - M1_mean
+                    M01_mean = np.mean(M01, axis=0, keepdims=True)
+                    M01 = M01 - M01_mean
+                    
                     # Use FFT for time dimension
                     M1_fft = np.fft.fft(M1, axis=0)
                     M01_fft = np.fft.fft(M01, axis=0)
@@ -938,6 +1035,10 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
             
         # Stack all tau data
         M_NL_tau_stack = np.stack([results[group]['M_NL_FF_tau'][t] for t in tau_sorted], axis=0)
+        
+        # Subtract mean configuration before FFT over tau
+        M_NL_tau_mean = np.mean(M_NL_tau_stack, axis=0, keepdims=True)
+        M_NL_tau_stack = M_NL_tau_stack - M_NL_tau_mean
         
         # Get tau spacing
         d_tau = tau_sorted[1] - tau_sorted[0] if len(tau_sorted) > 1 else 1.0
@@ -1143,7 +1244,7 @@ if __name__ == "__main__":
     MD_read = argv[2] if len(argv) > 2 else "False"
     MD_read = MD_read.lower() == "true"
     if MD_read:
-        read_MD_tot(directory)
+        read_MD_tot(directory, True)
     else:
         full_read_2DCS_TFO(directory)
     # read_MD(directory + "spin_t.txt")

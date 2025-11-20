@@ -401,16 +401,147 @@ mixed_UnitCell<3, 4, 8, 4> setup_lattice(double Jai, double Jbi, double Jci, dou
     }
     param_log.close();
 
+    // ========================================================================
+    // OUTPUT UNIT CELL INFORMATION
+    // ========================================================================
+    ofstream unitcell_info(dir + "/unitcell_info.txt");
+    unitcell_info << "========================================" << endl;
+    unitcell_info << "UNIT CELL INFORMATION - TmFeO3" << endl;
+    unitcell_info << "========================================\n" << endl;
+    
+    // Lattice vectors (same for both Fe and Tm sublattices)
+    unitcell_info << "Lattice Vectors (in units of lattice constant):" << endl;
+    unitcell_info << "  a1 = (" << TFO.SU2.lattice_vectors[0][0] << ", " 
+                  << TFO.SU2.lattice_vectors[0][1] << ", " 
+                  << TFO.SU2.lattice_vectors[0][2] << ")" << endl;
+    unitcell_info << "  a2 = (" << TFO.SU2.lattice_vectors[1][0] << ", " 
+                  << TFO.SU2.lattice_vectors[1][1] << ", " 
+                  << TFO.SU2.lattice_vectors[1][2] << ")" << endl;
+    unitcell_info << "  a3 = (" << TFO.SU2.lattice_vectors[2][0] << ", " 
+                  << TFO.SU2.lattice_vectors[2][1] << ", " 
+                  << TFO.SU2.lattice_vectors[2][2] << ")" << endl;
+    
+    // Fe sublattice information
+    unitcell_info << "\n----------------------------------------" << endl;
+    unitcell_info << "Fe Sublattice (SU(2) spins, S=5/2)" << endl;
+    unitcell_info << "----------------------------------------" << endl;
+    unitcell_info << "Number of Fe sites per unit cell: 4" << endl;
+    unitcell_info << "Spin dimension: 3" << endl;
+    unitcell_info << "\nFe site positions (fractional coordinates):" << endl;
+    for (int i = 0; i < 4; i++) {
+        unitcell_info << "  Fe[" << i << "] = (" 
+                      << fixed << setprecision(5) << TFO.SU2.lattice_pos[i][0] << ", " 
+                      << TFO.SU2.lattice_pos[i][1] << ", " 
+                      << TFO.SU2.lattice_pos[i][2] << ")" << endl;
+    }
+    
+    unitcell_info << "\nFe local sublattice frames:" << endl;
+    unitcell_info << "  (transformation from global to local coordinates)" << endl;
+    for (int i = 0; i < 4; i++) {
+        unitcell_info << "  Fe[" << i << "] frame:" << endl;
+        unitcell_info << "    x_local = (" << TFO.SU2.sublattice_frames[i][0][0] << ", "
+                      << TFO.SU2.sublattice_frames[i][0][1] << ", "
+                      << TFO.SU2.sublattice_frames[i][0][2] << ")" << endl;
+        unitcell_info << "    y_local = (" << TFO.SU2.sublattice_frames[i][1][0] << ", "
+                      << TFO.SU2.sublattice_frames[i][1][1] << ", "
+                      << TFO.SU2.sublattice_frames[i][1][2] << ")" << endl;
+        unitcell_info << "    z_local = (" << TFO.SU2.sublattice_frames[i][2][0] << ", "
+                      << TFO.SU2.sublattice_frames[i][2][1] << ", "
+                      << TFO.SU2.sublattice_frames[i][2][2] << ")" << endl;
+    }
+    
+    // Tm sublattice information
+    unitcell_info << "\n----------------------------------------" << endl;
+    unitcell_info << "Tm Sublattice (SU(3) pseudospins, J=1)" << endl;
+    unitcell_info << "----------------------------------------" << endl;
+    unitcell_info << "Number of Tm sites per unit cell: 4" << endl;
+    unitcell_info << "Spin dimension: 8 (Gell-Mann matrices)" << endl;
+    unitcell_info << "\nTm site positions (fractional coordinates):" << endl;
+    for (int i = 0; i < 4; i++) {
+        unitcell_info << "  Tm[" << i << "] = (" 
+                      << fixed << setprecision(5) << TFO.SU3.lattice_pos[i][0] << ", " 
+                      << TFO.SU3.lattice_pos[i][1] << ", " 
+                      << TFO.SU3.lattice_pos[i][2] << ")" << endl;
+    }
+    
+    // Total unit cell summary
+    unitcell_info << "\n========================================" << endl;
+    unitcell_info << "UNIT CELL SUMMARY" << endl;
+    unitcell_info << "========================================" << endl;
+    unitcell_info << "Total sites per unit cell: 8 (4 Fe + 4 Tm)" << endl;
+    unitcell_info << "Crystal structure: Orthorhombic (Pbnm space group)" << endl;
+    unitcell_info << "Lattice type: Simple orthorhombic with basis" << endl;
+    unitcell_info << "\nNotes:" << endl;
+    unitcell_info << "  - Fe sites form a distorted perovskite B-site sublattice" << endl;
+    unitcell_info << "  - Tm sites occupy the perovskite A-site sublattice" << endl;
+    unitcell_info << "  - Local frames for Fe sites account for crystallographic" << endl;
+    unitcell_info << "    symmetry operations of the Pbnm space group" << endl;
+    unitcell_info << "  - All coordinates given in fractional (reduced) units" << endl;
+    unitcell_info << "========================================" << endl;
+    
+    unitcell_info.close();
+    
+    cout << "Unit cell information written to " << dir << "/unitcell_info.txt" << endl;
+
     return TFO;
 }
 
 void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir){
     mixed_UnitCell<3, 4, 8, 4> TFO = setup_lattice(Jai, Jbi, Jci, J2ai, J2bi, J2ci, Ka, Kc, D1, D2, e1, e2, chii, xii, h, fielddir, dir);
+    
+    // Write all parameters to params.txt
+    ofstream params_file(dir + "/params.txt");
+    params_file << "# TmFeO3 Simulated Annealing Parameters" << endl;
+    params_file << "# All parameters normalized to J1ab = 1" << endl;
+    params_file << "# ========================================" << endl;
+    params_file << endl;
+    params_file << "# Temperature range" << endl;
+    params_file << "T_start = " << T_start << endl;
+    params_file << "T_end = " << T_end << endl;
+    params_file << endl;
+    params_file << "# Exchange interactions (J1 nearest neighbor)" << endl;
+    params_file << "J1ab = " << Jai << "  # In-plane (a,b directions)" << endl;
+    params_file << "J1c = " << Jci << "   # Out-of-plane (c direction)" << endl;
+    params_file << endl;
+    params_file << "# Next-nearest neighbor exchange (J2)" << endl;
+    params_file << "J2ab = " << J2ai << endl;
+    params_file << "J2c = " << J2ci << endl;
+    params_file << endl;
+    params_file << "# Single-ion anisotropy" << endl;
+    params_file << "Ka = " << Ka << "  # In-plane anisotropy" << endl;
+    params_file << "Kc = " << Kc << "  # Out-of-plane anisotropy" << endl;
+    params_file << endl;
+    params_file << "# Dzyaloshinskii-Moriya interactions" << endl;
+    params_file << "D1 = " << D1 << "  # DM along y-axis" << endl;
+    params_file << "D2 = " << D2 << "  # DM along z-axis" << endl;
+    params_file << endl;
+    params_file << "# Tm crystal field splitting" << endl;
+    params_file << "e1 = " << e1 << endl;
+    params_file << "e2 = " << e2 << endl;
+    params_file << endl;
+    params_file << "# Fe-Tm coupling" << endl;
+    params_file << "chii = " << chii << "  # Bilinear coupling" << endl;
+    params_file << "xii = " << xii << "   # (Additional coupling parameter)" << endl;
+    params_file << endl;
+    params_file << "# External magnetic field" << endl;
+    params_file << "h = " << h << "  # Field magnitude" << endl;
+    params_file << "fielddir = (" << fielddir[0] << ", " << fielddir[1] << ", " << fielddir[2] << ")  # Field direction" << endl;
+    params_file << endl;
+    params_file << "# Output directory" << endl;
+    params_file << "dir_name = " << dir << endl;
+    params_file.close();
+    cout << "Parameters written to " << dir << "/params.txt" << endl;
+    
     mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
     cout << "Starting simulated annealing from T=" << T_start << " to T=" << T_end << endl;
     MC.simulated_annealing(T_start, T_end, 10000, 0, 10, false);
 
     MC.write_to_file_spin(dir + "/spin");
+    
+    // Write atom positions
+    cout << "Writing atom positions to " << dir + "/pos_SU2.txt and " << dir + "/pos_SU3.txt" << endl;
+    MC.write_to_file_pos(dir + "/pos");
+    
     cout << "Running zero temperature relaxation sweeps..." << endl;
     for (size_t i = 0; i < 100000; ++i) {
         MC.deterministic_sweep();
@@ -475,18 +606,19 @@ int main(int argc, char** argv) {
     }
 
     // Normalize to J1ab
-    J1c /= J1ab;
-    J2ab /= J1ab;
-    J2c /= J1ab;
-    Ka /= J1ab;
-    Kc /= J1ab;
-    D1 /= J1ab;
-    D2 /= J1ab;
-    e1 /= J1ab;
-    e2 /= J1ab;
-    h /= J1ab;
-    J1ab = 1;
-
+    if (J1ab != 0){
+        J1c /= J1ab;
+        J2ab /= J1ab;
+        J2c /= J1ab;
+        Ka /= J1ab;
+        Kc /= J1ab;
+        D1 /= J1ab;
+        D2 /= J1ab;
+        e1 /= J1ab;
+        e2 /= J1ab;
+        h /= J1ab;
+        J1ab = 1;
+    }
     filesystem::create_directories(dir_name);
 
     cout << "Begin simulated annealing on TmFeO3 with parameters:" << endl;
