@@ -4,6 +4,7 @@
 #define _USE_MATH_DEFINES
 #include "unitcell.h"
 #include "simple_linear_alg.h"
+#include "file_io.h"
 #include <cmath>
 #include <numbers>
 #include <iostream>
@@ -83,6 +84,7 @@ class lattice
     spin_config field;
     array<array<double, N>, N_ATOMS> field_drive_1;
     array<array<double, N>, N_ATOMS> field_drive_2;
+    array<array<array<double, N>, N>, N_ATOMS> sublattice_frames;
     double field_drive_freq;
     double field_drive_amp;
     double field_drive_width;
@@ -206,6 +208,9 @@ class lattice
         
         // Precompute maximum neighbor offset to determine boundary thickness in each dimension
         boundary_thickness = {0,0,0};
+        sublattice_frames = UC.sublattice_frames;
+
+
         for (size_t l=0; l<N_ATOMS; ++l){
             auto bilinear_matched_pre = UC.bilinear_interaction.equal_range(l);
             for (auto m = bilinear_matched_pre.first; m != bilinear_matched_pre.second; ++m){
@@ -971,89 +976,47 @@ class lattice
 
 
     void write_to_file_spin(string filename, spin_config towrite){
-        ofstream myfile;
-        myfile.open(filename);
-        for(size_t i = 0; i<lattice_size; ++i){
-            for(size_t j = 0; j<N; ++j){
-                myfile << towrite[i][j] << " ";
-            }
-            myfile << endl;
-        }
-        myfile.close();
+        write_spin_config_to_file<N>(filename, towrite, lattice_size, /*append=*/false);
     }
 
     void write_to_file(string filename, spin_config towrite){
-        ofstream myfile;
-        myfile.open(filename, ios::app);
-        for(size_t i = 0; i<lattice_size; ++i){
-            for(size_t j = 0; j<N; ++j){
-                myfile << towrite[i][j] << " ";
-            }
-            myfile << endl;
-        }
-        myfile.close();
+        write_spin_config_to_file<N>(filename, towrite, lattice_size, /*append=*/true);
     }
     void write_to_file_magnetization_init(string filename, double towrite){
-        ofstream myfile;
-        myfile.open(filename);
-        myfile << towrite << " ";
-        myfile << endl;
-        myfile.close();
+        write_single_value_to_file(filename, towrite, /*append=*/false);
     }
     void write_to_file_magnetization(string filename, double towrite){
-        ofstream myfile;
-        myfile.open(filename, ios::app);
-        myfile << towrite << " ";
-        myfile << endl;
-        myfile.close();
+        write_single_value_to_file(filename, towrite, /*append=*/true);
     }
 
     void write_to_file_magnetization_local(string filename, array<double, N> towrite){
-        ofstream myfile;
-        myfile.open(filename, ios::app);
-        for(size_t j = 0; j<N; ++j){
-            myfile << towrite[j] << " ";
-        }
-        myfile << endl;
-        myfile.close();
+        write_arrayN_to_file<N>(filename, towrite, /*append=*/true);
     }
 
     void write_to_file_2d_vector_array(string filename, vector<array<double, N>> towrite){
-        ofstream myfile;
-        myfile.open(filename, ios::app);
-        for(size_t i = 0; i<towrite.size(); ++i){
-            for(size_t j = 0; j<N; ++j){
-                myfile << towrite[i][j] << " ";
-            }
-            myfile << endl;
-        }
-        myfile.close();
+        write_2d_vector_array_to_file<N>(filename, towrite, /*append=*/true);
     }
 
     void write_column_vector(string filename, vector<double> towrite){
-        ofstream myfile;
-        myfile.open(filename);
-        for(size_t j = 0; j<towrite.size(); ++j){
-            myfile << towrite[j] << endl;
-        }
-        myfile.close();
+        write_column_vector_to_file(filename, towrite, /*append=*/false);
     }
 
     void write_to_file_pos(string filename){
-        ofstream myfile;
-        myfile.open(filename);
+        // Overwrite file with site positions
+        ofstream myfile(filename);
+        if (!myfile) return;
         for(size_t i = 0; i<lattice_size; ++i){
             for(size_t j = 0; j<3; ++j){
-                myfile << site_pos[i][j] << " ";
+                myfile << site_pos[i][j] << (j+1==3?"":" ");
             }
-            myfile << endl;
+            myfile << '\n';
         }
         myfile.close();
     }
 
     void write_T_param(double T_end, size_t num_steps, string dir_name){
-        ofstream myfile;
-        myfile.open(dir_name);
+        ofstream myfile(dir_name);
+        if (!myfile) return;
         myfile << T_end << " " << num_steps << " " << lattice_size << endl;
         myfile.close();
     }
@@ -2644,7 +2607,7 @@ class lattice
 
 
 
-    array<double,N>  magnetization(const spin_config &current_spins, array<array<double, N>, N_ATOMS>  x, array<array<double, N>, N_ATOMS>  y, array<array<double, N>, N_ATOMS>  z){
+    array<double,N>  magnetization_global(const spin_config &current_spins){
         array<double,N> mag = {{0}};
         for (size_t i=0; i< dim1; ++i){
             for (size_t j=0; j< dim2; ++j){
@@ -2652,10 +2615,14 @@ class lattice
                     for (size_t l=0; l< N_ATOMS;++l){
                         size_t current_site_index = flatten_index(i,j,k,l);
                         
-                        mag = x[l] * current_spins[current_site_index][0] 
-                            + y[l] * current_spins[current_site_index][1]
-                            + z[l] * current_spins[current_site_index][2];
-
+                        // Transform spin to global frame using sublattice frame
+                        array<double,N> spin_global = {{0}};
+                        for (size_t mu = 0; mu < N; ++mu) {
+                            for (size_t nu = 0; nu < N; ++nu) {
+                                spin_global[mu] += sublattice_frames[l][nu][mu] * current_spins[current_site_index][nu];
+                            }
+                        }
+                        mag = mag + spin_global;
                     }
                 }
             }
@@ -2692,9 +2659,6 @@ class lattice
         vector<double> time;
         time.push_back(currT);
         write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local(spin_t));
-        // write_to_file_spin(dir_name + "/spin_t.txt", spin_t);
-        // ofstream pulse_info;
-        // pulse_info.open(dir_name + "/pulse_t.txt");
         cross_product_method cross_prod;
         if constexpr(N==3){
             cross_prod = cross_prod_SU2;
@@ -2704,8 +2668,6 @@ class lattice
 
         set_pulse(field_in, t_B, {{0}}, 0, pulse_amp, pulse_width, pulse_freq);
         while(currT < T_end){
-            // double factor = double(pulse_amp*exp(-pow((currT+t_B)/(2*pulse_width),2))*cos(2*M_PI*pulse_freq*(currT+t_B)));
-            // pulse_info << "Current Time: " << currT << " Pulse Time: " << t_B << " Factor: " << factor << " Field: " endl;
             spin_t = RK45_step_fixed(step_size, spin_t, currT, tol, cross_prod);
             write_to_file_magnetization_local(dir_name + "/M_t.txt", magnetization_local_antiferro(spin_t));
             write_to_file_magnetization_local(dir_name + "/M_t_f.txt", magnetization_local(spin_t));
@@ -2726,9 +2688,6 @@ class lattice
     };
 
     void M_BA_BB_t(array<array<double,N>, N_ATOMS> &field_in_1, double t_B_1, array<array<double,N>, N_ATOMS> &field_in_2, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq, double T_start, double T_end, double step_size, string dir_name){
-        // simulated_annealing(Temp_start, Temp_end, n_anneal, overrelaxation_rate);
-        // write_to_file_pos(dir_name + "/pos.txt");
-        // write_to_file_spin(dir_name + "/spin_t.txt", spins);
         cross_product_method cross_prod;
         if constexpr(N==3){
             cross_prod = cross_prod_SU2;

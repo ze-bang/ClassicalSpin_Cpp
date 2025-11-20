@@ -208,7 +208,7 @@ void cross_product_SU2_device(double* result, const double* a, const double* b) 
 
 __device__
 void cross_product_SU3_device(double* result, const double* a, const double* b) {
-    const double sqrt3_2 = 0.86602540378; // sqrt(3)/2
+    constexpr double sqrt3_2 = 0.86602540378443864676372317075294; // sqrt(3)/2 - more precision
     
     // Component 0 (λ_1): receives contributions from f_{123}, f_{147}, f_{156}
     result[0] = a[1]*b[2] - a[2]*b[1] + 0.5*(a[3]*b[6] - a[6]*b[3]) - 0.5*(a[4]*b[5] - a[5]*b[4]);
@@ -720,9 +720,10 @@ void SSPRK53_step_kernel(
     double* tmp_SU3 = work_SU3_2;
     double* u_SU3 = work_SU3_3;
 
-    // Optimize grid configuration - compute once
-    constexpr dim3 block_size(256);
-    constexpr dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + 255) / 256);
+    // Optimize grid configuration - compute once with better occupancy
+    constexpr int BLOCK_SIZE = 256;
+    constexpr dim3 block_size(BLOCK_SIZE);
+    const dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
 
     
@@ -1000,27 +1001,13 @@ void euler_step_kernel(
         curr_time, dt);
 
     
-    // Synchronize before updating arrays
-    //cudaDeviceSynchronize();
-    
-    double *temp2_SU2, *temp2_SU3;
-    cudaMalloc(&temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double));
-    cudaMalloc(&temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double));
-    
     // Update spins using Euler step: S(t+dt) = S(t) + dt * (dS/dt)
+    // Directly update d_spins arrays without intermediate allocation
     update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
-    (temp2_SU2, d_spins_SU2, 1.0, k_SU2, dt, 
-     temp2_SU3, d_spins_SU3, 1.0, k_SU3, dt);
+    (d_spins_SU2, d_spins_SU2, 1.0, k_SU2, dt, 
+     d_spins_SU3, d_spins_SU3, 1.0, k_SU3, dt);
 
-    cudaMemcpy(d_spins_SU2, temp2_SU2, lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_spins_SU3, temp2_SU3, lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyDeviceToDevice);
-
-    // Final synchronization
-    //cudaDeviceSynchronize();
-    
     // Free temporary arrays
-    cudaFree(temp2_SU2);
-    cudaFree(temp2_SU3);
     cudaFree(k_SU2);
     cudaFree(k_SU3);
 }

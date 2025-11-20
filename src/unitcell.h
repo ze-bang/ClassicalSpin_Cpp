@@ -211,6 +211,7 @@ struct UnitCell{
 
     array<array<double,3>, N_ATOMS> lattice_pos;
     array<array<double,3>, 3> lattice_vectors;
+    array<array<array<double, N>, N>, N_ATOMS> sublattice_frames;
 
     array<array<double, N>, N_ATOMS> field;
     array<array<double, N * N>, N_ATOMS> onsite_interaction;
@@ -220,6 +221,14 @@ struct UnitCell{
     UnitCell(const array<array<double,3>, N_ATOMS> &spos,const array<array<double,3>, 3> &svec) : lattice_pos(spos), lattice_vectors(svec) {
         field = {{{0}}};
         onsite_interaction = {{{0}}};
+        // Initialize sublattice_frames with identity matrices
+        for (size_t atom = 0; atom < N_ATOMS; ++atom) {
+            for (size_t i = 0; i < N; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    sublattice_frames[atom][i][j] = (i == j) ? 1.0 : 0.0;
+                }
+            }
+        }
     };
 
     UnitCell(){
@@ -227,6 +236,14 @@ struct UnitCell{
         lattice_pos = {{{0}}};
         lattice_vectors = {{{0}}};
         onsite_interaction = {{{0}}};
+        // Initialize sublattice_frames with identity matrices
+        for (size_t atom = 0; atom < N_ATOMS; ++atom) {
+            for (size_t i = 0; i < N; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    sublattice_frames[atom][i][j] = (i == j) ? 1.0 : 0.0;
+                }
+            }
+        }
     };  
 
     void set_UnitCell(const UnitCell<N, N_ATOMS> *atoms){
@@ -262,6 +279,10 @@ struct UnitCell{
     void set_onsite_interaction(const array<double,N * N> &oin, size_t index){
         onsite_interaction[index] = oin;
     };
+
+    void set_sublattice_frames(const array<array<double, N>, N> &frames, size_t index) {
+        sublattice_frames[index] = frames;
+    }
 
     void print() const {
         cout << "--- UnitCell Information ---" << endl;
@@ -371,6 +392,14 @@ struct mixed_UnitCell{
         bilinear_SU2_SU3.insert(make_pair(source, b_set));
     };
 
+    void set_sublattice_frames_SU2(const array<array<double, N_SU2>, N_SU2> &frames, size_t index) {
+        SU2.set_sublattice_frames(frames, index);
+    }
+
+    void set_sublattice_frames_SU3(const array<array<double, N_SU3>, N_SU3> &frames, size_t index) {
+        SU3.set_sublattice_frames(frames, index);
+    }
+
 
 };
 
@@ -401,6 +430,10 @@ struct TmFeO3_Fe : UnitCell<N, 4>{
         this->set_field(field0, 1);
         this->set_field(field0, 2);
         this->set_field(field0, 3);
+        this->set_sublattice_frames({{{1,0,0},{0,1,0},{0,0,1}}}, 0);
+        this->set_sublattice_frames({{{1,0,0},{0,-1,0},{0,0,-1}}}, 1);
+        this->set_sublattice_frames({{{-1,0,0},{0,1,0},{0,0,-1}}}, 2);
+        this->set_sublattice_frames({{{-1,0,0},{0,-1,0},{0,0,1}}}, 3);
     };
 };
 template<size_t N>
@@ -431,6 +464,40 @@ struct Pyrochlore : UnitCell<N, 4>{
         this->set_field(field0, 1);
         this->set_field(field0, 2);
         this->set_field(field0, 3);
+
+        array<double,3> z1 = {1, 1, 1};
+        array<double,3> z2 = {1,-1,-1};
+        array<double,3> z3 = {-1,1,-1};
+        array<double,3> z4 = {-1,-1,1};
+
+        z1 /= double(sqrt(3));
+        z2 /= double(sqrt(3));
+        z3 /= double(sqrt(3));
+        z4 /= double(sqrt(3));
+
+
+        array<double, 3> y1 = {0,-1,1};
+        array<double, 3> y2 = {0,1,-1};
+        array<double, 3> y3 = {0,-1,-1};
+        array<double, 3> y4 = {0,1,1};
+        y1 /= sqrt(2);
+        y2 /= sqrt(2);
+        y3 /= sqrt(2);
+        y4 /= sqrt(2);
+
+        array<double, 3> x1 = {-2,1,1};
+        array<double, 3> x2 = {-2,-1,-1};
+        array<double, 3> x3 = {2,1,-1};
+        array<double, 3> x4 = {2,-1,1};
+        x1 /= sqrt(6);
+        x2 /= sqrt(6);
+        x3 /= sqrt(6);
+        x4 /= sqrt(6);
+
+        this->set_sublattice_frames({{{x1[0], x1[1], x1[2]}, {y1[0], y1[1], y1[2]}, {z1[0], z1[1], z1[2]}}}, 0);
+        this->set_sublattice_frames({{{x2[0], x2[1], x2[2]}, {y2[0], y2[1], y2[2]}, {z2[0], z2[1], z2[2]}}}, 1);
+        this->set_sublattice_frames({{{x3[0], x3[1], x3[2]}, {y3[0], y3[1], y3[2]}, {z3[0], z3[1], z3[2]}}}, 2);
+        this->set_sublattice_frames({{{x4[0], x4[1], x4[2]}, {y4[0], y4[1], y4[2]}, {z4[0], z4[1], z4[2]}}}, 3);
     };
 };
 
