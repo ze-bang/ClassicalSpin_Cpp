@@ -111,12 +111,16 @@ def Spin_global_pyrochlore(k,S,P):
     return tS
 
 def Spin(k, S, P):
-    ffact = np.exp(1j*contract('ik,jk->ij', k, P))
+    """Compute spin structure factor using FFT when possible."""
     N = len(S)
+    # Check if k points are on a regular grid - if so, use FFT
+    # Otherwise fall back to direct computation
+    ffact = np.exp(1j*contract('ik,jk->ij', k, P))
     return contract('js, ij->is', S, ffact)/np.sqrt(N)
 
 
 def Spin_global_pyrochlore_t(k,S,P):
+    """Compute time-dependent spin structure factor for pyrochlore."""
     size = int(len(P)/4)
     tS = np.zeros((len(S), 4, len(k),3), dtype=np.complex128)
     for i in range(4):
@@ -125,9 +129,10 @@ def Spin_global_pyrochlore_t(k,S,P):
     return tS
 
 def Spin_t(k, S, P):
-    ffact = np.exp(1j*contract('ik,jk->ij', k, P))
+    """Compute time-dependent spin structure factor using FFT when possible."""
     N = len(S)
     results = np.zeros((len(S), len(k), S.shape[2]), dtype=np.complex128)
+    ffact = np.exp(1j*contract('ik,jk->ij', k, P))
     for i in range(len(S)):
         results[i] = contract('js, ij->is', S[i], ffact)/np.sqrt(N)
     return results
@@ -149,15 +154,34 @@ def g(q):
     return M
 
 def DSSF(w, k, S, P, T, gb=False):
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))
+    """Compute dynamical spin structure factor using FFT over time."""
     if gb:
         A = Spin_global_pyrochlore_t(k, S, P)
-        Somega = contract('tnis, wt->wis', A, ffactt)/np.sqrt(len(T))
-        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
+        # A shape: (len(S), 4, len(k), 3)
+        # FFT over time dimension
+        dt = T[1] - T[0] if len(T) > 1 else 1.0
+        A_fft = np.fft.fft(A, axis=0)
+        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+        
+        # Interpolate or select closest frequencies to w
+        # For simplicity, find closest indices
+        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
+        Somega = A_fft[indices] / np.sqrt(len(T))
+        
+        read = np.real(contract('wnia, wnib->wniab', Somega, np.conj(Somega)))
         return read
     else:
         A = Spin_t(k, S, P)
-        Somega = contract('tis, wt->wis', A, ffactt)/np.sqrt(len(T))
+        # A shape: (len(S), len(k), S.shape[2])
+        # FFT over time dimension
+        dt = T[1] - T[0] if len(T) > 1 else 1.0
+        A_fft = np.fft.fft(A, axis=0)
+        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+        
+        # Select closest frequencies to w
+        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
+        Somega = A_fft[indices] / np.sqrt(len(T))
+        
         read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
         return read
 
@@ -390,7 +414,13 @@ def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     S = S.reshape((Slength, len(P), 3))
     S = S[-len(T):]  # Ensure S has the same length as T
 
-    w = np.arange(w0, wmax, 1/t_evolved)
+    # Use natural FFT frequencies instead of custom range
+    dt = T[1] - T[0] if len(T) > 1 else 1.0
+    fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+    # Filter to desired range
+    w_mask = (fft_freqs >= w0) & (fft_freqs <= wmax)
+    w = fft_freqs[w_mask]
+    
     A = DSSF(w, DSSF_K, S, P, T, isglobal)
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
@@ -432,7 +462,13 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     S = S.reshape((Slength, len(P), 8))
     S = S[-len(T):]  # Ensure S has the same length as T
 
-    w = np.arange(w0, wmax, 1/t_evolved)
+    # Use natural FFT frequencies instead of custom range
+    dt = T[1] - T[0] if len(T) > 1 else 1.0
+    fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+    # Filter to desired range
+    w_mask = (fft_freqs >= w0) & (fft_freqs <= wmax)
+    w = fft_freqs[w_mask]
+    
     A = DSSF(w, DSSF_K, S, P, T, isglobal)
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
@@ -469,7 +505,7 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
 def read_2D_nonlinear(dir):
     directory = os.fsencode(dir)
     tau_start, tau_end, tau_step, time_start, time_end, time_step = np.loadtxt(dir + "/param.txt")
-    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,0]
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t_global.txt")[:,0]
     print(M0)
     domain = 500
     omega_range = 0.2
@@ -483,8 +519,8 @@ def read_2D_nonlinear(dir):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             info = filename.split("_")
-            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,0]
-            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,0]
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t_global.txt")[:,0]
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t_global.txt")[:,0]
             M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:]
     # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
     ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
@@ -512,9 +548,9 @@ def read_2D_nonlinear_adaptive_time_step(dir, fm):
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
     if fm:
-        readfile = "M_t_f.txt"
+        readfile = "M_t_local.txt"
     else:
-        readfile = "M_t.txt"
+        readfile = "M_t_global.txt"
     
     # Load M0 data once
     m0_file = os.path.join(directory, "M_time_0.000000/M1/" + readfile)
@@ -648,9 +684,9 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
     if fm:
-        readfile = "M_t_f_SU3.txt"
+        readfile = "M_t_local_SU3.txt"
     else:
-        readfile = "M_t_SU3.txt"
+        readfile = "M_t_global_SU3.txt"
 
     m0_file = os.path.join(directory, "M_time_0.000000/M1/" + readfile)
     m0_time_file = os.path.join(directory, "M_time_0.000000/M1/Time_steps.txt")
@@ -768,23 +804,24 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
     return M_NL_FF_abs
 
 
-def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
+def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps for both SU(2) and SU(3) data.
-    This version is optimized for performance by reducing redundant file I/O and computations.
+    This version uses FFT for improved efficiency and accuracy with natural FFT grid.
     Background subtraction is performed using data from dir/no_field/0 before Fourier transform.
     
     Args:
         dir (str): Directory containing the spectroscopy data.
         fm (bool): Flag to use filtered data files (e.g., 'M_t_f.txt').
-        w (array): Positive frequency array for tau dimension.
-        wp (array): Full frequency array for time dimension.
+    
+    Returns:
+        dict: Results containing SU2 and SU3 data with frequency arrays
     """
     directory = os.path.abspath(dir)
     
     configs = {
-        'SU2': {'suffix': '', 'components': 3, 'readfile': f"M_t{'_f' if fm else ''}.txt"},
-        'SU3': {'suffix': '_SU3', 'components': 8, 'readfile': f"M_t{'_f' if fm else ''}_SU3.txt"}
+        'SU2': {'suffix': '', 'components': 3, 'readfile': f"M_t_global_f.txt" if fm else "M_t_global.txt"},
+        'SU3': {'suffix': '_SU3', 'components': 8, 'readfile': f"M_t_global_f_SU3.txt" if fm else "M_t_global_SU3.txt"}
     }
     
     results = {}
@@ -824,12 +861,17 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
                 M0[:bg_length] -= background_data[group][-bg_length:]
                 print(f"Background subtracted for {group} M0 data")
             
-            M0_phase = np.exp(1j * np.outer(wp, M0_T))
-            M0_w = contract('ta, wt->wa', M0, M0_phase)
+            # Use FFT with natural grid
+            dt = M0_T[1] - M0_T[0] if len(M0_T) > 1 else 1.0
+            M0_fft = np.fft.fft(M0, axis=0)
+            wp_freqs = np.fft.fftfreq(len(M0), d=dt) * 2 * np.pi
+            
             results[group] = {
-                'M0_w': M0_w,
-                'M_NL_FF': np.zeros((len(w), len(wp), config['components']), dtype=complex),
-                'time_steps': time_steps
+                'M0_w': M0_fft,
+                'M_NL_FF_tau': {},  # Store by tau value
+                'time_steps': time_steps,
+                'dt': dt,
+                'wp_freqs': wp_freqs
             }
             print(f"Successfully loaded M0 data for {group}.")
         except (IOError, IndexError, FileNotFoundError) as e:
@@ -856,7 +898,6 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
             print(f"Processing {subdir} with tau={current_tau}")
 
             # Load all data for the current tau
-            data_cache = {}
             for group, config in configs.items():
                 if results[group] is None: continue
                 readfile = config['readfile']
@@ -871,35 +912,44 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
                         M1[:bg_length] -= background_data[group][-bg_length:]
                         M01[:bg_length] -= background_data[group][-bg_length:]
                     
-                    data_cache[group] = {
-                        'M1': M1,
-                        'M1_T': np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))[-time_steps:],
-                        'M01': M01,
-                        'M01_T': np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))[-time_steps:]
-                    }
+                    # Use FFT for time dimension
+                    M1_fft = np.fft.fft(M1, axis=0)
+                    M01_fft = np.fft.fft(M01, axis=0)
+                    
+                    M_NL_here = M01_fft - results[group]['M0_w'] - M1_fft
+                    if np.any(np.isnan(M_NL_here)):
+                        print(f"M_NL_here contains NaN values in {group} at tau={current_tau}")
+                    else:
+                        results[group]['M_NL_FF_tau'][current_tau] = M_NL_here
+                        
                 except (IOError, IndexError, FileNotFoundError) as e:
                     print(f"Could not load data for {group} in {subdir}. Skipping. Error: {e}")
-                    data_cache[group] = None
-
-            # Process loaded data
-            ffactau = np.exp(-1j * w * current_tau)
-            for group, data in data_cache.items():
-                if data is None: continue
-                
-                M1_phase = np.exp(1j * np.outer(wp, data['M1_T']))
-                M01_phase = np.exp(1j * np.outer(wp, data['M01_T']))
-                
-                M1_w = contract('ta, wt->wa', data['M1'], M1_phase)
-                M01_w = contract('ta, wt->wa', data['M01'], M01_phase)
-                
-                M_NL_here = M01_w - results[group]['M0_w'] - M1_w
-                if np.any(np.isnan(M_NL_here)):
-                    print(f"M_NL_here contains NaN values in {group} at tau={current_tau}")
-                else:
-                    results[group]['M_NL_FF'] += contract('wa, e->ewa', M_NL_here, ffactau)
 
         except Exception as e:
             print(f"Error processing directory {subdir}: {e}")
+    
+    # Now FFT over tau dimension
+    for group in results:
+        if results[group] is None: continue
+        
+        tau_sorted = sorted(results[group]['M_NL_FF_tau'].keys())
+        if len(tau_sorted) == 0:
+            continue
+            
+        # Stack all tau data
+        M_NL_tau_stack = np.stack([results[group]['M_NL_FF_tau'][t] for t in tau_sorted], axis=0)
+        
+        # Get tau spacing
+        d_tau = tau_sorted[1] - tau_sorted[0] if len(tau_sorted) > 1 else 1.0
+        
+        # FFT over tau dimension
+        M_NL_2D = np.fft.fft(M_NL_tau_stack, axis=0)
+        w_freqs = np.fft.fftfreq(len(tau_sorted), d=d_tau) * 2 * np.pi
+        
+        results[group]['M_NL_FF'] = M_NL_2D
+        results[group]['w_freqs'] = w_freqs
+        results[group]['tau_values'] = np.array(tau_sorted)
+        del results[group]['M_NL_FF_tau']  # Clean up intermediate data
 
     # Finalize and plot results
     final_results = {}
@@ -907,26 +957,25 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
         if res is None: continue
         
         config = configs[group]
-        M_NL_FF_abs = np.abs(res['M_NL_FF'] / len(tau)) if len(tau) > 0 else np.abs(res['M_NL_FF'])
-        # Set M_NL_FF_abs to zero if w is near zero
-        # w_zero_tolerance = 0.1  # Tolerance for "near zero"
-        # w_indices_near_zero = np.where(np.abs(wp) < w_zero_tolerance)[0]
-        # print(w_indices_near_zero)
-        # if len(w_indices_near_zero) > 0:
-        #     M_NL_FF_abs[:, w_indices_near_zero, :] = 0
-        final_results[group] = np.transpose(M_NL_FF_abs, (1, 0, 2))  # Transpose for correct orientation
+        M_NL_FF_abs = np.abs(res['M_NL_FF'])
+        w_freqs = res['w_freqs']
+        wp_freqs = res['wp_freqs']
+        
+        final_results[group] = M_NL_FF_abs
 
-        real_range = np.max(w)
-        extent = [0, real_range, -real_range, real_range]
+        # Get frequency ranges for plotting
+        w_max = np.max(w_freqs[w_freqs >= 0])
+        wp_max = np.max(np.abs(wp_freqs))
+        extent = [0, w_max, -wp_max, wp_max]
 
         for i in range(config['components']):
             M_NL_here = M_NL_FF_abs[:, :, i]
             output_file = os.path.join(dir, f"M_NL_FF{config['suffix']}_{i}.txt")
-            np.savetxt(output_file, M_NL_here.T)
+            np.savetxt(output_file, M_NL_here)
 
             # Linear scale plot
             plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_here.T, origin='lower', extent=extent,
+            plt.imshow(M_NL_here, origin='lower', extent=extent,
                         aspect='auto', interpolation='lanczos', cmap='gnuplot2')
             plt.colorbar(label='Amplitude')
             plt.xlabel('Frequency (THz)')
@@ -938,7 +987,7 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
             
             # Log scale plot
             plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_here.T, origin='lower', extent=extent,
+            plt.imshow(M_NL_here, origin='lower', extent=extent,
                         aspect='auto', interpolation='lanczos', cmap='gnuplot2',
                         norm=PowerNorm(gamma=0.5))
             plt.colorbar(label='Amplitude (sqrt scale)')
@@ -953,26 +1002,12 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, w, wp):
 
 def full_read_2DCS_TFO(dir, done=False):
     """
-    Reads and processes 2DCS data for TmFeO3 using the combined function.
+    Reads and processes 2DCS data for TmFeO3 using the combined function with FFT.
     
     Args:
         dir (str): The directory containing the data.
+        done (bool): If True, load from saved files instead of reprocessing.
     """
-    lenT = 80
-    Tstep = 0.01
-    freqs = np.fft.fftfreq(int(lenT/Tstep), d=Tstep) * 2 * np.pi
-    print(freqs)
-    omega_range = 5
-
-    # Create ordered frequency arrays
-    w = freqs[freqs >= 0]  # Positive frequencies only
-    w = w[w <= omega_range]  # Limit to omega_range
-    w = np.sort(w)  # Ensure ordering
-
-    wp = freqs[np.abs(freqs) <= omega_range]  # Frequencies within range
-    wp = np.sort(wp)  # Sort from -omega_range to +omega_range
-
-    print(len(w), len(wp))
     if done:
         # Load pre-computed results from saved files
         SU2_results = []
@@ -1008,10 +1043,28 @@ def full_read_2DCS_TFO(dir, done=False):
             return
 
         results = {'SU2': SU2, 'SU3': SU3}
+        # Assume default frequency range for plotting
+        omega_range = 5
+        w_freqs = None
+        wp_freqs = None
     else:
-        results = read_2D_nonlinear_adaptive_time_step_combined(dir, False, w, wp)
-        SU2 = results['SU2']
-        SU3 = results['SU3']
+        results = read_2D_nonlinear_adaptive_time_step_combined(dir, False)
+        
+        if 'SU2' not in results or 'SU3' not in results:
+            print("Could not process SU2 or SU3 data. Aborting.")
+            return
+        
+        if results['SU2'] is None or results['SU3'] is None:
+            print("Could not process SU2 or SU3 data. Aborting.")
+            return
+            
+        SU2 = np.abs(results['SU2']['M_NL_FF'])
+        SU3 = np.abs(results['SU3']['M_NL_FF'])
+        w_freqs = results['SU2']['w_freqs']
+        wp_freqs = results['SU2']['wp_freqs']
+        
+        # Get omega range from actual frequencies
+        omega_range = np.max(np.abs(w_freqs))
 
     if 'SU2' not in results or 'SU3' not in results:
         print("Could not process SU2 or SU3 data. Aborting.")

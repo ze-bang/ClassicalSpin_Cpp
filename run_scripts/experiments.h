@@ -393,7 +393,7 @@ void simulated_annealing_pyrochlore_non_kramer(double Tstart, double TargetT, do
 
     MC.write_to_file_pos(dir + "/pos.txt");
     MC.write_to_file_spin(dir + "/spin.txt", MC.spins);
-    MC.write_to_file_magnetization_local(dir + "/M_t_f.txt", MC.magnetization(MC.spins, x, y, z));
+    MC.write_to_file_magnetization_local(dir + "/M_t_f.txt", MC.magnetization_global(MC.spins));
     MC.write_to_file_magnetization_local(dir + "/M_t_f_local.txt", MC.magnetization_local(MC.spins));
 }
 

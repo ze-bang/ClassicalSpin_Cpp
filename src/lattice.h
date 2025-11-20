@@ -208,7 +208,7 @@ class lattice
         
         // Precompute maximum neighbor offset to determine boundary thickness in each dimension
         boundary_thickness = {0,0,0};
-        sublattice_frames = UC.sublattice_frames;
+        sublattice_frames = atoms->sublattice_frames;
 
 
         for (size_t l=0; l<N_ATOMS; ++l){

@@ -4,6 +4,7 @@
 #include "mixed_lattice.h"
 #include "unitcell.h"
 #include "simple_linear_alg.h"
+#include "kernel_params.cuh"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <curand_kernel.h>
@@ -113,6 +114,21 @@ __device__ void contract_trilinear_field_device(double* result, const double* te
 __device__ void cross_product_SU2_device(double* result, const double* a, const double* b);
 __device__ void cross_product_SU3_device(double* result, const double* a, const double* b);
 
+// Forward declarations for magnetization kernels
+template <size_t N_SU2, size_t lattice_size_SU2>
+__global__ void compute_magnetization_local_SU2_kernel(const double* spins, double* mag_out);
+
+template <size_t N_SU3, size_t lattice_size_SU3>
+__global__ void compute_magnetization_local_SU3_kernel(const double* spins, double* mag_out);
+
+template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t dim1, size_t dim2, size_t dim>
+__global__ void compute_magnetization_global_SU2_kernel(
+    const double* spins, const double* sublattice_frames, double* mag_out);
+
+template <size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3, size_t dim1, size_t dim2, size_t dim>
+__global__ void compute_magnetization_global_SU3_kernel(
+    const double* spins, const double* sublattice_frames, double* mag_out);
+
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
 class mixed_lattice_cuda;
 
@@ -190,6 +206,12 @@ public:
     // Random state for CUDA kernels
     curandState* d_rng_states;
     
+    // Device buffers for magnetization results
+    double* d_mag_local_SU2;      // [N_SU2]
+    double* d_mag_local_SU3;      // [N_SU3]
+    double* d_mag_global_SU2;     // [N_SU2]
+    double* d_mag_global_SU3;     // [N_SU3]
+    
     // Constructor - inherits from base class and sets up CUDA data
     __host__
     mixed_lattice_cuda(mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3>* atoms, 
@@ -222,6 +244,10 @@ public:
         d_mixed_trilinear_partners_SU2 = nullptr;
         d_mixed_trilinear_partners_SU3 = nullptr;
         d_rng_states = nullptr;
+        d_mag_local_SU2 = nullptr;
+        d_mag_local_SU3 = nullptr;
+        d_mag_global_SU2 = nullptr;
+        d_mag_global_SU3 = nullptr;
         
         // Copy scalar values
         d_spin_length_SU2 = this->spin_length_SU2;
@@ -404,6 +430,12 @@ private:
 
         // Allocate random states
         cudaMalloc(&d_rng_states, (lattice_size_SU2 + lattice_size_SU3) * sizeof(curandState));
+        
+        // Allocate magnetization buffers
+        cudaMalloc(&d_mag_local_SU2, N_SU2 * sizeof(double));
+        cudaMalloc(&d_mag_local_SU3, N_SU3 * sizeof(double));
+        cudaMalloc(&d_mag_global_SU2, N_SU2 * sizeof(double));
+        cudaMalloc(&d_mag_global_SU3, N_SU3 * sizeof(double));
     }
     
     // Copy data from host arrays to device arrays
@@ -793,9 +825,99 @@ private:
             cudaFree(d_rng_states);
             d_rng_states = nullptr;
         }
+        if (d_mag_local_SU2) {
+            cudaFree(d_mag_local_SU2);
+            d_mag_local_SU2 = nullptr;
+        }
+        if (d_mag_local_SU3) {
+            cudaFree(d_mag_local_SU3);
+            d_mag_local_SU3 = nullptr;
+        }
+        if (d_mag_global_SU2) {
+            cudaFree(d_mag_global_SU2);
+            d_mag_global_SU2 = nullptr;
+        }
+        if (d_mag_global_SU3) {
+            cudaFree(d_mag_global_SU3);
+            d_mag_global_SU3 = nullptr;
+        }
         
         // Synchronize device to make sure all deallocations are complete
         cudaDeviceSynchronize();
+    }
+
+    // Helper methods to build parameter structures for kernels
+    __host__
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> get_su2_params() const {
+        SU2_DeviceParams<N_SU2, lattice_size_SU2> params;
+        params.spins = d_spins.spins_SU2;
+        params.local_field = nullptr;  // Will be set by caller
+        params.field = d_field_SU2;
+        params.onsite_interaction = d_onsite_interaction_SU2;
+        params.bilinear_interaction = d_bilinear_interaction_SU2;
+        params.bilinear_partners = d_bilinear_partners_SU2;
+        params.trilinear_interaction = d_trilinear_interaction_SU2;
+        params.trilinear_partners = d_trilinear_partners_SU2;
+        params.field_drive_1 = d_field_drive_1_SU2;
+        params.field_drive_2 = d_field_drive_2_SU2;
+        params.num_bi = d_num_bi_SU2;
+        params.num_tri = d_num_tri_SU2;
+        params.max_bi_neighbors = max_bilinear_neighbors_SU2;
+        params.max_tri_neighbors = max_trilinear_neighbors_SU2;
+        return params;
+    }
+
+    __host__
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> get_su3_params() const {
+        SU3_DeviceParams<N_SU3, lattice_size_SU3> params;
+        params.spins = d_spins.spins_SU3;
+        params.local_field = nullptr;  // Will be set by caller
+        params.field = d_field_SU3;
+        params.onsite_interaction = d_onsite_interaction_SU3;
+        params.bilinear_interaction = d_bilinear_interaction_SU3;
+        params.bilinear_partners = d_bilinear_partners_SU3;
+        params.trilinear_interaction = d_trilinear_interaction_SU3;
+        params.trilinear_partners = d_trilinear_partners_SU3;
+        params.field_drive_1 = d_field_drive_1_SU3;
+        params.field_drive_2 = d_field_drive_2_SU3;
+        params.num_bi = d_num_bi_SU3;
+        params.num_tri = d_num_tri_SU3;
+        params.max_bi_neighbors = max_bilinear_neighbors_SU3;
+        params.max_tri_neighbors = max_trilinear_neighbors_SU3;
+        return params;
+    }
+
+    __host__
+    MixedInteractionParams<N_SU2, N_SU3> get_mixed_params() const {
+        MixedInteractionParams<N_SU2, N_SU3> params;
+        params.mixed_bilinear_interaction_SU2 = d_mixed_bilinear_interaction_SU2;
+        params.mixed_bilinear_interaction_SU3 = d_mixed_bilinear_interaction_SU3;
+        params.mixed_bilinear_partners_SU2 = d_mixed_bilinear_partners_SU2;
+        params.mixed_bilinear_partners_SU3 = d_mixed_bilinear_partners_SU3;
+        params.mixed_trilinear_interaction_SU2 = d_mixed_trilinear_interaction_SU2;
+        params.mixed_trilinear_interaction_SU3 = d_mixed_trilinear_interaction_SU3;
+        params.mixed_trilinear_partners_SU2 = d_mixed_trilinear_partners_SU2;
+        params.mixed_trilinear_partners_SU3 = d_mixed_trilinear_partners_SU3;
+        params.num_bi_SU2_SU3 = d_num_bi_SU2_SU3;
+        params.num_tri_SU2_SU3 = d_num_tri_SU2_SU3;
+        params.max_mixed_bi_neighbors_SU2 = max_mixed_bilinear_neighbors_SU2;
+        params.max_mixed_bi_neighbors_SU3 = max_mixed_bilinear_neighbors_SU3;
+        params.max_mixed_tri_neighbors_SU2 = max_mixed_trilinear_neighbors_SU2;
+        params.max_mixed_tri_neighbors_SU3 = max_mixed_trilinear_neighbors_SU3;
+        return params;
+    }
+
+    __host__
+    DriveFieldParams get_drive_params(double curr_time, double dt) const {
+        DriveFieldParams params;
+        params.amp = d_field_drive_amp_SU2;
+        params.width = d_field_drive_width_SU2;
+        params.freq = d_field_drive_freq_SU2;
+        params.t_B_1 = d_t_B_1_SU2;
+        params.t_B_2 = d_t_B_2_SU2;
+        params.curr_time = curr_time;
+        params.dt = dt;
+        return params;
     }
 
 public:
@@ -1016,10 +1138,10 @@ public:
         ofstream spin_file_SU2, spin_file_SU3;
         
         if (dir_name != "") {
-            mag_file_f.open(dir_name + "/M_t_f.txt", ios::out | ios::trunc);
-            mag_file.open(dir_name + "/M_t.txt", ios::out | ios::trunc);
-            mag_file_f_SU3.open(dir_name + "/M_t_f_SU3.txt", ios::out | ios::trunc);
-            mag_file_SU3.open(dir_name + "/M_t_SU3.txt", ios::out | ios::trunc);
+            mag_file_f.open(dir_name + "/M_t_local.txt", ios::out | ios::trunc);
+            mag_file.open(dir_name + "/M_t_global.txt", ios::out | ios::trunc);
+            mag_file_f_SU3.open(dir_name + "/M_t_local_SU3.txt", ios::out | ios::trunc);
+            mag_file_SU3.open(dir_name + "/M_t_global_SU3.txt", ios::out | ios::trunc);
             
             if (verbose) {
                 spin_file_SU2.open(dir_name + "/spin_t_SU2.txt", ios::out | ios::trunc);
@@ -1042,67 +1164,20 @@ public:
         double current_time = T_start;
         size_t step_count = 0;
 
-        // Just write the basis vector for TmFeO3 for now
-        array<array<array<double, N_SU2>, N_SU2>, N_ATOMS_SU2> basis_vectors_SU2 = {{
-            {{{1,0,0}, {0,1,0}, {0,0,1}}},
-            {{{1,0,0}, {0,-1,0}, {0,0,-1}}},
-            {{{-1,0,0}, {0,1,0}, {0,0,-1}}},
-            {{{-1,0,0}, {0,-1,0}, {0,0,1}}}
-        }};
-
-        array<array<array<double, N_SU3>, N_SU3>, N_ATOMS_SU3> basis_vectors_SU3 = {{
-            {{{0,0,5.264,0,0,0,0,0}, {0,0,0,0,0,2.3915,0,0.9128}, {0,0,0,0,0,2.7866,0,-0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
-            {{{0,0,5.264,0,0,0,0,0}, {0,0,0,0,0,-2.3915,0,-0.9128}, {0,0,0,0,0,-2.7866,0,0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
-            {{{0,0,-5.264,0,0,0,0,0}, {0,0,0,0,0,2.3915,0,0.9128}, {0,0,0,0,0,-2.7866,0,0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
-            {{{0,0,-5.264,0,0,0,0,0}, {0,0,0,0,0,-2.3915,0,-0.9128}, {0,0,0,0,0,2.7866,0,-0.4655}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}}},
-        }};
-
-        // Normalize the basis vectors
-        for (size_t atom = 0; atom < N_ATOMS_SU2; ++atom) {
-            for (size_t vec = 0; vec < N_SU2; ++vec) {
-                double norm = 0.0;
-                for (size_t i = 0; i < N_SU2; ++i) {
-                    norm += basis_vectors_SU2[atom][vec][i] * basis_vectors_SU2[atom][vec][i];
-                }
-                norm = sqrt(norm);
-                if (norm > 1e-10) {
-                    for (size_t i = 0; i < N_SU2; ++i) {
-                    basis_vectors_SU2[atom][vec][i] /= norm;
-                    }
-                }
-            }
-        }
-
-        for (size_t atom = 0; atom < N_ATOMS_SU3; ++atom) {
-            for (size_t vec = 0; vec < N_SU3; ++vec) {
-                double norm = 0.0;
-                for (size_t i = 0; i < N_SU3; ++i) {
-                    norm += basis_vectors_SU3[atom][vec][i] * basis_vectors_SU3[atom][vec][i];
-                }
-                norm = sqrt(norm);
-                if (norm > 1e-10) {
-                    for (size_t i = 0; i < N_SU3; ++i) {
-                    basis_vectors_SU3[atom][vec][i] /= norm;
-                    }
-                }
-            }
-        }
-
         std::cout << "Starting time evolution from t = " << T_start << " to t = " << T_end 
                   << " with step size " << step_size << " and output every " 
                   << output_frequency << " steps." << std::endl;
         
-        // Initial magnetization
+        // Initial magnetization - computed directly on GPU
         if (dir_name != "") {
-            copy_spins_to_host();
+            std::array<double, N_SU2> mag_f, mag;
+            std::array<double, N_SU3> mag_SU3, mag_f_SU3;
             
-            // Write initial magnetization
-            auto mag_f = this->magnetization_local(this->spins);
-            // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
-            auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-            // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-            auto mag = this->magnetization_global(this->spins, basis_vectors_SU2);
-            auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins, basis_vectors_SU3);
+            // Compute magnetizations directly on GPU (no host copy needed!)
+            compute_magnetization_local_SU2_cuda(mag_f);
+            compute_magnetization_global_SU2_cuda(mag);
+            compute_magnetization_local_SU3_cuda(mag_f_SU3);
+            compute_magnetization_global_SU3_cuda(mag_SU3);
 
             for (size_t j = 0; j < N_SU2; ++j) {
                 mag_file_f << mag_f[j] << " ";
@@ -1112,8 +1187,8 @@ public:
             mag_file << "\n";
             
             for (size_t j = 0; j < N_SU3; ++j) {
-                mag_file_f_SU3 << mag_SU3[j] << " ";
-                mag_file_SU3 << mag_afm_SU3[j] << " ";
+                mag_file_f_SU3 << mag_f_SU3[j] << " ";
+                mag_file_SU3 << mag_SU3[j] << " ";
             }
             mag_file_f_SU3 << "\n";
             mag_file_SU3 << "\n";
@@ -1145,17 +1220,16 @@ public:
                           << current_time << "/" << T_end << std::flush;
             }
             
-            // Periodically copy data back to host for output
+            // Periodically write data (magnetization computed on GPU, spins only copied if verbose)
             if (dir_name != "" && step_count % output_frequency == 0) {
-                copy_spins_to_host();
+                std::array<double, N_SU2> mag_f, mag;
+                std::array<double, N_SU3> mag_SU3, mag_f_SU3;
                 
-                // Write initial magnetization
-                auto mag_f = this->magnetization_local(this->spins);
-                // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
-                auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-                // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-                auto mag = this->magnetization_global(this->spins, basis_vectors_SU2);
-                auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins, basis_vectors_SU3);
+                // Compute magnetizations directly on GPU (no host copy needed!)
+                compute_magnetization_local_SU2_cuda(mag_f);
+                compute_magnetization_global_SU2_cuda(mag);
+                compute_magnetization_local_SU3_cuda(mag_f_SU3);
+                compute_magnetization_global_SU3_cuda(mag_SU3);
 
                 for (size_t j = 0; j < N_SU2; ++j) {
                     mag_file_f << mag_f[j] << " ";
@@ -1165,14 +1239,16 @@ public:
                 mag_file << "\n";
                 
                 for (size_t j = 0; j < N_SU3; ++j) {
-                    mag_file_f_SU3 << mag_SU3[j] << " ";
-                    mag_file_SU3 << mag_afm_SU3[j] << " ";
+                    mag_file_f_SU3 << mag_f_SU3[j] << " ";
+                    mag_file_SU3 << mag_SU3[j] << " ";
                 }
                 mag_file_f_SU3 << "\n";
                 mag_file_SU3 << "\n";
                 
-                // Write spin states if verbose
+                // Write spin states if verbose (only copy spins if actually needed)
                 if (verbose) {
+                    copy_spins_to_host();  // Only copy when verbose mode is on
+                    
                     for (size_t i = 0; i < lattice_size_SU2; ++i) {
                         for (size_t j = 0; j < N_SU2; ++j) {
                             spin_file_SU2 << this->spins.spins_SU2[i][j] << " ";
@@ -1353,6 +1429,21 @@ public:
         cudaMemcpy(d_spins.spins_SU2, temp_spins_SU2.data(), lattice_size_SU2 * N_SU2 * sizeof(double), cudaMemcpyHostToDevice);
         cudaMemcpy(d_spins.spins_SU3, temp_spins_SU3.data(), lattice_size_SU3 * N_SU3 * sizeof(double), cudaMemcpyHostToDevice);
     }
+    
+    // Override read_spin_from_file to also update device memory
+    __host__
+    void read_spin_from_file(const std::string &filename) {
+        // Call base class method to load spins into host memory
+        mixed_lattice<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>::read_spin_from_file(filename);
+        // Copy the loaded spins to device memory to reset device state
+        copy_spins_to_device();
+    }
+    
+    // GPU Magnetization Computation Methods - Declarations only
+    __host__ void compute_magnetization_local_SU2_cuda(std::array<double, N_SU2>& mag_out);
+    __host__ void compute_magnetization_local_SU3_cuda(std::array<double, N_SU3>& mag_out);
+    __host__ void compute_magnetization_global_SU2_cuda(std::array<double, N_SU2>& mag_out);
+    __host__ void compute_magnetization_global_SU3_cuda(std::array<double, N_SU3>& mag_out);
 };
 
 template <size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
@@ -1832,72 +1923,30 @@ void landau_Lifshitz_SU3(double* out, int site_index, double* spins, const doubl
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __global__
 void LLG_kernel(
-    double* k_SU2, double* k_SU3,
-    double* d_spins_SU2, double* d_spins_SU3,
-    double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
-    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt);
+    RKWorkArrays<N_SU2, N_SU3> work_arrays,
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params,
+    DriveFieldParams drive_params);
 
 
 template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __host__
 void SSPRK53_step_kernel(
-    double* d_spins_SU2, double* d_spins_SU3,
-    double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
-    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
-    // Pre-allocated working arrays passed from caller
-    double* work_SU2_1, double* work_SU2_2, double* work_SU2_3,
-    double* work_SU3_1, double* work_SU3_2, double* work_SU3_3);
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params,
+    DriveFieldParams drive_params,
+    double spin_length_SU2, double spin_length_SU3,
+    RKWorkArrays<N_SU2, N_SU3> work_arrays);
 
 template<size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __host__
 void euler_step_kernel(
-    double* d_spins_SU2, double* d_spins_SU3,
-    double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
-    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3);
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params,
+    DriveFieldParams drive_params,
+    double spin_length_SU2, double spin_length_SU3);
 
 #endif // MIXED_LATTICE_CUDA_CUH

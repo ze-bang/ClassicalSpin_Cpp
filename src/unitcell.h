@@ -465,34 +465,22 @@ struct Pyrochlore : UnitCell<N, 4>{
         this->set_field(field0, 2);
         this->set_field(field0, 3);
 
-        array<double,3> z1 = {1, 1, 1};
-        array<double,3> z2 = {1,-1,-1};
-        array<double,3> z3 = {-1,1,-1};
-        array<double,3> z4 = {-1,-1,1};
-
-        z1 /= double(sqrt(3));
-        z2 /= double(sqrt(3));
-        z3 /= double(sqrt(3));
-        z4 /= double(sqrt(3));
+        array<double,3> z1 = {1/sqrt(3), 1/sqrt(3), 1/sqrt(3)};
+        array<double,3> z2 = {1/sqrt(3),-1/sqrt(3),-1/sqrt(3)};
+        array<double,3> z3 = {-1/sqrt(3),1/sqrt(3),-1/sqrt(3)};
+        array<double,3> z4 = {-1/sqrt(3),-1/sqrt(3),1/sqrt(3)};
 
 
-        array<double, 3> y1 = {0,-1,1};
-        array<double, 3> y2 = {0,1,-1};
-        array<double, 3> y3 = {0,-1,-1};
-        array<double, 3> y4 = {0,1,1};
-        y1 /= sqrt(2);
-        y2 /= sqrt(2);
-        y3 /= sqrt(2);
-        y4 /= sqrt(2);
 
-        array<double, 3> x1 = {-2,1,1};
-        array<double, 3> x2 = {-2,-1,-1};
-        array<double, 3> x3 = {2,1,-1};
-        array<double, 3> x4 = {2,-1,1};
-        x1 /= sqrt(6);
-        x2 /= sqrt(6);
-        x3 /= sqrt(6);
-        x4 /= sqrt(6);
+        array<double, 3> y1 = {0,-1/sqrt(2),1/sqrt(2)};
+        array<double, 3> y2 = {0,1/sqrt(2),-1/sqrt(2)};
+        array<double, 3> y3 = {0,-1/sqrt(2),-1/sqrt(2)};
+        array<double, 3> y4 = {0,1/sqrt(2),1/sqrt(2)};
+
+        array<double, 3> x1 = {-2/sqrt(6),1/sqrt(6),1/sqrt(6)};
+        array<double, 3> x2 = {-2/sqrt(6),-1/sqrt(6),-1/sqrt(6)};
+        array<double, 3> x3 = {2/sqrt(6),1/sqrt(6),-1/sqrt(6)};
+        array<double, 3> x4 = {2/sqrt(6),-1/sqrt(6),1/sqrt(6)};
 
         this->set_sublattice_frames({{{x1[0], x1[1], x1[2]}, {y1[0], y1[1], y1[2]}, {z1[0], z1[1], z1[2]}}}, 0);
         this->set_sublattice_frames({{{x2[0], x2[1], x2[2]}, {y2[0], y2[1], y2[2]}, {z2[0], z2[1], z2[2]}}}, 1);

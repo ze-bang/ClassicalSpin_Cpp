@@ -171,6 +171,9 @@ class mixed_lattice
 
     DeviceStructureTensorManager device_structure_tensor_manager;
 
+    array<array<array<double, N_SU2>, N_SU2>, N_ATOMS_SU2> sublattice_frames_SU2;
+    array<array<array<double, N_SU3>, N_SU3>, N_ATOMS_SU3> sublattice_frames_SU3;
+
     template<size_t N>
     void gen_random_spin(array<double, N> &temp_spin, const double spin_l){
         // array<double,N> temp_spin;
@@ -414,6 +417,9 @@ class mixed_lattice
         t_B_1_SU2_SU3 = 0.0;
         t_B_2_SU2_SU3 = 0.0;
 
+        sublattice_frames_SU2 = atoms->SU2.sublattice_frames;
+        sublattice_frames_SU3 = atoms->SU3.sublattice_frames;
+
         // Set up sublattices in parallel
         #pragma omp parallel sections
         {
@@ -609,7 +615,6 @@ class mixed_lattice
         }
 
         cout << "Finished setting up lattice" << endl;
-        cout << num_bi_SU2 << " " << num_tri_SU2 << " " << num_bi_SU3 << " " << num_tri_SU3 << " " << num_tri_SU2_SU3 << endl;
     }
 
     void print_lattice_info(const string& filename = "lattice_info_CPU.txt") const {
@@ -801,8 +806,8 @@ class mixed_lattice
         double bilinear_energy = 0.0;
         double bilinear_energy_mixed = 0.0;
         
-        // Prefetch in batches for better cache utilization
-        constexpr size_t PREFETCH_DIST = 4;
+        // Adaptive prefetch distance based on cache line size (64 bytes typical)
+        constexpr size_t PREFETCH_DIST = 8;
         for (size_t i = 0; i < num_bi_SU2; ++i) {
             // Prefetch multiple iterations ahead
             if (i + PREFETCH_DIST < num_bi_SU2) {
@@ -817,19 +822,18 @@ class mixed_lattice
             const auto& partner_spin = spins.spins_SU2[partner_idx]; 
             const auto& interaction = bilinear_interaction_SU2[site_index][i];
             
-            // Inline the contract operation for bilinear interactions
+            // Let compiler auto-vectorize - removed conflicting simd pragmas
             for (size_t a = 0; a < N_SU2; ++a) {
                 const double diff_a = new_spin[a] - old_spin[a];
-                if (std::abs(diff_a) < 1e-10) continue; 
                 
                 double row_sum = 0.0;
-                #pragma omp simd reduction(+:row_sum)
                 for (size_t b = 0; b < N_SU2; ++b) {
                     row_sum += interaction[a*N_SU2 + b] * partner_spin[b];
                 }
                 bilinear_energy += diff_a * row_sum;
             }
         }
+        
         // Optimized mixed bilinear energy calculation with aggressive prefetching
         for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
             // Prefetch multiple iterations ahead
@@ -845,14 +849,11 @@ class mixed_lattice
             const auto& partner_spin = spins.spins_SU3[partner_idx]; 
             const auto& interaction = mixed_bilinear_interaction_SU2[site_index][i];
             
-            // Process all non-zero differences in one pass to reduce branch mispredictions
+            // Let compiler auto-vectorize inner loops
             for (size_t a = 0; a < N_SU2; ++a) {
                 const double diff_a = new_spin[a] - old_spin[a];
-                if (std::abs(diff_a) < 1e-10) continue;
                 
-                // Compute dot product with better vectorization
                 double dot_result = 0.0;
-                #pragma omp simd reduction(+:dot_result)
                 for (size_t b = 0; b < N_SU3; ++b) {
                     dot_result += interaction[a*N_SU3 + b] * partner_spin[b];
                 }
@@ -865,8 +866,8 @@ class mixed_lattice
         double trilinear_energy_SU2 = 0.0;
         double trilinear_energy_mixed = 0.0;
         
-        // Process trilinear interactions in blocks for better cache utilization
-        constexpr size_t BLOCK_SIZE = 4; // Tune this parameter based on cache size
+        // Adaptive block size based on typical L1 cache size (32KB)
+        constexpr size_t BLOCK_SIZE = 8;
         
         for (size_t i_block = 0; i_block < num_tri_SU2; i_block += BLOCK_SIZE) {
             const size_t end_idx = std::min(i_block + BLOCK_SIZE, num_tri_SU2);
@@ -878,17 +879,18 @@ class mixed_lattice
                 const auto& partner2_spin = spins.spins_SU2[partner2_idx];
                 const auto& interaction = trilinear_interaction_SU2[site_index][i];
                 
-                // Process only non-zero differences to avoid unnecessary computations
+                // Let compiler auto-vectorize the tensor contraction
                 for (size_t a = 0; a < N_SU2; ++a) {
                     const double diff_a = new_spin[a] - old_spin[a];
-                    if (std::abs(diff_a) < 1e-10) continue;
                     
+                    double temp_sum = 0.0;
                     for (size_t b = 0; b < N_SU2; ++b) {
                         for (size_t c = 0; c < N_SU2; ++c) {
-                            trilinear_energy_SU2 += diff_a * interaction[(a*N_SU2 + b)*N_SU2 + c] * 
-                                                   partner1_spin[b] * partner2_spin[c];
+                            temp_sum += interaction[(a*N_SU2 + b)*N_SU2 + c] * 
+                                       partner1_spin[b] * partner2_spin[c];
                         }
                     }
+                    trilinear_energy_SU2 += diff_a * temp_sum;
                 }
             }
         }
@@ -904,17 +906,18 @@ class mixed_lattice
                 const auto& partner2_spin = spins.spins_SU3[partner2_idx];
                 const auto& interaction = mixed_trilinear_interaction_SU2[site_index][i];
                 
-                // Process only non-zero differences to avoid unnecessary calculations
+                // Let compiler auto-vectorize
                 for (size_t a = 0; a < N_SU2; ++a) {
                     const double diff_a = new_spin[a] - old_spin[a];
-                    if (std::abs(diff_a) < 1e-10) continue;
                     
+                    double temp_sum = 0.0;
                     for (size_t b = 0; b < N_SU2; ++b) {
                         for (size_t c = 0; c < N_SU3; ++c) {
-                            trilinear_energy_mixed += diff_a * interaction[(a*N_SU2 + b)*N_SU3 + c] * 
-                                                    partner1_spin[b] * partner2_spin[c];
+                            temp_sum += interaction[(a*N_SU2 + b)*N_SU3 + c] * 
+                                       partner1_spin[b] * partner2_spin[c];
                         }
                     }
+                    trilinear_energy_mixed += diff_a * temp_sum;
                 }
             }
         }
@@ -945,8 +948,8 @@ class mixed_lattice
         double bilinear_energy = 0.0;
         double bilinear_energy_mixed = 0.0;
         
-        // Use same prefetch distance for consistency
-        constexpr size_t PREFETCH_DIST = 4;
+        // Adaptive prefetch distance
+        constexpr size_t PREFETCH_DIST = 8;
         for (size_t i = 0; i < num_bi_SU3; ++i) {
             // Prefetch multiple iterations ahead
             if (i + PREFETCH_DIST < num_bi_SU3) {
@@ -961,13 +964,11 @@ class mixed_lattice
             const auto& partner_spin = spins.spins_SU3[partner_idx];
             const auto& interaction = bilinear_interaction_SU3[site_index][i];
             
-            // Inline the contract operation with better vectorization
+            // Let compiler auto-vectorize
             for (size_t a = 0; a < N_SU3; ++a) {
                 const double diff_a = new_spin[a] - old_spin[a];
-                if (std::abs(diff_a) < 1e-10) continue;
                 
                 double row_sum = 0.0;
-                #pragma omp simd reduction(+:row_sum)
                 for (size_t b = 0; b < N_SU3; ++b) {
                     row_sum += interaction[a*N_SU3 + b] * partner_spin[b];
                 }
@@ -990,13 +991,11 @@ class mixed_lattice
             const auto& partner_spin = spins.spins_SU2[partner_idx]; 
             const auto& interaction = mixed_bilinear_interaction_SU3[site_index][i];
             
-            // Process all non-zero differences with better vectorization
+            // Let compiler auto-vectorize
             for (size_t a = 0; a < N_SU3; ++a) {
                 const double diff_a = new_spin[a] - old_spin[a];
-                if (std::abs(diff_a) < 1e-10) continue;
                 
                 double dot_result = 0.0;
-                #pragma omp simd reduction(+:dot_result)
                 for (size_t b = 0; b < N_SU2; ++b) {
                     dot_result += interaction[a*N_SU2 + b] * partner_spin[b];
                 }
@@ -1010,9 +1009,9 @@ class mixed_lattice
         double trilinear_energy_SU3 = 0.0;
         double trilinear_energy_mixed = 0.0;
         
-        constexpr size_t BLOCK_SIZE = 4; // Tune based on cache size
+        constexpr size_t BLOCK_SIZE = 8;
 
-        // Optimized SU3 trilinear interactions with blocking and early skipping
+        // Optimized SU3 trilinear interactions with blocking
         for (size_t i_block = 0; i_block < num_tri_SU3; i_block += BLOCK_SIZE) {
             const size_t end_idx = std::min(i_block + BLOCK_SIZE, num_tri_SU3);
             
@@ -1023,17 +1022,18 @@ class mixed_lattice
                 const auto& partner2_spin = spins.spins_SU3[partner2_idx];
                 const auto& interaction = trilinear_interaction_SU3[site_index][i];
                 
-                // Skip computation for zero differences
+                // Let compiler auto-vectorize
                 for (size_t a = 0; a < N_SU3; ++a) {
                     const double diff_a = new_spin[a] - old_spin[a];
-                    if (std::abs(diff_a) < 1e-10) continue;
                     
+                    double temp_sum = 0.0;
                     for (size_t b = 0; b < N_SU3; ++b) {
                         for (size_t c = 0; c < N_SU3; ++c) {
-                            trilinear_energy_SU3 += diff_a * interaction[(a*N_SU3 + b)*N_SU3 + c] * 
-                                                   partner1_spin[b] * partner2_spin[c];
+                            temp_sum += interaction[(a*N_SU3 + b)*N_SU3 + c] * 
+                                       partner1_spin[b] * partner2_spin[c];
                         }
                     }
+                    trilinear_energy_SU3 += diff_a * temp_sum;
                 }
             }
         }
@@ -1049,16 +1049,18 @@ class mixed_lattice
                 const auto& partner2_spin = spins.spins_SU2[partner2_idx];
                 const auto& interaction = mixed_trilinear_interaction_SU3[site_index][i];
                 
+                // Let compiler auto-vectorize
                 for (size_t a = 0; a < N_SU3; ++a) {
                     const double diff_a = new_spin[a] - old_spin[a];
-                    if (std::abs(diff_a) < 1e-10) continue;
                     
+                    double temp_sum = 0.0;
                     for (size_t b = 0; b < N_SU2; ++b) {
                         for (size_t c = 0; c < N_SU2; ++c) {
-                            trilinear_energy_mixed += diff_a * interaction[(a*N_SU2 + b)*N_SU2 + c] * 
-                                                    partner1_spin[b] * partner2_spin[c];
+                            temp_sum += interaction[(a*N_SU2 + b)*N_SU2 + c] * 
+                                       partner1_spin[b] * partner2_spin[c];
                         }
                     }
+                    trilinear_energy_mixed += diff_a * temp_sum;
                 }
             }
         }
@@ -1087,13 +1089,12 @@ class mixed_lattice
         double mixed_bilinear_energy_SU3 = 0.0;
         double mixed_trilinear_energy_SU3 = 0.0;
         
-        // Process SU2 and SU3 lattices in parallel sections
+        // Process SU2 and SU3 lattices in parallel sections - no nested parallelism
         #pragma omp parallel sections reduction(+:field_energy_SU2,onsite_energy_SU2,bilinear_energy_SU2,trilinear_energy_SU2,mixed_trilinear_energy_SU2,field_energy_SU3,onsite_energy_SU3,bilinear_energy_SU3,trilinear_energy_SU3,mixed_trilinear_energy_SU3)
         {
             #pragma omp section
             {
-                // Process SU2 lattice with better vectorization opportunities
-                #pragma omp parallel for reduction(+:field_energy_SU2,onsite_energy_SU2,bilinear_energy_SU2,trilinear_energy_SU2,mixed_trilinear_energy_SU2) schedule(static)
+                // Process SU2 lattice - removed nested parallel for to avoid oversubscription
                 for(size_t site_index = 0; site_index < lattice_size_SU2; ++site_index) {
                     // Fetch current spin once to avoid repeated memory access
                     const auto& current_spin = curr_spins.spins_SU2[site_index];
@@ -1104,8 +1105,7 @@ class mixed_lattice
                     // Onsite energy computation
                     onsite_energy_SU2 += contract(current_spin, onsite_interaction_SU2[site_index], current_spin);
                     
-                    // Bilinear energy - use SIMD for auto-vectorization of hot loop
-                    #pragma omp simd reduction(+:bilinear_energy_SU2)
+                    // Bilinear energy - removed simd pragma (function calls prevent vectorization)
                     for (size_t i = 0; i < num_bi_SU2; ++i) {
                         bilinear_energy_SU2 += contract(
                             current_spin,
@@ -1115,7 +1115,6 @@ class mixed_lattice
                     }
 
                     // Mixed Bilinear energy - SU2-SU3 interactions
-                    #pragma omp simd reduction(+:mixed_bilinear_energy_SU2)
                     for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
                         mixed_bilinear_energy_SU2 += contract_mixed_bilinear(
                             current_spin,
@@ -1125,7 +1124,6 @@ class mixed_lattice
                     }
                     
                     // Trilinear energy - SU2 components
-                    #pragma omp simd reduction(+:trilinear_energy_SU2)
                     for (size_t i = 0; i < num_tri_SU2; ++i) {
                         trilinear_energy_SU2 += contract_trilinear(
                             trilinear_interaction_SU2[site_index][i],
@@ -1136,7 +1134,6 @@ class mixed_lattice
                     }
                     
                     // Mixed trilinear energy - SU2-SU3 interactions
-                    #pragma omp simd reduction(+:mixed_trilinear_energy_SU2)
                     for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
                         mixed_trilinear_energy_SU2 += contract_trilinear(
                             mixed_trilinear_interaction_SU2[site_index][i],
@@ -1150,8 +1147,7 @@ class mixed_lattice
             
             #pragma omp section
             {
-                // Process SU3 lattice
-                #pragma omp parallel for reduction(+:field_energy_SU3,onsite_energy_SU3,bilinear_energy_SU3,trilinear_energy_SU3,mixed_trilinear_energy_SU3) schedule(static)
+                // Process SU3 lattice - removed nested parallel for to avoid oversubscription
                 for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index) {
                     // Fetch current spin once to avoid repeated memory access
                     const auto& current_spin = curr_spins.spins_SU3[site_index];
@@ -1162,8 +1158,7 @@ class mixed_lattice
                     // Onsite energy computation
                     onsite_energy_SU3 += contract(current_spin, onsite_interaction_SU3[site_index], current_spin);
                     
-                    // Bilinear energy - use SIMD for auto-vectorization of hot loop
-                    #pragma omp simd reduction(+:bilinear_energy_SU3)
+                    // Bilinear energy - removed simd pragma (function calls prevent vectorization)
                     for (size_t i = 0; i < num_bi_SU3; ++i) {
                         bilinear_energy_SU3 += contract(
                             current_spin,
@@ -1173,7 +1168,6 @@ class mixed_lattice
                     }
 
                     // Mixed Bilinear energy - SU3-SU2 interactions
-                    #pragma omp simd reduction(+:mixed_bilinear_energy_SU3)
                     for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
                         mixed_bilinear_energy_SU3 += contract_mixed_bilinear(  
                             current_spin,
@@ -1183,7 +1177,6 @@ class mixed_lattice
                     }
                     
                     // Trilinear energy - SU3 components
-                    #pragma omp simd reduction(+:trilinear_energy_SU3)
                     for (size_t i = 0; i < num_tri_SU3; ++i) {
                         trilinear_energy_SU3 += contract_trilinear(
                             trilinear_interaction_SU3[site_index][i],
@@ -1194,7 +1187,6 @@ class mixed_lattice
                     }
                     
                     // Mixed trilinear energy - SU3-SU2 interactions
-                    #pragma omp simd reduction(+:mixed_trilinear_energy_SU3)
                     for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
                         mixed_trilinear_energy_SU3 += contract_trilinear(
                             mixed_trilinear_interaction_SU3[site_index][i],
@@ -1231,34 +1223,11 @@ class mixed_lattice
         field_drive_width_SU2 = pulse_width;
         t_B_1_SU2 = t_B;
         t_B_2_SU2 = t_B_2;
-
-        // Calculate the norm of z basis vector
-
-        double z_norm = 0.0;
-
-        z_norm = 5.264/2;
-
-        const array<double, N_SU3> drive_field_basis_z_SU3 = {{0,5.264/z_norm,0,0,0,0,0,0}};
-        // Normalize all basis vectors by the norm of z
-        const array<double, N_SU3> drive_field_basis_x_SU3 = {{0,0,0,0,2.3915/z_norm,0,0.9128/z_norm,0}};
-        const array<double, N_SU3> drive_field_basis_y_SU3 = {{0,0,0,0,2.7866/z_norm,0,-0.4655/z_norm,0}};
-
-
-
-        for (size_t atom_idx = 0; atom_idx < N_ATOMS_SU3; ++atom_idx) {
-            // Convert SU2 drive fields to SU3 basis
-            field_drive_1_SU3[atom_idx] = drive_field_basis_x_SU3 * field_drive_1_SU2[0][0] +
-                                          drive_field_basis_y_SU3 * field_drive_1_SU2[0][1] +
-                                          drive_field_basis_z_SU3 * field_drive_1_SU2[0][2];
-            field_drive_2_SU3[atom_idx] = drive_field_basis_x_SU3 * field_drive_2_SU2[0][0] +
-                                          drive_field_basis_y_SU3 * field_drive_2_SU2[0][1] +
-                                          drive_field_basis_z_SU3 * field_drive_2_SU2[0][2];
-        }
     }
 
     void set_pulse_SU3(const array<array<double,N_SU3>, N_ATOMS_SU3> &field_in_SU3, double t_B, const array<array<double,N_SU3>, N_ATOMS_SU3> &field_in_2_SU3, double t_B_2, double pulse_amp, double pulse_width, double pulse_freq){
-        field_drive_1_SU3 = field_in_SU3;
-        field_drive_2_SU3 = field_in_2_SU3;
+        field_drive_1_SU3 = {{0}};
+        field_drive_2_SU3 = {{0}};
         field_drive_amp_SU3 = pulse_amp;
         field_drive_freq_SU3 = pulse_freq;
         field_drive_width_SU3 = pulse_width;
@@ -1305,15 +1274,13 @@ class mixed_lattice
     array<double, N_SU2>  get_local_field_SU2(size_t site_index){
         array<double,N_SU2> local_field = multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], spins.spins_SU2[site_index]) * 2;
 
-        #pragma omp simd
+        // Removed simd pragmas - loops have function calls and data dependencies
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply<N_SU2, N_SU2>(bilinear_interaction_SU2[site_index][i], spins.spins_SU2[bilinear_partners_SU2[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
             local_field = local_field + multiply<N_SU2, N_SU3>(mixed_bilinear_interaction_SU2[site_index][i], spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
         }   
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             size_t partner1 = trilinear_partners_SU2[site_index][i][0];
             size_t partner2 = trilinear_partners_SU2[site_index][i][1];
@@ -1321,7 +1288,6 @@ class mixed_lattice
             array<double, N_SU2> current_spin_SU2_partner2 = spins.spins_SU2[partner2];
             local_field = local_field + contract_trilinear_field<N_SU2, N_SU2, N_SU2>(trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
             size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
@@ -1334,15 +1300,13 @@ class mixed_lattice
 
     array<double, N_SU3>  get_local_field_SU3(size_t site_index){
         array<double,N_SU3> local_field = multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], spins.spins_SU3[site_index]) * 2;
-        #pragma omp simd
+        // Removed simd pragmas - loops have function calls and data dependencies
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], spins.spins_SU3[bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i){
             local_field = local_field + multiply<N_SU3, N_SU2>(mixed_bilinear_interaction_SU3[site_index][i], spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             size_t partner1 = trilinear_partners_SU3[site_index][i][0];
             size_t partner2 = trilinear_partners_SU3[site_index][i][1];
@@ -1350,7 +1314,6 @@ class mixed_lattice
             array<double, N_SU3> current_spin_SU3_partner2 = spins.spins_SU3[partner2];
             local_field = local_field + contract_trilinear_field<N_SU3, N_SU3, N_SU3>(trilinear_interaction_SU3[site_index][i], current_spin_SU3_partner1, current_spin_SU3_partner2);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             size_t partner1 = mixed_trilinear_partners_SU3[site_index][i][0];
             size_t partner2 = mixed_trilinear_partners_SU3[site_index][i][1];
@@ -1545,15 +1508,13 @@ class mixed_lattice
     array<double, N_SU2>  get_local_field_SU2_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU2> local_field = {{0.0}};
         local_field += multiply<N_SU2, N_SU2>(onsite_interaction_SU2[site_index], current_spin_SU2[site_index]) * 2;
-        #pragma omp simd
+        // Removed simd pragmas - loops have function calls
         for (size_t i=0; i< num_bi_SU2; ++i) {
             local_field = local_field + multiply<N_SU2, N_SU2>(bilinear_interaction_SU2[site_index][i], current_spin_SU2[bilinear_partners_SU2[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
             local_field = local_field + multiply<N_SU2, N_SU3>(mixed_bilinear_interaction_SU2[site_index][i], current_spin_SU3[mixed_bilinear_partners_SU2[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2; ++i){
             size_t partner1 = trilinear_partners_SU2[site_index][i][0];
             size_t partner2 = trilinear_partners_SU2[site_index][i][1];
@@ -1561,7 +1522,6 @@ class mixed_lattice
             array<double, N_SU2> current_spin_SU2_partner2 = current_spin_SU2[partner2];
             local_field = local_field + contract_trilinear_field<N_SU2, N_SU2, N_SU2>(trilinear_interaction_SU2[site_index][i], current_spin_SU2_partner1, current_spin_SU2_partner2);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             size_t partner1 = mixed_trilinear_partners_SU2[site_index][i][0];
             size_t partner2 = mixed_trilinear_partners_SU2[site_index][i][1];
@@ -1575,15 +1535,13 @@ class mixed_lattice
     array<double, N_SU3>  get_local_field_SU3_lattice(size_t site_index, const spin_config_SU2 &current_spin_SU2, const spin_config_SU3 &current_spin_SU3){
         array<double,N_SU3> local_field = {{0.0}};
         local_field += multiply<N_SU3, N_SU3>(onsite_interaction_SU3[site_index], current_spin_SU3[site_index]) * 2;
-        #pragma omp simd
+        // Removed simd pragmas - loops have function calls
         for (size_t i=0; i< num_bi_SU3; ++i) {
             local_field = local_field + multiply<N_SU3, N_SU3>(bilinear_interaction_SU3[site_index][i], current_spin_SU3[bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_bi_SU2_SU3; ++i) {
             local_field = local_field + multiply<N_SU3, N_SU2>(mixed_bilinear_interaction_SU3[site_index][i], current_spin_SU2[mixed_bilinear_partners_SU3[site_index][i]]);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU3; ++i){
             size_t partner1 = trilinear_partners_SU3[site_index][i][0];
             size_t partner2 = trilinear_partners_SU3[site_index][i][1];
@@ -1591,7 +1549,6 @@ class mixed_lattice
             array<double, N_SU3> current_spin_SU3_partner2 = current_spin_SU3[partner2];
             local_field = local_field + contract_trilinear_field<N_SU3, N_SU3, N_SU3>(trilinear_interaction_SU3[site_index][i], current_spin_SU3_partner1, current_spin_SU3_partner2);
         }
-        #pragma omp simd
         for (size_t i=0; i < num_tri_SU2_SU3; ++i){
             size_t partner1 = mixed_trilinear_partners_SU3[site_index][i][0];
             size_t partner2 = mixed_trilinear_partners_SU3[site_index][i][1];
@@ -2228,33 +2185,34 @@ class mixed_lattice
     }
 
     void RK4_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
+        // Pre-compute step size multiplications
+        const double half_step = 0.5 * step_size;
+        const double sixth_step = step_size / 6.0;
+        
         spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
         spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time);
 
-        spin_config_SU2 lval_k2_SU2 = curr_spins.spins_SU2 + k1_SU2*(0.5*step_size);
-        spin_config_SU3 lval_k2_SU3 = curr_spins.spins_SU3 + k1_SU3*(0.5*step_size);
+        spin_config_SU2 lval_k2_SU2 = curr_spins.spins_SU2 + k1_SU2 * half_step;
+        spin_config_SU3 lval_k2_SU3 = curr_spins.spins_SU3 + k1_SU3 * half_step;
 
-        spin_config_SU2 k2_SU2 = landau_lifshitz_SU2(lval_k2_SU2, lval_k2_SU3, curr_time + step_size*0.5);
-        spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(lval_k2_SU2, lval_k2_SU3, curr_time + step_size*0.5);
+        spin_config_SU2 k2_SU2 = landau_lifshitz_SU2(lval_k2_SU2, lval_k2_SU3, curr_time + half_step);
+        spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(lval_k2_SU2, lval_k2_SU3, curr_time + half_step);
 
-        spin_config_SU2 lval_k3_SU2 = curr_spins.spins_SU2 + k2_SU2*(0.5*step_size);
-        spin_config_SU3 lval_k3_SU3 = curr_spins.spins_SU3 + k2_SU3*(0.5*step_size);
+        spin_config_SU2 lval_k3_SU2 = curr_spins.spins_SU2 + k2_SU2 * half_step;
+        spin_config_SU3 lval_k3_SU3 = curr_spins.spins_SU3 + k2_SU3 * half_step;
 
-        spin_config_SU2 k3_SU2 = landau_lifshitz_SU2(lval_k3_SU2, lval_k3_SU3, curr_time + step_size*0.5);
-        spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(lval_k3_SU2, lval_k3_SU3, curr_time + step_size*0.5);
+        spin_config_SU2 k3_SU2 = landau_lifshitz_SU2(lval_k3_SU2, lval_k3_SU3, curr_time + half_step);
+        spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(lval_k3_SU2, lval_k3_SU3, curr_time + half_step);
 
-        spin_config_SU2 lval_k4_SU2 = curr_spins.spins_SU2 + k3_SU2*step_size;
-        spin_config_SU3 lval_k4_SU3 = curr_spins.spins_SU3 + k3_SU3*step_size;
+        spin_config_SU2 lval_k4_SU2 = curr_spins.spins_SU2 + k3_SU2 * step_size;
+        spin_config_SU3 lval_k4_SU3 = curr_spins.spins_SU3 + k3_SU3 * step_size;
 
         spin_config_SU2 k4_SU2 = landau_lifshitz_SU2(lval_k4_SU2, lval_k4_SU3, curr_time + step_size);
         spin_config_SU3 k4_SU3 = landau_lifshitz_SU3(lval_k4_SU2, lval_k4_SU3, curr_time + step_size);
 
-        spin_config_SU2 new_spins_SU2 = curr_spins.spins_SU2 + (k1_SU2+ k2_SU2 * 2 + k3_SU2 * 2 + k4_SU2)*(step_size/6);
-        spin_config_SU3 new_spins_SU3 = curr_spins.spins_SU3 + (k1_SU3+ k2_SU3 * 2 + k3_SU3 * 2 + k4_SU3)*(step_size/6);
-
-        curr_spins.spins_SU2 = std::move(new_spins_SU2);
-        curr_spins.spins_SU3 = std::move(new_spins_SU3);
-
+        // Direct update without intermediate variable
+        curr_spins.spins_SU2 += (k1_SU2 + k2_SU2 * 2.0 + k3_SU2 * 2.0 + k4_SU2) * sixth_step;
+        curr_spins.spins_SU3 += (k1_SU3 + k2_SU3 * 2.0 + k3_SU3 * 2.0 + k4_SU3) * sixth_step;
     }
 
     void RK45_step(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
@@ -2298,38 +2256,45 @@ class mixed_lattice
     }
     
     void RK45_step_fixed(double &step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol){
-        spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
-        spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time)*step_size;
+        // Pre-compute RK45 coefficients and step sizes
+        constexpr double a21 = 1.0/4.0, c2 = 1.0/4.0;
+        constexpr double a31 = 3.0/32.0, a32 = 9.0/32.0, c3 = 3.0/8.0;
+        constexpr double a41 = 1932.0/2197.0, a42 = -7200.0/2197.0, a43 = 7296.0/2197.0, c4 = 12.0/13.0;
+        constexpr double a51 = 439.0/216.0, a52 = -8.0, a53 = 3680.0/513.0, a54 = -845.0/4104.0;
+        constexpr double a61 = -8.0/27.0, a62 = 2.0, a63 = -3544.0/2565.0, a64 = 1859.0/4104.0, a65 = -11.0/40.0, c6 = 0.5;
+        constexpr double b1 = 25.0/216.0, b3 = 1408.0/2565.0, b4 = 2197.0/4101.0, b5 = -1.0/5.0;
+        constexpr double b1p = 16.0/135.0, b3p = 6656.0/12825.0, b4p = 28561.0/56430.0, b5p = -9.0/50.0, b6p = 2.0/55.0;
+        
+        spin_config_SU2 k1_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * step_size;
+        spin_config_SU3 k1_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2, curr_spins.spins_SU3, curr_time) * step_size;
 
-        spin_config_SU2 k2_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(1.0/4.0), curr_spins.spins_SU3 + k1_SU3*(1.0/4.0), curr_time + step_size*(1/4))*step_size;
-        spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(1.0/4.0), curr_spins.spins_SU3 + k1_SU3*(1.0/4.0), curr_time + step_size*(1/4))*step_size;
+        spin_config_SU2 k2_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2 * a21, curr_spins.spins_SU3 + k1_SU3 * a21, curr_time + step_size * c2) * step_size;
+        spin_config_SU3 k2_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2 * a21, curr_spins.spins_SU3 + k1_SU3 * a21, curr_time + step_size * c2) * step_size;
 
-        spin_config_SU2 k3_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(3.0/32.0)+ k2_SU2*(9.0/32.0), curr_spins.spins_SU3 + k1_SU3*(3.0/32.0)+ k2_SU3*(9.0/32.0), curr_time + step_size*(3/8))*step_size;
-        spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(3.0/32.0)+ k2_SU2*(9.0/32.0), curr_spins.spins_SU3 + k1_SU3*(3.0/32.0)+ k2_SU3*(9.0/32.0), curr_time + step_size*(3/8))*step_size;
+        spin_config_SU2 k3_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2 * a31 + k2_SU2 * a32, curr_spins.spins_SU3 + k1_SU3 * a31 + k2_SU3 * a32, curr_time + step_size * c3) * step_size;
+        spin_config_SU3 k3_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2 * a31 + k2_SU2 * a32, curr_spins.spins_SU3 + k1_SU3 * a31 + k2_SU3 * a32, curr_time + step_size * c3) * step_size;
 
-        spin_config_SU2 k4_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(1932.0/2197.0)+ k2_SU2*(-7200.0/2197.0) + k3_SU2*(7296.0/2197.0), curr_spins.spins_SU3 + k1_SU3*(1932.0/2197.0) + k2_SU3*(-7200.0/2197.0) + k3_SU3*(7296.0/2197.0), curr_time + step_size*(12/13))*step_size;
-        spin_config_SU3 k4_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(1932.0/2197.0)+ k2_SU2*(-7200.0/2197.0) + k3_SU2*(7296.0/2197.0), curr_spins.spins_SU3 + k1_SU3*(1932.0/2197.0) + k2_SU3*(-7200.0/2197.0) + k3_SU3*(7296.0/2197.0), curr_time + step_size*(12/13))*step_size;
+        spin_config_SU2 k4_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2 * a41 + k2_SU2 * a42 + k3_SU2 * a43, curr_spins.spins_SU3 + k1_SU3 * a41 + k2_SU3 * a42 + k3_SU3 * a43, curr_time + step_size * c4) * step_size;
+        spin_config_SU3 k4_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2 * a41 + k2_SU2 * a42 + k3_SU2 * a43, curr_spins.spins_SU3 + k1_SU3 * a41 + k2_SU3 * a42 + k3_SU3 * a43, curr_time + step_size * c4) * step_size;
 
-        spin_config_SU2 k5_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
-        spin_config_SU3 k5_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(439.0/216.0) + k2_SU2*(-8.0) + k3_SU2*(3680.0/513.0) + k4_SU2*(-845.0/4104.0), curr_spins.spins_SU3 + k1_SU3*(439.0/216.0) + k2_SU3*(-8.0) + k3_SU3*(3680.0/513.0) + k4_SU3*(-845.0/4104.0), curr_time + step_size)*step_size;
+        spin_config_SU2 k5_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2 * a51 + k2_SU2 * a52 + k3_SU2 * a53 + k4_SU2 * a54, curr_spins.spins_SU3 + k1_SU3 * a51 + k2_SU3 * a52 + k3_SU3 * a53 + k4_SU3 * a54, curr_time + step_size) * step_size;
+        spin_config_SU3 k5_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2 * a51 + k2_SU2 * a52 + k3_SU2 * a53 + k4_SU2 * a54, curr_spins.spins_SU3 + k1_SU3 * a51 + k2_SU3 * a52 + k3_SU3 * a53 + k4_SU3 * a54, curr_time + step_size) * step_size;
 
-        spin_config_SU2 k6_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
-        spin_config_SU3 k6_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2*(-8.0/27.0)+ k2_SU2*(2.0) + k3_SU2*(-3544.0/2565.0)+ k4_SU2*(1859.0/4104.0)+ k5_SU2*(-11.0/40.0), curr_spins.spins_SU3 + k1_SU3*(-8.0/27.0) + k2_SU3*(2.0) + k3_SU3*(-3544.0/2565.0)+ k4_SU3*(1859.0/4104.0)+ k5_SU3*(-11.0/40.0), curr_time + step_size/2)*step_size;
+        spin_config_SU2 k6_SU2 = landau_lifshitz_SU2(curr_spins.spins_SU2 + k1_SU2 * a61 + k2_SU2 * a62 + k3_SU2 * a63 + k4_SU2 * a64 + k5_SU2 * a65, curr_spins.spins_SU3 + k1_SU3 * a61 + k2_SU3 * a62 + k3_SU3 * a63 + k4_SU3 * a64 + k5_SU3 * a65, curr_time + step_size * c6) * step_size;
+        spin_config_SU3 k6_SU3 = landau_lifshitz_SU3(curr_spins.spins_SU2 + k1_SU2 * a61 + k2_SU2 * a62 + k3_SU2 * a63 + k4_SU2 * a64 + k5_SU2 * a65, curr_spins.spins_SU3 + k1_SU3 * a61 + k2_SU3 * a62 + k3_SU3 * a63 + k4_SU3 * a64 + k5_SU3 * a65, curr_time + step_size * c6) * step_size;
 
-        spin_config_SU2 y_SU2 = curr_spins.spins_SU2 + k1_SU2*(25.0/216.0) + k3_SU2*(1408.0/2565.0) + k4_SU2*(2197.0/4101.0) - k5_SU2*(1.0/5.0);
-        spin_config_SU3 y_SU3 = curr_spins.spins_SU3 + k1_SU3*(25.0/216.0) + k3_SU3*(1408.0/2565.0) + k4_SU3*(2197.0/4101.0) - k5_SU3*(1.0/5.0);
+        spin_config_SU2 y_SU2 = curr_spins.spins_SU2 + k1_SU2 * b1 + k3_SU2 * b3 + k4_SU2 * b4 + k5_SU2 * b5;
+        spin_config_SU3 y_SU3 = curr_spins.spins_SU3 + k1_SU3 * b1 + k3_SU3 * b3 + k4_SU3 * b4 + k5_SU3 * b5;
 
-        spin_config_SU2 z_SU2 = curr_spins.spins_SU2 + k1_SU2*(16.0/135.0) + k3_SU2*(6656.0/12825.0) + k4_SU2*(28561.0/56430.0) - k5_SU2*(9.0/50.0) + k6_SU2*(2.0/55.0);
-        spin_config_SU3 z_SU3 = curr_spins.spins_SU3 + k1_SU3*(16.0/135.0) + k3_SU3*(6656.0/12825.0) + k4_SU3*(28561.0/56430.0) - k5_SU3*(9.0/50.0) + k6_SU3*(2.0/55.0);
+        // Direct update without intermediate variable
+        curr_spins.spins_SU2 += k1_SU2 * b1p + k3_SU2 * b3p + k4_SU2 * b4p + k5_SU2 * b5p + k6_SU2 * b6p;
+        curr_spins.spins_SU3 += k1_SU3 * b1p + k3_SU3 * b3p + k4_SU3 * b4p + k5_SU3 * b5p + k6_SU3 * b6p;
 
-        double error_SU2 = norm_average_2D(y_SU2-z_SU2);
-        double error_SU3 = norm_average_2D(y_SU3-z_SU3);
+        double error_SU2 = norm_average_2D(y_SU2 - curr_spins.spins_SU2);
+        double error_SU3 = norm_average_2D(y_SU3 - curr_spins.spins_SU3);
 
         double error = max(error_SU2, error_SU3);
-        step_size *= 0.9*pow(tol/error, 0.2);
-
-        curr_spins.spins_SU2 = std::move(z_SU2);
-        curr_spins.spins_SU3 = std::move(z_SU3);
+        step_size *= 0.9 * pow(tol / error, 0.2);
     }
     
     void euler_step(const double step_size, mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &curr_spins, const double &curr_time, const double tol) {
@@ -2503,12 +2468,16 @@ class mixed_lattice
     array<double,N_SU2> magnetization_local(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU2> mag = {{0}};
         
-        #pragma omp parallel
+        // Use aligned arrays for better vectorization
+        alignas(64) double mag_data[N_SU2] = {0};
+        
+        #pragma omp parallel proc_bind(close)
         {
-            array<double,N_SU2> local_mag = {{0}};
+            alignas(64) double local_mag[N_SU2] = {0};
             
-            #pragma omp for nowait
+            #pragma omp for schedule(static) nowait
             for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU2; ++j) {
                     local_mag[j] += spin_t.spins_SU2[i][j];
                 }
@@ -2516,15 +2485,17 @@ class mixed_lattice
             
             #pragma omp critical
             {
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU2; ++j) {
-                    mag[j] += local_mag[j];
+                    mag_data[j] += local_mag[j];
                 }
             }
         }
         
         const double inv_size = 1.0 / double(lattice_size_SU2);
+        #pragma omp simd
         for (size_t j = 0; j < N_SU2; ++j) {
-            mag[j] *= inv_size;
+            mag[j] = mag_data[j] * inv_size;
         }
         
         return mag;
@@ -2533,13 +2504,17 @@ class mixed_lattice
     array<double,N_SU2> magnetization_local_antiferromagnetic(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU2> mag = {{0}};
         
-        #pragma omp parallel
+        // Use aligned arrays for better vectorization
+        alignas(64) double mag_data[N_SU2] = {0};
+        
+        #pragma omp parallel proc_bind(close)
         {
-            array<double,N_SU2> local_mag = {{0}};
+            alignas(64) double local_mag[N_SU2] = {0};
             
-            #pragma omp for nowait
+            #pragma omp for schedule(static) nowait
             for (size_t i = 0; i < lattice_size_SU2; ++i) {
                 const int sign = 1 - 2 * (i & 1); // Efficient (-1)^i calculation
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU2; ++j) {
                     local_mag[j] += spin_t.spins_SU2[i][j] * sign;
                 }
@@ -2547,15 +2522,17 @@ class mixed_lattice
             
             #pragma omp critical
             {
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU2; ++j) {
-                    mag[j] += local_mag[j];
+                    mag_data[j] += local_mag[j];
                 }
             }
         }
         
         const double inv_size = 1.0 / double(lattice_size_SU2);
+        #pragma omp simd
         for (size_t j = 0; j < N_SU2; ++j) {
-            mag[j] *= inv_size;
+            mag[j] = mag_data[j] * inv_size;
         }
         
         return mag;
@@ -2564,12 +2541,16 @@ class mixed_lattice
     array<double,N_SU3> magnetization_local_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU3> mag = {{0}};
         
-        #pragma omp parallel
+        // Use aligned arrays for better vectorization
+        alignas(64) double mag_data[N_SU3] = {0};
+        
+        #pragma omp parallel proc_bind(close)
         {
-            array<double,N_SU3> local_mag = {{0}};
+            alignas(64) double local_mag[N_SU3] = {0};
             
-            #pragma omp for nowait
+            #pragma omp for schedule(static) nowait
             for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU3; ++j) {
                     local_mag[j] += spin_t.spins_SU3[i][j];
                 }
@@ -2577,15 +2558,17 @@ class mixed_lattice
             
             #pragma omp critical
             {
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU3; ++j) {
-                    mag[j] += local_mag[j];
+                    mag_data[j] += local_mag[j];
                 }
             }
         }
         
         const double inv_size = 1.0 / double(lattice_size_SU3);
+        #pragma omp simd
         for (size_t j = 0; j < N_SU3; ++j) {
-            mag[j] *= inv_size;
+            mag[j] = mag_data[j] * inv_size;
         }
         
         return mag;
@@ -2594,13 +2577,17 @@ class mixed_lattice
     array<double,N_SU3> magnetization_local_antiferromagnetic_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU3> mag = {{0}};
         
-        #pragma omp parallel
+        // Use aligned arrays for better vectorization
+        alignas(64) double mag_data[N_SU3] = {0};
+        
+        #pragma omp parallel proc_bind(close)
         {
-            array<double,N_SU3> local_mag = {{0}};
+            alignas(64) double local_mag[N_SU3] = {0};
             
-            #pragma omp for nowait
+            #pragma omp for schedule(static) nowait
             for (size_t i = 0; i < lattice_size_SU3; ++i) {
                 const int sign = 1 - 2 * (i & 1); // Efficient (-1)^i calculation
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU3; ++j) {
                     local_mag[j] += spin_t.spins_SU3[i][j] * sign;
                 }
@@ -2608,134 +2595,72 @@ class mixed_lattice
             
             #pragma omp critical
             {
+                #pragma omp simd
                 for (size_t j = 0; j < N_SU3; ++j) {
-                    mag[j] += local_mag[j];
+                    mag_data[j] += local_mag[j];
                 }
             }
         }
         
         const double inv_size = 1.0 / double(lattice_size_SU3);
+        #pragma omp simd
         for (size_t j = 0; j < N_SU3; ++j) {
-            mag[j] *= inv_size;
+            mag[j] = mag_data[j] * inv_size;
         }
         
         return mag;
     }
 
-    array<double,N_SU2> magnetization_global(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t, array<array<array<double, N_SU2>, N_SU2>, N_ATOMS_SU2> &basis_SU2) {
+    array<double,N_SU2> magnetization_global(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU2> mag = {{0}};
         
-        // Accumulate per-atom magnetizations
-        array<array<double,N_SU2>, N_ATOMS_SU2> atom_mag = {{0}};
-        
-        #pragma omp parallel
-        {
-            // Thread-local accumulator to reduce false sharing
-            array<array<double,N_SU2>, N_ATOMS_SU2> local_atom_mag = {{0}};
-            
-            // Process sites with better memory access pattern
-            #pragma omp for schedule(static)
-            for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                const size_t atom_idx = i % N_ATOMS_SU2;
-                
-                // Vectorizable inner loop
-                #pragma omp simd
-                for (size_t j = 0; j < N_SU2; ++j) {
-                    local_atom_mag[atom_idx][j] += spin_t.spins_SU2[i][j];
-                }
-            }
-            
-            // Reduce thread-local results - only critical for final accumulation
-            #pragma omp critical
-            {
-                for (size_t atom = 0; atom < N_ATOMS_SU2; ++atom) {
-                    #pragma omp simd
-                    for (size_t j = 0; j < N_SU2; ++j) {
-                        atom_mag[atom][j] += local_atom_mag[atom][j];
+        // Transform spins to global frame per-site using sublattice frames
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    for (size_t l = 0; l < N_ATOMS_SU2; ++l) {
+                        size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU2);
+                        
+                        // Transform spin to global frame using sublattice frame
+                        array<double,N_SU2> spin_global = {{0}};
+                        for (size_t mu = 0; mu < N_SU2; ++mu) {
+                            for (size_t nu = 0; nu < N_SU2; ++nu) {
+                                spin_global[mu] += sublattice_frames_SU2[l][nu][mu] * spin_t.spins_SU2[current_site_index][nu];
+                            }
+                        }
+                        mag = mag + spin_global;
                     }
                 }
             }
         }
         
-        // Apply basis transformation outside parallel region (done once)
-        // This avoids redundant calculations in the critical section
-        for (size_t atom = 0; atom < N_ATOMS_SU2; ++atom) {
-            for (size_t j = 0; j < N_SU2; ++j) {
-                double sum = 0.0;
-                #pragma omp simd reduction(+:sum)
-                for (size_t k = 0; k < N_SU2; ++k) {
-                    sum += basis_SU2[atom][j][k] * atom_mag[atom][k];
-                }
-                mag[j] += sum;
-            }
-        }
-        
-        // Normalize
-        const double inv_size = 1.0 / double(lattice_size_SU2);
-        #pragma omp simd
-        for (size_t j = 0; j < N_SU2; ++j) {
-            mag[j] *= inv_size;
-        }
-        
-        return mag;
+        return mag / double(lattice_size_SU2);
     }
 
-    array<double,N_SU3> magnetization_global_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t, array<array<array<double, N_SU3>, N_SU3>, N_ATOMS_SU3> &basis_SU3) {
+    array<double,N_SU3> magnetization_global_SU3(mixed_lattice_spin<N_SU2, N_ATOMS_SU2*dim1*dim2*dim, N_SU3, N_ATOMS_SU3*dim1*dim2*dim> &spin_t) {
         array<double,N_SU3> mag = {{0}};
         
-        // Accumulate per-atom magnetizations
-        array<array<double,N_SU3>, N_ATOMS_SU3> atom_mag = {{0}};
-        
-        #pragma omp parallel
-        {
-            // Thread-local accumulator to reduce false sharing
-            array<array<double,N_SU3>, N_ATOMS_SU3> local_atom_mag = {{0}};
-            
-            // Process sites with better memory access pattern
-            #pragma omp for schedule(static)
-            for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                const size_t atom_idx = i % N_ATOMS_SU3;
-                
-                // Vectorizable inner loop
-                #pragma omp simd
-                for (size_t j = 0; j < N_SU3; ++j) {
-                    local_atom_mag[atom_idx][j] += spin_t.spins_SU3[i][j];
-                }
-            }
-            
-            // Reduce thread-local results - only critical for final accumulation
-            #pragma omp critical
-            {
-                for (size_t atom = 0; atom < N_ATOMS_SU3; ++atom) {
-                    #pragma omp simd
-                    for (size_t j = 0; j < N_SU3; ++j) {
-                        atom_mag[atom][j] += local_atom_mag[atom][j];
+        // Transform spins to global frame per-site using sublattice frames
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
+                        size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU3);
+                        
+                        // Transform spin to global frame using sublattice frame
+                        array<double,N_SU3> spin_global = {{0}};
+                        for (size_t mu = 0; mu < N_SU3; ++mu) {
+                            for (size_t nu = 0; nu < N_SU3; ++nu) {
+                                spin_global[mu] += sublattice_frames_SU3[l][nu][mu] * spin_t.spins_SU3[current_site_index][nu];
+                            }
+                        }
+                        mag = mag + spin_global;
                     }
                 }
             }
         }
         
-        // Apply basis transformation outside parallel region (done once)
-        // This avoids redundant calculations in the critical section
-        for (size_t atom = 0; atom < N_ATOMS_SU3; ++atom) {
-            for (size_t j = 0; j < N_SU3; ++j) {
-                double sum = 0.0;
-                #pragma omp simd reduction(+:sum)
-                for (size_t k = 0; k < N_SU3; ++k) {
-                    sum += basis_SU3[atom][j][k] * atom_mag[atom][k];
-                }
-                mag[j] += sum;
-            }
-        }
-        
-        // Normalize
-        const double inv_size = 1.0 / double(lattice_size_SU3);
-        #pragma omp simd
-        for (size_t j = 0; j < N_SU3; ++j) {
-            mag[j] *= inv_size;
-        }
-        
-        return mag;
+        return mag / double(lattice_size_SU3);
     }
 
     void molecular_dynamics(double T_start, double T_end, double step_size, string dir_name, bool verbose= false) {

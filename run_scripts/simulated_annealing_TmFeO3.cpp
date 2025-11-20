@@ -64,7 +64,8 @@ static std::string getString(const std::unordered_map<std::string, std::string> 
     return it->second;
 }
 
-void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir){
+
+mixed_UnitCell<3, 4, 8, 4> setup_lattice(double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir){
     filesystem::create_directories(dir);
     TmFeO3_Fe<3> Fe_atoms;
     TmFeO3_Tm<8> Tm_atoms;
@@ -355,7 +356,6 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
 
     }
 
-
     cout << "\n========================================" << endl;
     cout << "Finished setting up TmFeO3 model." << endl;
     cout << "========================================" << endl;
@@ -401,10 +401,16 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     }
     param_log.close();
 
+    return TFO;
+}
+
+void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir){
+    mixed_UnitCell<3, 4, 8, 4> TFO = setup_lattice(Jai, Jbi, Jci, J2ai, J2bi, J2ci, Ka, Kc, D1, D2, e1, e2, chii, xii, h, fielddir, dir);
     mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
     cout << "Starting simulated annealing from T=" << T_start << " to T=" << T_end << endl;
-    MC.simulated_annealing(T_start, T_end, 10000, 0, 100, true);
+    MC.simulated_annealing(T_start, T_end, 10000, 0, 10, false);
 
+    MC.write_to_file_spin(dir + "/spin");
     cout << "Running zero temperature relaxation sweeps..." << endl;
     for (size_t i = 0; i < 100000; ++i) {
         MC.deterministic_sweep();
@@ -458,7 +464,7 @@ int main(int argc, char** argv) {
         Kc = (argc > 6) ? atof(argv[6]) : -0.09;
         D1 = (argc > 7) ? atof(argv[7]) : 0.0;
         D2 = (argc > 8) ? atof(argv[8]) : 0.0;
-        chii = (argc > 9) ? atof(argv[9]) : 0.05;
+        chii = (argc > 9) ? atof(argv[9]) : 0.0;
         xii = (argc > 10) ? atof(argv[10]) : 0.0;
         e1 = (argc > 11) ? atof(argv[11]) : 4.0;
         e2 = (argc > 12) ? atof(argv[12]) : 0.0;
