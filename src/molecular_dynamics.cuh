@@ -658,13 +658,13 @@ private:
         if (max_mixed_bilinear_neighbors_SU3 > 0){ 
             std::vector<double> temp_mixed_bi_SU3(lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * N_SU2 * N_SU3, 0.0);
             std::vector<size_t> temp_mixed_bi_partners_SU3(lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3, 0);
-            // Fill mixed bilinear data for SU2
+            // Fill mixed bilinear data for SU3
             for (size_t site = 0; site < lattice_size_SU3; ++site) {
-                const auto& interactions = this->mixed_bilinear_interaction_SU2[site];
+                const auto& interactions = this->mixed_bilinear_interaction_SU3[site];
                 const auto& partner = this->mixed_bilinear_partners_SU3[site];
 
-                for (size_t i = 0; i < max_mixed_bilinear_neighbors_SU2; ++i) {
-                    size_t base_idx = site * max_mixed_bilinear_neighbors_SU2 * N_SU2 * N_SU3 + i * N_SU2 * N_SU3;
+                for (size_t i = 0; i < max_mixed_bilinear_neighbors_SU3; ++i) {
+                    size_t base_idx = site * max_mixed_bilinear_neighbors_SU3 * N_SU2 * N_SU3 + i * N_SU2 * N_SU3;
                     for (size_t j = 0; j < N_SU2 * N_SU3; ++j) {
                         temp_mixed_bi_SU3[base_idx + j] = interactions[i][j];
                     }
@@ -1451,52 +1451,35 @@ __device__
 void compute_local_field_SU2(
     double* out,
     int site_index,
-    const double* spins_SU2,
-    const double* field_SU2,
-    const double* onsite_interaction_SU2,
-    const double* bilinear_interaction_SU2,
-    const size_t* bilinear_partners_SU2,
-    const double* trilinear_interaction_SU2,
-    const size_t* trilinear_partners_SU2,
-    const double* mixed_bilinear_interaction_SU2,
-    const size_t* mixed_bilinear_partners_SU2,
-    const double* mixed_trilinear_interaction_SU2,
-    const size_t* mixed_trilinear_partners_SU2,
-    const double* spins_SU3,
-    size_t num_bi_SU2,
-    size_t num_tri_SU2,
-    size_t num_bi_SU2_SU3,
-    size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors,
-    size_t max_tri_neighbors,
-    size_t max_mixed_bi_neighbors,
-    size_t max_mixed_tri_neighbors
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params
 ) {
     double local_field[N_SU2] = {0.0};
 
     // Onsite contribution with better memory access pattern
     const size_t onsite_base = site_index * N_SU2 * N_SU2;
-    const double* spin_site = &spins_SU2[site_index * N_SU2];
+    const double* spin_site = &su2_params.spins[site_index * N_SU2];
     
     #pragma unroll
     for (size_t i = 0; i < N_SU2; ++i) {
         double sum = 0.0;
         #pragma unroll
         for (size_t j = 0; j < N_SU2; ++j) {
-            sum += 2 * onsite_interaction_SU2[onsite_base + i * N_SU2 + j] * spin_site[j];
+            sum += 2 * su2_params.onsite_interaction[onsite_base + i * N_SU2 + j] * spin_site[j];
         }
         local_field[i] = sum;
     }
     
     // Bilinear contributions with improved memory access
-    if (num_bi_SU2 > 0) {
-        const size_t partner_base = site_index * max_bi_neighbors;
+    if (su2_params.num_bi > 0) {
+        const size_t partner_base = site_index * su2_params.max_bi_neighbors;
         const size_t interaction_base = partner_base * N_SU2 * N_SU2;
         
-        for (size_t i = 0; i < num_bi_SU2; ++i) {
-            const size_t partner = bilinear_partners_SU2[partner_base + i];
+        for (size_t i = 0; i < su2_params.num_bi; ++i) {
+            const size_t partner = su2_params.bilinear_partners[partner_base + i];
             if (partner < lattice_size_SU2) {
-                const double* spin_partner = &spins_SU2[partner * N_SU2];
+                const double* spin_partner = &su2_params.spins[partner * N_SU2];
                 const size_t i_base = interaction_base + i * N_SU2 * N_SU2;
                 
                 #pragma unroll
@@ -1504,7 +1487,7 @@ void compute_local_field_SU2(
                     double sum = 0.0;
                     #pragma unroll
                     for (size_t k = 0; k < N_SU2; ++k) {
-                        sum += bilinear_interaction_SU2[i_base + j * N_SU2 + k] * spin_partner[k];
+                        sum += su2_params.bilinear_interaction[i_base + j * N_SU2 + k] * spin_partner[k];
                     }
                     local_field[j] += sum;
                 }
@@ -1513,20 +1496,20 @@ void compute_local_field_SU2(
     }
     
     // Trilinear contributions with optimized access patterns
-    if (num_tri_SU2 > 0) {
-        const size_t partner_base = site_index * max_tri_neighbors * 2;
-        const size_t interaction_base = site_index * max_tri_neighbors * N_SU2 * N_SU2 * N_SU2;
+    if (su2_params.num_tri > 0) {
+        const size_t partner_base = site_index * su2_params.max_tri_neighbors * 2;
+        const size_t interaction_base = site_index * su2_params.max_tri_neighbors * N_SU2 * N_SU2 * N_SU2;
         
-        for (size_t i = 0; i < num_tri_SU2; ++i) {
-            const size_t partner1 = trilinear_partners_SU2[partner_base + i * 2];
-            const size_t partner2 = trilinear_partners_SU2[partner_base + i * 2 + 1];
+        for (size_t i = 0; i < su2_params.num_tri; ++i) {
+            const size_t partner1 = su2_params.trilinear_partners[partner_base + i * 2];
+            const size_t partner2 = su2_params.trilinear_partners[partner_base + i * 2 + 1];
             
             if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {
                 double temp[N_SU2] = {0.0};
                 contract_trilinear_field_device(temp,
-                    &trilinear_interaction_SU2[interaction_base + i * N_SU2 * N_SU2 * N_SU2],
-                    &spins_SU2[partner1 * N_SU2], 
-                    &spins_SU2[partner2 * N_SU2], 
+                    &su2_params.trilinear_interaction[interaction_base + i * N_SU2 * N_SU2 * N_SU2],
+                    &su2_params.spins[partner1 * N_SU2], 
+                    &su2_params.spins[partner2 * N_SU2], 
                     N_SU2);
                 
                 #pragma unroll
@@ -1538,13 +1521,13 @@ void compute_local_field_SU2(
     }
 
     // Mixed bilinear contributions with improved memory access
-    if (num_bi_SU2_SU3 > 0) {
-        const size_t partner_base = site_index * max_mixed_bi_neighbors;
+    if (mixed_params.num_bi_SU2_SU3 > 0) {
+        const size_t partner_base = site_index * mixed_params.max_mixed_bi_neighbors_SU2;
         const size_t interaction_base = partner_base * N_SU2 * N_SU3;
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
-            const size_t partner = mixed_bilinear_partners_SU2[partner_base + i];
+        for (size_t i = 0; i < mixed_params.num_bi_SU2_SU3; ++i) {
+            const size_t partner = mixed_params.mixed_bilinear_partners_SU2[partner_base + i];
             if (partner < lattice_size_SU3) {
-                const double* spin_partner = &spins_SU3[partner * N_SU3];
+                const double* spin_partner = &su3_params.spins[partner * N_SU3];
                 const size_t i_base = interaction_base + i * N_SU2 * N_SU3;
                 
                 #pragma unroll
@@ -1552,7 +1535,7 @@ void compute_local_field_SU2(
                     double sum = 0.0;
                     #pragma unroll
                     for (size_t k = 0; k < N_SU3; ++k) {
-                        sum += mixed_bilinear_interaction_SU2[i_base + j * N_SU3 + k] * spin_partner[k];
+                        sum += mixed_params.mixed_bilinear_interaction_SU2[i_base + j * N_SU3 + k] * spin_partner[k];
                     }
                     local_field[j] += sum;
                 }
@@ -1561,17 +1544,17 @@ void compute_local_field_SU2(
     }
 
     // Mixed trilinear contributions with improved memory access
-    if (num_tri_SU2_SU3 > 0) {
-        const size_t partner_base = site_index * max_mixed_tri_neighbors * 2;
-        const size_t interaction_base = site_index * max_mixed_tri_neighbors * N_SU2 * N_SU2 * N_SU3;
+    if (mixed_params.num_tri_SU2_SU3 > 0) {
+        const size_t partner_base = site_index * mixed_params.max_mixed_tri_neighbors_SU2 * 2;
+        const size_t interaction_base = site_index * mixed_params.max_mixed_tri_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3;
         
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-            const size_t partner1 = mixed_trilinear_partners_SU2[partner_base + i * 2];
-            const size_t partner2 = mixed_trilinear_partners_SU2[partner_base + i * 2 + 1];
+        for (size_t i = 0; i < mixed_params.num_tri_SU2_SU3; ++i) {
+            const size_t partner1 = mixed_params.mixed_trilinear_partners_SU2[partner_base + i * 2];
+            const size_t partner2 = mixed_params.mixed_trilinear_partners_SU2[partner_base + i * 2 + 1];
             
             if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU3) {
-                const double* spin1_ptr = &spins_SU2[partner1 * N_SU2];
-                const double* spin3_ptr = &spins_SU3[partner2 * N_SU3];
+                const double* spin1_ptr = &su2_params.spins[partner1 * N_SU2];
+                const double* spin3_ptr = &su3_params.spins[partner2 * N_SU3];
                 const size_t i_interaction_base = interaction_base + i * N_SU2 * N_SU2 * N_SU3;
                 
                 // Rearranged loops for better cache usage
@@ -1588,7 +1571,7 @@ void compute_local_field_SU2(
                         
                         #pragma unroll
                         for (size_t b = 0; b < N_SU2; ++b) {
-                            inner_sum += mixed_trilinear_interaction_SU2[a_base + b * N_SU3 + c] * spin1_ptr[b];
+                            inner_sum += mixed_params.mixed_trilinear_interaction_SU2[a_base + b * N_SU3 + c] * spin1_ptr[b];
                         }
                         temp += inner_sum * spin3_c;
                     }
@@ -1599,7 +1582,7 @@ void compute_local_field_SU2(
     }
     
     // Subtract external field with vectorized operation
-    const double* field_ptr = &field_SU2[site_index * N_SU2];
+    const double* field_ptr = &su2_params.field[site_index * N_SU2];
     #pragma unroll
     for (size_t i = 0; i < N_SU2; ++i) {
         out[site_index * N_SU2 + i] = local_field[i] - field_ptr[i];
@@ -1611,52 +1594,35 @@ __device__
 void compute_local_field_SU3(
     double* out,
     int site_index,
-    const double* spins_SU3,
-    const double* field_SU3,
-    const double* onsite_interaction_SU3,
-    const double* bilinear_interaction_SU3,
-    const size_t* bilinear_partners_SU3,
-    const double* trilinear_interaction_SU3,
-    const size_t* trilinear_partners_SU3,
-    const double* mixed_bilinear_interaction_SU3,
-    const size_t* mixed_bilinear_partners_SU3,
-    const double* mixed_trilinear_interaction_SU3,
-    const size_t* mixed_trilinear_partners_SU3,
-    const double* spins_SU2,
-    size_t num_bi_SU3,
-    size_t num_tri_SU3,
-    size_t num_bi_SU2_SU3,
-    size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors,
-    size_t max_tri_neighbors,
-    size_t max_mixed_bi_neighbors,
-    size_t max_mixed_tri_neighbors
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params
 ) {
     double local_field[N_SU3] = {0.0};
 
     // Onsite contribution with better memory access pattern
     const size_t onsite_base = site_index * N_SU3 * N_SU3;
-    const double* spin_site = &spins_SU3[site_index * N_SU3];
+    const double* spin_site = &su3_params.spins[site_index * N_SU3];
     
     #pragma unroll
     for (size_t i = 0; i < N_SU3; ++i) {
         double sum = 0.0;
         #pragma unroll
         for (size_t j = 0; j < N_SU3; ++j) {
-            sum += 2 * onsite_interaction_SU3[onsite_base + i * N_SU3 + j] * spin_site[j];
+            sum += 2 * su3_params.onsite_interaction[onsite_base + i * N_SU3 + j] * spin_site[j];
         }
         local_field[i] = sum;
     }
     
     // Bilinear contributions with improved memory access
-    if (num_bi_SU3 > 0) {
-        const size_t partner_base = site_index * max_bi_neighbors;
+    if (su3_params.num_bi > 0) {
+        const size_t partner_base = site_index * su3_params.max_bi_neighbors;
         const size_t interaction_base = partner_base * N_SU3 * N_SU3;
         
-        for (size_t i = 0; i < num_bi_SU3; ++i) {
-            const size_t partner = bilinear_partners_SU3[partner_base + i];
+        for (size_t i = 0; i < su3_params.num_bi; ++i) {
+            const size_t partner = su3_params.bilinear_partners[partner_base + i];
             if (partner < lattice_size_SU3) {
-                const double* spin_partner = &spins_SU3[partner * N_SU3];
+                const double* spin_partner = &su3_params.spins[partner * N_SU3];
                 const size_t i_base = interaction_base + i * N_SU3 * N_SU3;
                 
                 #pragma unroll
@@ -1664,7 +1630,7 @@ void compute_local_field_SU3(
                     double sum = 0.0;
                     #pragma unroll
                     for (size_t k = 0; k < N_SU3; ++k) {
-                        sum += bilinear_interaction_SU3[i_base + j * N_SU3 + k] * spin_partner[k];
+                        sum += su3_params.bilinear_interaction[i_base + j * N_SU3 + k] * spin_partner[k];
                     }
                     local_field[j] += sum;
                 }
@@ -1673,20 +1639,20 @@ void compute_local_field_SU3(
     }
     
     // Trilinear contributions with optimized access patterns
-    if (num_tri_SU3 > 0) {
-        const size_t partner_base = site_index * max_tri_neighbors * 2;
-        const size_t interaction_base = site_index * max_tri_neighbors * N_SU3 * N_SU3 * N_SU3;
+    if (su3_params.num_tri > 0) {
+        const size_t partner_base = site_index * su3_params.max_tri_neighbors * 2;
+        const size_t interaction_base = site_index * su3_params.max_tri_neighbors * N_SU3 * N_SU3 * N_SU3;
         
-        for (size_t i = 0; i < num_tri_SU3; ++i) {
-            const size_t partner1 = trilinear_partners_SU3[partner_base + i * 2];
-            const size_t partner2 = trilinear_partners_SU3[partner_base + i * 2 + 1];
+        for (size_t i = 0; i < su3_params.num_tri; ++i) {
+            const size_t partner1 = su3_params.trilinear_partners[partner_base + i * 2];
+            const size_t partner2 = su3_params.trilinear_partners[partner_base + i * 2 + 1];
             
             if (partner1 < lattice_size_SU3 && partner2 < lattice_size_SU3) {
                 double temp[N_SU3] = {0.0};
                 contract_trilinear_field_device(temp,
-                    &trilinear_interaction_SU3[interaction_base + i * N_SU3 * N_SU3 * N_SU3],
-                    &spins_SU3[partner1 * N_SU3], 
-                    &spins_SU3[partner2 * N_SU3], 
+                    &su3_params.trilinear_interaction[interaction_base + i * N_SU3 * N_SU3 * N_SU3],
+                    &su3_params.spins[partner1 * N_SU3], 
+                    &su3_params.spins[partner2 * N_SU3], 
                     N_SU3);
                 
                 #pragma unroll
@@ -1698,13 +1664,13 @@ void compute_local_field_SU3(
     }
 
     // Mixed bilinear contributions with improved memory access
-    if (num_bi_SU2_SU3 > 0) {
-        const size_t partner_base = site_index * max_mixed_bi_neighbors;
+    if (mixed_params.num_bi_SU2_SU3 > 0) {
+        const size_t partner_base = site_index * mixed_params.max_mixed_bi_neighbors_SU3;
         const size_t interaction_base = partner_base * N_SU2 * N_SU3;
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
-            const size_t partner = mixed_bilinear_partners_SU3[partner_base + i];
+        for (size_t i = 0; i < mixed_params.num_bi_SU2_SU3; ++i) {
+            const size_t partner = mixed_params.mixed_bilinear_partners_SU3[partner_base + i];
             if (partner < lattice_size_SU2) {
-                const double* spin_partner = &spins_SU2[partner * N_SU2];
+                const double* spin_partner = &su2_params.spins[partner * N_SU2];
                 const size_t i_base = interaction_base + i * N_SU2 * N_SU3;
                 
                 #pragma unroll
@@ -1712,7 +1678,7 @@ void compute_local_field_SU3(
                     double sum = 0.0;
                     #pragma unroll
                     for (size_t k = 0; k < N_SU2; ++k) {
-                        sum += mixed_bilinear_interaction_SU3[i_base + j * N_SU2 + k] * spin_partner[k];
+                        sum += mixed_params.mixed_bilinear_interaction_SU3[i_base + j * N_SU2 + k] * spin_partner[k];
                     }
                     local_field[j] += sum;
                 }
@@ -1720,17 +1686,17 @@ void compute_local_field_SU3(
         }
     }
     // Mixed trilinear contributions with improved memory access
-    if (num_tri_SU2_SU3 > 0) {
-        const size_t partner_base = site_index * max_mixed_tri_neighbors * 2;
-        const size_t interaction_base = site_index * max_mixed_tri_neighbors * N_SU2 * N_SU2 * N_SU3;
+    if (mixed_params.num_tri_SU2_SU3 > 0) {
+        const size_t partner_base = site_index * mixed_params.max_mixed_tri_neighbors_SU3 * 2;
+        const size_t interaction_base = site_index * mixed_params.max_mixed_tri_neighbors_SU3 * N_SU2 * N_SU2 * N_SU3;
         
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
-            const size_t partner1 = mixed_trilinear_partners_SU3[partner_base + i * 2];
-            const size_t partner2 = mixed_trilinear_partners_SU3[partner_base + i * 2 + 1];
+        for (size_t i = 0; i < mixed_params.num_tri_SU2_SU3; ++i) {
+            const size_t partner1 = mixed_params.mixed_trilinear_partners_SU3[partner_base + i * 2];
+            const size_t partner2 = mixed_params.mixed_trilinear_partners_SU3[partner_base + i * 2 + 1];
             
             if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {
-                const double* spin1_ptr = &spins_SU2[partner1 * N_SU2];
-                const double* spin2_ptr = &spins_SU2[partner2 * N_SU2];
+                const double* spin1_ptr = &su2_params.spins[partner1 * N_SU2];
+                const double* spin2_ptr = &su2_params.spins[partner2 * N_SU2];
                 const size_t i_interaction_base = interaction_base + i * N_SU2 * N_SU2 * N_SU3;
                 
                 // Rearranged loops for better cache usage
@@ -1747,7 +1713,7 @@ void compute_local_field_SU3(
                         
                         #pragma unroll
                         for (size_t b = 0; b < N_SU2; ++b) {
-                            inner_sum += mixed_trilinear_interaction_SU3[a_base + b * N_SU2 + c] * spin1_ptr[b];
+                            inner_sum += mixed_params.mixed_trilinear_interaction_SU3[a_base + b * N_SU2 + c] * spin1_ptr[b];
                         }
                         temp += inner_sum * spin2_c;
                     }
@@ -1758,7 +1724,7 @@ void compute_local_field_SU3(
     }
     
     // Subtract external field with vectorized operation
-    const double* field_ptr = &field_SU3[site_index * N_SU3];
+    const double* field_ptr = &su3_params.field[site_index * N_SU3];
     #pragma unroll
     for (size_t i = 0; i < N_SU3; ++i) {
         out[site_index * N_SU3 + i] = local_field[i] - field_ptr[i];
@@ -1769,115 +1735,92 @@ void compute_local_field_SU3(
 template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __device__
 void drive_field_T_SU2(
-    double* out, double currT, int site_index,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, 
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, 
-    double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2, 
-    size_t max_mixed_tri_neighbors, double* mixed_trilinear_interaction_SU2, size_t* mixed_trilinear_partners_SU2,
-    double* d_spins_SU3)
+    double* out,
+    int site_index,
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params,
+    DriveFieldParams drive_params)
 {
     // Pre-compute common exponential terms
-    const double dt1 = currT - d_t_B_1_SU2;
-    const double dt2 = currT - d_t_B_2_SU2;
-    const double inv_2width_sq = 1.0 / (4.0 * d_field_drive_width_SU2 * d_field_drive_width_SU2);
+    const double dt1 = drive_params.curr_time - drive_params.t_B_1;
+    const double dt2 = drive_params.curr_time - drive_params.t_B_2;
+    const double inv_2width_sq = 1.0 / (4.0 * drive_params.width * drive_params.width);
     const double exp1 = exp(-dt1 * dt1 * inv_2width_sq);
     const double exp2 = exp(-dt2 * dt2 * inv_2width_sq);
-    const double omega = 2.0 * M_PI * d_field_drive_freq_SU2;
+    const double omega = 2.0 * M_PI * drive_params.freq;
     
     // Compute factors once
-    const double factor1_SU2 = d_field_drive_amp_SU2 * exp1 * cos(omega * dt1);
-    const double factor2_SU2 = d_field_drive_amp_SU2 * exp2 * cos(omega * dt2);
+    const double factor1 = drive_params.amp * exp1 * cos(omega * dt1);
+    const double factor2 = drive_params.amp * exp2 * cos(omega * dt2);
+    
+    // Early exit if factors are negligible
+    if (factor1 < 1e-14 && factor2 < 1e-14) return;
     
     // Cache sublattice index for site
     const int site_sublattice = site_index % N_ATOMS_SU2;
     const size_t site_sublattice_base = site_sublattice * N_SU2;
-
-    if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
     
-    // Initialize output with direct field contribution
+    // Apply drive field contribution
     #pragma unroll
     for (size_t i = 0; i < N_SU2; ++i) {
-        out[site_index * N_SU2 + i] -= (d_field_drive_1_SU2[site_sublattice_base + i] * factor1_SU2 + 
-                                        d_field_drive_2_SU2[site_sublattice_base + i] * factor2_SU2);
+        out[site_index * N_SU2 + i] -= (su2_params.field_drive_1[site_sublattice_base + i] * factor1 + 
+                                        su2_params.field_drive_2[site_sublattice_base + i] * factor2);
     }
 }
 
 template <size_t N_SU2, size_t N_ATOMS_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t lattice_size_SU3>
 __device__
 void drive_field_T_SU3(
-    double* out, double currT, int site_index,
-    double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2,
-    double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    size_t max_mixed_tri_neighbors, double* mixed_trilinear_interaction_SU3,
-    size_t* mixed_trilinear_partners_SU3, double* d_spins_SU2)
+    double* out,
+    int site_index,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params,
+    DriveFieldParams drive_params)
 {
     // Pre-compute common exponential terms
-    const double dt1 = currT - d_t_B_1_SU2;
-    const double dt2 = currT - d_t_B_2_SU2;
-    const double inv_2width_sq = 1.0 / (4.0 * d_field_drive_width_SU2 * d_field_drive_width_SU2);
+    const double dt1 = drive_params.curr_time - drive_params.t_B_1;
+    const double dt2 = drive_params.curr_time - drive_params.t_B_2;
+    const double inv_2width_sq = 1.0 / (4.0 * drive_params.width * drive_params.width);
     const double exp1 = exp(-dt1 * dt1 * inv_2width_sq);
     const double exp2 = exp(-dt2 * dt2 * inv_2width_sq);
-    const double omega = 2.0 * M_PI * d_field_drive_freq_SU2;
+    const double omega = 2.0 * M_PI * drive_params.freq;
     
     // Compute factors once
-    const double factor1_SU2 = d_field_drive_amp_SU2 * exp1 * cos(omega * dt1);
-    const double factor2_SU2 = d_field_drive_amp_SU2 * exp2 * cos(omega * dt2);
+    const double factor1 = drive_params.amp * exp1 * cos(omega * dt1);
+    const double factor2 = drive_params.amp * exp2 * cos(omega * dt2);
     
-    // Early exit if factors are small
-    if (factor1_SU2 < 1e-14 && factor2_SU2 < 1e-14) return;
+    // Early exit if factors are negligible
+    if (factor1 < 1e-14 && factor2 < 1e-14) return;
 
-    int site_sublattice_base = site_index % N_ATOMS_SU3;
+    // Cache sublattice index for site
+    const int site_sublattice = site_index % N_ATOMS_SU3;
+    const size_t site_sublattice_base = site_sublattice * N_SU3;
 
-    // Initialize output with direct field contribution
+    // Apply drive field contribution
     #pragma unroll
     for (size_t i = 0; i < N_SU3; ++i) {
-        out[site_index * N_SU3 + i] -= (d_field_drive_1_SU3[site_sublattice_base + i] * factor1_SU2 + 
-                                        d_field_drive_2_SU3[site_sublattice_base + i] * factor2_SU2);
+        out[site_index * N_SU3 + i] -= (su3_params.field_drive_1[site_sublattice_base + i] * factor1 + 
+                                        su3_params.field_drive_2[site_sublattice_base + i] * factor2);
     }
 }
 
+template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 __global__
 void compute_site_energy_SU2_kernel(
     double* d_energies,
-    const double* spins_SU2,
-    const double* field_SU2,
-    const double* onsite_interaction_SU2,
-    const double* bilinear_interaction_SU2,
-    const size_t* bilinear_partners_SU2,
-    const double* trilinear_interaction_SU2,
-    const size_t* trilinear_partners_SU2,
-    const double* mixed_trilinear_interaction_SU2,
-    const size_t* mixed_trilinear_partners_SU2,
-    const double* spins_SU3,
-    size_t num_bi_SU2,
-    size_t num_tri_SU2,
-    size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors,
-    size_t max_tri_neighbors,
-    size_t max_mixed_tri_neighbors
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params
 );
 
 // CUDA kernel for computing site energy for SU3
+template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 __global__
 void compute_site_energy_SU3_kernel(
     double* d_energies,
-    const double* spins_SU3,
-    const double* field_SU3,
-    const double* onsite_interaction_SU3,
-    const double* bilinear_interaction_SU3,
-    const size_t* bilinear_partners_SU3,
-    const double* trilinear_interaction_SU3,
-    const size_t* trilinear_partners_SU3,
-    const double* mixed_trilinear_interaction_SU3,
-    const size_t* mixed_trilinear_partners_SU3,
-    const double* spins_SU2,
-    size_t num_bi_SU3,
-    size_t num_tri_SU3,
-    size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors,
-    size_t max_tri_neighbors,
-    size_t max_mixed_tri_neighbors
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params
 );
 
 

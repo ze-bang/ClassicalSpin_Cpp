@@ -427,9 +427,8 @@ mixed_UnitCell<3, 4, 8, 4> setup_lattice(double Jai, double Jbi, double Jci, dou
     //Tm atoms
     //Set energy splitting for Tm atoms
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
-    double alpha = e1/2;
-    double beta = sqrt(3)/6*(2*e2-e1);
-    double gamma = -(e1+e2)/3;
+    double alpha = e1;
+    double beta = sqrt(3)/3*(2*e2-e1);
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);

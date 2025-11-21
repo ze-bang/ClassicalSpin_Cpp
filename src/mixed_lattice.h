@@ -1070,7 +1070,6 @@ class mixed_lattice
 
     double total_energy(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {
         // Pre-calculate scaling factors for better numerical stability
-        constexpr double onsite_factor = 0.5;
         constexpr double bilinear_factor = 0.5;
         constexpr double trilinear_factor = 1.0/3.0;
         
@@ -1201,7 +1200,7 @@ class mixed_lattice
         
         // Combine all energy components with appropriate scaling factors
         const double field_energy = field_energy_SU2 + field_energy_SU3;
-        const double onsite_energy = (onsite_energy_SU2 + onsite_energy_SU3) * onsite_factor;
+        const double onsite_energy = (onsite_energy_SU2 + onsite_energy_SU3);
         const double bilinear_energy = (bilinear_energy_SU2 + bilinear_energy_SU3 
                                         + mixed_bilinear_energy_SU2 + mixed_bilinear_energy_SU3) * bilinear_factor;
         const double trilinear_energy = (trilinear_energy_SU2 + trilinear_energy_SU3 + 
@@ -1209,6 +1208,263 @@ class mixed_lattice
         
         // Return the total energy
         return field_energy + onsite_energy + bilinear_energy + trilinear_energy;
+    }
+
+
+
+
+    double total_energy_SU2(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {
+        // Pre-calculate scaling factors for better numerical stability
+        constexpr double bilinear_factor = 0.5;
+        constexpr double trilinear_factor = 1.0/3.0;
+        
+        std::cout << "\n=== DEBUG: total_energy_SU2 ===" << std::endl;
+        std::cout << "Lattice size SU2: " << lattice_size_SU2 << std::endl;
+        std::cout << "Number of bilinear interactions: " << num_bi_SU2 << std::endl;
+        std::cout << "Number of trilinear interactions: " << num_tri_SU2 << std::endl;
+        std::cout << "Number of mixed bilinear interactions: " << num_bi_SU2_SU3 << std::endl;
+        std::cout << "Number of mixed trilinear interactions: " << num_tri_SU2_SU3 << std::endl;
+        
+        // Use OpenMP reductions to safely accumulate energy across threads
+        double field_energy_SU2 = 0.0;
+        double onsite_energy_SU2 = 0.0;
+        double bilinear_energy_SU2 = 0.0;
+        double trilinear_energy_SU2 = 0.0;
+        double mixed_bilinear_energy_SU2 = 0.0;
+        double mixed_trilinear_energy_SU2 = 0.0;
+        
+        // Process SU2 lattice - removed nested parallel for to avoid oversubscription
+        #pragma omp parallel for reduction(+:field_energy_SU2,onsite_energy_SU2,bilinear_energy_SU2,trilinear_energy_SU2,mixed_bilinear_energy_SU2,mixed_trilinear_energy_SU2)
+        for(size_t site_index = 0; site_index < lattice_size_SU2; ++site_index) {
+            // Fetch current spin once to avoid repeated memory access
+            const auto& current_spin = curr_spins.spins_SU2[site_index];
+            
+            // Field energy computation
+            double site_field_energy = -dot(current_spin, field_SU2[site_index]);
+            field_energy_SU2 += site_field_energy;
+            
+            // Onsite energy computation
+            double site_onsite_energy = contract(current_spin, onsite_interaction_SU2[site_index], current_spin);
+            onsite_energy_SU2 += site_onsite_energy;
+            
+            // Bilinear energy
+            double site_bilinear_energy = 0.0;
+            for (size_t i = 0; i < num_bi_SU2; ++i) {
+                double interaction_energy = contract(
+                    current_spin,
+                    bilinear_interaction_SU2[site_index][i],
+                    curr_spins.spins_SU2[bilinear_partners_SU2[site_index][i]]
+                );
+                site_bilinear_energy += interaction_energy;
+            }
+            bilinear_energy_SU2 += site_bilinear_energy;
+
+            // Mixed Bilinear energy - SU2-SU3 interactions
+            double site_mixed_bilinear_energy = 0.0;
+            for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+                double interaction_energy = contract_mixed_bilinear(
+                    current_spin,
+                    mixed_bilinear_interaction_SU2[site_index][i],
+                    curr_spins.spins_SU3[mixed_bilinear_partners_SU2[site_index][i]]
+                );
+                site_mixed_bilinear_energy += interaction_energy;
+            }
+            mixed_bilinear_energy_SU2 += site_mixed_bilinear_energy;
+            
+            // Trilinear energy - SU2 components
+            double site_trilinear_energy = 0.0;
+            for (size_t i = 0; i < num_tri_SU2; ++i) {
+                double interaction_energy = contract_trilinear(
+                    trilinear_interaction_SU2[site_index][i],
+                    current_spin,
+                    curr_spins.spins_SU2[trilinear_partners_SU2[site_index][i][0]],
+                    curr_spins.spins_SU2[trilinear_partners_SU2[site_index][i][1]]
+                );
+                site_trilinear_energy += interaction_energy;
+            }
+            trilinear_energy_SU2 += site_trilinear_energy;
+            
+            // Mixed trilinear energy - SU2-SU3 interactions
+            double site_mixed_trilinear_energy = 0.0;
+            for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+                double interaction_energy = contract_trilinear(
+                    mixed_trilinear_interaction_SU2[site_index][i],
+                    current_spin,
+                    curr_spins.spins_SU2[mixed_trilinear_partners_SU2[site_index][i][0]],
+                    curr_spins.spins_SU3[mixed_trilinear_partners_SU2[site_index][i][1]]
+                );
+                site_mixed_trilinear_energy += interaction_energy;
+            }
+            mixed_trilinear_energy_SU2 += site_mixed_trilinear_energy;
+            
+            // Debug output for first 3 sites only to avoid excessive output
+            if (site_index < 3) {
+                #pragma omp critical
+                {
+                    std::cout << "\nSite " << site_index << " energy contributions:" << std::endl;
+                    std::cout << "  Field energy: " << site_field_energy << std::endl;
+                    std::cout << "  Onsite energy: " << site_onsite_energy << std::endl;
+                    std::cout << "  Bilinear energy: " << site_bilinear_energy << std::endl;
+                    std::cout << "  Mixed bilinear energy: " << site_mixed_bilinear_energy << std::endl;
+                    std::cout << "  Trilinear energy: " << site_trilinear_energy << std::endl;
+                    std::cout << "  Mixed trilinear energy: " << site_mixed_trilinear_energy << std::endl;
+                }
+            }
+        }
+        
+        std::cout << "\nTotal energy components (before scaling):" << std::endl;
+        std::cout << "  Total field energy: " << field_energy_SU2 << std::endl;
+        std::cout << "  Total onsite energy: " << onsite_energy_SU2 << std::endl;
+        std::cout << "  Total bilinear energy: " << bilinear_energy_SU2 << std::endl;
+        std::cout << "  Total mixed bilinear energy: " << mixed_bilinear_energy_SU2 << std::endl;
+        std::cout << "  Total trilinear energy: " << trilinear_energy_SU2 << std::endl;
+        std::cout << "  Total mixed trilinear energy: " << mixed_trilinear_energy_SU2 << std::endl;
+        
+        // Combine all energy components with appropriate scaling factors
+        const double field_energy = field_energy_SU2;
+        const double onsite_energy = onsite_energy_SU2;
+        const double bilinear_energy = (bilinear_energy_SU2 + mixed_bilinear_energy_SU2) * bilinear_factor;
+        const double trilinear_energy = (trilinear_energy_SU2 + mixed_trilinear_energy_SU2) * trilinear_factor;
+        
+        std::cout << "\nScaled energy components:" << std::endl;
+        std::cout << "  Field energy: " << field_energy << std::endl;
+        std::cout << "  Onsite energy: " << onsite_energy << std::endl;
+        std::cout << "  Bilinear energy (scaled by " << bilinear_factor << "): " << bilinear_energy << std::endl;
+        std::cout << "  Trilinear energy (scaled by " << trilinear_factor << "): " << trilinear_energy << std::endl;
+        
+        // Return the total energy for SU2 sublattice
+        const double total = field_energy + onsite_energy + bilinear_energy + trilinear_energy;
+        std::cout << "\nTotal SU2 energy: " << total << std::endl;
+        std::cout << "=== END DEBUG ===" << std::endl;
+        
+        return total;
+    }
+
+    double total_energy_SU3(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3> &curr_spins) {
+        // Pre-calculate scaling factors for better numerical stability
+        constexpr double bilinear_factor = 0.5;
+        constexpr double trilinear_factor = 1.0/3.0;
+        
+        std::cout << "\n=== DEBUG: total_energy_SU3 ===" << std::endl;
+        std::cout << "Lattice size SU3: " << lattice_size_SU3 << std::endl;
+        std::cout << "Number of bilinear interactions: " << num_bi_SU3 << std::endl;
+        std::cout << "Number of trilinear interactions: " << num_tri_SU3 << std::endl;
+        std::cout << "Number of mixed bilinear interactions: " << num_bi_SU2_SU3 << std::endl;
+        std::cout << "Number of mixed trilinear interactions: " << num_tri_SU2_SU3 << std::endl;
+        
+        // Use OpenMP reductions to safely accumulate energy across threads
+        double field_energy_SU3 = 0.0;
+        double onsite_energy_SU3 = 0.0;
+        double bilinear_energy_SU3 = 0.0;
+        double trilinear_energy_SU3 = 0.0;
+        double mixed_bilinear_energy_SU3 = 0.0;
+        double mixed_trilinear_energy_SU3 = 0.0;
+        
+        // Process SU3 lattice - removed nested parallel for to avoid oversubscription
+        #pragma omp parallel for reduction(+:field_energy_SU3,onsite_energy_SU3,bilinear_energy_SU3,trilinear_energy_SU3,mixed_bilinear_energy_SU3,mixed_trilinear_energy_SU3)
+        for(size_t site_index = 0; site_index < lattice_size_SU3; ++site_index) {
+            // Fetch current spin once to avoid repeated memory access
+            const auto& current_spin = curr_spins.spins_SU3[site_index];
+            
+            // Field energy computation
+            double site_field_energy = -dot(current_spin, field_SU3[site_index]);
+            field_energy_SU3 += site_field_energy;
+            
+            // Onsite energy computation
+            double site_onsite_energy = contract(current_spin, onsite_interaction_SU3[site_index], current_spin);
+            onsite_energy_SU3 += site_onsite_energy;
+            
+            // Bilinear energy
+            double site_bilinear_energy = 0.0;
+            for (size_t i = 0; i < num_bi_SU3; ++i) {
+                double interaction_energy = contract(
+                    current_spin,
+                    bilinear_interaction_SU3[site_index][i],
+                    curr_spins.spins_SU3[bilinear_partners_SU3[site_index][i]]
+                );
+                site_bilinear_energy += interaction_energy;
+            }
+            bilinear_energy_SU3 += site_bilinear_energy;
+
+            // Mixed Bilinear energy - SU3-SU2 interactions
+            double site_mixed_bilinear_energy = 0.0;
+            for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+                double interaction_energy = contract_mixed_bilinear(  
+                    current_spin,
+                    mixed_bilinear_interaction_SU3[site_index][i],
+                    curr_spins.spins_SU2[mixed_bilinear_partners_SU3[site_index][i]]
+                );
+                site_mixed_bilinear_energy += interaction_energy;
+            }
+            mixed_bilinear_energy_SU3 += site_mixed_bilinear_energy;
+            
+            // Trilinear energy - SU3 components
+            double site_trilinear_energy = 0.0;
+            for (size_t i = 0; i < num_tri_SU3; ++i) {
+                double interaction_energy = contract_trilinear(
+                    trilinear_interaction_SU3[site_index][i],
+                    current_spin,
+                    curr_spins.spins_SU3[trilinear_partners_SU3[site_index][i][0]],
+                    curr_spins.spins_SU3[trilinear_partners_SU3[site_index][i][1]]
+                );
+                site_trilinear_energy += interaction_energy;
+            }
+            trilinear_energy_SU3 += site_trilinear_energy;
+            
+            // Mixed trilinear energy - SU3-SU2 interactions
+            double site_mixed_trilinear_energy = 0.0;
+            for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+                double interaction_energy = contract_trilinear(
+                    mixed_trilinear_interaction_SU3[site_index][i],
+                    current_spin,
+                    curr_spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][0]],
+                    curr_spins.spins_SU2[mixed_trilinear_partners_SU3[site_index][i][1]]
+                );
+                site_mixed_trilinear_energy += interaction_energy;
+            }
+            mixed_trilinear_energy_SU3 += site_mixed_trilinear_energy;
+            
+            // Debug output for first 3 sites only to avoid excessive output
+            if (site_index < 3) {
+                #pragma omp critical
+                {
+                    std::cout << "\nSite " << site_index << " energy contributions:" << std::endl;
+                    std::cout << "  Field energy: " << site_field_energy << std::endl;
+                    std::cout << "  Onsite energy: " << site_onsite_energy << std::endl;
+                    std::cout << "  Bilinear energy: " << site_bilinear_energy << std::endl;
+                    std::cout << "  Mixed bilinear energy: " << site_mixed_bilinear_energy << std::endl;
+                    std::cout << "  Trilinear energy: " << site_trilinear_energy << std::endl;
+                    std::cout << "  Mixed trilinear energy: " << site_mixed_trilinear_energy << std::endl;
+                }
+            }
+        }
+        
+        std::cout << "\nTotal energy components (before scaling):" << std::endl;
+        std::cout << "  Total field energy: " << field_energy_SU3 << std::endl;
+        std::cout << "  Total onsite energy: " << onsite_energy_SU3 << std::endl;
+        std::cout << "  Total bilinear energy: " << bilinear_energy_SU3 << std::endl;
+        std::cout << "  Total mixed bilinear energy: " << mixed_bilinear_energy_SU3 << std::endl;
+        std::cout << "  Total trilinear energy: " << trilinear_energy_SU3 << std::endl;
+        std::cout << "  Total mixed trilinear energy: " << mixed_trilinear_energy_SU3 << std::endl;
+        
+        // Combine all energy components with appropriate scaling factors
+        const double field_energy = field_energy_SU3;
+        const double onsite_energy = onsite_energy_SU3;
+        const double bilinear_energy = (bilinear_energy_SU3 + mixed_bilinear_energy_SU3) * bilinear_factor;
+        const double trilinear_energy = (trilinear_energy_SU3 + mixed_trilinear_energy_SU3) * trilinear_factor;
+        
+        std::cout << "\nScaled energy components:" << std::endl;
+        std::cout << "  Field energy: " << field_energy << std::endl;
+        std::cout << "  Onsite energy: " << onsite_energy << std::endl;
+        std::cout << "  Bilinear energy (scaled by " << bilinear_factor << "): " << bilinear_energy << std::endl;
+        std::cout << "  Trilinear energy (scaled by " << trilinear_factor << "): " << trilinear_energy << std::endl;
+        
+        // Return the total energy for SU3 sublattice
+        const double total = field_energy + onsite_energy + bilinear_energy + trilinear_energy;
+        std::cout << "\nTotal SU3 energy: " << total << std::endl;
+        std::cout << "=== END DEBUG ===" << std::endl;
+        
+        return total;
     }
 
     double energy_density(mixed_lattice_spin<N_SU2, dim1*dim2*dim*N_ATOMS_SU2, N_SU3, dim1*dim2*dim*N_ATOMS_SU3>  &curr_spins){

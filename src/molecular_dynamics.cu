@@ -242,72 +242,59 @@ template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_siz
 __global__
 void compute_site_energy_SU2_kernel(
     double* d_energies,
-    const double* spins_SU2,
-    const double* field_SU2,
-    const double* onsite_interaction_SU2,
-    const double* bilinear_interaction_SU2,
-    const size_t* bilinear_partners_SU2,
-    const double* trilinear_interaction_SU2,
-    const size_t* trilinear_partners_SU2,
-    const double* mixed_trilinear_interaction_SU2,
-    const size_t* mixed_trilinear_partners_SU2,
-    const double* spins_SU3,
-    size_t num_bi_SU2,
-    size_t num_tri_SU2,
-    size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors,
-    size_t max_tri_neighbors,
-    size_t max_mixed_tri_neighbors
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params
 ) {
     int site_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (site_index >= lattice_size_SU2) return;
     
     double energy = 0.0;
-    const double* spin_here = &spins_SU2[site_index * N_SU2];
+    const double* spin_here = &su2_params.spins[site_index * N_SU2];
     
     // Field energy
     for (size_t i = 0; i < N_SU2; ++i) {
-        energy -= spin_here[i] * field_SU2[site_index * N_SU2 + i];
+        energy -= spin_here[i] * su2_params.field[site_index * N_SU2 + i];
     }
     
     // Onsite energy
-    energy += contract_device(spin_here, &onsite_interaction_SU2[site_index * N_SU2 * N_SU2], spin_here, N_SU2)/2;
+    energy += contract_device(spin_here, &su2_params.onsite_interaction[site_index * N_SU2 * N_SU2], spin_here, N_SU2)/2;
     
     // Bilinear interactions
-    for (size_t i = 0; i < num_bi_SU2 && i < max_bi_neighbors; ++i) {
-        size_t partner = bilinear_partners_SU2[site_index * max_bi_neighbors + i];
+    for (size_t i = 0; i < su2_params.num_bi && i < su2_params.max_bi_neighbors; ++i) {
+        size_t partner = su2_params.bilinear_partners[site_index * su2_params.max_bi_neighbors + i];
         if (partner < lattice_size_SU2) {
             energy += contract_device(spin_here, 
-                &bilinear_interaction_SU2[site_index * max_bi_neighbors * N_SU2 * N_SU2 + i * N_SU2 * N_SU2],
-                &spins_SU2[partner * N_SU2], N_SU2)/2;
+                &su2_params.bilinear_interaction[site_index * su2_params.max_bi_neighbors * N_SU2 * N_SU2 + i * N_SU2 * N_SU2],
+                &su2_params.spins[partner * N_SU2], N_SU2)/2;
         }
     }
     
     // Trilinear interactions
-    for (size_t i = 0; i < num_tri_SU2 && i < max_tri_neighbors; ++i) {
-        size_t partner1 = trilinear_partners_SU2[site_index * max_tri_neighbors * 2 + i * 2];
-        size_t partner2 = trilinear_partners_SU2[site_index * max_tri_neighbors * 2 + i * 2 + 1];
+    for (size_t i = 0; i < su2_params.num_tri && i < su2_params.max_tri_neighbors; ++i) {
+        size_t partner1 = su2_params.trilinear_partners[site_index * su2_params.max_tri_neighbors * 2 + i * 2];
+        size_t partner2 = su2_params.trilinear_partners[site_index * su2_params.max_tri_neighbors * 2 + i * 2 + 1];
         if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {
             energy += contract_trilinear_device(
-                &trilinear_interaction_SU2[site_index * max_tri_neighbors * N_SU2 * N_SU2 * N_SU2 + i * N_SU2 * N_SU2 * N_SU2],
-                spin_here, &spins_SU2[partner1 * N_SU2], &spins_SU2[partner2 * N_SU2], N_SU2)/3;
+                &su2_params.trilinear_interaction[site_index * su2_params.max_tri_neighbors * N_SU2 * N_SU2 * N_SU2 + i * N_SU2 * N_SU2 * N_SU2],
+                spin_here, &su2_params.spins[partner1 * N_SU2], &su2_params.spins[partner2 * N_SU2], N_SU2)/3;
         }
     }
     
     // Mixed trilinear interactions
-    for (size_t i = 0; i < num_tri_SU2_SU3 && i < max_mixed_tri_neighbors; ++i) {
-        size_t partner1 = mixed_trilinear_partners_SU2[site_index * max_mixed_tri_neighbors * 2 + i * 2];
-        size_t partner2 = mixed_trilinear_partners_SU2[site_index * max_mixed_tri_neighbors * 2 + i * 2 + 1];
+    for (size_t i = 0; i < mixed_params.num_tri_SU2_SU3 && i < mixed_params.max_mixed_tri_neighbors_SU2; ++i) {
+        size_t partner1 = mixed_params.mixed_trilinear_partners_SU2[site_index * mixed_params.max_mixed_tri_neighbors_SU2 * 2 + i * 2];
+        size_t partner2 = mixed_params.mixed_trilinear_partners_SU2[site_index * mixed_params.max_mixed_tri_neighbors_SU2 * 2 + i * 2 + 1];
         if (partner1 < lattice_size_SU2) {
             // Note: mixed interaction tensor has dimensions N_SU2 x N_SU2 x N_SU3
             double partial_energy = 0.0;
             for (size_t a = 0; a < N_SU2; ++a) {
                 for (size_t b = 0; b < N_SU2; ++b) {
                     for (size_t c = 0; c < N_SU3; ++c) {
-                        partial_energy += mixed_trilinear_interaction_SU2[
-                            site_index * max_mixed_tri_neighbors * N_SU2 * N_SU2 * N_SU3 + 
+                        partial_energy += mixed_params.mixed_trilinear_interaction_SU2[
+                            site_index * mixed_params.max_mixed_tri_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3 + 
                             i * N_SU2 * N_SU2 * N_SU3 + a * N_SU2 * N_SU3 + b * N_SU3 + c] *
-                            spin_here[a] * spins_SU2[partner1 * N_SU2 + b] * spins_SU3[partner2 * N_SU3 + c]/3;
+                            spin_here[a] * su2_params.spins[partner1 * N_SU2 + b] * su3_params.spins[partner2 * N_SU3 + c]/3;
                     }
                 }
             }
@@ -322,71 +309,58 @@ template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_siz
 __global__
 void compute_site_energy_SU3_kernel(
     double* d_energies,
-    const double* spins_SU3,
-    const double* field_SU3,
-    const double* onsite_interaction_SU3,
-    const double* bilinear_interaction_SU3,
-    const size_t* bilinear_partners_SU3,
-    const double* trilinear_interaction_SU3,
-    const size_t* trilinear_partners_SU3,
-    const double* mixed_trilinear_interaction_SU3,
-    const size_t* mixed_trilinear_partners_SU3,
-    const double* spins_SU2,
-    size_t num_bi_SU3,
-    size_t num_tri_SU3,
-    size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors,
-    size_t max_tri_neighbors,
-    size_t max_mixed_tri_neighbors
+    SU2_DeviceParams<N_SU2, lattice_size_SU2> su2_params,
+    SU3_DeviceParams<N_SU3, lattice_size_SU3> su3_params,
+    MixedInteractionParams<N_SU2, N_SU3> mixed_params
 ) {
     int site_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (site_index >= lattice_size_SU3) return;
     
     double energy = 0.0;
-    const double* spin_here = &spins_SU3[site_index * N_SU3];
+    const double* spin_here = &su3_params.spins[site_index * N_SU3];
     
     // Field energy
     for (size_t i = 0; i < N_SU3; ++i) {
-        energy -= spin_here[i] * field_SU3[site_index * N_SU3 + i];
+        energy -= spin_here[i] * su3_params.field[site_index * N_SU3 + i];
     }
     // Onsite energy
-    energy += contract_device(spin_here, &onsite_interaction_SU3[site_index * N_SU3 * N_SU3], spin_here, N_SU3)/2;
+    energy += contract_device(spin_here, &su3_params.onsite_interaction[site_index * N_SU3 * N_SU3], spin_here, N_SU3)/2;
 
     // Bilinear interactions
-    for (size_t i = 0; i < num_bi_SU3 && i < max_bi_neighbors; ++i) {
-        size_t partner = bilinear_partners_SU3[site_index * max_bi_neighbors + i];
+    for (size_t i = 0; i < su3_params.num_bi && i < su3_params.max_bi_neighbors; ++i) {
+        size_t partner = su3_params.bilinear_partners[site_index * su3_params.max_bi_neighbors + i];
         if (partner < lattice_size_SU3) {
             energy += contract_device(spin_here, 
-                &bilinear_interaction_SU3[site_index * max_bi_neighbors * N_SU3 * N_SU3 + i * N_SU3 * N_SU3],
-                &spins_SU3[partner * N_SU3], N_SU3)/2;
+                &su3_params.bilinear_interaction[site_index * su3_params.max_bi_neighbors * N_SU3 * N_SU3 + i * N_SU3 * N_SU3],
+                &su3_params.spins[partner * N_SU3], N_SU3)/2;
         }
     }
     
     // Trilinear interactions
-    for (size_t i = 0; i < num_tri_SU3 && i < max_tri_neighbors; ++i) {
-        size_t partner1 = trilinear_partners_SU3[site_index * max_tri_neighbors * 2 + i * 2];
-        size_t partner2 = trilinear_partners_SU3[site_index * max_tri_neighbors * 2 + i * 2 + 1];
+    for (size_t i = 0; i < su3_params.num_tri && i < su3_params.max_tri_neighbors; ++i) {
+        size_t partner1 = su3_params.trilinear_partners[site_index * su3_params.max_tri_neighbors * 2 + i * 2];
+        size_t partner2 = su3_params.trilinear_partners[site_index * su3_params.max_tri_neighbors * 2 + i * 2 + 1];
         if (partner1 < lattice_size_SU3 && partner2 < lattice_size_SU3) {
             energy += contract_trilinear_device(
-                &trilinear_interaction_SU3[site_index * max_tri_neighbors * N_SU3 * N_SU3 * N_SU3 + i * N_SU3 * N_SU3 * N_SU3],
-                spin_here, &spins_SU3[partner1 * N_SU3], &spins_SU3[partner2 * N_SU3], N_SU3)/3;
+                &su3_params.trilinear_interaction[site_index * su3_params.max_tri_neighbors * N_SU3 * N_SU3 * N_SU3 + i * N_SU3 * N_SU3 * N_SU3],
+                spin_here, &su3_params.spins[partner1 * N_SU3], &su3_params.spins[partner2 * N_SU3], N_SU3)/3;
         }
     }
     
     // Mixed trilinear interactions
-    for (size_t i = 0; i < num_tri_SU2_SU3 && i < max_mixed_tri_neighbors; ++i) {
-        size_t partner1 = mixed_trilinear_partners_SU3[site_index * max_mixed_tri_neighbors * 2 + i * 2];
-        size_t partner2 = mixed_trilinear_partners_SU3[site_index * max_mixed_tri_neighbors * 2 + i * 2 + 1];
+    for (size_t i = 0; i < mixed_params.num_tri_SU2_SU3 && i < mixed_params.max_mixed_tri_neighbors_SU3; ++i) {
+        size_t partner1 = mixed_params.mixed_trilinear_partners_SU3[site_index * mixed_params.max_mixed_tri_neighbors_SU3 * 2 + i * 2];
+        size_t partner2 = mixed_params.mixed_trilinear_partners_SU3[site_index * mixed_params.max_mixed_tri_neighbors_SU3 * 2 + i * 2 + 1];
         if (partner1 < lattice_size_SU2 && partner2 < lattice_size_SU2) {
             // Note: mixed interaction tensor has dimensions N_SU3 x N_SU2 x N_SU2
             double partial_energy = 0.0;
             for (size_t a = 0; a < N_SU3; ++a) {
                 for (size_t b = 0; b < N_SU2; ++b) {
                     for (size_t c = 0; c < N_SU2; ++c) {
-                        partial_energy += mixed_trilinear_interaction_SU3[
-                            site_index * max_mixed_tri_neighbors * N_SU3 * N_SU2 * N_SU2 + 
+                        partial_energy += mixed_params.mixed_trilinear_interaction_SU3[
+                            site_index * mixed_params.max_mixed_tri_neighbors_SU3 * N_SU3 * N_SU2 * N_SU2 + 
                             i * N_SU3 * N_SU2 * N_SU2 + a * N_SU2 * N_SU2 + b * N_SU2 + c] *
-                            spin_here[a] * spins_SU2[partner1 * N_SU2 + b] * spins_SU2[partner2 * N_SU2 + c]/3;
+                            spin_here[a] * su2_params.spins[partner1 * N_SU2 + b] * su2_params.spins[partner2 * N_SU2 + c]/3;
                     }
                 }
             }
@@ -412,22 +386,17 @@ double mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, di
     dim3 grid_SU2((lattice_size_SU2 + block.x - 1) / block.x);
     dim3 grid_SU3((lattice_size_SU3 + block.x - 1) / block.x);
     
+    // Build parameter structures
+    auto su2_params = get_su2_params();
+    auto su3_params = get_su3_params();
+    auto mixed_params = get_mixed_params();
+    
     compute_site_energy_SU2_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> <<<grid_SU2, block>>>(
-        d_energies_SU2, d_spins.spins_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        d_spins.spins_SU3, d_num_bi_SU2, d_num_tri_SU2, d_num_tri_SU2_SU3,
-        max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2
+        d_energies_SU2, su2_params, su3_params, mixed_params
     );
     
     compute_site_energy_SU3_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> <<<grid_SU3, block>>>(
-        d_energies_SU3, d_spins.spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-        d_spins.spins_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_tri_SU2_SU3,
-        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3
+        d_energies_SU3, su2_params, su3_params, mixed_params
     );
     
     // Reduce energies
@@ -548,21 +517,11 @@ void LLG_kernel(
 
     if (site_index < lattice_size_SU2) {
         compute_local_field_SU2<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
-            su2_params.local_field, site_index, su2_params.spins, su2_params.field, su2_params.onsite_interaction,
-            su2_params.bilinear_interaction, su2_params.bilinear_partners,
-            su2_params.trilinear_interaction, su2_params.trilinear_partners,
-            mixed_params.mixed_bilinear_interaction_SU2, mixed_params.mixed_bilinear_partners_SU2,
-            mixed_params.mixed_trilinear_interaction_SU2, mixed_params.mixed_trilinear_partners_SU2,
-            su3_params.spins, su2_params.num_bi, su2_params.num_tri, mixed_params.num_bi_SU2_SU3, mixed_params.num_tri_SU2_SU3,
-            su2_params.max_bi_neighbors, su2_params.max_tri_neighbors, 
-            mixed_params.max_mixed_bi_neighbors_SU2, mixed_params.max_mixed_tri_neighbors_SU2);
+            su2_params.local_field, site_index, su2_params, su3_params, mixed_params);
 
         // Add drive field if applicable
         drive_field_T_SU2<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            su2_params.local_field, drive_params.curr_time, site_index, su2_params.field_drive_1, su2_params.field_drive_2, 
-            drive_params.amp, drive_params.width, drive_params.freq, drive_params.t_B_1, drive_params.t_B_2,
-            mixed_params.max_mixed_tri_neighbors_SU2, mixed_params.mixed_trilinear_interaction_SU2, 
-            mixed_params.mixed_trilinear_partners_SU2, su3_params.spins);
+            su2_params.local_field, site_index, su2_params, mixed_params, drive_params);
         
         // Compute derivatives (dS/dt) using Landau-Lifshitz equation
         landau_Lifshitz_SU2<N_SU2, lattice_size_SU2>(
@@ -571,20 +530,10 @@ void LLG_kernel(
     } else {
         size_t site_index_SU3 = site_index - lattice_size_SU2;        
         compute_local_field_SU3<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
-            su3_params.local_field, site_index_SU3, su3_params.spins, su3_params.field, su3_params.onsite_interaction,
-            su3_params.bilinear_interaction, su3_params.bilinear_partners,
-            su3_params.trilinear_interaction, su3_params.trilinear_partners,
-            mixed_params.mixed_bilinear_interaction_SU3, mixed_params.mixed_bilinear_partners_SU3,
-            mixed_params.mixed_trilinear_interaction_SU3, mixed_params.mixed_trilinear_partners_SU3,
-            su2_params.spins, su3_params.num_bi, su3_params.num_tri, mixed_params.num_bi_SU2_SU3, mixed_params.num_tri_SU2_SU3,
-            su3_params.max_bi_neighbors, su3_params.max_tri_neighbors,
-            mixed_params.max_mixed_bi_neighbors_SU3, mixed_params.max_mixed_tri_neighbors_SU3);
+            su3_params.local_field, site_index_SU3, su2_params, su3_params, mixed_params);
 
         drive_field_T_SU3<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            su3_params.local_field, drive_params.curr_time, site_index_SU3, su3_params.field_drive_1, su3_params.field_drive_2, 
-            drive_params.amp, drive_params.width, drive_params.freq, drive_params.t_B_1, drive_params.t_B_2,
-            mixed_params.max_mixed_tri_neighbors_SU3, mixed_params.mixed_trilinear_interaction_SU3, 
-            mixed_params.mixed_trilinear_partners_SU3, su2_params.spins);
+            su3_params.local_field, site_index_SU3, su3_params, mixed_params, drive_params);
             
         landau_Lifshitz_SU3<N_SU3, lattice_size_SU3>(
             work_arrays.k_SU3, site_index_SU3, su3_params.local_field, su3_params.spins);

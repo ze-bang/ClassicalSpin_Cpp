@@ -458,7 +458,7 @@ def read_MD(dir,isglobal=False):
     A = contract('wiab->wi',SU2) + contract('wiab->wi',SU3)
     np.savetxt(dir + "/DSSF.txt", A)
     fig, ax = plt.subplots(figsize=(10,4))
-    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
+    C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
     ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
     ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
@@ -505,7 +505,7 @@ def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
-        C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
+        C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
         ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
         ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
         ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
@@ -527,11 +527,12 @@ def read_MD_SU2(dir, w0, wmax, t_evolved, isglobal=False):
     DSSF_graph(DSSF_sum, 'sum', '')
 
     fig, ax = plt.subplots(figsize=(10,4))
-    ax.plot(w, np.log(DSSF_sum_Gamma[:,0]))
-    ax.set_xlim([0, 3])
+    ax.plot(w, DSSF_sum_Gamma[:,0])
+    ax.set_xlim([-3, 3])
     plt.savefig(dir+"DSSF_SU2_gap_Gamma.pdf")
     plt.clf()
     plt.close('all')
+    np.savetxt(dir+"DSSF_SU2_gap_Gamma.txt", np.column_stack((w, DSSF_sum_Gamma[:,0])))
     return A
 
 def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
@@ -559,7 +560,7 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     
     def DSSF_graph(DSSF, i, j):
         fig, ax = plt.subplots(figsize=(10,4))
-        C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='log')
+        C = ax.imshow(DSSF, origin='lower', extent=[0, g4, w0, wmax], aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm='linear')
         ax.axvline(x=g1, color='b', label='axvline - full height', linestyle='dashed')
         ax.axvline(x=g2, color='b', label='axvline - full height', linestyle='dashed')
         ax.axvline(x=g3, color='b', label='axvline - full height', linestyle='dashed')
@@ -582,11 +583,12 @@ def read_MD_SU3(dir, w0, wmax, t_evolved, isglobal=False):
     DSSF_graph(DSSF_sum, 'sum', '')
 
     fig, ax = plt.subplots(figsize=(10,4))
-    ax.plot(w, np.log(DSSF_sum_Gamma[:,0]))
-    ax.set_xlim([0, 3])
+    ax.plot(w, DSSF_sum_Gamma[:,0])
+    ax.set_xlim([-3, 3])
     plt.savefig(dir+"DSSF_SU3_gap_Gamma.pdf")
     plt.clf()
     plt.close('all')
+    np.savetxt(dir+"DSSF_SU3_gap_Gamma.txt", np.column_stack((w, DSSF_sum_Gamma[:,0])))
     return A
 
 def read_2D_nonlinear(dir):

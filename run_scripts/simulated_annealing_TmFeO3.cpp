@@ -266,9 +266,8 @@ mixed_UnitCell<3, 4, 8, 4> setup_lattice(double Jai, double Jbi, double Jci, dou
     //Tm atoms
     //Set energy splitting for Tm atoms
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
-    double alpha = e1/2;
-    double beta = sqrt(3)/6*(2*e2-e1);
-    double gamma = -(e1+e2)/3;
+    double alpha = e1;
+    double beta = sqrt(3)/3*(2*e2-e1);
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
@@ -486,7 +485,7 @@ mixed_UnitCell<3, 4, 8, 4> setup_lattice(double Jai, double Jbi, double Jci, dou
     return TFO;
 }
 
-void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir){
+void simulated_annealing_TmFeO3(double Temp_start, double Temp_end, double Jai, double Jbi, double Jci, double J2ai, double J2bi, double J2ci, double Ka, double Kc, double D1, double D2, double e1, double e2, double chii, double xii, double h, const array<double,3> &fielddir, string dir){
     mixed_UnitCell<3, 4, 8, 4> TFO = setup_lattice(Jai, Jbi, Jci, J2ai, J2bi, J2ci, Ka, Kc, D1, D2, e1, e2, chii, xii, h, fielddir, dir);
     
     // Write all parameters to params.txt
@@ -496,8 +495,8 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     params_file << "# ========================================" << endl;
     params_file << endl;
     params_file << "# Temperature range" << endl;
-    params_file << "T_start = " << T_start << endl;
-    params_file << "T_end = " << T_end << endl;
+    params_file << "Temp_start = " << Temp_start << endl;
+    params_file << "Temp_end = " << Temp_end << endl;
     params_file << endl;
     params_file << "# Exchange interactions (J1 nearest neighbor)" << endl;
     params_file << "J1ab = " << Jai << "  # In-plane (a,b directions)" << endl;
@@ -533,8 +532,8 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     cout << "Parameters written to " << dir << "/params.txt" << endl;
     
     mixed_lattice<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
-    cout << "Starting simulated annealing from T=" << T_start << " to T=" << T_end << endl;
-    MC.simulated_annealing(T_start, T_end, 10000, 0, 10, false);
+    cout << "Starting simulated annealing from T=" << Temp_start << " to T=" << Temp_end << endl;
+    MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, 10, false);
 
     MC.write_to_file_spin(dir + "/spin");
     
@@ -551,6 +550,37 @@ void simulated_annealing_TmFeO3(double T_start, double T_end, double Jai, double
     cout << "Writing zero temperature spin configuration to " << dir + "/spin_zero" << endl;
     MC.write_to_file_spin(dir + "/spin_zero");
 
+    // Calculate and print final energies
+    cout << "\n========================================" << endl;
+    cout << "Final Energy Summary" << endl;
+    cout << "========================================" << endl;
+    
+    double total_energy = MC.total_energy(MC.spins);
+    double energy_SU2 = MC.total_energy_SU2(MC.spins);
+    double energy_SU3 = MC.total_energy_SU3(MC.spins);
+    
+    cout << fixed << setprecision(8);
+    cout << "Total Energy:     " << total_energy << endl;
+    cout << "SU2 Energy (Fe):  " << energy_SU2 << endl;
+    cout << "SU3 Energy (Tm):  " << energy_SU3 << endl;
+    cout << "Energy per site:  " << total_energy / (MC.lattice_size_SU2 + MC.lattice_size_SU3) << endl;
+    cout << "========================================\n" << endl;
+    
+    // Write energies to file
+    ofstream energy_file(dir + "/final_energies.txt");
+    energy_file << "# Final Energy Summary (after zero temperature relaxation)" << endl;
+    energy_file << "# All energies in units of J1ab" << endl;
+    energy_file << "# ========================================" << endl;
+    energy_file << fixed << setprecision(12);
+    energy_file << "Total_Energy = " << total_energy << endl;
+    energy_file << "SU2_Energy_Fe = " << energy_SU2 << endl;
+    energy_file << "SU3_Energy_Tm = " << energy_SU3 << endl;
+    energy_file << "Energy_per_site = " << total_energy / (MC.lattice_size_SU2 + MC.lattice_size_SU3) << endl;
+    energy_file << "Lattice_size_SU2 = " << MC.lattice_size_SU2 << endl;
+    energy_file << "Lattice_size_SU3 = " << MC.lattice_size_SU3 << endl;
+    energy_file.close();
+    cout << "Final energies written to " << dir << "/final_energies.txt" << endl;
+
 }
 
 int main(int argc, char** argv) {
@@ -558,7 +588,7 @@ int main(int argc, char** argv) {
     double mu_B = 5.7883818012e-2;
 
     // Prefer loading parameters from a key=value param file if argv[1] is a valid file path.
-    double T_start, T_end;
+    double Temp_start, Temp_end;
     double J1ab, J1c, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h;
     std::string dir_name;
 
@@ -567,8 +597,8 @@ int main(int argc, char** argv) {
         std::cout << "Loading parameters from file: " << param_file << std::endl;
         auto p = read_params_from_file(param_file);
         // Defaults (same as TmFeO3_2DCS.cpp)
-        T_start = getDouble(p, "T_start", 20.0);
-        T_end = getDouble(p, "T_end", 0.01);
+        Temp_start = getDouble(p, "Temp_start", 20.0);
+        Temp_end = getDouble(p, "Temp_end", 0.01);
 
         J1ab = getDouble(p, "J1ab", 4.92);
         J1c  = getDouble(p, "J1c", 4.92);
@@ -601,8 +631,8 @@ int main(int argc, char** argv) {
         e2 = (argc > 12) ? atof(argv[12]) : 0.0;
         h = (argc > 13) ? atof(argv[13]) : 0.0;
         dir_name = (argc > 14) ? argv[14] : std::string("TmFeO3_annealing");
-        T_start = (argc > 15) ? atof(argv[15]) : 20.0;
-        T_end = (argc > 16) ? atof(argv[16]) : 0.01;
+        Temp_start = (argc > 15) ? atof(argv[15]) : 20.0;
+        Temp_end = (argc > 16) ? atof(argv[16]) : 0.01;
     }
 
     // Normalize to J1ab
@@ -625,10 +655,10 @@ int main(int argc, char** argv) {
     cout << "  J1ab=" << J1ab << " J1c=" << J1c << " J2ab=" << J2ab << " J2c=" << J2c << endl;
     cout << "  Ka=" << Ka << " Kc=" << Kc << " D1=" << D1 << " D2=" << D2 << endl;
     cout << "  e1=" << e1 << " e2=" << e2 << " chii=" << chii << " xii=" << xii << endl;
-    cout << "  h=" << h << " T_start=" << T_start << " T_end=" << T_end << endl;
+    cout << "  h=" << h << " Temp_start=" << Temp_start << " Temp_end=" << Temp_end << endl;
     cout << "  Output directory: " << dir_name << endl;
 
-    simulated_annealing_TmFeO3(T_start, T_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0,0,1}, dir_name);
+    simulated_annealing_TmFeO3(Temp_start, Temp_end, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, e1, e2, chii, xii, h, {0,0,1}, dir_name);
     
     return 0;
 }

@@ -348,9 +348,8 @@ mixed_UnitCell<3, 4, 8, 4> setup_lattice(double Jai, double Jbi, double Jci, dou
     //Tm atoms
     //Set energy splitting for Tm atoms
     //\alpha\lambda3 + \beta\lambda8 + \gamma\identity
-    double alpha = e1/2;
-    double beta = sqrt(3)/6*(2*e2-e1);
-    double gamma = -(e1+e2)/3;
+    double alpha = e1;
+    double beta = sqrt(3)/3*(2*e2-e1);
 
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 0);
     Tm_atoms.set_field({0,0,alpha,0,0,0,0,beta}, 1);
@@ -586,9 +585,6 @@ int main(int argc, char** argv) {
     if (!loaded && argc > 1) {
         // If first arg was not a path, try default params.txt or parameters.txt
         loaded = load_params_from_file("params.txt", par_double, par_string);
-        if (!loaded) {
-            loaded = load_params_from_file("parameters.txt", par_double, par_string);
-        }
     }
     if (loaded) {
         cout << "Successfully loaded parameters from: " << param_path << endl;
@@ -675,28 +671,6 @@ int main(int argc, char** argv) {
     cout << "Begin MD on TmFeO3 with parameters:" << J1ab << " " << J1c << " " << J2ab << " " << J2c << " " << Ka << " " << Kc << " " << D1 << " " << D2 << " " << chii << " " << xii << " " << e1 << " " << e2 << " " << h << " " << dir_name << " " << num_trials << endl;
     filesystem::create_directory(dir_name);
 
-    ofstream myfile;
-    myfile.open(dir_name + "/parameters.txt");
-    myfile << "J1ab: " << J1ab << endl;
-    myfile << "J1c: " << J1c << endl;
-    myfile << "J2ab: " << J2ab << endl;
-    myfile << "J2c: " << J2c << endl;
-    myfile << "Ka: " << Ka << endl;
-    myfile << "Kc: " << Kc << endl;
-    myfile << "D1: " << D1 << endl;
-    myfile << "D2: " << D2 << endl;
-    myfile << "chii: " << chii << endl;
-    myfile << "xii: " << xii << endl;
-    myfile << "e1: " << e1 << endl;
-    myfile << "e2: " << e2 << endl;
-    myfile << "h: " << h << endl;
-    myfile << "dir_name: " << dir_name << endl;
-    myfile << "num_trials: " << num_trials << endl;
-    myfile << "T_start: " << T_start << endl;
-    myfile << "T_end: " << T_end << endl;
-    myfile << "T_step_size: " << T_step_size << endl;
-    myfile << "spin_config_file: " << spin_config_file << endl;
-    myfile.close();
 
     // MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, fielddir, e1, e2, offset, dir_name, spin_config_file);
     MD_TmFeO3_cuda(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, chii, xii, h, fielddir, e1, e2, offset, dir_name, spin_config_file);
