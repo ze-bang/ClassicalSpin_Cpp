@@ -361,39 +361,71 @@ private:
         cudaMalloc(&d_onsite_interaction_SU2, lattice_size_SU2 * N_SU2 * N_SU2 * sizeof(double));
         cudaMalloc(&d_onsite_interaction_SU3, lattice_size_SU3 * N_SU3 * N_SU3 * sizeof(double));
         // Allocate bilinear interaction arrays
+        // Note: CUDA kernels cannot accept NULL pointers, so allocate dummy buffers (size 1) when count is 0
         if (max_bilinear_neighbors_SU2 > 0) {
             cudaMalloc(&d_bilinear_interaction_SU2, lattice_size_SU2 * max_bilinear_neighbors_SU2 * N_SU2 * N_SU2 * sizeof(double));
             cudaMalloc(&d_bilinear_partners_SU2, lattice_size_SU2 * max_bilinear_neighbors_SU2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_bilinear_interaction_SU2, sizeof(double));
+            cudaMalloc(&d_bilinear_partners_SU2, sizeof(size_t));
         }
         if (max_bilinear_neighbors_SU3 > 0) {
             cudaMalloc(&d_bilinear_interaction_SU3, lattice_size_SU3 * max_bilinear_neighbors_SU3 * N_SU3 * N_SU3 * sizeof(double));
             cudaMalloc(&d_bilinear_partners_SU3, lattice_size_SU3 * max_bilinear_neighbors_SU3 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_bilinear_interaction_SU3, sizeof(double));
+            cudaMalloc(&d_bilinear_partners_SU3, sizeof(size_t));
         }
         
         // Allocate trilinear interaction arrays
         if (max_trilinear_neighbors_SU2 > 0) {
             cudaMalloc(&d_trilinear_interaction_SU2, lattice_size_SU2 * max_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU2 * sizeof(double));
             cudaMalloc(&d_trilinear_partners_SU2, lattice_size_SU2 * max_trilinear_neighbors_SU2 * 2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_trilinear_interaction_SU2, sizeof(double));
+            cudaMalloc(&d_trilinear_partners_SU2, sizeof(size_t));
         }
 
         if (max_trilinear_neighbors_SU3 > 0) {
             cudaMalloc(&d_trilinear_interaction_SU3, lattice_size_SU3 * max_trilinear_neighbors_SU3 * N_SU3 * N_SU3 * N_SU3 * sizeof(double));
             cudaMalloc(&d_trilinear_partners_SU3, lattice_size_SU3 * max_trilinear_neighbors_SU3 * 2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_trilinear_interaction_SU3, sizeof(double));
+            cudaMalloc(&d_trilinear_partners_SU3, sizeof(size_t));
         }
 
         // Allocate mixed interaction arrays
+        // Allocate based on actual max neighbors for each type independently
         if (max_mixed_bilinear_neighbors_SU2 > 0) {
             cudaMalloc(&d_mixed_bilinear_interaction_SU2, lattice_size_SU2 * max_mixed_bilinear_neighbors_SU2 * N_SU2 * N_SU3 * sizeof(double));
-            cudaMalloc(&d_mixed_bilinear_interaction_SU3, lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * N_SU2 * N_SU3 * sizeof(double));
             cudaMalloc(&d_mixed_bilinear_partners_SU2, lattice_size_SU2 * max_mixed_bilinear_neighbors_SU2 * 2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_mixed_bilinear_interaction_SU2, sizeof(double));
+            cudaMalloc(&d_mixed_bilinear_partners_SU2, sizeof(size_t));
+        }
+        
+        if (max_mixed_bilinear_neighbors_SU3 > 0) {
+            cudaMalloc(&d_mixed_bilinear_interaction_SU3, lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * N_SU2 * N_SU3 * sizeof(double));
             cudaMalloc(&d_mixed_bilinear_partners_SU3, lattice_size_SU3 * max_mixed_bilinear_neighbors_SU3 * 2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_mixed_bilinear_interaction_SU3, sizeof(double));
+            cudaMalloc(&d_mixed_bilinear_partners_SU3, sizeof(size_t));
         }
         
         if (max_mixed_trilinear_neighbors_SU2 > 0) {
             cudaMalloc(&d_mixed_trilinear_interaction_SU2, lattice_size_SU2 * max_mixed_trilinear_neighbors_SU2 * N_SU2 * N_SU2 * N_SU3 * sizeof(double));
-            cudaMalloc(&d_mixed_trilinear_interaction_SU3, lattice_size_SU3 * max_mixed_trilinear_neighbors_SU3 * N_SU2 * N_SU2 * N_SU3 * sizeof(double));
             cudaMalloc(&d_mixed_trilinear_partners_SU2, lattice_size_SU2 * max_mixed_trilinear_neighbors_SU2 * 2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_mixed_trilinear_interaction_SU2, sizeof(double));
+            cudaMalloc(&d_mixed_trilinear_partners_SU2, sizeof(size_t));
+        }
+        
+        if (max_mixed_trilinear_neighbors_SU3 > 0) {
+            cudaMalloc(&d_mixed_trilinear_interaction_SU3, lattice_size_SU3 * max_mixed_trilinear_neighbors_SU3 * N_SU2 * N_SU2 * N_SU3 * sizeof(double));
             cudaMalloc(&d_mixed_trilinear_partners_SU3, lattice_size_SU3 * max_mixed_trilinear_neighbors_SU3 * 2 * sizeof(size_t));
+        } else {
+            cudaMalloc(&d_mixed_trilinear_interaction_SU3, sizeof(double));
+            cudaMalloc(&d_mixed_trilinear_partners_SU3, sizeof(size_t));
         }
         
         // Allocate structure tensors
@@ -1402,9 +1434,11 @@ void compute_local_field_SU2(
     }
 
     // Mixed bilinear contributions with improved memory access
+    // SU2-SU3 bilinear: local_field[a] += sum_b J[a,b] * spin_SU3[b]
     if (num_bi_SU2_SU3 > 0) {
         const size_t partner_base = site_index * max_mixed_bi_neighbors;
-        const size_t interaction_base = partner_base * N_SU2 * N_SU3;
+        const size_t interaction_base = site_index * max_mixed_bi_neighbors * N_SU2 * N_SU3;
+        
         for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
             const size_t partner = mixed_bilinear_partners_SU2[partner_base + i];
             if (partner < lattice_size_SU3) {
@@ -1562,14 +1596,16 @@ void compute_local_field_SU3(
     }
 
     // Mixed bilinear contributions with improved memory access
+    // SU3-SU2 bilinear: local_field[a] += sum_b J[a,b] * spin_SU2[b]
     if (num_bi_SU2_SU3 > 0) {
         const size_t partner_base = site_index * max_mixed_bi_neighbors;
-        const size_t interaction_base = partner_base * N_SU2 * N_SU3;
+        const size_t interaction_base = site_index * max_mixed_bi_neighbors * N_SU3 * N_SU2;
+        
         for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
             const size_t partner = mixed_bilinear_partners_SU3[partner_base + i];
             if (partner < lattice_size_SU2) {
                 const double* spin_partner = &spins_SU2[partner * N_SU2];
-                const size_t i_base = interaction_base + i * N_SU2 * N_SU3;
+                const size_t i_base = interaction_base + i * N_SU3 * N_SU2;
                 
                 #pragma unroll
                 for (size_t j = 0; j < N_SU3; ++j) {

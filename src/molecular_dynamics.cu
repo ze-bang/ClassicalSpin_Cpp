@@ -616,7 +616,9 @@ private:
     bool allocated;
 
 public:
-    SSPRK53_MemoryPool() : allocated(false) {
+    SSPRK53_MemoryPool() : work_SU2_1(nullptr), work_SU2_2(nullptr), work_SU2_3(nullptr),
+                           work_SU3_1(nullptr), work_SU3_2(nullptr), work_SU3_3(nullptr),
+                           allocated(false) {
         allocate();
     }
     
@@ -627,24 +629,67 @@ public:
     void allocate() {
         if (allocated) return;
         
-        cudaMalloc(&work_SU2_1, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU2_2, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU2_3, lattice_size_SU2 * N_SU2 * sizeof(double));
-        cudaMalloc(&work_SU3_1, lattice_size_SU3 * N_SU3 * sizeof(double));
-        cudaMalloc(&work_SU3_2, lattice_size_SU3 * N_SU3 * sizeof(double));
-        cudaMalloc(&work_SU3_3, lattice_size_SU3 * N_SU3 * sizeof(double));
+        cudaError_t err;
+        err = cudaMalloc(&work_SU2_1, lattice_size_SU2 * N_SU2 * sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: Failed to allocate work_SU2_1 (Error code: %s)\n", cudaGetErrorString(err));
+            return;
+        }
+        err = cudaMalloc(&work_SU2_2, lattice_size_SU2 * N_SU2 * sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: Failed to allocate work_SU2_2 (Error code: %s)\n", cudaGetErrorString(err));
+            cudaFree(work_SU2_1);
+            return;
+        }
+        err = cudaMalloc(&work_SU2_3, lattice_size_SU2 * N_SU2 * sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: Failed to allocate work_SU2_3 (Error code: %s)\n", cudaGetErrorString(err));
+            cudaFree(work_SU2_1);
+            cudaFree(work_SU2_2);
+            return;
+        }
+        err = cudaMalloc(&work_SU3_1, lattice_size_SU3 * N_SU3 * sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: Failed to allocate work_SU3_1 (Error code: %s)\n", cudaGetErrorString(err));
+            cudaFree(work_SU2_1);
+            cudaFree(work_SU2_2);
+            cudaFree(work_SU2_3);
+            return;
+        }
+        err = cudaMalloc(&work_SU3_2, lattice_size_SU3 * N_SU3 * sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: Failed to allocate work_SU3_2 (Error code: %s)\n", cudaGetErrorString(err));
+            cudaFree(work_SU2_1);
+            cudaFree(work_SU2_2);
+            cudaFree(work_SU2_3);
+            cudaFree(work_SU3_1);
+            return;
+        }
+        err = cudaMalloc(&work_SU3_3, lattice_size_SU3 * N_SU3 * sizeof(double));
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: Failed to allocate work_SU3_3 (Error code: %s)\n", cudaGetErrorString(err));
+            cudaFree(work_SU2_1);
+            cudaFree(work_SU2_2);
+            cudaFree(work_SU2_3);
+            cudaFree(work_SU3_1);
+            cudaFree(work_SU3_2);
+            return;
+        }
         allocated = true;
     }
     
     void deallocate() {
         if (!allocated) return;
         
-        cudaFree(work_SU2_1);
-        cudaFree(work_SU2_2);
-        cudaFree(work_SU2_3);
-        cudaFree(work_SU3_1);
-        cudaFree(work_SU3_2);
-        cudaFree(work_SU3_3);
+        if (work_SU2_1) cudaFree(work_SU2_1);
+        if (work_SU2_2) cudaFree(work_SU2_2);
+        if (work_SU2_3) cudaFree(work_SU2_3);
+        if (work_SU3_1) cudaFree(work_SU3_1);
+        if (work_SU3_2) cudaFree(work_SU3_2);
+        if (work_SU3_3) cudaFree(work_SU3_3);
+        
+        work_SU2_1 = work_SU2_2 = work_SU2_3 = nullptr;
+        work_SU3_1 = work_SU3_2 = work_SU3_3 = nullptr;
         allocated = false;
     }
     
@@ -655,6 +700,8 @@ public:
     double* get_work_SU3_1() const { return work_SU3_1; }
     double* get_work_SU3_2() const { return work_SU3_2; }
     double* get_work_SU3_3() const { return work_SU3_3; }
+    
+    bool is_allocated() const { return allocated; }
 };
 
 
@@ -748,6 +795,8 @@ void SSPRK53_step_kernel(
         d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
         d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
         curr_time, dt);
+    
+
 
     // Stage 1 update: tmp = y + b10*h*k1
     update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
@@ -896,6 +945,102 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         cudaFree(d_local_fields_SU3);
         return;
     }
+
+    // Check if memory pool is properly allocated
+    if (!memory_pool.is_allocated()) {
+        fprintf(stderr, "CUDA error: Memory pool not marked as allocated\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    if (memory_pool.get_work_SU2_1() == nullptr) {
+        fprintf(stderr, "CUDA error: work_SU2_1 is nullptr\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    if (memory_pool.get_work_SU2_2() == nullptr) {
+        fprintf(stderr, "CUDA error: work_SU2_2 is nullptr\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    if (memory_pool.get_work_SU2_3() == nullptr) {
+        fprintf(stderr, "CUDA error: work_SU2_3 is nullptr\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    if (memory_pool.get_work_SU3_1() == nullptr) {
+        fprintf(stderr, "CUDA error: work_SU3_1 is nullptr\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    if (memory_pool.get_work_SU3_2() == nullptr) {
+        fprintf(stderr, "CUDA error: work_SU3_2 is nullptr\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+    if (memory_pool.get_work_SU3_3() == nullptr) {
+        fprintf(stderr, "CUDA error: work_SU3_3 is nullptr\n");
+        cudaFree(d_local_fields_SU2);
+        cudaFree(d_local_fields_SU3);
+        return;
+    }
+
+    // Comprehensive validation of critical pointers before kernel launch
+    // Note: Interaction pointers can be NULL if the corresponding count is zero
+    #define CHECK_PTR(ptr, name) \
+        if (ptr == nullptr) { \
+            fprintf(stderr, "CUDA error: NULL pointer detected for %s\n", name); \
+            cudaFree(d_local_fields_SU2); \
+            cudaFree(d_local_fields_SU3); \
+            return; \
+        }
+    
+    // Always required pointers
+    CHECK_PTR(d_field_SU2, "d_field_SU2");
+    CHECK_PTR(d_field_SU3, "d_field_SU3");
+    CHECK_PTR(d_onsite_interaction_SU2, "d_onsite_interaction_SU2");
+    CHECK_PTR(d_onsite_interaction_SU3, "d_onsite_interaction_SU3");
+    CHECK_PTR(d_field_drive_1_SU2, "d_field_drive_1_SU2");
+    CHECK_PTR(d_field_drive_2_SU2, "d_field_drive_2_SU2");
+    CHECK_PTR(d_field_drive_1_SU3, "d_field_drive_1_SU3");
+    CHECK_PTR(d_field_drive_2_SU3, "d_field_drive_2_SU3");
+    
+    // Conditional checks - only validate if interactions exist
+    if (d_num_bi_SU2 > 0) {
+        CHECK_PTR(d_bilinear_interaction_SU2, "d_bilinear_interaction_SU2");
+        CHECK_PTR(d_bilinear_partners_SU2, "d_bilinear_partners_SU2");
+    }
+    if (d_num_bi_SU3 > 0) {
+        CHECK_PTR(d_bilinear_interaction_SU3, "d_bilinear_interaction_SU3");
+        CHECK_PTR(d_bilinear_partners_SU3, "d_bilinear_partners_SU3");
+    }
+    if (d_num_tri_SU2 > 0) {
+        CHECK_PTR(d_trilinear_interaction_SU2, "d_trilinear_interaction_SU2");
+        CHECK_PTR(d_trilinear_partners_SU2, "d_trilinear_partners_SU2");
+    }
+    if (d_num_tri_SU3 > 0) {
+        CHECK_PTR(d_trilinear_interaction_SU3, "d_trilinear_interaction_SU3");
+        CHECK_PTR(d_trilinear_partners_SU3, "d_trilinear_partners_SU3");
+    }
+    if (d_num_bi_SU2_SU3 > 0) {
+        CHECK_PTR(d_mixed_bilinear_interaction_SU2, "d_mixed_bilinear_interaction_SU2");
+        CHECK_PTR(d_mixed_bilinear_interaction_SU3, "d_mixed_bilinear_interaction_SU3");
+        CHECK_PTR(d_mixed_bilinear_partners_SU2, "d_mixed_bilinear_partners_SU2");
+        CHECK_PTR(d_mixed_bilinear_partners_SU3, "d_mixed_bilinear_partners_SU3");
+    }
+    if (d_num_tri_SU2_SU3 > 0) {
+        CHECK_PTR(d_mixed_trilinear_interaction_SU2, "d_mixed_trilinear_interaction_SU2");
+        CHECK_PTR(d_mixed_trilinear_interaction_SU3, "d_mixed_trilinear_interaction_SU3");
+        CHECK_PTR(d_mixed_trilinear_partners_SU2, "d_mixed_trilinear_partners_SU2");
+        CHECK_PTR(d_mixed_trilinear_partners_SU3, "d_mixed_trilinear_partners_SU3");
+    }
+    
+    #undef CHECK_PTR
 
     // Execute optimized SSPRK53 step with pre-allocated working arrays
     SSPRK53_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
