@@ -750,9 +750,9 @@ int main(int argc, char** argv) {
         Kc   = getDouble(p, "Kc", -0.09);
         D1   = getDouble(p, "D1", 0.0);
         D2   = getDouble(p, "D2", 0.0);
-        e1   = getDouble(p, "e1", 4.0);
-        e2   = getDouble(p, "e2", 0.0);
-        chii = getDouble(p, "chii", 0.05);
+        e1   = getDouble(p, "e1", 0.97);
+        e2   = getDouble(p, "e2", 3.97);
+        chii = getDouble(p, "chii", 0.0);
         xii  = getDouble(p, "xii", 0.0);
         h    = getDouble(p, "h", 0.0);
 
@@ -760,10 +760,10 @@ int main(int argc, char** argv) {
         field_drive_y = getDouble(p, "field_drive_y", 0.0);
         field_drive_z = getDouble(p, "field_drive_z", 0.0);
 
-        dir_name = getString(p, "dir_name", "TmFeO3_2DCS_xii=0.05");
+        dir_name = getString(p, "dir_name", "TmFeO3_simulation");
         slurm_ID = getInt(p, "slurm_ID", 1);
         total_jobs = getInt(p, "total_jobs", 1);
-        spin_config_file = getString(p, "spin_config_file", "TFO_4_0_xii=0.05/spin_zero.txt");
+        spin_config_file = getString(p, "spin_config_file", "TmFeO3_simulation/spin_zero");
     } else {
         // Fallback to original CLI parsing
         T_zero = (argc > 1) ? atoi(argv[1]) : 0;
@@ -795,10 +795,10 @@ int main(int argc, char** argv) {
         field_drive_y = (argc > 24) ? atof(argv[24]) : 0.0;
         field_drive_z = (argc > 25) ? atof(argv[25]) : 0.0;
 
-        dir_name = (argc > 26) ? argv[26] : std::string("TmFeO3_2DCS_xii=0.05");
+        dir_name = (argc > 26) ? argv[26] : std::string("TmFeO3_simulation");
         slurm_ID = (argc > 27) ? atoi(argv[27]) : 1;
         total_jobs = (argc > 28) ? atoi(argv[28]) : 1;
-        spin_config_file = (argc > 29) ? argv[29] : std::string("TFO_4_0_xii=0.05/spin_zero.txt");
+        spin_config_file = (argc > 29) ? argv[29] : std::string("TmFeO3_simulation/spin_zero");
     }
 
     J1c /= J1ab;

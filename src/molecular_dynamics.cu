@@ -539,61 +539,38 @@ void LLG_kernel(
     double* k_SU2, double* k_SU3,
     double* d_spins_SU2, double* d_spins_SU3,
     double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
-    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt)
+    InteractionDataSU2<N_SU2, N_SU3> interactions_SU2,
+    InteractionDataSU3<N_SU2, N_SU3> interactions_SU3,
+    NeighborCounts neighbors,
+    FieldDriveParams<N_SU2, N_SU3> field_drive,
+    TimeStepParams time_params)
 {
     int site_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (site_index > lattice_size_SU2 + lattice_size_SU3) return;
 
     if (site_index < lattice_size_SU2) {
         compute_local_field_SU2<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
-        d_local_field_SU2, site_index, d_spins_SU2, d_field_SU2, d_onsite_interaction_SU2,
-        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
-        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_partners_SU2,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2,
-        d_spins_SU3, num_bi_SU2, num_tri_SU2, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2);
+            d_local_field_SU2, site_index, d_spins_SU2, d_spins_SU3, interactions_SU2, neighbors);
 
         // Add drive field if applicable
         drive_field_T_SU2<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            d_local_field_SU2, curr_time, site_index, d_field_drive_1_SU2, d_field_drive_2_SU2, 
-            d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-            max_mixed_tri_neighbors_SU2, d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2, d_spins_SU3);
+            d_local_field_SU2, time_params.curr_time, site_index, field_drive.field_drive_1_SU2, field_drive.field_drive_2_SU2, 
+            field_drive.field_drive_amp_SU2, field_drive.field_drive_width_SU2, field_drive.field_drive_freq_SU2, field_drive.t_B_1_SU2, field_drive.t_B_2_SU2,
+            neighbors.max_mixed_tri_neighbors_SU2, interactions_SU2.mixed_trilinear_interaction, interactions_SU2.mixed_trilinear_partners, d_spins_SU3);
         
-            // Compute derivatives (dS/dt) using Landau-Lifshitz equation
+        // Compute derivatives (dS/dt) using Landau-Lifshitz equation
         landau_Lifshitz_SU2<N_SU2, lattice_size_SU2>(
             k_SU2, site_index, d_local_field_SU2, d_spins_SU2);
     
-    }else{
+    } else {
         size_t site_index_SU3 = site_index - lattice_size_SU2;        
         compute_local_field_SU3<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3>(
-            d_local_field_SU3, site_index_SU3, d_spins_SU3, d_field_SU3, d_onsite_interaction_SU3,
-            d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
-            d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
-            d_mixed_bilinear_interaction_SU3, d_mixed_bilinear_partners_SU3,
-            d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3,
-            d_spins_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-            max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3);
+            d_local_field_SU3, site_index_SU3, d_spins_SU3, d_spins_SU2, interactions_SU3, neighbors);
 
         drive_field_T_SU3<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3>(
-            d_local_field_SU3, curr_time, site_index_SU3, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-            d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-            max_mixed_tri_neighbors_SU3, d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3, d_spins_SU2);
+            d_local_field_SU3, time_params.curr_time, site_index_SU3, field_drive.field_drive_1_SU3, field_drive.field_drive_2_SU3, 
+            field_drive.field_drive_amp_SU2, field_drive.field_drive_width_SU2, field_drive.field_drive_freq_SU2, field_drive.t_B_1_SU2, field_drive.t_B_2_SU2,
+            neighbors.max_mixed_tri_neighbors_SU3, interactions_SU3.mixed_trilinear_interaction, interactions_SU3.mixed_trilinear_partners, d_spins_SU2);
             
         landau_Lifshitz_SU3<N_SU3, lattice_size_SU3>(
             k_SU3, site_index_SU3, d_local_field_SU3, d_spins_SU3);
@@ -711,25 +688,12 @@ __host__
 void SSPRK53_step_kernel(
     double* d_spins_SU2, double* d_spins_SU3,
     double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
-    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3,
-    // Pre-allocated working arrays passed from caller
-    double* work_SU2_1, double* work_SU2_2, double* work_SU2_3,
-    double* work_SU3_1, double* work_SU3_2, double* work_SU3_3)
+    InteractionDataSU2<N_SU2, N_SU3> interactions_SU2,
+    InteractionDataSU3<N_SU2, N_SU3> interactions_SU3,
+    NeighborCounts neighbors,
+    FieldDriveParams<N_SU2, N_SU3> field_drive,
+    TimeStepParams time_params,
+    WorkingArrays work_arrays)
 {
     // SSPRK53 coefficients - now constexpr for compile-time optimization
     constexpr double a30 = 0.355909775063327;
@@ -749,6 +713,8 @@ void SSPRK53_step_kernel(
     constexpr double c4 = 0.699226135931670;
 
     // Pre-compute all time step multiplications
+    const double dt = time_params.dt;
+    const double curr_time = time_params.curr_time;
     const double b10_h = b10 * dt;
     const double b21_h = b21 * dt;
     const double b32_h = b32 * dt;
@@ -760,12 +726,12 @@ void SSPRK53_step_kernel(
     const double c4_h = c4 * dt;
 
     // Use pre-allocated working arrays instead of allocating
-    double* k_SU2 = work_SU2_1;
-    double* tmp_SU2 = work_SU2_2;
-    double* u_SU2 = work_SU2_3;
-    double* k_SU3 = work_SU3_1;
-    double* tmp_SU3 = work_SU3_2;
-    double* u_SU3 = work_SU3_3;
+    double* k_SU2 = work_arrays.work_SU2_1;
+    double* tmp_SU2 = work_arrays.work_SU2_2;
+    double* u_SU2 = work_arrays.work_SU2_3;
+    double* k_SU3 = work_arrays.work_SU3_1;
+    double* tmp_SU3 = work_arrays.work_SU3_2;
+    double* u_SU3 = work_arrays.work_SU3_3;
 
     // Optimize grid configuration - compute once with better occupancy
     constexpr int BLOCK_SIZE = 256;
@@ -775,26 +741,12 @@ void SSPRK53_step_kernel(
 
     
     // Stage 1: Compute k1 = f(t, y)
+    TimeStepParams time_stage1 = {curr_time, dt, time_params.spin_length_SU2, time_params.spin_length_SU3};
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
         k_SU2, k_SU3,
         d_spins_SU2, d_spins_SU3,
         d_local_field_SU2, d_local_field_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time, dt);
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_stage1);
     
 
 
@@ -804,26 +756,10 @@ void SSPRK53_step_kernel(
      tmp_SU3, d_spins_SU3, 1.0, k_SU3, b10_h);
     
     // Stage 2: Compute k2 = f(t + c1*h, tmp)
+    TimeStepParams time_stage2 = {curr_time + c1_h, dt, time_params.spin_length_SU2, time_params.spin_length_SU3};
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
-        k_SU2, k_SU3,
-        tmp_SU2, tmp_SU3,
-        d_local_field_SU2, d_local_field_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time + c1_h, dt);
+        k_SU2, k_SU3, tmp_SU2, tmp_SU3, d_local_field_SU2, d_local_field_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_stage2);
         
     // Stage 2 update: u = tmp + b21*h*k2
     update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
@@ -831,26 +767,10 @@ void SSPRK53_step_kernel(
      u_SU3, tmp_SU3, 1.0, k_SU3, b21_h);
     
     // Stage 3: Compute k3 = f(t + c2*h, u)
+    TimeStepParams time_stage3 = {curr_time + c2_h, dt, time_params.spin_length_SU2, time_params.spin_length_SU3};
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
-        k_SU2, k_SU3,
-        u_SU2, u_SU3,
-        d_local_field_SU2, d_local_field_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time + c2_h, dt);
+        k_SU2, k_SU3, u_SU2, u_SU3, d_local_field_SU2, d_local_field_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_stage3);
 
     // Stage 3 update: tmp = a30*y + a32*u + b32*h*k3
     update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
@@ -858,26 +778,10 @@ void SSPRK53_step_kernel(
      tmp_SU3, d_spins_SU3, a30, u_SU3, a32, k_SU3, b32_h);
 
     // Stage 4: Compute k4 = f(t + c3*h, tmp)
+    TimeStepParams time_stage4 = {curr_time + c3_h, dt, time_params.spin_length_SU2, time_params.spin_length_SU3};
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
-        k_SU2, k_SU3,
-        tmp_SU2, tmp_SU3,
-        d_local_field_SU2, d_local_field_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time + c3_h, dt);
+        k_SU2, k_SU3, tmp_SU2, tmp_SU3, d_local_field_SU2, d_local_field_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_stage4);
 
     // Stage 4 update: Reuse tmp arrays for efficiency (tmp = a40*y + a43*tmp + b43*h*k4)
     update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3> <<<grid_size, block_size>>>
@@ -885,26 +789,10 @@ void SSPRK53_step_kernel(
      tmp_SU3, d_spins_SU3, a40, tmp_SU3, a43, k_SU3, b43_h);
 
     // Stage 5: Compute k5 = f(t + c4*h, tmp)
+    TimeStepParams time_stage5 = {curr_time + c4_h, dt, time_params.spin_length_SU2, time_params.spin_length_SU3};
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
-        k_SU2, k_SU3,
-        tmp_SU2, tmp_SU3,
-        d_local_field_SU2, d_local_field_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time + c4_h, dt);
+        k_SU2, k_SU3, tmp_SU2, tmp_SU3, d_local_field_SU2, d_local_field_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_stage5);
 
     // Final update: y_new = a52*u + a54*tmp + b54*h*k5
     update_arrays_three_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
@@ -1042,29 +930,45 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     
     #undef CHECK_PTR
 
-    // Execute optimized SSPRK53 step with pre-allocated working arrays
+    // Build struct parameters for cleaner function call
+    InteractionDataSU2<N_SU2, N_SU3> interactions_SU2 = {
+        d_field_SU2, d_onsite_interaction_SU2,
+        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
+        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_partners_SU2,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2
+    };
+    
+    InteractionDataSU3<N_SU2, N_SU3> interactions_SU3 = {
+        d_field_SU3, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU3, d_mixed_bilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3
+    };
+    
+    NeighborCounts neighbors = {
+        d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_bi_SU2_SU3, d_num_tri_SU2_SU3,
+        max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_bilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
+        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_bilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3
+    };
+    
+    FieldDriveParams<N_SU2, N_SU3> field_drive = {
+        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3,
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2
+    };
+    
+    TimeStepParams time_params = {curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3};
+    
+    WorkingArrays work_arrays = {
+        memory_pool.get_work_SU2_1(), memory_pool.get_work_SU2_2(), memory_pool.get_work_SU2_3(),
+        memory_pool.get_work_SU3_1(), memory_pool.get_work_SU3_2(), memory_pool.get_work_SU3_3()
+    };
+
+    // Execute optimized SSPRK53 step with structured parameters
     SSPRK53_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
-    d_spins.spins_SU2, d_spins.spins_SU3,
-    d_local_fields_SU2, d_local_fields_SU3,
-    d_field_SU2, d_field_SU3,
-    d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-    d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-    d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-    d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-    d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-    d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-    d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-    d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-    d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-    d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_bi_SU2_SU3, d_num_tri_SU2_SU3,
-    max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_bilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
-    max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_bilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
-    d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-    d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-    curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3,
-    // Pass pre-allocated working arrays from memory pool
-    memory_pool.get_work_SU2_1(), memory_pool.get_work_SU2_2(), memory_pool.get_work_SU2_3(),
-    memory_pool.get_work_SU3_1(), memory_pool.get_work_SU3_2(), memory_pool.get_work_SU3_3());    
+        d_spins.spins_SU2, d_spins.spins_SU3, d_local_fields_SU2, d_local_fields_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_params, work_arrays);    
     
     // Check for errors in kernel launch
     err = cudaGetLastError();
@@ -1082,22 +986,11 @@ __host__
 void euler_step_kernel(
     double* d_spins_SU2, double* d_spins_SU3,
     double* d_local_field_SU2, double* d_local_field_SU3,
-    double* d_field_SU2, double* d_field_SU3,
-    double* d_onsite_interaction_SU2, double* d_onsite_interaction_SU3,
-    double* d_bilinear_interaction_SU2, double* d_bilinear_interaction_SU3,
-    size_t* d_bilinear_partners_SU2, size_t* d_bilinear_partners_SU3,
-    double* d_trilinear_interaction_SU2, double* d_trilinear_interaction_SU3,
-    size_t* d_trilinear_partners_SU2, size_t* d_trilinear_partners_SU3,
-    double* d_mixed_bilinear_interaction_SU2, double* d_mixed_bilinear_interaction_SU3,
-    size_t* d_mixed_bilinear_partners_SU2, size_t* d_mixed_bilinear_partners_SU3,
-    double* d_mixed_trilinear_interaction_SU2, double* d_mixed_trilinear_interaction_SU3,
-    size_t* d_mixed_trilinear_partners_SU2, size_t* d_mixed_trilinear_partners_SU3,
-    size_t num_bi_SU2, size_t num_tri_SU2, size_t num_bi_SU3, size_t num_tri_SU3, size_t num_bi_SU2_SU3, size_t num_tri_SU2_SU3,
-    size_t max_bi_neighbors_SU2, size_t max_tri_neighbors_SU2, size_t max_mixed_bi_neighbors_SU2, size_t max_mixed_tri_neighbors_SU2,
-    size_t max_bi_neighbors_SU3, size_t max_tri_neighbors_SU3, size_t max_mixed_bi_neighbors_SU3, size_t max_mixed_tri_neighbors_SU3,
-    double* d_field_drive_1_SU2, double* d_field_drive_2_SU2, double* d_field_drive_1_SU3, double* d_field_drive_2_SU3,
-    double d_field_drive_amp_SU2, double d_field_drive_width_SU2, double d_field_drive_freq_SU2, double d_t_B_1_SU2, double d_t_B_2_SU2,
-    double curr_time, double dt, double spin_length_SU2, double spin_length_SU3)
+    InteractionDataSU2<N_SU2, N_SU3> interactions_SU2,
+    InteractionDataSU3<N_SU2, N_SU3> interactions_SU3,
+    NeighborCounts neighbors,
+    FieldDriveParams<N_SU2, N_SU3> field_drive,
+    TimeStepParams time_params)
 {
     // Allocate device memory for intermediate results
     double* k_SU2 = nullptr;
@@ -1119,38 +1012,16 @@ void euler_step_kernel(
     // Set up grid and block dimensions
     dim3 block_size(256);
     dim3 grid_size((lattice_size_SU2 + lattice_size_SU3 + block_size.x - 1) / block_size.x);
-    
-    // Synchronize before starting the computation
-    //cudaDeviceSynchronize();
 
     // Compute local fields
     LLG_kernel<N_SU2, N_ATOMS_SU2, lattice_size_SU2, N_SU3, N_ATOMS_SU3, lattice_size_SU3><<<grid_size, block_size>>>(
-        k_SU2, k_SU3,
-        d_spins_SU2, d_spins_SU3,
-        d_local_field_SU2, d_local_field_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
-        num_bi_SU2, num_tri_SU2, num_bi_SU3, num_tri_SU3, num_bi_SU2_SU3, num_tri_SU2_SU3,
-        max_bi_neighbors_SU2, max_tri_neighbors_SU2, max_mixed_bi_neighbors_SU2, max_mixed_tri_neighbors_SU2,
-        max_bi_neighbors_SU3, max_tri_neighbors_SU3, max_mixed_bi_neighbors_SU3, max_mixed_tri_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time, dt);
-
+        k_SU2, k_SU3, d_spins_SU2, d_spins_SU3, d_local_field_SU2, d_local_field_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_params);
     
     // Update spins using Euler step: S(t+dt) = S(t) + dt * (dS/dt)
-    // Directly update d_spins arrays without intermediate allocation
     update_arrays_kernel<N_SU2, lattice_size_SU2, N_SU3, lattice_size_SU3><<<grid_size, block_size>>>
-    (d_spins_SU2, d_spins_SU2, 1.0, k_SU2, dt, 
-     d_spins_SU3, d_spins_SU3, 1.0, k_SU3, dt);
+    (d_spins_SU2, d_spins_SU2, 1.0, k_SU2, time_params.dt, 
+     d_spins_SU3, d_spins_SU3, 1.0, k_SU3, time_params.dt);
 
     // Free temporary arrays
     cudaFree(k_SU2);
@@ -1185,26 +1056,40 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
         return;
     }
     
-    // Execute Euler step
-    euler_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
-        d_spins.spins_SU2, d_spins.spins_SU3,
-        d_local_fields_SU2, d_local_fields_SU3,
-        d_field_SU2, d_field_SU3,
-        d_onsite_interaction_SU2, d_onsite_interaction_SU3,
-        d_bilinear_interaction_SU2, d_bilinear_interaction_SU3,
-        d_bilinear_partners_SU2, d_bilinear_partners_SU3,
-        d_trilinear_interaction_SU2, d_trilinear_interaction_SU3,
-        d_trilinear_partners_SU2, d_trilinear_partners_SU3,
-        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_interaction_SU3,
-        d_mixed_bilinear_partners_SU2, d_mixed_bilinear_partners_SU3,
-        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_interaction_SU3,
-        d_mixed_trilinear_partners_SU2, d_mixed_trilinear_partners_SU3,
+    // Build struct parameters for cleaner function call
+    InteractionDataSU2<N_SU2, N_SU3> interactions_SU2 = {
+        d_field_SU2, d_onsite_interaction_SU2,
+        d_bilinear_interaction_SU2, d_bilinear_partners_SU2,
+        d_trilinear_interaction_SU2, d_trilinear_partners_SU2,
+        d_mixed_bilinear_interaction_SU2, d_mixed_bilinear_partners_SU2,
+        d_mixed_trilinear_interaction_SU2, d_mixed_trilinear_partners_SU2
+    };
+    
+    InteractionDataSU3<N_SU2, N_SU3> interactions_SU3 = {
+        d_field_SU3, d_onsite_interaction_SU3,
+        d_bilinear_interaction_SU3, d_bilinear_partners_SU3,
+        d_trilinear_interaction_SU3, d_trilinear_partners_SU3,
+        d_mixed_bilinear_interaction_SU3, d_mixed_bilinear_partners_SU3,
+        d_mixed_trilinear_interaction_SU3, d_mixed_trilinear_partners_SU3
+    };
+    
+    NeighborCounts neighbors = {
         d_num_bi_SU2, d_num_tri_SU2, d_num_bi_SU3, d_num_tri_SU3, d_num_bi_SU2_SU3, d_num_tri_SU2_SU3,
         max_bilinear_neighbors_SU2, max_trilinear_neighbors_SU2, max_mixed_bilinear_neighbors_SU2, max_mixed_trilinear_neighbors_SU2,
-        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_bilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3,
-        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3, 
-        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2,
-        curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3);
+        max_bilinear_neighbors_SU3, max_trilinear_neighbors_SU3, max_mixed_bilinear_neighbors_SU3, max_mixed_trilinear_neighbors_SU3
+    };
+    
+    FieldDriveParams<N_SU2, N_SU3> field_drive = {
+        d_field_drive_1_SU2, d_field_drive_2_SU2, d_field_drive_1_SU3, d_field_drive_2_SU3,
+        d_field_drive_amp_SU2, d_field_drive_width_SU2, d_field_drive_freq_SU2, d_t_B_1_SU2, d_t_B_2_SU2
+    };
+    
+    TimeStepParams time_params = {curr_time, step_size, d_spin_length_SU2, d_spin_length_SU3};
+
+    // Execute Euler step with structured parameters
+    euler_step_kernel<N_SU2, N_ATOMS_SU2, N_ATOMS_SU2*dim*dim1*dim2, N_SU3, N_ATOMS_SU3, N_ATOMS_SU3*dim*dim1*dim2>(
+        d_spins.spins_SU2, d_spins.spins_SU3, d_local_fields_SU2, d_local_fields_SU3,
+        interactions_SU2, interactions_SU3, neighbors, field_drive, time_params);
     
     // Check for errors in kernel launch
     err = cudaGetLastError();
@@ -1222,71 +1107,31 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
 
 //Explicitly declare template specializations for the mixed lattice class
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
-template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(double*, double*, double*, double*, 
-    double* , double* ,double* , double* ,double* , double* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    size_t , size_t , size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    double* , double* , double* , double* ,
-    double , double , double , double , double ,
-    double , double );
+template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(
+    double*, double*, double*, double*, double*, double*,
+    InteractionDataSU2<3, 8>, InteractionDataSU3<3, 8>, 
+    NeighborCounts, FieldDriveParams<3, 8>, TimeStepParams);
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4>;
-template void __global__ LLG_kernel<3, 4, 256, 8, 4, 256>(double*, double*, double*, double*, 
-    double* , double* ,double* , double* ,double* , double* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    size_t , size_t , size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    double* , double* , double* , double* ,
-    double , double , double , double , double ,
-    double , double );
+template void __global__ LLG_kernel<3, 4, 256, 8, 4, 256>(
+    double*, double*, double*, double*, double*, double*,
+    InteractionDataSU2<3, 8>, InteractionDataSU3<3, 8>, 
+    NeighborCounts, FieldDriveParams<3, 8>, TimeStepParams);
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 1, 1, 1>;
-template void __global__ LLG_kernel<3, 4, 4, 8, 4, 4>(double*, double*, double*, double*, 
-    double* , double* ,double* , double* ,double* , double* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    size_t , size_t , size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    double* , double* , double* , double* ,
-    double , double , double , double , double ,
-    double , double );
+template void __global__ LLG_kernel<3, 4, 4, 8, 4, 4>(
+    double*, double*, double*, double*, double*, double*,
+    InteractionDataSU2<3, 8>, InteractionDataSU3<3, 8>, 
+    NeighborCounts, FieldDriveParams<3, 8>, TimeStepParams);
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 2, 2, 2>;
-template void __global__ LLG_kernel<3, 4, 32, 8, 4, 32>(double*, double*, double*, double*, 
-    double* , double* ,double* , double* ,double* , double* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    size_t , size_t , size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    double* , double* , double* , double* ,
-    double , double , double , double , double ,
-    double , double );
+template void __global__ LLG_kernel<3, 4, 32, 8, 4, 32>(
+    double*, double*, double*, double*, double*, double*,
+    InteractionDataSU2<3, 8>, InteractionDataSU3<3, 8>, 
+    NeighborCounts, FieldDriveParams<3, 8>, TimeStepParams);
 
 template class mixed_lattice_cuda<3, 4, 8, 4, 3, 3, 3>;
-template void __global__ LLG_kernel<3, 4, 108, 8, 4, 108>(double*, double*, double*, double*, 
-    double* , double* ,double* , double* ,double* , double* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    double* , double* ,size_t* , size_t* ,
-    size_t , size_t , size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    size_t , size_t , size_t , size_t ,
-    double* , double* , double* , double* ,
-    double , double , double , double , double ,
-    double , double );
+template void __global__ LLG_kernel<3, 4, 108, 8, 4, 108>(
+    double*, double*, double*, double*, double*, double*,
+    InteractionDataSU2<3, 8>, InteractionDataSU3<3, 8>, 
+    NeighborCounts, FieldDriveParams<3, 8>, TimeStepParams);

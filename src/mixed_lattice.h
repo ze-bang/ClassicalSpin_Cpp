@@ -3243,8 +3243,8 @@ class mixed_lattice
         time.reserve(estimated_steps);
         
         // Open file handles once
-        ofstream mag_file_f(dir_name + "/M_t_f.txt", ios::out | ios::trunc);
-        ofstream mag_file(dir_name + "/M_t.txt", ios::out | ios::trunc);
+        ofstream mag_file_f(dir_name + "/M_t_local.txt", ios::out | ios::trunc);
+        ofstream mag_file(dir_name + "/M_t_global.txt", ios::out | ios::trunc);
         
         if (!mag_file_f.is_open() || !mag_file.is_open()) {
             cerr << "Error opening magnetization files" << endl;
@@ -3261,7 +3261,7 @@ class mixed_lattice
         
         // Write initial magnetization
         auto mag_f = magnetization_local(spin_t);
-        auto mag = magnetization_local_antiferromagnetic(spin_t);
+        auto mag = magnetization_global(spin_t);
         
         for(size_t j = 0; j < N_SU2; ++j){
             mag_file_f << mag_f[j] << " ";
@@ -3327,8 +3327,8 @@ class mixed_lattice
         time.reserve(estimated_steps);
         
         // Open file handles once
-        ofstream mag_file_f(dir_name + "/M_t_f.txt", ios::out | ios::trunc);
-        ofstream mag_file(dir_name + "/M_t.txt", ios::out | ios::trunc);
+        ofstream mag_file_f(dir_name + "/M_t_local.txt", ios::out | ios::trunc);
+        ofstream mag_file(dir_name + "/M_t_global.txt", ios::out | ios::trunc);
         
         if (!mag_file_f.is_open() || !mag_file.is_open()) {
             cerr << "Error opening magnetization files" << endl;
@@ -3345,7 +3345,7 @@ class mixed_lattice
         
         // Write initial magnetization
         auto mag_f = magnetization_local(spin_t);
-        auto mag = magnetization_local_antiferromagnetic(spin_t);
+        auto mag = magnetization_global(spin_t);
         
         for(size_t j = 0; j < N_SU2; ++j){
             mag_file_f << mag_f[j] << " ";
