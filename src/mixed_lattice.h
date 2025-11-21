@@ -23,6 +23,31 @@
 #include "convergence_monitor.h"
 // #include <boost>
 
+// Performance monitoring utilities
+struct PerformanceTimer {
+    std::chrono::high_resolution_clock::time_point start_time;
+    std::string name;
+    bool verbose;
+    
+    PerformanceTimer(const std::string& timer_name, bool verbose_output = true) 
+        : name(timer_name), verbose(verbose_output) {
+        start_time = std::chrono::high_resolution_clock::now();
+    }
+    
+    ~PerformanceTimer() {
+        if (verbose) {
+            auto end_time = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+            std::cout << "[PERF] " << name << " took " << duration.count() << " ms" << std::endl;
+        }
+    }
+    
+    double elapsed_ms() const {
+        auto current_time = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
+    }
+};
+
 template<size_t N_SU2, size_t lattice_size_SU2, size_t N_SU3, size_t lattice_size_SU3>
 struct mixed_lattice_spin{
     array<array<double,N_SU2>, lattice_size_SU2> spins_SU2;
@@ -391,6 +416,8 @@ class mixed_lattice
     }
     
     mixed_lattice(mixed_UnitCell<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3> *atoms, double spin_length_SU2_in, double spin_length_SU3_in): UC(*atoms) {
+        PerformanceTimer total_timer("Mixed Lattice Construction", true);
+        
         // Initialize random seed with better entropy source
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -421,22 +448,25 @@ class mixed_lattice
         sublattice_frames_SU3 = atoms->SU3.sublattice_frames;
 
         // Set up sublattices in parallel
-        #pragma omp parallel sections
         {
-            #pragma omp section
+            PerformanceTimer sublattice_timer("Sublattice Setup (SU2 & SU3)", true);
+            #pragma omp parallel sections
             {
-                set_up_sublattice(spin_length_SU2, spins.spins_SU2, site_pos.pos_SU2, 
-                                field_SU2, onsite_interaction_SU2, bilinear_interaction_SU2, 
-                                trilinear_interaction_SU2, bilinear_partners_SU2, 
-                                trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
-            }
-            
-            #pragma omp section
-            {
-                set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, 
-                                field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, 
-                                trilinear_interaction_SU3, bilinear_partners_SU3, 
-                                trilinear_partners_SU3, &(atoms->SU3), num_bi_SU3, num_tri_SU3);
+                #pragma omp section
+                {
+                    set_up_sublattice(spin_length_SU2, spins.spins_SU2, site_pos.pos_SU2, 
+                                    field_SU2, onsite_interaction_SU2, bilinear_interaction_SU2, 
+                                    trilinear_interaction_SU2, bilinear_partners_SU2, 
+                                    trilinear_partners_SU2, &(atoms->SU2), num_bi_SU2, num_tri_SU2);
+                }
+                
+                #pragma omp section
+                {
+                    set_up_sublattice(spin_length_SU3, spins.spins_SU3, site_pos.pos_SU3, 
+                                    field_SU3, onsite_interaction_SU3, bilinear_interaction_SU3, 
+                                    trilinear_interaction_SU3, bilinear_partners_SU3, 
+                                    trilinear_partners_SU3, &(atoms->SU3), num_bi_SU3, num_tri_SU3);
+                }
             }
         }
         
@@ -453,7 +483,39 @@ class mixed_lattice
         cout << "Mixed lattice initialized with SU2 size: " << lattice_size_SU2 
              << ", SU3 size: " << lattice_size_SU3 << endl;
 
-        // Process bilinear mixed interactions in parallel across outer loop dimensions
+        // Process bilinear mixed interactions using lock-free approach
+        {
+        PerformanceTimer bilinear_timer("Mixed Bilinear Interactions Setup", true);
+        // Step 1: Count interactions per SU2 site (thread-safe read-only pass)
+        vector<std::atomic<size_t>> su2_interaction_count(lattice_size_SU2);
+        
+        #pragma omp parallel for collapse(3) schedule(static)
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
+                        auto bilinear_matched = atoms->bilinear_SU2_SU3.equal_range(l);
+                        for (auto m = bilinear_matched.first; m != bilinear_matched.second; ++m) {
+                            const mixed_bilinear<N_SU3, N_SU2>& J = m->second;
+                            const size_t partner = flatten_index_periodic_boundary(
+                                i + J.offset[0], j + J.offset[1], k + J.offset[2], J.partner, N_ATOMS_SU2);
+                            su2_interaction_count[partner].fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Step 2: Pre-allocate space (sequential, fast)
+        for (size_t site = 0; site < lattice_size_SU2; ++site) {
+            const size_t count = su2_interaction_count[site].load(std::memory_order_relaxed);
+            mixed_bilinear_interaction_SU2[site].reserve(count);
+            mixed_bilinear_partners_SU2[site].reserve(count);
+        }
+        
+        // Step 3: Fill interactions with atomic counters for index management
+        vector<std::atomic<size_t>> su2_current_index(lattice_size_SU2);
+        
         #pragma omp parallel for collapse(3) schedule(static)
         for (size_t i = 0; i < dim1; ++i) {
             for (size_t j = 0; j < dim2; ++j) {
@@ -468,33 +530,74 @@ class mixed_lattice
                             const size_t partner = flatten_index_periodic_boundary(
                                 i + J.offset[0], j + J.offset[1], k + J.offset[2], J.partner, N_ATOMS_SU2);
 
+                            // Add to SU3 side (no contention)
                             mixed_bilinear_interaction_SU3[current_site_index].push_back(J.bilinear_interaction);
                             mixed_bilinear_partners_SU3[current_site_index].push_back(partner);
                             
                             // Precompute transposed tensors once
                             const auto transposed = transpose2D<N_SU3, N_SU2>(J.bilinear_interaction);
 
-                            #pragma omp critical(bilinear_SU2_update)
-                            {
-                                mixed_bilinear_interaction_SU2[partner].push_back(transposed);
-                                mixed_bilinear_partners_SU2[partner].push_back(current_site_index);
-                            }
-
+                            // Lock-free insertion using atomic counter
+                            const size_t idx = su2_current_index[partner].fetch_add(1, std::memory_order_relaxed);
+                            mixed_bilinear_interaction_SU2[partner][idx] = transposed;
+                            mixed_bilinear_partners_SU2[partner][idx] = current_site_index;
+                        }
+                    }
+                }
+            }
+        }
+        }  // End bilinear timer scope
+        
+        // Process trilinear mixed interactions using lock-free approach
+        {
+        PerformanceTimer trilinear_timer("Mixed Trilinear Interactions Setup", true);
+        // Step 1: Count interactions per site (thread-safe)
+        vector<std::atomic<size_t>> su2_tri_count(lattice_size_SU2);
+        vector<std::atomic<size_t>> su3_tri_count(lattice_size_SU3);
+        
+        #pragma omp parallel for collapse(3) schedule(static)
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim; ++k) {
+                    for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
+                        const size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU3);
+                        auto trilinear_matched = atoms->trilinear_SU2_SU3.equal_range(l);
+                        for (auto m = trilinear_matched.first; m != trilinear_matched.second; ++m) {
+                            const mixed_trilinear<N_SU2, N_SU3>& J = m->second;
+                            const size_t partner1 = flatten_index_periodic_boundary(
+                                i + J.offset1[0], j + J.offset1[1], k + J.offset1[2], J.partner1, N_ATOMS_SU2);
+                            const size_t partner2 = flatten_index_periodic_boundary(
+                                i + J.offset2[0], j + J.offset2[1], k + J.offset2[2], J.partner2, N_ATOMS_SU2);
+                            
+                            su3_tri_count[current_site_index].fetch_add(1, std::memory_order_relaxed);
+                            su2_tri_count[partner1].fetch_add(1, std::memory_order_relaxed);
+                            su2_tri_count[partner2].fetch_add(1, std::memory_order_relaxed);
                         }
                     }
                 }
             }
         }
         
-
+        // Step 2: Pre-allocate space
+        for (size_t site = 0; site < lattice_size_SU2; ++site) {
+            const size_t count = su2_tri_count[site].load(std::memory_order_relaxed);
+            mixed_trilinear_interaction_SU2[site].reserve(count);
+            mixed_trilinear_partners_SU2[site].reserve(count);
+        }
+        for (size_t site = 0; site < lattice_size_SU3; ++site) {
+            const size_t count = su3_tri_count[site].load(std::memory_order_relaxed);
+            mixed_trilinear_interaction_SU3[site].reserve(count);
+            mixed_trilinear_partners_SU3[site].reserve(count);
+        }
+        
+        // Step 3: Fill interactions with atomic counters
+        vector<std::atomic<size_t>> su2_tri_idx(lattice_size_SU2);
+        vector<std::atomic<size_t>> su3_tri_idx(lattice_size_SU3);
+        
         #pragma omp parallel for collapse(3) schedule(static)
         for (size_t i = 0; i < dim1; ++i) {
             for (size_t j = 0; j < dim2; ++j) {
                 for (size_t k = 0; k < dim; ++k) {
-                    // Thread-local vectors to avoid synchronization overhead
-                    vector<vector<array<double, N_SU2 * N_SU2 * N_SU3>>> local_mixed_trilinear_interaction_SU2(N_ATOMS_SU2);
-                    vector<vector<array<size_t, 2>>> local_mixed_trilinear_partners_SU2(N_ATOMS_SU2);
-                    
                     for (size_t l = 0; l < N_ATOMS_SU3; ++l) {
                         const size_t current_site_index = flatten_index(i, j, k, l, N_ATOMS_SU3);
                         
@@ -507,52 +610,33 @@ class mixed_lattice
                             const size_t partner2 = flatten_index_periodic_boundary(
                                 i + J.offset2[0], j + J.offset2[1], k + J.offset2[2], J.partner2, N_ATOMS_SU2);
                             
-                            // Add directly to site-specific array for SU3
-                            #pragma omp critical(SU3_update)
-                            {
-                                mixed_trilinear_interaction_SU3[current_site_index].push_back(J.trilinear_interaction);
-                                mixed_trilinear_partners_SU3[current_site_index].push_back({partner1, partner2});
-                            }
+                            // Add to SU3 side
+                            const size_t idx_su3 = su3_tri_idx[current_site_index].fetch_add(1, std::memory_order_relaxed);
+                            mixed_trilinear_interaction_SU3[current_site_index][idx_su3] = J.trilinear_interaction;
+                            mixed_trilinear_partners_SU3[current_site_index][idx_su3] = {partner1, partner2};
                             
                             // Precompute transposed tensors once
                             const auto transposed = transpose3D(J.trilinear_interaction, N_SU3, N_SU2, N_SU2);
                             const auto swapped = swap_axis_3D(transposed, N_SU2, N_SU2, N_SU3);
                             
-                            // Store in thread-local vectors to avoid synchronization
-                            if (local_mixed_trilinear_interaction_SU2.size() <= partner1) {
-                                local_mixed_trilinear_interaction_SU2.resize(partner1 + 1);
-                                local_mixed_trilinear_partners_SU2.resize(partner1 + 1);
-                            }
-                            if (local_mixed_trilinear_interaction_SU2.size() <= partner2) {
-                                local_mixed_trilinear_interaction_SU2.resize(partner2 + 1);
-                                local_mixed_trilinear_partners_SU2.resize(partner2 + 1);
-                            }
+                            // Add to SU2 sides
+                            const size_t idx1 = su2_tri_idx[partner1].fetch_add(1, std::memory_order_relaxed);
+                            mixed_trilinear_interaction_SU2[partner1][idx1] = transposed;
+                            mixed_trilinear_partners_SU2[partner1][idx1] = {partner2, current_site_index};
                             
-                            local_mixed_trilinear_interaction_SU2[partner1].push_back(transposed);
-                            local_mixed_trilinear_partners_SU2[partner1].push_back({partner2, current_site_index});
-                            
-                            local_mixed_trilinear_interaction_SU2[partner2].push_back(swapped);
-                            local_mixed_trilinear_partners_SU2[partner2].push_back({partner1, current_site_index});
-                        }
-                    }
-                    
-                    // Merge thread-local data into global arrays
-                    #pragma omp critical(SU2_update)
-                    {
-                        for (size_t idx = 0; idx < local_mixed_trilinear_interaction_SU2.size(); ++idx) {
-                            for (size_t v = 0; v < local_mixed_trilinear_interaction_SU2[idx].size(); ++v) {
-                                mixed_trilinear_interaction_SU2[idx].push_back(
-                                    local_mixed_trilinear_interaction_SU2[idx][v]);
-                                mixed_trilinear_partners_SU2[idx].push_back(
-                                    local_mixed_trilinear_partners_SU2[idx][v]);
-                            }
+                            const size_t idx2 = su2_tri_idx[partner2].fetch_add(1, std::memory_order_relaxed);
+                            mixed_trilinear_interaction_SU2[partner2][idx2] = swapped;
+                            mixed_trilinear_partners_SU2[partner2][idx2] = {partner1, current_site_index};
                         }
                     }
                 }
             }
         }
+        }  // End trilinear timer scope
         
         // Initialize structure tensors - OPTIMIZED VERSION
+        {
+        PerformanceTimer structure_timer("Structure Tensor Initialization", true);
         // Structure tensors are identical for all sites, so we build once and broadcast
         // This is a MAJOR optimization: reduces from O(lattice_size * N^3) to O(N^3)
         
@@ -613,8 +697,10 @@ class mixed_lattice
             #pragma omp section
             device_structure_tensor_manager.initSU3(SU3_structure_tensor, N_SU3, N_ATOMS_SU3, dim1, dim2, dim);
         }
+        }  // End structure tensor timer scope
 
         cout << "Finished setting up lattice" << endl;
+        cout << "Total initialization breakdown shown above." << endl;
     }
 
     void print_lattice_info(const string& filename = "lattice_info_CPU.txt") const {
@@ -835,30 +921,55 @@ class mixed_lattice
         }
         
         // Optimized mixed bilinear energy calculation with aggressive prefetching
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
-            // Prefetch multiple iterations ahead
-            if (i + PREFETCH_DIST < num_bi_SU2_SU3) {
-                const size_t prefetch_idx = i + PREFETCH_DIST;
-                __builtin_prefetch(&mixed_bilinear_partners_SU2[site_index][prefetch_idx], 0, 3);
-                __builtin_prefetch(&mixed_bilinear_interaction_SU2[site_index][prefetch_idx], 0, 3);
-                const size_t prefetch_partner = mixed_bilinear_partners_SU2[site_index][prefetch_idx];
-                __builtin_prefetch(&spins.spins_SU3[prefetch_partner], 0, 3);
+        // Process in blocks for better cache utilization
+        constexpr size_t MIX_BI_BLOCK = 4;
+        for (size_t i_block = 0; i_block < num_bi_SU2_SU3; i_block += MIX_BI_BLOCK) {
+            const size_t block_end = std::min(i_block + MIX_BI_BLOCK, num_bi_SU2_SU3);
+            
+            // Prefetch next block
+            if (block_end < num_bi_SU2_SU3) {
+                for (size_t pf = block_end; pf < std::min(block_end + MIX_BI_BLOCK, num_bi_SU2_SU3); ++pf) {
+                    const size_t prefetch_partner = mixed_bilinear_partners_SU2[site_index][pf];
+                    __builtin_prefetch(&spins.spins_SU3[prefetch_partner], 0, 2);
+                    __builtin_prefetch(&mixed_bilinear_interaction_SU2[site_index][pf], 0, 2);
+                }
             }
             
-            const size_t partner_idx = mixed_bilinear_partners_SU2[site_index][i];
-            const auto& partner_spin = spins.spins_SU3[partner_idx]; 
-            const auto& interaction = mixed_bilinear_interaction_SU2[site_index][i];
-            
-            // Let compiler auto-vectorize inner loops
-            for (size_t a = 0; a < N_SU2; ++a) {
-                const double diff_a = new_spin[a] - old_spin[a];
+            // Process current block
+            for (size_t i = i_block; i < block_end; ++i) {
+                const size_t partner_idx = mixed_bilinear_partners_SU2[site_index][i];
+                const auto& partner_spin = spins.spins_SU3[partner_idx]; 
+                const auto& interaction = mixed_bilinear_interaction_SU2[site_index][i];
                 
-                double dot_result = 0.0;
-                for (size_t b = 0; b < N_SU3; ++b) {
-                    dot_result += interaction[a*N_SU3 + b] * partner_spin[b];
+                // Manual loop unrolling for common case (N_SU2 = 3)
+                if constexpr (N_SU2 == 3) {
+                    const double diff_0 = new_spin[0] - old_spin[0];
+                    const double diff_1 = new_spin[1] - old_spin[1];
+                    const double diff_2 = new_spin[2] - old_spin[2];
+                    
+                    double dot_0 = 0.0, dot_1 = 0.0, dot_2 = 0.0;
+                    #pragma omp simd reduction(+:dot_0,dot_1,dot_2)
+                    for (size_t b = 0; b < N_SU3; ++b) {
+                        dot_0 += interaction[0*N_SU3 + b] * partner_spin[b];
+                        dot_1 += interaction[1*N_SU3 + b] * partner_spin[b];
+                        dot_2 += interaction[2*N_SU3 + b] * partner_spin[b];
+                    }
+                    
+                    bilinear_energy_mixed += diff_0 * dot_0 + diff_1 * dot_1 + diff_2 * dot_2;
+                } else {
+                    // Generic path for other dimensions
+                    for (size_t a = 0; a < N_SU2; ++a) {
+                        const double diff_a = new_spin[a] - old_spin[a];
+                        
+                        double dot_result = 0.0;
+                        #pragma omp simd reduction(+:dot_result)
+                        for (size_t b = 0; b < N_SU3; ++b) {
+                            dot_result += interaction[a*N_SU3 + b] * partner_spin[b];
+                        }
+                        
+                        bilinear_energy_mixed += diff_a * dot_result;
+                    }
                 }
-                
-                bilinear_energy_mixed += diff_a * dot_result;
             }
         }
 
@@ -895,9 +1006,20 @@ class mixed_lattice
             }
         }
         
-        // Mixed trilinear interactions - optimized similarly
-        for (size_t i_block = 0; i_block < num_tri_SU2_SU3; i_block += BLOCK_SIZE) {
-            const size_t end_idx = std::min(i_block + BLOCK_SIZE, num_tri_SU2_SU3);
+        // Mixed trilinear interactions - optimized with better memory access pattern
+        constexpr size_t MIX_TRI_BLOCK = 2;
+        for (size_t i_block = 0; i_block < num_tri_SU2_SU3; i_block += MIX_TRI_BLOCK) {
+            const size_t end_idx = std::min(i_block + MIX_TRI_BLOCK, num_tri_SU2_SU3);
+            
+            // Prefetch next block
+            if (end_idx < num_tri_SU2_SU3) {
+                for (size_t pf = end_idx; pf < std::min(end_idx + MIX_TRI_BLOCK, num_tri_SU2_SU3); ++pf) {
+                    const size_t pf1 = mixed_trilinear_partners_SU2[site_index][pf][0];
+                    const size_t pf2 = mixed_trilinear_partners_SU2[site_index][pf][1];
+                    __builtin_prefetch(&spins.spins_SU2[pf1], 0, 1);
+                    __builtin_prefetch(&spins.spins_SU3[pf2], 0, 1);
+                }
+            }
             
             for (size_t i = i_block; i < end_idx; ++i) {
                 const size_t partner1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
@@ -906,18 +1028,42 @@ class mixed_lattice
                 const auto& partner2_spin = spins.spins_SU3[partner2_idx];
                 const auto& interaction = mixed_trilinear_interaction_SU2[site_index][i];
                 
-                // Let compiler auto-vectorize
-                for (size_t a = 0; a < N_SU2; ++a) {
-                    const double diff_a = new_spin[a] - old_spin[a];
+                // Optimized for N_SU2=3 case with manual unrolling
+                if constexpr (N_SU2 == 3) {
+                    const double diff_0 = new_spin[0] - old_spin[0];
+                    const double diff_1 = new_spin[1] - old_spin[1];
+                    const double diff_2 = new_spin[2] - old_spin[2];
                     
-                    double temp_sum = 0.0;
+                    double sum_0 = 0.0, sum_1 = 0.0, sum_2 = 0.0;
+                    
                     for (size_t b = 0; b < N_SU2; ++b) {
+                        const double p1_b = partner1_spin[b];
+                        #pragma omp simd reduction(+:sum_0,sum_1,sum_2)
                         for (size_t c = 0; c < N_SU3; ++c) {
-                            temp_sum += interaction[(a*N_SU2 + b)*N_SU3 + c] * 
-                                       partner1_spin[b] * partner2_spin[c];
+                            const double p2_c = partner2_spin[c];
+                            const double product = p1_b * p2_c;
+                            sum_0 += interaction[(0*N_SU2 + b)*N_SU3 + c] * product;
+                            sum_1 += interaction[(1*N_SU2 + b)*N_SU3 + c] * product;
+                            sum_2 += interaction[(2*N_SU2 + b)*N_SU3 + c] * product;
                         }
                     }
-                    trilinear_energy_mixed += diff_a * temp_sum;
+                    
+                    trilinear_energy_mixed += diff_0 * sum_0 + diff_1 * sum_1 + diff_2 * sum_2;
+                } else {
+                    // Generic path
+                    for (size_t a = 0; a < N_SU2; ++a) {
+                        const double diff_a = new_spin[a] - old_spin[a];
+                        
+                        double temp_sum = 0.0;
+                        for (size_t b = 0; b < N_SU2; ++b) {
+                            const double p1_b = partner1_spin[b];
+                            for (size_t c = 0; c < N_SU3; ++c) {
+                                temp_sum += interaction[(a*N_SU2 + b)*N_SU3 + c] * 
+                                           p1_b * partner2_spin[c];
+                            }
+                        }
+                        trilinear_energy_mixed += diff_a * temp_sum;
+                    }
                 }
             }
         }
@@ -976,31 +1122,50 @@ class mixed_lattice
             }
         }
 
-        // Optimized mixed bilinear energy calculation with aggressive prefetching
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
-            // Prefetch multiple iterations ahead
-            if (i + PREFETCH_DIST < num_bi_SU2_SU3) {
-                const size_t prefetch_idx = i + PREFETCH_DIST;
-                __builtin_prefetch(&mixed_bilinear_partners_SU3[site_index][prefetch_idx], 0, 3);
-                __builtin_prefetch(&mixed_bilinear_interaction_SU3[site_index][prefetch_idx], 0, 3);
-                const size_t prefetch_partner = mixed_bilinear_partners_SU3[site_index][prefetch_idx];
-                __builtin_prefetch(&spins.spins_SU2[prefetch_partner], 0, 3);
+        // Optimized mixed bilinear energy calculation with block processing
+        constexpr size_t MIX_BI_BLOCK = 4;
+        for (size_t i_block = 0; i_block < num_bi_SU2_SU3; i_block += MIX_BI_BLOCK) {
+            const size_t block_end = std::min(i_block + MIX_BI_BLOCK, num_bi_SU2_SU3);
+            
+            // Prefetch next block
+            if (block_end < num_bi_SU2_SU3) {
+                for (size_t pf = block_end; pf < std::min(block_end + MIX_BI_BLOCK, num_bi_SU2_SU3); ++pf) {
+                    const size_t prefetch_partner = mixed_bilinear_partners_SU3[site_index][pf];
+                    __builtin_prefetch(&spins.spins_SU2[prefetch_partner], 0, 2);
+                    __builtin_prefetch(&mixed_bilinear_interaction_SU3[site_index][pf], 0, 2);
+                }
             }
             
-            const size_t partner_idx = mixed_bilinear_partners_SU3[site_index][i];
-            const auto& partner_spin = spins.spins_SU2[partner_idx]; 
-            const auto& interaction = mixed_bilinear_interaction_SU3[site_index][i];
-            
-            // Let compiler auto-vectorize
-            for (size_t a = 0; a < N_SU3; ++a) {
-                const double diff_a = new_spin[a] - old_spin[a];
+            // Process current block
+            for (size_t i = i_block; i < block_end; ++i) {
+                const size_t partner_idx = mixed_bilinear_partners_SU3[site_index][i];
+                const auto& partner_spin = spins.spins_SU2[partner_idx]; 
+                const auto& interaction = mixed_bilinear_interaction_SU3[site_index][i];
                 
-                double dot_result = 0.0;
-                for (size_t b = 0; b < N_SU2; ++b) {
-                    dot_result += interaction[a*N_SU2 + b] * partner_spin[b];
+                // Optimized for N_SU3 = 8 (common case)
+                if constexpr (N_SU3 == 8 && N_SU2 == 3) {
+                    // Unroll outer loop for better instruction pipelining
+                    for (size_t a = 0; a < 8; ++a) {
+                        const double diff_a = new_spin[a] - old_spin[a];
+                        const double dot_result = interaction[a*3 + 0] * partner_spin[0] +
+                                                 interaction[a*3 + 1] * partner_spin[1] +
+                                                 interaction[a*3 + 2] * partner_spin[2];
+                        bilinear_energy_mixed += diff_a * dot_result;
+                    }
+                } else {
+                    // Generic path
+                    for (size_t a = 0; a < N_SU3; ++a) {
+                        const double diff_a = new_spin[a] - old_spin[a];
+                        
+                        double dot_result = 0.0;
+                        #pragma omp simd reduction(+:dot_result)
+                        for (size_t b = 0; b < N_SU2; ++b) {
+                            dot_result += interaction[a*N_SU2 + b] * partner_spin[b];
+                        }
+                        
+                        bilinear_energy_mixed += diff_a * dot_result;
+                    }
                 }
-                
-                bilinear_energy_mixed += diff_a * dot_result;
             }
         }
 
@@ -1038,9 +1203,20 @@ class mixed_lattice
             }
         }
         
-        // Mixed trilinear interactions with similar optimizations
-        for (size_t i_block = 0; i_block < num_tri_SU2_SU3; i_block += BLOCK_SIZE) {
-            const size_t end_idx = std::min(i_block + BLOCK_SIZE, num_tri_SU2_SU3);
+        // Mixed trilinear interactions - optimized for SU3-SU2-SU2
+        constexpr size_t MIX_TRI_BLOCK = 2;
+        for (size_t i_block = 0; i_block < num_tri_SU2_SU3; i_block += MIX_TRI_BLOCK) {
+            const size_t end_idx = std::min(i_block + MIX_TRI_BLOCK, num_tri_SU2_SU3);
+            
+            // Prefetch next block
+            if (end_idx < num_tri_SU2_SU3) {
+                for (size_t pf = end_idx; pf < std::min(end_idx + MIX_TRI_BLOCK, num_tri_SU2_SU3); ++pf) {
+                    const size_t pf1 = mixed_trilinear_partners_SU3[site_index][pf][0];
+                    const size_t pf2 = mixed_trilinear_partners_SU3[site_index][pf][1];
+                    __builtin_prefetch(&spins.spins_SU2[pf1], 0, 1);
+                    __builtin_prefetch(&spins.spins_SU2[pf2], 0, 1);
+                }
+            }
             
             for (size_t i = i_block; i < end_idx; ++i) {
                 const size_t partner1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
@@ -1049,18 +1225,43 @@ class mixed_lattice
                 const auto& partner2_spin = spins.spins_SU2[partner2_idx];
                 const auto& interaction = mixed_trilinear_interaction_SU3[site_index][i];
                 
-                // Let compiler auto-vectorize
-                for (size_t a = 0; a < N_SU3; ++a) {
-                    const double diff_a = new_spin[a] - old_spin[a];
-                    
-                    double temp_sum = 0.0;
-                    for (size_t b = 0; b < N_SU2; ++b) {
-                        for (size_t c = 0; c < N_SU2; ++c) {
-                            temp_sum += interaction[(a*N_SU2 + b)*N_SU2 + c] * 
-                                       partner1_spin[b] * partner2_spin[c];
+                // Optimized for N_SU3=8, N_SU2=3 (most common case)
+                if constexpr (N_SU3 == 8 && N_SU2 == 3) {
+                    // Pre-compute outer products of partner spins (3x3 = 9 values)
+                    double outer_product[9];
+                    for (size_t b = 0; b < 3; ++b) {
+                        for (size_t c = 0; c < 3; ++c) {
+                            outer_product[b*3 + c] = partner1_spin[b] * partner2_spin[c];
                         }
                     }
-                    trilinear_energy_mixed += diff_a * temp_sum;
+                    
+                    // Now compute contractions for each dimension
+                    for (size_t a = 0; a < 8; ++a) {
+                        const double diff_a = new_spin[a] - old_spin[a];
+                        
+                        double temp_sum = 0.0;
+                        #pragma omp simd reduction(+:temp_sum)
+                        for (size_t bc = 0; bc < 9; ++bc) {
+                            temp_sum += interaction[a*9 + bc] * outer_product[bc];
+                        }
+                        
+                        trilinear_energy_mixed += diff_a * temp_sum;
+                    }
+                } else {
+                    // Generic path
+                    for (size_t a = 0; a < N_SU3; ++a) {
+                        const double diff_a = new_spin[a] - old_spin[a];
+                        
+                        double temp_sum = 0.0;
+                        for (size_t b = 0; b < N_SU2; ++b) {
+                            const double p1_b = partner1_spin[b];
+                            for (size_t c = 0; c < N_SU2; ++c) {
+                                temp_sum += interaction[(a*N_SU2 + b)*N_SU2 + c] * 
+                                           p1_b * partner2_spin[c];
+                            }
+                        }
+                        trilinear_energy_mixed += diff_a * temp_sum;
+                    }
                 }
             }
         }
@@ -1836,96 +2037,105 @@ class mixed_lattice
         array<double, N_SU2> new_spin_SU2;
         array<double, N_SU3> new_spin_SU3;
         
-        // Batch generate random numbers for better performance
-        constexpr size_t BATCH_SIZE = 64;
-        std::vector<size_t> random_sites(BATCH_SIZE);
+        // OPTIMIZED: Process sublattices separately for better cache locality
+        // This keeps all SU2-SU2 and SU3-SU3 interactions in cache
+        constexpr size_t BATCH_SIZE = 128;  // Increased batch size for better amortization
+        std::vector<size_t> random_sites_SU2(BATCH_SIZE);
+        std::vector<size_t> random_sites_SU3(BATCH_SIZE);
         std::vector<double> random_uniforms(BATCH_SIZE);
         
-        // Process sites in batches for better cache locality
-        for (size_t batch_start = 0; batch_start < total_sites; batch_start += BATCH_SIZE) {
-            const size_t batch_end = std::min(batch_start + BATCH_SIZE, total_sites);
+        // Process SU2 sublattice
+        for (size_t batch_start = 0; batch_start < lattice_size_SU2; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, lattice_size_SU2);
             const size_t current_batch_size = batch_end - batch_start;
             
-            // Generate random sites and uniform numbers in batch
+            // Generate random sites and uniforms
             for (size_t j = 0; j < current_batch_size; ++j) {
-                random_sites[j] = random_int_lehman(total_sites);
+                random_sites_SU2[j] = random_int_lehman(lattice_size_SU2);
                 random_uniforms[j] = random_double_lehman(0, 1);
             }
             
-            // Process batch
+            // Process SU2 batch - sequential access improves cache hit rate
             for (size_t j = 0; j < current_batch_size; ++j) {
-                const size_t i = random_sites[j];
+                const size_t i = random_sites_SU2[j];
                 const double rand_uniform = random_uniforms[j];
                 
-                if (i < lattice_size_SU2) {
-                    // SU2 case - inline spin generation to avoid function call overhead
-                    if (gaussian) {
-                        // Inline gaussian move computation
-                        const auto& current_spin_ref = curr_spin.spins_SU2[i];
-                        gen_random_spin(new_spin_SU2, spin_length_SU2);
-                        
-                        // Compute new_spin = current + random * sigma, then normalize
-                        double norm_sq = 0.0;
-                        #pragma omp simd reduction(+:norm_sq)
-                        for (size_t k = 0; k < N_SU2; ++k) {
-                            new_spin_SU2[k] = current_spin_ref[k] + new_spin_SU2[k] * sigma;
-                            norm_sq += new_spin_SU2[k] * new_spin_SU2[k];
-                        }
-                        
-                        const double inv_norm = spin_length_SU2 / sqrt(norm_sq);
-                        #pragma omp simd
-                        for (size_t k = 0; k < N_SU2; ++k) {
-                            new_spin_SU2[k] *= inv_norm;
-                        }
-                    } else {
-                        gen_random_spin(new_spin_SU2, spin_length_SU2);
+                if (gaussian) {
+                    const auto& current_spin_ref = curr_spin.spins_SU2[i];
+                    gen_random_spin(new_spin_SU2, spin_length_SU2);
+                    
+                    double norm_sq = 0.0;
+                    #pragma omp simd reduction(+:norm_sq)
+                    for (size_t k = 0; k < N_SU2; ++k) {
+                        new_spin_SU2[k] = current_spin_ref[k] + new_spin_SU2[k] * sigma;
+                        norm_sq += new_spin_SU2[k] * new_spin_SU2[k];
                     }
                     
-                    const double dE = site_energy_SU2_diff(new_spin_SU2, curr_spin.spins_SU2[i], i);
-                    
-                    // Branchless acceptance check using conditional move
-                    const bool accepted = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
-                    
-                    if (accepted) {
-                        // Use std::copy for potentially better optimization
-                        std::copy(new_spin_SU2.begin(), new_spin_SU2.end(), curr_spin.spins_SU2[i].begin());
-                        accept++;
+                    const double inv_norm = spin_length_SU2 / sqrt(norm_sq);
+                    #pragma omp simd
+                    for (size_t k = 0; k < N_SU2; ++k) {
+                        new_spin_SU2[k] *= inv_norm;
                     }
                 } else {
-                    // SU3 case
-                    const size_t i_SU3 = i - lattice_size_SU2;
+                    gen_random_spin(new_spin_SU2, spin_length_SU2);
+                }
+                
+                const double dE = site_energy_SU2_diff(new_spin_SU2, curr_spin.spins_SU2[i], i);
+                
+                // Branchless acceptance
+                const bool accepted = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                
+                if (accepted) {
+                    std::copy(new_spin_SU2.begin(), new_spin_SU2.end(), curr_spin.spins_SU2[i].begin());
+                    accept++;
+                }
+            }
+        }
+        
+        // Process SU3 sublattice separately
+        for (size_t batch_start = 0; batch_start < lattice_size_SU3; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, lattice_size_SU3);
+            const size_t current_batch_size = batch_end - batch_start;
+            
+            // Generate random sites and uniforms
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                random_sites_SU3[j] = random_int_lehman(lattice_size_SU3);
+                random_uniforms[j] = random_double_lehman(0, 1);
+            }
+            
+            // Process SU3 batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                const size_t i = random_sites_SU3[j];
+                const double rand_uniform = random_uniforms[j];
+                
+                if (gaussian) {
+                    const auto& current_spin_ref = curr_spin.spins_SU3[i];
+                    gen_random_spin(new_spin_SU3, spin_length_SU3);
                     
-                    if (gaussian) {
-                        // Inline gaussian move computation
-                        const auto& current_spin_ref = curr_spin.spins_SU3[i_SU3];
-                        gen_random_spin(new_spin_SU3, spin_length_SU3);
-                        
-                        // Compute new_spin = current + random * sigma, then normalize
-                        double norm_sq = 0.0;
-                        #pragma omp simd reduction(+:norm_sq)
-                        for (size_t k = 0; k < N_SU3; ++k) {
-                            new_spin_SU3[k] = current_spin_ref[k] + new_spin_SU3[k] * sigma;
-                            norm_sq += new_spin_SU3[k] * new_spin_SU3[k];
-                        }
-                        
-                        const double inv_norm = spin_length_SU3 / sqrt(norm_sq);
-                        #pragma omp simd
-                        for (size_t k = 0; k < N_SU3; ++k) {
-                            new_spin_SU3[k] *= inv_norm;
-                        }
-                    } else {
-                        gen_random_spin(new_spin_SU3, spin_length_SU3);
+                    double norm_sq = 0.0;
+                    #pragma omp simd reduction(+:norm_sq)
+                    for (size_t k = 0; k < N_SU3; ++k) {
+                        new_spin_SU3[k] = current_spin_ref[k] + new_spin_SU3[k] * sigma;
+                        norm_sq += new_spin_SU3[k] * new_spin_SU3[k];
                     }
                     
-                    const double dE = site_energy_SU3_diff(new_spin_SU3, curr_spin.spins_SU3[i_SU3], i_SU3);
-                    
-                    // Branchless acceptance check
-                    const bool accepted = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
-                    
-                    if (accepted) {
-                        std::copy(new_spin_SU3.begin(), new_spin_SU3.end(), curr_spin.spins_SU3[i_SU3].begin());
-                        accept++;
+                    const double inv_norm = spin_length_SU3 / sqrt(norm_sq);
+                    #pragma omp simd
+                    for (size_t k = 0; k < N_SU3; ++k) {
+                        new_spin_SU3[k] *= inv_norm;
                     }
+                } else {
+                    gen_random_spin(new_spin_SU3, spin_length_SU3);
+                }
+                
+                const double dE = site_energy_SU3_diff(new_spin_SU3, curr_spin.spins_SU3[i], i);
+                
+                // Branchless acceptance
+                const bool accepted = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                
+                if (accepted) {
+                    std::copy(new_spin_SU3.begin(), new_spin_SU3.end(), curr_spin.spins_SU3[i].begin());
+                    accept++;
                 }
             }
         }

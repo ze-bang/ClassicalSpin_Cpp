@@ -647,6 +647,8 @@ int main(int argc, char** argv) {
         e1 /= J1ab;
         e2 /= J1ab;
         h /= J1ab;
+        chii /= J1ab;
+        xii /= J1ab;
         J1ab = 1;
     }
     filesystem::create_directories(dir_name);
