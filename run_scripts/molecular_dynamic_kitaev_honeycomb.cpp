@@ -97,10 +97,10 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
     lattice<3, 2, 20, 20, 1> MC(&atoms);
-    MC.simulated_annealing(Temp_start, Temp_end, 10000, 0, true);
+    MC.simulated_annealing(Temp_start, Temp_end, 1000, 1);
 
     if (T_zero){
-        for (size_t i = 0; i<100000; ++i){
+        for (size_t i = 0; i<1000; ++i){
             MC.deterministic_sweep();
         }
     }
@@ -141,7 +141,7 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     filesystem::create_directory(dir);
 
     for(size_t i = 0; i < num_trials; ++i){
-        nonlinearspectroscopy_kitaev_honeycomb(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, K, Gamma, Gammap, h, dir+std::to_string(i), T_zero);
+        nonlinearspectroscopy_kitaev_honeycomb(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, K, Gamma, Gammap, h, dir+"/"+std::to_string(i), T_zero);
     }
     int finalized;
     MPI_Finalized(&finalized);
@@ -150,7 +150,7 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     }
 }
 
-void MD_kitaev_honeycomb_real(size_t num_trials, string dir, double J=0, double K=-1, double Gamma=0.25, double Gammap=-0.02, double h=0){
+void MD_kitaev_honeycomb_real(size_t num_trials, string dir, double J=0, double K=-1, double Gamma=0.25, double Gammap=-0.02, double h=0.7){
     filesystem::create_directory(dir);
     HoneyComb_standarx<3> atoms;
     array<array<double,3>, 3> Jx = {{{J+K,Gammap,Gammap},{Gammap,J,Gamma},{Gammap,Gamma,J}}};
@@ -170,7 +170,7 @@ void MD_kitaev_honeycomb_real(size_t num_trials, string dir, double J=0, double 
     for(size_t i=0; i<num_trials;++i){
 
         lattice<3, 2, 24, 24, 1> MC(&atoms);
-        MC.simulated_annealing(10, 1e-3, 100000, 0, true);
+        MC.simulated_annealing(5, 1e-2, 1000, 1);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
     }
 }
@@ -258,7 +258,8 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
     double J = argv[7] ? atof(argv[7]) : 0.0;
-    // MD_kitaev_honeycomb_real(20, "KITAEV");
-    MD_honeycomb_J1_J3("BCAO_J1J3",20);
+    // MD_kitaev_honeycomb_real(1, "KITAEV");
+    // MD_honeycomb_J1_J3("BCAO_J1J3",20);
+    full_nonlinearspectroscopy_kitaev_honeycomb(1, 5, 0.01, -600, 0, 0.25, -600, 0, 0.25, -1, -0.25, 0.02, 0.7, "KITAEV", true);
     return 0;
 }

@@ -1261,10 +1261,10 @@ class lattice
             cout << "T=" << fixed << setprecision(6) << T << ", Acceptance=" << fixed << setprecision(6) << acceptance_rate;
             
             // Mix in deterministic updates when acceptance rate is very low
-            if (acceptance_rate < 0.02) {
-                deterministic_sweep();
-                cout << ", Mixed in deterministic sweep due to low acceptance";
-            }
+            // if (acceptance_rate < 0.02) {
+            //     deterministic_sweep();
+            //     cout << ", Mixed in deterministic sweep due to low acceptance";
+            // }
             
             // Adaptive sigma adjustment for gaussian moves
             if (gaussian_move && acceptance_rate < 0.5) {

@@ -1822,6 +1822,7 @@ def read_MD_tot(dir):
 
     for file in sorted(os.listdir(directory)):  
         filename = os.fsdecode(file)
+        print("Processing folder: " + filename)
         if os.path.isdir(dir + "/" + filename):
             try:
                 B += read_MD(dir + "/" + filename, w_line)
@@ -2041,11 +2042,7 @@ def read_2D_nonlinear_tot(dir):
     plt.colorbar()
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
-# dir = "BCAO_zero_field_1.7K"
-# dir = "Kitaev_BCAO"
-# read_MD_tot(dir)
-# read_MD_tot("BCAO_zero_field_5K_sasha")
-# read_MD_tot("BCAO_zero_field_15K")
+
 
 def plot_spin_config_2d(P, S, filename, zoom_frac=None):
     """
@@ -2900,59 +2897,14 @@ if __name__ == "__main__":
         read_field_scan(base_dir)
     else:
         if os.path.isdir(base_dir):
+            read_MD_tot(base_dir)
             for subdir in sorted(os.listdir(base_dir)):
                 full_path = os.path.join(base_dir, subdir)
                 if os.path.isdir(full_path):
                     print(f"Processing directory: {full_path}")
                     try:
                         print("Computing spin configuration information...")
-                        parse_spin_config(full_path)
-                        # read_MD_tot(full_path)
+                        # parse_spin_config(full_path)
                     except Exception as e:
                         print(f"Could not process {full_path}: {e}")
 
-
-
-# dir = "BCAO_sasha_phase/J3_1.308000_Jzp_0.000000"
-# S = np.loadtxt(dir + "/spins.txt")
-# P = np.loadtxt(dir + "/pos.txt")
-# SSSF2D(S, P, 100, dir)
-
-# read_MD_tot("BCAO_J1J3")
-# parseDSSF(dir)
-
-# A = np.loadtxt("BCAO_Sasha_Sweep_ab.txt")
-# plt.plot(A[:,0], A[:,1]/0.086)
-# plt.xlabel(r"$\theta$ (from a to b)")
-# plt.ylabel("B/T")
-# plt.savefig("BCAO_Sasha_Sweep_ab.pdf")
-# plt.clf()
-# A = np.loadtxt("BCAO_Sasha_Sweep_ac.txt")
-# plt.plot(A[:,0], A[:,1]/0.086)
-# plt.xlabel(r"$\theta$ (from a to c)")
-# plt.ylabel("B/T")
-# plt.savefig("BCAO_Sasha_Sweep_ac.pdf")
-
-# dir = "kitaev_honeycomb_nonlinear_Gamma=0.25_Gammap=-0.02_h=0.7"
-# dir = "test_long_h=0.0"
-# read_2D_nonlinear_tot(dir)
-# dir = "pure_kitaev_2DCS_h=0.7_weak_pulse"
-# read_2D_nonlinear_tot(dir)
-# P = np.loadtxt("pos.txt")
-# S = np.loadtxt("spin.txt")
-# S_global = np.zeros(S.shape)
-# for i in range(4):
-#     S_global[i::4] = contract('js, sp->jp', S[i::4], localframe[:,i,:])
-# plot_spin_config(P[0:4], S_global[0:4],  -np.array([1,1,1])/np.sqrt(3), "spin_config.pdf")
-
-# dir = "./kitaev/"
-# fullread(dir, True, "110")
-# #
-# dir = "./Jxx_-0.2_Jyy_1.0_Jzz_-0.2_gxx_0_gyy_0_gzz_1/"
-# fullread(dir, True)
-#
-# dir = "./Jxx_0.2_Jyy_1.0_Jzz_0.2_gxx_0_gyy_0_gzz_1/"
-# fullread(dir, True)
-#
-# dir = "./Jxx_0.6_Jyy_1.0_Jzz_0.6_gxx_0_gyy_0_gzz_1/"
-# fullread(dir, True)
