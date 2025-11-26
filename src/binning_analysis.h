@@ -115,7 +115,7 @@ struct FastBin {
 };
 
 // Calculate autocorrelation function
-std::vector<double> calculate_autocorrelation(const std::vector<double>& data, int max_lag = -1) {
+inline std::vector<double> calculate_autocorrelation(const std::vector<double>& data, int max_lag = -1) {
     if (data.size() < 2) return {};
     
     if (max_lag < 0) max_lag = std::min(static_cast<int>(data.size() / 4), 100);
@@ -143,7 +143,7 @@ std::vector<double> calculate_autocorrelation(const std::vector<double>& data, i
 }
 
 // Estimate integrated autocorrelation time
-double estimate_autocorr_time(const std::vector<double>& autocorr) {
+inline double estimate_autocorr_time(const std::vector<double>& autocorr) {
     if (autocorr.empty()) return 1.0;
     
     double tau_int = 0.5; // tau_int = 0.5 + sum_{t=1}^{W} rho(t)
@@ -163,7 +163,7 @@ double estimate_autocorr_time(const std::vector<double>& autocorr) {
 }
 
 // Determine optimal number of bins based on autocorrelation
-int calculate_optimal_bins(const std::vector<double>& data, double tau_int) {
+inline int calculate_optimal_bins(const std::vector<double>& data, double tau_int) {
     // Rule of thumb: each bin should contain ~2*tau_int independent samples
     double independent_samples = data.size() / (2.0 * tau_int);
     int optimal_bins = static_cast<int>(std::sqrt(independent_samples));
@@ -173,7 +173,7 @@ int calculate_optimal_bins(const std::vector<double>& data, double tau_int) {
 }
 
 // Enhanced binning analysis with automatic optimization
-BinningResults enhanced_binning_analysis(
+inline BinningResults enhanced_binning_analysis(
     const std::vector<double>& data, 
     int num_bins = -1,  // -1 for automatic selection
     std::function<double(const std::vector<double>&)> metric = nullptr,
@@ -296,7 +296,7 @@ BinningResults enhanced_binning_analysis(
 }
 
 // Legacy interface for backward compatibility
-std::tuple<double, double> binning_analysis(
+inline std::tuple<double, double> binning_analysis(
     const std::vector<double>& data, 
     int num_bins, 
     std::function<double(const std::vector<double>&)> metric = nullptr, 
@@ -307,7 +307,7 @@ std::tuple<double, double> binning_analysis(
 }
 
 // Utility function to print detailed results
-void print_binning_results(const BinningResults& results, std::ostream& os = std::cout) {
+inline void print_binning_results(const BinningResults& results, std::ostream& os = std::cout) {
     os << std::fixed << std::setprecision(6);
     os << "=== Enhanced Binning Analysis Results ===\n";
     os << "Number of bins: " << results.optimal_num_bins << "\n";

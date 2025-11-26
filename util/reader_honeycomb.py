@@ -7,6 +7,7 @@ import os
 import sys
 from math import gcd
 from functools import reduce
+from matplotlib.colors import PowerNorm, LogNorm
 # plt.rcParams['text.usetex'] = True
 import re
 from scipy.optimize import minimize
@@ -1993,53 +1994,149 @@ def plot_spin_config(P, S, field_dir, filename):
     plt.clf()
 
 def read_2D_nonlinear(dir):
+    """Read and compute 2D nonlinear spectroscopy using FFT.
+    
+    Uses actual data dimensions instead of hardcoded values.
+    Computes omega range from time step size.
+    """
     directory = os.fsencode(dir)
-    tau_start, tau_end, tau_step, time_start, time_end, time_step, K, h = np.loadtxt(dir + "/param.txt")
-    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t.txt")[:,2]
-    domain = 2401
-    omega_range = 0.2
-    M_NL = np.zeros((int(tau_step), domain))
-    w = np.arange(-omega_range, omega_range, 1/600)
-    T = np.linspace(time_start, time_end, int(time_step)) 
-    T = T[-domain:]
-    ffactt = np.exp(1j*contract('w,t->wt', w, T))/len(T)
+    
+    # Read parameters from simulation_params.txt in parent directory
+    params = {}
+    with open(os.path.dirname(dir) + "/simulation_params.txt", 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('=') and ':' in line:
+                key, value = line.split(':', 1)
+                params[key.strip()] = value.strip()
+    
+    tau_start = float(params['tau_start'])
+    tau_end = float(params['tau_end'])
+    tau_step = int(1 + (tau_end - tau_start) / float(params['tau_step_size']))
+    time_start = float(params['T_start'])
+    time_end = float(params['T_end'])
+    time_step = int(1 + (time_end - time_start) / float(params['T_step_size']))
+    K = float(params['K'])
+    h = float(params['h'])
+    
+    # Load M0 to determine data dimensions
+    M0 = np.loadtxt(dir + "/M_time_0/M0/M_t_f.txt")[:,2]
+    
+    # Compute time array and derive omega range from FFT properties
+    T = np.linspace(time_start, time_end, int(time_step))
+    dt = T[1] - T[0] if len(T) > 1 else 1.0
+    
+    length = min(len(M0), int(time_step))
+
+    # Initialize based on M0 dimensions
+    M_NL = np.zeros((int(tau_step), length))
     tau = np.linspace(tau_start, tau_end, int(tau_step))
+    
+    # Load nonlinear magnetization data
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             info = filename.split("_")
-            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t.txt")[:,2]
-            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t.txt")[:,2]
-            M_NL[int(info[2])] = M01[-domain:] - M0[-domain:] - M1[-domain:] + 0.57735
-    # gaussian_filter =  np.exp(-1e-6 * (contract('i,i,a->ia',T,T,np.ones(len(tau))) + contract('a,a,i->ia',tau,tau,np.ones(len(T)))))   
-    ffactau = np.exp(-1j*contract('w,t->wt', w, tau))/len(tau)
-    # M_NL_FF = contract('it, ti->it', M_NL, gaussian_filter)
-    M_NL_FF = M_NL
-    M_NL_FF = np.abs(contract('it, wi, ut->wu', M_NL_FF, ffactau, ffactt))
-    # M_NL_FF = np.log(M_NL_FF)
-    # M_NL_FF = M_NL_FF/np.max(M_NL_FF)
+            M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t_f.txt")[:,2]
+            M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t_f.txt")[:,2]
+            # Ensure all arrays have the same length by taking minimum
+            min_len = min(len(M0), len(M1), len(M01), length)
+            M_NL[int(info[2])] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+    
+    # Subtract static (time-averaged) values for FFT stability
+    M_NL_static = np.mean(M_NL)  # Average over time axis
+    print(M_NL_static)
+    M_NL_dynamic = M_NL - M_NL_static
+    
+    # Perform 2D FFT on the dynamic component
+    M_NL_FF = np.fft.fft2(M_NL_dynamic)
+    M_NL_FF = np.fft.fftshift(M_NL_FF)
+    M_NL_FF = np.abs(M_NL_FF)
+    
+    # Compute omega arrays for plotting
+    omega_tau = np.fft.fftfreq(int(tau_step), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
+    omega_tau = np.fft.fftshift(omega_tau)
+    omega_t = np.fft.fftfreq(len(M0), dt) * 2 * np.pi
+    omega_t = np.fft.fftshift(omega_t)
+    
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
-    plt.imshow(M_NL_FF, origin='lower', extent=[-omega_range, omega_range, -omega_range, omega_range], aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='linear')
-    # plt.pcolormesh(w, w, np.log(M_NL_FF))
-    plt.colorbar()
+    
+    # Full spectrum plot
+    plt.imshow(M_NL_FF, origin='lower', 
+               extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]], 
+               aspect='auto', cmap='gnuplot2', norm=PowerNorm(gamma=0.3))
+    plt.xlabel('$\\omega_t$ (rad/time)')
+    plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+    plt.colorbar(label='Intensity (log scale)')
     plt.savefig(dir + "_NLSPEC.pdf")
+    plt.clf()
+    
+    # Zoomed-in plot with user-specified domain
+    # Read zoom parameters if available, otherwise use defaults
+    omega_t_min = float(params.get('omega_t_min', omega_t[0]/8))
+    omega_t_max = float(params.get('omega_t_max', omega_t[-1]/8))
+    omega_tau_min = float(params.get('omega_tau_min', omega_tau[0]/8))
+    omega_tau_max = float(params.get('omega_tau_max', omega_tau[-1]/8))
+    
+    # Create zoomed plot
+    plt.imshow(M_NL_FF, origin='lower', 
+               extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]], 
+               aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm=PowerNorm(gamma=0.3))
+    plt.xlim(omega_t_min, omega_t_max)
+    plt.ylim(omega_tau_min, omega_tau_max)
+    plt.xlabel('$\\omega_t$ (rad/time)')
+    plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+    plt.colorbar(label='Intensity (log scale)')
+    plt.savefig(dir + "_NLSPEC_zoom.pdf")
+    
     np.savetxt(dir + "_M_NL_FF.txt", M_NL_FF)
     plt.clf()
 
 def read_2D_nonlinear_tot(dir):
+    """Aggregate and plot total 2D nonlinear spectroscopy from subdirectories.
+    
+    Properly handles FFT dimensions without hardcoded values.
+    """
     directory = os.fsencode(dir)
-    A = 0
+    A = None
+    count = 0
+    
     for file in sorted(os.listdir(directory)):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
-            read_2D_nonlinear(dir + "/" + filename)
-            A = A + np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
-    A = A/np.max(A)
-    time_step = len(A)
-    plt.imshow(A.T, origin='lower', extent=[-1, 1, -1, 1], aspect='auto', interpolation='none', cmap='gnuplot2', norm='log')
-    # w = np.linspace(-0.2, -0.2, time_step)
-    # plt.pcolormesh(w, w, np.log(A))
-    plt.colorbar()
+            try:
+                read_2D_nonlinear(dir + "/" + filename)
+                M_NL_data = np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
+                
+                if A is None:
+                    A = M_NL_data
+                else:
+                    # Handle potential size mismatches by using minimum dimensions
+                    min_shape = (min(A.shape[0], M_NL_data.shape[0]), 
+                                 min(A.shape[1], M_NL_data.shape[1]))
+                    A[:min_shape[0], :min_shape[1]] += M_NL_data[:min_shape[0], :min_shape[1]]
+                count += 1
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+                continue
+    
+    if A is None or count == 0:
+        print(f"No valid data found in {dir}")
+        return
+    
+    # Normalize
+    A = A / np.max(A) if np.max(A) > 0 else A
+    
+    # Determine extent from data dimensions
+    # Assuming symmetric frequency range
+    n_tau, n_t = A.shape
+    
+    plt.imshow(A.T, origin='lower', aspect='auto', 
+               interpolation='none', cmap='gnuplot2', norm='log')
+    plt.xlabel('$\\omega_{\\tau}$ index')
+    plt.ylabel('$\\omega_t$ index')
+    plt.title('Total 2D Nonlinear Spectrum')
+    plt.colorbar(label='Intensity (log scale)')
     plt.savefig(dir + "_NLSPEC.pdf")
     plt.clf()
 
@@ -2897,7 +2994,8 @@ if __name__ == "__main__":
         read_field_scan(base_dir)
     else:
         if os.path.isdir(base_dir):
-            read_MD_tot(base_dir)
+            read_2D_nonlinear_tot(base_dir)
+            # read_MD_tot(base_dir)
             for subdir in sorted(os.listdir(base_dir)):
                 full_path = os.path.join(base_dir, subdir)
                 if os.path.isdir(full_path):

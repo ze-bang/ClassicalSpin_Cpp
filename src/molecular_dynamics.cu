@@ -1105,6 +1105,154 @@ void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>
     cudaFree(d_local_fields_SU3);
 }
 
+// ========================= GPU Magnetization Computation Kernels =========================
+// These kernels compute magnetizations directly on GPU to avoid large memory transfers
+
+// Helper function for double atomicAdd (for older compute capability)
+#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 600
+#else
+__device__ double atomicAdd_double(double* address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed,
+                        __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);
+    return __longlong_as_double(old);
+}
+#define atomicAdd atomicAdd_double
+#endif
+
+template<size_t N_SU2, size_t lattice_size_SU2>
+__global__
+void compute_magnetization_SU2_kernel(const double* d_spins_SU2, double* d_mag_local, double* d_mag_global, 
+                                      size_t N_ATOMS_SU2) {
+    // Use shared memory for reduction
+    __shared__ double s_mag_local;
+    __shared__ double s_mag_global;
+    
+    int tid = threadIdx.x;
+    int component = blockIdx.x;  // Each block handles one component
+    
+    // Initialize shared memory (only first thread)
+    if (tid == 0) {
+        s_mag_local = 0.0;
+        s_mag_global = 0.0;
+    }
+    __syncthreads();
+    
+    // Check component validity after syncthreads
+    if (component >= N_SU2) return;
+    
+    // Each thread processes multiple sites
+    double local_sum = 0.0;
+    double global_sum = 0.0;
+    
+    for (size_t i = tid; i < lattice_size_SU2; i += blockDim.x) {
+        double spin_val = d_spins_SU2[i * N_SU2 + component];
+        local_sum += spin_val;
+        // For global/AFM: alternate sign based on sublattice
+        int sign = 1 - 2 * ((i % N_ATOMS_SU2) & 1);
+        global_sum += spin_val * sign;
+    }
+    
+    // Reduce within warp using warp shuffle
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
+        global_sum += __shfl_down_sync(0xffffffff, global_sum, offset);
+    }
+    
+    // First thread of each warp atomically adds to shared memory
+    if ((tid % warpSize) == 0) {
+        atomicAdd(&s_mag_local, local_sum);
+        atomicAdd(&s_mag_global, global_sum);
+    }
+    __syncthreads();
+    
+    // Thread 0 writes final result
+    if (tid == 0) {
+        d_mag_local[component] = s_mag_local / double(lattice_size_SU2);
+        d_mag_global[component] = s_mag_global / double(lattice_size_SU2);
+    }
+}
+
+template<size_t N_SU3, size_t lattice_size_SU3>
+__global__
+void compute_magnetization_SU3_kernel(const double* d_spins_SU3, double* d_mag_local, double* d_mag_global,
+                                      size_t N_ATOMS_SU3) {
+    // Use shared memory for reduction
+    __shared__ double s_mag_local;
+    __shared__ double s_mag_global;
+    
+    int tid = threadIdx.x;
+    int component = blockIdx.x;  // Each block handles one component
+    
+    // Initialize shared memory (only first thread)
+    if (tid == 0) {
+        s_mag_local = 0.0;
+        s_mag_global = 0.0;
+    }
+    __syncthreads();
+    
+    // Check component validity after syncthreads
+    if (component >= N_SU3) return;
+    
+    // Each thread processes multiple sites
+    double local_sum = 0.0;
+    double global_sum = 0.0;
+    
+    for (size_t i = tid; i < lattice_size_SU3; i += blockDim.x) {
+        double spin_val = d_spins_SU3[i * N_SU3 + component];
+        local_sum += spin_val;
+        // For global/AFM: alternate sign based on sublattice
+        int sign = 1 - 2 * ((i % N_ATOMS_SU3) & 1);
+        global_sum += spin_val * sign;
+    }
+    
+    // Reduce within warp using warp shuffle
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
+        global_sum += __shfl_down_sync(0xffffffff, global_sum, offset);
+    }
+    
+    // First thread of each warp atomically adds to shared memory
+    if ((tid % warpSize) == 0) {
+        atomicAdd(&s_mag_local, local_sum);
+        atomicAdd(&s_mag_global, global_sum);
+    }
+    __syncthreads();
+    
+    // Thread 0 writes final result
+    if (tid == 0) {
+        d_mag_local[component] = s_mag_local / double(lattice_size_SU3);
+        d_mag_global[component] = s_mag_global / double(lattice_size_SU3);
+    }
+}
+
+// Host function implementation for computing magnetizations on GPU
+template<size_t N_SU2, size_t N_ATOMS_SU2, size_t N_SU3, size_t N_ATOMS_SU3, size_t dim1, size_t dim2, size_t dim>
+void mixed_lattice_cuda<N_SU2, N_ATOMS_SU2, N_SU3, N_ATOMS_SU3, dim1, dim2, dim>::
+compute_magnetization_cuda(double* d_mag_local_SU2, double* d_mag_global_SU2, 
+                          double* d_mag_local_SU3, double* d_mag_global_SU3) {
+    // Launch kernels with one block per component, multiple threads per block for reduction
+    const int threads_per_block = 256;
+    
+    // Compute SU2 magnetizations
+    compute_magnetization_SU2_kernel<N_SU2, lattice_size_SU2><<<N_SU2, threads_per_block>>>(
+        d_spins.spins_SU2, d_mag_local_SU2, d_mag_global_SU2, N_ATOMS_SU2);
+    
+    // Compute SU3 magnetizations
+    compute_magnetization_SU3_kernel<N_SU3, lattice_size_SU3><<<N_SU3, threads_per_block>>>(
+        d_spins.spins_SU3, d_mag_local_SU3, d_mag_global_SU3, N_ATOMS_SU3);
+    
+    // Check for errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error in compute_magnetization_cuda: %s\n", cudaGetErrorString(err));
+    }
+}
+
 //Explicitly declare template specializations for the mixed lattice class
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
 template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(

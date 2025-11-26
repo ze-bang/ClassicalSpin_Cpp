@@ -2,770 +2,372 @@ import numpy as np
 from scipy.optimize import minimize
 from luttinger_tisza import create_honeycomb_lattice, construct_interaction_matrices, get_bond_vectors, visualize_spins
 
-# filepath: /home/pc_linux/ClassicalSpin_Cpp/util/double_q_BCAO.py
+"""Double-Q variational ansatz for BCAO on the honeycomb lattice.
 
-import matplotlib.pyplot as plt
+This is a minimal extension of `single_q_BCAO.SingleQ` where the spiral
+part of the spin texture is allowed to contain two independent Fourier
+components with wave–vectors
+
+    Q1_vec = q1 * b1   (along first reciprocal basis vector)
+    Q2_vec = q2 * b2   (along second reciprocal basis vector)
+
+The real-space spin on site i belonging to sublattice s=A,B is taken as
+
+    S_i^s = m_s * e_z^s
+             + sqrt(1-m_s^2) * [
+                 a1_s * e_x^s cos(Q1·r_i) + b1_s * e_y^s sin(Q1·r_i)
+               + a2_s * e_x^s cos(Q2·r_i) + b2_s * e_y^s sin(Q2·r_i)
+             ]
+
+with separate amplitudes for the two Q-components on each sublattice.
+The energy is evaluated from the microscopic BCAO Hamiltonian by
+explicit real‑space summation over bonds (same lattice and couplings as
+in the single‑Q code).
+"""
+
 
 class DoubleQ:
-    """
-    Class to perform double-Q ansatz simulation on a BCAO honeycomb lattice
-    to determine ground state spin configuration and energy.
-    
-    The double-Q ansatz allows for more complex magnetic orderings by superposing
-    two different Q-vectors. The spin configuration is:
-    
-    S_A(r) = α_A * e_z^A + Σ_{Q∈{Q1,Q2}} √(β_Q^A/2) * [e_x^{A,Q} * cos(Q·r + φ_Q^A) + e_y^{A,Q} * sin(Q·r + φ_Q^A)]
-    S_B(r) = α_B * e_z^B + Σ_{Q∈{Q1,Q2}} √(β_Q^B/2) * [e_x^{B,Q} * cos(Q·r + φ_Q^B) + e_y^{B,Q} * sin(Q·r + φ_Q^B)]
-    
-    where:
-    - Q1, Q2 are two independent ordering wavevectors
-    - α_A, α_B control the uniform (Q=0) component
-    - β_Q^A, β_Q^B control the amplitude of each Q component
-    - Constraint: α_A² + Σ_Q β_Q^A = 1 (and similarly for B)
-    - e_z, e_x, e_y are orthonormal basis vectors defined by Euler angles
-    - φ_Q are phase factors for each Q component
-    
-    Uses the BCAO parameter convention: J = [J1xy, J1z, D, E, F, G, J3xy, J3z]
-    """
-    
-    # Define parameter bounds
-    eta_small = 10**-9
-    min_Q1, max_Q1 = (0, 0.5-eta_small)
-    min_Q2, max_Q2 = (0, 0.5)
-    min_Q3, max_Q3 = (0, 0.5-eta_small)
-    min_Q4, max_Q4 = (0, 0.5)
-    min_phi_A, max_phi_A = (0, (2-eta_small)*np.pi)
-    min_theta_A, max_theta_A = (0, (2-eta_small)*np.pi)
-    min_psi_A, max_psi_A = (0, (2-eta_small)*np.pi)
-    min_phi_B, max_phi_B = (0, (2-eta_small)*np.pi)
-    min_theta_B, max_theta_B = (0, (2-eta_small)*np.pi)
-    min_psi_B, max_psi_B = (0, (2-eta_small)*np.pi)
-    min_phi_A_Q1, max_phi_A_Q1 = (0, (2-eta_small)*np.pi)
-    min_theta_A_Q1, max_theta_A_Q1 = (0, (2-eta_small)*np.pi)
-    min_psi_A_Q1, max_psi_A_Q1 = (0, (2-eta_small)*np.pi)
-    min_phi_B_Q1, max_phi_B_Q1 = (0, (2-eta_small)*np.pi)
-    min_theta_B_Q1, max_theta_B_Q1 = (0, (2-eta_small)*np.pi)
-    min_psi_B_Q1, max_psi_B_Q1 = (0, (2-eta_small)*np.pi)
-    min_phi_A_Q2, max_phi_A_Q2 = (0, (2-eta_small)*np.pi)
-    min_theta_A_Q2, max_theta_A_Q2 = (0, (2-eta_small)*np.pi)
-    min_psi_A_Q2, max_psi_A_Q2 = (0, (2-eta_small)*np.pi)
-    min_phi_B_Q2, max_phi_B_Q2 = (0, (2-eta_small)*np.pi)
-    min_theta_B_Q2, max_theta_B_Q2 = (0, (2-eta_small)*np.pi)
-    min_psi_B_Q2, max_psi_B_Q2 = (0, (2-eta_small)*np.pi)
-    min_alpha_A, max_alpha_A = (0, 1.0)
-    min_alpha_B, max_alpha_B = (0, 1.0)
-    min_beta_Q1_A, max_beta_Q1_A = (0, 1.0)
-    min_beta_Q1_B, max_beta_Q1_B = (0, 1.0)
-    min_beta_Q2_A, max_beta_Q2_A = (0, 1.0)
-    min_beta_Q2_B, max_beta_Q2_B = (0, 1.0)
-    min_phase_Q1_A, max_phase_Q1_A = (0, (2-eta_small)*np.pi)
-    min_phase_Q1_B, max_phase_Q1_B = (0, (2-eta_small)*np.pi)
-    min_phase_Q2_A, max_phase_Q2_A = (0, (2-eta_small)*np.pi)
-    min_phase_Q2_B, max_phase_Q2_B = (0, (2-eta_small)*np.pi)
-    
+    # Parameter ranges
+    eta_small = 1e-9
+    min_q1, max_q1 = (0.0, 0.5 - eta_small)
+    min_q2, max_q2 = (0.0, 0.5)
+
+    # uniform magnetization fraction on each sublattice
+    min_mA, max_mA = (0.0, 1.0)
+    min_mB, max_mB = (0.0, 1.0)
+
+    # Euler angles for local frames
+    min_phi, max_phi = (0.0, (2.0 - eta_small) * np.pi)
+    min_theta, max_theta = (0.0, (2.0 - eta_small) * np.pi)
+    min_psi, max_psi = (0.0, (2.0 - eta_small) * np.pi)
+
+    # amplitudes for double-Q on each sublattice; restricted so that
+    # |S| ≈ 1 but we enforce this only approximately and re-normalise.
+    min_a, max_a = (-1.0, 1.0)
+
     parameter_bounds = [
-        # Q-vectors
-        (min_Q1, max_Q1), (min_Q2, max_Q2), 
-        (min_Q3, max_Q3), (min_Q4, max_Q4),
-        # Amplitudes
-        (min_alpha_A, max_alpha_A), (min_alpha_B, max_alpha_B),
-        (min_beta_Q1_A, max_beta_Q1_A), (min_beta_Q1_B, max_beta_Q1_B),
-        (min_beta_Q2_A, max_beta_Q2_A), (min_beta_Q2_B, max_beta_Q2_B),
-        # Uniform component Euler angles
-        (min_phi_A, max_phi_A), (min_theta_A, max_theta_A), (min_psi_A, max_psi_A),
-        (min_phi_B, max_phi_B), (min_theta_B, max_theta_B), (min_psi_B, max_psi_B),
-        # Q1 component Euler angles
-        (min_phi_A_Q1, max_phi_A_Q1), (min_theta_A_Q1, max_theta_A_Q1), (min_psi_A_Q1, max_psi_A_Q1),
-        (min_phi_B_Q1, max_phi_B_Q1), (min_theta_B_Q1, max_theta_B_Q1), (min_psi_B_Q1, max_psi_B_Q1),
-        # Q2 component Euler angles
-        (min_phi_A_Q2, max_phi_A_Q2), (min_theta_A_Q2, max_theta_A_Q2), (min_psi_A_Q2, max_psi_A_Q2),
-        (min_phi_B_Q2, max_phi_B_Q2), (min_theta_B_Q2, max_theta_B_Q2), (min_psi_B_Q2, max_psi_B_Q2),
-        # Phase factors
-        (min_phase_Q1_A, max_phase_Q1_A), (min_phase_Q1_B, max_phase_Q1_B),
-        (min_phase_Q2_A, max_phase_Q2_A), (min_phase_Q2_B, max_phase_Q2_B),
+        (min_q1, max_q1),  # 0: q1 along b1
+        (min_q2, max_q2),  # 1: q2 along b2
+        (min_mA, max_mA),  # 2: m_A
+        (min_mB, max_mB),  # 3: m_B
+        (min_phi, max_phi),   # 4: phi_A
+        (min_theta, max_theta),  # 5: theta_A
+        (min_psi, max_psi),   # 6: psi_A
+        (min_phi, max_phi),   # 7: phi_B
+        (min_theta, max_theta),  # 8: theta_B
+        (min_psi, max_psi),   # 9: psi_B
+        # amplitudes for Q1 on A sublattice
+        (min_a, max_a),  # 10: a1_A (ex cos Q1)
+        (min_a, max_a),  # 11: b1_A (ey sin Q1)
+        # amplitudes for Q2 on A sublattice
+        (min_a, max_a),  # 12: a2_A
+        (min_a, max_a),  # 13: b2_A
+        # amplitudes for Q1 on B sublattice
+        (min_a, max_a),  # 14: a1_B
+        (min_a, max_a),  # 15: b1_B
+        # amplitudes for Q2 on B sublattice
+        (min_a, max_a),  # 16: a2_B
+        (min_a, max_a),  # 17: b2_B
     ]
-    
-    def __init__(self, L=4, J=[-7.6, -1.2, 0.1, -0.1, 0, 0, 2.5, -0.85], B_field=np.array([0, 0, 0])):
-        """
-        Initialize the double-Q model
-        
-        Args:
-            L: Size of the lattice (L x L unit cells)
-            J: BCAO exchange coupling parameters [J1xy, J1z, D, E, F, G, J3xy, J3z]
-            B_field: External magnetic field
-        """
+
+    def __init__(self, L=4, J=None, B_field=None):
+        if J is None:
+            # Default BCAO parameters, same convention as single_Q code
+            J = [-7.6, -1.2, 0.1, -0.1, 0.0, 0.0, 2.5, -0.85]
+        if B_field is None:
+            B_field = np.array([0.0, 0.0, 0.0])
+
         self.L = L
         self.J = J
-        self.J1xy = J[0]
-        self.J1z = J[1]
-        self.D = J[2]
-        self.E = J[3]
-        self.F = J[4]
-        self.G = J[5]
-        self.J3xy = J[6]
-        self.J3z = J[7] 
-        self.B_field = B_field
-        
-        # Create lattice and compute interaction matrices
-        self.positions, self.NN, self.NN_bonds, self.NNN, self.NNNN, self.a1, self.a2 = create_honeycomb_lattice(L)
-        self.J1, self.J2_mat, self.J3_mat = self.construct_BCAO_interaction_matrices()
-        self.nn_vectors, self.nnn_vectors, self.nnnn_vectors = get_bond_vectors(self.a1, self.a2)
-        
-        # Reciprocal lattice vectors
-        self.b1 = 2 * np.pi * np.array([1, -1/np.sqrt(3)])
-        self.b2 = 2 * np.pi * np.array([0, 2/np.sqrt(3)])
-        
-        # Find optimal spin configuration
-        self.opt_params, self.opt_energy = self.find_minimum_energy()
-        
-        # Determine spin configuration type
-        self.magnetic_order = self.classify_phase()
+        self.J1xy, self.J1z, self.D, self.E, self.F, self.G, self.J3xy, self.J3z = J
+        self.B_field = np.asarray(B_field, dtype=float)
 
-    @classmethod
-    def RotatedBasis(cls, phi, theta, psi):
-        """Define rotated basis with Euler angles (phi, theta, psi) in X-Y-Z convention"""
+        # lattice and geometry
+        (
+            self.positions,
+            self.NN,
+            self.NN_bonds,
+            self.NNN,
+            self.NNNN,
+            self.a1,
+            self.a2,
+        ) = create_honeycomb_lattice(L)
+
+        self.J1_list, self.J2_mat, self.J3_mat = self._construct_BCAO_interaction_matrices()
+        self.nn_vectors, self.nnn_vectors, self.nnnn_vectors = get_bond_vectors(self.a1, self.a2)
+
+        # reciprocal lattice (same convention as in single_q_BCAO)
+        self.b1 = 2.0 * np.pi * np.array([1.0, -1.0 / np.sqrt(3.0)])
+        self.b2 = 2.0 * np.pi * np.array([0.0, 2.0 / np.sqrt(3.0)])
+
+        # optimise variational parameters
+        self.opt_params, self.opt_energy = self._find_minimum_energy()
+
+    # --- local frame utilities -------------------------------------------------
+
+    @staticmethod
+    def rotated_basis(phi, theta, psi):
+        """Return orthonormal basis (ex, ey, ez) defined by Euler angles.
+
+        Same convention as in `SingleQ.RotatedBasis`.
+        """
         RotMat = np.array([
-            [np.cos(theta)*np.cos(phi)*np.cos(psi) - np.sin(phi)*np.sin(psi),
-             -np.cos(psi)*np.sin(phi) - np.cos(theta)*np.cos(phi)*np.sin(psi),
-             np.cos(phi)*np.sin(theta)],
-            [np.cos(theta)*np.cos(psi)*np.sin(phi) + np.cos(phi)*np.sin(psi),
-             np.cos(phi)*np.cos(psi) - np.cos(theta)*np.sin(phi)*np.sin(psi),
-             np.sin(theta)*np.sin(phi)],
-            [-np.cos(psi)*np.sin(theta),
-             np.sin(theta)*np.sin(psi),
-             np.cos(theta)]
+            [
+                np.cos(theta) * np.cos(phi) * np.cos(psi)
+                - np.sin(phi) * np.sin(psi),
+                -np.cos(psi) * np.sin(phi)
+                - np.cos(theta) * np.cos(phi) * np.sin(psi),
+                np.cos(phi) * np.sin(theta),
+            ],
+            [
+                np.cos(theta) * np.cos(psi) * np.sin(phi)
+                + np.cos(phi) * np.sin(psi),
+                np.cos(phi) * np.cos(psi)
+                - np.cos(theta) * np.sin(phi) * np.sin(psi),
+                np.sin(theta) * np.sin(phi),
+            ],
+            [
+                -np.cos(psi) * np.sin(theta),
+                np.sin(theta) * np.sin(psi),
+                np.cos(theta),
+            ],
         ])
         ex = RotMat[:, 0]
         ey = RotMat[:, 1]
         ez = RotMat[:, 2]
         return ex, ey, ez
 
-    @classmethod
-    def uniform_sampling(cls, a, b):
-        """Generate a random number between a and b"""
+    @staticmethod
+    def _uniform(a, b):
         return (b - a) * np.random.random() + a
-    
-    def construct_BCAO_interaction_matrices(self):
-        """Construct interaction matrices for BCAO using the same convention as the C++ code"""
-        # J1z matrix (the base interaction matrix)
-        J1z_mat = np.array([
-            [self.J1xy + self.D, self.E, self.F],
-            [self.E, self.J1xy - self.D, self.G],
-            [self.F, self.G, self.J1z]
-        ])
-        
-        # Rotation matrix for 2π/3
-        cos_2pi3 = np.cos(2*np.pi/3)
-        sin_2pi3 = np.sin(2*np.pi/3)
-        U_2pi_3 = np.array([
-            [cos_2pi3, sin_2pi3, 0],
-            [-sin_2pi3, cos_2pi3, 0],
-            [0, 0, 1]
-        ])
-        
-        # Construct J1x and J1y through rotations
-        J1x_mat = U_2pi_3 @ J1z_mat @ U_2pi_3.T
-        J1y_mat = U_2pi_3.T @ J1z_mat @ U_2pi_3
-        
-        # List of J1 matrices for the three bond types
-        J1 = [J1x_mat, J1y_mat, J1z_mat]
-        
-        # Second nearest neighbor interactions (set to zero for BCAO)
-        J2_mat = np.zeros((3, 3))
-        
-        # Third nearest neighbor interactions
-        J3_mat = np.array([
-            [self.J3xy, 0, 0],
-            [0, self.J3xy, 0],
-            [0, 0, self.J3z]
-        ])
-        
-        return J1, J2_mat, J3_mat
-    
-    def HAB(self, q):
-        """Compute the Fourier transformed interaction matrix between A and B sublattices"""
-        JAB = np.zeros((3, 3), dtype=complex)
-        
-        # Nearest-neighbor interactions
-        for i, delta in enumerate(self.nn_vectors):
-            phase = np.exp(1j * np.dot(q, delta))
-            JAB += self.J1[i] * phase
-        
-        # Third-neighbor interactions
-        for delta in self.nnnn_vectors:
-            phase = np.exp(1j * np.dot(q, delta))
-            JAB += self.J3_mat * phase
-        
-        return JAB
-    
-    def HBA(self, q):
-        """Compute the Fourier transformed interaction matrix between B and A sublattices"""
-        return self.HAB(q).conj().T
-    
-    def HAA(self, q):
-        """Compute the Fourier transformed interaction matrix for A-A interactions"""
-        JAA = np.zeros((3, 3), dtype=complex)
-        
-        # Second-neighbor interactions
-        for delta in self.nnn_vectors:
-            phase = np.exp(1j * np.dot(q, delta))
-            JAA += self.J2_mat * phase
-        
-        return JAA
-    
-    def HBB(self, q):
-        """Compute the Fourier transformed interaction matrix for B-B interactions"""
-        # Second-neighbor interactions for B sites are the same as for A sites
-        return self.HAA(q)
-    
-    def E_per_UC(self, params):
-        """
-        Calculate the energy per unit cell for the double-Q ansatz
-        
-        Parameters are organized as:
-        [Q1_1, Q1_2, Q2_1, Q2_2,
-         alpha_A, alpha_B, beta_Q1_A, beta_Q1_B, beta_Q2_A, beta_Q2_B,
-         phi_A, theta_A, psi_A, phi_B, theta_B, psi_B,
-         phi_A_Q1, theta_A_Q1, psi_A_Q1, phi_B_Q1, theta_B_Q1, psi_B_Q1,
-         phi_A_Q2, theta_A_Q2, psi_A_Q2, phi_B_Q2, theta_B_Q2, psi_B_Q2,
-         phase_Q1_A, phase_Q1_B, phase_Q2_A, phase_Q2_B]
-        """
-        (Q1_1, Q1_2, Q2_1, Q2_2,
-         alpha_A, alpha_B, beta_Q1_A, beta_Q1_B, beta_Q2_A, beta_Q2_B,
-         phi_A, theta_A, psi_A, phi_B, theta_B, psi_B,
-         phi_A_Q1, theta_A_Q1, psi_A_Q1, phi_B_Q1, theta_B_Q1, psi_B_Q1,
-         phi_A_Q2, theta_A_Q2, psi_A_Q2, phi_B_Q2, theta_B_Q2, psi_B_Q2,
-         phase_Q1_A, phase_Q1_B, phase_Q2_A, phase_Q2_B) = params
-        
-        # Check normalization constraint with soft penalty
-        norm_A = alpha_A**2 + beta_Q1_A + beta_Q2_A
-        norm_B = alpha_B**2 + beta_Q1_B + beta_Q2_B
-        
-        # Soft penalty for constraint violations
-        penalty = 0.0
-        if norm_A > 1.0:
-            penalty += 1e6 * (norm_A - 1.0)**2
-        if norm_B > 1.0:
-            penalty += 1e6 * (norm_B - 1.0)**2
-        if norm_A < 0.0 or norm_B < 0.0:
-            return 1e10
-        
-        # Construct Q-vectors
-        Q1 = Q1_1 * self.b1 + Q1_2 * self.b2
-        Q2 = Q2_1 * self.b1 + Q2_2 * self.b2
-        
-        # Get rotated basis vectors for uniform component
-        exA, eyA, ezA = self.RotatedBasis(phi_A, theta_A, psi_A)
-        exB, eyB, ezB = self.RotatedBasis(phi_B, theta_B, psi_B)
-        
-        # Get rotated basis vectors for Q1 component
-        exA_Q1, eyA_Q1, ezA_Q1 = self.RotatedBasis(phi_A_Q1, theta_A_Q1, psi_A_Q1)
-        exB_Q1, eyB_Q1, ezB_Q1 = self.RotatedBasis(phi_B_Q1, theta_B_Q1, psi_B_Q1)
-        
-        # Get rotated basis vectors for Q2 component
-        exA_Q2, eyA_Q2, ezA_Q2 = self.RotatedBasis(phi_A_Q2, theta_A_Q2, psi_A_Q2)
-        exB_Q2, eyB_Q2, ezB_Q2 = self.RotatedBasis(phi_B_Q2, theta_B_Q2, psi_B_Q2)
-        
-        # Energy calculation
-        E = 0.0
-        
-        # === Q=0 (uniform) component contributions ===
-        E_q0_AB = alpha_A * alpha_B * (ezA.dot(self.HAB(np.array([0, 0]))).dot(ezB))
-        E_q0_BA = alpha_A * alpha_B * (ezB.dot(self.HBA(np.array([0, 0]))).dot(ezA))
-        E_q0_AA = alpha_A**2 * ezA.dot(self.HAA(np.array([0, 0]))).dot(ezA)
-        E_q0_BB = alpha_B**2 * ezB.dot(self.HBB(np.array([0, 0]))).dot(ezB)
-        
-        E += (E_q0_AB + E_q0_BA + E_q0_AA + E_q0_BB) / 4
-        
-        # === Q1 component contributions ===
-        # Define complex spin vectors for Q1
-        SA_Q1_plus = exA_Q1 * np.cos(phase_Q1_A) + eyA_Q1 * np.sin(phase_Q1_A)
-        SA_Q1_minus = exA_Q1 * np.cos(-phase_Q1_A) + eyA_Q1 * np.sin(-phase_Q1_A)
-        SB_Q1_plus = exB_Q1 * np.cos(phase_Q1_B) + eyB_Q1 * np.sin(phase_Q1_B)
-        SB_Q1_minus = exB_Q1 * np.cos(-phase_Q1_B) + eyB_Q1 * np.sin(-phase_Q1_B)
-        
-        # Q1 inter-sublattice
-        E_Q1_AB = np.sqrt(beta_Q1_A * beta_Q1_B) / 4 * (
-            SA_Q1_plus.dot(self.HAB(Q1)).dot(SB_Q1_minus) +
-            SA_Q1_minus.dot(self.HAB(-Q1)).dot(SB_Q1_plus)
-        )
-        E_Q1_BA = np.sqrt(beta_Q1_A * beta_Q1_B) / 4 * (
-            SB_Q1_plus.dot(self.HBA(Q1)).dot(SA_Q1_minus) +
-            SB_Q1_minus.dot(self.HBA(-Q1)).dot(SA_Q1_plus)
-        )
-        
-        # Q1 intra-sublattice
-        E_Q1_AA = beta_Q1_A / 4 * (
-            SA_Q1_plus.dot(self.HAA(Q1)).dot(SA_Q1_minus) +
-            SA_Q1_minus.dot(self.HAA(-Q1)).dot(SA_Q1_plus)
-        )
-        E_Q1_BB = beta_Q1_B / 4 * (
-            SB_Q1_plus.dot(self.HBB(Q1)).dot(SB_Q1_minus) +
-            SB_Q1_minus.dot(self.HBB(-Q1)).dot(SB_Q1_plus)
-        )
-        
-        E += (E_Q1_AB + E_Q1_BA + E_Q1_AA + E_Q1_BB) / 4
-        
-        # === Q2 component contributions ===
-        SA_Q2_plus = exA_Q2 * np.cos(phase_Q2_A) + eyA_Q2 * np.sin(phase_Q2_A)
-        SA_Q2_minus = exA_Q2 * np.cos(-phase_Q2_A) + eyA_Q2 * np.sin(-phase_Q2_A)
-        SB_Q2_plus = exB_Q2 * np.cos(phase_Q2_B) + eyB_Q2 * np.sin(phase_Q2_B)
-        SB_Q2_minus = exB_Q2 * np.cos(-phase_Q2_B) + eyB_Q2 * np.sin(-phase_Q2_B)
-        
-        # Q2 inter-sublattice
-        E_Q2_AB = np.sqrt(beta_Q2_A * beta_Q2_B) / 4 * (
-            SA_Q2_plus.dot(self.HAB(Q2)).dot(SB_Q2_minus) +
-            SA_Q2_minus.dot(self.HAB(-Q2)).dot(SB_Q2_plus)
-        )
-        E_Q2_BA = np.sqrt(beta_Q2_A * beta_Q2_B) / 4 * (
-            SB_Q2_plus.dot(self.HBA(Q2)).dot(SA_Q2_minus) +
-            SB_Q2_minus.dot(self.HBA(-Q2)).dot(SA_Q2_plus)
-        )
-        
-        # Q2 intra-sublattice
-        E_Q2_AA = beta_Q2_A / 4 * (
-            SA_Q2_plus.dot(self.HAA(Q2)).dot(SA_Q2_minus) +
-            SA_Q2_minus.dot(self.HAA(-Q2)).dot(SA_Q2_plus)
-        )
-        E_Q2_BB = beta_Q2_B / 4 * (
-            SB_Q2_plus.dot(self.HBB(Q2)).dot(SB_Q2_minus) +
-            SB_Q2_minus.dot(self.HBB(-Q2)).dot(SB_Q2_plus)
-        )
-        
-        E += (E_Q2_AB + E_Q2_BA + E_Q2_AA + E_Q2_BB) / 4
-        
-        # === Cross terms between Q=0 and Q1 ===
-        E_cross_0_Q1_AB = alpha_A * np.sqrt(beta_Q1_B) / 2 * (
-            ezA.dot(self.HAB(Q1)).dot(SB_Q1_minus) +
-            ezA.dot(self.HAB(-Q1)).dot(SB_Q1_plus)
-        )
-        E_cross_0_Q1_BA = alpha_B * np.sqrt(beta_Q1_A) / 2 * (
-            ezB.dot(self.HBA(Q1)).dot(SA_Q1_minus) +
-            ezB.dot(self.HBA(-Q1)).dot(SA_Q1_plus)
-        )
-        E_cross_0_Q1_AA = alpha_A * np.sqrt(beta_Q1_A) / 2 * (
-            ezA.dot(self.HAA(Q1)).dot(SA_Q1_minus) +
-            ezA.dot(self.HAA(-Q1)).dot(SA_Q1_plus)
-        )
-        E_cross_0_Q1_BB = alpha_B * np.sqrt(beta_Q1_B) / 2 * (
-            ezB.dot(self.HBB(Q1)).dot(SB_Q1_minus) +
-            ezB.dot(self.HBB(-Q1)).dot(SB_Q1_plus)
-        )
-        
-        E += (E_cross_0_Q1_AB + E_cross_0_Q1_BA + E_cross_0_Q1_AA + E_cross_0_Q1_BB) / 4
-        
-        # === Cross terms between Q=0 and Q2 ===
-        E_cross_0_Q2_AB = alpha_A * np.sqrt(beta_Q2_B) / 2 * (
-            ezA.dot(self.HAB(Q2)).dot(SB_Q2_minus) +
-            ezA.dot(self.HAB(-Q2)).dot(SB_Q2_plus)
-        )
-        E_cross_0_Q2_BA = alpha_B * np.sqrt(beta_Q2_A) / 2 * (
-            ezB.dot(self.HBA(Q2)).dot(SA_Q2_minus) +
-            ezB.dot(self.HBA(-Q2)).dot(SA_Q2_plus)
-        )
-        E_cross_0_Q2_AA = alpha_A * np.sqrt(beta_Q2_A) / 2 * (
-            ezA.dot(self.HAA(Q2)).dot(SA_Q2_minus) +
-            ezA.dot(self.HAA(-Q2)).dot(SA_Q2_plus)
-        )
-        E_cross_0_Q2_BB = alpha_B * np.sqrt(beta_Q2_B) / 2 * (
-            ezB.dot(self.HBB(Q2)).dot(SB_Q2_minus) +
-            ezB.dot(self.HBB(-Q2)).dot(SB_Q2_plus)
-        )
-        
-        E += (E_cross_0_Q2_AB + E_cross_0_Q2_BA + E_cross_0_Q2_AA + E_cross_0_Q2_BB) / 4
-        
-        # === Cross terms between Q1 and Q2 ===
-        Q_sum = Q1 + Q2
-        Q_diff = Q1 - Q2
-        
-        # Q1 + Q2 contributions
-        E_cross_Q1_Q2_AB = np.sqrt(beta_Q1_A * beta_Q2_B) / 4 * (
-            SA_Q1_plus.dot(self.HAB(Q_sum)).dot(SB_Q2_minus) +
-            SA_Q1_minus.dot(self.HAB(-Q_sum)).dot(SB_Q2_plus)
-        )
-        E_cross_Q1_Q2_BA = np.sqrt(beta_Q2_A * beta_Q1_B) / 4 * (
-            SB_Q1_plus.dot(self.HBA(Q_sum)).dot(SA_Q2_minus) +
-            SB_Q1_minus.dot(self.HBA(-Q_sum)).dot(SA_Q2_plus)
-        )
-        E_cross_Q1_Q2_AA = np.sqrt(beta_Q1_A * beta_Q2_A) / 4 * (
-            SA_Q1_plus.dot(self.HAA(Q_sum)).dot(SA_Q2_minus) +
-            SA_Q1_minus.dot(self.HAA(-Q_sum)).dot(SA_Q2_plus)
-        )
-        E_cross_Q1_Q2_BB = np.sqrt(beta_Q1_B * beta_Q2_B) / 4 * (
-            SB_Q1_plus.dot(self.HBB(Q_sum)).dot(SB_Q2_minus) +
-            SB_Q1_minus.dot(self.HBB(-Q_sum)).dot(SB_Q2_plus)
-        )
-        
-        E += (E_cross_Q1_Q2_AB + E_cross_Q1_Q2_BA + E_cross_Q1_Q2_AA + E_cross_Q1_Q2_BB) / 4
-        
-        # Q1 - Q2 contributions
-        E_cross_Q1_Q2_diff_AB = np.sqrt(beta_Q1_A * beta_Q2_B) / 4 * (
-            SA_Q1_plus.dot(self.HAB(Q_diff)).dot(SB_Q2_plus) +
-            SA_Q1_minus.dot(self.HAB(-Q_diff)).dot(SB_Q2_minus)
-        )
-        E_cross_Q1_Q2_diff_BA = np.sqrt(beta_Q2_A * beta_Q1_B) / 4 * (
-            SB_Q2_plus.dot(self.HBA(Q_diff)).dot(SA_Q1_plus) +
-            SB_Q2_minus.dot(self.HBA(-Q_diff)).dot(SA_Q1_minus)
-        )
-        E_cross_Q1_Q2_diff_AA = np.sqrt(beta_Q1_A * beta_Q2_A) / 4 * (
-            SA_Q1_plus.dot(self.HAA(Q_diff)).dot(SA_Q2_plus) +
-            SA_Q1_minus.dot(self.HAA(-Q_diff)).dot(SA_Q2_minus)
-        )
-        E_cross_Q1_Q2_diff_BB = np.sqrt(beta_Q1_B * beta_Q2_B) / 4 * (
-            SB_Q1_plus.dot(self.HBB(Q_diff)).dot(SB_Q2_plus) +
-            SB_Q1_minus.dot(self.HBB(-Q_diff)).dot(SB_Q2_minus)
-        )
-        
-        E += (E_cross_Q1_Q2_diff_AB + E_cross_Q1_Q2_diff_BA + E_cross_Q1_Q2_diff_AA + E_cross_Q1_Q2_diff_BB) / 4
-        
-        # === Zeeman energy contribution ===
-        # Average spin components
-        avg_spin_A = alpha_A * ezA
-        avg_spin_B = alpha_B * ezB
-        E_zeeman = self.B_field.dot(avg_spin_A + avg_spin_B) / 2
-        
-        E += E_zeeman
-        
-        return np.real(E) + penalty
-    
-    def find_minimum_energy(self, N_ITERATIONS=20, tol_first_opt=10**-5, tol_second_opt=10**-7, 
-                           start_from_single_q=True):
-        """
-        Find the optimal parameters that minimize the energy
-        
-        Args:
-            N_ITERATIONS: Number of random initializations
-            tol_first_opt: Tolerance for first optimization phase
-            tol_second_opt: Tolerance for final optimization phase
-            start_from_single_q: Whether to seed some initial guesses from single-Q solution
-        """
-        opt_params = None
-        opt_energy = 10**10
-        
-        print(f"Starting optimization with {N_ITERATIONS} random initial guesses...")
-        
-        # If requested, try starting from single-Q solution
-        if start_from_single_q:
-            try:
-                from single_q_BCAO import SingleQ
-                single_q = SingleQ(L=self.L, J=self.J, B_field=self.B_field)
-                
-                # Use single-Q solution as one of the initial guesses
-                Q1_sq, Q2_sq = single_q.opt_params[0], single_q.opt_params[1]
-                alpha_A_sq, alpha_B_sq = single_q.opt_params[2], single_q.opt_params[3]
-                phi_A_sq, theta_A_sq, psi_A_sq = single_q.opt_params[4], single_q.opt_params[5], single_q.opt_params[6]
-                phi_B_sq, theta_B_sq, psi_B_sq = single_q.opt_params[7], single_q.opt_params[8], single_q.opt_params[9]
-                
-                # Create initial guess from single-Q (set Q2 components to zero)
-                initial_guess_sq = [
-                    Q1_sq, Q2_sq, 0.0, 0.0,  # Q1 from single-Q, Q2 = 0
-                    alpha_A_sq, alpha_B_sq,   # Amplitudes from single-Q
-                    1 - alpha_A_sq**2, 1 - alpha_B_sq**2, 0.0, 0.0,  # All weight on Q1
-                    phi_A_sq, theta_A_sq, psi_A_sq, phi_B_sq, theta_B_sq, psi_B_sq,  # From single-Q
-                    self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi),
-                    self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi),
-                    self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi),
-                    self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi), self.uniform_sampling(0, 2*np.pi),
-                    0.0, 0.0, 0.0, 0.0  # Phases
-                ]
-                
-                res = minimize(self.E_per_UC, x0=initial_guess_sq, bounds=self.parameter_bounds,
-                             method='Nelder-Mead', options={'maxiter': 5000}, tol=tol_first_opt)
-                
-                if res.fun < opt_energy:
-                    opt_params = res.x
-                    opt_energy = res.fun
-                    print(f"  Single-Q seeded guess: energy = {res.fun:.8f}")
-            except Exception as e:
-                print(f"  Warning: Could not seed from single-Q: {str(e)}")
-        
-        for i in range(N_ITERATIONS):
-            if (i+1) % 5 == 0:
-                print(f"  Iteration {i+1}/{N_ITERATIONS}, current best energy: {opt_energy:.8f}")
-            
-            # Random initial guess
-            Q1_1_guess = self.uniform_sampling(self.min_Q1, self.max_Q1)
-            Q1_2_guess = self.uniform_sampling(self.min_Q2, self.max_Q2)
-            Q2_1_guess = self.uniform_sampling(self.min_Q3, self.max_Q3)
-            Q2_2_guess = self.uniform_sampling(self.min_Q4, self.max_Q4)
-            
-            alpha_A_guess = self.uniform_sampling(self.min_alpha_A, self.max_alpha_A)
-            alpha_B_guess = self.uniform_sampling(self.min_alpha_B, self.max_alpha_B)
-            
-            # Ensure normalization constraint: α² + β_Q1 + β_Q2 = 1
-            remaining_A = max(0, 1 - alpha_A_guess**2)
-            remaining_B = max(0, 1 - alpha_B_guess**2)
-            
-            if remaining_A > 0:
-                beta_Q1_A_guess = self.uniform_sampling(0, remaining_A)
-                beta_Q2_A_guess = remaining_A - beta_Q1_A_guess
-            else:
-                beta_Q1_A_guess = 0
-                beta_Q2_A_guess = 0
-            
-            if remaining_B > 0:
-                beta_Q1_B_guess = self.uniform_sampling(0, remaining_B)
-                beta_Q2_B_guess = remaining_B - beta_Q1_B_guess
-            else:
-                beta_Q1_B_guess = 0
-                beta_Q2_B_guess = 0
-            
-            phi_A_guess = self.uniform_sampling(self.min_phi_A, self.max_phi_A)
-            theta_A_guess = self.uniform_sampling(self.min_theta_A, self.max_theta_A)
-            psi_A_guess = self.uniform_sampling(self.min_psi_A, self.max_psi_A)
-            phi_B_guess = self.uniform_sampling(self.min_phi_B, self.max_phi_B)
-            theta_B_guess = self.uniform_sampling(self.min_theta_B, self.max_theta_B)
-            psi_B_guess = self.uniform_sampling(self.min_psi_B, self.max_psi_B)
-            
-            phi_A_Q1_guess = self.uniform_sampling(self.min_phi_A_Q1, self.max_phi_A_Q1)
-            theta_A_Q1_guess = self.uniform_sampling(self.min_theta_A_Q1, self.max_theta_A_Q1)
-            psi_A_Q1_guess = self.uniform_sampling(self.min_psi_A_Q1, self.max_psi_A_Q1)
-            phi_B_Q1_guess = self.uniform_sampling(self.min_phi_B_Q1, self.max_phi_B_Q1)
-            theta_B_Q1_guess = self.uniform_sampling(self.min_theta_B_Q1, self.max_theta_B_Q1)
-            psi_B_Q1_guess = self.uniform_sampling(self.min_psi_B_Q1, self.max_psi_B_Q1)
-            
-            phi_A_Q2_guess = self.uniform_sampling(self.min_phi_A_Q2, self.max_phi_A_Q2)
-            theta_A_Q2_guess = self.uniform_sampling(self.min_theta_A_Q2, self.max_theta_A_Q2)
-            psi_A_Q2_guess = self.uniform_sampling(self.min_psi_A_Q2, self.max_psi_A_Q2)
-            phi_B_Q2_guess = self.uniform_sampling(self.min_phi_B_Q2, self.max_phi_B_Q2)
-            theta_B_Q2_guess = self.uniform_sampling(self.min_theta_B_Q2, self.max_theta_B_Q2)
-            psi_B_Q2_guess = self.uniform_sampling(self.min_psi_B_Q2, self.max_psi_B_Q2)
-            
-            phase_Q1_A_guess = self.uniform_sampling(self.min_phase_Q1_A, self.max_phase_Q1_A)
-            phase_Q1_B_guess = self.uniform_sampling(self.min_phase_Q1_B, self.max_phase_Q1_B)
-            phase_Q2_A_guess = self.uniform_sampling(self.min_phase_Q2_A, self.max_phase_Q2_A)
-            phase_Q2_B_guess = self.uniform_sampling(self.min_phase_Q2_B, self.max_phase_Q2_B)
-            
-            initial_guess = [
-                Q1_1_guess, Q1_2_guess, Q2_1_guess, Q2_2_guess,
-                alpha_A_guess, alpha_B_guess, beta_Q1_A_guess, beta_Q1_B_guess, beta_Q2_A_guess, beta_Q2_B_guess,
-                phi_A_guess, theta_A_guess, psi_A_guess, phi_B_guess, theta_B_guess, psi_B_guess,
-                phi_A_Q1_guess, theta_A_Q1_guess, psi_A_Q1_guess, phi_B_Q1_guess, theta_B_Q1_guess, psi_B_Q1_guess,
-                phi_A_Q2_guess, theta_A_Q2_guess, psi_A_Q2_guess, phi_B_Q2_guess, theta_B_Q2_guess, psi_B_Q2_guess,
-                phase_Q1_A_guess, phase_Q1_B_guess, phase_Q2_A_guess, phase_Q2_B_guess
-            ]
-            
-            # Minimize at that point
-            res = minimize(self.E_per_UC, x0=initial_guess, bounds=self.parameter_bounds, 
-                          method='Nelder-Mead', options={'maxiter': 5000}, tol=tol_first_opt)
 
-            if res.fun < opt_energy:
-                opt_params = res.x
-                opt_energy = res.fun
-        
-        print(f"First phase complete. Best energy: {opt_energy:.8f}")
-        print(f"Running final optimization with L-BFGS-B...")
-        
-        # Final optimization run on best parameters
-        res = minimize(self.E_per_UC, x0=opt_params, bounds=self.parameter_bounds, 
-                      method='L-BFGS-B', options={'maxiter': 10000}, tol=tol_second_opt)
-        opt_params = res.x
-        opt_energy = res.fun
-        
-        print(f"Optimization complete. Final energy: {opt_energy:.8f}")
-        
-        return opt_params, opt_energy
-    
-    def classify_phase(self, tol=10**-5):
-        """Classify the magnetic ordering based on the optimal parameters"""
-        (Q1_1, Q1_2, Q2_1, Q2_2,
-         alpha_A, alpha_B, beta_Q1_A, beta_Q1_B, beta_Q2_A, beta_Q2_B,
-         *_) = self.opt_params
-        
-        Q1_vec = Q1_1 * self.b1 + Q1_2 * self.b2
-        Q2_vec = Q2_1 * self.b1 + Q2_2 * self.b2
-        
-        # Check if it's effectively single-Q
-        if beta_Q1_A < tol and beta_Q1_B < tol:
-            # Only Q2 is active
-            return self._classify_single_q(Q2_1, Q2_2, alpha_A, alpha_B, tol)
-        elif beta_Q2_A < tol and beta_Q2_B < tol:
-            # Only Q1 is active
-            return self._classify_single_q(Q1_1, Q1_2, alpha_A, alpha_B, tol)
-        
-        # Check for special double-Q points
-        Q1_norm = np.linalg.norm(Q1_vec)
-        Q2_norm = np.linalg.norm(Q2_vec)
-        
-        # Both Q vectors are non-zero - true double-Q order
-        phase_info = f"Double-Q order: Q1=({Q1_1:.4f}, {Q1_2:.4f}), Q2=({Q2_1:.4f}, {Q2_2:.4f})"
-        
-        # Check for specific symmetric configurations
-        if (np.abs(Q1_1 - 1/3) < tol and np.abs(Q1_2 - 1/3) < tol and 
-            np.abs(Q2_1 - 1/3) < tol and np.abs(Q2_2) < tol):
-            return "Double-Q at K-points (tetrahedral)"
-        
-        return phase_info
-    
-    def _classify_single_q(self, Q1, Q2, alphaA, alphaB, tol):
-        """Helper to classify single-Q phases"""
-        # Gamma point order
-        if np.abs(Q1) < tol and np.abs(Q2) < tol:
-            return "FM/AFM (Gamma point)"
-        
-        # M point order
-        elif (np.abs(Q1-0.5) < tol and np.abs(Q2) < tol) or (np.abs(Q2-0.5) < tol and np.abs(Q1) < tol):
-            return "Zigzag/Stripy (M point)"
-        
-        # K point order
-        elif np.abs(Q1-1/3) < tol and np.abs(Q2-1/3) < tol:
-            return "120° order (K point)"
-        
-        # Incommensurate order
-        else:
-            return f"Incommensurate single-Q: ({Q1:.4f}, {Q2:.4f})"
-    
-    def generate_spin_configuration(self):
-        """Generate the spin configuration from the optimal parameters"""
-        (Q1_1, Q1_2, Q2_1, Q2_2,
-         alpha_A, alpha_B, beta_Q1_A, beta_Q1_B, beta_Q2_A, beta_Q2_B,
-         phi_A, theta_A, psi_A, phi_B, theta_B, psi_B,
-         phi_A_Q1, theta_A_Q1, psi_A_Q1, phi_B_Q1, theta_B_Q1, psi_B_Q1,
-         phi_A_Q2, theta_A_Q2, psi_A_Q2, phi_B_Q2, theta_B_Q2, psi_B_Q2,
-         phase_Q1_A, phase_Q1_B, phase_Q2_A, phase_Q2_B) = self.opt_params
-        
-        Q1 = Q1_1 * self.b1 + Q1_2 * self.b2
-        Q2 = Q2_1 * self.b1 + Q2_2 * self.b2
-        
+    # --- interactions ----------------------------------------------------------
+
+    def _construct_BCAO_interaction_matrices(self):
+        J1z_mat = np.array(
+            [
+                [self.J1xy + self.D, self.E, self.F],
+                [self.E, self.J1xy - self.D, self.G],
+                [self.F, self.G, self.J1z],
+            ]
+        )
+
+        cos_2pi3 = np.cos(2.0 * np.pi / 3.0)
+        sin_2pi3 = np.sin(2.0 * np.pi / 3.0)
+        U = np.array(
+            [
+                [cos_2pi3, sin_2pi3, 0.0],
+                [-sin_2pi3, cos_2pi3, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+
+        J1x_mat = U @ J1z_mat @ U.T
+        J1y_mat = U.T @ J1z_mat @ U
+        J1_list = [J1x_mat, J1y_mat, J1z_mat]
+
+        J2_mat = np.zeros((3, 3))
+        J3_mat = np.array(
+            [
+                [self.J3xy, 0.0, 0.0],
+                [0.0, self.J3xy, 0.0],
+                [0.0, 0.0, self.J3z],
+            ]
+        )
+        return J1_list, J2_mat, J3_mat
+
+    # --- variational spin texture ---------------------------------------------
+
+    def _build_spins(self, params):
+        (
+            q1,
+            q2,
+            mA,
+            mB,
+            phiA,
+            thetaA,
+            psiA,
+            phiB,
+            thetaB,
+            psiB,
+            a1A,
+            b1A,
+            a2A,
+            b2A,
+            a1B,
+            b1B,
+            a2B,
+            b2B,
+        ) = params
+
+        Q1_vec = q1 * self.b1
+        Q2_vec = q2 * self.b2
+
+        exA, eyA, ezA = self.rotated_basis(phiA, thetaA, psiA)
+        exB, eyB, ezB = self.rotated_basis(phiB, thetaB, psiB)
+
         N = len(self.positions)
-        spins = np.zeros((N, 3))
-        
-        exA, eyA, ezA = self.RotatedBasis(phi_A, theta_A, psi_A)
-        exB, eyB, ezB = self.RotatedBasis(phi_B, theta_B, psi_B)
-        
-        exA_Q1, eyA_Q1, ezA_Q1 = self.RotatedBasis(phi_A_Q1, theta_A_Q1, psi_A_Q1)
-        exB_Q1, eyB_Q1, ezB_Q1 = self.RotatedBasis(phi_B_Q1, theta_B_Q1, psi_B_Q1)
-        
-        exA_Q2, eyA_Q2, ezA_Q2 = self.RotatedBasis(phi_A_Q2, theta_A_Q2, psi_A_Q2)
-        exB_Q2, eyB_Q2, ezB_Q2 = self.RotatedBasis(phi_B_Q2, theta_B_Q2, psi_B_Q2)
-        
-        for i in range(N):
-            pos = self.positions[i]
+        spins = np.zeros((N, 3), dtype=float)
+
+        for i, r in enumerate(self.positions):
+            phase1 = Q1_vec.dot(r)
+            phase2 = Q2_vec.dot(r)
+
             if i % 2 == 0:  # A sublattice
-                spin = alpha_A * ezA
-                spin += np.sqrt(beta_Q1_A) * (exA_Q1 * np.cos(Q1.dot(pos) + phase_Q1_A) + 
-                                               eyA_Q1 * np.sin(Q1.dot(pos) + phase_Q1_A))
-                spin += np.sqrt(beta_Q2_A) * (exA_Q2 * np.cos(Q2.dot(pos) + phase_Q2_A) + 
-                                               eyA_Q2 * np.sin(Q2.dot(pos) + phase_Q2_A))
+                m = mA
+                ex, ey, ez = exA, eyA, ezA
+                a1, b1, a2, b2 = a1A, b1A, a2A, b2A
             else:  # B sublattice
-                spin = alpha_B * ezB
-                spin += np.sqrt(beta_Q1_B) * (exB_Q1 * np.cos(Q1.dot(pos) + phase_Q1_B) + 
-                                               eyB_Q1 * np.sin(Q1.dot(pos) + phase_Q1_B))
-                spin += np.sqrt(beta_Q2_B) * (exB_Q2 * np.cos(Q2.dot(pos) + phase_Q2_B) + 
-                                               eyB_Q2 * np.sin(Q2.dot(pos) + phase_Q2_B))
-            
-            # Normalize the spin
-            spin_norm = np.linalg.norm(spin)
-            if spin_norm > 1e-10:
-                spins[i] = spin / spin_norm
-            else:
-                spins[i] = np.array([0, 0, 1])  # Default direction if spin is zero
-        
+                m = mB
+                ex, ey, ez = exB, eyB, ezB
+                a1, b1, a2, b2 = a1B, b1B, a2B, b2B
+
+            mod = (
+                a1 * ex * np.cos(phase1)
+                + b1 * ey * np.sin(phase1)
+                + a2 * ex * np.cos(phase2)
+                + b2 * ey * np.sin(phase2)
+            )
+
+            spin = m * ez + np.sqrt(max(0.0, 1.0 - m * m)) * mod
+            # normalise to unit length to keep spins classical of length 1
+            norm = np.linalg.norm(spin)
+            if norm > 0:
+                spin /= norm
+            spins[i] = spin
+
         return spins
 
-    def calculate_magnetization(self, spins):
-        """
-        Calculate the magnetization components of the spin configuration.
-        
-        Args:
-            spins: Spin configuration (N x 3 array)
-        
-        Returns:
-            magnetization: Dictionary with magnetization components
-        """
+    # --- energy evaluation -----------------------------------------------------
+
+    def energy_per_site(self, params):
+        spins = self._build_spins(params)
         N = len(spins)
-        
-        # Total magnetization
-        total_magnetization = np.mean(spins, axis=0)
-        total_magnitude = np.linalg.norm(total_magnetization)
-        
-        # Sublattice magnetizations
-        spins_A = spins[::2]   # A sublattice (even indices)
-        spins_B = spins[1::2]  # B sublattice (odd indices)
-        
+
+        # exchange part from NN and NNNN (J1_list and J3_mat), mirroring
+        # the structure of the BCAO C++ code as closely as possible.
+        E = 0.0
+
+        # nearest neighbours (A-B). `NN_bonds` may store more than just a
+        # simple integer; mirror the access pattern from the single-Q code by
+        # taking only the first entry as the bond-type index.
+        for (i, j, *rest), bond_info in zip(self.NN, self.NN_bonds):
+            S_i = spins[i]
+            S_j = spins[j]
+            # support both scalar and tuple/list bond descriptors
+            bond_type = bond_info[0] if isinstance(bond_info, (list, tuple, np.ndarray)) else bond_info
+            Jmat = self.J1_list[int(bond_type)]
+            E += S_i @ (Jmat @ S_j)
+
+        # third neighbours (same sublattice). `NNNN` may also contain
+        # additional metadata per bond; only first two entries are site
+        # indices.
+        for (i, j, *rest) in self.NNNN:
+            S_i = spins[i]
+            S_j = spins[j]
+            E += S_i @ (self.J3_mat @ S_j)
+
+        # Zeeman term
+        if np.linalg.norm(self.B_field) > 0:
+            for S in spins:
+                E -= self.B_field.dot(S)
+
+        # Each bond counted once; divide by number of sites for energy/site
+        return E / float(N)
+
+    # --- optimisation ---------------------------------------------------------
+
+    def _find_minimum_energy(self, N_ITER=20, tol_first=1e-6, tol_second=1e-8):
+        best_params = None
+        best_E = np.inf
+
+        for _ in range(N_ITER):
+            guess = [
+                self._uniform(self.min_q1, self.max_q1),
+                self._uniform(self.min_q2, self.max_q2),
+                self._uniform(self.min_mA, self.max_mA),
+                self._uniform(self.min_mB, self.max_mB),
+                self._uniform(self.min_phi, self.max_phi),
+                self._uniform(self.min_theta, self.max_theta),
+                self._uniform(self.min_psi, self.max_psi),
+                self._uniform(self.min_phi, self.max_phi),
+                self._uniform(self.min_theta, self.max_theta),
+                self._uniform(self.min_psi, self.max_psi),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+                self._uniform(self.min_a, self.max_a),
+            ]
+
+            res = minimize(
+                self.energy_per_site,
+                x0=guess,
+                bounds=self.parameter_bounds,
+                method="Nelder-Mead",
+                tol=tol_first,
+            )
+
+            if res.fun < best_E:
+                best_E = res.fun
+                best_params = res.x
+
+        # refine with gradient-based method starting from best guess
+        res = minimize(
+            self.energy_per_site,
+            x0=best_params,
+            bounds=self.parameter_bounds,
+            method="L-BFGS-B",
+            tol=tol_second,
+        )
+        return res.x, res.fun
+
+    # --- helpers for analysis --------------------------------------------------
+
+    def generate_spin_configuration(self):
+        return self._build_spins(self.opt_params)
+
+    def calculate_magnetization(self, spins):
+        N = len(spins)
+        total = np.mean(spins, axis=0)
+        total_mag = np.linalg.norm(total)
+        spins_A = spins[::2]
+        spins_B = spins[1::2]
         mag_A = np.mean(spins_A, axis=0)
         mag_B = np.mean(spins_B, axis=0)
-        
-        mag_A_magnitude = np.linalg.norm(mag_A)
-        mag_B_magnitude = np.linalg.norm(mag_B)
-        
-        # Staggered magnetization
+        mag_A_mag = np.linalg.norm(mag_A)
+        mag_B_mag = np.linalg.norm(mag_B)
         staggered = mag_A - mag_B
-        staggered_magnitude = np.linalg.norm(staggered)
-        
+        stag_mag = np.linalg.norm(staggered)
         return {
-            'total': total_magnetization,
-            'total_magnitude': total_magnitude,
-            'A': mag_A,
-            'B': mag_B,
-            'A_magnitude': mag_A_magnitude,
-            'B_magnitude': mag_B_magnitude,
-            'staggered': staggered,
-            'staggered_magnitude': staggered_magnitude
+            "total": total,
+            "total_magnitude": total_mag,
+            "A": mag_A,
+            "B": mag_B,
+            "A_magnitude": mag_A_mag,
+            "B_magnitude": mag_B_mag,
+            "staggered": staggered,
+            "staggered_magnitude": stag_mag,
         }
 
 
 if __name__ == "__main__":
-    # Size of lattice (L x L unit cells)
-    L = 8  # Use smaller lattice due to increased complexity
-    
-    # BCAO parameters matching the C++ convention: [J1xy, J1z, D, E, F, G, J3xy, J3z]
-    J = [-7.6, -1.2, 0.1, -0.1, 0, 0, 2.5, -0.85]
-    
-    # Create double-Q model
-    print("="*60)
-    print("DOUBLE-Q ANSATZ FOR BCAO HONEYCOMB LATTICE")
-    print("="*60)
-    print(f"Lattice size: {L}x{L}")
-    print(f"BCAO Parameters: J1xy={J[0]}, J1z={J[1]}, D={J[2]}, E={J[3]}, F={J[4]}, G={J[5]}, J3xy={J[6]}, J3z={J[7]}")
-    print()
-    
-    model = DoubleQ(L, J)
-    
-    # Print results
-    Q1_1, Q1_2, Q2_1, Q2_2 = model.opt_params[0], model.opt_params[1], model.opt_params[2], model.opt_params[3]
-    alpha_A, alpha_B = model.opt_params[4], model.opt_params[5]
-    beta_Q1_A, beta_Q1_B = model.opt_params[6], model.opt_params[7]
-    beta_Q2_A, beta_Q2_B = model.opt_params[8], model.opt_params[9]
-    
-    print("\n" + "="*60)
-    print("OPTIMIZATION RESULTS")
-    print("="*60)
-    print(f"Ground state energy per unit cell: {model.opt_energy:.8f}")
-    print(f"\nQ-vectors:")
-    print(f"  Q1 = ({Q1_1:.6f}, {Q1_2:.6f})")
-    print(f"  Q2 = ({Q2_1:.6f}, {Q2_2:.6f})")
-    print(f"\nAmplitudes (A sublattice):")
-    print(f"  α_A (uniform) = {alpha_A:.6f}")
-    print(f"  β_Q1_A = {beta_Q1_A:.6f}")
-    print(f"  β_Q2_A = {beta_Q2_A:.6f}")
-    print(f"  Normalization check: α_A² + β_Q1_A + β_Q2_A = {alpha_A**2 + beta_Q1_A + beta_Q2_A:.6f}")
-    print(f"\nAmplitudes (B sublattice):")
-    print(f"  α_B (uniform) = {alpha_B:.6f}")
-    print(f"  β_Q1_B = {beta_Q1_B:.6f}")
-    print(f"  β_Q2_B = {beta_Q2_B:.6f}")
-    print(f"  Normalization check: α_B² + β_Q1_B + β_Q2_B = {alpha_B**2 + beta_Q1_B + beta_Q2_B:.6f}")
-    print(f"\nMagnetic order: {model.magnetic_order}")
-    
-    # Generate and analyze the spin configuration
+    L = 6
+
+    # J = [-7.6, -1.2, 0.1, -0.1, 0.0, 0.0, 2.5, -0.85]
+    # J = [-6.772, -1.887, 0.815, 1.292, -0.091, 0.627, 1.823, -0.157]
+    J = [-6.646, -2.084, 0.675, 1.33, -1.516, 0.21, 1.697, 0.039]
+    model = DoubleQ(L=L, J=J, B_field=np.array([0.0, 0.0, 0.0]))
+
+    print("Optimal parameters (q1, q2, ...):")
+    print(model.opt_params)
+    print(f"Ground-state energy per site: {model.opt_energy:.6f}")
+
     spins = model.generate_spin_configuration()
-    
-    # Calculate magnetization
-    magnetization = model.calculate_magnetization(spins)
-    
-    # Print magnetization results
-    print("\n" + "="*60)
-    print("MAGNETIZATION ANALYSIS")
-    print("="*60)
-    print(f"Total magnetization: [{magnetization['total'][0]:.6f}, {magnetization['total'][1]:.6f}, {magnetization['total'][2]:.6f}]")
-    print(f"Total magnetization magnitude: {magnetization['total_magnitude']:.6f}")
-    print(f"\nSublattice A magnetization: [{magnetization['A'][0]:.6f}, {magnetization['A'][1]:.6f}, {magnetization['A'][2]:.6f}]")
-    print(f"Sublattice A magnitude: {magnetization['A_magnitude']:.6f}")
-    print(f"\nSublattice B magnetization: [{magnetization['B'][0]:.6f}, {magnetization['B'][1]:.6f}, {magnetization['B'][2]:.6f}]")
-    print(f"Sublattice B magnitude: {magnetization['B_magnitude']:.6f}")
-    print(f"\nStaggered magnetization: [{magnetization['staggered'][0]:.6f}, {magnetization['staggered'][1]:.6f}, {magnetization['staggered'][2]:.6f}]")
-    print(f"Staggered magnetization magnitude: {magnetization['staggered_magnitude']:.6f}")
-    print("="*60)
-    
-    # Visualize the spin configuration
+    mags = model.calculate_magnetization(spins)
+    print("Total magnetization:", mags["total"], "|M|=", mags["total_magnitude"])
+
     visualize_spins(model.positions, spins, L)

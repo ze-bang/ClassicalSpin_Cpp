@@ -1093,6 +1093,11 @@ public:
 
     __host__
     void get_local_field_cuda(double step_size, double curr_time, double tol);
+    
+    // GPU magnetization computation (avoids large host-device memory transfers)
+    __host__
+    void compute_magnetization_cuda(double* d_mag_local_SU2, double* d_mag_global_SU2, 
+                                    double* d_mag_local_SU3, double* d_mag_global_SU3);
 
     __host__
     void molecular_dynamics_cuda(double T_start, double T_end, double step_size, string dir_name, 
@@ -1108,6 +1113,22 @@ public:
         
         // Copy initial spins to device if not already there
         copy_spins_to_device();
+        
+        // Allocate device memory for magnetization outputs
+        double* d_mag_local_SU2;
+        double* d_mag_global_SU2;
+        double* d_mag_local_SU3;
+        double* d_mag_global_SU3;
+        cudaMalloc(&d_mag_local_SU2, N_SU2 * sizeof(double));
+        cudaMalloc(&d_mag_global_SU2, N_SU2 * sizeof(double));
+        cudaMalloc(&d_mag_local_SU3, N_SU3 * sizeof(double));
+        cudaMalloc(&d_mag_global_SU3, N_SU3 * sizeof(double));
+        
+        // Host arrays for magnetization results
+        std::vector<double> h_mag_local_SU2(N_SU2);
+        std::vector<double> h_mag_global_SU2(N_SU2);
+        std::vector<double> h_mag_local_SU3(N_SU3);
+        std::vector<double> h_mag_global_SU3(N_SU3);
         
         // Open file handles once instead of reopening for each write
         ofstream mag_file_f, mag_file, mag_file_f_SU3, mag_file_SU3;
@@ -1145,28 +1166,26 @@ public:
                   << " with step size " << step_size << " and output every " 
                   << output_frequency << " steps." << std::endl;
         
-        // Initial magnetization
+        // Initial magnetization - compute on GPU
         if (dir_name != "") {
-            copy_spins_to_host();
+            compute_magnetization_cuda(d_mag_local_SU2, d_mag_global_SU2, d_mag_local_SU3, d_mag_global_SU3);
             
-            // Write initial magnetization
-            auto mag_f = this->magnetization_local(this->spins);
-            // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
-            auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-            // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-            auto mag = this->magnetization_global(this->spins);
-            auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins);
+            // Copy only magnetization results (small data)
+            cudaMemcpy(h_mag_local_SU2.data(), d_mag_local_SU2, N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_mag_global_SU2.data(), d_mag_global_SU2, N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_mag_local_SU3.data(), d_mag_local_SU3, N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_mag_global_SU3.data(), d_mag_global_SU3, N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
 
             for (size_t j = 0; j < N_SU2; ++j) {
-                mag_file_f << mag_f[j] << " ";
-                mag_file << mag[j] << " ";
+                mag_file_f << h_mag_local_SU2[j] << " ";
+                mag_file << h_mag_global_SU2[j] << " ";
             }
             mag_file_f << "\n";
             mag_file << "\n";
             
             for (size_t j = 0; j < N_SU3; ++j) {
-                mag_file_f_SU3 << mag_SU3[j] << " ";
-                mag_file_SU3 << mag_afm_SU3[j] << " ";
+                mag_file_f_SU3 << h_mag_local_SU3[j] << " ";
+                mag_file_SU3 << h_mag_global_SU3[j] << " ";
             }
             mag_file_f_SU3 << "\n";
             mag_file_SU3 << "\n";
@@ -1198,34 +1217,34 @@ public:
                           << current_time << "/" << T_end << std::flush;
             }
             
-            // Periodically copy data back to host for output
+            // Periodically compute magnetization on GPU and copy only small results
             if (dir_name != "" && step_count % output_frequency == 0) {
-                copy_spins_to_host();
+                // Compute magnetization on GPU (no full spin copy needed!)
+                compute_magnetization_cuda(d_mag_local_SU2, d_mag_global_SU2, d_mag_local_SU3, d_mag_global_SU3);
                 
-                // Write initial magnetization
-                auto mag_f = this->magnetization_local(this->spins);
-                // auto mag = this->magnetization_local_antiferromagnetic(this->spins);
-                auto mag_SU3 = this->magnetization_local_SU3(this->spins);
-                // auto mag_afm_SU3 = this->magnetization_local_antiferromagnetic_SU3(this->spins);
-                auto mag = this->magnetization_global(this->spins);
-                auto mag_afm_SU3 = this->magnetization_global_SU3(this->spins);
+                // Copy only magnetization results (very small transfer: 2*(N_SU2+N_SU3) doubles)
+                cudaMemcpy(h_mag_local_SU2.data(), d_mag_local_SU2, N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
+                cudaMemcpy(h_mag_global_SU2.data(), d_mag_global_SU2, N_SU2 * sizeof(double), cudaMemcpyDeviceToHost);
+                cudaMemcpy(h_mag_local_SU3.data(), d_mag_local_SU3, N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
+                cudaMemcpy(h_mag_global_SU3.data(), d_mag_global_SU3, N_SU3 * sizeof(double), cudaMemcpyDeviceToHost);
 
                 for (size_t j = 0; j < N_SU2; ++j) {
-                    mag_file_f << mag_f[j] << " ";
-                    mag_file << mag[j] << " ";
+                    mag_file_f << h_mag_local_SU2[j] << " ";
+                    mag_file << h_mag_global_SU2[j] << " ";
                 }
                 mag_file_f << "\n";
                 mag_file << "\n";
                 
                 for (size_t j = 0; j < N_SU3; ++j) {
-                    mag_file_f_SU3 << mag_SU3[j] << " ";
-                    mag_file_SU3 << mag_afm_SU3[j] << " ";
+                    mag_file_f_SU3 << h_mag_local_SU3[j] << " ";
+                    mag_file_SU3 << h_mag_global_SU3[j] << " ";
                 }
                 mag_file_f_SU3 << "\n";
                 mag_file_SU3 << "\n";
                 
-                // Write spin states if verbose
+                // Only copy full spins if verbose mode (for spin snapshots)
                 if (verbose) {
+                    copy_spins_to_host();
                     for (size_t i = 0; i < lattice_size_SU2; ++i) {
                         for (size_t j = 0; j < N_SU2; ++j) {
                             spin_file_SU2 << this->spins.spins_SU2[i][j] << " ";
@@ -1263,6 +1282,12 @@ public:
             }
             time_sections.close();
         }
+        
+        // Cleanup device memory
+        cudaFree(d_mag_local_SU2);
+        cudaFree(d_mag_global_SU2);
+        cudaFree(d_mag_local_SU3);
+        cudaFree(d_mag_global_SU3);
     }
     // CUDA implementation of M_B_t
     __host__

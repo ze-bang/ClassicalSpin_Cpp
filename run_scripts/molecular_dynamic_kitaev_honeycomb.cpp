@@ -1,33 +1,6 @@
 #include "experiments.h"
+#include "../src/lattice_cuda.cuh"
 
-void MD_kitaev_honeycomb(size_t num_trials, double J, double K, double Gamma, double Gammap, double h, string dir){
-    filesystem::create_directory(dir);
-    HoneyComb<3> atoms;
-    array<array<double,3>, 3> Jx = {{{K,Gammap,Gammap},{Gammap,0,Gamma},{Gammap,Gamma,0}}};
-    array<array<double,3>, 3> Jy = {{{0,Gammap,Gamma},{Gammap,K,Gammap},{Gamma,Gammap,0}}};
-    array<array<double,3>, 3> Jz = {{{0,Gamma,Gammap},{Gamma,0,Gammap},{Gammap,Gammap,K}}};
-
-
-    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
-    
-    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
-    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
-    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
-    atoms.set_field(field, 0);
-    atoms.set_field(field, 1);
-
-    for(size_t i=0; i<num_trials;++i){
-
-        lattice<3, 2, 12, 12, 1> MC(&atoms);
-        MC.simulated_annealing(1, 1e-4, 100000, 0, true);
-        // std::random_device rd;
-        // std::mt19937 gen(rd());
-        // for (size_t i = 0; i<100000; ++i){
-        //     MC.deterministic_sweep(gen);
-        // }
-        MC.molecular_dynamics(0, 600, 0.25, dir+"/"+std::to_string(i));
-    }
-}
 
 void parallel_tempering_honeycomb(double T_start, double T_end, double K, double Gamma, double Gammap, double h, string dir, const vector<int> &rank_to_write){
     filesystem::create_directory(dir);
@@ -88,7 +61,7 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
     // array<array<double, 3>,2> field_drive = {{{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)},{-1/sqrt(3), -1/sqrt(3), 1/sqrt(3)}}};
     array<array<double, 3>,2> field_drive = {{{0,0,1},{0,0,1}}};
 
-    double pulse_amp = 0.1;
+    double pulse_amp = 0.5;
     double pulse_width = 0.38;
     double pulse_freq = 0.33;
 
@@ -96,7 +69,7 @@ void nonlinearspectroscopy_kitaev_honeycomb(double Temp_start, double Temp_end, 
     int tau_steps = abs(int((tau_end-tau_start)/tau_step_size))+1;
     tau_step_size = tau_end - tau_start < 0 ? - abs(tau_step_size) : abs(tau_step_size);
     T_step_size = T_end - T_start < 0 ? - abs(T_step_size) : abs(T_step_size);
-    lattice<3, 2, 20, 20, 1> MC(&atoms);
+    lattice<3, 2, 6, 6, 1> MC(&atoms);
     MC.simulated_annealing(Temp_start, Temp_end, 1000, 1);
 
     if (T_zero){
@@ -140,6 +113,53 @@ void full_nonlinearspectroscopy_kitaev_honeycomb(size_t num_trials, double Temp_
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     filesystem::create_directory(dir);
 
+    // Print all simulation parameters
+    if (rank == 0) {
+        cout << "=====================================" << endl;
+        cout << "Simulation Parameters:" << endl;
+        cout << "=====================================" << endl;
+        cout << "Number of trials: " << num_trials << endl;
+        cout << "Temperature annealing: " << Temp_start << " -> " << Temp_end << endl;
+        cout << "Tau range: " << tau_start << " -> " << tau_end << endl;
+        cout << "Tau step size: " << tau_step_size << endl;
+        cout << "Time range: " << T_start << " -> " << T_end << endl;
+        cout << "Time step size: " << T_step_size << endl;
+        cout << "K (Kitaev): " << K << endl;
+        cout << "Gamma: " << Gamma << endl;
+        cout << "Gamma': " << Gammap << endl;
+        cout << "Magnetic field h: " << h << endl;
+        cout << "Field components: {" << h/sqrt(3) << ", " << h/sqrt(3) << ", " << h/sqrt(3) << "}" << endl;
+        cout << "T_zero mode: " << (T_zero ? "true" : "false") << endl;
+        cout << "Output directory: " << dir << endl;
+        cout << "MPI size: " << size << endl;
+        cout << "=====================================" << endl;
+
+        // Save parameters to file
+        ofstream param_file;
+        param_file.open(dir + "/simulation_params.txt");
+        param_file << "Simulation Parameters" << endl;
+        param_file << "=====================================" << endl;
+        param_file << "num_trials: " << num_trials << endl;
+        param_file << "Temp_start: " << Temp_start << endl;
+        param_file << "Temp_end: " << Temp_end << endl;
+        param_file << "tau_start: " << tau_start << endl;
+        param_file << "tau_end: " << tau_end << endl;
+        param_file << "tau_step_size: " << tau_step_size << endl;
+        param_file << "T_start: " << T_start << endl;
+        param_file << "T_end: " << T_end << endl;
+        param_file << "T_step_size: " << T_step_size << endl;
+        param_file << "K: " << K << endl;
+        param_file << "Gamma: " << Gamma << endl;
+        param_file << "Gammap: " << Gammap << endl;
+        param_file << "h: " << h << endl;
+        param_file << "field_x: " << h/sqrt(3) << endl;
+        param_file << "field_y: " << h/sqrt(3) << endl;
+        param_file << "field_z: " << h/sqrt(3) << endl;
+        param_file << "T_zero: " << (T_zero ? "true" : "false") << endl;
+        param_file << "MPI_size: " << size << endl;
+        param_file.close();
+    }
+
     for(size_t i = 0; i < num_trials; ++i){
         nonlinearspectroscopy_kitaev_honeycomb(Temp_start, Temp_end, tau_start, tau_end, tau_step_size, T_start, T_end, T_step_size, K, Gamma, Gammap, h, dir+"/"+std::to_string(i), T_zero);
     }
@@ -172,6 +192,33 @@ void MD_kitaev_honeycomb_real(size_t num_trials, string dir, double J=0, double 
         lattice<3, 2, 24, 24, 1> MC(&atoms);
         MC.simulated_annealing(5, 1e-2, 1000, 1);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
+    }
+}
+
+
+
+void MD_kitaev_honeycomb_cuda(size_t num_trials, string dir, double J=0, double K=-1, double Gamma=0.25, double Gammap=-0.02, double h=0.7){
+    filesystem::create_directory(dir);
+    HoneyComb_standarx<3> atoms;
+    array<array<double,3>, 3> Jx = {{{J+K,Gammap,Gammap},{Gammap,J,Gamma},{Gammap,Gamma,J}}};
+    array<array<double,3>, 3> Jy = {{{J,Gammap,Gamma},{Gammap,J+K,Gammap},{Gamma,Gammap,J}}};
+    array<array<double,3>, 3> Jz = {{{J,Gamma,Gammap},{Gamma,J,Gammap},{Gammap,Gammap,J+K}}};
+
+
+    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
+    
+    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
+    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
+    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
+    atoms.set_field(field, 0);
+    atoms.set_field(field, 1);
+    double k_B = 0.08620689655;
+
+    for(size_t i=0; i<num_trials;++i){
+
+        lattice_cuda<3, 2, 4, 4, 1> MC(&atoms);
+        MC.simulated_annealing(5, 1e-2, 1000, 1);
+        MC.molecular_dynamics_cuda(0, 100, 1e-2, dir+"/"+std::to_string(i), true);
     }
 }
 
@@ -258,8 +305,8 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
     double J = argv[7] ? atof(argv[7]) : 0.0;
-    // MD_kitaev_honeycomb_real(1, "KITAEV");
+    MD_kitaev_honeycomb_cuda(1, "KITAEV");
     // MD_honeycomb_J1_J3("BCAO_J1J3",20);
-    full_nonlinearspectroscopy_kitaev_honeycomb(1, 5, 0.01, -600, 0, 0.25, -600, 0, 0.25, -1, -0.25, 0.02, 0.7, "KITAEV", true);
+    // full_nonlinearspectroscopy_kitaev_honeycomb(1, 5, 0.01, -200, 0, 0.2, -200, 200, 0.2, -1, -0.25, 0.02, 0.7, "KITAEV", true);
     return 0;
 }

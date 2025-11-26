@@ -35,6 +35,7 @@ include_directories(src)
 
 # Set optimized compiler flags with modern CMake approach
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -mtune=native")
+set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
 
 # Additional optimization flags for specific configurations
@@ -67,12 +68,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     )
     
     # CUDA host compiler optimization flags (separate from device flags)
+    # Note: Omitting -march flag to avoid AMX intrinsics incompatibility between nvcc and GCC 12
     set(CUDA_HOST_OPTIMIZATION_FLAGS
         -Xcompiler=-O3       # Host compiler optimization
         -Xcompiler=-ffast-math
         -Xcompiler=-funroll-loops
-        -Xcompiler=-march=native
-        -Xcompiler=-mtune=native
     )
 endif()
 
@@ -93,6 +93,14 @@ file(GLOB CUDA_SOURCE_FILES "src/*.cu")
 # Collect all CUDA header files
 file(GLOB CUDA_HEADER_FILES 
     "src/*.cuh"
+)
+
+# Ensure lattice_cuda files are included
+list(APPEND CUDA_SOURCE_FILES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/lattice_cuda.cu"
+)
+list(APPEND CUDA_HEADER_FILES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/lattice_cuda.cuh"
 )
 
 # Collect all C++ source files in results directory
@@ -132,6 +140,8 @@ if(CUDA_SOURCE_FILES)
         POSITION_INDEPENDENT_CODE ON
         CUDA_STANDARD 20
         CUDA_STANDARD_REQUIRED ON
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
     
     # Include directories for CUDA library
@@ -153,6 +163,10 @@ if(CUDA_SOURCE_FILES)
     target_compile_options(cuda_lib PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
+        # Workaround for nvcc/GCC 12 incompatibility: prevent inclusion of AMX headers
+        $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMXTILEINTRIN_H_INCLUDED>
+        $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_INT8INTRIN_H_INCLUDED>
+        $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_BF16INTRIN_H_INCLUDED>
     )
     
     # Create interface library for CUDA headers
