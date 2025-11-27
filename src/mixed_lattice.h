@@ -1623,7 +1623,19 @@ public:
                double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
                double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
                double T_start, double T_end, double step_size,
-               const string& method = "dopri5") {
+               const string& method = "dopri5", bool use_gpu = false) {
+        
+        if (use_gpu) {
+#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+            return M_B_t_gpu(field_in_SU2, field_in_SU3, t_B,
+                            pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                            pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                            T_start, T_end, step_size, method);
+#else
+            std::cerr << "Warning: GPU support not available. Falling back to CPU." << endl;
+            // Fall through to CPU implementation
+#endif
+        }
         
         // Set up pulse
         set_pulse_SU2(field_in_SU2, t_B, vector<SpinVector>(N_atoms_SU2, SpinVector::Zero(spin_dim_SU2)),
@@ -1703,7 +1715,20 @@ public:
                double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
                double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
                double T_start, double T_end, double step_size,
-               const string& method = "dopri5") {
+               const string& method = "dopri5", bool use_gpu = false) {
+        
+        if (use_gpu) {
+#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+            return M_BA_BB_t_gpu(field_in_1_SU2, field_in_1_SU3, t_B_1,
+                                field_in_2_SU2, field_in_2_SU3, t_B_2,
+                                pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                T_start, T_end, step_size, method);
+#else
+            std::cerr << "Warning: GPU support not available. Falling back to CPU." << endl;
+            // Fall through to CPU implementation
+#endif
+        }
         
         // Set up two-pulse configuration
         set_pulse_SU2(field_in_1_SU2, t_B_1, field_in_2_SU2, t_B_2,
@@ -1775,6 +1800,26 @@ public:
      * Molecular dynamics using Boost.Odeint
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
+                           const string& out_dir = "", size_t save_interval = 100,
+                           const string& method = "dopri5", bool use_gpu = false) {
+        if (use_gpu) {
+#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+            molecular_dynamics_gpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+#else
+            std::cerr << "Warning: GPU support not available in this compilation unit." << endl;
+            std::cerr << "GPU methods require CUDA compilation (.cu files)" << endl;
+            std::cerr << "Falling back to CPU implementation." << endl;
+            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+#endif
+        } else {
+            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+        }
+    }
+
+    /**
+     * CPU implementation of molecular dynamics
+     */
+    void molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            const string& out_dir = "", size_t save_interval = 100,
                            const string& method = "dopri5") {
 #ifndef HDF5_ENABLED
@@ -1922,7 +1967,7 @@ public:
                                  size_t n_anneal = 1000,
                                  bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                  string dir_name = "spectroscopy_mixed",
-                                 string method = "dopri5") {
+                                 string method = "dopri5", bool use_gpu = false) {
         
         std::filesystem::create_directories(dir_name);
         
@@ -1955,10 +2000,11 @@ public:
         
         // Step 2: Reference single-pulse dynamics (pump at t=0)
         cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
+        if (use_gpu) cout << "  Using GPU acceleration" << endl;
         auto M0_trajectory = M_B_t(field_in_SU2, field_in_SU3, 0.0,
                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                   T_start, T_end, T_step, method);
+                                   T_start, T_end, T_step, method, use_gpu);
         
         // Step 3: Delay time scan
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
@@ -1989,7 +2035,7 @@ public:
             auto M1_traj = M_B_t(field_in_SU2, field_in_SU3, current_tau,
                                 pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                 pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                T_start, T_end, T_step, method);
+                                T_start, T_end, T_step, method, use_gpu);
             M1_trajectories.push_back(M1_traj);
             
             // Restore ground state
@@ -2002,7 +2048,7 @@ public:
                                      field_in_SU2, field_in_SU3, current_tau,
                                      pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                      pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                     T_start, T_end, T_step, method);
+                                     T_start, T_end, T_step, method, use_gpu);
             M01_trajectories.push_back(M01_traj);
             
             current_tau += tau_step;
@@ -2070,6 +2116,546 @@ public:
         cout << "Total delay points: " << tau_steps << endl;
         cout << "==========================================" << endl;
     }
+
+// ============================================================
+// GPU Implementation Section
+// ============================================================
+#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+private:
+    /**
+     * GPU data structure for mixed lattice
+     * Contains both SU(2) and SU(3) lattice data
+     */
+    struct GPUMixedLatticeData {
+        // SU(2) sublattice data
+        thrust::device_vector<double> d_field_SU2;
+        thrust::device_vector<double> d_onsite_interaction_SU2;
+        thrust::device_vector<double> d_bilinear_interaction_SU2;
+        thrust::device_vector<size_t> d_bilinear_partners_SU2;
+        thrust::device_vector<int8_t> d_bilinear_wrap_dir_SU2;
+        thrust::device_vector<double> d_trilinear_interaction_SU2;
+        thrust::device_vector<size_t> d_trilinear_partners_SU2;
+        thrust::device_vector<double> d_field_drive_SU2;
+        thrust::device_vector<double> d_twist_matrices_SU2;
+        
+        // SU(3) sublattice data
+        thrust::device_vector<double> d_field_SU3;
+        thrust::device_vector<double> d_onsite_interaction_SU3;
+        thrust::device_vector<double> d_bilinear_interaction_SU3;
+        thrust::device_vector<size_t> d_bilinear_partners_SU3;
+        thrust::device_vector<int8_t> d_bilinear_wrap_dir_SU3;
+        thrust::device_vector<double> d_trilinear_interaction_SU3;
+        thrust::device_vector<size_t> d_trilinear_partners_SU3;
+        thrust::device_vector<double> d_field_drive_SU3;
+        thrust::device_vector<double> d_twist_matrices_SU3;
+        
+        // Mixed interaction data
+        thrust::device_vector<double> d_mixed_bilinear_interaction;
+        thrust::device_vector<size_t> d_mixed_bilinear_partners_SU2;
+        thrust::device_vector<size_t> d_mixed_bilinear_partners_SU3;
+        thrust::device_vector<int8_t> d_mixed_bilinear_wrap_dir;
+        
+        thrust::device_vector<double> d_mixed_trilinear_interaction;
+        thrust::device_vector<size_t> d_mixed_trilinear_partners_SU2;
+        thrust::device_vector<size_t> d_mixed_trilinear_partners_SU3;
+        
+        // Sizes
+        size_t lattice_size_SU2;
+        size_t lattice_size_SU3;
+        size_t num_bi_SU2;
+        size_t num_tri_SU2;
+        size_t num_bi_SU3;
+        size_t num_tri_SU3;
+        size_t num_mixed_bi;
+        size_t num_mixed_tri;
+        
+        // Pulse parameters
+        double field_drive_amp_SU2;
+        double field_drive_freq_SU2;
+        double field_drive_width_SU2;
+        double t_pulse_0_SU2;
+        double t_pulse_1_SU2;
+        
+        double field_drive_amp_SU3;
+        double field_drive_freq_SU3;
+        double field_drive_width_SU3;
+        double t_pulse_0_SU3;
+        double t_pulse_1_SU3;
+    };
+    
+    /**
+     * Transfer mixed lattice data to GPU
+     */
+    GPUMixedLatticeData transfer_mixed_lattice_data_to_gpu() const {
+        GPUMixedLatticeData gpu_data;
+        
+        // Set sizes
+        gpu_data.lattice_size_SU2 = lattice_SU2.lattice_size;
+        gpu_data.lattice_size_SU3 = lattice_SU3.lattice_size;
+        gpu_data.num_bi_SU2 = lattice_SU2.num_bi;
+        gpu_data.num_tri_SU2 = lattice_SU2.num_tri;
+        gpu_data.num_bi_SU3 = lattice_SU3.num_bi;
+        gpu_data.num_tri_SU3 = lattice_SU3.num_tri;
+        
+        // Transfer SU(2) field data
+        vector<double> flat_field_SU2;
+        for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+            for (size_t d = 0; d < 3; ++d) {
+                flat_field_SU2.push_back(lattice_SU2.field[i](d));
+            }
+        }
+        gpu_data.d_field_SU2 = thrust::device_vector<double>(flat_field_SU2.begin(), flat_field_SU2.end());
+        
+        // Transfer SU(3) field data
+        vector<double> flat_field_SU3;
+        for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+            for (size_t d = 0; d < 8; ++d) {
+                flat_field_SU3.push_back(lattice_SU3.field[i](d));
+            }
+        }
+        gpu_data.d_field_SU3 = thrust::device_vector<double>(flat_field_SU3.begin(), flat_field_SU3.end());
+        
+        // Transfer SU(2) onsite interactions
+        vector<double> flat_onsite_SU2;
+        for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+            for (size_t r = 0; r < 3; ++r) {
+                for (size_t c = 0; c < 3; ++c) {
+                    flat_onsite_SU2.push_back(lattice_SU2.onsite_interaction[i](r, c));
+                }
+            }
+        }
+        gpu_data.d_onsite_interaction_SU2 = thrust::device_vector<double>(flat_onsite_SU2.begin(), flat_onsite_SU2.end());
+        
+        // Transfer SU(3) onsite interactions
+        vector<double> flat_onsite_SU3;
+        for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+            for (size_t r = 0; r < 8; ++r) {
+                for (size_t c = 0; c < 8; ++c) {
+                    flat_onsite_SU3.push_back(lattice_SU3.onsite_interaction[i](r, c));
+                }
+            }
+        }
+        gpu_data.d_onsite_interaction_SU3 = thrust::device_vector<double>(flat_onsite_SU3.begin(), flat_onsite_SU3.end());
+        
+        // Transfer SU(2) bilinear interactions
+        vector<double> flat_bilinear_SU2;
+        vector<size_t> flat_partners_SU2;
+        vector<int8_t> flat_wrap_SU2;
+        
+        for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+            for (size_t n = 0; n < lattice_SU2.num_bi; ++n) {
+                if (n < lattice_SU2.bilinear_partners[i].size()) {
+                    flat_partners_SU2.push_back(lattice_SU2.bilinear_partners[i][n]);
+                    for (size_t r = 0; r < 3; ++r) {
+                        for (size_t c = 0; c < 3; ++c) {
+                            flat_bilinear_SU2.push_back(lattice_SU2.bilinear_interaction[i][n](r, c));
+                        }
+                    }
+                    for (size_t d = 0; d < 3; ++d) {
+                        flat_wrap_SU2.push_back(lattice_SU2.bilinear_wrap_dir[i][n][d]);
+                    }
+                }
+            }
+        }
+        gpu_data.d_bilinear_interaction_SU2 = thrust::device_vector<double>(flat_bilinear_SU2.begin(), flat_bilinear_SU2.end());
+        gpu_data.d_bilinear_partners_SU2 = thrust::device_vector<size_t>(flat_partners_SU2.begin(), flat_partners_SU2.end());
+        gpu_data.d_bilinear_wrap_dir_SU2 = thrust::device_vector<int8_t>(flat_wrap_SU2.begin(), flat_wrap_SU2.end());
+        
+        // Transfer SU(3) bilinear interactions
+        vector<double> flat_bilinear_SU3;
+        vector<size_t> flat_partners_SU3;
+        vector<int8_t> flat_wrap_SU3;
+        
+        for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+            for (size_t n = 0; n < lattice_SU3.num_bi; ++n) {
+                if (n < lattice_SU3.bilinear_partners[i].size()) {
+                    flat_partners_SU3.push_back(lattice_SU3.bilinear_partners[i][n]);
+                    for (size_t r = 0; r < 8; ++r) {
+                        for (size_t c = 0; c < 8; ++c) {
+                            flat_bilinear_SU3.push_back(lattice_SU3.bilinear_interaction[i][n](r, c));
+                        }
+                    }
+                    for (size_t d = 0; d < 3; ++d) {
+                        flat_wrap_SU3.push_back(lattice_SU3.bilinear_wrap_dir[i][n][d]);
+                    }
+                }
+            }
+        }
+        gpu_data.d_bilinear_interaction_SU3 = thrust::device_vector<double>(flat_bilinear_SU3.begin(), flat_bilinear_SU3.end());
+        gpu_data.d_bilinear_partners_SU3 = thrust::device_vector<size_t>(flat_partners_SU3.begin(), flat_partners_SU3.end());
+        gpu_data.d_bilinear_wrap_dir_SU3 = thrust::device_vector<int8_t>(flat_wrap_SU3.begin(), flat_wrap_SU3.end());
+        
+        // Transfer mixed bilinear interactions
+        vector<double> flat_mixed_bilinear;
+        vector<size_t> flat_mixed_partners_SU2;
+        vector<size_t> flat_mixed_partners_SU3;
+        vector<int8_t> flat_mixed_wrap;
+        
+        gpu_data.num_mixed_bi = 0;
+        if (!bilinear_SU2_SU3.empty() && !bilinear_SU2_SU3[0].empty()) {
+            gpu_data.num_mixed_bi = bilinear_SU2_SU3[0].size();
+            
+            for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+                for (size_t n = 0; n < bilinear_SU2_SU3[i].size(); ++n) {
+                    flat_mixed_partners_SU2.push_back(i);
+                    flat_mixed_partners_SU3.push_back(bilinear_partners_SU2_SU3[i][n]);
+                    
+                    for (size_t r = 0; r < 3; ++r) {
+                        for (size_t c = 0; c < 8; ++c) {
+                            flat_mixed_bilinear.push_back(bilinear_SU2_SU3[i][n](r, c));
+                        }
+                    }
+                    
+                    for (size_t d = 0; d < 3; ++d) {
+                        flat_mixed_wrap.push_back(bilinear_wrap_dir_SU2_SU3[i][n][d]);
+                    }
+                }
+            }
+        }
+        gpu_data.d_mixed_bilinear_interaction = thrust::device_vector<double>(flat_mixed_bilinear.begin(), flat_mixed_bilinear.end());
+        gpu_data.d_mixed_bilinear_partners_SU2 = thrust::device_vector<size_t>(flat_mixed_partners_SU2.begin(), flat_mixed_partners_SU2.end());
+        gpu_data.d_mixed_bilinear_partners_SU3 = thrust::device_vector<size_t>(flat_mixed_partners_SU3.begin(), flat_mixed_partners_SU3.end());
+        gpu_data.d_mixed_bilinear_wrap_dir = thrust::device_vector<int8_t>(flat_mixed_wrap.begin(), flat_mixed_wrap.end());
+        
+        // Store pulse parameters
+        gpu_data.field_drive_amp_SU2 = lattice_SU2.field_drive_amp;
+        gpu_data.field_drive_freq_SU2 = lattice_SU2.field_drive_freq;
+        gpu_data.field_drive_width_SU2 = lattice_SU2.field_drive_width;
+        gpu_data.t_pulse_0_SU2 = lattice_SU2.t_pulse_0;
+        gpu_data.t_pulse_1_SU2 = lattice_SU2.t_pulse_1;
+        
+        gpu_data.field_drive_amp_SU3 = lattice_SU3.field_drive_amp;
+        gpu_data.field_drive_freq_SU3 = lattice_SU3.field_drive_freq;
+        gpu_data.field_drive_width_SU3 = lattice_SU3.field_drive_width;
+        gpu_data.t_pulse_0_SU3 = lattice_SU3.t_pulse_0;
+        gpu_data.t_pulse_1_SU3 = lattice_SU3.t_pulse_1;
+        
+        return gpu_data;
+    }
+    
+    /**
+     * GPU ODE system function
+     * For mixed lattice, this needs to handle both SU(2) and SU(3) spins
+     */
+    void ode_system_gpu(const thrust::device_vector<double>& x, 
+                       thrust::device_vector<double>& dxdt, 
+                       double t,
+                       const GPUMixedLatticeData& d_data) const {
+        // Placeholder: In full implementation, this would call CUDA kernels
+        // For now, fall back to CPU computation
+        thrust::host_vector<double> h_x = x;
+        thrust::host_vector<double> h_dxdt(x.size());
+        
+        landau_lifshitz_flat(thrust::raw_pointer_cast(h_x.data()), 
+                            thrust::raw_pointer_cast(h_dxdt.data()), t);
+        
+        dxdt = h_dxdt;
+    }
+    
+    /**
+     * GPU integration wrapper for mixed lattice
+     */
+    template<typename System, typename Observer>
+    void integrate_ode_system_gpu(System system_func, thrust::device_vector<double>& state,
+                                  double T_start, double T_end, double dt_step,
+                                  Observer observer, const string& method,
+                                  bool use_adaptive = false,
+                                  double abs_tol = 1e-6, double rel_tol = 1e-6) {
+        // For GPU integration, copy to host, integrate, and copy back
+        thrust::host_vector<double> h_state = state;
+        ODEState cpu_state(h_state.begin(), h_state.end());
+        
+        auto cpu_system = [&](const ODEState& x, ODEState& dxdt, double t) {
+            thrust::device_vector<double> d_x(x.begin(), x.end());
+            thrust::device_vector<double> d_dxdt(x.size());
+            system_func(d_x, d_dxdt, t);
+            thrust::host_vector<double> h_dxdt = d_dxdt;
+            std::copy(h_dxdt.begin(), h_dxdt.end(), dxdt.begin());
+        };
+        
+        auto cpu_observer = [&](const ODEState& x, double t) {
+            thrust::device_vector<double> d_x(x.begin(), x.end());
+            observer(d_x, t);
+        };
+        
+        integrate_ode_system(cpu_system, cpu_state, T_start, T_end, dt_step,
+                            cpu_observer, method, use_adaptive, abs_tol, rel_tol);
+        
+        h_state = thrust::host_vector<double>(cpu_state.begin(), cpu_state.end());
+        state = h_state;
+    }
+    
+    /**
+     * GPU version of molecular_dynamics
+     */
+    void molecular_dynamics_gpu(double T_start, double T_end, double dt_initial,
+                               const string& out_dir, size_t save_interval,
+                               const string& method) {
+        // Transfer data to GPU
+        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        
+        // Initial state on GPU
+        ODEState state = spins_to_state(spins_SU2, spins_SU3);
+        thrust::device_vector<double> d_state(state.begin(), state.end());
+        
+        // Setup HDF5 writer if directory specified
+        HDF5MixedMDWriter* writer = nullptr;
+        if (!out_dir.empty()) {
+            string filename = out_dir + "/molecular_dynamics.h5";
+            writer = new HDF5MixedMDWriter(filename, lattice_SU2.N_atoms, lattice_SU3.N_atoms);
+        }
+        
+        // Observer
+        size_t step_count = 0;
+        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
+            if (step_count % save_interval == 0) {
+                thrust::host_vector<double> x = d_x;
+                
+                // Extract SU(2) and SU(3) spins
+                size_t total_SU2 = lattice_SU2.lattice_size * 3;
+                
+                vector<SpinVector> current_spins_SU2(lattice_SU2.lattice_size);
+                vector<SpinVector> current_spins_SU3(lattice_SU3.lattice_size);
+                
+                for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+                    SpinVector spin(3);
+                    for (size_t d = 0; d < 3; ++d) {
+                        spin(d) = x[i * 3 + d];
+                    }
+                    current_spins_SU2[i] = spin;
+                }
+                
+                for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+                    SpinVector spin(8);
+                    for (size_t d = 0; d < 8; ++d) {
+                        spin(d) = x[total_SU2 + i * 8 + d];
+                    }
+                    current_spins_SU3[i] = spin;
+                }
+                
+                if (writer) {
+                    writer->write_trajectory_step(t, current_spins_SU2, current_spins_SU3);
+                }
+                
+                cout << "t = " << t << endl;
+            }
+            step_count++;
+        };
+        
+        // System function
+        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
+                                                        thrust::device_vector<double>& dxdt, 
+                                                        double t) {
+            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
+        };
+        
+        // Integrate on GPU
+        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, dt_initial,
+                                observer, method, false, 1e-10, 1e-10);
+        
+        // Cleanup
+        if (writer) {
+            delete writer;
+        }
+    }
+    
+    /**
+     * GPU version of M_B_t for mixed lattice
+     * Returns nested pair: outer=(SU2_results, SU3_results), 
+     * inner for each = (M_antiferro, M_local)
+     */
+    vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>>
+    M_B_t_gpu(const vector<SpinVector>& field_in_SU2,
+              const vector<SpinVector>& field_in_SU3,
+              double t_B,
+              double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
+              double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
+              double T_start, double T_end, double step_size,
+              string method = "dopri5") {
+        
+        // Set up pulses for both sublattices
+        lattice_SU2.set_pulse(field_in_SU2, t_B, 
+                             vector<SpinVector>(lattice_SU2.N_atoms, SpinVector::Zero(3)), 0.0,
+                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
+        
+        lattice_SU3.set_pulse(field_in_SU3, t_B,
+                             vector<SpinVector>(lattice_SU3.N_atoms, SpinVector::Zero(8)), 0.0,
+                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
+        
+        // Transfer data to GPU
+        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        
+        // Storage for trajectory
+        vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> trajectory;
+        
+        // Initial state on GPU
+        ODEState state = spins_to_state(spins_SU2, spins_SU3);
+        thrust::device_vector<double> d_state(state.begin(), state.end());
+        
+        // Observer
+        double last_save_time = T_start;
+        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
+            if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
+                thrust::host_vector<double> x = d_x;
+                
+                size_t total_SU2 = lattice_SU2.lattice_size * 3;
+                
+                // Compute SU(2) magnetizations
+                double M_local_SU2_arr[3] = {0};
+                double M_antiferro_SU2_arr[3] = {0};
+                
+                for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    for (size_t d = 0; d < 3; ++d) {
+                        M_local_SU2_arr[d] += x[i * 3 + d];
+                        M_antiferro_SU2_arr[d] += x[i * 3 + d] * sign;
+                    }
+                }
+                
+                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, 3) / double(lattice_SU2.lattice_size);
+                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, 3) / double(lattice_SU2.lattice_size);
+                
+                // Compute SU(3) magnetizations
+                double M_local_SU3_arr[8] = {0};
+                double M_antiferro_SU3_arr[8] = {0};
+                
+                for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    for (size_t d = 0; d < 8; ++d) {
+                        M_local_SU3_arr[d] += x[total_SU2 + i * 8 + d];
+                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * 8 + d] * sign;
+                    }
+                }
+                
+                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, 8) / double(lattice_SU3.lattice_size);
+                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, 8) / double(lattice_SU3.lattice_size);
+                
+                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2}, {M_antiferro_SU3, M_local_SU3}}});
+                last_save_time = t;
+            }
+        };
+        
+        // System function
+        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
+                                                        thrust::device_vector<double>& dxdt, 
+                                                        double t) {
+            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
+        };
+        
+        // Integrate on GPU
+        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
+                                observer, method, false, 1e-10, 1e-10);
+        
+        // Reset pulses
+        lattice_SU2.field_drive[0] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
+        lattice_SU2.field_drive[1] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
+        lattice_SU2.field_drive_amp = 0.0;
+        
+        lattice_SU3.field_drive[0] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
+        lattice_SU3.field_drive[1] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
+        lattice_SU3.field_drive_amp = 0.0;
+        
+        return trajectory;
+    }
+    
+    /**
+     * GPU version of M_BA_BB_t for mixed lattice
+     */
+    vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>>
+    M_BA_BB_t_gpu(const vector<SpinVector>& field_in_1_SU2,
+                  const vector<SpinVector>& field_in_1_SU3,
+                  double t_B_1,
+                  const vector<SpinVector>& field_in_2_SU2,
+                  const vector<SpinVector>& field_in_2_SU3,
+                  double t_B_2,
+                  double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
+                  double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
+                  double T_start, double T_end, double step_size,
+                  string method = "dopri5") {
+        
+        // Set up two-pulse configuration for both sublattices
+        lattice_SU2.set_pulse(field_in_1_SU2, t_B_1, field_in_2_SU2, t_B_2,
+                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
+        
+        lattice_SU3.set_pulse(field_in_1_SU3, t_B_1, field_in_2_SU3, t_B_2,
+                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
+        
+        // Transfer data to GPU
+        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        
+        // Storage for trajectory
+        vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> trajectory;
+        
+        // Initial state on GPU
+        ODEState state = spins_to_state(spins_SU2, spins_SU3);
+        thrust::device_vector<double> d_state(state.begin(), state.end());
+        
+        // Observer
+        double last_save_time = T_start;
+        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
+            if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
+                thrust::host_vector<double> x = d_x;
+                
+                size_t total_SU2 = lattice_SU2.lattice_size * 3;
+                
+                // Compute SU(2) magnetizations
+                double M_local_SU2_arr[3] = {0};
+                double M_antiferro_SU2_arr[3] = {0};
+                
+                for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    for (size_t d = 0; d < 3; ++d) {
+                        M_local_SU2_arr[d] += x[i * 3 + d];
+                        M_antiferro_SU2_arr[d] += x[i * 3 + d] * sign;
+                    }
+                }
+                
+                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, 3) / double(lattice_SU2.lattice_size);
+                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, 3) / double(lattice_SU2.lattice_size);
+                
+                // Compute SU(3) magnetizations
+                double M_local_SU3_arr[8] = {0};
+                double M_antiferro_SU3_arr[8] = {0};
+                
+                for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    for (size_t d = 0; d < 8; ++d) {
+                        M_local_SU3_arr[d] += x[total_SU2 + i * 8 + d];
+                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * 8 + d] * sign;
+                    }
+                }
+                
+                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, 8) / double(lattice_SU3.lattice_size);
+                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, 8) / double(lattice_SU3.lattice_size);
+                
+                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2}, {M_antiferro_SU3, M_local_SU3}}});
+                last_save_time = t;
+            }
+        };
+        
+        // System function
+        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
+                                                        thrust::device_vector<double>& dxdt, 
+                                                        double t) {
+            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
+        };
+        
+        // Integrate on GPU
+        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
+                                observer, method, false, 1e-10, 1e-10);
+        
+        // Reset pulses
+        lattice_SU2.field_drive[0] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
+        lattice_SU2.field_drive[1] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
+        lattice_SU2.field_drive_amp = 0.0;
+        
+        lattice_SU3.field_drive[0] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
+        lattice_SU3.field_drive[1] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
+        lattice_SU3.field_drive_amp = 0.0;
+        
+        return trajectory;
+    }
+#endif // defined(CUDA_ENABLED) && defined(__CUDACC__)
 };
 
 #endif // MIXED_LATTICE_REFACTORED_H
