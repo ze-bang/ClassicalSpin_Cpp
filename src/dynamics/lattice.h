@@ -74,9 +74,10 @@ struct SAParams {
 /**
  * Lattice class: Template-free implementation using Eigen3 and std::vector
  * 
- * This class manages a periodic lattice of quantum spins with:
+ * This class manages a periodic lattice of classical spins with:
  * - Runtime-configurable dimensions (spin_dim, N_atoms, dim1, dim2, dim3)
  * - Bilinear and trilinear interactions
+ * - Twisted boundary conditions
  * - Monte Carlo sampling (Metropolis, Wolff, Swendsen-Wang)
  * - Simulated annealing with auto-tuning
  * - Parallel tempering with twist boundary conditions
