@@ -107,6 +107,10 @@ file(GLOB CPP_SOURCE_FILES
     "run_scripts/*.cpp"
 )
 
+file(GLOB CUDA_RUN_SCRIPTS 
+    "run_scripts/*.cu"
+)
+
 # Create a modern header-only interface library
 add_library(headers INTERFACE)
 target_include_directories(headers INTERFACE 
@@ -138,6 +142,12 @@ if(HDF5_FOUND)
     target_include_directories(headers INTERFACE ${HDF5_INCLUDE_DIRS})
     target_link_libraries(headers INTERFACE ${HDF5_CXX_LIBRARIES})
     target_compile_definitions(headers INTERFACE HDF5_ENABLED)
+endif()
+
+# Enable CUDA support globally if CUDA is found
+if(CUDAToolkit_FOUND)
+    target_compile_definitions(headers INTERFACE CUDA_ENABLED)
+    target_link_libraries(headers INTERFACE CUDA::cudart)
 endif()
 
 # Create optimized CUDA library
@@ -295,6 +305,56 @@ foreach(cpp_file ${CPP_SOURCE_FILES})
     )
 endforeach()
 
+# Create optimized executables for each CUDA file in run_scripts
+foreach(cu_file ${CUDA_RUN_SCRIPTS})
+    # Get the filename without extension
+    get_filename_component(exec_name ${cu_file} NAME_WE)
+    
+    # Create executable
+    add_executable(${exec_name} ${cu_file})
+    
+    # Set modern C++ and CUDA features
+    target_compile_features(${exec_name} PRIVATE cxx_std_20)
+    set_target_properties(${exec_name} PROPERTIES
+        CUDA_STANDARD 20
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+        CUDA_SEPARABLE_COMPILATION OFF
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        POSITION_INDEPENDENT_CODE ON
+    )
+    
+    # Link with header libraries and CUDA
+    target_link_libraries(${exec_name} PRIVATE headers)
+    
+    if(CUDA_SOURCE_FILES)
+        target_link_libraries(${exec_name} PRIVATE cuda_headers)
+    endif()
+    
+    # Set include directories
+    target_include_directories(${exec_name} PRIVATE src)
+    
+    # Apply optimized compiler flags
+    target_compile_options(${exec_name} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPTIMIZATION_FLAGS}>
+        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
+        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
+    )
+    
+    # Link-time optimization for Release builds
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set_target_properties(${exec_name} PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION TRUE
+        )
+    endif()
+    
+    # Add debug information for profiling
+    target_compile_options(${exec_name} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-g1>
+        $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    )
+endforeach()
+
 # Enable parallel builds
 if(NOT DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
     include(ProcessorCount)
@@ -382,6 +442,11 @@ if(CMAKE_GENERATOR STREQUAL "Ninja")
     message(STATUS "Using Ninja generator for optimized parallel builds")
     set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
 endif()
+
+# GPU build test
+add_executable(test_gpu_build test_gpu_build.cu)
+target_link_libraries(test_gpu_build headers cuda_lib)
+set_target_properties(test_gpu_build PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 # Performance testing target
 add_custom_target(performance_test
