@@ -20,7 +20,6 @@
 #include <atomic>
 #include <mutex>
 #include "cuda_contractions_wrapper.cuh"
-#include "convergence_monitor.h"
 // #include <boost>
 
 // Performance monitoring utilities

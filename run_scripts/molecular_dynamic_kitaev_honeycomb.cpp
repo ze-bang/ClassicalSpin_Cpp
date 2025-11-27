@@ -1,5 +1,4 @@
 #include "experiments.h"
-#include "../src/lattice_cuda.cuh"
 
 
 void parallel_tempering_honeycomb(double T_start, double T_end, double K, double Gamma, double Gammap, double h, string dir, const vector<int> &rank_to_write){
@@ -191,34 +190,8 @@ void MD_kitaev_honeycomb_real(size_t num_trials, string dir, double J=0, double 
 
         lattice<3, 2, 24, 24, 1> MC(&atoms);
         MC.simulated_annealing(5, 1e-2, 1000, 1);
+        MC.write_to_file_spin(dir+"/"+std::to_string(i)+"/spin_initial.txt", MC.spins);
         MC.molecular_dynamics(0, 100, 1e-2, dir+"/"+std::to_string(i));
-    }
-}
-
-
-
-void MD_kitaev_honeycomb_cuda(size_t num_trials, string dir, double J=0, double K=-1, double Gamma=0.25, double Gammap=-0.02, double h=0.7){
-    filesystem::create_directory(dir);
-    HoneyComb_standarx<3> atoms;
-    array<array<double,3>, 3> Jx = {{{J+K,Gammap,Gammap},{Gammap,J,Gamma},{Gammap,Gamma,J}}};
-    array<array<double,3>, 3> Jy = {{{J,Gammap,Gamma},{Gammap,J+K,Gammap},{Gamma,Gammap,J}}};
-    array<array<double,3>, 3> Jz = {{{J,Gamma,Gammap},{Gamma,J,Gammap},{Gammap,Gammap,J+K}}};
-
-
-    array<double, 3> field = {h/double(sqrt(3)),h/double(sqrt(3)),h/double(sqrt(3))};
-    
-    atoms.set_bilinear_interaction(Jx, 0, 1, {0,-1,0});
-    atoms.set_bilinear_interaction(Jy, 0, 1, {1,-1,0});
-    atoms.set_bilinear_interaction(Jz, 0, 1, {0,0,0});
-    atoms.set_field(field, 0);
-    atoms.set_field(field, 1);
-    double k_B = 0.08620689655;
-
-    for(size_t i=0; i<num_trials;++i){
-
-        lattice_cuda<3, 2, 4, 4, 1> MC(&atoms);
-        MC.simulated_annealing(5, 1e-2, 1000, 1);
-        MC.molecular_dynamics_cuda(0, 100, 1e-2, dir+"/"+std::to_string(i), true);
     }
 }
 
@@ -305,7 +278,7 @@ int main(int argc, char** argv) {
     filesystem::create_directory(dir_name);
     int num_trials = argv[6] ? atoi(argv[6]) : 1;
     double J = argv[7] ? atof(argv[7]) : 0.0;
-    MD_kitaev_honeycomb_cuda(1, "KITAEV");
+    MD_kitaev_honeycomb_real(1, "KITAEV");
     // MD_honeycomb_J1_J3("BCAO_J1J3",20);
     // full_nonlinearspectroscopy_kitaev_honeycomb(1, 5, 0.01, -200, 0, 0.2, -200, 200, 0.2, -1, -0.25, 0.02, 0.7, "KITAEV", true);
     return 0;

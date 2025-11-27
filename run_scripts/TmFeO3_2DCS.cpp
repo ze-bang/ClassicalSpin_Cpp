@@ -785,9 +785,9 @@ int main(int argc, char** argv) {
         Kc = (argc > 15) ? atof(argv[15]) : -0.09;
         D1 = (argc > 16) ? atof(argv[16]) : 0.0;
         D2 = (argc > 17) ? atof(argv[17]) : 0.0;
-        e1 = (argc > 18) ? atof(argv[18]) : 4.0;
-        e2 = (argc > 19) ? atof(argv[19]) : 0.0;
-        chii = (argc > 20) ? atof(argv[20]) : 0.05; // TmFeO bilinear coupling parameter
+        e1 = (argc > 18) ? atof(argv[18]) : 0.97;
+        e2 = (argc > 19) ? atof(argv[19]) : 3.97;
+        chii = (argc > 20) ? atof(argv[20]) : 0.0; // TmFeO bilinear coupling parameter
         xii = (argc > 21) ? atof(argv[21]) : 0.0;
         h = (argc > 22) ? atof(argv[22]) : 0.0;
 

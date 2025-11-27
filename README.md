@@ -2,6 +2,15 @@
 
 ClassicalSpin_Cpp is a high-performance C++/CUDA toolkit for simulating classical spin models on complex lattices. The code supports hybrid SU(2)/SU(3) degrees of freedom, large-scale Monte Carlo workflows, and GPU-accelerated molecular dynamics so that researchers can explore phase diagrams, dynamical responses, and field-driven behaviour in materials such as pyrochlores, honeycomb magnets, and TmFeO$_3$.
 
+## 🆕 Template-Free Refactoring
+
+**New in 2024**: The core lattice implementation has been refactored to eliminate template programming! The new implementation uses **Eigen3** and **std::vector** for runtime-configurable dimensions. See:
+- **`LATTICE_REFACTORING_GUIDE.md`** - Complete usage guide
+- **`LATTICE_IMPLEMENTATION_SUMMARY.md`** - Technical details
+- **`examples/lattice_refactored_example.cpp`** - Working examples
+
+Benefits: faster compilation, smaller binaries, runtime flexibility, better debuggability, and automatic SIMD vectorization.
+
 ## Key capabilities
 
 - **Template-based lattice construction.** `UnitCell` helpers collect on-site terms together with bi- and tri-linear couplings, making it straightforward to encode material-specific Hamiltonians and print debug summaries of the resulting unit cell definitions.【F:src/unitcell.h†L209-L320】

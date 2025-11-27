@@ -21,8 +21,12 @@ endif()
 
 # Find required packages using modern CMake
 find_package(CUDAToolkit REQUIRED)
+find_package(Thrust REQUIRED CONFIG)
 find_package(OpenMP REQUIRED)
 find_package(MPI REQUIRED)
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(Boost 1.65 REQUIRED)
+find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 # Set CUDA architectures for multiple GPU support
 set(CMAKE_CUDA_ARCHITECTURES "60 75 80 86 89" CACHE STRING "CUDA architectures")
@@ -85,22 +89,17 @@ endif()
 file(GLOB HEADER_FILES 
     "src/*.h"
     "src/*.hpp"
+    "src/**/*.h"
+    "src/**/*.hpp"
 )
 
-# Collect all CUDA source files (not headers)
-file(GLOB CUDA_SOURCE_FILES "src/*.cu")
+# Collect all CUDA source files (not headers) - include subdirectories
+# Exclude GPU MD file which needs separate compilation
+file(GLOB_RECURSE CUDA_SOURCE_FILES "src/*.cu")
 
-# Collect all CUDA header files
-file(GLOB CUDA_HEADER_FILES 
+# Collect all CUDA header files - include subdirectories
+file(GLOB_RECURSE CUDA_HEADER_FILES 
     "src/*.cuh"
-)
-
-# Ensure lattice_cuda files are included
-list(APPEND CUDA_SOURCE_FILES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/lattice_cuda.cu"
-)
-list(APPEND CUDA_HEADER_FILES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/lattice_cuda.cuh"
 )
 
 # Collect all C++ source files in results directory
@@ -130,6 +129,17 @@ if(MPI_CXX_FOUND)
     target_compile_definitions(headers INTERFACE MPI_ENABLED)
 endif()
 
+if(Eigen3_FOUND)
+    target_link_libraries(headers INTERFACE Eigen3::Eigen)
+    target_compile_definitions(headers INTERFACE EIGEN3_ENABLED)
+endif()
+
+if(HDF5_FOUND)
+    target_include_directories(headers INTERFACE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(headers INTERFACE ${HDF5_CXX_LIBRARIES})
+    target_compile_definitions(headers INTERFACE HDF5_ENABLED)
+endif()
+
 # Create optimized CUDA library
 if(CUDA_SOURCE_FILES)
     add_library(cuda_lib STATIC ${CUDA_SOURCE_FILES})
@@ -147,11 +157,28 @@ if(CUDA_SOURCE_FILES)
     # Include directories for CUDA library
     target_include_directories(cuda_lib PUBLIC 
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/dynamics>
         $<INSTALL_INTERFACE:include>
     )
     
+    # Link with Eigen3 for GPU code
+    if(Eigen3_FOUND)
+        target_link_libraries(cuda_lib PUBLIC Eigen3::Eigen)
+    endif()
+    
     # Link with CUDA libraries using modern CMake
     target_link_libraries(cuda_lib PUBLIC CUDA::cudart CUDA::cublas CUDA::curand)
+    
+    # Add Thrust support (header-only library)
+    if(Thrust_FOUND)
+        # Thrust is header-only - just add compile definitions, no linking needed
+        target_compile_definitions(cuda_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA)
+    endif()
+    
+    # Link with Boost for Odeint
+    if(Boost_FOUND)
+        target_include_directories(cuda_lib PUBLIC ${Boost_INCLUDE_DIRS})
+    endif()
     
     # Add MPI dependency to CUDA library
     if(MPI_CXX_FOUND)
@@ -169,11 +196,57 @@ if(CUDA_SOURCE_FILES)
         $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_BF16INTRIN_H_INCLUDED>
     )
     
+    # Create separate library for GPU molecular dynamics (needs Boost.Odeint thrust)
+    # DISABLED due to Boost.Odeint thrust integration compilation issues with NVCC
+    # The Boost template specializations are being instantiated multiple times causing
+    # "already defined" errors. Re-enable when compatibility issue is resolved.
+    # add_library(cuda_md_lib STATIC src/dynamics/lattice_refactored_gpu_md.cu)
+    # 
+    # set_target_properties(cuda_md_lib PROPERTIES
+    #     CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+    #     POSITION_INDEPENDENT_CODE ON
+    #     CUDA_STANDARD 20
+    #     CUDA_STANDARD_REQUIRED ON
+    #     CUDA_SEPARABLE_COMPILATION OFF
+    #     CUDA_RESOLVE_DEVICE_SYMBOLS OFF
+    # )
+    # 
+    # target_include_directories(cuda_md_lib PUBLIC
+    #     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    #     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/dynamics>
+    #     $<INSTALL_INTERFACE:include>
+    # )
+    # 
+    # target_link_libraries(cuda_md_lib PUBLIC 
+    #     CUDA::cudart
+    # )
+    # 
+    # if(Eigen3_FOUND)
+    #     target_link_libraries(cuda_md_lib PUBLIC Eigen3::Eigen)
+    # endif()
+    # 
+    # if(Boost_FOUND)
+    #     target_include_directories(cuda_md_lib PUBLIC ${Boost_INCLUDE_DIRS})
+    # endif()
+    # 
+    # if(Thrust_FOUND)
+    #     target_compile_definitions(cuda_md_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA)
+    # endif()
+    # 
+    # target_compile_options(cuda_md_lib PRIVATE
+    #     $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
+    #     $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
+    #     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMXTILEINTRIN_H_INCLUDED>
+    #     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_INT8INTRIN_H_INCLUDED>
+    #     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_BF16INTRIN_H_INCLUDED>
+    # )
+    
     # Create interface library for CUDA headers
     add_library(cuda_headers INTERFACE)
-    target_include_directories(cuda_headers INTERFACE src)
+    target_include_directories(cuda_headers INTERFACE src src/dynamics)
     target_sources(cuda_headers INTERFACE ${CUDA_HEADER_FILES})
     target_link_libraries(cuda_headers INTERFACE cuda_lib)
+    # Note: cuda_md_lib is disabled due to compilation issues
 endif()
 
 # Create optimized executables for each C++ file in run_scripts
@@ -264,9 +337,34 @@ else()
     message(WARNING "CUDA not found")
 endif()
 
-message(STATUS "=====================================================")
+if(Eigen3_FOUND)
+    message(STATUS "Eigen3 found and enabled (version: ${Eigen3_VERSION})")
+else()
+    message(WARNING "Eigen3 not found")
+endif()
 
-# Print optimization flags being used
+if(Thrust_FOUND)
+    message(STATUS "Thrust found and enabled")
+else()
+    message(WARNING "Thrust not found")
+endif()
+
+if(Boost_FOUND)
+    message(STATUS "Boost found and enabled (version: ${Boost_VERSION})")
+    message(STATUS "Boost include dirs: ${Boost_INCLUDE_DIRS}")
+else()
+    message(WARNING "Boost not found")
+endif()
+
+if(HDF5_FOUND)
+    message(STATUS "HDF5 found and enabled (version: ${HDF5_VERSION})")
+    message(STATUS "HDF5 include dirs: ${HDF5_INCLUDE_DIRS}")
+    message(STATUS "HDF5 libraries: ${HDF5_CXX_LIBRARIES}")
+else()
+    message(WARNING "HDF5 not found")
+endif()
+
+message(STATUS "=====================================================")  # Print optimization flags being used
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     message(STATUS "C++ Optimization Flags: ${CXX_OPTIMIZATION_FLAGS}")
     message(STATUS "CUDA Optimization Flags: ${CUDA_OPTIMIZATION_FLAGS}")

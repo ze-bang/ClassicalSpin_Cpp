@@ -1254,6 +1254,13 @@ compute_magnetization_cuda(double* d_mag_local_SU2, double* d_mag_global_SU2,
 }
 
 //Explicitly declare template specializations for the mixed lattice class
+
+template class mixed_lattice_cuda<3, 4, 8, 4, 12, 12, 12>;
+template void __global__ LLG_kernel<3, 4, 6912, 8, 4, 6912>(
+    double*, double*, double*, double*, double*, double*,
+    InteractionDataSU2<3, 8>, InteractionDataSU3<3, 8>, 
+    NeighborCounts, FieldDriveParams<3, 8>, TimeStepParams);
+
 template class mixed_lattice_cuda<3, 4, 8, 4, 8, 8, 8>;
 template void __global__ LLG_kernel<3, 4, 2048, 8, 4, 2048>(
     double*, double*, double*, double*, double*, double*,

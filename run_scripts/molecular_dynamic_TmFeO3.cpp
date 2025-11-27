@@ -535,12 +535,14 @@ void MD_TmFeO3_cuda(int num_trials, double Temp_start, double Temp_end, double T
     int trial_section = int(num_trials/size);
 
     for(size_t i = rank*trial_section; i < (rank+1)*trial_section; ++i){
-        mixed_lattice_cuda<3, 4, 8, 4, 4, 4, 4> MC(&TFO, 2.5, 1.0);
+        mixed_lattice_cuda<3, 4, 8, 4, 12, 12, 12> MC(&TFO, 2.5, 1.0);
         if (spin_config_filename != ""){
             MC.read_spin_from_file(spin_config_filename);
         }
         else{MC.simulated_annealing(Temp_start, Temp_end , 10000, 0, 10, false);
         }
+        MC.write_to_file_pos(dir + "/pos");
+        MC.write_to_file_spin(dir + "/spin");
         MC.molecular_dynamics_cuda(T_start, T_end, T_step_size, dir+"/"+std::to_string(i), 1, false, true);
     }
 }
@@ -562,14 +564,14 @@ int main(int argc, char** argv) {
     double D2 = 0.0;
     double chii = 0.05; // Tm-O coupling
     double xii = 0.0;
-    double e1 = 2.2;
-    double e2 = 4.8;
+    double e1 = 0.97;
+    double e2 = 3.97;
     double offset = 0.0;
     double h = 0.0;
 
     int num_trials = 1;
     double T_start = 0.0;
-    double T_end = 50.0;
+    double T_end = 400.0;
     double T_step_size = 1e-2;
     array<double, 3> fielddir = {0, 1, 0};  // Default field direction
 
@@ -578,7 +580,7 @@ int main(int argc, char** argv) {
     std::unordered_map<std::string,std::string> par_string;
     std::string dir_name = (argc > 1) ? argv[1] : "TmFeO3_2DCS";
     string param_path = dir_name + "/params.txt";
-    string spin_config_file = dir_name + "/spin";
+    string spin_config_file = "";
 
 
     bool loaded = load_params_from_file(param_path, par_double, par_string);
@@ -673,7 +675,7 @@ int main(int argc, char** argv) {
 
 
     // MD_TmFeO3(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, xii, h, fielddir, e1, e2, offset, dir_name, spin_config_file);
-    MD_TmFeO3_cuda(num_trials, 20, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, chii, xii, h, fielddir, e1, e2, offset, dir_name, spin_config_file);
+    MD_TmFeO3_cuda(num_trials, 10, 1e-2, T_start, T_end, T_step_size, J1ab, J1ab, J1c, J2ab, J2ab, J2c, Ka, Kc, D1, D2, chii, xii, h, fielddir, e1, e2, offset, dir_name, spin_config_file);
 
     int finalized;
     MPI_Finalized(&finalized);
