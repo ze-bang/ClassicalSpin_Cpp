@@ -3124,7 +3124,7 @@ public:
      * Complete pump-probe nonlinear spectroscopy workflow
      * 
      * This method performs a typical 2D coherent spectroscopy experiment:
-     * 1. Prepares ground state via simulated annealing (or T=0 quench)
+     * 1. Uses current spin configuration as ground state (assumed pre-loaded)
      * 2. Runs reference single-pulse dynamics (pump at t=0)
      * 3. Scans delay times (tau) to measure pump-probe response
      * 
@@ -3134,6 +3134,9 @@ public:
      * 
      * This enables extraction of nonlinear response via:
      * M_nonlinear = M01 - M0 - M1
+     * 
+     * NOTE: Ground state should be prepared beforehand via simulated_annealing()
+     *       or loaded from file before calling this method.
      * 
      * @param field_in          Pulse field direction (one per sublattice)
      * @param pulse_amp         Pulse amplitude
@@ -3145,12 +3148,11 @@ public:
      * @param T_start           Integration start time
      * @param T_end             Integration end time
      * @param T_step            Integration time step
-     * @param Temp_start        Annealing start temperature
-     * @param Temp_end          Annealing end temperature
-     * @param n_anneal          Sweeps per temperature
-     * @param overrelax_rate    Overrelaxation frequency
-     * @param T_zero_quench     If true, use deterministic T=0 quench instead of thermal annealing
-     * @param quench_sweeps     Number of deterministic sweeps for T=0 quench
+     * @param Temp_start        Annealing start temperature (for metadata only)
+     * @param Temp_end          Annealing end temperature (for metadata only)
+     * @param n_anneal          Sweeps per temperature (for metadata only)
+     * @param T_zero_quench     Was T=0 quench used? (for metadata only)
+     * @param quench_sweeps     Number of deterministic sweeps (for metadata only)
      * @param dir_name          Output directory
      * @param method            ODE integration method
      */
@@ -3159,7 +3161,7 @@ public:
                                  double tau_start, double tau_end, double tau_step,
                                  double T_start, double T_end, double T_step,
                                  double Temp_start = 5.0, double Temp_end = 1e-3,
-                                 size_t n_anneal = 1000, size_t overrelax_rate = 1,
+                                 size_t n_anneal = 1000,
                                  bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                  string dir_name = "spectroscopy", string method = "dopri5",
                                  bool use_gpu = false) {
@@ -3176,22 +3178,8 @@ public:
         cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
         cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
         
-        // Step 1: Prepare ground state
-        cout << "\n[1/3] Preparing ground state..." << endl;
-        if (T_zero_quench) {
-            cout << "  Using T=0 deterministic quench (" << quench_sweeps << " sweeps)" << endl;
-            for (size_t i = 0; i < quench_sweeps; ++i) {
-                deterministic_sweep(1);
-                if (i % 100 == 0) {
-                    cout << "  Quench progress: " << i << "/" << quench_sweeps 
-                         << ", E/N = " << energy_density() << endl;
-                }
-            }
-        } else {
-            cout << "  Using simulated annealing: T=" << Temp_start << " → " << Temp_end << endl;
-            simulated_annealing(Temp_start, Temp_end, n_anneal, overrelax_rate);
-        }
-        
+        // Use current spin configuration as ground state (assumed pre-loaded)
+        cout << "\n[1/3] Using current configuration as ground state..." << endl;
         double E_ground = energy_density();
         SpinVector M_ground = magnetization_local();
         cout << "  Ground state: E/N = " << E_ground << ", |M| = " << M_ground.norm() << endl;
@@ -3199,27 +3187,6 @@ public:
         // Save initial configuration
         save_positions(dir_name + "/positions.txt");
         save_spin_config(dir_name + "/spins_initial.txt");
-        
-        // Save parameters
-        ofstream param_file(dir_name + "/parameters.txt");
-        param_file << "# Pump-Probe Spectroscopy Parameters\n";
-        param_file << "pulse_amp " << pulse_amp << "\n";
-        param_file << "pulse_width " << pulse_width << "\n";
-        param_file << "pulse_freq " << pulse_freq << "\n";
-        param_file << "tau_start " << tau_start << "\n";
-        param_file << "tau_end " << tau_end << "\n";
-        param_file << "tau_step " << tau_step << "\n";
-        param_file << "T_start " << T_start << "\n";
-        param_file << "T_end " << T_end << "\n";
-        param_file << "T_step " << T_step << "\n";
-        param_file << "Temp_start " << Temp_start << "\n";
-        param_file << "Temp_end " << Temp_end << "\n";
-        param_file << "T_zero_quench " << (T_zero_quench ? "true" : "false") << "\n";
-        param_file << "integration_method " << method << "\n";
-        param_file << "lattice_size " << lattice_size << "\n";
-        param_file << "dimensions " << dim1 << " " << dim2 << " " << dim3 << "\n";
-        param_file << "ground_state_energy " << E_ground << "\n";
-        param_file.close();
         
         // Backup ground state
         SpinConfig ground_state = spins;
@@ -3275,224 +3242,44 @@ public:
         string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
         cout << "\nWriting all data to single HDF5 file: " << hdf5_file << endl;
         
+#ifdef HDF5_ENABLED
         try {
-            H5::H5File file(hdf5_file, H5F_ACC_TRUNC);
+            // Create HDF5 writer with comprehensive metadata
+            HDF5PumpProbeWriter writer(
+                hdf5_file,
+                // Lattice parameters
+                lattice_size, spin_dim, N_atoms, dim1, dim2, dim3, spin_length,
+                // Pulse parameters
+                pulse_amp, pulse_width, pulse_freq,
+                // Time evolution
+                T_start, T_end, T_step, method,
+                // Delay scan
+                tau_start, tau_end, tau_step,
+                // Ground state info
+                E_ground, M_ground, Temp_start, Temp_end, n_anneal,
+                T_zero_quench, quench_sweeps,
+                // Optional data
+                &field_in, &site_positions
+            );
             
-            // Create groups for organization
-            H5::Group reference_group = file.createGroup("/reference");
-            H5::Group tau_scan_group = file.createGroup("/tau_scan");
-            H5::Group metadata_group = file.createGroup("/metadata");
+            // Write reference trajectory
+            writer.write_reference_trajectory(M0_trajectory);
             
-            // Helper functions for writing metadata
-            auto write_scalar_double = [&](H5::Group& group, const std::string& name, double value) {
-                H5::DataSpace attr_space(H5S_SCALAR);
-                H5::Attribute attr = group.createAttribute(name, H5::PredType::NATIVE_DOUBLE, attr_space);
-                attr.write(H5::PredType::NATIVE_DOUBLE, &value);
-            };
-            
-            auto write_scalar_int = [&](H5::Group& group, const std::string& name, int value) {
-                H5::DataSpace attr_space(H5S_SCALAR);
-                H5::Attribute attr = group.createAttribute(name, H5::PredType::NATIVE_INT, attr_space);
-                attr.write(H5::PredType::NATIVE_INT, &value);
-            };
-            
-            auto write_scalar_size_t = [&](H5::Group& group, const std::string& name, size_t value) {
-                H5::DataSpace attr_space(H5S_SCALAR);
-                H5::Attribute attr = group.createAttribute(name, H5::PredType::NATIVE_HSIZE, attr_space);
-                attr.write(H5::PredType::NATIVE_HSIZE, &value);
-            };
-            
-            auto write_string = [&](H5::Group& group, const std::string& name, const std::string& value) {
-                H5::StrType str_type(H5::PredType::C_S1, value.size() + 1);
-                H5::DataSpace attr_space(H5S_SCALAR);
-                H5::Attribute attr = group.createAttribute(name, str_type, attr_space);
-                attr.write(str_type, value.c_str());
-            };
-            
-            // Get current timestamp
-            std::time_t now = std::time(nullptr);
-            char time_str[100];
-            std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
-            
-            // Write comprehensive metadata
-            write_string(metadata_group, "creation_time", std::string(time_str));
-            write_string(metadata_group, "experiment_type", "pump_probe_spectroscopy");
-            write_string(metadata_group, "code_version", "ClassicalSpin_Cpp v1.0");
-            write_string(metadata_group, "file_format", "HDF5_PumpProbe_v1.0");
-            
-            // Lattice parameters
-            write_scalar_size_t(metadata_group, "lattice_size", lattice_size);
-            write_scalar_size_t(metadata_group, "spin_dim", spin_dim);
-            write_scalar_size_t(metadata_group, "n_atoms", N_atoms);
-            write_scalar_size_t(metadata_group, "dim1", dim1);
-            write_scalar_size_t(metadata_group, "dim2", dim2);
-            write_scalar_size_t(metadata_group, "dim3", dim3);
-            write_scalar_double(metadata_group, "spin_length", spin_length);
-            
-            // Pulse parameters
-            write_scalar_double(metadata_group, "pulse_amp", pulse_amp);
-            write_scalar_double(metadata_group, "pulse_width", pulse_width);
-            write_scalar_double(metadata_group, "pulse_freq", pulse_freq);
-            
-            // Time evolution parameters
-            write_scalar_double(metadata_group, "T_start", T_start);
-            write_scalar_double(metadata_group, "T_end", T_end);
-            write_scalar_double(metadata_group, "T_step", T_step);
-            write_string(metadata_group, "integration_method", method);
-            
-            // Delay scan parameters
-            write_scalar_double(metadata_group, "tau_start", tau_start);
-            write_scalar_double(metadata_group, "tau_end", tau_end);
-            write_scalar_double(metadata_group, "tau_step", tau_step);
-            write_scalar_int(metadata_group, "tau_steps", tau_steps);
-            
-            // Ground state preparation
-            write_scalar_double(metadata_group, "ground_state_energy", E_ground);
-            write_scalar_double(metadata_group, "ground_state_magnetization", M_ground.norm());
-            write_scalar_double(metadata_group, "Temp_start", Temp_start);
-            write_scalar_double(metadata_group, "Temp_end", Temp_end);
-            write_scalar_size_t(metadata_group, "n_anneal", n_anneal);
-            write_scalar_size_t(metadata_group, "overrelax_rate", overrelax_rate);
-            write_string(metadata_group, "T_zero_quench", T_zero_quench ? "true" : "false");
-            if (T_zero_quench) {
-                write_scalar_size_t(metadata_group, "quench_sweeps", quench_sweeps);
-            }
-            
-            // Write pulse field direction
-            {
-                std::vector<double> field_data(N_atoms * spin_dim);
-                for (size_t atom = 0; atom < N_atoms && atom < field_in.size(); ++atom) {
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        field_data[atom * spin_dim + d] = field_in[atom](d);
-                    }
-                }
-                hsize_t dims[2] = {N_atoms, spin_dim};
-                H5::DataSpace dataspace(2, dims);
-                H5::DataSet dataset = metadata_group.createDataSet("pulse_field_direction", 
-                                                                   H5::PredType::NATIVE_DOUBLE, dataspace);
-                dataset.write(field_data.data(), H5::PredType::NATIVE_DOUBLE);
-            }
-            
-            // Write site positions [lattice_size, 3]
-            {
-                std::vector<double> pos_data(lattice_size * 3);
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    pos_data[i * 3 + 0] = site_positions[i](0);
-                    pos_data[i * 3 + 1] = site_positions[i](1);
-                    pos_data[i * 3 + 2] = site_positions[i](2);
-                }
-                hsize_t dims[2] = {lattice_size, 3};
-                H5::DataSpace dataspace(2, dims);
-                H5::DataSet dataset = metadata_group.createDataSet("positions", 
-                                                                   H5::PredType::NATIVE_DOUBLE, dataspace);
-                dataset.write(pos_data.data(), H5::PredType::NATIVE_DOUBLE);
-            }
-            
-            // Write tau values
-            {
-                hsize_t dims[1] = {static_cast<hsize_t>(tau_values.size())};
-                H5::DataSpace dataspace(1, dims);
-                H5::DataSet dataset = tau_scan_group.createDataSet("tau_values", H5::PredType::NATIVE_DOUBLE, dataspace);
-                dataset.write(tau_values.data(), H5::PredType::NATIVE_DOUBLE);
-            }
-            
-            // Write M0 reference trajectory
-            size_t n_times = M0_trajectory.size();
-            {
-                // Time array
-                vector<double> times(n_times);
-                for (size_t t = 0; t < n_times; ++t) {
-                    times[t] = M0_trajectory[t].first;
-                }
-                hsize_t dims[1] = {n_times};
-                H5::DataSpace dataspace(1, dims);
-                H5::DataSet dataset = reference_group.createDataSet("times", H5::PredType::NATIVE_DOUBLE, dataspace);
-                dataset.write(times.data(), H5::PredType::NATIVE_DOUBLE);
-                
-                // M_antiferro array
-                vector<double> m_antiferro(n_times * spin_dim);
-                for (size_t t = 0; t < n_times; ++t) {
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        m_antiferro[t * spin_dim + d] = M0_trajectory[t].second.first(d);
-                    }
-                }
-                hsize_t m_dims[2] = {n_times, spin_dim};
-                H5::DataSpace m_space(2, m_dims);
-                H5::DataSet m_dataset = reference_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, m_space);
-                m_dataset.write(m_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
-                
-                // M_local array
-                vector<double> m_local(n_times * spin_dim);
-                for (size_t t = 0; t < n_times; ++t) {
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        m_local[t * spin_dim + d] = M0_trajectory[t].second.second(d);
-                    }
-                }
-                H5::DataSet m_local_dataset = reference_group.createDataSet("M_local", H5::PredType::NATIVE_DOUBLE, m_space);
-                m_local_dataset.write(m_local.data(), H5::PredType::NATIVE_DOUBLE);
-            }
-            
-            // Write M1 and M01 trajectories for each tau
+            // Write delay-dependent trajectories
             for (int i = 0; i < tau_steps; ++i) {
-                string tau_group_name = "/tau_scan/tau_" + std::to_string(i);
-                H5::Group tau_group = file.createGroup(tau_group_name);
-                
-                // Write tau value as attribute
-                {
-                    H5::DataSpace attr_space(H5S_SCALAR);
-                    H5::Attribute attr = tau_group.createAttribute("tau_value", H5::PredType::NATIVE_DOUBLE, attr_space);
-                    attr.write(H5::PredType::NATIVE_DOUBLE, &tau_values[i]);
-                }
-                
-                size_t n_times_tau = M1_trajectories[i].size();
-                
-                // M1 trajectory
-                {
-                    vector<double> m_antiferro(n_times_tau * spin_dim);
-                    vector<double> m_local(n_times_tau * spin_dim);
-                    
-                    for (size_t t = 0; t < n_times_tau; ++t) {
-                        for (size_t d = 0; d < spin_dim; ++d) {
-                            m_antiferro[t * spin_dim + d] = M1_trajectories[i][t].second.first(d);
-                            m_local[t * spin_dim + d] = M1_trajectories[i][t].second.second(d);
-                        }
-                    }
-                    
-                    hsize_t dims[2] = {n_times_tau, spin_dim};
-                    H5::DataSpace dataspace(2, dims);
-                    H5::DataSet m1_antiferro = tau_group.createDataSet("M1_antiferro", H5::PredType::NATIVE_DOUBLE, dataspace);
-                    m1_antiferro.write(m_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
-                    H5::DataSet m1_local = tau_group.createDataSet("M1_local", H5::PredType::NATIVE_DOUBLE, dataspace);
-                    m1_local.write(m_local.data(), H5::PredType::NATIVE_DOUBLE);
-                }
-                
-                // M01 trajectory
-                {
-                    vector<double> m_antiferro(n_times_tau * spin_dim);
-                    vector<double> m_local(n_times_tau * spin_dim);
-                    
-                    for (size_t t = 0; t < n_times_tau; ++t) {
-                        for (size_t d = 0; d < spin_dim; ++d) {
-                            m_antiferro[t * spin_dim + d] = M01_trajectories[i][t].second.first(d);
-                            m_local[t * spin_dim + d] = M01_trajectories[i][t].second.second(d);
-                        }
-                    }
-                    
-                    hsize_t dims[2] = {n_times_tau, spin_dim};
-                    H5::DataSpace dataspace(2, dims);
-                    H5::DataSet m01_antiferro = tau_group.createDataSet("M01_antiferro", H5::PredType::NATIVE_DOUBLE, dataspace);
-                    m01_antiferro.write(m_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
-                    H5::DataSet m01_local = tau_group.createDataSet("M01_local", H5::PredType::NATIVE_DOUBLE, dataspace);
-                    m01_local.write(m_local.data(), H5::PredType::NATIVE_DOUBLE);
-                }
+                writer.write_tau_trajectory(i, tau_values[i], M1_trajectories[i], M01_trajectories[i]);
             }
             
-            file.close();
+            writer.close();
             cout << "Successfully wrote all data to single HDF5 file" << endl;
             
         } catch (H5::Exception& e) {
             std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
         }
+#else
+        cout << "Warning: HDF5 support not enabled. Data not saved to HDF5 file." << endl;
+        cout << "  Rebuild with -DHDF5_ENABLED to enable HDF5 output." << endl;
+#endif
         
         // Restore ground state at end
         spins = ground_state;
