@@ -424,32 +424,51 @@ MixedUnitCell build_tmfeo3(const UnifiedConfig& config) {
 void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running simulated annealing..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.overrelaxation_rate,
-        config.use_twist_boundary,
-        config.gaussian_move,
-        config.cooling_rate,
-        config.output_dir,
-        config.save_observables
-    );
-    
-    // Save final configuration
-    lattice.save_positions(config.output_dir + "/positions.txt");
-    lattice.save_spin_config(config.output_dir + "/spins.txt");
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.use_twist_boundary,
+            config.gaussian_move,
+            config.cooling_rate,
+            trial_dir,
+            config.save_observables,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Save final configuration
+        lattice.save_positions(trial_dir + "/positions.txt");
+        lattice.save_spin_config(trial_dir + "/spins.txt");
+        
+        if (rank == 0) {
+            ofstream energy_file(trial_dir + "/final_energy.txt");
+            energy_file << "Energy Density: " << lattice.energy_density() << "\n";
+            energy_file.close();
+            
+            cout << "Trial " << trial << " completed. Final energy: " << lattice.energy_density() << endl;
+        }
+    }
     
     if (rank == 0) {
-        ofstream energy_file(config.output_dir + "/final_energy.txt");
-        energy_file << "Energy Density: " << lattice.energy_density() << "\n";
-        energy_file.close();
-        
-        cout << "Simulated annealing completed. Final energy: " << lattice.energy_density() << endl;
+        cout << "Simulated annealing completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -459,9 +478,8 @@ void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int 
 void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running parallel tempering with " << size << " replicas..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
     }
-    
-    filesystem::create_directories(config.output_dir);
     
     // Generate temperature ladder
     vector<double> temps(size);
@@ -471,20 +489,38 @@ void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int r
         temps[i] = pow(10, log_T);
     }
     
-    lattice.parallel_tempering(
-        temps,
-        config.annealing_steps,
-        config.annealing_steps,
-        config.overrelaxation_rate,
-        config.pt_exchange_frequency,
-        config.probe_rate,
-        config.output_dir,
-        config.ranks_to_write,
-        config.gaussian_move
-    );
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.parallel_tempering(
+            temps,
+            config.annealing_steps,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.pt_exchange_frequency,
+            config.probe_rate,
+            trial_dir,
+            config.ranks_to_write,
+            config.gaussian_move
+        );
+        
+        if (rank == 0) {
+            cout << "Trial " << trial << " completed." << endl;
+        }
+    }
     
     if (rank == 0) {
-        cout << "Parallel tempering completed." << endl;
+        cout << "Parallel tempering completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -494,6 +530,7 @@ void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int r
 void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running molecular dynamics..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
         if (config.use_gpu) {
 #ifdef CUDA_ENABLED
             cout << "GPU acceleration: ENABLED" << endl;
@@ -517,42 +554,63 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
         }
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    // First equilibrate at low temperature
-    if (rank == 0) {
-        cout << "Equilibrating system..." << endl;
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // First equilibrate at low temperature
+        if (rank == 0) {
+            cout << "Equilibrating system..." << endl;
+        }
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.use_twist_boundary,
+            config.gaussian_move,
+            config.cooling_rate,
+            "",
+            false,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Run MD
+        if (rank == 0) {
+            cout << "Starting MD integration..." << endl;
+            cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
+            cout << "Timestep: " << config.md_timestep << endl;
+            cout << "Integration method: " << config.md_integrator << endl;
+        }
+        
+        lattice.molecular_dynamics(
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            trial_dir,
+            config.md_save_interval,
+            config.md_integrator,
+            config.use_gpu
+        );
+        
+        if (rank == 0) {
+            cout << "Trial " << trial << " completed." << endl;
+            cout << "Results saved to: " << trial_dir << "/trajectory.h5" << endl;
+        }
     }
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.overrelaxation_rate,
-        config.use_twist_boundary
-    );
-    
-    // Run MD
-    if (rank == 0) {
-        cout << "Starting MD integration..." << endl;
-        cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
-        cout << "Timestep: " << config.md_timestep << endl;
-        cout << "Integration method: " << config.md_integrator << endl;
-    }
-    
-    
-    lattice.molecular_dynamics(
-        config.md_time_start,
-        config.md_time_end,
-        config.md_timestep,
-        config.output_dir,
-        config.md_save_interval,
-        config.md_integrator,
-        config.use_gpu
-    );
     
     if (rank == 0) {
-        cout << "Molecular dynamics completed." << endl;
-        cout << "Results saved to: " << config.output_dir << "/trajectory.h5" << endl;
+        cout << "Molecular dynamics completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -562,6 +620,7 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
 void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running pump-probe simulation..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
         if (config.use_gpu) {
 #ifdef CUDA_ENABLED
             cout << "GPU acceleration: ENABLED" << endl;
@@ -571,30 +630,7 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
         }
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    // First equilibrate
-    if (rank == 0) {
-        cout << "Equilibrating system..." << endl;
-    }
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.overrelaxation_rate,
-        config.use_twist_boundary
-    );
-    
-    // Setup pump pulse
-    if (rank == 0) {
-        cout << "Setting up pump-probe pulses..." << endl;
-        cout << "Pump: t=" << config.pump_time << ", A=" << config.pump_amplitude 
-             << ", w=" << config.pump_width << ", f=" << config.pump_frequency << endl;
-        cout << "Probe: t=" << config.probe_time << ", A=" << config.probe_amplitude << endl;
-    }
-    
     // Setup pulse field directions (one per sublattice)
-    vector<Eigen::VectorXd> field_dirs;
     auto pump_dir_norm = config.pump_direction;
     double norm = sqrt(pump_dir_norm[0]*pump_dir_norm[0] + 
                       pump_dir_norm[1]*pump_dir_norm[1] + 
@@ -605,46 +641,88 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
         pump_dir_norm[2] /= norm;
     }
     
-    for (size_t i = 0; i < lattice.N_atoms; ++i) {
-        Eigen::VectorXd field_dir(3);
-        field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
-        field_dirs.push_back(field_dir);
-    }
-    
-    if (rank == 0) {
-        cout << "Pulse direction: [" << pump_dir_norm[0] << ", " 
-             << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
-    }
-    
-    // Run single pulse magnetization dynamics
-    auto trajectory = lattice.single_pulse_drive(
-        field_dirs,
-        config.pump_time,
-        config.pump_amplitude,
-        config.pump_width,
-        config.pump_frequency,
-        config.md_time_start,
-        config.md_time_end,
-        config.md_timestep,
-        config.md_integrator,
-        config.use_gpu
-    );
-    
-    // Save trajectory
-    if (rank == 0) {
-        ofstream traj_file(config.output_dir + "/pump_probe_trajectory.txt");
-        for (const auto& [t, mag_data] : trajectory) {
-            traj_file << t << " "
-                     << mag_data[0].transpose() << " "  // mag antiferro
-                     << mag_data[1].transpose() << " "  // mag local
-                     << mag_data[2].transpose() << "\n"; // mag global
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
         }
-        traj_file.close();
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // First equilibrate
+        if (rank == 0) {
+            cout << "Equilibrating system..." << endl;
+        }
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.use_twist_boundary,
+            config.gaussian_move,
+            config.cooling_rate,
+            "",
+            false,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Setup pump pulse
+        if (rank == 0) {
+            cout << "Setting up pump-probe pulses..." << endl;
+            cout << "Pump: t=" << config.pump_time << ", A=" << config.pump_amplitude 
+                 << ", w=" << config.pump_width << ", f=" << config.pump_frequency << endl;
+            cout << "Probe: t=" << config.probe_time << ", A=" << config.probe_amplitude << endl;
+        }
+        
+        vector<Eigen::VectorXd> field_dirs;
+        for (size_t i = 0; i < lattice.N_atoms; ++i) {
+            Eigen::VectorXd field_dir(3);
+            field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+            field_dirs.push_back(field_dir);
+        }
+        
+        if (rank == 0) {
+            cout << "Pulse direction: [" << pump_dir_norm[0] << ", " 
+                 << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+        }
+        
+        // Run single pulse magnetization dynamics
+        auto trajectory = lattice.single_pulse_drive(
+            field_dirs,
+            config.pump_time,
+            config.pump_amplitude,
+            config.pump_width,
+            config.pump_frequency,
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            config.md_integrator,
+            config.use_gpu
+        );
+        
+        // Save trajectory
+        if (rank == 0) {
+            ofstream traj_file(trial_dir + "/pump_probe_trajectory.txt");
+            for (const auto& [t, mag_data] : trajectory) {
+                traj_file << t << " "
+                         << mag_data[0].transpose() << " "  // mag antiferro
+                         << mag_data[1].transpose() << " "  // mag local
+                         << mag_data[2].transpose() << "\n"; // mag global
+            }
+            traj_file.close();
+            cout << "Trial " << trial << " completed." << endl;
+            cout << "Results saved to: " << trial_dir << "/trajectory.h5" << endl;
+        }
     }
     
     if (rank == 0) {
-        cout << "Pump-probe simulation completed." << endl;
-        cout << "Results saved to: " << config.output_dir << "/trajectory.h5" << endl;
+        cout << "Pump-probe simulation completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -655,6 +733,7 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
 void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS)..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
         if (config.use_gpu) {
@@ -666,26 +745,7 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
         }
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    // First equilibrate to ground state
-    if (rank == 0) {
-        cout << "\n[1/3] Equilibrating to ground state..." << endl;
-    }
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.overrelaxation_rate,
-        config.use_twist_boundary,
-        config.gaussian_move,
-        config.cooling_rate,
-        config.output_dir,
-        config.save_observables
-    );
-    
-    // Setup pulse field directions (one per sublattice)
-    vector<Eigen::VectorXd> field_dirs;
+    // Setup pulse field directions normalization
     auto pump_dir_norm = config.pump_direction;
     double norm = sqrt(pump_dir_norm[0]*pump_dir_norm[0] + 
                       pump_dir_norm[1]*pump_dir_norm[1] + 
@@ -696,53 +756,85 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
         pump_dir_norm[2] /= norm;
     }
     
-    // Create field directions for all sublattices
-    for (size_t i = 0; i < lattice.N_atoms; ++i) {
-        Eigen::VectorXd field_dir(3);
-        field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
-        field_dirs.push_back(field_dir);
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // First equilibrate to ground state
+        if (rank == 0) {
+            cout << "\n[1/3] Equilibrating to ground state..." << endl;
+        }
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.use_twist_boundary,
+            config.gaussian_move,
+            config.cooling_rate,
+            trial_dir,
+            config.save_observables,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Create field directions for all sublattices
+        vector<Eigen::VectorXd> field_dirs;
+        for (size_t i = 0; i < lattice.N_atoms; ++i) {
+            Eigen::VectorXd field_dir(3);
+            field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+            field_dirs.push_back(field_dir);
+        }
+        
+        if (rank == 0) {
+            cout << "\n[2/3] Pulse configuration:" << endl;
+            cout << "  Amplitude: " << config.pump_amplitude << endl;
+            cout << "  Width: " << config.pump_width << endl;
+            cout << "  Frequency: " << config.pump_frequency << endl;
+            cout << "  Direction: [" << pump_dir_norm[0] << ", " 
+                 << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+            cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
+        }
+        
+        // Run the full 2DCS scan using lattice method
+        lattice.pump_probe_spectroscopy(
+            field_dirs,
+            config.pump_amplitude,
+            config.pump_width,
+            config.pump_frequency,
+            config.tau_start,
+            config.tau_end,
+            config.tau_step,
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            false,  // T_zero_quench
+            config.overrelaxation_rate,
+            trial_dir,
+            config.md_integrator,
+            config.use_gpu
+        );
+        
+        if (rank == 0) {
+            cout << "\nTrial " << trial << " 2DCS spectroscopy completed!" << endl;
+            cout << "Results saved to: " << trial_dir << "/pump_probe_spectroscopy.h5" << endl;
+        }
     }
     
     if (rank == 0) {
-        cout << "\n[2/3] Pulse configuration:" << endl;
-        cout << "  Amplitude: " << config.pump_amplitude << endl;
-        cout << "  Width: " << config.pump_width << endl;
-        cout << "  Frequency: " << config.pump_frequency << endl;
-        cout << "  Direction: [" << pump_dir_norm[0] << ", " 
-             << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
-        cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
-    }
-    
-    // Run the full 2DCS scan using lattice method
-    // Signature: pump_probe_spectroscopy(field_in, pulse_amp, pulse_width, pulse_freq,
-    //                                     tau_start, tau_end, tau_step,
-    //                                     T_start, T_end, T_step,
-    //                                     Temp_start, Temp_end, n_anneal, T_zero_quench, quench_sweeps,
-    //                                     dir_name, method, use_gpu)
-    lattice.pump_probe_spectroscopy(
-        field_dirs,
-        config.pump_amplitude,
-        config.pump_width,
-        config.pump_frequency,
-        config.tau_start,
-        config.tau_end,
-        config.tau_step,
-        config.md_time_start,
-        config.md_time_end,
-        config.md_timestep,
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        false,  // T_zero_quench
-        config.overrelaxation_rate,
-        config.output_dir,
-        config.md_integrator,
-        config.use_gpu
-    );
-    
-    if (rank == 0) {
-        cout << "\n2DCS spectroscopy completed!" << endl;
-        cout << "Results saved to: " << config.output_dir << "/pump_probe_spectroscopy.h5" << endl;
+        cout << "\n2DCS spectroscopy completed (" << config.num_trials << " trials)!" << endl;
         cout << "\nTo analyze:" << endl;
         cout << "  - M0(t): Reference single-pulse response" << endl;
         cout << "  - M1(t,tau): Probe-only response at delay tau" << endl;
@@ -757,30 +849,49 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
 void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running simulated annealing on mixed lattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.gaussian_move,
-        config.cooling_rate,
-        config.output_dir,
-        config.save_observables
-    );
-    
-    // Save final configuration
-    lattice.save_positions(config.output_dir + "/positions.txt");
-    lattice.save_spin_config(config.output_dir + "/spins.txt");
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.gaussian_move,
+            config.cooling_rate,
+            trial_dir,
+            config.save_observables,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Save final configuration
+        lattice.save_positions(trial_dir + "/positions.txt");
+        lattice.save_spin_config(trial_dir + "/spins.txt");
+        
+        if (rank == 0) {
+            ofstream energy_file(trial_dir + "/final_energy.txt");
+            energy_file << "Energy Density: " << lattice.energy_density() << "\n";
+            energy_file.close();
+            
+            cout << "Trial " << trial << " completed. Final energy: " << lattice.energy_density() << endl;
+        }
+    }
     
     if (rank == 0) {
-        ofstream energy_file(config.output_dir + "/final_energy.txt");
-        energy_file << "Energy Density: " << lattice.energy_density() << "\n";
-        energy_file.close();
-        
-        cout << "Simulated annealing completed. Final energy: " << lattice.energy_density() << endl;
+        cout << "Simulated annealing completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -790,9 +901,8 @@ void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& c
 void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running parallel tempering on mixed lattice with " << size << " replicas..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
     }
-    
-    filesystem::create_directories(config.output_dir);
     
     // Generate temperature ladder
     vector<double> temps(size);
@@ -802,20 +912,38 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& co
         temps[i] = pow(10, log_T);
     }
     
-    lattice.parallel_tempering(
-        temps,
-        config.annealing_steps,
-        config.annealing_steps,
-        config.overrelaxation_rate,
-        config.pt_exchange_frequency,
-        config.probe_rate,
-        config.output_dir,
-        config.ranks_to_write,
-        config.gaussian_move
-    );
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.parallel_tempering(
+            temps,
+            config.annealing_steps,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.pt_exchange_frequency,
+            config.probe_rate,
+            trial_dir,
+            config.ranks_to_write,
+            config.gaussian_move
+        );
+        
+        if (rank == 0) {
+            cout << "Trial " << trial << " completed." << endl;
+        }
+    }
     
     if (rank == 0) {
-        cout << "Parallel tempering completed." << endl;
+        cout << "Parallel tempering completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -825,43 +953,64 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& co
 void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running molecular dynamics on mixed lattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    // Equilibrate
-    if (rank == 0) {
-        cout << "Equilibrating system..." << endl;
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // Equilibrate
+        if (rank == 0) {
+            cout << "Equilibrating system..." << endl;
+        }
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.gaussian_move,
+            config.cooling_rate,
+            "",
+            false,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Run MD
+        if (rank == 0) {
+            cout << "Starting MD integration..." << endl;
+            cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
+            cout << "Timestep: " << config.md_timestep << endl;
+            cout << "Integration method: " << config.md_integrator << endl;
+        }
+        
+        lattice.molecular_dynamics(
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            trial_dir,
+            config.md_save_interval,
+            config.md_integrator,
+            config.use_gpu
+        );
+        
+        if (rank == 0) {
+            cout << "Trial " << trial << " completed." << endl;
+            cout << "Results saved to: " << trial_dir << "/trajectory_mixed.h5" << endl;
+        }
     }
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.gaussian_move
-    );
-    
-    // Run MD
-    if (rank == 0) {
-        cout << "Starting MD integration..." << endl;
-        cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
-        cout << "Timestep: " << config.md_timestep << endl;
-        cout << "Integration method: " << config.md_integrator << endl;
-    }
-    
-    
-    lattice.molecular_dynamics(
-        config.md_time_start,
-        config.md_time_end,
-        config.md_timestep,
-        config.output_dir,
-        config.md_save_interval,
-        config.md_integrator,
-        config.use_gpu
-    );
     
     if (rank == 0) {
-        cout << "Molecular dynamics completed." << endl;
-        cout << "Results saved to: " << config.output_dir << "/trajectory_mixed.h5" << endl;
+        cout << "Molecular dynamics completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -871,30 +1020,10 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& co
 void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running pump-probe simulation on mixed lattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    // Equilibrate
-    if (rank == 0) {
-        cout << "Equilibrating system..." << endl;
-    }
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.gaussian_move
-    );
-    
-    // Setup pump field directions
-    if (rank == 0) {
-        cout << "Setting up pump-probe pulses..." << endl;
-    }
-    
-    // Create field directions for SU2 (Fe) and SU3 (Tm)
-    vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
-    vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
-    
+    // Prepare pulse directions
     SpinVector pump_dir_su2(3);
     pump_dir_su2 << config.pump_direction[0], config.pump_direction[1], config.pump_direction[2];
     pump_dir_su2.normalize();
@@ -908,40 +1037,83 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
         pump_dir_su3(2) = 1.0;  // Default to λ3
     }
     
-    for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
-        field_dirs_su2[i] = pump_dir_su2;
-    }
-    for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
-        field_dirs_su3[i] = pump_dir_su3;
-    }
-    
-    // Run single pulse magnetization dynamics
-    if (rank == 0) {
-        cout << "Running pump-probe dynamics..." << endl;
-    }
-    
-    auto trajectory = lattice.single_pulse_drive(
-        field_dirs_su2, field_dirs_su3, config.pump_time,
-        config.pump_amplitude, config.pump_width, config.pump_frequency,
-        config.pump_amplitude, config.pump_width, config.pump_frequency,
-        config.md_time_start, config.md_time_end, config.md_timestep,
-        config.md_integrator, config.use_gpu
-    );
-    
-    // Save trajectory
-    if (rank == 0) {
-        ofstream traj_file(config.output_dir + "/pump_probe_trajectory.txt");
-        for (const auto& [t, mag_data] : trajectory) {
-            traj_file << t << " "
-                     << mag_data.first[0].transpose() << " "  // SU2 mag antiferro
-                     << mag_data.first[1].transpose() << " "  // SU2 mag local
-                     << mag_data.first[2].transpose() << " "  // SU2 mag global
-                     << mag_data.second[0].transpose() << " " // SU3 mag antiferro
-                     << mag_data.second[1].transpose() << " " // SU3 mag local
-                     << mag_data.second[2].transpose() << "\n"; // SU3 mag global
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
         }
-        traj_file.close();
-        cout << "Pump-probe simulation completed." << endl;
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // Equilibrate
+        if (rank == 0) {
+            cout << "Equilibrating system..." << endl;
+        }
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.gaussian_move,
+            config.cooling_rate,
+            "",
+            false,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        // Setup pump field directions
+        if (rank == 0) {
+            cout << "Setting up pump-probe pulses..." << endl;
+        }
+        
+        // Create field directions for SU2 (Fe) and SU3 (Tm)
+        vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
+        vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
+        
+        for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+            field_dirs_su2[i] = pump_dir_su2;
+        }
+        for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+            field_dirs_su3[i] = pump_dir_su3;
+        }
+        
+        // Run single pulse magnetization dynamics
+        if (rank == 0) {
+            cout << "Running pump-probe dynamics..." << endl;
+        }
+        
+        auto trajectory = lattice.single_pulse_drive(
+            field_dirs_su2, field_dirs_su3, config.pump_time,
+            config.pump_amplitude, config.pump_width, config.pump_frequency,
+            config.pump_amplitude, config.pump_width, config.pump_frequency,
+            config.md_time_start, config.md_time_end, config.md_timestep,
+            config.md_integrator, config.use_gpu
+        );
+        
+        // Save trajectory
+        if (rank == 0) {
+            ofstream traj_file(trial_dir + "/pump_probe_trajectory.txt");
+            for (const auto& [t, mag_data] : trajectory) {
+                traj_file << t << " "
+                         << mag_data.first[0].transpose() << " "  // SU2 mag antiferro
+                         << mag_data.first[1].transpose() << " "  // SU2 mag local
+                         << mag_data.first[2].transpose() << " "  // SU2 mag global
+                         << mag_data.second[0].transpose() << " " // SU3 mag antiferro
+                         << mag_data.second[1].transpose() << " " // SU3 mag local
+                         << mag_data.second[2].transpose() << "\n"; // SU3 mag global
+            }
+            traj_file.close();
+            cout << "Trial " << trial << " completed." << endl;
+        }
+    }
+    
+    if (rank == 0) {
+        cout << "Pump-probe simulation completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -951,6 +1123,7 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
 void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS) on mixed lattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
         if (config.use_gpu) {
@@ -962,26 +1135,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
         }
     }
     
-    filesystem::create_directories(config.output_dir);
-    
-    // First equilibrate to ground state
-    if (rank == 0) {
-        cout << "\n[1/3] Equilibrating to ground state..." << endl;
-    }
-    lattice.simulated_annealing(
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        config.gaussian_move,
-        config.cooling_rate,
-        config.output_dir,
-        config.save_observables
-    );
-    
     // Setup pulse field directions
-    vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
-    vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
-    
     SpinVector pump_dir_su2(3);
     pump_dir_su2 << config.pump_direction[0], config.pump_direction[1], config.pump_direction[2];
     pump_dir_su2.normalize();
@@ -995,52 +1149,89 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
         pump_dir_su3(2) = 1.0;  // Default to λ3
     }
     
-    for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
-        field_dirs_su2[i] = pump_dir_su2;
-    }
-    for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
-        field_dirs_su3[i] = pump_dir_su3;
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // First equilibrate to ground state
+        if (rank == 0) {
+            cout << "\n[1/3] Equilibrating to ground state..." << endl;
+        }
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.gaussian_move,
+            config.cooling_rate,
+            trial_dir,
+            config.save_observables,
+            config.T_zero,
+            config.n_deterministics
+        );
+        
+        vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
+        vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
+        
+        for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+            field_dirs_su2[i] = pump_dir_su2;
+        }
+        for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+            field_dirs_su3[i] = pump_dir_su3;
+        }
+        
+        if (rank == 0) {
+            cout << "\n[2/3] Pulse configuration:" << endl;
+            cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
+            cout << "  SU2 Width: " << config.pump_width << endl;
+            cout << "  SU2 Frequency: " << config.pump_frequency << endl;
+            cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
+            cout << "  SU3 Component: λ" << su3_pump_component << endl;
+            cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
+        }
+        
+        // Run the full 2DCS scan using mixed lattice method
+        lattice.pump_probe_spectroscopy(
+            field_dirs_su2,
+            field_dirs_su3,
+            config.pump_amplitude,
+            config.pump_width,
+            config.pump_frequency,
+            config.pump_amplitude,
+            config.pump_width,
+            config.pump_frequency,
+            config.tau_start,
+            config.tau_end,
+            config.tau_step,
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            false,  // T_zero_quench
+            config.overrelaxation_rate,
+            trial_dir,
+            config.md_integrator,
+            config.use_gpu
+        );
+        
+        if (rank == 0) {
+            cout << "\nTrial " << trial << " 2DCS spectroscopy completed!" << endl;
+            cout << "Results saved to: " << trial_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
+        }
     }
     
     if (rank == 0) {
-        cout << "\n[2/3] Pulse configuration:" << endl;
-        cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
-        cout << "  SU2 Width: " << config.pump_width << endl;
-        cout << "  SU2 Frequency: " << config.pump_frequency << endl;
-        cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
-        cout << "  SU3 Component: λ" << su3_pump_component << endl;
-        cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
-    }
-    
-    // Run the full 2DCS scan using mixed lattice method
-    lattice.pump_probe_spectroscopy(
-        field_dirs_su2,
-        field_dirs_su3,
-        config.pump_amplitude,
-        config.pump_width,
-        config.pump_frequency,
-        config.pump_amplitude,
-        config.pump_width,
-        config.pump_frequency,
-        config.tau_start,
-        config.tau_end,
-        config.tau_step,
-        config.md_time_start,
-        config.md_time_end,
-        config.md_timestep,
-        config.T_start,
-        config.T_end,
-        config.annealing_steps,
-        false,  // T_zero_quench
-        config.overrelaxation_rate,
-        config.output_dir,
-        config.md_integrator,
-        config.use_gpu
-    );
-    
-    if (rank == 0) {
-        cout << "\n2DCS spectroscopy completed!" << endl;
-        cout << "Results saved to: " << config.output_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
+        cout << "\n2DCS spectroscopy completed (" << config.num_trials << " trials)!" << endl;
         cout << "\nTo analyze:" << endl;
         cout << "  - M0(t): Reference single-pulse response" << endl;
         cout << "  - M1(t,tau): Probe-only response at delay tau" << endl;

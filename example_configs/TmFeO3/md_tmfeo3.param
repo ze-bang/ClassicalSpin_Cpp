@@ -50,7 +50,7 @@ gaussian_move = false
 md_time_start = 0.0
 md_time_end = 400.0
 md_timestep = 0.01
-md_save_interval = 100
+md_save_interval = 1
 md_integrator = rk5
 use_gpu = true
 

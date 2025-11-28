@@ -59,6 +59,8 @@ struct UnifiedConfig {
     bool gaussian_move = false;
     bool save_observables = true;
     bool deterministic = false;
+    bool T_zero = false;
+    size_t n_deterministics = 1000;
     
     // Molecular dynamics parameters
     double md_time_start = 0.0;
@@ -299,6 +301,12 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             }
             else if (key == "deterministic") {
                 config.deterministic = parse_bool(value);
+            }
+            else if (key == "T_zero") {
+                config.T_zero = parse_bool(value);
+            }
+            else if (key == "n_deterministics") {
+                config.n_deterministics = stoull(value);
             }
             else if (key == "md_time_start") {
                 config.md_time_start = stod(value);

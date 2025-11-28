@@ -1095,7 +1095,9 @@ public:
                             bool gaussian_move = false,
                             double cooling_rate = 0.9,
                             string out_dir = "",
-                            bool save_observables = false) {
+                            bool save_observables = false,
+                            bool T_zero = false,
+                            size_t n_deterministics = 1000) {
         
         // Setup output directory
         ensure_directory_exists(out_dir);
@@ -1104,6 +1106,9 @@ public:
         double sigma = 1000.0;
         
         cout << "Starting mixed lattice simulated annealing: T=" << T_start << " → " << T_end << endl;
+        if (T_zero) {
+            cout << "T=0 mode enabled: will perform " << n_deterministics << " deterministic sweeps at T=0" << endl;
+        }
         
         size_t temp_step = 0;
         while (T > T_end) {
@@ -1145,6 +1150,25 @@ public:
         }
         
         cout << "Final energy density: " << energy_density() << endl;
+        
+        // T=0 deterministic sweeps if requested
+        if (T_zero && n_deterministics > 0) {
+            cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
+                deterministic_sweep();
+                
+                if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
+                    double E = energy_density();
+                    SpinVector M_SU2 = magnetization_SU2();
+                    SpinVector M_SU3 = magnetization_SU3();
+                    cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
+                         << ", E/N=" << E 
+                         << ", |M_SU2|=" << M_SU2.norm()
+                         << ", |M_SU3|=" << M_SU3.norm() << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
+        }
         
         // Final measurements if requested
         if (save_observables && !out_dir.empty()) {

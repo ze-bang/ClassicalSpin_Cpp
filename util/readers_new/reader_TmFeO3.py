@@ -149,6 +149,13 @@ def generate_k_path(reciprocal_lattice: np.ndarray, graphres: int = 4) -> Tuple[
 # SPIN STRUCTURE FACTOR COMPUTATIONS
 # =============================================================================
 
+# Local frame definitions for TmFeO3 (4 sublattices)
+x = np.array([[1, 0, 0], [1, 0, 0], [-1, 0, 0], [-1, 0, 0]])
+y = np.array([[0, 1, 0], [0, -1, 0], [0, 1, 0], [0, -1, 0]])
+z = np.array([[0, 0, 1], [0, 0, -1], [0, 0, -1], [0, 0, 1]])
+localframe = np.array([x, y, z])
+
+
 def Spin_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     """
     Compute time-dependent spin structure factor.
@@ -173,8 +180,34 @@ def Spin_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     return results
 
 
+def Spin_global_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
+    """
+    Compute time-dependent spin structure factor in global frame.
+    Transforms spins from local sublattice frames to global frame.
+    
+    Args:
+        k: k-points array [n_k, 3]
+        S: Spin configurations [n_times, n_sites, spin_dim]
+        P: Site positions [n_sites, 3]
+        
+    Returns:
+        results: [n_times, n_sublattices, n_k, 3] complex array
+    """
+    n_sublattices = 4
+    size = int(len(P) / n_sublattices)
+    n_times = S.shape[0]
+    tS = np.zeros((n_times, n_sublattices, len(k), 3), dtype=np.complex128)
+    
+    for i in range(n_sublattices):
+        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
+        tS[:, i, :, :] = contract('tjs, ij, sp->tip', S[:, i*size:(i+1)*size, :3], 
+                                   ffact, localframe[:, i, :]) / np.sqrt(size)
+    
+    return tS
+
+
 def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray, 
-         T: np.ndarray) -> np.ndarray:
+         T: np.ndarray, global_frame: bool = False) -> np.ndarray:
     """
     Compute dynamical spin structure factor using FFT over time.
     
@@ -184,27 +217,48 @@ def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray,
         S: Spin configurations [n_times, n_sites, spin_dim]
         P: Site positions
         T: Time points
+        global_frame: If True, transform to global frame (for SU(2) only)
         
     Returns:
         DSSF: [n_w, n_k, spin_dim, spin_dim] array
     """
-    A = Spin_t(k, S, P)
-    
-    # Subtract mean configuration before FFT
-    A_mean = np.mean(A, axis=0, keepdims=True)
-    A = A - A_mean
-    
-    # FFT over time dimension
-    dt = T[1] - T[0] if len(T) > 1 else 1.0
-    A_fft = np.fft.fft(A, axis=0)
-    fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
-    
-    # Select closest frequencies to w
-    indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
-    Somega = A_fft[indices] / np.sqrt(len(T))
-    
-    read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
-    return read
+    if global_frame and S.shape[2] >= 3:
+        # Use global frame transformation for 3-component spins
+        A = Spin_global_t(k, S, P)
+        # A shape: (n_times, n_sublattices, n_k, 3)
+        # Subtract mean configuration before FFT
+        A_mean = np.mean(A, axis=0, keepdims=True)
+        A = A - A_mean
+        # FFT over time dimension
+        dt = T[1] - T[0] if len(T) > 1 else 1.0
+        A_fft = np.fft.fft(A, axis=0)
+        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+        
+        # Select closest frequencies to w
+        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
+        Somega = A_fft[indices] / np.sqrt(len(T))
+        
+        read = np.real(contract('wnia, wnib->wiab', Somega, np.conj(Somega)))
+        return read
+    else:
+        # Use local frame (original implementation)
+        A = Spin_t(k, S, P)
+        
+        # Subtract mean configuration before FFT
+        A_mean = np.mean(A, axis=0, keepdims=True)
+        A = A - A_mean
+        
+        # FFT over time dimension
+        dt = T[1] - T[0] if len(T) > 1 else 1.0
+        A_fft = np.fft.fft(A, axis=0)
+        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+        
+        # Select closest frequencies to w
+        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
+        Somega = A_fft[indices] / np.sqrt(len(T))
+        
+        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
+        return read
 
 
 # =============================================================================
@@ -484,21 +538,34 @@ def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 15,
             w_mask = (fft_freqs >= w0) & (fft_freqs <= wmax)
             w = fft_freqs[w_mask]
             
-            # Compute DSSF
-            A_SU2 = DSSF(w, DSSF_K, S, P, T)
-            results['DSSF_SU2'] = A_SU2
+            # Compute DSSF in local frame
+            A_SU2_local = DSSF(w, DSSF_K, S, P, T, global_frame=False)
+            results['DSSF_SU2_local'] = A_SU2_local
             results['w'] = w
             
-            # Plot individual components
+            # Compute DSSF in global frame
+            A_SU2_global = DSSF(w, DSSF_K, S, P, T, global_frame=True)
+            results['DSSF_SU2_global'] = A_SU2_global
+            
+            # Plot individual components - local frame
             spin_dim_SU2 = reader.metadata_SU2.get('spin_dim', 3)
-            _plot_DSSF_components(A_SU2, w, tick_positions, output_dir, 'SU2', 
+            _plot_DSSF_components(A_SU2_local, w, tick_positions, output_dir, 'SU2_local', 
                                   min(3, spin_dim_SU2), w0, wmax)
             
-            # Compute and save gap at Gamma
+            # Plot individual components - global frame
+            _plot_DSSF_components(A_SU2_global, w, tick_positions, output_dir, 'SU2_global', 
+                                  3, w0, wmax)
+            
+            # Compute and save gap at Gamma - local frame
             Gamma_point = np.array([[0, 0, 0]])
-            A_Gamma = DSSF(w, Gamma_point, S, P, T)
-            DSSF_sum_Gamma = contract('wiab->wi', A_Gamma)
-            _plot_gap_analysis(w, DSSF_sum_Gamma, output_dir, 'SU2')
+            A_Gamma_local = DSSF(w, Gamma_point, S, P, T, global_frame=False)
+            DSSF_sum_Gamma_local = contract('wiab->wi', A_Gamma_local)
+            _plot_gap_analysis(w, DSSF_sum_Gamma_local, output_dir, 'SU2_local')
+            
+            # Compute and save gap at Gamma - global frame
+            A_Gamma_global = DSSF(w, Gamma_point, S, P, T, global_frame=True)
+            DSSF_sum_Gamma_global = contract('wiab->wi', A_Gamma_global)
+            _plot_gap_analysis(w, DSSF_sum_Gamma_global, output_dir, 'SU2_global')
         
         # Process SU3
         if 'trajectory_SU3' in reader._file:
@@ -532,14 +599,39 @@ def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 15,
             _plot_gap_analysis(w, DSSF_sum_Gamma, output_dir, 'SU3')
         
         # Combined DSSF if both exist
-        if 'DSSF_SU2' in results and 'DSSF_SU3' in results:
-            A_combined = contract('wiab->wi', results['DSSF_SU2']) + \
-                        contract('wiab->wi', results['DSSF_SU3'])
-            results['DSSF_combined'] = A_combined
+        if 'DSSF_SU2_local' in results and 'DSSF_SU3' in results:
+            # Combined local frame
+            A_combined_local = contract('wiab->wi', results['DSSF_SU2_local']) + \
+                              contract('wiab->wi', results['DSSF_SU3'])
+            results['DSSF_combined_local'] = A_combined_local
             
-            # Save and plot combined
-            np.savetxt(os.path.join(output_dir, "DSSF.txt"), A_combined)
-            _plot_DSSF_combined(A_combined, w, tick_positions, output_dir, w0, wmax)
+            # Save and plot combined local
+            np.savetxt(os.path.join(output_dir, "DSSF_local.txt"), A_combined_local)
+            _plot_DSSF_combined(A_combined_local, w, tick_positions, output_dir, w0, wmax)
+            
+        if 'DSSF_SU2_global' in results and 'DSSF_SU3' in results:
+            # Combined with global frame for SU2
+            A_combined_global = contract('wiab->wi', results['DSSF_SU2_global']) + \
+                               contract('wiab->wi', results['DSSF_SU3'])
+            results['DSSF_combined_global'] = A_combined_global
+            
+            # Plot combined global
+            fig, ax = plt.subplots(figsize=(10, 4))
+            g1, g2, g3, g4 = tick_positions
+            labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+            C = ax.imshow(A_combined_global, origin='lower', extent=[0, g4, w0, wmax],
+                         aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+            ax.axvline(x=g1, color='b', linestyle='dashed')
+            ax.axvline(x=g2, color='b', linestyle='dashed')
+            ax.axvline(x=g3, color='b', linestyle='dashed')
+            ax.axvline(x=g4, color='b', linestyle='dashed')
+            ax.set_xticks([g1, g2, g3, g4])
+            ax.set_xticklabels(labels)
+            ax.set_xlim([0, g4])
+            fig.colorbar(C)
+            plt.savefig(os.path.join(output_dir, "DSSF_global.pdf"))
+            plt.close()
+            np.savetxt(os.path.join(output_dir, "DSSF_global.txt"), A_combined_global)
     
     return results
 
@@ -555,7 +647,7 @@ def _plot_DSSF_components(A: np.ndarray, w: np.ndarray, tick_positions: List[int
         fig, ax = plt.subplots(figsize=(10, 4))
         C = ax.imshow(A[:, :, i, i], origin='lower', 
                      extent=[0, g4, w0, wmax],
-                     aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+                     aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='log')
         ax.axvline(x=g1, color='b', linestyle='dashed')
         ax.axvline(x=g2, color='b', linestyle='dashed')
         ax.axvline(x=g3, color='b', linestyle='dashed')
