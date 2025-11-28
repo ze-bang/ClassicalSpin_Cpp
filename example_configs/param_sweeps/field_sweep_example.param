@@ -1,0 +1,42 @@
+# Example configuration for field strength sweep
+# This sweeps over external magnetic field strength
+
+# System specification
+system = honeycomb_kitaev
+lattice_size = 16, 16, 1
+spin_length = 1.0
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# Parameter sweep settings
+sweep_parameter = field_strength    # Sweep over field strength
+sweep_start = 0.0                    # Starting field
+sweep_end = 2.0                      # Ending field
+sweep_step = 0.1                     # Step size
+sweep_base_simulation = molecular_dynamics  # Run MD at each field value
+
+# Molecular dynamics parameters
+md_time_start = 0.0
+md_time_end = 100.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = dopri5
+use_gpu = false
+
+# Output
+output_dir = output_sweep_field
+num_trials = 1
+
+# Hamiltonian parameters (Kitaev model)
+K = -1.0
+Gamma = 0.25
+Gammap = -0.02
+J = 0.0
+
+# Field direction (sweep will change magnitude)
+field_direction = 1, 1, 1           # [111] direction
+
+# General settings
+use_twist_boundary = false
+initial_spin_config =               # Empty = random initialization

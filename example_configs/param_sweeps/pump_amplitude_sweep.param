@@ -1,0 +1,55 @@
+# Example configuration for pump amplitude sweep with pump-probe
+# This sweeps over pump amplitude to study excitation-dependent dynamics
+
+# System specification
+system = honeycomb_kitaev
+lattice_size = 16, 16, 1
+spin_length = 1.0
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# Parameter sweep settings
+sweep_parameter = pump_amplitude     # Sweep over pump pulse amplitude
+sweep_start = 0.5                    # Starting amplitude
+sweep_end = 2.5                      # Ending amplitude
+sweep_step = 0.2                     # Step size
+sweep_base_simulation = pump_probe   # Run pump-probe at each amplitude
+
+# Pump-probe parameters
+pump_time = 0.0
+pump_width = 10.0
+pump_frequency = 0.0
+pump_direction = 0, 1, 0
+
+probe_time = 50.0
+probe_width = 10.0
+probe_frequency = 0.0
+probe_amplitude = 0.1
+probe_direction = 0, 1, 0
+
+# Molecular dynamics settings
+md_time_start = 0.0
+md_time_end = 150.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = dopri5
+use_gpu = false
+
+# Output
+output_dir = output_pump_amplitude_sweep
+num_trials = 1
+
+# Hamiltonian parameters (Kitaev model)
+K = -1.0
+Gamma = 0.25
+Gammap = -0.02
+J = 0.0
+
+# Field
+field_strength = 0.5
+field_direction = 1, 1, 1
+
+# General settings
+use_twist_boundary = false
+initial_spin_config =               # Empty = random initialization

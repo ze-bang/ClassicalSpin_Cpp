@@ -1,0 +1,67 @@
+# Example configuration for 2DCS parameter sweep
+# Sweeps over pump frequency for 2D coherent spectroscopy
+
+# System specification
+system = tmfeo3
+lattice_size = 6, 6, 6
+spin_length = 1.0
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# Parameter sweep settings
+sweep_parameter = pump_frequency     # Sweep over pump frequency
+sweep_start = 0.0                    # Starting frequency
+sweep_end = 5.0                      # Ending frequency
+sweep_step = 0.5                     # Step size
+sweep_base_simulation = 2dcs         # Run 2DCS at each point
+
+# 2DCS parameters
+pump_amplitude = 1.0
+pump_width = 10.0
+pump_frequency = 0.0                 # Will be overridden by sweep
+pump_time = 0.0
+pump_direction = 0, 1, 0
+
+probe_amplitude = 0.1
+probe_width = 10.0
+probe_frequency = 0.0
+probe_time = 50.0
+probe_direction = 0, 1, 0
+
+# Delay time (tau) scan parameters
+tau_start = -200.0
+tau_end = 200.0
+tau_step = 2.0
+
+# MD settings
+md_time_start = -100.0
+md_time_end = 200.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = dopri5
+use_gpu = false
+
+# Output
+output_dir = output_sweep_pump_freq_2dcs
+num_trials = 1
+
+# TmFeO3 Hamiltonian parameters
+J1ab = 4.92
+J1c = 4.92
+J2ab = 0.29
+J2c = 0.29
+Ka = 0.0
+Kc = -0.09
+D1 = 0.0
+D2 = 0.0
+chii = 0.05
+e1 = 0.97
+e2 = 3.97
+
+# Field
+field_strength = 0.0
+field_direction = 0, 1, 0
+
+# General settings
+use_twist_boundary = false

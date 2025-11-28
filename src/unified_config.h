@@ -31,6 +31,7 @@ enum class SimulationType {
     MOLECULAR_DYNAMICS,
     PUMP_PROBE,
     TWOD_COHERENT_SPECTROSCOPY,  // 2DCS / pump-probe spectroscopy
+    PARAMETER_SWEEP,             // Sweep over any Hamiltonian parameter
     CUSTOM
 };
 
@@ -95,6 +96,13 @@ struct UnifiedConfig {
     double tau_start = -200.0;
     double tau_end = 200.0;
     double tau_step = 1.0;
+    
+    // Parameter sweep parameters
+    string sweep_parameter = "";      // Name of parameter to sweep
+    double sweep_start = 0.0;          // Starting value
+    double sweep_end = 1.0;            // Ending value
+    double sweep_step = 0.1;           // Step size
+    SimulationType sweep_base_simulation = SimulationType::SIMULATED_ANNEALING;  // Simulation to run at each sweep point
     
     // Field parameters
     double field_strength = 0.0;
@@ -161,6 +169,7 @@ inline SimulationType parse_simulation(const string& str) {
     if (s == "molecular_dynamics" || s == "MD" || s == "dynamics") return SimulationType::MOLECULAR_DYNAMICS;
     if (s == "pump_probe" || s == "PUMP_PROBE" || s == "pump-probe") return SimulationType::PUMP_PROBE;
     if (s == "2dcs" || s == "2DCS" || s == "spectroscopy" || s == "pump_probe_spectroscopy") return SimulationType::TWOD_COHERENT_SPECTROSCOPY;
+    if (s == "parameter_sweep" || s == "PARAMETER_SWEEP" || s == "sweep") return SimulationType::PARAMETER_SWEEP;
     if (s == "custom" || s == "CUSTOM") return SimulationType::CUSTOM;
     throw runtime_error("Unknown simulation type: " + str);
 }
@@ -383,6 +392,21 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             else if (key == "tau_step") {
                 config.tau_step = stod(value);
             }
+            else if (key == "sweep_parameter") {
+                config.sweep_parameter = value;
+            }
+            else if (key == "sweep_start") {
+                config.sweep_start = stod(value);
+            }
+            else if (key == "sweep_end") {
+                config.sweep_end = stod(value);
+            }
+            else if (key == "sweep_step") {
+                config.sweep_step = stod(value);
+            }
+            else if (key == "sweep_base_simulation") {
+                config.sweep_base_simulation = parse_simulation(value);
+            }
             else if (key == "field_strength" || key == "h") {
                 config.field_strength = stod(value);
             }
@@ -456,6 +480,8 @@ inline void UnifiedConfig::to_file(const string& filename) const {
         case SimulationType::PARALLEL_TEMPERING: file << "parallel_tempering"; break;
         case SimulationType::MOLECULAR_DYNAMICS: file << "molecular_dynamics"; break;
         case SimulationType::PUMP_PROBE: file << "pump_probe"; break;
+        case SimulationType::TWOD_COHERENT_SPECTROSCOPY: file << "2dcs"; break;
+        case SimulationType::PARAMETER_SWEEP: file << "parameter_sweep"; break;
         case SimulationType::CUSTOM: file << "custom"; break;
     }
     file << "\n";
@@ -474,6 +500,12 @@ inline void UnifiedConfig::to_file(const string& filename) const {
     file << "md_timestep = " << md_timestep << "\n";
     file << "md_integrator = " << md_integrator << "\n";
     file << "use_gpu = " << (use_gpu ? "true" : "false") << "\n\n";
+    
+    file << "# Parameter Sweep Parameters\n";
+    file << "sweep_parameter = " << sweep_parameter << "\n";
+    file << "sweep_start = " << sweep_start << "\n";
+    file << "sweep_end = " << sweep_end << "\n";
+    file << "sweep_step = " << sweep_step << "\n\n";
     
     file << "# Field Parameters\n";
     file << "field_strength = " << field_strength << "\n";
@@ -526,6 +558,8 @@ inline void UnifiedConfig::print() const {
         case SimulationType::PARALLEL_TEMPERING: cout << "Parallel Tempering"; break;
         case SimulationType::MOLECULAR_DYNAMICS: cout << "Molecular Dynamics"; break;
         case SimulationType::PUMP_PROBE: cout << "Pump-Probe"; break;
+        case SimulationType::TWOD_COHERENT_SPECTROSCOPY: cout << "2DCS Spectroscopy"; break;
+        case SimulationType::PARAMETER_SWEEP: cout << "Parameter Sweep"; break;
         case SimulationType::CUSTOM: cout << "Custom"; break;
     }
     cout << "\n";

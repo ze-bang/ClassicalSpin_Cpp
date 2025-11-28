@@ -1360,6 +1360,195 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
     }
 }
 
+/**
+ * Run parameter sweep for any Hamiltonian parameter
+ * Sweeps over specified parameter and runs the base simulation at each point
+ */
+void run_parameter_sweep(const UnifiedConfig& base_config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running parameter sweep..." << endl;
+        cout << "Sweeping parameter: " << base_config.sweep_parameter << endl;
+        cout << "Range: " << base_config.sweep_start << " to " << base_config.sweep_end 
+             << " (step: " << base_config.sweep_step << ")" << endl;
+        cout << "Base simulation: ";
+        switch (base_config.sweep_base_simulation) {
+            case SimulationType::SIMULATED_ANNEALING: cout << "Simulated Annealing"; break;
+            case SimulationType::PARALLEL_TEMPERING: cout << "Parallel Tempering"; break;
+            case SimulationType::MOLECULAR_DYNAMICS: cout << "Molecular Dynamics"; break;
+            case SimulationType::PUMP_PROBE: cout << "Pump-Probe"; break;
+            case SimulationType::TWOD_COHERENT_SPECTROSCOPY: cout << "2DCS Spectroscopy"; break;
+            default: cout << "Unknown"; break;
+        }
+        cout << endl;
+        cout << "MPI ranks: " << size << endl;
+    }
+    
+    // Calculate sweep points
+    vector<double> sweep_values;
+    for (double val = base_config.sweep_start; 
+         (base_config.sweep_step > 0 ? val <= base_config.sweep_end : val >= base_config.sweep_end); 
+         val += base_config.sweep_step) {
+        sweep_values.push_back(val);
+    }
+    
+    if (rank == 0) {
+        cout << "Number of sweep points: " << sweep_values.size() << endl;
+    }
+    
+    // Distribute sweep points across MPI ranks
+    for (size_t i = rank; i < sweep_values.size(); i += size) {
+        double param_value = sweep_values[i];
+        
+        if (rank == 0 || sweep_values.size() > 1) {
+            cout << "[Rank " << rank << "] Processing " << base_config.sweep_parameter 
+                 << " = " << param_value << " (point " << i+1 << "/" << sweep_values.size() << ")" << endl;
+        }
+        
+        // Create modified config for this sweep point
+        UnifiedConfig sweep_config = base_config;
+        sweep_config.simulation = base_config.sweep_base_simulation;
+        sweep_config.set_param(base_config.sweep_parameter, param_value);
+        
+        // Also check if it's a special field parameter
+        if (base_config.sweep_parameter == "field_strength" || base_config.sweep_parameter == "h") {
+            sweep_config.field_strength = param_value;
+        }
+        
+        // Create output directory for this sweep point
+        stringstream ss;
+        ss << base_config.output_dir << "/" << base_config.sweep_parameter 
+           << "_" << scientific << param_value;
+        sweep_config.output_dir = ss.str();
+        filesystem::create_directories(sweep_config.output_dir);
+        
+        // Build unit cell with updated parameters
+        if (sweep_config.system == SystemType::TMFEO3) {
+            MixedUnitCell mixed_uc = build_tmfeo3(sweep_config);
+            MixedLattice mixed_lattice(mixed_uc, sweep_config.lattice_size[0], 
+                                      sweep_config.lattice_size[1], 
+                                      sweep_config.lattice_size[2],
+                                      sweep_config.use_twist_boundary);
+            
+            // Initialize spins
+            if (sweep_config.use_ferromagnetic_init) {
+                SpinVector dir_su2(3);
+                dir_su2 << sweep_config.ferromagnetic_direction[0],
+                          sweep_config.ferromagnetic_direction[1],
+                          sweep_config.ferromagnetic_direction[2];
+                SpinVector dir_su3 = SpinVector::Zero(8);
+                const int su3_init_component = static_cast<int>(sweep_config.get_param("su3_init_component", 2.0));
+                if (su3_init_component >= 0 && su3_init_component < 8) {
+                    dir_su3(su3_init_component) = 1.0;
+                } else {
+                    dir_su3(2) = 1.0;  // Default to λ3
+                }
+                mixed_lattice.init_ferromagnetic(dir_su2, dir_su3);
+            } else if (!sweep_config.initial_spin_config.empty()) {
+                mixed_lattice.load_spin_config(sweep_config.initial_spin_config);
+            }
+            // else: spins already initialized randomly in constructor
+            
+            // Run appropriate simulation
+            switch (sweep_config.simulation) {
+                case SimulationType::SIMULATED_ANNEALING:
+                    run_simulated_annealing_mixed(mixed_lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::PARALLEL_TEMPERING:
+                    run_parallel_tempering_mixed(mixed_lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::MOLECULAR_DYNAMICS:
+                    run_molecular_dynamics_mixed(mixed_lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::PUMP_PROBE:
+                    run_pump_probe_mixed(mixed_lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
+                    run_2dcs_spectroscopy_mixed(mixed_lattice, sweep_config, rank, size);
+                    break;
+                default:
+                    if (rank == 0) {
+                        cerr << "Error: Unsupported base simulation for parameter sweep with mixed lattice" << endl;
+                    }
+                    break;
+            }
+        } else {
+            // Standard lattice systems - build unit cell based on system type
+            UnitCell* uc_ptr = nullptr;
+            switch (sweep_config.system) {
+                case SystemType::HONEYCOMB_BCAO:
+                    uc_ptr = new UnitCell(build_bcao_honeycomb(sweep_config));
+                    break;
+                case SystemType::HONEYCOMB_KITAEV:
+                    uc_ptr = new UnitCell(build_kitaev_honeycomb(sweep_config));
+                    break;
+                case SystemType::PYROCHLORE:
+                    uc_ptr = new UnitCell(build_pyrochlore(sweep_config));
+                    break;
+                default:
+                    if (rank == 0) {
+                        cerr << "Error: Unknown system type for parameter sweep" << endl;
+                    }
+                    MPI_Abort(MPI_COMM_WORLD, 1);
+                    return;
+            }
+            
+            Lattice lattice(*uc_ptr, sweep_config.lattice_size[0], 
+                          sweep_config.lattice_size[1], 
+                          sweep_config.lattice_size[2],
+                          sweep_config.use_twist_boundary);
+            
+            // Initialize spins
+            if (sweep_config.use_ferromagnetic_init) {
+                SpinVector dir(3);
+                dir << sweep_config.ferromagnetic_direction[0],
+                      sweep_config.ferromagnetic_direction[1],
+                      sweep_config.ferromagnetic_direction[2];
+                lattice.init_ferromagnetic(dir);
+            } else if (!sweep_config.initial_spin_config.empty()) {
+                lattice.load_spin_config(sweep_config.initial_spin_config);
+            }
+            // else: spins already initialized randomly in constructor
+            
+            // Run appropriate simulation
+            switch (sweep_config.simulation) {
+                case SimulationType::SIMULATED_ANNEALING:
+                    run_simulated_annealing(lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::PARALLEL_TEMPERING:
+                    run_parallel_tempering(lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::MOLECULAR_DYNAMICS:
+                    run_molecular_dynamics(lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::PUMP_PROBE:
+                    run_pump_probe(lattice, sweep_config, rank, size);
+                    break;
+                case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
+                    run_2dcs_spectroscopy(lattice, sweep_config, rank, size);
+                    break;
+                default:
+                    if (rank == 0) {
+                        cerr << "Error: Unsupported base simulation for parameter sweep" << endl;
+                    }
+                    break;
+            }
+            
+            // Clean up unit cell pointer
+            delete uc_ptr;
+        }
+        
+        cout << "[Rank " << rank << "] Completed " << base_config.sweep_parameter 
+             << " = " << param_value << endl;
+    }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "Parameter sweep completed (" << sweep_values.size() << " points)." << endl;
+    }
+}
+
 // ============================================================================
 // MAIN FUNCTION
 // ============================================================================
@@ -1462,6 +1651,9 @@ int main(int argc, char** argv) {
                 case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
                     run_2dcs_spectroscopy_mixed(mixed_lattice, config, rank, size);
                     break;
+                case SimulationType::PARAMETER_SWEEP:
+                    run_parameter_sweep(config, rank, size);
+                    break;
                 default:
                     if (rank == 0) {
                         cerr << "Simulation type not supported for mixed lattice\n";
@@ -1533,6 +1725,9 @@ int main(int argc, char** argv) {
                     break;
                 case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
                     run_2dcs_spectroscopy(lattice, config, rank, size);
+                    break;
+                case SimulationType::PARAMETER_SWEEP:
+                    run_parameter_sweep(config, rank, size);
                     break;
                 default:
                     if (rank == 0) {
