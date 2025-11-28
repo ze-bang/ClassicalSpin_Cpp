@@ -11,6 +11,7 @@
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
+#include <cmath>
 
 using namespace std;
 
@@ -63,6 +64,7 @@ struct UnifiedConfig {
     double md_time_start = 0.0;
     double md_time_end = 100.0;
     double md_timestep = 0.01;
+    size_t md_save_interval = 1;  // Save every N steps
     string md_integrator = "dopri5";  // euler, rk2, rk4, rk5, dopri5, rk78, bulirsch_stoer
     bool use_gpu = false;
     
@@ -259,7 +261,7 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             else if (key == "spin_length") {
                 config.spin_length = stof(value);
             }
-            else if (key == "simulation" || key == "simulation_type") {
+            else if (key == "simulation_mode") {
                 config.simulation = parse_simulation(value);
             }
             else if (key == "num_trials") {
@@ -306,6 +308,9 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             }
             else if (key == "md_timestep" || key == "dt") {
                 config.md_timestep = stod(value);
+            }
+            else if (key == "md_save_interval") {
+                config.md_save_interval = stoull(value);
             }
             else if (key == "md_integrator" || key == "integrator") {
                 config.md_integrator = value;
@@ -375,6 +380,14 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             }
             else if (key == "field_direction") {
                 config.field_direction = parse_vector3(value);
+                double norm = std::sqrt(
+                    config.field_direction[0]*config.field_direction[0] +
+                    config.field_direction[1]*config.field_direction[1] +
+                    config.field_direction[2]*config.field_direction[2]
+                );
+                for (auto& comp : config.field_direction) {
+                    comp /= norm;
+                }
             }
             else if (key == "g_factor") {
                 config.g_factor = parse_vector3(value);

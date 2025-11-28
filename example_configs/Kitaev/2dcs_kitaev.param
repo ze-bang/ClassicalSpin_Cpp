@@ -21,7 +21,7 @@ field_direction = 0.577,0.577,0.577
 
 # Equilibration
 T_start = 5.0               # Annealing start
-T_end = 0.01                # Annealing end
+T_end = 0.001                # Annealing end
 annealing_steps = 1000
 use_twist_boundary = false
 

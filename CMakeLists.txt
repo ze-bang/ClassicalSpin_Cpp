@@ -130,17 +130,20 @@ if(CUDA_SOURCE_FILES)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/dynamics>
         $<INSTALL_INTERFACE:include>
         ${Boost_INCLUDE_DIRS}
+        ${HDF5_INCLUDE_DIRS}
     )
     
     target_link_libraries(cuda_lib PUBLIC 
         Eigen3::Eigen
         CUDA::cudart CUDA::cublas CUDA::curand
         MPI::MPI_CXX
+        ${HDF5_CXX_LIBRARIES}
     )
     
     target_compile_definitions(cuda_lib PUBLIC 
         THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA
         MPI_ENABLED
+        HDF5_ENABLED
     )
     
     target_compile_options(cuda_lib PRIVATE
@@ -193,7 +196,7 @@ endfunction()
 # ============================================================================
 
 # Main unified simulation executable
-add_optimized_executable(unified_simulation src/unified_simulation.cpp)
+add_optimized_executable(unified_simulation src/unified_simulation.cu)
 
 
 # ============================================================================

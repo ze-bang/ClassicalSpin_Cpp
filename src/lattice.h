@@ -3,6 +3,7 @@
 
 #include "unitcell.h"
 #include "simple_linear_alg.h"
+#include "hdf5_io.h"
 #include <vector>
 #include <functional>
 #include <random>

@@ -539,14 +539,13 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
         cout << "Integration method: " << config.md_integrator << endl;
     }
     
-    const size_t save_interval = static_cast<size_t>(config.get_param("md_save_interval", 100.0));
     
     lattice.molecular_dynamics(
         config.md_time_start,
         config.md_time_end,
         config.md_timestep,
         config.output_dir,
-        save_interval,
+        config.md_save_interval,
         config.md_integrator,
         config.use_gpu
     );
@@ -849,14 +848,13 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& co
         cout << "Integration method: " << config.md_integrator << endl;
     }
     
-    const size_t save_interval = static_cast<size_t>(config.get_param("md_save_interval", 100.0));
     
     lattice.molecular_dynamics(
         config.md_time_start,
         config.md_time_end,
         config.md_timestep,
         config.output_dir,
-        save_interval,
+        config.md_save_interval,
         config.md_integrator,
         config.use_gpu
     );

@@ -3588,9 +3588,10 @@ private:
                 
                 compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), total_SU2, 
                     lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
-                    }
                     
-                    // Transform to global frame using sublattice frame
+                // Transform to global frame using sublattice frame
+                for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                    size_t atom = i % N_atoms_SU3;
                     for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
                             M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[total_SU2 + i * spin_dim_SU3 + nu];
@@ -3699,9 +3700,10 @@ private:
                 
                 compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), total_SU2, 
                     lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
-                    }
                     
-                    // Transform to global frame using sublattice frame
+                // Transform to global frame using sublattice frame
+                for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                    size_t atom = i % N_atoms_SU3;
                     for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
                             M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[total_SU2 + i * spin_dim_SU3 + nu];

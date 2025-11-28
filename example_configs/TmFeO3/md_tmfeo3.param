@@ -7,7 +7,7 @@ system = tmfeo3
 simulation_mode = molecular_dynamics
 
 # Lattice Size (for mixed Fe + Tm lattice)
-lattice_size = 4,4,4
+lattice_size = 8,8,8
 
 # Fe Exchange Interaction Parameters (in meV)
 J1ab = 4.92     # In-plane nearest neighbor
@@ -32,7 +32,7 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
-chii = 0.05     # χ parameter
+chii = 0.0     # χ parameter
 
 # Magnetic Field
 field_strength = 0.0
@@ -41,18 +41,18 @@ field_direction = 0,1,0
 # Simulated Annealing (equilibration)
 T_start = 10.0
 T_end = 0.01
-annealing_steps = 10000
-overrelaxation_rate = 0
+annealing_steps = 1000
+overrelaxation_rate = 1
 use_twist_boundary = false
-gaussian_move = true
+gaussian_move = false
 
 # Molecular Dynamics
 md_time_start = 0.0
 md_time_end = 400.0
 md_timestep = 0.01
 md_save_interval = 100
-md_integrator = rk4
-use_gpu = false
+md_integrator = rk5
+use_gpu = true
 
 # Output
 output_dir = TmFeO3_md

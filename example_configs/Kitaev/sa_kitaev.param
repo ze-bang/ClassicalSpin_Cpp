@@ -29,5 +29,5 @@ use_twist_boundary = false
 
 
 # Output
-output_dir = KITAEV_md/0
+output_dir = KITAEV_sa/0
 save_observables = true
