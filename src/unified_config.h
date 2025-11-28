@@ -98,10 +98,17 @@ struct UnifiedConfig {
     double tau_step = 1.0;
     
     // Parameter sweep parameters
-    string sweep_parameter = "";      // Name of parameter to sweep
-    double sweep_start = 0.0;          // Starting value
-    double sweep_end = 1.0;            // Ending value
-    double sweep_step = 0.1;           // Step size
+    string sweep_parameter = "";      // Name of parameter to sweep (deprecated, use sweep_parameters)
+    double sweep_start = 0.0;          // Starting value (deprecated)
+    double sweep_end = 1.0;            // Ending value (deprecated)
+    double sweep_step = 0.1;           // Step size (deprecated)
+    
+    // N-dimensional parameter sweep
+    vector<string> sweep_parameters;   // Names of parameters to sweep
+    vector<double> sweep_starts;       // Starting values for each parameter
+    vector<double> sweep_ends;         // Ending values for each parameter
+    vector<double> sweep_steps;        // Step sizes for each parameter
+    
     SimulationType sweep_base_simulation = SimulationType::SIMULATED_ANNEALING;  // Simulation to run at each sweep point
     
     // Field parameters
@@ -219,6 +226,34 @@ inline vector<int> parse_int_list(const string& str) {
     string item;
     while (getline(ss, item, ',')) {
         result.push_back(stoi(trim(item)));
+    }
+    return result;
+}
+
+inline vector<double> parse_double_list(const string& str) {
+    vector<double> result;
+    string s = trim(str);
+    s.erase(std::remove(s.begin(), s.end(), '['), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ']'), s.end());
+    
+    stringstream ss(s);
+    string item;
+    while (getline(ss, item, ',')) {
+        result.push_back(stod(trim(item)));
+    }
+    return result;
+}
+
+inline vector<string> parse_string_list(const string& str) {
+    vector<string> result;
+    string s = trim(str);
+    s.erase(std::remove(s.begin(), s.end(), '['), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ']'), s.end());
+    
+    stringstream ss(s);
+    string item;
+    while (getline(ss, item, ',')) {
+        result.push_back(trim(item));
     }
     return result;
 }
@@ -394,15 +429,40 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             }
             else if (key == "sweep_parameter") {
                 config.sweep_parameter = value;
+                // For backward compatibility, also populate new arrays
+                if (!value.empty() && config.sweep_parameters.empty()) {
+                    config.sweep_parameters.push_back(value);
+                }
             }
             else if (key == "sweep_start") {
                 config.sweep_start = stod(value);
+                if (config.sweep_starts.empty()) {
+                    config.sweep_starts.push_back(stod(value));
+                }
             }
             else if (key == "sweep_end") {
                 config.sweep_end = stod(value);
+                if (config.sweep_ends.empty()) {
+                    config.sweep_ends.push_back(stod(value));
+                }
             }
             else if (key == "sweep_step") {
                 config.sweep_step = stod(value);
+                if (config.sweep_steps.empty()) {
+                    config.sweep_steps.push_back(stod(value));
+                }
+            }
+            else if (key == "sweep_parameters") {
+                config.sweep_parameters = parse_string_list(value);
+            }
+            else if (key == "sweep_starts") {
+                config.sweep_starts = parse_double_list(value);
+            }
+            else if (key == "sweep_ends") {
+                config.sweep_ends = parse_double_list(value);
+            }
+            else if (key == "sweep_steps") {
+                config.sweep_steps = parse_double_list(value);
             }
             else if (key == "sweep_base_simulation") {
                 config.sweep_base_simulation = parse_simulation(value);
