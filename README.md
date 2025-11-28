@@ -2,7 +2,7 @@
 
 **Unified Framework for Classical Spin Dynamics Simulations**
 
-A high-performance C++ simulation framework for studying frustrated magnetic systems including Ba₃CoSb₂O₉ (BCAO), Kitaev honeycomb models, pyrochlore lattices, and mixed SU(2)×SU(3) systems like TmFeO₃.
+A high-performance C++ simulation framework for studying frustrated magnetic systems including BCAO, Kitaev honeycomb models, pyrochlore lattices, and mixed SU(2)×SU(3) systems like TmFeO₃.
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
@@ -64,7 +64,7 @@ This framework provides a **unified interface** for running various types of cla
 <th>Key Interactions</th>
 </tr>
 <tr>
-<td><b>BCAO</b><br>(Ba₃CoSb₂O₉)</td>
+<td><b>BCAO</b><br>(BCAO)</td>
 <td>Honeycomb</td>
 <td>SU(2)</td>
 <td>
