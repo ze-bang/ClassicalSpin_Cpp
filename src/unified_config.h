@@ -55,6 +55,9 @@ struct UnifiedConfig {
     size_t annealing_steps = 100000;
     size_t equilibration_steps = 1000;
     double cooling_rate = 0.9;
+    bool gaussian_move = false;
+    bool save_observables = true;
+    bool deterministic = false;
     
     // Molecular dynamics parameters
     double md_time_start = 0.0;
@@ -285,6 +288,15 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             }
             else if (key == "cooling_rate") {
                 config.cooling_rate = stod(value);
+            }
+            else if (key == "gaussian_move") {
+                config.gaussian_move = parse_bool(value);
+            }
+            else if (key == "save_observables") {
+                config.save_observables = parse_bool(value);
+            }
+            else if (key == "deterministic") {
+                config.deterministic = parse_bool(value);
             }
             else if (key == "md_time_start") {
                 config.md_time_start = stod(value);

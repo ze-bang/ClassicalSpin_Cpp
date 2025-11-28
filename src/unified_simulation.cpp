@@ -434,10 +434,10 @@ void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int 
         config.annealing_steps,
         config.overrelaxation_rate,
         config.use_twist_boundary,
-        true,  // gaussian_move
+        config.gaussian_move,
         config.cooling_rate,
         config.output_dir,
-        true   // save_observables
+        config.save_observables
     );
     
     // Save final configuration
@@ -480,7 +480,7 @@ void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int r
         config.probe_rate,
         config.output_dir,
         config.ranks_to_write,
-        true  // gaussian_move
+        config.gaussian_move
     );
     
     if (rank == 0) {
@@ -527,7 +527,7 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
         config.T_start,
         config.T_end,
         config.annealing_steps,
-        0,
+        config.overrelaxation_rate,
         config.use_twist_boundary
     );
     
@@ -582,7 +582,7 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
         config.T_start,
         config.T_end,
         config.annealing_steps,
-        0,
+        config.overrelaxation_rate,
         config.use_twist_boundary
     );
     
@@ -594,25 +594,54 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
         cout << "Probe: t=" << config.probe_time << ", A=" << config.probe_amplitude << endl;
     }
     
-    // Note: Pump-probe functionality needs to be implemented in lattice.h
-    // For now, we run standard MD and note that pulse implementation is needed
-    if (rank == 0) {
-        cout << "Warning: Full pump-probe implementation requires pulse field setup in lattice class" << endl;
-        cout << "Running standard MD for now..." << endl;
+    // Setup pulse field directions (one per sublattice)
+    vector<Eigen::VectorXd> field_dirs;
+    auto pump_dir_norm = config.pump_direction;
+    double norm = sqrt(pump_dir_norm[0]*pump_dir_norm[0] + 
+                      pump_dir_norm[1]*pump_dir_norm[1] + 
+                      pump_dir_norm[2]*pump_dir_norm[2]);
+    if (norm > 1e-10) {
+        pump_dir_norm[0] /= norm;
+        pump_dir_norm[1] /= norm;
+        pump_dir_norm[2] /= norm;
     }
     
-    // Run MD
-    const size_t save_interval = static_cast<size_t>(config.get_param("md_save_interval", 100.0));
+    for (size_t i = 0; i < lattice.N_atoms; ++i) {
+        Eigen::VectorXd field_dir(3);
+        field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+        field_dirs.push_back(field_dir);
+    }
     
-    lattice.molecular_dynamics(
+    if (rank == 0) {
+        cout << "Pulse direction: [" << pump_dir_norm[0] << ", " 
+             << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+    }
+    
+    // Run single pulse magnetization dynamics
+    auto trajectory = lattice.single_pulse_drive(
+        field_dirs,
+        config.pump_time,
+        config.pump_amplitude,
+        config.pump_width,
+        config.pump_frequency,
         config.md_time_start,
         config.md_time_end,
         config.md_timestep,
-        config.output_dir,
-        save_interval,
         config.md_integrator,
         config.use_gpu
     );
+    
+    // Save trajectory
+    if (rank == 0) {
+        ofstream traj_file(config.output_dir + "/pump_probe_trajectory.txt");
+        for (const auto& [t, mag_data] : trajectory) {
+            traj_file << t << " "
+                     << mag_data[0].transpose() << " "  // mag antiferro
+                     << mag_data[1].transpose() << " "  // mag local
+                     << mag_data[2].transpose() << "\n"; // mag global
+        }
+        traj_file.close();
+    }
     
     if (rank == 0) {
         cout << "Pump-probe simulation completed." << endl;
@@ -648,12 +677,12 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
         config.T_start,
         config.T_end,
         config.annealing_steps,
-        config.equilibration_steps,
+        config.overrelaxation_rate,
         config.use_twist_boundary,
-        false,  // deterministic
+        config.gaussian_move,
         config.cooling_rate,
         config.output_dir,
-        true    // save_observables
+        config.save_observables
     );
     
     // Setup pulse field directions (one per sublattice)
@@ -706,7 +735,7 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
         config.T_end,
         config.annealing_steps,
         false,  // T_zero_quench
-        config.equilibration_steps,
+        config.overrelaxation_rate,
         config.output_dir,
         config.md_integrator,
         config.use_gpu
@@ -737,10 +766,10 @@ void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& c
         config.T_start,
         config.T_end,
         config.annealing_steps,
-        true,  // gaussian_move
+        config.gaussian_move,
         config.cooling_rate,
         config.output_dir,
-        true   // save_observables
+        config.save_observables
     );
     
     // Save final configuration
@@ -778,12 +807,12 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& co
         temps,
         config.annealing_steps,
         config.annealing_steps,
-        0,  // overrelaxation_rate
+        config.overrelaxation_rate,
         config.pt_exchange_frequency,
         config.probe_rate,
         config.output_dir,
         config.ranks_to_write,
-        true  // gaussian_move
+        config.gaussian_move
     );
     
     if (rank == 0) {
@@ -809,42 +838,32 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& co
         config.T_start,
         config.T_end,
         config.annealing_steps,
-        true
+        config.gaussian_move
     );
     
     // Run MD
     if (rank == 0) {
         cout << "Starting MD integration..." << endl;
+        cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
+        cout << "Timestep: " << config.md_timestep << endl;
+        cout << "Integration method: " << config.md_integrator << endl;
     }
     
-    // Create pump fields
-    vector<SpinVector> pump_su2(lattice.lattice_size_SU2, SpinVector::Zero(3));
-    vector<SpinVector> pump_su3(lattice.lattice_size_SU3, SpinVector::Zero(8));
-    vector<SpinVector> probe_su2(lattice.lattice_size_SU2, SpinVector::Zero(3));
-    vector<SpinVector> probe_su3(lattice.lattice_size_SU3, SpinVector::Zero(8));
+    const size_t save_interval = static_cast<size_t>(config.get_param("md_save_interval", 100.0));
     
-    auto trajectory = lattice.M_B_t(
-        pump_su2, pump_su3, config.pump_time,
-        config.pump_amplitude, config.pump_width, config.pump_frequency,
-        config.probe_amplitude, config.probe_width, config.probe_frequency,
-        config.md_time_start, config.md_time_end, config.md_timestep,
-        config.md_integrator, config.use_gpu
+    lattice.molecular_dynamics(
+        config.md_time_start,
+        config.md_time_end,
+        config.md_timestep,
+        config.output_dir,
+        save_interval,
+        config.md_integrator,
+        config.use_gpu
     );
     
-    // Save trajectory
     if (rank == 0) {
-        ofstream traj_file(config.output_dir + "/trajectory.txt");
-        for (const auto& [t, mag_data] : trajectory) {
-            traj_file << t << " "
-                     << mag_data.first[0].transpose() << " "  // SU2 mag antiferro
-                     << mag_data.first[1].transpose() << " "  // SU2 mag local
-                     << mag_data.first[2].transpose() << " "  // SU2 mag global
-                     << mag_data.second[0].transpose() << " " // SU3 mag antiferro
-                     << mag_data.second[1].transpose() << " " // SU3 mag local
-                     << mag_data.second[2].transpose() << "\n"; // SU3 mag global
-        }
-        traj_file.close();
         cout << "Molecular dynamics completed." << endl;
+        cout << "Results saved to: " << config.output_dir << "/trajectory_mixed.h5" << endl;
     }
 }
 
@@ -866,17 +885,17 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
         config.T_start,
         config.T_end,
         config.annealing_steps,
-        true
+        config.gaussian_move
     );
     
-    // Setup pump and probe fields
+    // Setup pump field directions
     if (rank == 0) {
         cout << "Setting up pump-probe pulses..." << endl;
     }
     
-    // Create pump fields for SU2 (Fe) and SU3 (Tm)
-    vector<SpinVector> pump_su2(lattice.lattice_size_SU2);
-    vector<SpinVector> pump_su3(lattice.lattice_size_SU3);
+    // Create field directions for SU2 (Fe) and SU3 (Tm)
+    vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
+    vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
     
     SpinVector pump_dir_su2(3);
     pump_dir_su2 << config.pump_direction[0], config.pump_direction[1], config.pump_direction[2];
@@ -892,21 +911,21 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
     }
     
     for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
-        pump_su2[i] = config.pump_amplitude * pump_dir_su2;
+        field_dirs_su2[i] = pump_dir_su2;
     }
     for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
-        pump_su3[i] = config.pump_amplitude * pump_dir_su3;
+        field_dirs_su3[i] = pump_dir_su3;
     }
     
-    // Run MD with pump-probe
+    // Run single pulse magnetization dynamics
     if (rank == 0) {
         cout << "Running pump-probe dynamics..." << endl;
     }
     
-    auto trajectory = lattice.M_B_t(
-        pump_su2, pump_su3, config.pump_time,
+    auto trajectory = lattice.single_pulse_drive(
+        field_dirs_su2, field_dirs_su3, config.pump_time,
         config.pump_amplitude, config.pump_width, config.pump_frequency,
-        config.probe_amplitude, config.probe_width, config.probe_frequency,
+        config.pump_amplitude, config.pump_width, config.pump_frequency,
         config.md_time_start, config.md_time_end, config.md_timestep,
         config.md_integrator, config.use_gpu
     );
@@ -925,6 +944,110 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
         }
         traj_file.close();
         cout << "Pump-probe simulation completed." << endl;
+    }
+}
+
+/**
+ * Run 2D coherent spectroscopy (2DCS) for mixed lattice
+ */
+void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
+    if (rank == 0) {
+        cout << "Running 2D coherent spectroscopy (2DCS) on mixed lattice..." << endl;
+        cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
+             << " (step: " << config.tau_step << ")" << endl;
+        if (config.use_gpu) {
+#ifdef CUDA_ENABLED
+            cout << "GPU acceleration: ENABLED" << endl;
+#else
+            cout << "GPU acceleration: REQUESTED but not available" << endl;
+#endif
+        }
+    }
+    
+    filesystem::create_directories(config.output_dir);
+    
+    // First equilibrate to ground state
+    if (rank == 0) {
+        cout << "\n[1/3] Equilibrating to ground state..." << endl;
+    }
+    lattice.simulated_annealing(
+        config.T_start,
+        config.T_end,
+        config.annealing_steps,
+        config.gaussian_move,
+        config.cooling_rate,
+        config.output_dir,
+        config.save_observables
+    );
+    
+    // Setup pulse field directions
+    vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
+    vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
+    
+    SpinVector pump_dir_su2(3);
+    pump_dir_su2 << config.pump_direction[0], config.pump_direction[1], config.pump_direction[2];
+    pump_dir_su2.normalize();
+    
+    // For SU3, pump direction in Gell-Mann basis (default: λ3)
+    const int su3_pump_component = static_cast<int>(config.get_param("su3_pump_component", 2.0));
+    SpinVector pump_dir_su3 = SpinVector::Zero(8);
+    if (su3_pump_component >= 0 && su3_pump_component < 8) {
+        pump_dir_su3(su3_pump_component) = 1.0;
+    } else {
+        pump_dir_su3(2) = 1.0;  // Default to λ3
+    }
+    
+    for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+        field_dirs_su2[i] = pump_dir_su2;
+    }
+    for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+        field_dirs_su3[i] = pump_dir_su3;
+    }
+    
+    if (rank == 0) {
+        cout << "\n[2/3] Pulse configuration:" << endl;
+        cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
+        cout << "  SU2 Width: " << config.pump_width << endl;
+        cout << "  SU2 Frequency: " << config.pump_frequency << endl;
+        cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
+        cout << "  SU3 Component: λ" << su3_pump_component << endl;
+        cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
+    }
+    
+    // Run the full 2DCS scan using mixed lattice method
+    lattice.pump_probe_spectroscopy(
+        field_dirs_su2,
+        field_dirs_su3,
+        config.pump_amplitude,
+        config.pump_width,
+        config.pump_frequency,
+        config.pump_amplitude,
+        config.pump_width,
+        config.pump_frequency,
+        config.tau_start,
+        config.tau_end,
+        config.tau_step,
+        config.md_time_start,
+        config.md_time_end,
+        config.md_timestep,
+        config.T_start,
+        config.T_end,
+        config.annealing_steps,
+        false,  // T_zero_quench
+        config.overrelaxation_rate,
+        config.output_dir,
+        config.md_integrator,
+        config.use_gpu
+    );
+    
+    if (rank == 0) {
+        cout << "\n2DCS spectroscopy completed!" << endl;
+        cout << "Results saved to: " << config.output_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
+        cout << "\nTo analyze:" << endl;
+        cout << "  - M0(t): Reference single-pulse response" << endl;
+        cout << "  - M1(t,tau): Probe-only response at delay tau" << endl;
+        cout << "  - M01(t,tau): Two-pulse response (pump + probe)" << endl;
+        cout << "  - Nonlinear signal: M01 - M0 - M1" << endl;
     }
 }
 
@@ -1028,10 +1151,7 @@ int main(int argc, char** argv) {
                     run_pump_probe_mixed(mixed_lattice, config, rank);
                     break;
                 case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
-                    if (rank == 0) {
-                        cerr << "2DCS spectroscopy not yet implemented for mixed (TmFeO3) lattice." << endl;
-                        cerr << "Use legacy TmFeO3_2DCS.cpp script instead." << endl;
-                    }
+                    run_2dcs_spectroscopy_mixed(mixed_lattice, config, rank);
                     break;
                 default:
                     if (rank == 0) {

@@ -2616,7 +2616,7 @@ public:
      * Molecular dynamics with single pulse field for SU(2) sublattice
      * Returns magnetization trajectory without I/O
      */
-    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> M_B_t(
+    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> single_pulse_drive(
                const vector<SpinVector>& field_in_SU2, const vector<SpinVector>& field_in_SU3,
                double t_B,
                double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
@@ -2626,7 +2626,7 @@ public:
         
         if (use_gpu) {
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
-            return M_B_t_gpu(field_in_SU2, field_in_SU3, t_B,
+            return single_pulse_drive_gpu(field_in_SU2, field_in_SU3, t_B,
                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                             T_start, T_end, step_size, method);
@@ -2724,7 +2724,7 @@ public:
      * Molecular dynamics with two-pulse field
      * Returns magnetization trajectory without I/O
      */
-    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> M_BA_BB_t(
+    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> double_pulse_drive(
                const vector<SpinVector>& field_in_1_SU2, const vector<SpinVector>& field_in_1_SU3,
                double t_B_1,
                const vector<SpinVector>& field_in_2_SU2, const vector<SpinVector>& field_in_2_SU3,
@@ -2736,7 +2736,7 @@ public:
         
         if (use_gpu) {
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
-            return M_BA_BB_t_gpu(field_in_1_SU2, field_in_1_SU3, t_B_1,
+            return double_pulse_drive_gpu(field_in_1_SU2, field_in_1_SU3, t_B_1,
                                 field_in_2_SU2, field_in_2_SU3, t_B_2,
                                 pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                 pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
@@ -3033,7 +3033,7 @@ public:
         // Step 2: Reference single-pulse dynamics (pump at t=0)
         cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
         if (use_gpu) cout << "  Using GPU acceleration" << endl;
-        auto M0_trajectory = M_B_t(field_in_SU2, field_in_SU3, 0.0,
+        auto M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                    T_start, T_end, T_step, method, use_gpu);
@@ -3064,7 +3064,7 @@ public:
             
             // M1: Probe pulse only at tau
             cout << "  Computing M1 (probe at tau)..." << endl;
-            auto M1_traj = M_B_t(field_in_SU2, field_in_SU3, current_tau,
+            auto M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
                                 pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                 pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                 T_start, T_end, T_step, method, use_gpu);
@@ -3076,7 +3076,7 @@ public:
             
             // M01: Pump at 0 + Probe at tau
             cout << "  Computing M01 (pump + probe)..." << endl;
-            auto M01_traj = M_BA_BB_t(field_in_SU2, field_in_SU3, 0.0,
+            auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
                                      field_in_SU2, field_in_SU3, current_tau,
                                      pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                      pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
@@ -3519,12 +3519,12 @@ private:
     }
     
     /**
-     * GPU version of M_B_t for mixed lattice
+     * GPU version of single_pulse_drive for mixed lattice
      * Returns nested pair: outer=(SU2_results, SU3_results), 
      * inner for each = (M_antiferro, M_local)
      */
     vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>>
-    M_B_t_gpu(const vector<SpinVector>& field_in_SU2,
+    single_pulse_drive_gpu(const vector<SpinVector>& field_in_SU2,
               const vector<SpinVector>& field_in_SU3,
               double t_B,
               double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
@@ -3631,10 +3631,10 @@ private:
     }
     
     /**
-     * GPU version of M_BA_BB_t for mixed lattice
+     * GPU version of double_pulse_drive for mixed lattice
      */
     vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>>
-    M_BA_BB_t_gpu(const vector<SpinVector>& field_in_1_SU2,
+    double_pulse_drive_gpu(const vector<SpinVector>& field_in_1_SU2,
                   const vector<SpinVector>& field_in_1_SU3,
                   double t_B_1,
                   const vector<SpinVector>& field_in_2_SU2,

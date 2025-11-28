@@ -3049,7 +3049,7 @@ public:
      * Returns magnetization trajectory without I/O
      * @param use_gpu Enable GPU acceleration
      */
-    vector<pair<double, array<SpinVector, 3>>> M_B_t(
+    vector<pair<double, array<SpinVector, 3>>> single_pulse_drive(
                const vector<SpinVector>& field_in, double t_B, 
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
@@ -3057,7 +3057,7 @@ public:
         
         if (use_gpu) {
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
-            return M_B_t_gpu(field_in, t_B, pulse_amp, pulse_width, pulse_freq, 
+            return single_pulse_drive_gpu(field_in, t_B, pulse_amp, pulse_width, pulse_freq, 
                             T_start, T_end, step_size, method);
 #else
             std::cerr << "Warning: GPU support not available in this compilation unit." << endl;
@@ -3130,7 +3130,7 @@ public:
      * Returns magnetization trajectory without I/O
      * @param use_gpu Enable GPU acceleration
      */
-    vector<pair<double, array<SpinVector, 3>>> M_BA_BB_t(
+    vector<pair<double, array<SpinVector, 3>>> double_pulse_drive(
                    const vector<SpinVector>& field_in_1, double t_B_1,
                    const vector<SpinVector>& field_in_2, double t_B_2,
                    double pulse_amp, double pulse_width, double pulse_freq,
@@ -3139,8 +3139,8 @@ public:
         
         if (use_gpu) {
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
-            return M_BA_BB_t_gpu(field_in_1, t_B_1, field_in_2, t_B_2, 
-                                pulse_amp, pulse_width, pulse_freq, 
+            return double_pulse_drive_gpu(field_in_1, t_B_1, field_in_2, t_B_2, 
+                                pulse_amp, pulse_width, pulse_freq,
                                 T_start, T_end, step_size, method);
 #else
             std::cerr << "Warning: GPU support not available in this compilation unit." << endl;
@@ -3276,7 +3276,7 @@ public:
         // Step 2: Reference single-pulse dynamics (pump at t=0)
         cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
         if (use_gpu) cout << "  Using GPU acceleration" << endl;
-        auto M0_trajectory = M_B_t(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
+        auto M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
                                    T_start, T_end, T_step, method, use_gpu);
         
         // Step 3: Delay time scan
@@ -3303,7 +3303,7 @@ public:
             
             // M1: Probe pulse only at time tau
             cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
-            auto M1_trajectory = M_B_t(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
+            auto M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
                                        T_start, T_end, T_step, method, use_gpu);
             M1_trajectories.push_back(M1_trajectory);
             
@@ -3312,7 +3312,7 @@ public:
             
             // M01: Pump at t=0 + Probe at t=tau
             cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
-            auto M01_trajectory = M_BA_BB_t(field_in, 0.0, field_in, current_tau,
+            auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
                                             pulse_amp, pulse_width, pulse_freq,
                                             T_start, T_end, T_step, method, use_gpu);
             M01_trajectories.push_back(M01_trajectory);
@@ -3373,7 +3373,7 @@ public:
         cout << "==========================================" << endl;
     }
 
-    // Note: GPU-accelerated methods (molecular_dynamics_gpu, M_B_t_gpu, M_BA_BB_t_gpu)
+    // Note: GPU-accelerated methods (molecular_dynamics_gpu, single_pulse_drive_gpu, double_pulse_drive_gpu)
     // are available when compiling with CUDA (.cu files). 
     // For C++ compilation, use_gpu parameter will automatically fallback to CPU implementation.
     // See GPU_MD_IMPLEMENTATION.md for details.
@@ -3534,15 +3534,13 @@ private:
     }
     
     /**
-     * GPU version of M_B_t
+     * GPU version of single_pulse_drive
      */
-    vector<pair<double, array<SpinVector, 3>>> M_B_t_gpu(
-               const vector<SpinVector>& field_in, double t_B, 
+    vector<pair<double, array<SpinVector, 3>>> single_pulse_drive_gpu(
+               const vector<SpinVector>& field_in, double t_B,
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
-               string method = "dopri5") {
-        
-        // Set up pulse
+               string method = "dopri5") {        // Set up pulse
         set_pulse(field_in, t_B, vector<SpinVector>(N_atoms, SpinVector::Zero(spin_dim)), 
                  0.0, pulse_amp, pulse_width, pulse_freq);
         
@@ -3603,16 +3601,14 @@ private:
     }
     
     /**
-     * GPU version of M_BA_BB_t
+     * GPU version of double_pulse_drive
      */
-    vector<pair<double, array<SpinVector, 3>>> M_BA_BB_t_gpu(
-                   const vector<SpinVector>& field_in_1, double t_B_1,
-                   const vector<SpinVector>& field_in_2, double t_B_2,
-                   double pulse_amp, double pulse_width, double pulse_freq,
-                   double T_start, double T_end, double step_size,
-                   string method = "dopri5") {
-        
-        // Set up two-pulse configuration
+    vector<pair<double, array<SpinVector, 3>>> double_pulse_drive_gpu(
+               const vector<SpinVector>& field_in_1, double t_B_1,
+               const vector<SpinVector>& field_in_2, double t_B_2,
+               double pulse_amp, double pulse_width, double pulse_freq,
+               double T_start, double T_end, double step_size,
+               string method = "dopri5") {        // Set up two-pulse configuration
         set_pulse(field_in_1, t_B_1, field_in_2, t_B_2, 
                  pulse_amp, pulse_width, pulse_freq);
         
