@@ -29,6 +29,7 @@ enum class SimulationType {
     PARALLEL_TEMPERING,
     MOLECULAR_DYNAMICS,
     PUMP_PROBE,
+    TWOD_COHERENT_SPECTROSCOPY,  // 2DCS / pump-probe spectroscopy
     CUSTOM
 };
 
@@ -82,6 +83,11 @@ struct UnifiedConfig {
     double probe_frequency = 0.0;
     double probe_time = 50.0;
     array<double, 3> probe_direction = {0, 1, 0};
+    
+    // 2DCS spectroscopy parameters (delay time scan)
+    double tau_start = -200.0;
+    double tau_end = 200.0;
+    double tau_step = 1.0;
     
     // Field parameters
     double field_strength = 0.0;
@@ -147,6 +153,7 @@ inline SimulationType parse_simulation(const string& str) {
     if (s == "parallel_tempering" || s == "PT" || s == "tempering") return SimulationType::PARALLEL_TEMPERING;
     if (s == "molecular_dynamics" || s == "MD" || s == "dynamics") return SimulationType::MOLECULAR_DYNAMICS;
     if (s == "pump_probe" || s == "PUMP_PROBE" || s == "pump-probe") return SimulationType::PUMP_PROBE;
+    if (s == "2dcs" || s == "2DCS" || s == "spectroscopy" || s == "pump_probe_spectroscopy") return SimulationType::TWOD_COHERENT_SPECTROSCOPY;
     if (s == "custom" || s == "CUSTOM") return SimulationType::CUSTOM;
     throw runtime_error("Unknown simulation type: " + str);
 }
@@ -341,6 +348,15 @@ inline UnifiedConfig UnifiedConfig::from_file(const string& filename) {
             }
             else if (key == "probe_direction") {
                 config.probe_direction = parse_vector3(value);
+            }
+            else if (key == "tau_start") {
+                config.tau_start = stod(value);
+            }
+            else if (key == "tau_end") {
+                config.tau_end = stod(value);
+            }
+            else if (key == "tau_step") {
+                config.tau_step = stod(value);
             }
             else if (key == "field_strength" || key == "h") {
                 config.field_strength = stod(value);

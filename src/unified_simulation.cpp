@@ -621,6 +621,109 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
 }
 
 /**
+ * Run 2D coherent spectroscopy (2DCS) / pump-probe spectroscopy
+ * This is equivalent to pump-probe with a delay time (tau) scan
+ */
+void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int rank) {
+    if (rank == 0) {
+        cout << "Running 2D coherent spectroscopy (2DCS)..." << endl;
+        cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
+             << " (step: " << config.tau_step << ")" << endl;
+        if (config.use_gpu) {
+#ifdef CUDA_ENABLED
+            cout << "GPU acceleration: ENABLED" << endl;
+#else
+            cout << "GPU acceleration: REQUESTED but not available" << endl;
+#endif
+        }
+    }
+    
+    filesystem::create_directories(config.output_dir);
+    
+    // First equilibrate to ground state
+    if (rank == 0) {
+        cout << "\n[1/3] Equilibrating to ground state..." << endl;
+    }
+    lattice.simulated_annealing(
+        config.T_start,
+        config.T_end,
+        config.annealing_steps,
+        config.equilibration_steps,
+        config.use_twist_boundary,
+        false,  // deterministic
+        config.cooling_rate,
+        config.output_dir,
+        true    // save_observables
+    );
+    
+    // Setup pulse field directions (one per sublattice)
+    vector<Eigen::VectorXd> field_dirs;
+    auto pump_dir_norm = config.pump_direction;
+    double norm = sqrt(pump_dir_norm[0]*pump_dir_norm[0] + 
+                      pump_dir_norm[1]*pump_dir_norm[1] + 
+                      pump_dir_norm[2]*pump_dir_norm[2]);
+    if (norm > 1e-10) {
+        pump_dir_norm[0] /= norm;
+        pump_dir_norm[1] /= norm;
+        pump_dir_norm[2] /= norm;
+    }
+    
+    // Create field directions for all sublattices
+    for (size_t i = 0; i < lattice.N_atoms; ++i) {
+        Eigen::VectorXd field_dir(3);
+        field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+        field_dirs.push_back(field_dir);
+    }
+    
+    if (rank == 0) {
+        cout << "\n[2/3] Pulse configuration:" << endl;
+        cout << "  Amplitude: " << config.pump_amplitude << endl;
+        cout << "  Width: " << config.pump_width << endl;
+        cout << "  Frequency: " << config.pump_frequency << endl;
+        cout << "  Direction: [" << pump_dir_norm[0] << ", " 
+             << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+        cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
+    }
+    
+    // Run the full 2DCS scan using lattice method
+    // Signature: pump_probe_spectroscopy(field_in, pulse_amp, pulse_width, pulse_freq,
+    //                                     tau_start, tau_end, tau_step,
+    //                                     T_start, T_end, T_step,
+    //                                     Temp_start, Temp_end, n_anneal, T_zero_quench, quench_sweeps,
+    //                                     dir_name, method, use_gpu)
+    lattice.pump_probe_spectroscopy(
+        field_dirs,
+        config.pump_amplitude,
+        config.pump_width,
+        config.pump_frequency,
+        config.tau_start,
+        config.tau_end,
+        config.tau_step,
+        config.md_time_start,
+        config.md_time_end,
+        config.md_timestep,
+        config.T_start,
+        config.T_end,
+        config.annealing_steps,
+        false,  // T_zero_quench
+        config.equilibration_steps,
+        config.output_dir,
+        config.md_integrator,
+        config.use_gpu
+    );
+    
+    if (rank == 0) {
+        cout << "\n2DCS spectroscopy completed!" << endl;
+        cout << "Results saved to: " << config.output_dir << "/pump_probe_spectroscopy.h5" << endl;
+        cout << "\nTo analyze:" << endl;
+        cout << "  - M0(t): Reference single-pulse response" << endl;
+        cout << "  - M1(t,tau): Probe-only response at delay tau" << endl;
+        cout << "  - M01(t,tau): Two-pulse response (pump + probe)" << endl;
+        cout << "  - Nonlinear signal: M01 - M0 - M1" << endl;
+    }
+}
+
+/**
  * Run simulated annealing for mixed lattice
  */
 void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
@@ -924,6 +1027,12 @@ int main(int argc, char** argv) {
                 case SimulationType::PUMP_PROBE:
                     run_pump_probe_mixed(mixed_lattice, config, rank);
                     break;
+                case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
+                    if (rank == 0) {
+                        cerr << "2DCS spectroscopy not yet implemented for mixed (TmFeO3) lattice." << endl;
+                        cerr << "Use legacy TmFeO3_2DCS.cpp script instead." << endl;
+                    }
+                    break;
                 default:
                     if (rank == 0) {
                         cerr << "Simulation type not supported for mixed lattice\n";
@@ -992,6 +1101,9 @@ int main(int argc, char** argv) {
                     break;
                 case SimulationType::PUMP_PROBE:
                     run_pump_probe(lattice, config, rank);
+                    break;
+                case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
+                    run_2dcs_spectroscopy(lattice, config, rank);
                     break;
                 default:
                     if (rank == 0) {
