@@ -7,7 +7,7 @@ system = pyrochlore
 simulation_mode = molecular_dynamics
 
 # Lattice Size
-lattice_size = 2,2,2        # Unit cells in each direction
+lattice_size = 8,8,8        # Unit cells in each direction
 
 # Exchange Interaction Parameters
 Jxx = 1.0

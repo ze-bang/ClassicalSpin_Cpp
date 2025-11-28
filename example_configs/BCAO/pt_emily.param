@@ -3,7 +3,7 @@
 # Usage: mpirun -np 48 ./unified_simulation pt_emily.param
 
 # Simulation Type
-system = bcao_honeycomb
+system = honeycomb_bcao
 simulation_mode = parallel_tempering
 
 # Lattice Size

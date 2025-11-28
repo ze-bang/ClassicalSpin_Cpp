@@ -3,7 +3,7 @@
 # Usage: ./unified_simulation md_kitaev.param
 
 # Simulation Type
-system = kitaev_honeycomb
+system = honeycomb_kitaev
 simulation_mode = molecular_dynamics
 
 # Lattice Size
@@ -32,7 +32,7 @@ md_time_start = 0.0
 md_time_end = 100.0
 md_timestep = 0.01
 md_save_interval = 100
-md_integrator = rk4
+md_integrator = rk54
 use_gpu = false
 
 # Output

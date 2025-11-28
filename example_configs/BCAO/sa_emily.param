@@ -3,7 +3,7 @@
 # Usage: ./unified_simulation sa_emily.param
 
 # Simulation Type
-system = bcao_honeycomb
+system = honeycomb_bcao
 simulation_mode = simulated_annealing
 
 # Lattice Size

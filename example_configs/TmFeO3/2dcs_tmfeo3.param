@@ -4,7 +4,7 @@
 
 # Simulation Type
 system = tmfeo3
-simulation_mode = pump_probe_2dcs
+simulation_mode = 2dcs
 
 # Lattice Size
 lattice_size = 4,4,4

@@ -3,7 +3,7 @@
 # Usage: ./unified_simulation md_emily.param
 
 # Simulation Type
-system = bcao_honeycomb
+system = honeycomb_bcao
 simulation_mode = molecular_dynamics
 
 # Lattice Size (Lx, Ly, Lz)

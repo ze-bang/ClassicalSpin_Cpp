@@ -3,8 +3,8 @@
 # Usage: ./unified_simulation 2dcs_kitaev.param
 
 # Simulation Type
-system = kitaev_honeycomb
-simulation_mode = pump_probe_2dcs
+system = honeycomb_kitaev
+simulation_mode = 2dcs
 
 # Lattice Size
 lattice_size = 6,6,1       # Smaller for 2DCS
