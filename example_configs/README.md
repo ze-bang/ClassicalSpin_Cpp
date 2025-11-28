@@ -9,7 +9,8 @@ example_configs/
 ├── BCAO/           # Ba₃CoSb₂O₉ honeycomb configurations
 ├── Kitaev/         # Kitaev honeycomb model configurations
 ├── Pyrochlore/     # Pyrochlore lattice configurations
-└── TmFeO3/         # TmFeO3 mixed lattice configurations
+├── TmFeO3/         # TmFeO3 mixed lattice configurations
+└── param_sweeps/   # N-dimensional parameter sweep examples
 ```
 
 ## System Coverage
@@ -75,6 +76,27 @@ The unified simulation covers all BCAO functionality from legacy run_scripts:
 - Fe-Tm bilinear coupling (chii parameter)
 - CUDA-accelerated 2DCS option
 
+### Parameter Sweeps (N-Dimensional)
+
+The `param_sweeps/` directory contains examples for systematic parameter space exploration:
+
+| Example Config | Dimensions | Parameters | Base Simulation |
+|----------------|------------|------------|-----------------|
+| `parameter_sweep_example.param` | 1D | J1xy | Simulated annealing |
+| `field_sweep_example.param` | 1D | field_strength | Molecular dynamics |
+| `2d_parameter_sweep_example.param` | 2D | J1xy × field | Simulated annealing |
+| `3d_parameter_sweep_example.param` | 3D | K × Γ × field | Simulated annealing |
+| `2dcs_chii_sweep.param` | 1D | chii | 2DCS spectroscopy |
+| `pump_amplitude_sweep.param` | 1D | pump_amplitude | Pump-probe |
+| `2d_pump_probe_sweep_example.param` | 2D | pump × probe | Pump-probe |
+
+**Key Features:**
+- Support for 1D, 2D, 3D, and higher-dimensional sweeps
+- Any Hamiltonian or simulation parameter can be swept
+- MPI-parallelized distribution of sweep points
+- Each sweep point runs independently
+- Organized output directory structure
+
 ## How to Use
 
 ### 1. Single Simulation
@@ -94,7 +116,20 @@ cmake --build build -j$(nproc)
 mpirun -np 48 ./build/unified_simulation example_configs/BCAO/pt_emily.param
 ```
 
-### 3. Field Scans
+### 3. Parameter Sweeps (MPI)
+
+```bash
+# 1D sweep (sweep points distributed across MPI ranks)
+mpirun -np 8 ./build/unified_simulation example_configs/param_sweeps/parameter_sweep_example.param
+
+# 2D sweep (creates grid of sweep points)
+mpirun -np 16 ./build/unified_simulation example_configs/param_sweeps/2d_parameter_sweep_example.param
+
+# 3D phase diagram sweep
+mpirun -np 32 ./build/unified_simulation example_configs/param_sweeps/3d_parameter_sweep_example.param
+```
+
+### 4. Field Scans
 
 ```bash
 # MPI processes will distribute field values
