@@ -2607,13 +2607,8 @@ public:
                 double M_local_arr[8] = {0};
                 double M_antiferro_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        M_local_arr[d] += h_state[i * spin_dim + d];
-                        M_antiferro_arr[d] += h_state[i * spin_dim + d] * sign;
-                    }
-                }
+                compute_magnetizations_from_flat(thrust::raw_pointer_cast(h_state.data()), 
+                    lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
                 
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
@@ -2645,6 +2640,9 @@ public:
         double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
         integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, dt_initial,
                                 observer, method, true, abs_tol, rel_tol);
+        
+        // Note: Lattice::spins remains unchanged (initial configuration preserved)
+        // The evolved state is stored in the device vector 'd_state'
         
         // Close HDF5 file
         if (hdf5_writer) {
@@ -2976,12 +2974,54 @@ private:
     }
 
     /**
+     * Helper: Get integration tolerances based on method
+     */
+    static std::pair<double, double> get_integration_tolerances(const string& method) {
+        if (method == "bulirsch_stoer") {
+            return {1e-8, 1e-8};  // abs_tol, rel_tol
+        }
+        return {1e-6, 1e-6};
+    }
+
+    /**
+     * Helper: Safely create directories if path is non-empty
+     */
+    static void ensure_directory_exists(const string& dir_path) {
+        if (!dir_path.empty()) {
+            std::filesystem::create_directories(dir_path);
+        }
+    }
+
+    /**
+     * Helper: Compute local and antiferromagnetic magnetization from flat state
+     * @param x Flat state array
+     * @param lattice_size Number of sites
+     * @param spin_dim Spin dimension
+     * @param M_local_arr Output array for local magnetization
+     * @param M_antiferro_arr Output array for antiferromagnetic magnetization
+     */
+    static void compute_magnetizations_from_flat(const double* x, size_t lattice_size, 
+                                                 size_t spin_dim, double* M_local_arr, 
+                                                 double* M_antiferro_arr) {
+        std::fill(M_local_arr, M_local_arr + spin_dim, 0.0);
+        std::fill(M_antiferro_arr, M_antiferro_arr + spin_dim, 0.0);
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            double sign = (i % 2 == 0) ? 1.0 : -1.0;
+            for (size_t d = 0; d < spin_dim; ++d) {
+                M_local_arr[d] += x[i * spin_dim + d];
+                M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
+            }
+        }
+    }
+
+    /**
      * Helper: Save energy and magnetization time series to files
      */
     void save_observables(const string& dir_path,
                          const vector<double>& energies,
                          const vector<SpinVector>& magnetizations) {
-        std::filesystem::create_directories(dir_path);
+        ensure_directory_exists(dir_path);
         
         // Save energy time series
         ofstream energy_file(dir_path + "/energy.txt");
@@ -3133,14 +3173,8 @@ public:
                 double M_antiferro_arr[8] = {0};
                 double M_global_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        M_local_arr[d] += x[i * spin_dim + d];
-                        M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
-                    }
-                }
+                compute_magnetizations_from_flat(x.data(), lattice_size, spin_dim, 
+                    M_local_arr, M_antiferro_arr);
                 
                 // Use helper function for global magnetization
                 compute_magnetization_global_from_flat(x.data(), M_global_arr);
@@ -3532,17 +3566,11 @@ private:
                 double M_antiferro_arr[8] = {0};
                 double M_global_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        M_local_arr[d] += x[i * spin_dim + d];
-                        M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
-                    }
-                }
+                compute_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 
+                    lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
                 
                 // Use helper function for global magnetization
-                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                compute_magnetization_global_from_flat(thrust::raw_pointer_cast(x.data()), M_global_arr);
                 
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
@@ -3560,9 +3588,11 @@ private:
             this->ode_system_gpu(x, dxdt, t, d_lattice_data);
         };
         
-        // Integrate on GPU
+        // Integrate on GPU (state was initialized from spins earlier)
         integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
                                 observer, method, false, 1e-10, 1e-10);
+        
+        // Note: Lattice::spins remains unchanged - only ODEState evolved
         
         // Reset pulse
         field_drive[0] = SpinVector::Zero(N_atoms * spin_dim);
@@ -3606,17 +3636,11 @@ private:
                 double M_antiferro_arr[8] = {0};
                 double M_global_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        M_local_arr[d] += x[i * spin_dim + d];
-                        M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
-                    }
-                }
+                compute_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 
+                    lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
                 
                 // Use helper function for global magnetization
-                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                compute_magnetization_global_from_flat(thrust::raw_pointer_cast(x.data()), M_global_arr);
                 
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
@@ -3634,9 +3658,11 @@ private:
             this->ode_system_gpu(x, dxdt, t, d_lattice_data);
         };
         
-        // Integrate on GPU
+        // Integrate on GPU (state was initialized from spins earlier)
         integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
                                 observer, method, false, 1e-10, 1e-10);
+        
+        // Note: Lattice::spins remains unchanged - only ODEState evolved
         
         // Reset pulse
         field_drive[0] = SpinVector::Zero(N_atoms * spin_dim);

@@ -1098,9 +1098,7 @@ public:
                             bool save_observables = false) {
         
         // Setup output directory
-        if (!out_dir.empty()) {
-            std::filesystem::create_directories(out_dir);
-        }
+        ensure_directory_exists(out_dir);
         
         double T = T_start;
         double sigma = 1000.0;
@@ -1148,11 +1146,226 @@ public:
         
         cout << "Final energy density: " << energy_density() << endl;
         
+        // Final measurements if requested
+        if (save_observables && !out_dir.empty()) {
+            perform_final_measurements(T_end, sigma, gaussian_move, out_dir);
+        }
+        
         // Save final configuration
         if (!out_dir.empty()) {
             save_spin_config(out_dir + "/spins_final.dat");
             save_positions(out_dir + "/positions_SU2.dat");
         }
+    }
+
+    /**
+     * Perform detailed measurements at final temperature
+     */
+    void perform_final_measurements(double T_final, double sigma, bool gaussian_move,
+                                   const string& out_dir) {
+        cout << "\n=== Final measurements at T=" << T_final << " ===" << endl;
+        
+        // Step 1: Estimate autocorrelation time
+        cout << "Estimating autocorrelation time..." << endl;
+        vector<double> prelim_energies;
+        size_t prelim_samples = 10000;
+        size_t prelim_interval = 10;
+        prelim_energies.reserve(prelim_samples / prelim_interval);
+        
+        for (size_t i = 0; i < prelim_samples; ++i) {
+            metropolis(T_final, gaussian_move, sigma);
+            if (i % prelim_interval == 0) {
+                prelim_energies.push_back(total_energy());
+            }
+        }
+        
+        AutocorrelationResult acf = compute_autocorrelation(prelim_energies, prelim_interval);
+        cout << "  τ_int = " << acf.tau_int << endl;
+        cout << "  Sampling interval = " << acf.sampling_interval << " sweeps" << endl;
+        
+        // Step 2: Equilibrate
+        size_t equilibration = 10 * acf.sampling_interval;
+        cout << "Equilibrating for " << equilibration << " sweeps..." << endl;
+        perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma);
+        
+        // Step 3: Collect samples
+        size_t n_samples = 1000;
+        size_t n_measure = n_samples * acf.sampling_interval;
+        cout << "Collecting " << n_samples << " independent samples..." << endl;
+        
+        vector<double> energies;
+        vector<pair<SpinVector, SpinVector>> magnetizations;
+        energies.reserve(n_samples);
+        magnetizations.reserve(n_samples);
+        
+        for (size_t i = 0; i < n_measure; ++i) {
+            metropolis(T_final, gaussian_move, sigma);
+            
+            if (i % acf.sampling_interval == 0) {
+                energies.push_back(total_energy());
+                magnetizations.push_back({magnetization_SU2(), magnetization_SU3()});
+            }
+        }
+        
+        cout << "Collected " << energies.size() << " samples" << endl;
+        
+        // Step 4: Compute observables
+        compute_and_save_observables(energies, magnetizations, T_final, out_dir);
+        
+        // Save autocorrelation function
+        save_autocorrelation_results(out_dir, acf);
+    }
+
+    /**
+     * Compute autocorrelation for mixed lattice
+     */
+    AutocorrelationResult compute_autocorrelation(const vector<double>& energies, 
+                                                   size_t base_interval = 10) {
+        AutocorrelationResult result;
+        
+        size_t N = energies.size();
+        if (N < 10) {
+            result.tau_int = 1.0;
+            result.sampling_interval = base_interval;
+            result.correlation_function = {1.0};
+            return result;
+        }
+        
+        // Compute mean
+        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
+        
+        // Compute autocorrelation function
+        size_t max_lag = std::min(N / 4, size_t(100));
+        result.correlation_function.resize(max_lag);
+        
+        double var = 0.0;
+        for (size_t i = 0; i < N; ++i) {
+            var += (energies[i] - mean) * (energies[i] - mean);
+        }
+        var /= N;
+        
+        for (size_t lag = 0; lag < max_lag; ++lag) {
+            double corr = 0.0;
+            for (size_t i = 0; i < N - lag; ++i) {
+                corr += (energies[i] - mean) * (energies[i + lag] - mean);
+            }
+            corr /= (N - lag);
+            result.correlation_function[lag] = corr / var;
+        }
+        
+        // Compute integrated autocorrelation time
+        result.tau_int = 0.5;
+        for (size_t lag = 1; lag < max_lag; ++lag) {
+            if (result.correlation_function[lag] < 0.1) break;
+            result.tau_int += result.correlation_function[lag];
+        }
+        
+        result.sampling_interval = static_cast<size_t>(std::max(1.0, 2.0 * result.tau_int)) * base_interval;
+        
+        return result;
+    }
+
+    /**
+     * Compute and save thermodynamic observables for mixed lattice
+     */
+    void compute_and_save_observables(const vector<double>& energies,
+                                     const vector<pair<SpinVector, SpinVector>>& magnetizations,
+                                     double T, const string& out_dir) {
+        // Mean energy
+        double E_mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
+        
+        // Energy variance
+        double E2_mean = 0.0;
+        for (double E : energies) {
+            E2_mean += E * E;
+        }
+        E2_mean /= energies.size();
+        double var_E = E2_mean - E_mean * E_mean;
+        
+        // Specific heat (per total site)
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        double C_V = var_E / (T * T * total_sites);
+        
+        // Mean magnetizations
+        SpinVector M_mean_SU2 = SpinVector::Zero(spin_dim_SU2);
+        SpinVector M_mean_SU3 = SpinVector::Zero(spin_dim_SU3);
+        for (const auto& M_pair : magnetizations) {
+            M_mean_SU2 += M_pair.first;
+            M_mean_SU3 += M_pair.second;
+        }
+        M_mean_SU2 /= magnetizations.size();
+        M_mean_SU3 /= magnetizations.size();
+        
+        cout << "Observables:" << endl;
+        cout << "  <E>/N = " << E_mean / total_sites << endl;
+        cout << "  C_V = " << C_V << endl;
+        cout << "  |<M_SU2>| = " << M_mean_SU2.norm() << endl;
+        cout << "  |<M_SU3>| = " << M_mean_SU3.norm() << endl;
+        
+        // Save to files
+        ofstream heat_file(out_dir + "/specific_heat.txt", std::ios::app);
+        heat_file << T << " " << C_V << " " << std::sqrt(var_E) / (T * T * total_sites) << endl;
+        heat_file.close();
+        
+        save_observables(out_dir, energies, magnetizations);
+    }
+
+    /**
+     * Save observables for mixed lattice
+     */
+    void save_observables(const string& dir_path,
+                         const vector<double>& energies,
+                         const vector<pair<SpinVector, SpinVector>>& magnetizations) {
+        ensure_directory_exists(dir_path);
+        
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        
+        // Save energy time series
+        ofstream energy_file(dir_path + "/energy.txt");
+        for (double E : energies) {
+            energy_file << E / total_sites << "\n";
+        }
+        energy_file.close();
+        
+        // Save magnetization time series
+        ofstream mag_su2_file(dir_path + "/magnetization_SU2.txt");
+        ofstream mag_su3_file(dir_path + "/magnetization_SU3.txt");
+        for (const auto& M_pair : magnetizations) {
+            const auto& M_SU2 = M_pair.first;
+            const auto& M_SU3 = M_pair.second;
+            
+            for (int i = 0; i < M_SU2.size(); ++i) {
+                mag_su2_file << M_SU2(i);
+                if (i < M_SU2.size() - 1) mag_su2_file << " ";
+            }
+            mag_su2_file << "\n";
+            
+            for (int i = 0; i < M_SU3.size(); ++i) {
+                mag_su3_file << M_SU3(i);
+                if (i < M_SU3.size() - 1) mag_su3_file << " ";
+            }
+            mag_su3_file << "\n";
+        }
+        mag_su2_file.close();
+        mag_su3_file.close();
+    }
+
+    /**
+     * Save autocorrelation results
+     */
+    void save_autocorrelation_results(const string& out_dir, 
+                                     const AutocorrelationResult& acf) {
+        ensure_directory_exists(out_dir);
+        ofstream acf_file(out_dir + "/autocorrelation.txt");
+        acf_file << "# lag autocorrelation" << endl;
+        acf_file << "# tau_int = " << acf.tau_int << endl;
+        acf_file << "# sampling_interval = " << acf.sampling_interval << endl;
+        
+        size_t max_output = std::min(size_t(100), acf.correlation_function.size());
+        for (size_t lag = 0; lag < max_output; ++lag) {
+            acf_file << lag << " " << acf.correlation_function[lag] << "\n";
+        }
+        acf_file.close();
     }
 
     // ============================================================
@@ -1241,6 +1454,31 @@ public:
         
         cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
         
+        // Compute local heat capacity using energy variance
+        double E_mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
+        double E2_mean = 0.0;
+        for (double E : energies) {
+            E2_mean += E * E;
+        }
+        E2_mean /= energies.size();
+        double var_E = E2_mean - E_mean * E_mean;
+        
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * total_sites);
+        double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * total_sites);
+        
+        // Gather heat capacity to root
+        vector<double> heat_capacity, dHeat;
+        if (rank == 0) {
+            heat_capacity.resize(size);
+            dHeat.resize(size);
+        }
+        
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
+                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 
+                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
         // Report statistics
         double total_steps = n_anneal + n_measure;
         double acc_rate = curr_accept / total_steps;
@@ -1252,13 +1490,13 @@ public:
         
         // Save results
         if (!dir_name.empty()) {
-            std::filesystem::create_directories(dir_name);
+            ensure_directory_exists(dir_name);
             
             bool should_write = std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end();
             
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
-                std::filesystem::create_directories(rank_dir);
+                ensure_directory_exists(rank_dir);
                 
                 save_spin_config(rank_dir + "/spins_final.dat");
                 
@@ -1290,6 +1528,16 @@ public:
                 }
                 mag_su2_file.close();
                 mag_su3_file.close();
+            }
+            
+            // Root process saves heat capacity
+            if (rank == 0) {
+                ofstream heat_file(dir_name + "/heat_capacity.txt");
+                heat_file << "# T C_V dC_V\n";
+                for (int r = 0; r < size; ++r) {
+                    heat_file << temp[r] << " " << heat_capacity[r] << " " << dHeat[r] << "\n";
+                }
+                heat_file.close();
             }
         }
         
@@ -2003,6 +2251,50 @@ private:
     }
 
     /**
+     * Helper: Get integration tolerances based on method
+     */
+    static std::pair<double, double> get_integration_tolerances(const string& method) {
+        if (method == "bulirsch_stoer") {
+            return {1e-8, 1e-8};  // abs_tol, rel_tol
+        }
+        return {1e-6, 1e-6};
+    }
+
+    /**
+     * Helper: Safely create directories if path is non-empty
+     */
+    static void ensure_directory_exists(const string& dir_path) {
+        if (!dir_path.empty()) {
+            ensure_directory_exists(dir_path);
+        }
+    }
+
+    /**
+     * Helper: Compute local and antiferromagnetic magnetization from flat state for a sublattice
+     * @param x Flat state array
+     * @param offset Starting index in flat array
+     * @param lattice_size Number of sites
+     * @param spin_dim Spin dimension
+     * @param M_local_arr Output array for local magnetization
+     * @param M_antiferro_arr Output array for antiferromagnetic magnetization
+     */
+    static void compute_sublattice_magnetizations_from_flat(const double* x, size_t offset,
+                                                            size_t lattice_size, size_t spin_dim,
+                                                            double* M_local_arr, double* M_antiferro_arr) {
+        std::fill(M_local_arr, M_local_arr + spin_dim, 0.0);
+        std::fill(M_antiferro_arr, M_antiferro_arr + spin_dim, 0.0);
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            double sign = (i % 2 == 0) ? 1.0 : -1.0;
+            size_t idx = offset + i * spin_dim;
+            for (size_t d = 0; d < spin_dim; ++d) {
+                M_local_arr[d] += x[idx + d];
+                M_antiferro_arr[d] += x[idx + d] * sign;
+            }
+        }
+    }
+
+    /**
      * Helper: Perform MC sweeps with optional overrelaxation
      * Returns sum of acceptance rates from metropolis calls
      */
@@ -2369,17 +2661,14 @@ public:
                 double M_SU2_local_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
                 double M_SU2_global_arr[8] = {0};
+                
+                compute_sublattice_magnetizations_from_flat(x.data(), 0, 
+                    lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
+                
+                // Transform to global frame using sublattice frame
                 size_t idx = 0;
                 for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     size_t atom = i % N_atoms_SU2;
-                    
-                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                        M_SU2_local_arr[d] += x[idx + d];
-                        M_SU2_antiferro_arr[d] += x[idx + d] * sign;
-                    }
-                    
-                    // Transform to global frame using sublattice frame
                     for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
                             M_SU2_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
@@ -2392,16 +2681,15 @@ public:
                 double M_SU3_local_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
                 double M_SU3_global_arr[8] = {0};
+                
+                size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
+                compute_sublattice_magnetizations_from_flat(x.data(), SU3_offset, 
+                    lattice_size_SU3, spin_dim_SU3, M_SU3_local_arr, M_SU3_antiferro_arr);
+                
+                // Transform to global frame using sublattice frame
+                idx = SU3_offset;
                 for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     size_t atom = i % N_atoms_SU3;
-                    
-                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                        M_SU3_local_arr[d] += x[idx + d];
-                        M_SU3_antiferro_arr[d] += x[idx + d] * sign;
-                    }
-                    
-                    // Transform to global frame using sublattice frame
                     for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
                             M_SU3_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
@@ -2484,17 +2772,14 @@ public:
                 double M_SU2_local_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
                 double M_SU2_global_arr[8] = {0};
+                
+                compute_sublattice_magnetizations_from_flat(x.data(), 0, 
+                    lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
+                
+                // Transform to global frame using sublattice frame
                 size_t idx = 0;
                 for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     size_t atom = i % N_atoms_SU2;
-                    
-                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                        M_SU2_local_arr[d] += x[idx + d];
-                        M_SU2_antiferro_arr[d] += x[idx + d] * sign;
-                    }
-                    
-                    // Transform to global frame using sublattice frame
                     for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
                             M_SU2_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
@@ -2507,16 +2792,15 @@ public:
                 double M_SU3_local_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
                 double M_SU3_global_arr[8] = {0};
+                
+                size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
+                compute_sublattice_magnetizations_from_flat(x.data(), SU3_offset, 
+                    lattice_size_SU3, spin_dim_SU3, M_SU3_local_arr, M_SU3_antiferro_arr);
+                
+                // Transform to global frame using sublattice frame
+                idx = SU3_offset;
                 for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     size_t atom = i % N_atoms_SU3;
-                    
-                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                        M_SU3_local_arr[d] += x[idx + d];
-                        M_SU3_antiferro_arr[d] += x[idx + d] * sign;
-                    }
-                    
-                    // Transform to global frame using sublattice frame
                     for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
                             M_SU3_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
@@ -2579,9 +2863,7 @@ public:
         std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
         return;
 #else
-        if (!out_dir.empty()) {
-            std::filesystem::create_directories(out_dir);
-        }
+        ensure_directory_exists(out_dir);
         
         cout << "Running mixed lattice molecular dynamics with Boost.Odeint: t=" << T_start << " → " << T_end << endl;
         cout << "Integration method: " << method << endl;
@@ -2616,28 +2898,20 @@ public:
                 SpinVector M_SU2_antiferro = SpinVector::Zero(spin_dim_SU2);
                 SpinVector M_SU3_antiferro = SpinVector::Zero(spin_dim_SU3);
                 
-                size_t idx = 0;
-                for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                        M_SU2(d) += x[idx + d];
-                        M_SU2_antiferro(d) += x[idx + d] * sign;
-                    }
-                    idx += spin_dim_SU2;
-                }
-                M_SU2 /= double(lattice_size_SU2);
-                M_SU2_antiferro /= double(lattice_size_SU2);
+                double M_SU2_arr[8] = {0};
+                double M_SU2_antiferro_arr[8] = {0};
+                compute_sublattice_magnetizations_from_flat(x.data(), 0, 
+                    lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
+                M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                        M_SU3(d) += x[idx + d];
-                        M_SU3_antiferro(d) += x[idx + d] * sign;
-                    }
-                    idx += spin_dim_SU3;
-                }
-                M_SU3 /= double(lattice_size_SU3);
-                M_SU3_antiferro /= double(lattice_size_SU3);
+                double M_SU3_arr[8] = {0};
+                double M_SU3_antiferro_arr[8] = {0};
+                size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
+                compute_sublattice_magnetizations_from_flat(x.data(), SU3_offset, 
+                    lattice_size_SU3, spin_dim_SU3, M_SU3_arr, M_SU3_antiferro_arr);
+                M_SU3 = Eigen::Map<Eigen::VectorXd>(M_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
                 // Compute accurate energy density directly from flat state (includes all interactions)
                 double E = total_energy_flat(x.data()) / (lattice_size_SU2 + lattice_size_SU3);
@@ -2667,8 +2941,7 @@ public:
         };
         
         // Integrate using selected method
-        double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
-        double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
+        auto [abs_tol, rel_tol] = get_integration_tolerances(method);
         integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
                             observer, method, true, abs_tol, rel_tol);
         
@@ -3139,9 +3412,7 @@ private:
         std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
         return;
 #else
-        if (!out_dir.empty()) {
-            std::filesystem::create_directories(out_dir);
-        }
+        ensure_directory_exists(out_dir);
         
         cout << "Running mixed lattice molecular dynamics with GPU acceleration: t=" << T_start << " → " << T_end << endl;
         cout << "Integration method: " << method << endl;
@@ -3185,28 +3456,20 @@ private:
                 SpinVector M_SU2_antiferro = SpinVector::Zero(spin_dim_SU2);
                 SpinVector M_SU3_antiferro = SpinVector::Zero(spin_dim_SU3);
                 
-                size_t idx = 0;
-                for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                        M_SU2(d) += h_state[idx + d];
-                        M_SU2_antiferro(d) += h_state[idx + d] * sign;
-                    }
-                    idx += spin_dim_SU2;
-                }
-                M_SU2 /= double(lattice_size_SU2);
-                M_SU2_antiferro /= double(lattice_size_SU2);
+                double M_SU2_arr[8] = {0};
+                double M_SU2_antiferro_arr[8] = {0};
+                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(h_state.data()), 0, 
+                    lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
+                M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                        M_SU3(d) += h_state[idx + d];
-                        M_SU3_antiferro(d) += h_state[idx + d] * sign;
-                    }
-                    idx += spin_dim_SU3;
-                }
-                M_SU3 /= double(lattice_size_SU3);
-                M_SU3_antiferro /= double(lattice_size_SU3);
+                double M_SU3_arr[8] = {0};
+                double M_SU3_antiferro_arr[8] = {0};
+                size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
+                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(h_state.data()), SU3_offset, 
+                    lattice_size_SU3, spin_dim_SU3, M_SU3_arr, M_SU3_antiferro_arr);
+                M_SU3 = Eigen::Map<Eigen::VectorXd>(M_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
                 // Compute accurate energy density directly from flat state (on CPU - could be optimized to GPU)
                 double E = total_energy_flat(thrust::raw_pointer_cast(h_state.data())) / (lattice_size_SU2 + lattice_size_SU3);
@@ -3238,10 +3501,12 @@ private:
         };
         
         // Integrate on GPU
-        double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
-        double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
+        auto [abs_tol, rel_tol] = get_integration_tolerances(method);
         integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, dt_initial,
                                 observer, method, true, abs_tol, rel_tol);
+        
+        // Note: MixedLattice::spins_SU2 and spins_SU3 remain unchanged (initial configuration preserved)
+        // The evolved state is stored in the device vector 'd_state'
         
         // Close HDF5 file
         if (hdf5_writer) {
@@ -3299,16 +3564,12 @@ private:
                 double M_antiferro_SU2_arr[8] = {0};
                 double M_global_SU2_arr[8] = {0};
                 
+                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 0, 
+                    lattice_size_SU2, spin_dim_SU2, M_local_SU2_arr, M_antiferro_SU2_arr);
+                
+                // Transform to global frame using sublattice frame
                 for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     size_t atom = i % N_atoms_SU2;
-                    
-                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                        M_local_SU2_arr[d] += x[i * spin_dim_SU2 + d];
-                        M_antiferro_SU2_arr[d] += x[i * spin_dim_SU2 + d] * sign;
-                    }
-                    
-                    // Transform to global frame using sublattice frame
                     for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
                             M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[i * spin_dim_SU2 + nu];
@@ -3325,13 +3586,8 @@ private:
                 double M_antiferro_SU3_arr[8] = {0};
                 double M_global_SU3_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    size_t atom = i % N_atoms_SU3;
-                    
-                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                        M_local_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d];
-                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d] * sign;
+                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), total_SU2, 
+                    lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
                     }
                     
                     // Transform to global frame using sublattice frame
@@ -3419,16 +3675,12 @@ private:
                 double M_antiferro_SU2_arr[3] = {0};
                 double M_global_SU2_arr[3] = {0};
                 
+                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 0, 
+                    lattice_size_SU2, spin_dim_SU2, M_local_SU2_arr, M_antiferro_SU2_arr);
+                
+                // Transform to global frame using sublattice frame
                 for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     size_t atom = i % N_atoms_SU2;
-                    
-                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                        M_local_SU2_arr[d] += x[i * spin_dim_SU2 + d];
-                        M_antiferro_SU2_arr[d] += x[i * spin_dim_SU2 + d] * sign;
-                    }
-                    
-                    // Transform to global frame using sublattice frame
                     for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                         for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
                             M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[i * spin_dim_SU2 + nu];
@@ -3445,13 +3697,8 @@ private:
                 double M_antiferro_SU3_arr[8] = {0};
                 double M_global_SU3_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    size_t atom = i % N_atoms_SU3;
-                    
-                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                        M_local_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d];
-                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d] * sign;
+                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), total_SU2, 
+                    lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
                     }
                     
                     // Transform to global frame using sublattice frame
