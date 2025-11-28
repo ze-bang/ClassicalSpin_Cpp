@@ -1,0 +1,42 @@
+# Example: 2D parameter sweep over J1xy and field_strength
+# This creates a 2D grid in parameter space
+
+system = honeycomb_bcao
+lattice_size = 12, 12, 1
+spin_length = 1.0
+
+# Simulation mode
+simulation_mode = parameter_sweep
+
+# 2D sweep: J1xy vs field_strength
+sweep_parameters = J1xy, field_strength
+sweep_starts = -10.0, 0.0
+sweep_ends = -5.0, 2.0
+sweep_steps = 1.0, 0.5
+
+# Base simulation at each grid point
+sweep_base_simulation = simulated_annealing
+
+# Simulation parameters
+T_start = 10.0
+T_end = 0.001
+annealing_steps = 30000
+cooling_rate = 0.9
+
+# Output
+output_dir = output_2d_sweep
+num_trials = 1
+
+# Hamiltonian parameters (will be overridden by sweep)
+J1xy = -7.6
+J1z = -1.2
+D = 0.1
+E = -0.1
+J3xy = 2.5
+J3z = -0.85
+
+# Field (magnitude will be swept)
+field_direction = 0, 1, 0
+g_factor = 1.0, 1.0, 1.0
+
+use_twist_boundary = false
