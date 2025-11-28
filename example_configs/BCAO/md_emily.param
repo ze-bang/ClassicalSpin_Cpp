@@ -1,0 +1,46 @@
+# BCAO Honeycomb Molecular Dynamics - Emily Model
+# Corresponds to: molecular_dynamic_BCAO_emily.cpp
+# Usage: ./unified_simulation md_emily.param
+
+# Simulation Type
+system = bcao_honeycomb
+simulation_mode = molecular_dynamics
+
+# Lattice Size (Lx, Ly, Lz)
+lattice_size = 36,36,1
+
+# Exchange Interaction Parameters (Emily model)
+J1xy = -7.6     # In-plane exchange
+J1z = -1.2      # Out-of-plane exchange
+D = 0.1         # Anisotropic exchange
+E = -0.1
+F = 0.0
+G = 0.0
+J3xy = 2.5      # Third nearest neighbor
+J3z = -0.85
+
+# Magnetic Field
+field_strength = 0.0        # in mu_B units
+field_direction = 0,1,0     # along y-axis
+g_factor = 4.8,4.85,2.5     # Anisotropic g-factors
+
+# Simulated Annealing (equilibration)
+T_start = 20.0              # Starting temperature (K)
+T_end = 1.0                 # Final temperature (K)
+annealing_steps = 100000
+overrelaxation_rate = 10
+use_twist_boundary = true
+gaussian_move = true
+cooling_rate = 0.9
+
+# Molecular Dynamics
+md_time_start = 0.0
+md_time_end = 200.0
+md_timestep = 0.01
+md_save_interval = 100
+md_integrator = rk4         # rk4 or verlet
+use_gpu = false
+
+# Output
+output_dir = BCAO_emily_md
+save_observables = true

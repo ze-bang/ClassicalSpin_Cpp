@@ -1,0 +1,45 @@
+# Pyrochlore Molecular Dynamics
+# Corresponds to: molecular_dynamic_pyrochlore.cpp
+# Usage: ./unified_simulation md_pyrochlore.param
+
+# Simulation Type
+system = pyrochlore
+simulation_mode = molecular_dynamics
+
+# Lattice Size
+lattice_size = 2,2,2        # Unit cells in each direction
+
+# Exchange Interaction Parameters
+Jxx = 1.0
+Jyy = 1.0
+Jzz = 1.0
+
+# g-tensor anisotropy parameters
+gxx = 0.01
+gyy = 0.0004                # 4e-4
+gzz = 1.0
+theta = 0.0                 # Rotation angle
+
+# Magnetic Field
+field_strength = 0.0
+field_direction = 0,0,1     # Options: 001, 110, 1-10, 111
+h = 0.0                     # Alternative specification
+
+# Simulated Annealing (equilibration)
+T_start = 5.0
+T_end = 0.0                 # Target temperature for MD
+annealing_steps = 100000
+overrelaxation_rate = 10
+use_twist_boundary = false
+
+# Molecular Dynamics
+md_time_start = 0.0
+md_time_end = 600.0
+md_timestep = 0.01
+md_save_interval = 100
+md_integrator = rk4
+use_gpu = false
+
+# Output
+output_dir = PYROCHLORE_md
+save_observables = true

@@ -1,0 +1,38 @@
+# BCAO Honeycomb Parallel Tempering - Emily Model
+# Corresponds to: parallel_tempering_BCAO_emily.cpp
+# Usage: mpirun -np 48 ./unified_simulation pt_emily.param
+
+# Simulation Type
+system = bcao_honeycomb
+simulation_mode = parallel_tempering
+
+# Lattice Size
+lattice_size = 36,36,1
+
+# Exchange Interaction Parameters (Emily model)
+J1xy = -7.6
+J1z = -1.2
+D = 0.1
+E = -0.1
+F = 0.0
+G = 0.0
+J3xy = 2.5
+J3z = -0.85
+
+# Magnetic Field
+field_strength = 0.0
+field_direction = 0,1,0
+g_factor = 4.8,4.85,2.5
+
+# Parallel Tempering
+T_start = 1.0               # Minimum temperature
+T_end = 25.0                # Maximum temperature
+annealing_steps = 5000000   # Thermalization sweeps
+overrelaxation_rate = 4000
+pt_exchange_frequency = 50
+probe_rate = 2000
+ranks_to_write = 0          # Comma-separated list of ranks to save
+
+# Output
+output_dir = BCAO_emily_pt
+save_observables = true

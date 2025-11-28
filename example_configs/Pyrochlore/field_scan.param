@@ -1,0 +1,41 @@
+# Pyrochlore Magnetic Field Scan
+# Scans field from h_start to h_end
+# Usage: mpirun -np N ./unified_simulation field_scan.param
+
+# Simulation Type
+system = pyrochlore
+simulation_mode = simulated_annealing  # Will be repeated for each field
+
+# Lattice Size
+lattice_size = 2,2,2
+
+# Exchange Interaction Parameters
+Jxx = 1.0
+Jyy = 1.0
+Jzz = 1.0
+
+# g-tensor parameters
+gxx = 0.01
+gyy = 0.0004
+gzz = 1.0
+theta = 0.0
+
+# Field Scan Parameters
+field_direction = 0,0,1
+field_scan_enabled = true
+field_scan_start = 0.0
+field_scan_end = 5.0
+field_scan_steps = 50
+
+# Annealing per field point
+T_start = 5.0
+T_end = 0.0
+annealing_steps = 100000
+overrelaxation_rate = 10
+
+# Number of trials per field value
+num_trials = 20
+
+# Output
+output_dir = PYROCHLORE_field_scan
+save_observables = true

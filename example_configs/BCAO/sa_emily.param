@@ -1,0 +1,38 @@
+# BCAO Honeycomb Simulated Annealing - Emily Model
+# Corresponds to: simulated_annealing_BCAO_emily.cpp
+# Usage: ./unified_simulation sa_emily.param
+
+# Simulation Type
+system = bcao_honeycomb
+simulation_mode = simulated_annealing
+
+# Lattice Size
+lattice_size = 36,36,1
+
+# Exchange Interaction Parameters (Emily model)
+J1xy = -7.6
+J1z = -1.2
+D = 0.1
+E = -0.1
+F = 0.0
+G = 0.0
+J3xy = 2.5
+J3z = -0.85
+
+# Magnetic Field
+field_strength = 0.0
+field_direction = 0,1,0
+g_factor = 4.8,4.85,2.5
+
+# Simulated Annealing
+T_start = 20.0
+T_end = 0.001
+annealing_steps = 1000000
+overrelaxation_rate = 10
+use_twist_boundary = true
+gaussian_move = false
+cooling_rate = 0.9
+
+# Output
+output_dir = BCAO_emily_sa
+save_observables = true
