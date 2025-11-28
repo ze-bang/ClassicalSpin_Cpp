@@ -1,25 +1,36 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 project(ClassicalSpin_Cpp LANGUAGES CXX CUDA)
 
-# Set C++ standard
+# ============================================================================
+# PROJECT CONFIGURATION
+# ============================================================================
+
+# C++ and CUDA standards
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-# Set CUDA standard
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Enable modern CMake policies for CUDA
+# Modern CMake policies
 cmake_policy(SET CMP0104 NEW)
 cmake_policy(SET CMP0105 NEW)
 
-# Set build type to Release if not specified (for optimization)
+# Default to Release build
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Find required packages using modern CMake
+# Enable position independent code
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# CUDA architectures
+set(CMAKE_CUDA_ARCHITECTURES "60;75;80;86;89" CACHE STRING "CUDA architectures")
+
+# ============================================================================
+# DEPENDENCIES
+# ============================================================================
+
 find_package(CUDAToolkit REQUIRED)
 find_package(Thrust REQUIRED CONFIG)
 find_package(OpenMP REQUIRED)
@@ -28,133 +39,83 @@ find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 find_package(Boost 1.65 REQUIRED)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
-# Set CUDA architectures for multiple GPU support
-set(CMAKE_CUDA_ARCHITECTURES "60 75 80 86 89" CACHE STRING "CUDA architectures")
+# ============================================================================
+# COMPILER FLAGS
+# ============================================================================
 
-# Enable position independent code
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-# Set include directories
-include_directories(src)
-
-# Set optimized compiler flags with modern CMake approach
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -mtune=native")
+# CUDA compiler flags
 set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
 
-# Additional optimization flags for specific configurations
+# Optimization flags for Release builds
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    # C++ optimization flags with numerical stability
     set(CXX_OPTIMIZATION_FLAGS
-        -O3                    # Maximum optimization
-        -DNDEBUG              # Disable assertions
-        -march=native         # Optimize for current CPU
-        -mtune=native         # Tune for current CPU
-        -flto                 # Link-time optimization
-        -funroll-loops        # Unroll loops
-        -fomit-frame-pointer  # Omit frame pointer
-        -fno-stack-protector  # Disable stack protector for performance
-        -ffp-contract=fast    # Contract floating point operations when safe (but not -ffast-math)
-        -fno-math-errno       # Don't set errno for math functions (safe optimization)
-        -fno-trapping-math    # Assume floating-point operations don't trap (safer than fast-math)
-        -fno-rounding-math    # Assume default rounding behavior (safer than fast-math)
+        -O3 -DNDEBUG -march=native -mtune=native -flto
+        -funroll-loops -fomit-frame-pointer -fno-stack-protector
+        -ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-rounding-math
     )
     
-    # CUDA optimization flags
     set(CUDA_OPTIMIZATION_FLAGS
-        -O3                   # Maximum optimization
-        -DNDEBUG             # Disable assertions
-        --use_fast_math      # Use fast math library
-        --ptxas-options=-v,-O3  # Verbose PTX assembler output and optimization
-        -lineinfo            # Line info for profiling
-        --maxrregcount=32    # Limit register usage for better occupancy
-        --extra-device-vectorization  # Enable extra vectorization
+        -O3 -DNDEBUG --use_fast_math --ptxas-options=-v,-O3
+        -lineinfo --maxrregcount=32 --extra-device-vectorization
     )
     
-    # CUDA host compiler optimization flags (separate from device flags)
-    # Note: Omitting -march flag to avoid AMX intrinsics incompatibility between nvcc and GCC 12
     set(CUDA_HOST_OPTIMIZATION_FLAGS
-        -Xcompiler=-O3       # Host compiler optimization
-        -Xcompiler=-ffast-math
-        -Xcompiler=-funroll-loops
+        -Xcompiler=-O3 -Xcompiler=-ffast-math -Xcompiler=-funroll-loops
     )
+    
+    # AMX intrinsics workaround for nvcc/GCC 12
+    set(CUDA_AMX_WORKAROUND
+        --compiler-options=-D_AMXTILEINTRIN_H_INCLUDED
+        --compiler-options=-D_AMX_INT8INTRIN_H_INCLUDED
+        --compiler-options=-D_AMX_BF16INTRIN_H_INCLUDED
+    )
+    
+    if(OpenMP_CXX_FOUND)
+        list(APPEND CXX_OPTIMIZATION_FLAGS -fopenmp-simd)
+    endif()
 endif()
 
-# OpenMP optimization flags
-if(OpenMP_CXX_FOUND)
-    list(APPEND CXX_OPTIMIZATION_FLAGS -fopenmp-simd)
-endif()
+# ============================================================================
+# SOURCE FILES
+# ============================================================================
 
-# Collect source files with better organization
-file(GLOB HEADER_FILES 
-    "src/*.h"
-    "src/*.hpp"
-    "src/**/*.h"
-    "src/**/*.hpp"
-)
-
-# Collect all CUDA source files (not headers) - include subdirectories
-# Exclude GPU MD file which needs separate compilation
+file(GLOB HEADER_FILES "src/*.h" "src/*.hpp" "src/**/*.h" "src/**/*.hpp")
 file(GLOB_RECURSE CUDA_SOURCE_FILES "src/*.cu")
+file(GLOB_RECURSE CUDA_HEADER_FILES "src/*.cuh")
 
-# Collect all CUDA header files - include subdirectories
-file(GLOB_RECURSE CUDA_HEADER_FILES 
-    "src/*.cuh"
-)
+# ============================================================================
+# LIBRARIES
+# ============================================================================
 
-# Collect all C++ source files in results directory
-file(GLOB CPP_SOURCE_FILES 
-    "run_scripts/*.cpp"
-)
-
-file(GLOB CUDA_RUN_SCRIPTS 
-    "run_scripts/*.cu"
-)
-
-# Create a modern header-only interface library
+# Header-only interface library
 add_library(headers INTERFACE)
 target_include_directories(headers INTERFACE 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:include>
 )
 target_sources(headers INTERFACE ${HEADER_FILES})
-
-# Apply modern compiler features and optimization flags
 target_compile_features(headers INTERFACE cxx_std_20)
 
-# Add OpenMP and MPI support to header library with proper modern linking
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(headers INTERFACE OpenMP::OpenMP_CXX)
-    target_compile_definitions(headers INTERFACE OPENMP_ENABLED)
-endif()
+# Link dependencies
+target_link_libraries(headers INTERFACE 
+    OpenMP::OpenMP_CXX 
+    MPI::MPI_CXX 
+    Eigen3::Eigen
+    ${HDF5_CXX_LIBRARIES}
+    CUDA::cudart
+)
 
-if(MPI_CXX_FOUND)
-    target_link_libraries(headers INTERFACE MPI::MPI_CXX)
-    target_compile_definitions(headers INTERFACE MPI_ENABLED)
-endif()
+target_include_directories(headers INTERFACE ${HDF5_INCLUDE_DIRS})
 
-if(Eigen3_FOUND)
-    target_link_libraries(headers INTERFACE Eigen3::Eigen)
-    target_compile_definitions(headers INTERFACE EIGEN3_ENABLED)
-endif()
+target_compile_definitions(headers INTERFACE 
+    OPENMP_ENABLED MPI_ENABLED EIGEN3_ENABLED HDF5_ENABLED CUDA_ENABLED
+)
 
-if(HDF5_FOUND)
-    target_include_directories(headers INTERFACE ${HDF5_INCLUDE_DIRS})
-    target_link_libraries(headers INTERFACE ${HDF5_CXX_LIBRARIES})
-    target_compile_definitions(headers INTERFACE HDF5_ENABLED)
-endif()
-
-# Enable CUDA support globally if CUDA is found
-if(CUDAToolkit_FOUND)
-    target_compile_definitions(headers INTERFACE CUDA_ENABLED)
-    target_link_libraries(headers INTERFACE CUDA::cudart)
-endif()
-
-# Create optimized CUDA library
+# CUDA library
 if(CUDA_SOURCE_FILES)
     add_library(cuda_lib STATIC ${CUDA_SOURCE_FILES})
     
-    # Set modern CUDA properties
     set_target_properties(cuda_lib PROPERTIES
         CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
         POSITION_INDEPENDENT_CODE ON
@@ -164,196 +125,80 @@ if(CUDA_SOURCE_FILES)
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
     
-    # Include directories for CUDA library
     target_include_directories(cuda_lib PUBLIC 
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/dynamics>
         $<INSTALL_INTERFACE:include>
+        ${Boost_INCLUDE_DIRS}
     )
     
-    # Link with Eigen3 for GPU code
-    if(Eigen3_FOUND)
-        target_link_libraries(cuda_lib PUBLIC Eigen3::Eigen)
-    endif()
+    target_link_libraries(cuda_lib PUBLIC 
+        Eigen3::Eigen
+        CUDA::cudart CUDA::cublas CUDA::curand
+        MPI::MPI_CXX
+    )
     
-    # Link with CUDA libraries using modern CMake
-    target_link_libraries(cuda_lib PUBLIC CUDA::cudart CUDA::cublas CUDA::curand)
+    target_compile_definitions(cuda_lib PUBLIC 
+        THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA
+        MPI_ENABLED
+    )
     
-    # Add Thrust support (header-only library)
-    if(Thrust_FOUND)
-        # Thrust is header-only - just add compile definitions, no linking needed
-        target_compile_definitions(cuda_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA)
-    endif()
-    
-    # Link with Boost for Odeint
-    if(Boost_FOUND)
-        target_include_directories(cuda_lib PUBLIC ${Boost_INCLUDE_DIRS})
-    endif()
-    
-    # Add MPI dependency to CUDA library
-    if(MPI_CXX_FOUND)
-        target_link_libraries(cuda_lib PUBLIC MPI::MPI_CXX)
-        target_compile_definitions(cuda_lib PUBLIC MPI_ENABLED)
-    endif()
-    
-    # Apply CUDA optimization flags
     target_compile_options(cuda_lib PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
-        # Workaround for nvcc/GCC 12 incompatibility: prevent inclusion of AMX headers
-        $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMXTILEINTRIN_H_INCLUDED>
-        $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_INT8INTRIN_H_INCLUDED>
-        $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_BF16INTRIN_H_INCLUDED>
+        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_AMX_WORKAROUND}>
     )
     
-    # Create separate library for GPU molecular dynamics (needs Boost.Odeint thrust)
-    # DISABLED due to Boost.Odeint thrust integration compilation issues with NVCC
-    # The Boost template specializations are being instantiated multiple times causing
-    # "already defined" errors. Re-enable when compatibility issue is resolved.
-    # add_library(cuda_md_lib STATIC src/dynamics/lattice_refactored_gpu_md.cu)
-    # 
-    # set_target_properties(cuda_md_lib PROPERTIES
-    #     CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-    #     POSITION_INDEPENDENT_CODE ON
-    #     CUDA_STANDARD 20
-    #     CUDA_STANDARD_REQUIRED ON
-    #     CUDA_SEPARABLE_COMPILATION OFF
-    #     CUDA_RESOLVE_DEVICE_SYMBOLS OFF
-    # )
-    # 
-    # target_include_directories(cuda_md_lib PUBLIC
-    #     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-    #     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/dynamics>
-    #     $<INSTALL_INTERFACE:include>
-    # )
-    # 
-    # target_link_libraries(cuda_md_lib PUBLIC 
-    #     CUDA::cudart
-    # )
-    # 
-    # if(Eigen3_FOUND)
-    #     target_link_libraries(cuda_md_lib PUBLIC Eigen3::Eigen)
-    # endif()
-    # 
-    # if(Boost_FOUND)
-    #     target_include_directories(cuda_md_lib PUBLIC ${Boost_INCLUDE_DIRS})
-    # endif()
-    # 
-    # if(Thrust_FOUND)
-    #     target_compile_definitions(cuda_md_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA)
-    # endif()
-    # 
-    # target_compile_options(cuda_md_lib PRIVATE
-    #     $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
-    #     $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
-    #     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMXTILEINTRIN_H_INCLUDED>
-    #     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_INT8INTRIN_H_INCLUDED>
-    #     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-D_AMX_BF16INTRIN_H_INCLUDED>
-    # )
-    
-    # Create interface library for CUDA headers
+    # CUDA headers interface library
     add_library(cuda_headers INTERFACE)
     target_include_directories(cuda_headers INTERFACE src src/dynamics)
     target_sources(cuda_headers INTERFACE ${CUDA_HEADER_FILES})
     target_link_libraries(cuda_headers INTERFACE cuda_lib)
-    # Note: cuda_md_lib is disabled due to compilation issues
 endif()
 
-# Create optimized executables for each C++ file in run_scripts
-foreach(cpp_file ${CPP_SOURCE_FILES})
-    # Get the filename without extension
-    get_filename_component(exec_name ${cpp_file} NAME_WE)
-    
-    # Create executable
-    add_executable(${exec_name} ${cpp_file})
-    
-    # Set modern C++ features
+# ============================================================================
+# HELPER FUNCTION FOR EXECUTABLES
+# ============================================================================
+
+function(add_optimized_executable exec_name source_file)
+    add_executable(${exec_name} ${source_file})
     target_compile_features(${exec_name} PRIVATE cxx_std_20)
-    
-    # Link with header libraries
     target_link_libraries(${exec_name} PRIVATE headers)
+    target_include_directories(${exec_name} PRIVATE src)
     
-    # Link with CUDA libraries if CUDA source files exist
     if(CUDA_SOURCE_FILES)
         target_link_libraries(${exec_name} PRIVATE cuda_headers)
         set_target_properties(${exec_name} PROPERTIES
             CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+            CUDA_SEPARABLE_COMPILATION OFF
+            CUDA_RESOLVE_DEVICE_SYMBOLS ON
         )
     endif()
     
-    # Set include directories
-    target_include_directories(${exec_name} PRIVATE src)
-    
-    # Apply optimized compiler flags using modern CMake
     target_compile_options(${exec_name} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPTIMIZATION_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
-    )
-    
-    # Link-time optimization for Release builds
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set_target_properties(${exec_name} PROPERTIES
-            INTERPROCEDURAL_OPTIMIZATION TRUE
-        )
-    endif()
-    
-    # Add debug information for profiling even in release mode
-    target_compile_options(${exec_name} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-g1>  # Minimal debug info for profiling
-        $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
-    )
-endforeach()
-
-# Create optimized executables for each CUDA file in run_scripts
-foreach(cu_file ${CUDA_RUN_SCRIPTS})
-    # Get the filename without extension
-    get_filename_component(exec_name ${cu_file} NAME_WE)
-    
-    # Create executable
-    add_executable(${exec_name} ${cu_file})
-    
-    # Set modern C++ and CUDA features
-    target_compile_features(${exec_name} PRIVATE cxx_std_20)
-    set_target_properties(${exec_name} PROPERTIES
-        CUDA_STANDARD 20
-        CUDA_STANDARD_REQUIRED ON
-        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-        CUDA_SEPARABLE_COMPILATION OFF
-        CUDA_RESOLVE_DEVICE_SYMBOLS ON
-        POSITION_INDEPENDENT_CODE ON
-    )
-    
-    # Link with header libraries and CUDA
-    target_link_libraries(${exec_name} PRIVATE headers)
-    
-    if(CUDA_SOURCE_FILES)
-        target_link_libraries(${exec_name} PRIVATE cuda_headers)
-    endif()
-    
-    # Set include directories
-    target_include_directories(${exec_name} PRIVATE src)
-    
-    # Apply optimized compiler flags
-    target_compile_options(${exec_name} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPTIMIZATION_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
-    )
-    
-    # Link-time optimization for Release builds
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set_target_properties(${exec_name} PROPERTIES
-            INTERPROCEDURAL_OPTIMIZATION TRUE
-        )
-    endif()
-    
-    # Add debug information for profiling
-    target_compile_options(${exec_name} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-g1>
+        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
+        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
     )
-endforeach()
+    
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set_target_properties(${exec_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+endfunction()
+
+# ============================================================================
+# EXECUTABLES
+# ============================================================================
+
+# Main unified simulation executable
+add_optimized_executable(unified_simulation src/unified_simulation.cpp)
+
+
+# ============================================================================
+# BUILD CONFIGURATION
+# ============================================================================
 
 # Enable parallel builds
 if(NOT DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
@@ -361,96 +206,42 @@ if(NOT DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
     ProcessorCount(N)
     if(NOT N EQUAL 0)
         set(CMAKE_BUILD_PARALLEL_LEVEL ${N} CACHE STRING "Number of parallel build jobs")
-        message(STATUS "Setting parallel build jobs to ${N}")
     endif()
 endif()
 
-# Enhanced build summary with optimization information
-message(STATUS "================== Build Configuration ==================")
+# Ninja generator optimization
+if(CMAKE_GENERATOR STREQUAL "Ninja")
+    set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
+endif()
+
+# ============================================================================
+# BUILD SUMMARY
+# ============================================================================
+
+message(STATUS "================ ClassicalSpin_Cpp Build =================")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "CUDA Standard: ${CMAKE_CUDA_STANDARD}")
 message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 message(STATUS "Parallel Build Jobs: ${CMAKE_BUILD_PARALLEL_LEVEL}")
-message(STATUS "Found ${CMAKE_CURRENT_LIST_DIR}")
-message(STATUS "Header files: ${HEADER_FILES}")
-message(STATUS "CUDA source files: ${CUDA_SOURCE_FILES}")
-message(STATUS "CUDA header files: ${CUDA_HEADER_FILES}")
-message(STATUS "C++ source files: ${CPP_SOURCE_FILES}")
+message(STATUS "")
+message(STATUS "Dependencies:")
+message(STATUS "  OpenMP: ${OpenMP_CXX_VERSION}")
+message(STATUS "  MPI: ${MPI_CXX_VERSION}")
+message(STATUS "  CUDA: ${CUDAToolkit_VERSION}")
+message(STATUS "  Eigen3: ${Eigen3_VERSION}")
+message(STATUS "  Boost: ${Boost_VERSION}")
+message(STATUS "  HDF5: ${HDF5_VERSION}")
+message(STATUS "")
+message(STATUS "Source Files:")
+message(STATUS "  C++ executables: ${CPP_SOURCE_FILES}")
+message(STATUS "  CUDA executables: ${CUDA_RUN_SCRIPTS}")
 
-# Print dependency status with versions
-if(OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP found and enabled (version: ${OpenMP_CXX_VERSION})")
-else()
-    message(WARNING "OpenMP not found")
-endif()
-
-if(MPI_CXX_FOUND)
-    message(STATUS "MPI found and enabled (version: ${MPI_CXX_VERSION})")
-else()
-    message(WARNING "MPI not found")
-endif()
-
-if(CUDAToolkit_FOUND)
-    message(STATUS "CUDA found and enabled (version: ${CUDAToolkit_VERSION})")
-else()
-    message(WARNING "CUDA not found")
-endif()
-
-if(Eigen3_FOUND)
-    message(STATUS "Eigen3 found and enabled (version: ${Eigen3_VERSION})")
-else()
-    message(WARNING "Eigen3 not found")
-endif()
-
-if(Thrust_FOUND)
-    message(STATUS "Thrust found and enabled")
-else()
-    message(WARNING "Thrust not found")
-endif()
-
-if(Boost_FOUND)
-    message(STATUS "Boost found and enabled (version: ${Boost_VERSION})")
-    message(STATUS "Boost include dirs: ${Boost_INCLUDE_DIRS}")
-else()
-    message(WARNING "Boost not found")
-endif()
-
-if(HDF5_FOUND)
-    message(STATUS "HDF5 found and enabled (version: ${HDF5_VERSION})")
-    message(STATUS "HDF5 include dirs: ${HDF5_INCLUDE_DIRS}")
-    message(STATUS "HDF5 libraries: ${HDF5_CXX_LIBRARIES}")
-else()
-    message(WARNING "HDF5 not found")
-endif()
-
-message(STATUS "=====================================================")  # Print optimization flags being used
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    message(STATUS "C++ Optimization Flags: ${CXX_OPTIMIZATION_FLAGS}")
-    message(STATUS "CUDA Optimization Flags: ${CUDA_OPTIMIZATION_FLAGS}")
+    message(STATUS "")
+    message(STATUS "Optimization Flags:")
+    message(STATUS "  C++: -O3 -march=native -flto ...")
+    message(STATUS "  CUDA: -O3 --use_fast_math ...")
 endif()
 
-# Create a target to build all executables with optimized parallel build
-add_custom_target(all_executables)
-foreach(cpp_file ${CPP_SOURCE_FILES})
-    get_filename_component(exec_name ${cpp_file} NAME_WE)
-    add_dependencies(all_executables ${exec_name})
-endforeach()
-
-# Add a custom target for ninja builds to show build progress
-if(CMAKE_GENERATOR STREQUAL "Ninja")
-    message(STATUS "Using Ninja generator for optimized parallel builds")
-    set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
-endif()
-
-# GPU build test
-add_executable(test_gpu_build test_gpu_build.cu)
-target_link_libraries(test_gpu_build headers cuda_lib)
-set_target_properties(test_gpu_build PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-
-# Performance testing target
-add_custom_target(performance_test
-    COMMAND echo "Run performance tests here"
-    DEPENDS all_executables
-    COMMENT "Running performance tests on optimized executables"
-)
+message(STATUS "===========================================================")

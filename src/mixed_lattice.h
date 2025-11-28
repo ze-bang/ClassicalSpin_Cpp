@@ -176,8 +176,8 @@ public:
      */
     MixedLattice(const MixedUnitCell& mixed_uc, size_t dim1, size_t dim2, size_t dim3,
                  float spin_l_SU2 = 1.0, float spin_l_SU3 = 1.0)
-        : spin_dim_SU2(mixed_uc.SU2_cell.spin_dim),
-          spin_dim_SU3(mixed_uc.SU3_cell.spin_dim),
+        : spin_dim_SU2(mixed_uc.SU2_cell.N),
+          spin_dim_SU3(mixed_uc.SU3_cell.N),
           N_atoms_SU2(mixed_uc.SU2_cell.N_atoms),
           N_atoms_SU3(mixed_uc.SU3_cell.N_atoms),
           dim1(dim1), dim2(dim2), dim3(dim3),
@@ -227,10 +227,10 @@ public:
         
         // Copy sublattice frames
         for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
-            sublattice_frames_SU2[atom] = uc_SU2.sublattice_frames[atom];
+            sublattice_frames_SU2[atom] = mixed_uc.SU2_cell.sublattice_frames[atom];
         }
         for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
-            sublattice_frames_SU3[atom] = uc_SU3.sublattice_frames[atom];
+            sublattice_frames_SU3[atom] = mixed_uc.SU3_cell.sublattice_frames[atom];
         }
 
         // Initialize time-dependent fields
@@ -378,7 +378,9 @@ public:
                         onsite[site_idx] = uc.onsite_interaction[l];
                         
                         // Count bilinear interactions
-                        for (const auto& J : uc.bilinear_interaction[l]) {
+                        auto bi_range = uc.bilinear_interaction.equal_range(l);
+                        for (auto it = bi_range.first; it != bi_range.second; ++it) {
+                            const auto& J = it->second;
                             bi_count[site_idx]++;
                             size_t partner = flatten_index_periodic(
                                 int(i) + J.offset[0], int(j) + J.offset[1], int(k) + J.offset[2], J.partner, N_atoms);
@@ -386,7 +388,9 @@ public:
                         }
                         
                         // Count trilinear interactions
-                        for (const auto& J : uc.trilinear_interaction[l]) {
+                        auto tri_range = uc.trilinear_interaction.equal_range(l);
+                        for (auto it = tri_range.first; it != tri_range.second; ++it) {
+                            const auto& J = it->second;
                             size_t partner1 = flatten_index_periodic(
                                 int(i) + J.offset1[0], int(j) + J.offset1[1], int(k) + J.offset1[2], J.partner1, N_atoms);
                             size_t partner2 = flatten_index_periodic(
@@ -417,27 +421,31 @@ public:
                 for (size_t k = 0; k < dim3; ++k) {
                     for (size_t l = 0; l < N_atoms; ++l) {
                         // Bilinear interactions
-                        for (const auto& J : uc.bilinear_interaction[l]) {
+                        auto bi_range = uc.bilinear_interaction.equal_range(l);
+                        for (auto it = bi_range.first; it != bi_range.second; ++it) {
+                            const auto& J = it->second;
                             size_t partner = flatten_index_periodic(
                                 int(i) + J.offset[0], int(j) + J.offset[1], int(k) + J.offset[2], J.partner, N_atoms);
                             
-                            bilinear[site_idx].push_back(J.bilinear_interaction);
+                            bilinear[site_idx].push_back(J.interaction);
                             bi_partners[site_idx].push_back(partner);
                             
                             // Symmetric interaction
-                            bilinear[partner].push_back(J.bilinear_interaction.transpose());
+                            bilinear[partner].push_back(J.interaction.transpose());
                             bi_partners[partner].push_back(site_idx);
                         }
                         
                         // Trilinear interactions
-                        for (const auto& J : uc.trilinear_interaction[l]) {
+                        auto tri_range = uc.trilinear_interaction.equal_range(l);
+                        for (auto it = tri_range.first; it != tri_range.second; ++it) {
+                            const auto& J = it->second;
                             size_t partner1 = flatten_index_periodic(
                                 int(i) + J.offset1[0], int(j) + J.offset1[1], int(k) + J.offset1[2], J.partner1, N_atoms);
                             size_t partner2 = flatten_index_periodic(
                                 int(i) + J.offset2[0], int(j) + J.offset2[1], int(k) + J.offset2[2], J.partner2, N_atoms);
                             
                             // Add interaction T_abc S_a^(0) S_b^(1) S_c^(2)
-                            trilinear[site_idx].push_back(J.trilinear_interaction);
+                            trilinear[site_idx].push_back(J.interaction);
                             tri_partners[site_idx].push_back({partner1, partner2});
                             
                             // Add symmetric contributions for energy conservation
@@ -448,7 +456,7 @@ public:
                                 tensor_p1[b] = SpinMatrix(spin_dim, spin_dim);
                                 for (size_t a = 0; a < spin_dim; ++a) {
                                     for (size_t c = 0; c < spin_dim; ++c) {
-                                        tensor_p1[b](a, c) = J.trilinear_interaction[a](b, c);
+                                        tensor_p1[b](a, c) = J.interaction[a](b, c);
                                     }
                                 }
                             }
@@ -462,7 +470,7 @@ public:
                                 tensor_p2[c] = SpinMatrix(spin_dim, spin_dim);
                                 for (size_t a = 0; a < spin_dim; ++a) {
                                     for (size_t b = 0; b < spin_dim; ++b) {
-                                        tensor_p2[c](a, b) = J.trilinear_interaction[a](b, c);
+                                        tensor_p2[c](a, b) = J.interaction[a](b, c);
                                     }
                                 }
                             }
@@ -495,7 +503,7 @@ public:
              it != mixed_uc.bilinear_SU2_SU3.end(); ) {
             int source = it->first;
             auto range = mixed_uc.bilinear_SU2_SU3.equal_range(source);
-            num_bi_mixed = std::max(num_bi_mixed, std::distance(range.first, range.second));
+            num_bi_mixed = std::max(num_bi_mixed, static_cast<size_t>(std::distance(range.first, range.second)));
             it = range.second;
         }
         
@@ -504,7 +512,7 @@ public:
              it != mixed_uc.trilinear_SU2_SU3.end(); ) {
             int source = it->first;
             auto range = mixed_uc.trilinear_SU2_SU3.equal_range(source);
-            num_tri_mixed = std::max(num_tri_mixed, std::distance(range.first, range.second));
+            num_tri_mixed = std::max(num_tri_mixed, static_cast<size_t>(std::distance(range.first, range.second)));
             it = range.second;
         }
 
@@ -817,6 +825,134 @@ public:
     }
 
     /**
+     * Compute total energy directly from flat state array (zero-allocation version)
+     * State layout: [SU2_site0_components... SU2_siteN... SU3_site0_components... SU3_siteM...]
+     * Includes all interaction terms with proper double-counting avoidance
+     */
+    double total_energy_flat(const double* state_flat) const {
+        double energy = 0.0;
+        const size_t offset_SU3 = lattice_size_SU2 * spin_dim_SU2;
+        
+        // SU(2) contributions
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            const double* spin = &state_flat[i * spin_dim_SU2];
+            
+            // Field
+            for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                energy -= spin[d] * field_SU2[i](d);
+            }
+            
+            // Onsite
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    energy += spin[a] * onsite_interaction_SU2[i](a, b) * spin[b];
+                }
+            }
+            
+            // Bilinear (half-counted)
+            for (size_t j = 0; j < num_bi_SU2; ++j) {
+                const size_t partner = bilinear_partners_SU2[i][j];
+                const double* partner_spin = &state_flat[partner * spin_dim_SU2];
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        energy += 0.5 * spin[a] * bilinear_interaction_SU2[i][j](a, b) * partner_spin[b];
+                    }
+                }
+            }
+            
+            // Mixed bilinear (half-counted)
+            for (size_t j = 0; j < num_bi_SU2_SU3; ++j) {
+                const size_t partner = mixed_bilinear_partners_SU2[i][j];
+                const double* partner_spin = &state_flat[offset_SU3 + partner * spin_dim_SU3];
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                        energy += 0.5 * spin[a] * mixed_bilinear_interaction_SU2[i][j](a, b) * partner_spin[b];
+                    }
+                }
+            }
+            
+            // Trilinear
+            for (size_t j = 0; j < num_tri_SU2; ++j) {
+                const size_t p1 = trilinear_partners_SU2[i][j][0];
+                const size_t p2 = trilinear_partners_SU2[i][j][1];
+                const double* spin1 = &state_flat[p1 * spin_dim_SU2];
+                const double* spin2 = &state_flat[p2 * spin_dim_SU2];
+                const auto& T = trilinear_interaction_SU2[i][j];
+                
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    double temp = 0.0;
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            temp += T[a](b, c) * spin1[b] * spin2[c];
+                        }
+                    }
+                    energy += (1.0/3.0) * spin[a] * temp;
+                }
+            }
+        }
+        
+        // SU(3) contributions
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            const double* spin = &state_flat[offset_SU3 + i * spin_dim_SU3];
+            
+            // Field
+            for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                energy -= spin[d] * field_SU3[i](d);
+            }
+            
+            // Onsite
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                    energy += spin[a] * onsite_interaction_SU3[i](a, b) * spin[b];
+                }
+            }
+            
+            // Bilinear (half-counted)
+            for (size_t j = 0; j < num_bi_SU3; ++j) {
+                const size_t partner = bilinear_partners_SU3[i][j];
+                const double* partner_spin = &state_flat[offset_SU3 + partner * spin_dim_SU3];
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                        energy += 0.5 * spin[a] * bilinear_interaction_SU3[i][j](a, b) * partner_spin[b];
+                    }
+                }
+            }
+            
+            // Mixed bilinear (half-counted)
+            for (size_t j = 0; j < num_bi_SU2_SU3; ++j) {
+                const size_t partner = mixed_bilinear_partners_SU3[i][j];
+                const double* partner_spin = &state_flat[partner * spin_dim_SU2];
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        energy += 0.5 * spin[a] * mixed_bilinear_interaction_SU3[i][j](a, b) * partner_spin[b];
+                    }
+                }
+            }
+            
+            // Trilinear
+            for (size_t j = 0; j < num_tri_SU3; ++j) {
+                const size_t p1 = trilinear_partners_SU3[i][j][0];
+                const size_t p2 = trilinear_partners_SU3[i][j][1];
+                const double* spin1 = &state_flat[offset_SU3 + p1 * spin_dim_SU3];
+                const double* spin2 = &state_flat[offset_SU3 + p2 * spin_dim_SU3];
+                const auto& T = trilinear_interaction_SU3[i][j];
+                
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    double temp = 0.0;
+                    for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            temp += T[a](b, c) * spin1[b] * spin2[c];
+                        }
+                    }
+                    energy += (1.0/3.0) * spin[a] * temp;
+                }
+            }
+        }
+        
+        return energy;
+    }
+
+    /**
      * Compute energy density
      */
     double energy_density() const {
@@ -878,42 +1014,382 @@ public:
     }
 
     /**
-     * Simulated annealing
+     * Over-relaxation sweep (microcanonical, zero acceptance rate)
+     * Reflects spins across their local field direction
+     */
+    void overrelaxation() {
+        // Over-relaxation for SU(2) spins
+        for (size_t count = 0; count < lattice_size_SU2; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU2);
+            SpinVector local_field = get_local_field_SU2(i);
+            double norm = local_field.squaredNorm();
+            
+            if (norm > 1e-12) {
+                double proj = 2.0 * spins_SU2[i].dot(local_field) / norm;
+                spins_SU2[i] = local_field * proj - spins_SU2[i];
+            }
+        }
+        
+        // Over-relaxation for SU(3) spins
+        for (size_t count = 0; count < lattice_size_SU3; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU3);
+            SpinVector local_field = get_local_field_SU3(i);
+            double norm = local_field.squaredNorm();
+            
+            if (norm > 1e-12) {
+                double proj = 2.0 * spins_SU3[i].dot(local_field) / norm;
+                spins_SU3[i] = local_field * proj - spins_SU3[i];
+            }
+        }
+    }
+
+    /**
+     * Deterministic sweep: align each spin antiparallel to its local field
+     * This is a zero-temperature relaxation step that randomly selects sites
+     */
+    void deterministic_sweep() {
+        // Deterministic update for SU(2) spins
+        for (size_t count = 0; count < lattice_size_SU2; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU2);
+            SpinVector local_field = get_local_field_SU2(i);
+            double norm = local_field.norm();
+            
+            if (norm > 1e-12) {
+                spins_SU2[i] = -local_field / norm * spin_length_SU2;
+            }
+        }
+        
+        // Deterministic update for SU(3) spins
+        for (size_t count = 0; count < lattice_size_SU3; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU3);
+            SpinVector local_field = get_local_field_SU3(i);
+            double norm = local_field.norm();
+            
+            if (norm > 1e-12) {
+                spins_SU3[i] = -local_field / norm * spin_length_SU3;
+            }
+        }
+    }
+
+    /**
+     * Zero-temperature greedy quench with convergence check
+     */
+    void greedy_quench(double rel_tol = 1e-12, size_t max_sweeps = 10000) {
+        double E_prev = total_energy();
+        for (size_t s = 0; s < max_sweeps; ++s) {
+            deterministic_sweep();
+            double E = total_energy();
+            if (fabs(E - E_prev) <= rel_tol * (fabs(E_prev) + 1e-18)) {
+                cout << "Greedy quench converged after " << s + 1 << " sweeps" << endl;
+                break;
+            }
+            E_prev = E;
+        }
+    }
+
+    /**
+     * Main simulated annealing routine
+     * Matches structure and features from Lattice::simulated_annealing
      */
     void simulated_annealing(double T_start, double T_end, size_t n_anneal,
-                            bool gaussian_move = true, const string& out_dir = "") {
+                            bool gaussian_move = false,
+                            double cooling_rate = 0.9,
+                            string out_dir = "",
+                            bool save_observables = false) {
+        
+        // Setup output directory
         if (!out_dir.empty()) {
-            std::filesystem::create_directory(out_dir);
+            std::filesystem::create_directories(out_dir);
         }
         
         double T = T_start;
         double sigma = 1000.0;
         
-        cout << "Starting simulated annealing: " << T_start << " → " << T_end << endl;
+        cout << "Starting mixed lattice simulated annealing: T=" << T_start << " → " << T_end << endl;
         
+        size_t temp_step = 0;
         while (T > T_end) {
-            double acceptance = 0.0;
-            for (size_t i = 0; i < n_anneal; ++i) {
-                acceptance += metropolis(T, gaussian_move, sigma);
+            // Perform sweeps at this temperature
+            double acc_sum = perform_mc_sweeps(n_anneal, T, gaussian_move, sigma);
+            
+            // Calculate acceptance rate
+            double acceptance = acc_sum / double(n_anneal);
+            
+            // Progress report
+            if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+                double E = energy_density();
+                SpinVector M_SU2 = magnetization_SU2();
+                SpinVector M_SU3 = magnetization_SU3();
+                cout << "T=" << std::scientific << T << ", E/N=" << E 
+                     << ", |M_SU2|=" << M_SU2.norm()
+                     << ", |M_SU3|=" << M_SU3.norm()
+                     << ", acc=" << std::fixed << acceptance;
+                if (gaussian_move) cout << ", σ=" << sigma;
+                cout << endl;
             }
-            acceptance /= n_anneal;
             
-            cout << "T = " << T << ", acceptance = " << acceptance << endl;
-            
+            // Adaptive sigma adjustment for gaussian moves
             if (gaussian_move && acceptance < 0.5) {
-                sigma *= 0.5 / (1 - acceptance);
-                cout << "  Adjusted sigma = " << sigma << endl;
+                sigma = sigma * 0.5 / (1.0 - acceptance);
+                if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+                    cout << "Sigma adjusted to " << sigma << endl;
+                }
             }
             
-            T *= 0.9;
+            // Save intermediate configuration
+            if (!out_dir.empty() && temp_step % 50 == 0) {
+                save_spin_config(out_dir + "/spins_T=" + std::to_string(T) + ".dat");
+            }
+            
+            // Cool down
+            T *= cooling_rate;
+            ++temp_step;
         }
         
+        cout << "Final energy density: " << energy_density() << endl;
+        
+        // Save final configuration
         if (!out_dir.empty()) {
-            save_spin_config(out_dir + "/spin_final");
-            save_positions(out_dir + "/pos");
+            save_spin_config(out_dir + "/spins_final.dat");
+            save_positions(out_dir + "/positions_SU2.dat");
         }
     }
 
+    // ============================================================
+    // PARALLEL TEMPERING
+    // ============================================================
+
+    /**
+     * Parallel tempering with MPI for mixed lattice
+     * Matches structure and features from Lattice::parallel_tempering
+     */
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+                           size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                           string dir_name, const vector<int>& rank_to_write,
+                           bool gaussian_move = true) {
+        // Initialize MPI
+        int initialized;
+        MPI_Initialized(&initialized);
+        if (!initialized) {
+            MPI_Init(nullptr, nullptr);
+        }
+        
+        int rank, size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        
+        if (size != static_cast<int>(temp.size())) {
+            if (rank == 0) {
+                cout << "Error: Number of MPI ranks (" << size 
+                     << ") must equal number of temperatures (" << temp.size() << ")" << endl;
+            }
+            return;
+        }
+        
+        double curr_Temp = temp[rank];
+        double sigma = 1000.0;
+        int swap_accept = 0;
+        double curr_accept = 0;
+        
+        vector<double> energies;
+        vector<pair<SpinVector, SpinVector>> magnetizations; // (SU2, SU3)
+        size_t expected_samples = n_measure / probe_rate + 100;
+        energies.reserve(expected_samples);
+        magnetizations.reserve(expected_samples);
+        
+        cout << "Rank " << rank << ": T=" << curr_Temp << endl;
+        
+        // Equilibration phase
+        cout << "Rank " << rank << ": Equilibrating..." << endl;
+        for (size_t i = 0; i < n_anneal; ++i) {
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                }
+            } else {
+                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+            }
+            
+            // Attempt replica exchange
+            if (swap_rate > 0 && i % swap_rate == 0) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+            }
+        }
+        
+        // Main measurement phase
+        cout << "Rank " << rank << ": Measuring..." << endl;
+        for (size_t i = 0; i < n_measure; ++i) {
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                }
+            } else {
+                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+            }
+            
+            if (swap_rate > 0 && i % swap_rate == 0) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+            }
+            
+            if (i % probe_rate == 0) {
+                energies.push_back(total_energy());
+                magnetizations.push_back({magnetization_SU2(), magnetization_SU3()});
+            }
+        }
+        
+        cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
+        
+        // Report statistics
+        double total_steps = n_anneal + n_measure;
+        double acc_rate = curr_accept / total_steps;
+        double swap_rate_actual = (swap_rate > 0) ? double(swap_accept) / (total_steps / swap_rate) : 0.0;
+        
+        cout << "Rank " << rank << ": T=" << curr_Temp 
+             << ", acc=" << acc_rate 
+             << ", swap_acc=" << swap_rate_actual << endl;
+        
+        // Save results
+        if (!dir_name.empty()) {
+            std::filesystem::create_directories(dir_name);
+            
+            bool should_write = std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end();
+            
+            if (should_write) {
+                string rank_dir = dir_name + "/rank_" + std::to_string(rank);
+                std::filesystem::create_directories(rank_dir);
+                
+                save_spin_config(rank_dir + "/spins_final.dat");
+                
+                // Save energy time series
+                ofstream energy_file(rank_dir + "/energy.txt");
+                for (double E : energies) {
+                    energy_file << E / (lattice_size_SU2 + lattice_size_SU3) << "\n";
+                }
+                energy_file.close();
+                
+                // Save magnetization time series
+                ofstream mag_su2_file(rank_dir + "/magnetization_SU2.txt");
+                ofstream mag_su3_file(rank_dir + "/magnetization_SU3.txt");
+                for (const auto& mag_pair : magnetizations) {
+                    const auto& M_SU2 = mag_pair.first;
+                    const auto& M_SU3 = mag_pair.second;
+                    
+                    for (int i = 0; i < M_SU2.size(); ++i) {
+                        mag_su2_file << M_SU2(i);
+                        if (i < M_SU2.size() - 1) mag_su2_file << " ";
+                    }
+                    mag_su2_file << "\n";
+                    
+                    for (int i = 0; i < M_SU3.size(); ++i) {
+                        mag_su3_file << M_SU3(i);
+                        if (i < M_SU3.size() - 1) mag_su3_file << " ";
+                    }
+                    mag_su3_file << "\n";
+                }
+                mag_su2_file.close();
+                mag_su3_file.close();
+            }
+        }
+        
+        MPI_Barrier(MPI_COMM_WORLD);
+        
+        if (rank == 0) {
+            cout << "Parallel tempering completed" << endl;
+        }
+    }
+
+private:
+    /**
+     * Attempt replica exchange between neighboring temperatures
+     * Returns 1 if exchange successful, 0 otherwise
+     */
+    int attempt_replica_exchange(int rank, int size, const vector<double>& temp,
+                                double curr_Temp, size_t swap_parity) {
+        // Determine partner based on checkerboard pattern
+        int partner_rank;
+        if (swap_parity % 2 == 0) {
+            partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+        } else {
+            partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+        }
+        
+        if (partner_rank < 0 || partner_rank >= size) {
+            return 0;
+        }
+        
+        // Exchange energies
+        double E = total_energy();
+        double E_partner, T_partner = temp[partner_rank];
+        
+        MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
+                    &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        // Decide acceptance
+        bool accept = false;
+        if (rank < partner_rank) {
+            double delta_beta = (1.0 / curr_Temp) - (1.0 / T_partner);
+            double delta_E = E_partner - E;
+            double P_swap = std::exp(delta_beta * delta_E);
+            accept = (random_double_lehman(0.0, 1.0) < P_swap);
+        }
+        
+        // Broadcast decision
+        int accept_int = accept ? 1 : 0;
+        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), MPI_COMM_WORLD);
+        accept = (accept_int == 1);
+        
+        // Exchange configurations if accepted
+        if (accept) {
+            // Serialize SU(2) spins
+            vector<double> send_buf_SU2(lattice_size_SU2 * spin_dim_SU2);
+            vector<double> recv_buf_SU2(lattice_size_SU2 * spin_dim_SU2);
+            
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                for (size_t j = 0; j < spin_dim_SU2; ++j) {
+                    send_buf_SU2[i * spin_dim_SU2 + j] = spins_SU2[i](j);
+                }
+            }
+            
+            MPI_Sendrecv(send_buf_SU2.data(), send_buf_SU2.size(), MPI_DOUBLE, partner_rank, 1,
+                        recv_buf_SU2.data(), recv_buf_SU2.size(), MPI_DOUBLE, partner_rank, 1,
+                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            
+            // Deserialize SU(2)
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                for (size_t j = 0; j < spin_dim_SU2; ++j) {
+                    spins_SU2[i](j) = recv_buf_SU2[i * spin_dim_SU2 + j];
+                }
+            }
+            
+            // Serialize SU(3) spins
+            vector<double> send_buf_SU3(lattice_size_SU3 * spin_dim_SU3);
+            vector<double> recv_buf_SU3(lattice_size_SU3 * spin_dim_SU3);
+            
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                    send_buf_SU3[i * spin_dim_SU3 + j] = spins_SU3[i](j);
+                }
+            }
+            
+            MPI_Sendrecv(send_buf_SU3.data(), send_buf_SU3.size(), MPI_DOUBLE, partner_rank, 2,
+                        recv_buf_SU3.data(), recv_buf_SU3.size(), MPI_DOUBLE, partner_rank, 2,
+                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            
+            // Deserialize SU(3)
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                    spins_SU3[i](j) = recv_buf_SU3[i * spin_dim_SU3 + j];
+                }
+            }
+        }
+        
+        return accept ? 1 : 0;
+    }
+
+public:
     // ============================================================
     // MOLECULAR DYNAMICS
     // ============================================================
@@ -1298,59 +1774,255 @@ public:
     /**
      * Compute Landau-Lifshitz derivatives using structure constants
      * Note: For SU(2), use cross product. For SU(3), use Gell-Mann structure constants.
+     * 
+     * Direct ODEState implementation - no intermediate SpinConfig conversions for efficiency.
+     * State layout: [SU2_site0_components... SU2_siteN... SU3_site0_components... SU3_siteM...]
      */
     void landau_lifshitz(const ODEState& state, ODEState& dsdt, double t) {
-        // Unpack state to spin configurations
-        SpinConfigSU2 curr_spins_SU2(lattice_size_SU2);
-        SpinConfigSU3 curr_spins_SU3(lattice_size_SU3);
-        for (size_t i = 0; i < lattice_size_SU2; ++i) curr_spins_SU2[i] = SpinVector::Zero(spin_dim_SU2);
-        for (size_t i = 0; i < lattice_size_SU3; ++i) curr_spins_SU3[i] = SpinVector::Zero(spin_dim_SU3);
-        state_to_spins(state, curr_spins_SU2, curr_spins_SU3);
-        
-        size_t idx = 0;
+        const size_t offset_SU3 = lattice_size_SU2 * spin_dim_SU2;  // Start index for SU(3) spins
         
         // SU(2) dynamics: dS/dt = H × S (cross product for spin-1/2)
-        for (size_t i = 0; i < lattice_size_SU2; ++i) {
-            SpinVector H = get_local_field_SU2_state(i, curr_spins_SU2, curr_spins_SU3);
-            H -= drive_field_SU2_at_time(t, i);
+        for (size_t site = 0; site < lattice_size_SU2; ++site) {
+            const size_t idx = site * spin_dim_SU2;
             
-            // Cross product for SU(2): (H × S)
+            // Compute local field using helper function
+            SpinVector H = get_local_field_SU2_flat(site, state, offset_SU3, t);
+            
+            // Compute dS/dt = H × S for SU(2)
             if (spin_dim_SU2 == 3) {
-                SpinVector dSdt = H.cross(curr_spins_SU2[i]);
-                for (size_t j = 0; j < 3; ++j) {
-                    dsdt[idx++] = dSdt(j);
-                }
+                // Standard cross product for 3D vectors
+                dsdt[idx + 0] = H(1) * state[idx + 2] - H(2) * state[idx + 1];
+                dsdt[idx + 1] = H(2) * state[idx + 0] - H(0) * state[idx + 2];
+                dsdt[idx + 2] = H(0) * state[idx + 1] - H(1) * state[idx + 0];
             } else {
-                // General case: would need structure constants
+                // General case: would need proper SU(N) structure constants
                 for (size_t j = 0; j < spin_dim_SU2; ++j) {
-                    dsdt[idx++] = 0.0;
+                    dsdt[idx + j] = 0.0;
                 }
             }
         }
         
         // SU(3) dynamics: dS/dt = f_ijk H_j S_k (structure constant contraction)
-        // For SU(3), f_ijk are the Gell-Mann structure constants
-        for (size_t i = 0; i < lattice_size_SU3; ++i) {
-            SpinVector H = get_local_field_SU3_state(i, curr_spins_SU2, curr_spins_SU3);
-            H -= drive_field_SU3_at_time(t, i);
+        const auto& f = get_SU3_structure();
+        for (size_t site = 0; site < lattice_size_SU3; ++site) {
+            const size_t idx = offset_SU3 + site * spin_dim_SU3;
             
-            // Structure constant contraction: (f_ijk H_j S_k)
-            SpinVector dSdt = SpinVector::Zero(spin_dim_SU3);
-            for (size_t ii = 0; ii < spin_dim_SU3; ++ii) {
-                for (size_t jj = 0; jj < spin_dim_SU3; ++jj) {
-                    for (size_t kk = 0; kk < spin_dim_SU3; ++kk) {
-                        dSdt(ii) += SU3_structure[ii][jj][kk] * H(jj) * curr_spins_SU3[i](kk);
+            // Compute local field using helper function
+            SpinVector H = get_local_field_SU3_flat(site, state, offset_SU3, t);
+            
+            // Compute dS/dt = f_ijk H_j S_k for SU(3) using Gell-Mann structure constants
+            for (size_t i = 0; i < spin_dim_SU3; ++i) {
+                double dSdt_i = 0.0;
+                for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                    for (size_t k = 0; k < spin_dim_SU3; ++k) {
+                        dSdt_i += f[i](j, k) * H(j) * state[idx + k];
                     }
                 }
-            }
-            
-            for (size_t j = 0; j < spin_dim_SU3; ++j) {
-                dsdt[idx++] = dSdt(j);
+                dsdt[idx + i] = dSdt_i;
             }
         }
     }
 
 private:
+    /**
+     * Compute local field for SU(2) site directly from flat state vector
+     * More efficient than get_local_field_SU2() which uses SpinConfig
+     * 
+     * @param site Site index in SU(2) sublattice
+     * @param state Flat ODE state vector
+     * @param offset_SU3 Starting index of SU(3) spins in state vector
+     * @param t Current time (for time-dependent drive)
+     */
+    SpinVector get_local_field_SU2_flat(size_t site, const ODEState& state, 
+                                         size_t offset_SU3, double t) const {
+        const size_t idx = site * spin_dim_SU2;
+        SpinVector H = -field_SU2[site];
+        
+        // Onsite: 2*A*S
+        for (size_t a = 0; a < spin_dim_SU2; ++a) {
+            for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                H(a) += 2.0 * onsite_interaction_SU2[site](a, b) * state[idx + b];
+            }
+        }
+        
+        // Bilinear SU(2)-SU(2): J*S_partner
+        for (size_t n = 0; n < num_bi_SU2; ++n) {
+            const size_t partner = bilinear_partners_SU2[site][n];
+            const size_t partner_idx = partner * spin_dim_SU2;
+            const auto& J = bilinear_interaction_SU2[site][n];
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    H(a) += J(a, b) * state[partner_idx + b];
+                }
+            }
+        }
+        
+        // Mixed bilinear SU(2)-SU(3)
+        for (size_t n = 0; n < num_bi_SU2_SU3; ++n) {
+            const size_t partner = mixed_bilinear_partners_SU2[site][n];
+            const size_t partner_idx = offset_SU3 + partner * spin_dim_SU3;
+            const auto& J = mixed_bilinear_interaction_SU2[site][n];
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                    H(a) += J(a, c) * state[partner_idx + c];
+                }
+            }
+        }
+        
+        // Trilinear SU(2)-SU(2)-SU(2): T[a](b,c) * S1[b] * S2[c]
+        for (size_t n = 0; n < num_tri_SU2; ++n) {
+            const size_t p1 = trilinear_partners_SU2[site][n][0];
+            const size_t p2 = trilinear_partners_SU2[site][n][1];
+            const size_t p1_idx = p1 * spin_dim_SU2;
+            const size_t p2_idx = p2 * spin_dim_SU2;
+            const auto& T = trilinear_interaction_SU2[site][n];
+            
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H(a) += temp;
+            }
+        }
+        
+        // Mixed trilinear SU(2)-SU(2)-SU(3): T[a](b,c) * S_SU2[b] * S_SU3[c]
+        for (size_t n = 0; n < num_tri_SU2_SU3; ++n) {
+            const size_t p1 = mixed_trilinear_partners_SU2[site][n][0];
+            const size_t p2 = mixed_trilinear_partners_SU2[site][n][1];
+            const size_t p1_idx = p1 * spin_dim_SU2;
+            const size_t p2_idx = offset_SU3 + p2 * spin_dim_SU3;
+            const auto& T = mixed_trilinear_interaction_SU2[site][n];
+            
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H(a) += temp;
+            }
+        }
+        
+        // Add time-dependent drive
+        H -= drive_field_SU2_at_time(t, site);
+        
+        return H;
+    }
+    
+    /**
+     * Compute local field for SU(3) site directly from flat state vector
+     * More efficient than get_local_field_SU3() which uses SpinConfig
+     * 
+     * @param site Site index in SU(3) sublattice
+     * @param state Flat ODE state vector
+     * @param offset_SU3 Starting index of SU(3) spins in state vector
+     * @param t Current time (for time-dependent drive)
+     */
+    SpinVector get_local_field_SU3_flat(size_t site, const ODEState& state, 
+                                         size_t offset_SU3, double t) const {
+        const size_t idx = offset_SU3 + site * spin_dim_SU3;
+        SpinVector H = -field_SU3[site];
+        
+        // Onsite: 2*A*S
+        for (size_t a = 0; a < spin_dim_SU3; ++a) {
+            for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                H(a) += 2.0 * onsite_interaction_SU3[site](a, b) * state[idx + b];
+            }
+        }
+        
+        // Bilinear SU(3)-SU(3): J*S_partner
+        for (size_t n = 0; n < num_bi_SU3; ++n) {
+            const size_t partner = bilinear_partners_SU3[site][n];
+            const size_t partner_idx = offset_SU3 + partner * spin_dim_SU3;
+            const auto& J = bilinear_interaction_SU3[site][n];
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                    H(a) += J(a, b) * state[partner_idx + b];
+                }
+            }
+        }
+        
+        // Mixed bilinear SU(3)-SU(2)
+        for (size_t n = 0; n < num_bi_SU2_SU3; ++n) {
+            const size_t partner = mixed_bilinear_partners_SU3[site][n];
+            const size_t partner_idx = partner * spin_dim_SU2;
+            const auto& J = mixed_bilinear_interaction_SU3[site][n];
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    H(a) += J(a, b) * state[partner_idx + b];
+                }
+            }
+        }
+        
+        // Trilinear SU(3)-SU(3)-SU(3): T[a](b,c) * S1[b] * S2[c]
+        for (size_t n = 0; n < num_tri_SU3; ++n) {
+            const size_t p1 = trilinear_partners_SU3[site][n][0];
+            const size_t p2 = trilinear_partners_SU3[site][n][1];
+            const size_t p1_idx = offset_SU3 + p1 * spin_dim_SU3;
+            const size_t p2_idx = offset_SU3 + p2 * spin_dim_SU3;
+            const auto& T = trilinear_interaction_SU3[site][n];
+            
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H(a) += temp;
+            }
+        }
+        
+        // Mixed trilinear SU(3)-SU(2)-SU(2): T[a](b,c) * S_SU2_1[b] * S_SU2_2[c]
+        for (size_t n = 0; n < num_tri_SU2_SU3; ++n) {
+            const size_t p1 = mixed_trilinear_partners_SU3[site][n][0];
+            const size_t p2 = mixed_trilinear_partners_SU3[site][n][1];
+            const size_t p1_idx = p1 * spin_dim_SU2;
+            const size_t p2_idx = p2 * spin_dim_SU2;
+            const auto& T = mixed_trilinear_interaction_SU3[site][n];
+            
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H(a) += temp;
+            }
+        }
+        
+        // Add time-dependent drive
+        H -= drive_field_SU3_at_time(t, site);
+        
+        return H;
+    }
+
+    /**
+     * Helper: Perform MC sweeps with optional overrelaxation
+     * Returns sum of acceptance rates from metropolis calls
+     */
+    double perform_mc_sweeps(size_t n_sweeps, double T, bool gaussian_move, 
+                            double& sigma, size_t overrelaxation_rate = 0) {
+        double acc_sum = 0.0;
+        for (size_t i = 0; i < n_sweeps; ++i) {
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    acc_sum += metropolis(T, gaussian_move, sigma);
+                }
+            } else {
+                acc_sum += metropolis(T, gaussian_move, sigma);
+            }
+        }
+        
+        return acc_sum;
+    }
+
     /**
      * Get local field for SU(2) from temporary state
      */
@@ -1495,6 +2167,41 @@ public:
         return mag / double(lattice_size_SU3);
     }
 
+    /**
+     * Helper function to compute SU(2) global magnetization from flat state
+     */
+    void compute_magnetization_global_SU2_from_flat(const double* x, double* M_global_arr) const {
+        for (size_t d = 0; d < spin_dim_SU2; ++d) M_global_arr[d] = 0.0;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            size_t atom = i % N_atoms_SU2;
+            size_t idx = i * spin_dim_SU2;
+            for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                    M_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
+                }
+            }
+        }
+        for (size_t d = 0; d < spin_dim_SU2; ++d) M_global_arr[d] /= double(lattice_size_SU2);
+    }
+
+    /**
+     * Helper function to compute SU(3) global magnetization from flat state
+     */
+    void compute_magnetization_global_SU3_from_flat(const double* x, double* M_global_arr) const {
+        for (size_t d = 0; d < spin_dim_SU3; ++d) M_global_arr[d] = 0.0;
+        size_t offset = lattice_size_SU2 * spin_dim_SU2;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            size_t atom = i % N_atoms_SU3;
+            size_t idx = offset + i * spin_dim_SU3;
+            for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                    M_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
+                }
+            }
+        }
+        for (size_t d = 0; d < spin_dim_SU3; ++d) M_global_arr[d] /= double(lattice_size_SU3);
+    }
+
     // ============================================================
     // FILE I/O
     // ============================================================
@@ -1617,7 +2324,7 @@ public:
      * Molecular dynamics with single pulse field for SU(2) sublattice
      * Returns magnetization trajectory without I/O
      */
-    vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> M_B_t(
+    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> M_B_t(
                const vector<SpinVector>& field_in_SU2, const vector<SpinVector>& field_in_SU3,
                double t_B,
                double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
@@ -1643,8 +2350,8 @@ public:
         set_pulse_SU3(field_in_SU3, t_B, vector<SpinVector>(N_atoms_SU3, SpinVector::Zero(spin_dim_SU3)),
                      0.0, pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
         
-        // Storage for trajectory: (time, ((M_SU2_antiferro, M_SU2_local), (M_SU3_antiferro, M_SU3_local)))
-        vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> trajectory;
+        // Storage for trajectory: (time, ([M_SU2_antiferro, M_SU2_local, M_SU2_global], [M_SU3_antiferro, M_SU3_local, M_SU3_global]))
+        vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> trajectory;
         
         // Start from current spins configuration
         ODEState state = spins_to_state();
@@ -1661,12 +2368,22 @@ public:
                 // Compute SU(2) magnetizations directly from flat state
                 double M_SU2_local_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
+                double M_SU2_global_arr[8] = {0};
                 size_t idx = 0;
                 for (size_t i = 0; i < lattice_size_SU2; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    size_t atom = i % N_atoms_SU2;
+                    
                     for (size_t d = 0; d < spin_dim_SU2; ++d) {
                         M_SU2_local_arr[d] += x[idx + d];
                         M_SU2_antiferro_arr[d] += x[idx + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                            M_SU2_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
+                        }
                     }
                     idx += spin_dim_SU2;
                 }
@@ -1674,21 +2391,33 @@ public:
                 // Compute SU(3) magnetizations
                 double M_SU3_local_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
+                double M_SU3_global_arr[8] = {0};
                 for (size_t i = 0; i < lattice_size_SU3; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    size_t atom = i % N_atoms_SU3;
+                    
                     for (size_t d = 0; d < spin_dim_SU3; ++d) {
                         M_SU3_local_arr[d] += x[idx + d];
                         M_SU3_antiferro_arr[d] += x[idx + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                            M_SU3_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
+                        }
                     }
                     idx += spin_dim_SU3;
                 }
                 
                 SpinVector M_SU2_local = Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 SpinVector M_SU3_local = Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
-                trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local}, {M_SU3_antiferro, M_SU3_local}}});
+                trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local, M_SU2_global}, {M_SU3_antiferro, M_SU3_local, M_SU3_global}}});
                 last_save_time = t;
             }
         };
@@ -1707,7 +2436,7 @@ public:
      * Molecular dynamics with two-pulse field
      * Returns magnetization trajectory without I/O
      */
-    vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> M_BA_BB_t(
+    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> M_BA_BB_t(
                const vector<SpinVector>& field_in_1_SU2, const vector<SpinVector>& field_in_1_SU3,
                double t_B_1,
                const vector<SpinVector>& field_in_2_SU2, const vector<SpinVector>& field_in_2_SU3,
@@ -1737,7 +2466,7 @@ public:
                      pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
         
         // Storage for trajectory
-        vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> trajectory;
+        vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> trajectory;
         
         // Start from current spins configuration
         ODEState state = spins_to_state();
@@ -1754,12 +2483,22 @@ public:
                 // Compute SU(2) magnetizations
                 double M_SU2_local_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
+                double M_SU2_global_arr[8] = {0};
                 size_t idx = 0;
                 for (size_t i = 0; i < lattice_size_SU2; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    size_t atom = i % N_atoms_SU2;
+                    
                     for (size_t d = 0; d < spin_dim_SU2; ++d) {
                         M_SU2_local_arr[d] += x[idx + d];
                         M_SU2_antiferro_arr[d] += x[idx + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                            M_SU2_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
+                        }
                     }
                     idx += spin_dim_SU2;
                 }
@@ -1767,21 +2506,33 @@ public:
                 // Compute SU(3) magnetizations
                 double M_SU3_local_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
+                double M_SU3_global_arr[8] = {0};
                 for (size_t i = 0; i < lattice_size_SU3; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    size_t atom = i % N_atoms_SU3;
+                    
                     for (size_t d = 0; d < spin_dim_SU3; ++d) {
                         M_SU3_local_arr[d] += x[idx + d];
                         M_SU3_antiferro_arr[d] += x[idx + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                            M_SU3_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
+                        }
                     }
                     idx += spin_dim_SU3;
                 }
                 
                 SpinVector M_SU2_local = Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 SpinVector M_SU3_local = Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
-                trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local}, {M_SU3_antiferro, M_SU3_local}}});
+                trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local, M_SU2_global}, {M_SU3_antiferro, M_SU3_local, M_SU3_global}}});
                 last_save_time = t;
             }
         };
@@ -1818,6 +2569,7 @@ public:
 
     /**
      * CPU implementation of molecular dynamics
+     * Requires HDF5 for output - all non-HDF5 I/O has been retired.
      */
     void molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            const string& out_dir = "", size_t save_interval = 100,
@@ -1828,17 +2580,17 @@ public:
         return;
 #else
         if (!out_dir.empty()) {
-            std::filesystem::create_directory(out_dir);
+            std::filesystem::create_directories(out_dir);
         }
         
-        cout << "Running mixed lattice molecular dynamics: t=" << T_start << " → " << T_end << endl;
+        cout << "Running mixed lattice molecular dynamics with Boost.Odeint: t=" << T_start << " → " << T_end << endl;
         cout << "Integration method: " << method << endl;
         cout << "Initial step size: " << dt_initial << endl;
         
         // Convert current spins to flat state vector
         ODEState state = spins_to_state();
         
-        // Create HDF5 writer with separate SU2 and SU3 groups
+        // Create HDF5 writer with comprehensive metadata
         std::unique_ptr<HDF5MixedMDWriter> hdf5_writer;
         if (!out_dir.empty()) {
             string hdf5_file = out_dir + "/trajectory.h5";
@@ -1858,7 +2610,7 @@ public:
         size_t save_count = 0;
         auto observer = [&](const ODEState& x, double t) {
             if (step_count % save_interval == 0) {
-                // Compute magnetizations directly from flat state
+                // Compute magnetizations directly from flat state (zero allocation)
                 SpinVector M_SU2 = SpinVector::Zero(spin_dim_SU2);
                 SpinVector M_SU3 = SpinVector::Zero(spin_dim_SU3);
                 SpinVector M_SU2_antiferro = SpinVector::Zero(spin_dim_SU2);
@@ -1887,6 +2639,9 @@ public:
                 M_SU3 /= double(lattice_size_SU3);
                 M_SU3_antiferro /= double(lattice_size_SU3);
                 
+                // Compute accurate energy density directly from flat state (includes all interactions)
+                double E = total_energy_flat(x.data()) / (lattice_size_SU2 + lattice_size_SU3);
+                
                 // Write to HDF5 directly from flat state (no conversion needed)
                 if (hdf5_writer) {
                     hdf5_writer->write_flat_step(t, 
@@ -1898,14 +2653,15 @@ public:
                 
                 // Progress output
                 if (step_count % (save_interval * 10) == 0) {
-                    cout << "t=" << t << ", |M_SU2|=" << M_SU2.norm() 
+                    cout << "t=" << t << ", E/N=" << E 
+                         << ", |M_SU2|=" << M_SU2.norm() 
                          << ", |M_SU3|=" << M_SU3.norm() << endl;
                 }
             }
             ++step_count;
         };
         
-        // Create ODE system wrapper
+        // Create ODE system wrapper for Boost.Odeint
         auto system_func = [this](const ODEState& x, ODEState& dxdt, double t) {
             this->ode_system(x, dxdt, t);
         };
@@ -1915,6 +2671,9 @@ public:
         double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
         integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
                             observer, method, true, abs_tol, rel_tol);
+        
+        // Note: MixedLattice::spins_SU2 and spins_SU3 remain unchanged (initial configuration preserved)
+        // The evolved state is stored in the ODEState 'state' variable
         
         // Close HDF5 file
         if (hdf5_writer) {
@@ -2011,7 +2770,7 @@ public:
         cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
         
         // Store trajectories
-        typedef vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> TrajectoryType;
+        typedef vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> TrajectoryType;
         vector<TrajectoryType> M1_trajectories;
         vector<TrajectoryType> M01_trajectories;
         vector<double> tau_values;
@@ -2190,37 +2949,37 @@ private:
         GPUMixedLatticeData gpu_data;
         
         // Set sizes
-        gpu_data.lattice_size_SU2 = lattice_SU2.lattice_size;
-        gpu_data.lattice_size_SU3 = lattice_SU3.lattice_size;
-        gpu_data.num_bi_SU2 = lattice_SU2.num_bi;
-        gpu_data.num_tri_SU2 = lattice_SU2.num_tri;
-        gpu_data.num_bi_SU3 = lattice_SU3.num_bi;
-        gpu_data.num_tri_SU3 = lattice_SU3.num_tri;
+        gpu_data.lattice_size_SU2 = lattice_size_SU2;
+        gpu_data.lattice_size_SU3 = lattice_size_SU3;
+        gpu_data.num_bi_SU2 = num_bi_SU2;
+        gpu_data.num_tri_SU2 = num_tri_SU2;
+        gpu_data.num_bi_SU3 = num_bi_SU3;
+        gpu_data.num_tri_SU3 = num_tri_SU3;
         
         // Transfer SU(2) field data
         vector<double> flat_field_SU2;
-        for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
-            for (size_t d = 0; d < 3; ++d) {
-                flat_field_SU2.push_back(lattice_SU2.field[i](d));
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                flat_field_SU2.push_back(field_SU2[i](d));
             }
         }
         gpu_data.d_field_SU2 = thrust::device_vector<double>(flat_field_SU2.begin(), flat_field_SU2.end());
         
         // Transfer SU(3) field data
         vector<double> flat_field_SU3;
-        for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
-            for (size_t d = 0; d < 8; ++d) {
-                flat_field_SU3.push_back(lattice_SU3.field[i](d));
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                flat_field_SU3.push_back(field_SU3[i](d));
             }
         }
         gpu_data.d_field_SU3 = thrust::device_vector<double>(flat_field_SU3.begin(), flat_field_SU3.end());
         
         // Transfer SU(2) onsite interactions
         vector<double> flat_onsite_SU2;
-        for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
-            for (size_t r = 0; r < 3; ++r) {
-                for (size_t c = 0; c < 3; ++c) {
-                    flat_onsite_SU2.push_back(lattice_SU2.onsite_interaction[i](r, c));
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                    flat_onsite_SU2.push_back(onsite_interaction_SU2[i](r, c));
                 }
             }
         }
@@ -2228,10 +2987,10 @@ private:
         
         // Transfer SU(3) onsite interactions
         vector<double> flat_onsite_SU3;
-        for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
-            for (size_t r = 0; r < 8; ++r) {
-                for (size_t c = 0; c < 8; ++c) {
-                    flat_onsite_SU3.push_back(lattice_SU3.onsite_interaction[i](r, c));
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            for (size_t r = 0; r < spin_dim_SU3; ++r) {
+                for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                    flat_onsite_SU3.push_back(onsite_interaction_SU3[i](r, c));
                 }
             }
         }
@@ -2240,95 +2999,75 @@ private:
         // Transfer SU(2) bilinear interactions
         vector<double> flat_bilinear_SU2;
         vector<size_t> flat_partners_SU2;
-        vector<int8_t> flat_wrap_SU2;
         
-        for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
-            for (size_t n = 0; n < lattice_SU2.num_bi; ++n) {
-                if (n < lattice_SU2.bilinear_partners[i].size()) {
-                    flat_partners_SU2.push_back(lattice_SU2.bilinear_partners[i][n]);
-                    for (size_t r = 0; r < 3; ++r) {
-                        for (size_t c = 0; c < 3; ++c) {
-                            flat_bilinear_SU2.push_back(lattice_SU2.bilinear_interaction[i][n](r, c));
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t n = 0; n < num_bi_SU2; ++n) {
+                if (n < bilinear_partners_SU2[i].size()) {
+                    flat_partners_SU2.push_back(bilinear_partners_SU2[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            flat_bilinear_SU2.push_back(bilinear_interaction_SU2[i][n](r, c));
                         }
-                    }
-                    for (size_t d = 0; d < 3; ++d) {
-                        flat_wrap_SU2.push_back(lattice_SU2.bilinear_wrap_dir[i][n][d]);
                     }
                 }
             }
         }
         gpu_data.d_bilinear_interaction_SU2 = thrust::device_vector<double>(flat_bilinear_SU2.begin(), flat_bilinear_SU2.end());
         gpu_data.d_bilinear_partners_SU2 = thrust::device_vector<size_t>(flat_partners_SU2.begin(), flat_partners_SU2.end());
-        gpu_data.d_bilinear_wrap_dir_SU2 = thrust::device_vector<int8_t>(flat_wrap_SU2.begin(), flat_wrap_SU2.end());
         
         // Transfer SU(3) bilinear interactions
         vector<double> flat_bilinear_SU3;
         vector<size_t> flat_partners_SU3;
-        vector<int8_t> flat_wrap_SU3;
         
-        for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
-            for (size_t n = 0; n < lattice_SU3.num_bi; ++n) {
-                if (n < lattice_SU3.bilinear_partners[i].size()) {
-                    flat_partners_SU3.push_back(lattice_SU3.bilinear_partners[i][n]);
-                    for (size_t r = 0; r < 8; ++r) {
-                        for (size_t c = 0; c < 8; ++c) {
-                            flat_bilinear_SU3.push_back(lattice_SU3.bilinear_interaction[i][n](r, c));
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            for (size_t n = 0; n < num_bi_SU3; ++n) {
+                if (n < bilinear_partners_SU3[i].size()) {
+                    flat_partners_SU3.push_back(bilinear_partners_SU3[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU3; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            flat_bilinear_SU3.push_back(bilinear_interaction_SU3[i][n](r, c));
                         }
-                    }
-                    for (size_t d = 0; d < 3; ++d) {
-                        flat_wrap_SU3.push_back(lattice_SU3.bilinear_wrap_dir[i][n][d]);
                     }
                 }
             }
         }
         gpu_data.d_bilinear_interaction_SU3 = thrust::device_vector<double>(flat_bilinear_SU3.begin(), flat_bilinear_SU3.end());
         gpu_data.d_bilinear_partners_SU3 = thrust::device_vector<size_t>(flat_partners_SU3.begin(), flat_partners_SU3.end());
-        gpu_data.d_bilinear_wrap_dir_SU3 = thrust::device_vector<int8_t>(flat_wrap_SU3.begin(), flat_wrap_SU3.end());
         
         // Transfer mixed bilinear interactions
         vector<double> flat_mixed_bilinear;
-        vector<size_t> flat_mixed_partners_SU2;
-        vector<size_t> flat_mixed_partners_SU3;
-        vector<int8_t> flat_mixed_wrap;
+        vector<size_t> flat_mixed_partners_SU2_list;
+        vector<size_t> flat_mixed_partners_SU3_list;
         
-        gpu_data.num_mixed_bi = 0;
-        if (!bilinear_SU2_SU3.empty() && !bilinear_SU2_SU3[0].empty()) {
-            gpu_data.num_mixed_bi = bilinear_SU2_SU3[0].size();
-            
-            for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
-                for (size_t n = 0; n < bilinear_SU2_SU3[i].size(); ++n) {
-                    flat_mixed_partners_SU2.push_back(i);
-                    flat_mixed_partners_SU3.push_back(bilinear_partners_SU2_SU3[i][n]);
-                    
-                    for (size_t r = 0; r < 3; ++r) {
-                        for (size_t c = 0; c < 8; ++c) {
-                            flat_mixed_bilinear.push_back(bilinear_SU2_SU3[i][n](r, c));
-                        }
-                    }
-                    
-                    for (size_t d = 0; d < 3; ++d) {
-                        flat_mixed_wrap.push_back(bilinear_wrap_dir_SU2_SU3[i][n][d]);
+        gpu_data.num_mixed_bi = num_bi_SU2_SU3;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t n = 0; n < mixed_bilinear_partners_SU2[i].size(); ++n) {
+                flat_mixed_partners_SU2_list.push_back(i);
+                flat_mixed_partners_SU3_list.push_back(mixed_bilinear_partners_SU2[i][n]);
+                
+                for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                        flat_mixed_bilinear.push_back(mixed_bilinear_interaction_SU2[i][n](r, c));
                     }
                 }
             }
         }
         gpu_data.d_mixed_bilinear_interaction = thrust::device_vector<double>(flat_mixed_bilinear.begin(), flat_mixed_bilinear.end());
-        gpu_data.d_mixed_bilinear_partners_SU2 = thrust::device_vector<size_t>(flat_mixed_partners_SU2.begin(), flat_mixed_partners_SU2.end());
-        gpu_data.d_mixed_bilinear_partners_SU3 = thrust::device_vector<size_t>(flat_mixed_partners_SU3.begin(), flat_mixed_partners_SU3.end());
-        gpu_data.d_mixed_bilinear_wrap_dir = thrust::device_vector<int8_t>(flat_mixed_wrap.begin(), flat_mixed_wrap.end());
+        gpu_data.d_mixed_bilinear_partners_SU2 = thrust::device_vector<size_t>(flat_mixed_partners_SU2_list.begin(), flat_mixed_partners_SU2_list.end());
+        gpu_data.d_mixed_bilinear_partners_SU3 = thrust::device_vector<size_t>(flat_mixed_partners_SU3_list.begin(), flat_mixed_partners_SU3_list.end());
         
         // Store pulse parameters
-        gpu_data.field_drive_amp_SU2 = lattice_SU2.field_drive_amp;
-        gpu_data.field_drive_freq_SU2 = lattice_SU2.field_drive_freq;
-        gpu_data.field_drive_width_SU2 = lattice_SU2.field_drive_width;
-        gpu_data.t_pulse_0_SU2 = lattice_SU2.t_pulse_0;
-        gpu_data.t_pulse_1_SU2 = lattice_SU2.t_pulse_1;
+        gpu_data.field_drive_amp_SU2 = field_drive_amp_SU2;
+        gpu_data.field_drive_freq_SU2 = field_drive_freq_SU2;
+        gpu_data.field_drive_width_SU2 = field_drive_width_SU2;
+        gpu_data.t_pulse_0_SU2 = t_pulse_SU2[0];
+        gpu_data.t_pulse_1_SU2 = t_pulse_SU2[1];
         
-        gpu_data.field_drive_amp_SU3 = lattice_SU3.field_drive_amp;
-        gpu_data.field_drive_freq_SU3 = lattice_SU3.field_drive_freq;
-        gpu_data.field_drive_width_SU3 = lattice_SU3.field_drive_width;
-        gpu_data.t_pulse_0_SU3 = lattice_SU3.t_pulse_0;
-        gpu_data.t_pulse_1_SU3 = lattice_SU3.t_pulse_1;
+        gpu_data.field_drive_amp_SU3 = field_drive_amp_SU3;
+        gpu_data.field_drive_freq_SU3 = field_drive_freq_SU3;
+        gpu_data.field_drive_width_SU3 = field_drive_width_SU3;
+        gpu_data.t_pulse_0_SU3 = t_pulse_SU3[0];
+        gpu_data.t_pulse_1_SU3 = t_pulse_SU3[1];
         
         return gpu_data;
     }
@@ -2346,9 +3085,13 @@ private:
         thrust::host_vector<double> h_x = x;
         thrust::host_vector<double> h_dxdt(x.size());
         
-        landau_lifshitz_flat(thrust::raw_pointer_cast(h_x.data()), 
-                            thrust::raw_pointer_cast(h_dxdt.data()), t);
+        ODEState x_state(h_x.begin(), h_x.end());
+        ODEState dxdt_state(h_dxdt.size());
         
+        // Call the existing landau_lifshitz method (non-const version needed)
+        const_cast<MixedLattice*>(this)->landau_lifshitz(x_state, dxdt_state, t);
+        
+        std::copy(dxdt_state.begin(), dxdt_state.end(), h_dxdt.begin());
         dxdt = h_dxdt;
     }
     
@@ -2389,60 +3132,105 @@ private:
      * GPU version of molecular_dynamics
      */
     void molecular_dynamics_gpu(double T_start, double T_end, double dt_initial,
-                               const string& out_dir, size_t save_interval,
-                               const string& method) {
-        // Transfer data to GPU
-        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
-        
-        // Initial state on GPU
-        ODEState state = spins_to_state(spins_SU2, spins_SU3);
-        thrust::device_vector<double> d_state(state.begin(), state.end());
-        
-        // Setup HDF5 writer if directory specified
-        HDF5MixedMDWriter* writer = nullptr;
+                               const string& out_dir = "", size_t save_interval = 100,
+                               const string& method = "dopri5") {
+#ifndef HDF5_ENABLED
+        std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
+        std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
+        return;
+#else
         if (!out_dir.empty()) {
-            string filename = out_dir + "/molecular_dynamics.h5";
-            writer = new HDF5MixedMDWriter(filename, lattice_SU2.N_atoms, lattice_SU3.N_atoms);
+            std::filesystem::create_directories(out_dir);
         }
         
-        // Observer
+        cout << "Running mixed lattice molecular dynamics with GPU acceleration: t=" << T_start << " → " << T_end << endl;
+        cout << "Integration method: " << method << endl;
+        cout << "Initial step size: " << dt_initial << endl;
+        
+        // Transfer initial state to GPU
+        ODEState state = spins_to_state();
+        thrust::device_vector<double> d_state(state.begin(), state.end());
+        
+        // Transfer lattice data to GPU (interaction matrices, fields, etc.)
+        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        
+        // Create HDF5 writer with comprehensive metadata
+        std::unique_ptr<HDF5MixedMDWriter> hdf5_writer;
+        if (!out_dir.empty()) {
+            string hdf5_file = out_dir + "/trajectory.h5";
+            cout << "Writing trajectory to HDF5 file: " << hdf5_file << endl;
+            hdf5_writer = std::make_unique<HDF5MixedMDWriter>(
+                hdf5_file, 
+                lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
+                lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
+                dim1, dim2, dim3, method + "_gpu", 
+                dt_initial, T_start, T_end, save_interval, 
+                spin_length_SU2, spin_length_SU3,
+                &site_positions_SU2, &site_positions_SU3, 10000);
+        }
+        
+        // Observer for saving data
         size_t step_count = 0;
+        size_t save_count = 0;
+        thrust::host_vector<double> h_state;
+        
         auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
             if (step_count % save_interval == 0) {
-                thrust::host_vector<double> x = d_x;
+                // Copy state back to host for I/O
+                h_state = d_x;
                 
-                // Extract SU(2) and SU(3) spins
-                size_t total_SU2 = lattice_SU2.lattice_size * 3;
+                // Compute magnetizations directly from flat state (zero allocation)
+                SpinVector M_SU2 = SpinVector::Zero(spin_dim_SU2);
+                SpinVector M_SU3 = SpinVector::Zero(spin_dim_SU3);
+                SpinVector M_SU2_antiferro = SpinVector::Zero(spin_dim_SU2);
+                SpinVector M_SU3_antiferro = SpinVector::Zero(spin_dim_SU3);
                 
-                vector<SpinVector> current_spins_SU2(lattice_SU2.lattice_size);
-                vector<SpinVector> current_spins_SU3(lattice_SU3.lattice_size);
-                
-                for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
-                    SpinVector spin(3);
-                    for (size_t d = 0; d < 3; ++d) {
-                        spin(d) = x[i * 3 + d];
+                size_t idx = 0;
+                for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                        M_SU2(d) += h_state[idx + d];
+                        M_SU2_antiferro(d) += h_state[idx + d] * sign;
                     }
-                    current_spins_SU2[i] = spin;
+                    idx += spin_dim_SU2;
                 }
+                M_SU2 /= double(lattice_size_SU2);
+                M_SU2_antiferro /= double(lattice_size_SU2);
                 
-                for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
-                    SpinVector spin(8);
-                    for (size_t d = 0; d < 8; ++d) {
-                        spin(d) = x[total_SU2 + i * 8 + d];
+                for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                        M_SU3(d) += h_state[idx + d];
+                        M_SU3_antiferro(d) += h_state[idx + d] * sign;
                     }
-                    current_spins_SU3[i] = spin;
+                    idx += spin_dim_SU3;
+                }
+                M_SU3 /= double(lattice_size_SU3);
+                M_SU3_antiferro /= double(lattice_size_SU3);
+                
+                // Compute accurate energy density directly from flat state (on CPU - could be optimized to GPU)
+                double E = total_energy_flat(thrust::raw_pointer_cast(h_state.data())) / (lattice_size_SU2 + lattice_size_SU3);
+                
+                // Write to HDF5 directly from flat state (no conversion needed)
+                if (hdf5_writer) {
+                    hdf5_writer->write_flat_step(t, 
+                                                M_SU2_antiferro, M_SU2, 
+                                                M_SU3_antiferro, M_SU3,
+                                                thrust::raw_pointer_cast(h_state.data()));
+                    save_count++;
                 }
                 
-                if (writer) {
-                    writer->write_trajectory_step(t, current_spins_SU2, current_spins_SU3);
+                // Progress output
+                if (step_count % (save_interval * 10) == 0) {
+                    cout << "t=" << t << ", E/N=" << E 
+                         << ", |M_SU2|=" << M_SU2.norm() 
+                         << ", |M_SU3|=" << M_SU3.norm() << endl;
                 }
-                
-                cout << "t = " << t << endl;
             }
-            step_count++;
+            ++step_count;
         };
         
-        // System function
+        // Create GPU ODE system
         auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
                                                         thrust::device_vector<double>& dxdt, 
                                                         double t) {
@@ -2450,13 +3238,19 @@ private:
         };
         
         // Integrate on GPU
+        double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
+        double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
         integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, dt_initial,
-                                observer, method, false, 1e-10, 1e-10);
+                                observer, method, true, abs_tol, rel_tol);
         
-        // Cleanup
-        if (writer) {
-            delete writer;
+        // Close HDF5 file
+        if (hdf5_writer) {
+            hdf5_writer->close();
+            cout << "HDF5 trajectory saved with " << save_count << " snapshots" << endl;
         }
+        
+        cout << "GPU molecular dynamics complete! (" << step_count << " steps)" << endl;
+#endif // HDF5_ENABLED
     }
     
     /**
@@ -2464,7 +3258,7 @@ private:
      * Returns nested pair: outer=(SU2_results, SU3_results), 
      * inner for each = (M_antiferro, M_local)
      */
-    vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>>
+    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>>
     M_B_t_gpu(const vector<SpinVector>& field_in_SU2,
               const vector<SpinVector>& field_in_SU3,
               double t_B,
@@ -2474,22 +3268,22 @@ private:
               string method = "dopri5") {
         
         // Set up pulses for both sublattices
-        lattice_SU2.set_pulse(field_in_SU2, t_B, 
-                             vector<SpinVector>(lattice_SU2.N_atoms, SpinVector::Zero(3)), 0.0,
-                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
+        set_pulse_SU2(field_in_SU2, t_B, 
+                     vector<SpinVector>(N_atoms_SU2, SpinVector::Zero(spin_dim_SU2)), 0.0,
+                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
         
-        lattice_SU3.set_pulse(field_in_SU3, t_B,
-                             vector<SpinVector>(lattice_SU3.N_atoms, SpinVector::Zero(8)), 0.0,
-                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
+        set_pulse_SU3(field_in_SU3, t_B,
+                     vector<SpinVector>(N_atoms_SU3, SpinVector::Zero(spin_dim_SU3)), 0.0,
+                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
         
         // Transfer data to GPU
         auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
         
         // Storage for trajectory
-        vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> trajectory;
+        vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> trajectory;
         
         // Initial state on GPU
-        ODEState state = spins_to_state(spins_SU2, spins_SU3);
+        ODEState state = spins_to_state();
         thrust::device_vector<double> d_state(state.begin(), state.end());
         
         // Observer
@@ -2498,39 +3292,61 @@ private:
             if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
                 thrust::host_vector<double> x = d_x;
                 
-                size_t total_SU2 = lattice_SU2.lattice_size * 3;
+                size_t total_SU2 = lattice_size_SU2 * spin_dim_SU2;
                 
                 // Compute SU(2) magnetizations
-                double M_local_SU2_arr[3] = {0};
-                double M_antiferro_SU2_arr[3] = {0};
+                double M_local_SU2_arr[8] = {0};
+                double M_antiferro_SU2_arr[8] = {0};
+                double M_global_SU2_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+                for (size_t i = 0; i < lattice_size_SU2; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < 3; ++d) {
-                        M_local_SU2_arr[d] += x[i * 3 + d];
-                        M_antiferro_SU2_arr[d] += x[i * 3 + d] * sign;
+                    size_t atom = i % N_atoms_SU2;
+                    
+                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                        M_local_SU2_arr[d] += x[i * spin_dim_SU2 + d];
+                        M_antiferro_SU2_arr[d] += x[i * spin_dim_SU2 + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                            M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[i * spin_dim_SU2 + nu];
+                        }
                     }
                 }
                 
-                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, 3) / double(lattice_SU2.lattice_size);
-                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, 3) / double(lattice_SU2.lattice_size);
+                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_global_SU2 = Eigen::Map<Eigen::VectorXd>(M_global_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 
                 // Compute SU(3) magnetizations
                 double M_local_SU3_arr[8] = {0};
                 double M_antiferro_SU3_arr[8] = {0};
+                double M_global_SU3_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+                for (size_t i = 0; i < lattice_size_SU3; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < 8; ++d) {
-                        M_local_SU3_arr[d] += x[total_SU2 + i * 8 + d];
-                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * 8 + d] * sign;
+                    size_t atom = i % N_atoms_SU3;
+                    
+                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                        M_local_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d];
+                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                            M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[total_SU2 + i * spin_dim_SU3 + nu];
+                        }
                     }
                 }
                 
-                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, 8) / double(lattice_SU3.lattice_size);
-                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, 8) / double(lattice_SU3.lattice_size);
+                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_global_SU3 = Eigen::Map<Eigen::VectorXd>(M_global_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
-                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2}, {M_antiferro_SU3, M_local_SU3}}});
+                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2, M_global_SU2}, {M_antiferro_SU3, M_local_SU3, M_global_SU3}}});
                 last_save_time = t;
             }
         };
@@ -2547,13 +3363,13 @@ private:
                                 observer, method, false, 1e-10, 1e-10);
         
         // Reset pulses
-        lattice_SU2.field_drive[0] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
-        lattice_SU2.field_drive[1] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
-        lattice_SU2.field_drive_amp = 0.0;
+        field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
+        field_drive_SU2[1] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
+        field_drive_amp_SU2 = 0.0;
         
-        lattice_SU3.field_drive[0] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
-        lattice_SU3.field_drive[1] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
-        lattice_SU3.field_drive_amp = 0.0;
+        field_drive_SU3[0] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
+        field_drive_SU3[1] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
+        field_drive_amp_SU3 = 0.0;
         
         return trajectory;
     }
@@ -2561,7 +3377,7 @@ private:
     /**
      * GPU version of M_BA_BB_t for mixed lattice
      */
-    vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>>
+    vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>>
     M_BA_BB_t_gpu(const vector<SpinVector>& field_in_1_SU2,
                   const vector<SpinVector>& field_in_1_SU3,
                   double t_B_1,
@@ -2574,20 +3390,20 @@ private:
                   string method = "dopri5") {
         
         // Set up two-pulse configuration for both sublattices
-        lattice_SU2.set_pulse(field_in_1_SU2, t_B_1, field_in_2_SU2, t_B_2,
-                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
+        set_pulse_SU2(field_in_1_SU2, t_B_1, field_in_2_SU2, t_B_2,
+                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
         
-        lattice_SU3.set_pulse(field_in_1_SU3, t_B_1, field_in_2_SU3, t_B_2,
-                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
+        set_pulse_SU3(field_in_1_SU3, t_B_1, field_in_2_SU3, t_B_2,
+                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
         
         // Transfer data to GPU
         auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
         
         // Storage for trajectory
-        vector<pair<double, pair<pair<SpinVector, SpinVector>, pair<SpinVector, SpinVector>>>> trajectory;
+        vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> trajectory;
         
         // Initial state on GPU
-        ODEState state = spins_to_state(spins_SU2, spins_SU3);
+        ODEState state = spins_to_state();
         thrust::device_vector<double> d_state(state.begin(), state.end());
         
         // Observer
@@ -2596,39 +3412,61 @@ private:
             if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
                 thrust::host_vector<double> x = d_x;
                 
-                size_t total_SU2 = lattice_SU2.lattice_size * 3;
+                size_t total_SU2 = lattice_size_SU2 * spin_dim_SU2;
                 
                 // Compute SU(2) magnetizations
                 double M_local_SU2_arr[3] = {0};
                 double M_antiferro_SU2_arr[3] = {0};
+                double M_global_SU2_arr[3] = {0};
                 
-                for (size_t i = 0; i < lattice_SU2.lattice_size; ++i) {
+                for (size_t i = 0; i < lattice_size_SU2; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < 3; ++d) {
-                        M_local_SU2_arr[d] += x[i * 3 + d];
-                        M_antiferro_SU2_arr[d] += x[i * 3 + d] * sign;
+                    size_t atom = i % N_atoms_SU2;
+                    
+                    for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                        M_local_SU2_arr[d] += x[i * spin_dim_SU2 + d];
+                        M_antiferro_SU2_arr[d] += x[i * spin_dim_SU2 + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                            M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[i * spin_dim_SU2 + nu];
+                        }
                     }
                 }
                 
-                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, 3) / double(lattice_SU2.lattice_size);
-                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, 3) / double(lattice_SU2.lattice_size);
+                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_global_SU2 = Eigen::Map<Eigen::VectorXd>(M_global_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 
                 // Compute SU(3) magnetizations
                 double M_local_SU3_arr[8] = {0};
                 double M_antiferro_SU3_arr[8] = {0};
+                double M_global_SU3_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_SU3.lattice_size; ++i) {
+                for (size_t i = 0; i < lattice_size_SU3; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    for (size_t d = 0; d < 8; ++d) {
-                        M_local_SU3_arr[d] += x[total_SU2 + i * 8 + d];
-                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * 8 + d] * sign;
+                    size_t atom = i % N_atoms_SU3;
+                    
+                    for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                        M_local_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d];
+                        M_antiferro_SU3_arr[d] += x[total_SU2 + i * spin_dim_SU3 + d] * sign;
+                    }
+                    
+                    // Transform to global frame using sublattice frame
+                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                            M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[total_SU2 + i * spin_dim_SU3 + nu];
+                        }
                     }
                 }
                 
-                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, 8) / double(lattice_SU3.lattice_size);
-                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, 8) / double(lattice_SU3.lattice_size);
+                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_global_SU3 = Eigen::Map<Eigen::VectorXd>(M_global_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
-                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2}, {M_antiferro_SU3, M_local_SU3}}});
+                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2, M_global_SU2}, {M_antiferro_SU3, M_local_SU3, M_global_SU3}}});
                 last_save_time = t;
             }
         };
@@ -2645,13 +3483,13 @@ private:
                                 observer, method, false, 1e-10, 1e-10);
         
         // Reset pulses
-        lattice_SU2.field_drive[0] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
-        lattice_SU2.field_drive[1] = SpinVector::Zero(lattice_SU2.N_atoms * 3);
-        lattice_SU2.field_drive_amp = 0.0;
+        field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
+        field_drive_SU2[1] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
+        field_drive_amp_SU2 = 0.0;
         
-        lattice_SU3.field_drive[0] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
-        lattice_SU3.field_drive[1] = SpinVector::Zero(lattice_SU3.N_atoms * 8);
-        lattice_SU3.field_drive_amp = 0.0;
+        field_drive_SU3[0] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
+        field_drive_SU3[1] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
+        field_drive_amp_SU3 = 0.0;
         
         return trajectory;
     }

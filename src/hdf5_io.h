@@ -698,7 +698,7 @@ public:
      * Write reference trajectory (M0 - single pulse at t=0)
      */
     void write_reference_trajectory(
-        const std::vector<std::pair<double, std::pair<SpinVector, SpinVector>>>& trajectory) {
+        const std::vector<std::pair<double, std::array<SpinVector, 3>>>& trajectory) {
         
         size_t n_times = trajectory.size();
         
@@ -714,18 +714,21 @@ public:
         time_ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
         
         // Write M_antiferro [n_times, spin_dim]
-        write_magnetization_dataset(reference_group_, "M_antiferro", trajectory, n_times, true);
+        write_magnetization_dataset(reference_group_, "M_antiferro", trajectory, n_times, 0);
         
         // Write M_local [n_times, spin_dim]
-        write_magnetization_dataset(reference_group_, "M_local", trajectory, n_times, false);
+        write_magnetization_dataset(reference_group_, "M_local", trajectory, n_times, 1);
+        
+        // Write M_global [n_times, spin_dim]
+        write_magnetization_dataset(reference_group_, "M_global", trajectory, n_times, 2);
     }
     
     /**
      * Write delay-dependent trajectories for a specific tau
      */
     void write_tau_trajectory(int tau_index, double tau_value,
-                             const std::vector<std::pair<double, std::pair<SpinVector, SpinVector>>>& M1_trajectory,
-                             const std::vector<std::pair<double, std::pair<SpinVector, SpinVector>>>& M01_trajectory) {
+                             const std::vector<std::pair<double, std::array<SpinVector, 3>>>& M1_trajectory,
+                             const std::vector<std::pair<double, std::array<SpinVector, 3>>>& M01_trajectory) {
         
         // Create group for this tau
         std::string tau_group_name = "/tau_scan/tau_" + std::to_string(tau_index);
@@ -740,12 +743,14 @@ public:
         size_t n_times = M1_trajectory.size();
         
         // Write M1 trajectories
-        write_magnetization_dataset(tau_group, "M1_antiferro", M1_trajectory, n_times, true);
-        write_magnetization_dataset(tau_group, "M1_local", M1_trajectory, n_times, false);
+        write_magnetization_dataset(tau_group, "M1_antiferro", M1_trajectory, n_times, 0);
+        write_magnetization_dataset(tau_group, "M1_local", M1_trajectory, n_times, 1);
+        write_magnetization_dataset(tau_group, "M1_global", M1_trajectory, n_times, 2);
         
         // Write M01 trajectories
-        write_magnetization_dataset(tau_group, "M01_antiferro", M01_trajectory, n_times, true);
-        write_magnetization_dataset(tau_group, "M01_local", M01_trajectory, n_times, false);
+        write_magnetization_dataset(tau_group, "M01_antiferro", M01_trajectory, n_times, 0);
+        write_magnetization_dataset(tau_group, "M01_local", M01_trajectory, n_times, 1);
+        write_magnetization_dataset(tau_group, "M01_global", M01_trajectory, n_times, 2);
     }
     
     void close() {
@@ -835,11 +840,11 @@ private:
     }
     
     void write_magnetization_dataset(H5::Group& group, const std::string& name,
-                                     const std::vector<std::pair<double, std::pair<SpinVector, SpinVector>>>& trajectory,
-                                     size_t n_times, bool use_antiferro) {
+                                     const std::vector<std::pair<double, std::array<SpinVector, 3>>>& trajectory,
+                                     size_t n_times, size_t mag_index) {
         std::vector<double> mag_data(n_times * spin_dim_);
         for (size_t t = 0; t < n_times; ++t) {
-            const SpinVector& mag = use_antiferro ? trajectory[t].second.first : trajectory[t].second.second;
+            const SpinVector& mag = trajectory[t].second[mag_index];
             for (size_t d = 0; d < spin_dim_; ++d) {
                 mag_data[t * spin_dim_ + d] = mag(d);
             }
@@ -978,11 +983,11 @@ public:
     
     /**
      * Write reference trajectory (M0 - single pulse at t=0)
-     * Mixed trajectory format: (time, ((M_af_SU2, M_loc_SU2), (M_af_SU3, M_loc_SU3)))
+     * Mixed trajectory format: (time, ([M_af_SU2, M_loc_SU2, M_glob_SU2], [M_af_SU3, M_loc_SU3, M_glob_SU3]))
      */
     void write_reference_trajectory(
-        const std::vector<std::pair<double, std::pair<std::pair<SpinVector, SpinVector>, 
-                                                       std::pair<SpinVector, SpinVector>>>>& trajectory) {
+        const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
+                                                       std::array<SpinVector, 3>>>>& trajectory) {
         
         size_t n_times = trajectory.size();
         
@@ -998,22 +1003,24 @@ public:
         time_ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
         
         // Write SU(2) magnetizations
-        write_mixed_magnetization(reference_group_, "M_antiferro_SU2", trajectory, n_times, spin_dim_SU2_, true, true);
-        write_mixed_magnetization(reference_group_, "M_local_SU2", trajectory, n_times, spin_dim_SU2_, false, true);
+        write_mixed_magnetization(reference_group_, "M_antiferro_SU2", trajectory, n_times, spin_dim_SU2_, 0, true);
+        write_mixed_magnetization(reference_group_, "M_local_SU2", trajectory, n_times, spin_dim_SU2_, 1, true);
+        write_mixed_magnetization(reference_group_, "M_global_SU2", trajectory, n_times, spin_dim_SU2_, 2, true);
         
         // Write SU(3) magnetizations
-        write_mixed_magnetization(reference_group_, "M_antiferro_SU3", trajectory, n_times, spin_dim_SU3_, true, false);
-        write_mixed_magnetization(reference_group_, "M_local_SU3", trajectory, n_times, spin_dim_SU3_, false, false);
+        write_mixed_magnetization(reference_group_, "M_antiferro_SU3", trajectory, n_times, spin_dim_SU3_, 0, false);
+        write_mixed_magnetization(reference_group_, "M_local_SU3", trajectory, n_times, spin_dim_SU3_, 1, false);
+        write_mixed_magnetization(reference_group_, "M_global_SU3", trajectory, n_times, spin_dim_SU3_, 2, false);
     }
     
     /**
      * Write delay-dependent trajectories for a specific tau
      */
     void write_tau_trajectory(int tau_index, double tau_value,
-                             const std::vector<std::pair<double, std::pair<std::pair<SpinVector, SpinVector>, 
-                                                                           std::pair<SpinVector, SpinVector>>>>& M1_trajectory,
-                             const std::vector<std::pair<double, std::pair<std::pair<SpinVector, SpinVector>, 
-                                                                           std::pair<SpinVector, SpinVector>>>>& M01_trajectory) {
+                             const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
+                                                                           std::array<SpinVector, 3>>>>& M1_trajectory,
+                             const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
+                                                                           std::array<SpinVector, 3>>>>& M01_trajectory) {
         
         // Create group for this tau
         std::string tau_group_name = "/tau_scan/tau_" + std::to_string(tau_index);
@@ -1028,16 +1035,20 @@ public:
         size_t n_times = M1_trajectory.size();
         
         // Write M1 trajectories (SU2 and SU3)
-        write_mixed_magnetization(tau_group, "M1_antiferro_SU2", M1_trajectory, n_times, spin_dim_SU2_, true, true);
-        write_mixed_magnetization(tau_group, "M1_local_SU2", M1_trajectory, n_times, spin_dim_SU2_, false, true);
-        write_mixed_magnetization(tau_group, "M1_antiferro_SU3", M1_trajectory, n_times, spin_dim_SU3_, true, false);
-        write_mixed_magnetization(tau_group, "M1_local_SU3", M1_trajectory, n_times, spin_dim_SU3_, false, false);
+        write_mixed_magnetization(tau_group, "M1_antiferro_SU2", M1_trajectory, n_times, spin_dim_SU2_, 0, true);
+        write_mixed_magnetization(tau_group, "M1_local_SU2", M1_trajectory, n_times, spin_dim_SU2_, 1, true);
+        write_mixed_magnetization(tau_group, "M1_global_SU2", M1_trajectory, n_times, spin_dim_SU2_, 2, true);
+        write_mixed_magnetization(tau_group, "M1_antiferro_SU3", M1_trajectory, n_times, spin_dim_SU3_, 0, false);
+        write_mixed_magnetization(tau_group, "M1_local_SU3", M1_trajectory, n_times, spin_dim_SU3_, 1, false);
+        write_mixed_magnetization(tau_group, "M1_global_SU3", M1_trajectory, n_times, spin_dim_SU3_, 2, false);
         
         // Write M01 trajectories (SU2 and SU3)
-        write_mixed_magnetization(tau_group, "M01_antiferro_SU2", M01_trajectory, n_times, spin_dim_SU2_, true, true);
-        write_mixed_magnetization(tau_group, "M01_local_SU2", M01_trajectory, n_times, spin_dim_SU2_, false, true);
-        write_mixed_magnetization(tau_group, "M01_antiferro_SU3", M01_trajectory, n_times, spin_dim_SU3_, true, false);
-        write_mixed_magnetization(tau_group, "M01_local_SU3", M01_trajectory, n_times, spin_dim_SU3_, false, false);
+        write_mixed_magnetization(tau_group, "M01_antiferro_SU2", M01_trajectory, n_times, spin_dim_SU2_, 0, true);
+        write_mixed_magnetization(tau_group, "M01_local_SU2", M01_trajectory, n_times, spin_dim_SU2_, 1, true);
+        write_mixed_magnetization(tau_group, "M01_global_SU2", M01_trajectory, n_times, spin_dim_SU2_, 2, true);
+        write_mixed_magnetization(tau_group, "M01_antiferro_SU3", M01_trajectory, n_times, spin_dim_SU3_, 0, false);
+        write_mixed_magnetization(tau_group, "M01_local_SU3", M01_trajectory, n_times, spin_dim_SU3_, 1, false);
+        write_mixed_magnetization(tau_group, "M01_global_SU3", M01_trajectory, n_times, spin_dim_SU3_, 2, false);
     }
     
     void close() {
@@ -1154,14 +1165,14 @@ private:
     }
     
     void write_mixed_magnetization(H5::Group& group, const std::string& name,
-                                   const std::vector<std::pair<double, std::pair<std::pair<SpinVector, SpinVector>, 
-                                                                                 std::pair<SpinVector, SpinVector>>>>& trajectory,
-                                   size_t n_times, size_t spin_dim, bool use_antiferro, bool use_SU2) {
+                                   const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
+                                                                                 std::array<SpinVector, 3>>>>& trajectory,
+                                   size_t n_times, size_t spin_dim, size_t mag_index, bool use_SU2) {
         std::vector<double> mag_data(n_times * spin_dim);
         for (size_t t = 0; t < n_times; ++t) {
-            const SpinVector& mag = use_SU2 ?
-                (use_antiferro ? trajectory[t].second.first.first : trajectory[t].second.first.second) :
-                (use_antiferro ? trajectory[t].second.second.first : trajectory[t].second.second.second);
+            const SpinVector& mag = use_SU2 ? 
+                trajectory[t].second.first[mag_index] : 
+                trajectory[t].second.second[mag_index];
             for (size_t d = 0; d < spin_dim; ++d) {
                 mag_data[t * spin_dim + d] = mag(d);
             }

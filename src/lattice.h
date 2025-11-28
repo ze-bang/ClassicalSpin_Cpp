@@ -1804,10 +1804,13 @@ public:
         // Equilibration
         cout << "Rank " << rank << ": Equilibrating..." << endl;
         for (size_t i = 0; i < n_anneal; ++i) {
-            curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
-            
-            if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+            if (overrelaxation_rate > 0) {
                 overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                }
+            } else {
+                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
             }
             
             // Attempt replica exchange
@@ -1824,10 +1827,13 @@ public:
         // Main measurement phase
         cout << "Rank " << rank << ": Measuring..." << endl;
         for (size_t i = 0; i < n_measure; ++i) {
-            curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
-            
-            if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+            if (overrelaxation_rate > 0) {
                 overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                }
+            } else {
+                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
             }
             
             if (swap_rate > 0 && i % swap_rate == 0) {
@@ -2683,6 +2689,36 @@ public:
     }
 
     /**
+     * Helper function: Compute magnetization_global from flat state array
+     * @param x Flat state array [lattice_size * spin_dim]
+     * @param M_global_arr Output array to write results [spin_dim]
+     */
+    void compute_magnetization_global_from_flat(const double* x, double* M_global_arr) const {
+        // Initialize output array
+        for (size_t d = 0; d < spin_dim; ++d) {
+            M_global_arr[d] = 0.0;
+        }
+        
+        // Accumulate global magnetization
+        for (size_t i = 0; i < lattice_size; ++i) {
+            size_t atom = i % N_atoms;
+            size_t idx = i * spin_dim;
+            
+            // Transform to global frame using sublattice frame
+            for (size_t mu = 0; mu < spin_dim; ++mu) {
+                for (size_t nu = 0; nu < spin_dim; ++nu) {
+                    M_global_arr[mu] += sublattice_frames[atom](nu, mu) * x[idx + nu];
+                }
+            }
+        }
+        
+        // Normalize by lattice size
+        for (size_t d = 0; d < spin_dim; ++d) {
+            M_global_arr[d] /= double(lattice_size);
+        }
+    }
+
+    /**
      * Compute structure factor S(q)
      */
     double structure_factor(const Eigen::Vector3d& q) const {
@@ -2973,7 +3009,7 @@ public:
      * Returns magnetization trajectory without I/O
      * @param use_gpu Enable GPU acceleration
      */
-    vector<pair<double, pair<SpinVector, SpinVector>>> M_B_t(
+    vector<pair<double, array<SpinVector, 3>>> M_B_t(
                const vector<SpinVector>& field_in, double t_B, 
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
@@ -2994,8 +3030,8 @@ public:
         set_pulse(field_in, t_B, vector<SpinVector>(N_atoms, SpinVector::Zero(spin_dim)), 
                  0.0, pulse_amp, pulse_width, pulse_freq);
         
-        // Storage for trajectory: (time, (M_antiferro, M_local))
-        vector<pair<double, pair<SpinVector, SpinVector>>> trajectory;
+        // Storage for trajectory: (time, [M_antiferro, M_local, M_global])
+        vector<pair<double, array<SpinVector, 3>>> trajectory;
         
         // Start from initial spins configuration (always use Lattice::spins as starting point)
         ODEState state = spins_to_state(spins);
@@ -3012,19 +3048,25 @@ public:
                 // Compute magnetizations directly from flat state
                 double M_local_arr[8] = {0};
                 double M_antiferro_arr[8] = {0};
+                double M_global_arr[8] = {0};
                 
                 for (size_t i = 0; i < lattice_size; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    
                     for (size_t d = 0; d < spin_dim; ++d) {
                         M_local_arr[d] += x[i * spin_dim + d];
                         M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
                     }
                 }
                 
+                // Use helper function for global magnetization
+                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
-                trajectory.push_back({t, {M_antiferro, M_local}});
+                trajectory.push_back({t, {M_antiferro, M_local, M_global}});
                 last_save_time = t;
             }
         };
@@ -3048,7 +3090,7 @@ public:
      * Returns magnetization trajectory without I/O
      * @param use_gpu Enable GPU acceleration
      */
-    vector<pair<double, pair<SpinVector, SpinVector>>> M_BA_BB_t(
+    vector<pair<double, array<SpinVector, 3>>> M_BA_BB_t(
                    const vector<SpinVector>& field_in_1, double t_B_1,
                    const vector<SpinVector>& field_in_2, double t_B_2,
                    double pulse_amp, double pulse_width, double pulse_freq,
@@ -3071,8 +3113,8 @@ public:
         set_pulse(field_in_1, t_B_1, field_in_2, t_B_2, 
                  pulse_amp, pulse_width, pulse_freq);
         
-        // Storage for trajectory: (time, (M_antiferro, M_local))
-        vector<pair<double, pair<SpinVector, SpinVector>>> trajectory;
+        // Storage for trajectory: (time, [M_antiferro, M_local, M_global])
+        vector<pair<double, array<SpinVector, 3>>> trajectory;
         
         // Start from initial spins configuration (always use Lattice::spins as starting point)
         ODEState state = spins_to_state(spins);
@@ -3089,19 +3131,25 @@ public:
                 // Compute magnetizations directly from flat state
                 double M_local_arr[8] = {0};
                 double M_antiferro_arr[8] = {0};
+                double M_global_arr[8] = {0};
                 
                 for (size_t i = 0; i < lattice_size; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    
                     for (size_t d = 0; d < spin_dim; ++d) {
                         M_local_arr[d] += x[i * spin_dim + d];
                         M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
                     }
                 }
                 
+                // Use helper function for global magnetization
+                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
-                trajectory.push_back({t, {M_antiferro, M_local}});
+                trajectory.push_back({t, {M_antiferro, M_local, M_global}});
                 last_save_time = t;
             }
         };
@@ -3202,8 +3250,8 @@ public:
         cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
         
         // Store all trajectories in memory first
-        vector<vector<pair<double, pair<SpinVector, SpinVector>>>> M1_trajectories;
-        vector<vector<pair<double, pair<SpinVector, SpinVector>>>> M01_trajectories;
+        vector<vector<pair<double, array<SpinVector, 3>>>> M1_trajectories;
+        vector<vector<pair<double, array<SpinVector, 3>>>> M01_trajectories;
         vector<double> tau_values;
         
         M1_trajectories.reserve(tau_steps);
@@ -3454,7 +3502,7 @@ private:
     /**
      * GPU version of M_B_t
      */
-    vector<pair<double, pair<SpinVector, SpinVector>>> M_B_t_gpu(
+    vector<pair<double, array<SpinVector, 3>>> M_B_t_gpu(
                const vector<SpinVector>& field_in, double t_B, 
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
@@ -3468,7 +3516,7 @@ private:
         auto d_lattice_data = transfer_lattice_data_to_gpu();
         
         // Storage for trajectory
-        vector<pair<double, pair<SpinVector, SpinVector>>> trajectory;
+        vector<pair<double, array<SpinVector, 3>>> trajectory;
         
         // Initial state on GPU
         ODEState state = spins_to_state(spins);
@@ -3482,19 +3530,25 @@ private:
                 
                 double M_local_arr[8] = {0};
                 double M_antiferro_arr[8] = {0};
+                double M_global_arr[8] = {0};
                 
                 for (size_t i = 0; i < lattice_size; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    
                     for (size_t d = 0; d < spin_dim; ++d) {
                         M_local_arr[d] += x[i * spin_dim + d];
                         M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
                     }
                 }
                 
+                // Use helper function for global magnetization
+                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
-                trajectory.push_back({t, {M_antiferro, M_local}});
+                trajectory.push_back({t, {M_antiferro, M_local, M_global}});
                 last_save_time = t;
             }
         };
@@ -3521,7 +3575,7 @@ private:
     /**
      * GPU version of M_BA_BB_t
      */
-    vector<pair<double, pair<SpinVector, SpinVector>>> M_BA_BB_t_gpu(
+    vector<pair<double, array<SpinVector, 3>>> M_BA_BB_t_gpu(
                    const vector<SpinVector>& field_in_1, double t_B_1,
                    const vector<SpinVector>& field_in_2, double t_B_2,
                    double pulse_amp, double pulse_width, double pulse_freq,
@@ -3536,7 +3590,7 @@ private:
         auto d_lattice_data = transfer_lattice_data_to_gpu();
         
         // Storage for trajectory
-        vector<pair<double, pair<SpinVector, SpinVector>>> trajectory;
+        vector<pair<double, array<SpinVector, 3>>> trajectory;
         
         // Initial state on GPU
         ODEState state = spins_to_state(spins);
@@ -3550,19 +3604,25 @@ private:
                 
                 double M_local_arr[8] = {0};
                 double M_antiferro_arr[8] = {0};
+                double M_global_arr[8] = {0};
                 
                 for (size_t i = 0; i < lattice_size; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                    
                     for (size_t d = 0; d < spin_dim; ++d) {
                         M_local_arr[d] += x[i * spin_dim + d];
                         M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
                     }
                 }
                 
+                // Use helper function for global magnetization
+                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
-                trajectory.push_back({t, {M_antiferro, M_local}});
+                trajectory.push_back({t, {M_antiferro, M_local, M_global}});
                 last_save_time = t;
             }
         };
