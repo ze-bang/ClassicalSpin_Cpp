@@ -16,7 +16,7 @@ struct Bilinear {
     size_t partner;
     Vector3i offset;  // Offset in lattice coordinates
     
-    Bilinear() : partner(-1), offset(Vector3i::Zero()) {}
+    Bilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()) {}
     
     Bilinear(const SpinMatrix& J, size_t p) 
         : interaction(J), partner(p), offset(Vector3i::Zero()) {}
@@ -33,7 +33,7 @@ struct Trilinear {
     Vector3i offset1;
     Vector3i offset2;
     
-    Trilinear() : partner1(-1), partner2(-1), 
+    Trilinear() : partner1(SIZE_MAX), partner2(SIZE_MAX), 
                   offset1(Vector3i::Zero()), offset2(Vector3i::Zero()) {}
     
     Trilinear(const SpinTensor3& K, size_t p1, size_t p2)
@@ -51,7 +51,7 @@ struct MixedBilinear {
     size_t partner;
     Vector3i offset;
     
-    MixedBilinear() : partner(-1), offset(Vector3i::Zero()) {}
+    MixedBilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()) {}
     
     MixedBilinear(const SpinMatrix& J, size_t p, const Vector3i& o)
         : interaction(J), partner(p), offset(o) {}
@@ -65,7 +65,7 @@ struct MixedTrilinear {
     Vector3i offset1;
     Vector3i offset2;
     
-    MixedTrilinear() : partner1(-1), partner2(-1),
+    MixedTrilinear() : partner1(SIZE_MAX), partner2(SIZE_MAX),
                        offset1(Vector3i::Zero()), offset2(Vector3i::Zero()) {}
     
     MixedTrilinear(const SpinTensor3& K, size_t p1, size_t p2,

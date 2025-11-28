@@ -421,18 +421,20 @@ MixedUnitCell build_tmfeo3(const UnifiedConfig& config) {
 /**
  * Run simulated annealing
  */
-void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int rank) {
+void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running simulated annealing..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
         // Re-initialize spins for each trial (except first)
@@ -519,6 +521,9 @@ void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int r
         }
     }
     
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
+    
     if (rank == 0) {
         cout << "Parallel tempering completed (" << config.num_trials << " trials)." << endl;
     }
@@ -527,24 +532,14 @@ void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int r
 /**
  * Run molecular dynamics
  */
-void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int rank) {
+void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running molecular dynamics..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
         if (config.use_gpu) {
 #ifdef CUDA_ENABLED
             cout << "GPU acceleration: ENABLED" << endl;
-            // Check CUDA device
-            int device_count;
-            cudaGetDeviceCount(&device_count);
-            if (device_count > 0) {
-                cudaDeviceProp prop;
-                cudaGetDeviceProperties(&prop, 0);
-                cout << "Using GPU: " << prop.name << endl;
-                cout << "Compute capability: " << prop.major << "." << prop.minor << endl;
-            } else {
-                cout << "Warning: No CUDA devices found, falling back to CPU" << endl;
-            }
 #else
             cout << "GPU acceleration: REQUESTED but not available (compiled without CUDA)" << endl;
             cout << "Falling back to CPU implementation" << endl;
@@ -554,7 +549,23 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
         }
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+#ifdef CUDA_ENABLED
+    // Set GPU device based on local rank (for multi-GPU nodes)
+    if (config.use_gpu) {
+        int device_count;
+        cudaGetDeviceCount(&device_count);
+        if (device_count > 0) {
+            int device_id = rank % device_count;
+            cudaSetDevice(device_id);
+            if (rank == 0) {
+                cout << "Assigning GPUs: Rank " << rank << " -> GPU " << device_id << endl;
+            }
+        }
+    }
+#endif
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
@@ -567,23 +578,27 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
             lattice.init_random();
         }
         
-        // First equilibrate at low temperature
-        if (rank == 0) {
-            cout << "Equilibrating system..." << endl;
+        // First equilibrate at low temperature (skip if spins loaded from file)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating system..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.use_twist_boundary,
+                config.gaussian_move,
+                config.cooling_rate,
+                "",
+                false,
+                config.T_zero,
+                config.n_deterministics
+            );
+        } else if (rank == 0) {
+            cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.overrelaxation_rate,
-            config.use_twist_boundary,
-            config.gaussian_move,
-            config.cooling_rate,
-            "",
-            false,
-            config.T_zero,
-            config.n_deterministics
-        );
         
         // Run MD
         if (rank == 0) {
@@ -603,11 +618,12 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
             config.use_gpu
         );
         
-        if (rank == 0) {
-            cout << "Trial " << trial << " completed." << endl;
-            cout << "Results saved to: " << trial_dir << "/trajectory.h5" << endl;
-        }
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+        cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/trajectory.h5" << endl;
     }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
         cout << "Molecular dynamics completed (" << config.num_trials << " trials)." << endl;
@@ -617,10 +633,11 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
 /**
  * Run pump-probe experiment
  */
-void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
+void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running pump-probe simulation..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
         if (config.use_gpu) {
 #ifdef CUDA_ENABLED
             cout << "GPU acceleration: ENABLED" << endl;
@@ -629,6 +646,18 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
 #endif
         }
     }
+    
+#ifdef CUDA_ENABLED
+    // Set GPU device based on local rank
+    if (config.use_gpu) {
+        int device_count;
+        cudaGetDeviceCount(&device_count);
+        if (device_count > 0) {
+            int device_id = rank % device_count;
+            cudaSetDevice(device_id);
+        }
+    }
+#endif
     
     // Setup pulse field directions (one per sublattice)
     auto pump_dir_norm = config.pump_direction;
@@ -641,36 +670,41 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
         pump_dir_norm[2] /= norm;
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
-        // Re-initialize spins for each trial (except first)
-        if (trial > 0) {
+        // Re-initialize spins for each trial (except first on this rank)
+        if (trial != rank) {
             lattice.init_random();
         }
         
-        // First equilibrate
-        if (rank == 0) {
-            cout << "Equilibrating system..." << endl;
+        // First equilibrate (skip if spins loaded from file)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating system..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.use_twist_boundary,
+                config.gaussian_move,
+                config.cooling_rate,
+                "",
+                false,
+                config.T_zero,
+                config.n_deterministics
+            );
+        } else if (rank == 0) {
+            cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.overrelaxation_rate,
-            config.use_twist_boundary,
-            config.gaussian_move,
-            config.cooling_rate,
-            "",
-            false,
-            config.T_zero,
-            config.n_deterministics
-        );
         
         // Setup pump pulse
         if (rank == 0) {
@@ -716,10 +750,13 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
                          << mag_data[2].transpose() << "\n"; // mag global
             }
             traj_file.close();
-            cout << "Trial " << trial << " completed." << endl;
-            cout << "Results saved to: " << trial_dir << "/trajectory.h5" << endl;
+            cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+            cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/trajectory.h5" << endl;
         }
     }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
         cout << "Pump-probe simulation completed (" << config.num_trials << " trials)." << endl;
@@ -730,10 +767,11 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank) {
  * Run 2D coherent spectroscopy (2DCS) / pump-probe spectroscopy
  * This is equivalent to pump-probe with a delay time (tau) scan
  */
-void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int rank) {
+void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS)..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
         if (config.use_gpu) {
@@ -744,6 +782,18 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
 #endif
         }
     }
+    
+#ifdef CUDA_ENABLED
+    // Set GPU device based on local rank
+    if (config.use_gpu) {
+        int device_count;
+        cudaGetDeviceCount(&device_count);
+        if (device_count > 0) {
+            int device_id = rank % device_count;
+            cudaSetDevice(device_id);
+        }
+    }
+#endif
     
     // Setup pulse field directions normalization
     auto pump_dir_norm = config.pump_direction;
@@ -756,36 +806,41 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
         pump_dir_norm[2] /= norm;
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
-        // Re-initialize spins for each trial (except first)
-        if (trial > 0) {
+        // Re-initialize spins for each trial (except first on this rank)
+        if (trial != rank) {
             lattice.init_random();
         }
         
-        // First equilibrate to ground state
-        if (rank == 0) {
-            cout << "\n[1/3] Equilibrating to ground state..." << endl;
+        // First equilibrate to ground state (skip if spins loaded from file)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "\n[1/3] Equilibrating to ground state..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.use_twist_boundary,
+                config.gaussian_move,
+                config.cooling_rate,
+                trial_dir,
+                config.save_observables,
+                config.T_zero,
+                config.n_deterministics
+            );
+        } else if (rank == 0) {
+            cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
         }
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.overrelaxation_rate,
-            config.use_twist_boundary,
-            config.gaussian_move,
-            config.cooling_rate,
-            trial_dir,
-            config.save_observables,
-            config.T_zero,
-            config.n_deterministics
-        );
         
         // Create field directions for all sublattices
         vector<Eigen::VectorXd> field_dirs;
@@ -827,11 +882,12 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
             config.use_gpu
         );
         
-        if (rank == 0) {
-            cout << "\nTrial " << trial << " 2DCS spectroscopy completed!" << endl;
-            cout << "Results saved to: " << trial_dir << "/pump_probe_spectroscopy.h5" << endl;
-        }
+        cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;
+        cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/pump_probe_spectroscopy.h5" << endl;
     }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
         cout << "\n2DCS spectroscopy completed (" << config.num_trials << " trials)!" << endl;
@@ -846,18 +902,20 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
 /**
  * Run simulated annealing for mixed lattice
  */
-void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
+void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running simulated annealing on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
         // Re-initialize spins for each trial (except first)
@@ -942,6 +1000,9 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& co
         }
     }
     
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
+    
     if (rank == 0) {
         cout << "Parallel tempering completed (" << config.num_trials << " trials)." << endl;
     }
@@ -950,40 +1011,58 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& co
 /**
  * Run molecular dynamics for mixed lattice
  */
-void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
+void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running molecular dynamics on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+#ifdef CUDA_ENABLED
+    // Set GPU device based on local rank
+    if (config.use_gpu) {
+        int device_count;
+        cudaGetDeviceCount(&device_count);
+        if (device_count > 0) {
+            int device_id = rank % device_count;
+            cudaSetDevice(device_id);
+        }
+    }
+#endif
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
-        // Re-initialize spins for each trial (except first)
-        if (trial > 0) {
+        // Re-initialize spins for each trial (except first on this rank)
+        if (trial != rank) {
             lattice.init_random();
         }
         
-        // Equilibrate
-        if (rank == 0) {
-            cout << "Equilibrating system..." << endl;
+        // Equilibrate (skip if spins loaded from file)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating system..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.gaussian_move,
+                config.cooling_rate,
+                "",
+                false,
+                config.T_zero,
+                config.n_deterministics
+            );
+        } else if (rank == 0) {
+            cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.gaussian_move,
-            config.cooling_rate,
-            "",
-            false,
-            config.T_zero,
-            config.n_deterministics
-        );
         
         // Run MD
         if (rank == 0) {
@@ -1003,11 +1082,12 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& co
             config.use_gpu
         );
         
-        if (rank == 0) {
-            cout << "Trial " << trial << " completed." << endl;
-            cout << "Results saved to: " << trial_dir << "/trajectory_mixed.h5" << endl;
-        }
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+        cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/trajectory_mixed.h5" << endl;
     }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
         cout << "Molecular dynamics completed (" << config.num_trials << " trials)." << endl;
@@ -1017,11 +1097,24 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& co
 /**
  * Run pump-probe experiment for mixed lattice
  */
-void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
+void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running pump-probe simulation on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
     }
+    
+#ifdef CUDA_ENABLED
+    // Set GPU device based on local rank
+    if (config.use_gpu) {
+        int device_count;
+        cudaGetDeviceCount(&device_count);
+        if (device_count > 0) {
+            int device_id = rank % device_count;
+            cudaSetDevice(device_id);
+        }
+    }
+#endif
     
     // Prepare pulse directions
     SpinVector pump_dir_su2(3);
@@ -1037,34 +1130,39 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
         pump_dir_su3(2) = 1.0;  // Default to λ3
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
-        // Re-initialize spins for each trial (except first)
-        if (trial > 0) {
+        // Re-initialize spins for each trial (except first on this rank)
+        if (trial != rank) {
             lattice.init_random();
         }
         
-        // Equilibrate
-        if (rank == 0) {
-            cout << "Equilibrating system..." << endl;
+        // Equilibrate (skip if spins loaded from file)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating system..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.gaussian_move,
+                config.cooling_rate,
+                "",
+                false,
+                config.T_zero,
+                config.n_deterministics
+            );
+        } else if (rank == 0) {
+            cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.gaussian_move,
-            config.cooling_rate,
-            "",
-            false,
-            config.T_zero,
-            config.n_deterministics
-        );
         
         // Setup pump field directions
         if (rank == 0) {
@@ -1108,22 +1206,26 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
                          << mag_data.second[2].transpose() << "\n"; // SU3 mag global
             }
             traj_file.close();
-            cout << "Trial " << trial << " completed." << endl;
+            cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
         }
     }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
         cout << "Pump-probe simulation completed (" << config.num_trials << " trials)." << endl;
     }
-}
+}   
 
 /**
  * Run 2D coherent spectroscopy (2DCS) for mixed lattice
  */
-void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank) {
+void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS) on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
         if (config.use_gpu) {
@@ -1134,6 +1236,18 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
 #endif
         }
     }
+    
+#ifdef CUDA_ENABLED
+    // Set GPU device based on local rank
+    if (config.use_gpu) {
+        int device_count;
+        cudaGetDeviceCount(&device_count);
+        if (device_count > 0) {
+            int device_id = rank % device_count;
+            cudaSetDevice(device_id);
+        }
+    }
+#endif
     
     // Setup pulse field directions
     SpinVector pump_dir_su2(3);
@@ -1149,34 +1263,39 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
         pump_dir_su3(2) = 1.0;  // Default to λ3
     }
     
-    for (int trial = 0; trial < config.num_trials; ++trial) {
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
         filesystem::create_directories(trial_dir);
         
-        if (rank == 0 && config.num_trials > 1) {
-            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
         }
         
-        // Re-initialize spins for each trial (except first)
-        if (trial > 0) {
+        // Re-initialize spins for each trial (except first on this rank)
+        if (trial != rank) {
             lattice.init_random();
         }
         
-        // First equilibrate to ground state
-        if (rank == 0) {
-            cout << "\n[1/3] Equilibrating to ground state..." << endl;
+        // First equilibrate to ground state (skip if spins loaded from file)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "\n[1/3] Equilibrating to ground state..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.gaussian_move,
+                config.cooling_rate,
+                trial_dir,
+                config.save_observables,
+                config.T_zero,
+                config.n_deterministics
+            );
+        } else if (rank == 0) {
+            cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
         }
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.gaussian_move,
-            config.cooling_rate,
-            trial_dir,
-            config.save_observables,
-            config.T_zero,
-            config.n_deterministics
-        );
         
         vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
         vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
@@ -1224,11 +1343,12 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
             config.use_gpu
         );
         
-        if (rank == 0) {
-            cout << "\nTrial " << trial << " 2DCS spectroscopy completed!" << endl;
-            cout << "Results saved to: " << trial_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
-        }
+        cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;
+        cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
     }
+    
+    // Synchronize all ranks
+    MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
         cout << "\n2DCS spectroscopy completed (" << config.num_trials << " trials)!" << endl;
@@ -1328,19 +1448,19 @@ int main(int argc, char** argv) {
             // Run simulation
             switch (config.simulation) {
                 case SimulationType::SIMULATED_ANNEALING:
-                    run_simulated_annealing_mixed(mixed_lattice, config, rank);
+                    run_simulated_annealing_mixed(mixed_lattice, config, rank, size);
                     break;
                 case SimulationType::PARALLEL_TEMPERING:
                     run_parallel_tempering_mixed(mixed_lattice, config, rank, size);
                     break;
                 case SimulationType::MOLECULAR_DYNAMICS:
-                    run_molecular_dynamics_mixed(mixed_lattice, config, rank);
+                    run_molecular_dynamics_mixed(mixed_lattice, config, rank, size);
                     break;
                 case SimulationType::PUMP_PROBE:
-                    run_pump_probe_mixed(mixed_lattice, config, rank);
+                    run_pump_probe_mixed(mixed_lattice, config, rank, size);
                     break;
                 case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
-                    run_2dcs_spectroscopy_mixed(mixed_lattice, config, rank);
+                    run_2dcs_spectroscopy_mixed(mixed_lattice, config, rank, size);
                     break;
                 default:
                     if (rank == 0) {
@@ -1400,19 +1520,19 @@ int main(int argc, char** argv) {
             // Run simulation
             switch (config.simulation) {
                 case SimulationType::SIMULATED_ANNEALING:
-                    run_simulated_annealing(lattice, config, rank);
+                    run_simulated_annealing(lattice, config, rank, size);
                     break;
                 case SimulationType::PARALLEL_TEMPERING:
                     run_parallel_tempering(lattice, config, rank, size);
                     break;
                 case SimulationType::MOLECULAR_DYNAMICS:
-                    run_molecular_dynamics(lattice, config, rank);
+                    run_molecular_dynamics(lattice, config, rank, size);
                     break;
                 case SimulationType::PUMP_PROBE:
-                    run_pump_probe(lattice, config, rank);
+                    run_pump_probe(lattice, config, rank, size);
                     break;
                 case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
-                    run_2dcs_spectroscopy(lattice, config, rank);
+                    run_2dcs_spectroscopy(lattice, config, rank, size);
                     break;
                 default:
                     if (rank == 0) {
