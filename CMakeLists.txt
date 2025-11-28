@@ -84,9 +84,32 @@ file(GLOB HEADER_FILES "src/*.h" "src/*.hpp" "src/**/*.h" "src/**/*.hpp")
 file(GLOB_RECURSE CUDA_SOURCE_FILES "src/*.cu")
 file(GLOB_RECURSE CUDA_HEADER_FILES "src/*.cuh")
 
+# C++ source files (non-CUDA) - compiled separately to reduce compile times
+set(CPP_LIB_SOURCES
+    src/unified_config.cpp
+    src/simple_linear_alg.cpp
+    src/unitcell_builders.cpp
+)
+
 # ============================================================================
 # LIBRARIES
 # ============================================================================
+
+# C++ library with implementations (reduces compile time by separating from headers)
+add_library(cpp_lib STATIC ${CPP_LIB_SOURCES})
+target_include_directories(cpp_lib PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:include>
+)
+target_compile_features(cpp_lib PUBLIC cxx_std_20)
+target_link_libraries(cpp_lib PUBLIC 
+    Eigen3::Eigen
+    ${HDF5_CXX_LIBRARIES}
+)
+target_include_directories(cpp_lib PUBLIC ${HDF5_INCLUDE_DIRS})
+target_compile_options(cpp_lib PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPTIMIZATION_FLAGS}>
+)
 
 # Header-only interface library
 add_library(headers INTERFACE)
@@ -166,7 +189,7 @@ endif()
 function(add_optimized_executable exec_name source_file)
     add_executable(${exec_name} ${source_file})
     target_compile_features(${exec_name} PRIVATE cxx_std_20)
-    target_link_libraries(${exec_name} PRIVATE headers)
+    target_link_libraries(${exec_name} PRIVATE headers cpp_lib)
     target_include_directories(${exec_name} PRIVATE src)
     
     if(CUDA_SOURCE_FILES)
