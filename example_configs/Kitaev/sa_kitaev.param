@@ -4,10 +4,10 @@
 
 # Simulation Type
 system = honeycomb_kitaev
-simulation_mode = molecular_dynamics
+simulation_mode = simulated_annealing
 
 # Lattice Size
-lattice_size = 24,24,1
+lattice_size = 12,12,1
 
 # Kitaev Model Parameters
 K = -1.0        # Kitaev interaction
@@ -22,18 +22,11 @@ h = 0.7                     # Alternative specification
 
 # Simulated Annealing (equilibration)
 T_start = 5.0
-T_end = 0.001
+T_end = 0.01
 annealing_steps = 1000
 overrelaxation_rate = 1
 use_twist_boundary = false
 
-# Molecular Dynamics
-md_time_start = 0.0
-md_time_end = 600.0
-md_timestep = 0.25
-md_save_interval = 1
-md_integrator = rk5
-use_gpu = true
 
 # Output
 output_dir = KITAEV_md/0
