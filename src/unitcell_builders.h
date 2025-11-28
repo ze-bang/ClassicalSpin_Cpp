@@ -1,0 +1,26 @@
+/**
+ * unitcell_builders.h - Unit cell builder function declarations
+ * 
+ * This header declares the builder functions for various lattice types.
+ * Implementations are in unitcell_builders.cpp.
+ */
+
+#ifndef UNITCELL_BUILDERS_H
+#define UNITCELL_BUILDERS_H
+
+#include "unified_config.h"
+#include "unitcell.h"
+
+// Build BCAO honeycomb unit cell
+UnitCell build_bcao_honeycomb(const UnifiedConfig& config);
+
+// Build Kitaev honeycomb unit cell
+UnitCell build_kitaev_honeycomb(const UnifiedConfig& config);
+
+// Build pyrochlore unit cell
+UnitCell build_pyrochlore(const UnifiedConfig& config);
+
+// Build TmFeO3 mixed unit cell (SU2 Fe + SU3 Tm)
+MixedUnitCell build_tmfeo3(const UnifiedConfig& config);
+
+#endif // UNITCELL_BUILDERS_H
