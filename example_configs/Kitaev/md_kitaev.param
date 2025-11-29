@@ -36,5 +36,5 @@ md_integrator = rk5
 use_gpu = true
 
 # Output
-output_dir = KITAEV_md/0
+output_dir = KITAEV_md
 save_observables = true

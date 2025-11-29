@@ -30,5 +30,5 @@ probe_rate = 2000
 ranks_to_write = 0          # Comma-separated list of ranks to save
 
 # Output
-output_dir = KITAEV_pt/0
+output_dir = KITAEV_pt
 save_observables = true
