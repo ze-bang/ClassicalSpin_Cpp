@@ -43,8 +43,8 @@ find_package(HDF5 REQUIRED COMPONENTS C CXX)
 # COMPILER FLAGS
 # ============================================================================
 
-# CUDA compiler flags
-set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK")
+# CUDA compiler flags - include --extended-lambda for device lambdas
+set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK --extended-lambda")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
 
 # Optimization flags for Release builds
@@ -81,8 +81,13 @@ endif()
 # ============================================================================
 
 file(GLOB HEADER_FILES "src/*.h" "src/*.hpp" "src/**/*.h" "src/**/*.hpp")
-file(GLOB_RECURSE CUDA_SOURCE_FILES "src/*.cu")
 file(GLOB_RECURSE CUDA_HEADER_FILES "src/*.cuh")
+
+# CUDA library source files (not including executables)
+set(CUDA_LIB_SOURCE_FILES
+    src/lattice_gpu.cu
+    src/mixed_lattice_gpu.cu
+)
 
 # C++ source files (non-CUDA) - compiled separately to reduce compile times
 set(CPP_LIB_SOURCES
@@ -136,8 +141,8 @@ target_compile_definitions(headers INTERFACE
 )
 
 # CUDA library
-if(CUDA_SOURCE_FILES)
-    add_library(cuda_lib STATIC ${CUDA_SOURCE_FILES})
+if(CUDA_LIB_SOURCE_FILES)
+    add_library(cuda_lib STATIC ${CUDA_LIB_SOURCE_FILES})
     
     set_target_properties(cuda_lib PROPERTIES
         CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
@@ -192,7 +197,7 @@ function(add_optimized_executable exec_name source_file)
     target_link_libraries(${exec_name} PRIVATE headers cpp_lib)
     target_include_directories(${exec_name} PRIVATE src)
     
-    if(CUDA_SOURCE_FILES)
+    if(CUDA_LIB_SOURCE_FILES)
         target_link_libraries(${exec_name} PRIVATE cuda_headers)
         set_target_properties(${exec_name} PROPERTIES
             CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
