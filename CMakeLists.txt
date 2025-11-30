@@ -44,7 +44,8 @@ find_package(HDF5 REQUIRED COMPONENTS C CXX)
 # ============================================================================
 
 # CUDA compiler flags
-set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK")
+# --extended-lambda allows __device__ annotation on lambdas (required for Thrust)
+set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK --extended-lambda --expt-relaxed-constexpr")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
 
 # Optimization flags for Release builds
@@ -83,6 +84,9 @@ endif()
 file(GLOB HEADER_FILES "src/*.h" "src/*.hpp" "src/**/*.h" "src/**/*.hpp")
 file(GLOB_RECURSE CUDA_SOURCE_FILES "src/*.cu")
 file(GLOB_RECURSE CUDA_HEADER_FILES "src/*.cuh")
+
+# Exclude main executable source from library
+list(FILTER CUDA_SOURCE_FILES EXCLUDE REGEX ".*unified_simulation\\.cu$")
 
 # C++ source files (non-CUDA) - compiled separately to reduce compile times
 set(CPP_LIB_SOURCES

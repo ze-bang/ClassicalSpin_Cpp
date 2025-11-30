@@ -25,11 +25,7 @@
 #endif
 
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#include <thrust/copy.h>
-#include <thrust/transform.h>
-#include <thrust/reduce.h>
+#include "lattice_gpu.cuh"
 #endif
 
 // Optional profiling instrumentation
@@ -2576,7 +2572,8 @@ public:
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
     /**
      * Run molecular dynamics simulation with GPU acceleration (CUDA/Thrust)
-     * Uses thrust::device_vector for on-GPU integration
+     * Uses true GPU integration - all computation stays on device
+     * Only transfers data to host for HDF5 I/O at save intervals
      */
     void molecular_dynamics_gpu(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
@@ -2592,15 +2589,18 @@ public:
         }
         
         cout << "Running molecular dynamics with GPU acceleration: t=" << T_start << " → " << T_end << endl;
-        cout << "Integration method: " << method << endl;
-        cout << "Initial step size: " << dt_initial << endl;
+        cout << "Integration method: " << method << " (GPU-native)" << endl;
+        cout << "Step size: " << dt_initial << endl;
+        
+        // Ensure GPU data is initialized
+        ensure_gpu_data_initialized();
+        
+        // Create GPU ODE system
+        gpu::GPUODESystem gpu_system(gpu_data_cache_);
         
         // Transfer initial state to GPU
-        ODEState state = spins_to_state(spins);
-        thrust::device_vector<double> d_state(state.begin(), state.end());
-        
-        // Transfer lattice data to GPU (interaction matrices, fields, etc.)
-        auto d_lattice_data = transfer_lattice_data_to_gpu();
+        ODEState h_state = spins_to_state(spins);
+        gpu::GPUState d_state(h_state.begin(), h_state.end());
         
         // Create HDF5 writer
         std::unique_ptr<HDF5MDWriter> hdf5_writer;
@@ -2609,61 +2609,39 @@ public:
             cout << "Writing trajectory to HDF5 file: " << hdf5_file << endl;
             hdf5_writer = std::make_unique<HDF5MDWriter>(
                 hdf5_file, lattice_size, spin_dim, N_atoms, 
-                dim1, dim2, dim3, method + "_gpu", 
+                dim1, dim2, dim3, method + "_gpu_native", 
                 dt_initial, T_start, T_end, save_interval, spin_length, 
                 &site_positions, 10000);
         }
         
-        // Observer for saving data
-        size_t step_count = 0;
+        // Integrate on GPU - all computation on device, only transfer for I/O
+        std::vector<std::pair<double, std::vector<double>>> trajectory;
+        gpu::integrate_gpu(gpu_system, d_state, T_start, T_end, dt_initial, 
+                          save_interval, trajectory);
+        
+        // Write trajectory to HDF5 (post-processing on CPU)
         size_t save_count = 0;
-        thrust::host_vector<double> h_state;
-        
-        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
-            if (step_count % save_interval == 0) {
-                // Copy state back to host for I/O
-                h_state = d_x;
-                
-                // Compute magnetizations
-                double M_local_arr[8] = {0};
-                double M_antiferro_arr[8] = {0};
-                
-                compute_magnetizations_from_flat(thrust::raw_pointer_cast(h_state.data()), 
-                    lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
-                
-                SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
-                
-                // Compute energy (on CPU for now - could be optimized to GPU)
-                double E = total_energy_flat(thrust::raw_pointer_cast(h_state.data())) / lattice_size;
-                
-                if (hdf5_writer) {
-                    hdf5_writer->write_flat_step(t, M_antiferro, M_local, thrust::raw_pointer_cast(h_state.data()));
-                    save_count++;
-                }
-                
-                if (step_count % (save_interval * 10) == 0) {
-                    cout << "t=" << t << ", E/N=" << E << ", |M|=" << M_local.norm() << endl;
-                }
+        for (const auto& [t, state_vec] : trajectory) {
+            double M_local_arr[8] = {0};
+            double M_antiferro_arr[8] = {0};
+            
+            compute_magnetizations_from_flat(state_vec.data(), 
+                lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            
+            SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            
+            if (hdf5_writer) {
+                hdf5_writer->write_flat_step(t, M_antiferro, M_local, state_vec.data());
+                save_count++;
             }
-            ++step_count;
-        };
-        
-        // Create GPU ODE system
-        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
-                                                        thrust::device_vector<double>& dxdt, 
-                                                        double t) {
-            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
-        };
-        
-        // Integrate on GPU
-        double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
-        double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
-        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, dt_initial,
-                                observer, method, true, abs_tol, rel_tol);
-        
-        // Note: Lattice::spins remains unchanged (initial configuration preserved)
-        // The evolved state is stored in the device vector 'd_state'
+            
+            // Progress output
+            if (save_count % 10 == 0) {
+                double E = total_energy_flat(state_vec.data()) / lattice_size;
+                cout << "t=" << t << ", E/N=" << E << ", |M|=" << M_local.norm() << endl;
+            }
+        }
         
         // Close HDF5 file
         if (hdf5_writer) {
@@ -2671,7 +2649,7 @@ public:
             cout << "HDF5 trajectory saved with " << save_count << " snapshots" << endl;
         }
         
-        cout << "GPU molecular dynamics complete! (" << step_count << " steps)" << endl;
+        cout << "GPU molecular dynamics complete! (" << trajectory.size() << " saved states)" << endl;
     }
 #endif // CUDA_ENABLED
 
@@ -3394,51 +3372,34 @@ public:
         cout << "==========================================" << endl;
     }
 
-    // Note: GPU-accelerated methods (molecular_dynamics_gpu, single_pulse_drive_gpu, double_pulse_drive_gpu)
-    // are available when compiling with CUDA (.cu files). 
+    // Note: GPU-accelerated methods use the modular GPU implementation in lattice_gpu.cuh/cu
     // For C++ compilation, use_gpu parameter will automatically fallback to CPU implementation.
-    // See GPU_MD_IMPLEMENTATION.md for details.
 
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
 private:
-    // GPU data structures
-    struct GPULatticeData {
-        thrust::device_vector<double> d_field;
-        thrust::device_vector<double> d_onsite_interaction;
-        thrust::device_vector<double> d_bilinear_interaction;
-        thrust::device_vector<size_t> d_bilinear_partners;
-        thrust::device_vector<int8_t> d_bilinear_wrap_dir;
-        thrust::device_vector<double> d_trilinear_interaction;
-        thrust::device_vector<size_t> d_trilinear_partners;
-        thrust::device_vector<double> d_field_drive;
-        thrust::device_vector<double> d_twist_matrices;
-        
-        size_t num_bi;
-        size_t num_tri;
-        double field_drive_amp;
-        double field_drive_freq;
-        double field_drive_width;
-        double t_pulse_0;
-        double t_pulse_1;
-    };
+    // GPU data cache for avoiding repeated transfers
+    mutable gpu::GPULatticeData gpu_data_cache_;
+    mutable bool gpu_data_initialized_ = false;
     
     /**
-     * Transfer lattice data to GPU
+     * Ensure GPU lattice data is initialized (lazy initialization)
+     * Uses the modular gpu:: implementation from lattice_gpu.cuh/cu
      */
-    GPULatticeData transfer_lattice_data_to_gpu() const {
-        GPULatticeData gpu_data;
+    void ensure_gpu_data_initialized() const {
+        if (gpu_data_initialized_) return;
         
-        // Flatten and transfer field data
+        // Flatten field data
         vector<double> flat_field;
+        flat_field.reserve(lattice_size * spin_dim);
         for (size_t i = 0; i < lattice_size; ++i) {
             for (size_t d = 0; d < spin_dim; ++d) {
                 flat_field.push_back(field[i](d));
             }
         }
-        gpu_data.d_field = thrust::device_vector<double>(flat_field.begin(), flat_field.end());
         
-        // Flatten and transfer onsite interaction matrices
+        // Flatten onsite interaction matrices
         vector<double> flat_onsite;
+        flat_onsite.reserve(lattice_size * spin_dim * spin_dim);
         for (size_t i = 0; i < lattice_size; ++i) {
             for (size_t r = 0; r < spin_dim; ++r) {
                 for (size_t c = 0; c < spin_dim; ++c) {
@@ -3446,14 +3407,18 @@ private:
                 }
             }
         }
-        gpu_data.d_onsite_interaction = thrust::device_vector<double>(flat_onsite.begin(), flat_onsite.end());
         
-        // Flatten and transfer bilinear interaction data
+        // Flatten bilinear interaction data
         vector<double> flat_bilinear;
         vector<size_t> flat_partners;
-        vector<int8_t> flat_wrap;
+        vector<size_t> num_bilinear_per_site;
+        
+        flat_bilinear.reserve(lattice_size * num_bi * spin_dim * spin_dim);
+        flat_partners.reserve(lattice_size * num_bi);
+        num_bilinear_per_site.reserve(lattice_size);
         
         for (size_t i = 0; i < lattice_size; ++i) {
+            num_bilinear_per_site.push_back(bilinear_partners[i].size());
             for (size_t n = 0; n < num_bi; ++n) {
                 if (n < bilinear_partners[i].size()) {
                     flat_partners.push_back(bilinear_partners[i][n]);
@@ -3462,156 +3427,102 @@ private:
                             flat_bilinear.push_back(bilinear_interaction[i][n](r, c));
                         }
                     }
-                    for (size_t d = 0; d < 3; ++d) {
-                        flat_wrap.push_back(bilinear_wrap_dir[i][n][d]);
-                    }
                 } else {
                     flat_partners.push_back(0);
                     for (size_t j = 0; j < spin_dim * spin_dim; ++j) {
                         flat_bilinear.push_back(0.0);
                     }
-                    for (size_t d = 0; d < 3; ++d) {
-                        flat_wrap.push_back(0);
-                    }
                 }
             }
         }
         
-        gpu_data.d_bilinear_interaction = thrust::device_vector<double>(flat_bilinear.begin(), flat_bilinear.end());
-        gpu_data.d_bilinear_partners = thrust::device_vector<size_t>(flat_partners.begin(), flat_partners.end());
-        gpu_data.d_bilinear_wrap_dir = thrust::device_vector<int8_t>(flat_wrap.begin(), flat_wrap.end());
+        // Create GPU data using the modular implementation
+        gpu_data_cache_ = gpu::create_gpu_lattice_data(
+            lattice_size, spin_dim, N_atoms, num_bi,
+            flat_field, flat_onsite, flat_bilinear, 
+            flat_partners, num_bilinear_per_site
+        );
         
-        // Transfer field drive parameters
+        gpu_data_initialized_ = true;
+    }
+    
+    /**
+     * Update GPU pulse parameters
+     */
+    void update_gpu_pulse() const {
         vector<double> flat_field_drive;
+        flat_field_drive.reserve(2 * N_atoms * spin_dim);
         for (size_t p = 0; p < 2; ++p) {
             for (size_t d = 0; d < field_drive[p].size(); ++d) {
                 flat_field_drive.push_back(field_drive[p](d));
             }
         }
-        gpu_data.d_field_drive = thrust::device_vector<double>(flat_field_drive.begin(), flat_field_drive.end());
         
-        // Store scalar parameters
-        gpu_data.num_bi = num_bi;
-        gpu_data.num_tri = num_tri;
-        gpu_data.field_drive_amp = field_drive_amp;
-        gpu_data.field_drive_freq = field_drive_freq;
-        gpu_data.field_drive_width = field_drive_width;
-        gpu_data.t_pulse_0 = t_pulse[0];
-        gpu_data.t_pulse_1 = t_pulse[1];
-        
-        return gpu_data;
+        gpu::set_gpu_pulse(
+            gpu_data_cache_,
+            flat_field_drive,
+            field_drive_amp,
+            field_drive_width,
+            field_drive_freq,
+            t_pulse[0],
+            t_pulse[1]
+        );
     }
     
     /**
-     * GPU ODE system function using Thrust
-     */
-    void ode_system_gpu(const thrust::device_vector<double>& x, 
-                       thrust::device_vector<double>& dxdt, 
-                       double t,
-                       const GPULatticeData& d_data) const {
-        // This would call CUDA kernels to compute dxdt on GPU
-        // For now, this is a placeholder that would need full CUDA kernel implementation
-        thrust::host_vector<double> h_x = x;
-        thrust::host_vector<double> h_dxdt(x.size());
-        
-        landau_lifshitz_flat(thrust::raw_pointer_cast(h_x.data()), 
-                            thrust::raw_pointer_cast(h_dxdt.data()), t);
-        
-        dxdt = h_dxdt;
-    }
-    
-    /**
-     * GPU integration wrapper for Thrust device vectors
-     */
-    template<typename System, typename Observer>
-    void integrate_ode_system_gpu(System system_func, thrust::device_vector<double>& state,
-                                  double T_start, double T_end, double dt_step,
-                                  Observer observer, const string& method,
-                                  bool use_adaptive = false,
-                                  double abs_tol = 1e-6, double rel_tol = 1e-6) {
-        // For GPU integration, we'd use Thrust-compatible integrators
-        // For now, copy to host, integrate, and copy back
-        thrust::host_vector<double> h_state = state;
-        ODEState cpu_state(h_state.begin(), h_state.end());
-        
-        auto cpu_system = [&](const ODEState& x, ODEState& dxdt, double t) {
-            thrust::device_vector<double> d_x(x.begin(), x.end());
-            thrust::device_vector<double> d_dxdt(x.size());
-            system_func(d_x, d_dxdt, t);
-            thrust::host_vector<double> h_dxdt = d_dxdt;
-            std::copy(h_dxdt.begin(), h_dxdt.end(), dxdt.begin());
-        };
-        
-        auto cpu_observer = [&](const ODEState& x, double t) {
-            thrust::device_vector<double> d_x(x.begin(), x.end());
-            observer(d_x, t);
-        };
-        
-        integrate_ode_system(cpu_system, cpu_state, T_start, T_end, dt_step,
-                            cpu_observer, method, use_adaptive, abs_tol, rel_tol);
-        
-        h_state = thrust::host_vector<double>(cpu_state.begin(), cpu_state.end());
-        state = h_state;
-    }
-    
-    /**
-     * GPU version of single_pulse_drive
+     * GPU version of single_pulse_drive using true GPU integration
+     * Uses gpu::integrate_gpu for pure GPU execution without per-step host transfers
      */
     vector<pair<double, array<SpinVector, 3>>> single_pulse_drive_gpu(
                const vector<SpinVector>& field_in, double t_B,
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
-               string method = "dopri5") {        // Set up pulse
+               string method = "dopri5") {
+        
+        // Set up pulse on CPU side first
         set_pulse(field_in, t_B, vector<SpinVector>(N_atoms, SpinVector::Zero(spin_dim)), 
                  0.0, pulse_amp, pulse_width, pulse_freq);
         
-        // Transfer data to GPU
-        auto d_lattice_data = transfer_lattice_data_to_gpu();
+        // Ensure GPU data is initialized and update pulse
+        ensure_gpu_data_initialized();
+        update_gpu_pulse();
         
-        // Storage for trajectory
+        // Create GPU ODE system
+        gpu::GPUODESystem gpu_system(gpu_data_cache_);
+        
+        // Transfer initial state to GPU
+        ODEState h_state = spins_to_state(spins);
+        gpu::GPUState d_state(h_state.begin(), h_state.end());
+        
+        // Calculate save interval from step size
+        double total_time = T_end - T_start;
+        size_t total_steps = static_cast<size_t>(total_time / step_size) + 1;
+        size_t save_interval = 1;  // Save every step for trajectory output
+        
+        // Integrate on GPU - all computation stays on device
+        std::vector<std::pair<double, std::vector<double>>> raw_trajectory;
+        gpu::integrate_gpu(gpu_system, d_state, T_start, T_end, step_size, 
+                          save_interval, raw_trajectory);
+        
+        // Convert raw trajectory to magnetization trajectory
         vector<pair<double, array<SpinVector, 3>>> trajectory;
+        trajectory.reserve(raw_trajectory.size());
         
-        // Initial state on GPU
-        ODEState state = spins_to_state(spins);
-        thrust::device_vector<double> d_state(state.begin(), state.end());
-        
-        // Observer
-        double last_save_time = T_start;
-        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
-            if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
-                thrust::host_vector<double> x = d_x;
-                
-                double M_local_arr[8] = {0};
-                double M_antiferro_arr[8] = {0};
-                double M_global_arr[8] = {0};
-                
-                compute_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 
-                    lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
-                
-                // Use helper function for global magnetization
-                compute_magnetization_global_from_flat(thrust::raw_pointer_cast(x.data()), M_global_arr);
-                
-                SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
-                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
-                
-                trajectory.push_back({t, {M_antiferro, M_local, M_global}});
-                last_save_time = t;
-            }
-        };
-        
-        // System function
-        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
-                                                        thrust::device_vector<double>& dxdt, 
-                                                        double t) {
-            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
-        };
-        
-        // Integrate on GPU (state was initialized from spins earlier)
-        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
-        
-        // Note: Lattice::spins remains unchanged - only ODEState evolved
+        for (const auto& [t, state_vec] : raw_trajectory) {
+            double M_local_arr[8] = {0};
+            double M_antiferro_arr[8] = {0};
+            double M_global_arr[8] = {0};
+            
+            compute_magnetizations_from_flat(state_vec.data(), 
+                lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            
+            SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
+            
+            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+        }
         
         // Reset pulse
         field_drive[0] = SpinVector::Zero(N_atoms * spin_dim);
@@ -3622,64 +3533,54 @@ private:
     }
     
     /**
-     * GPU version of double_pulse_drive
+     * GPU version of double_pulse_drive using true GPU integration
      */
     vector<pair<double, array<SpinVector, 3>>> double_pulse_drive_gpu(
                const vector<SpinVector>& field_in_1, double t_B_1,
                const vector<SpinVector>& field_in_2, double t_B_2,
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
-               string method = "dopri5") {        // Set up two-pulse configuration
+               string method = "dopri5") {
+        
+        // Set up two-pulse configuration
         set_pulse(field_in_1, t_B_1, field_in_2, t_B_2, 
                  pulse_amp, pulse_width, pulse_freq);
         
-        // Transfer data to GPU
-        auto d_lattice_data = transfer_lattice_data_to_gpu();
+        // Ensure GPU data is initialized and update pulse
+        ensure_gpu_data_initialized();
+        update_gpu_pulse();
         
-        // Storage for trajectory
+        // Create GPU ODE system
+        gpu::GPUODESystem gpu_system(gpu_data_cache_);
+        
+        // Transfer initial state to GPU
+        ODEState h_state = spins_to_state(spins);
+        gpu::GPUState d_state(h_state.begin(), h_state.end());
+        
+        // Integrate on GPU
+        std::vector<std::pair<double, std::vector<double>>> raw_trajectory;
+        gpu::integrate_gpu(gpu_system, d_state, T_start, T_end, step_size, 
+                          1, raw_trajectory);
+        
+        // Convert raw trajectory to magnetization trajectory
         vector<pair<double, array<SpinVector, 3>>> trajectory;
+        trajectory.reserve(raw_trajectory.size());
         
-        // Initial state on GPU
-        ODEState state = spins_to_state(spins);
-        thrust::device_vector<double> d_state(state.begin(), state.end());
-        
-        // Observer
-        double last_save_time = T_start;
-        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
-            if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
-                thrust::host_vector<double> x = d_x;
-                
-                double M_local_arr[8] = {0};
-                double M_antiferro_arr[8] = {0};
-                double M_global_arr[8] = {0};
-                
-                compute_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 
-                    lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
-                
-                // Use helper function for global magnetization
-                compute_magnetization_global_from_flat(thrust::raw_pointer_cast(x.data()), M_global_arr);
-                
-                SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
-                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
-                
-                trajectory.push_back({t, {M_antiferro, M_local, M_global}});
-                last_save_time = t;
-            }
-        };
-        
-        // System function
-        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
-                                                        thrust::device_vector<double>& dxdt, 
-                                                        double t) {
-            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
-        };
-        
-        // Integrate on GPU (state was initialized from spins earlier)
-        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
-        
-        // Note: Lattice::spins remains unchanged - only ODEState evolved
+        for (const auto& [t, state_vec] : raw_trajectory) {
+            double M_local_arr[8] = {0};
+            double M_antiferro_arr[8] = {0};
+            double M_global_arr[8] = {0};
+            
+            compute_magnetizations_from_flat(state_vec.data(), 
+                lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            
+            SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
+            
+            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+        }
         
         // Reset pulse
         field_drive[0] = SpinVector::Zero(N_atoms * spin_dim);
