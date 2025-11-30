@@ -1492,7 +1492,7 @@ int main(int argc, char** argv) {
                         cerr << "Error: Unknown system type for parameter sweep" << endl;
                     }
                     MPI_Abort(MPI_COMM_WORLD, 1);
-                    return;
+                    return 1;
                 }
             
             Lattice lattice(*uc_ptr, 

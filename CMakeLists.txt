@@ -223,7 +223,7 @@ endfunction()
 # ============================================================================
 
 # Main unified simulation executable
-add_optimized_executable(unified_simulation src/unified_simulation.cu)
+add_optimized_executable(unified_simulation src/unified_simulation.cpp)
 
 
 # ============================================================================
