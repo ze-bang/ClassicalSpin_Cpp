@@ -474,7 +474,7 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
                 config.use_twist_boundary,
                 config.gaussian_move,
                 config.cooling_rate,
-                trial_dir,
+                "",
                 config.save_observables,
                 config.T_zero,
                 config.n_deterministics

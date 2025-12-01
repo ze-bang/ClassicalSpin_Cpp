@@ -1,21 +1,66 @@
 #include "lattice_gpu.cuh"
+#include "lattice_gpu_api.h"
 #include "gpu_common_helpers.cuh"
 
-// Uses device functions from gpu_common_helpers.cuh:
-// - multiply_matrix_vector_device, cross_product_SU2/SU3_device, compute_ll_derivative_device
-// Uses kernels from gpu_common_helpers.cu:
-// - update_arrays_kernel, update_arrays_three_kernel, normalize_spins_kernel, compute_magnetization_kernel
-
-// ======================= gpu:: Namespace Implementation =======================
-
 namespace gpu {
+
+// Common device functions and kernels are now in gpu_common_helpers.cu/cuh
+// ======================= Device Helper Functions =======================
+
+// Note: Common device functions (multiply_matrix_vector_device, cross_product_SU2_device,
+// cross_product_SU3_device, init_local_field_device, add_onsite_contribution_device,
+// add_bilinear_contribution_device, add_drive_field_device, compute_ll_derivative_device)
+// are provided by gpu_common_helpers.cuh
+
+/**
+ * Compute local field for a site (device function)
+ * 
+ * Computes: H_eff = -B_ext + 2*A·S + sum_j J_ij·S_j
+ */
+__device__
+void compute_local_field_device(
+    double* local_field,
+    const double* d_spins,
+    int site,
+    const double* d_field,
+    const double* d_onsite,
+    const double* d_bilinear_vals,
+    const size_t* d_bilinear_idx,
+    const size_t* d_bilinear_counts,
+    size_t max_bilinear,
+    size_t lattice_size,
+    size_t spin_dim
+) {
+    const double* spin_here = &d_spins[site * spin_dim];
+    double temp[8];
+    
+    // Initialize: H = -B_ext
+    ::init_local_field_device(local_field, &d_field[site * spin_dim], spin_dim);
+    
+    // On-site: H += 2*A*S (factor 2 from derivative of quadratic term)
+    ::add_onsite_contribution_device(local_field, &d_onsite[site * spin_dim * spin_dim],
+                                     spin_here, temp, spin_dim, 2.0);
+    
+    // Bilinear: H += sum_j J_ij * S_j
+    size_t num_neighbors = d_bilinear_counts[site];
+    for (size_t n = 0; n < num_neighbors && n < max_bilinear; ++n) {
+        size_t partner = d_bilinear_idx[site * max_bilinear + n];
+        if (partner < lattice_size) {
+            ::add_bilinear_contribution_device(local_field,
+                &d_bilinear_vals[(site * max_bilinear + n) * spin_dim * spin_dim],
+                &d_spins[partner * spin_dim], temp, spin_dim);
+        }
+    }
+}
+
+// ======================= Kernel Implementations =======================
 
 /**
  * Kernel to compute Landau-Lifshitz derivatives using flattened arrays
  * This is the primary LLG kernel used by all integration methods.
  * 
  * Computes: dS/dt = H_eff × S
- * where H_eff = H_ext - A·S - sum_j J_ij·S_j + H_drive(t)
+ * where H_eff = -B_ext + 2*A·S + sum_j J_ij·S_j - H_drive(t)
  */
 __global__
 void LLG_flat_kernel(
@@ -45,41 +90,29 @@ void LLG_flat_kernel(
     const double* spin_here = &d_spins[site * spin_dim];
     double* local_field = &d_local_field[site * spin_dim];
     double* dsdt = &d_dsdt[site * spin_dim];
-    double temp[8];  // Working array for matrix-vector products
     
-    // Initialize: H = -B_ext
-    init_local_field_device(local_field, &d_field[site * spin_dim], spin_dim);
-    
-    // On-site interaction: H += 2 * A · S (factor 2 from derivative of quadratic term)
-    add_onsite_contribution_device(local_field, &d_onsite[site * spin_dim * spin_dim], spin_here, temp, spin_dim, 2.0);
-    
-    // Bilinear interactions: H += sum_j J_ij · S_j
-    size_t num_neighbors = d_bilinear_counts[site];
-    for (size_t n = 0; n < num_neighbors && n < max_bilinear; ++n) {
-        size_t partner = d_bilinear_idx[site * max_bilinear + n];
-        if (partner < lattice_size) {
-            add_bilinear_contribution_device(local_field, 
-                &d_bilinear_vals[(site * max_bilinear + n) * spin_dim * spin_dim],
-                &d_spins[partner * spin_dim], temp, spin_dim);
-        }
-    }
+    // Compute local field using device function
+    compute_local_field_device(
+        local_field, d_spins, site,
+        d_field, d_onsite,
+        d_bilinear_vals, d_bilinear_idx, d_bilinear_counts,
+        max_bilinear, lattice_size, spin_dim
+    );
     
     // Add drive field: H -= H_drive(t)
-    add_drive_field_device(local_field, d_field_drive, d_field_drive + N_atoms * spin_dim,
-                           site % N_atoms, pulse_amp, pulse_width, pulse_freq,
-                           t_pulse_1, t_pulse_2, curr_time, spin_dim);
+    ::add_drive_field_device(local_field, d_field_drive, d_field_drive + N_atoms * spin_dim,
+                             site % N_atoms, pulse_amp, pulse_width, pulse_freq,
+                             t_pulse_1, t_pulse_2, curr_time, spin_dim);
     
     // Compute Landau-Lifshitz derivative: dS/dt = H_eff × S
-    compute_ll_derivative_device(dsdt, spin_here, local_field, spin_dim);
+    ::compute_ll_derivative_device(dsdt, spin_here, local_field, spin_dim);
 }
 
-// Alias kernel names to use common implementations
+// ======================= GPUODESystem Implementation =======================
+
+// Alias kernel names to use common implementations from gpu_common_helpers.cu
 #define update_state_kernel ::update_arrays_kernel
 #define update_state_three_kernel ::update_arrays_three_kernel
-
-/**
- * GPUODESystem operator() implementation
- */
 void GPUODESystem::operator()(const GPUState& x, GPUState& dxdt, double t) const {
     const int BLOCK_SIZE = 256;
     dim3 block(BLOCK_SIZE);
@@ -112,8 +145,9 @@ void GPUODESystem::operator()(const GPUState& x, GPUState& dxdt, double t) const
 
 /**
  * Create GPU lattice data from host arrays
+ * Internal function - returns the raw struct
  */
-GPULatticeData create_gpu_lattice_data(
+GPULatticeData create_gpu_lattice_data_internal(
     size_t lattice_size,
     size_t spin_dim,
     size_t N_atoms,
@@ -819,3 +853,187 @@ void normalize_spins_gpu(GPUState& state, size_t lattice_size, size_t spin_dim, 
 }
 
 } // namespace gpu
+
+// =============================================================================
+// Host-Callable API Implementation (for C++ TUs)
+// These functions wrap the internal gpu:: namespace functions with opaque handles
+// =============================================================================
+
+namespace gpu {
+
+/**
+ * Internal structure that backs the opaque handle
+ * Only visible to CUDA translation units
+ */
+struct GPULatticeDataHandle {
+    GPULatticeData data;
+    GPUState state;
+    bool has_state;
+    
+    GPULatticeDataHandle() : has_state(false) {}
+};
+
+// API wrapper functions - use different internal namespace to avoid collision
+namespace api {
+
+GPULatticeDataHandle* create_handle(
+    size_t lattice_size,
+    size_t spin_dim,
+    size_t N_atoms,
+    size_t max_bilinear,
+    const std::vector<double>& flat_field,
+    const std::vector<double>& flat_onsite,
+    const std::vector<double>& flat_bilinear,
+    const std::vector<size_t>& flat_partners,
+    const std::vector<size_t>& num_bilinear_per_site
+) {
+    GPULatticeDataHandle* handle = new GPULatticeDataHandle();
+    
+    // Use the internal create function
+    handle->data = gpu::create_gpu_lattice_data_internal(
+        lattice_size, spin_dim, N_atoms, max_bilinear,
+        flat_field, flat_onsite, flat_bilinear, flat_partners, num_bilinear_per_site
+    );
+    
+    return handle;
+}
+
+} // namespace api
+
+// Implementations of API functions declared in lattice_gpu_api.h
+GPULatticeDataHandle* create_gpu_lattice_data(
+    size_t lattice_size,
+    size_t spin_dim,
+    size_t N_atoms,
+    size_t max_bilinear,
+    const std::vector<double>& flat_field,
+    const std::vector<double>& flat_onsite,
+    const std::vector<double>& flat_bilinear,
+    const std::vector<size_t>& flat_partners,
+    const std::vector<size_t>& num_bilinear_per_site
+) {
+    return api::create_handle(lattice_size, spin_dim, N_atoms, max_bilinear,
+                              flat_field, flat_onsite, flat_bilinear, 
+                              flat_partners, num_bilinear_per_site);
+}
+
+void destroy_gpu_lattice_data(GPULatticeDataHandle* handle) {
+    if (handle) {
+        // GPULatticeData uses thrust vectors which auto-deallocate
+        delete handle;
+    }
+}
+
+void set_gpu_pulse(
+    GPULatticeDataHandle* handle,
+    const std::vector<double>& flat_field_drive,
+    double pulse_amp,
+    double pulse_width,
+    double pulse_freq,
+    double t_pulse_1,
+    double t_pulse_2
+) {
+    if (!handle) return;
+    
+    gpu::set_gpu_pulse(handle->data, flat_field_drive, 
+                       pulse_amp, pulse_width, pulse_freq, 
+                       t_pulse_1, t_pulse_2);
+}
+
+void set_gpu_spins(
+    GPULatticeDataHandle* handle,
+    const std::vector<double>& flat_spins
+) {
+    if (!handle) return;
+    
+    handle->state.resize(flat_spins.size());
+    thrust::copy(flat_spins.begin(), flat_spins.end(), handle->state.begin());
+    handle->has_state = true;
+}
+
+void get_gpu_spins(
+    GPULatticeDataHandle* handle,
+    std::vector<double>& flat_spins
+) {
+    if (!handle || !handle->has_state) return;
+    
+    flat_spins.resize(handle->state.size());
+    thrust::copy(handle->state.begin(), handle->state.end(), flat_spins.begin());
+}
+
+void integrate_gpu(
+    GPULatticeDataHandle* handle,
+    double T_start,
+    double T_end,
+    double dt,
+    size_t save_interval,
+    std::vector<std::pair<double, std::vector<double>>>& trajectory,
+    const std::string& method
+) {
+    if (!handle || !handle->has_state) return;
+    
+    GPUODESystem system(handle->data);
+    gpu::integrate_gpu(system, handle->state, T_start, T_end, dt, 
+                       save_interval, trajectory, method);
+}
+
+void step_gpu(
+    GPULatticeDataHandle* handle,
+    double t,
+    double dt,
+    const std::string& method
+) {
+    if (!handle || !handle->has_state) return;
+    
+    GPUODESystem system(handle->data);
+    gpu::step_gpu(system, handle->state, t, dt, method);
+}
+
+double compute_energy_gpu(GPULatticeDataHandle* handle) {
+    if (!handle || !handle->has_state) return 0.0;
+    
+    return gpu::compute_energy_gpu(handle->data, handle->state);
+}
+
+void normalize_spins_gpu(GPULatticeDataHandle* handle, double spin_length) {
+    if (!handle || !handle->has_state) return;
+    
+    gpu::normalize_spins_gpu(handle->state, handle->data.lattice_size, 
+                             handle->data.spin_dim, spin_length);
+}
+
+void compute_magnetization_gpu(
+    GPULatticeDataHandle* handle,
+    std::vector<double>& mag_local,
+    std::vector<double>& mag_staggered
+) {
+    if (!handle || !handle->has_state) return;
+    
+    size_t spin_dim = handle->data.spin_dim;
+    size_t lattice_size = handle->data.lattice_size;
+    
+    mag_local.resize(spin_dim, 0.0);
+    mag_staggered.resize(spin_dim, 0.0);
+    
+    // Copy state to host for magnetization computation
+    std::vector<double> h_state(handle->state.size());
+    thrust::copy(handle->state.begin(), handle->state.end(), h_state.begin());
+    
+    // Compute magnetizations on CPU (could be optimized with GPU reduction)
+    for (size_t i = 0; i < lattice_size; ++i) {
+        double sign = (i % 2 == 0) ? 1.0 : -1.0;
+        for (size_t d = 0; d < spin_dim; ++d) {
+            mag_local[d] += h_state[i * spin_dim + d];
+            mag_staggered[d] += h_state[i * spin_dim + d] * sign;
+        }
+    }
+    
+    // Normalize
+    for (size_t d = 0; d < spin_dim; ++d) {
+        mag_local[d] /= lattice_size;
+        mag_staggered[d] /= lattice_size;
+    }
+}
+
+} // namespace gpu
+

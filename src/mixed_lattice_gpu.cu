@@ -1,4 +1,5 @@
 #include "mixed_lattice_gpu.cuh"
+#include "mixed_lattice_gpu_api.h"
 #include "gpu_common_helpers.cuh"
 
 namespace mixed_gpu {
@@ -342,7 +343,7 @@ void GPUMixedODESystem::operator()(const GPUState& x, GPUState& dxdt, double t) 
 
 // ======================= Host Integration Functions =======================
 
-GPUMixedLatticeData create_gpu_mixed_lattice_data(
+GPUMixedLatticeData create_gpu_mixed_lattice_data_internal(
     size_t lattice_size_SU2, size_t spin_dim_SU2, size_t N_atoms_SU2,
     size_t lattice_size_SU3, size_t spin_dim_SU3, size_t N_atoms_SU3,
     size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear,
@@ -746,6 +747,203 @@ void normalize_spins_mixed_gpu(
     }
     
     cudaDeviceSynchronize();
+}
+
+} // namespace mixed_gpu
+
+// =============================================================================
+// Host-Callable API Implementation (for C++ TUs)
+// These functions wrap the internal mixed_gpu:: namespace functions with opaque handles
+// =============================================================================
+
+namespace mixed_gpu {
+
+/**
+ * Internal structure that backs the opaque handle
+ * Only visible to CUDA translation units
+ */
+struct GPUMixedLatticeDataHandle {
+    GPUMixedLatticeData data;
+    GPUState state;
+    bool has_state;
+    
+    GPUMixedLatticeDataHandle() : has_state(false) {}
+};
+
+GPUMixedLatticeDataHandle* create_gpu_mixed_lattice_data(
+    size_t lattice_size_SU2, size_t spin_dim_SU2, size_t N_atoms_SU2,
+    size_t lattice_size_SU3, size_t spin_dim_SU3, size_t N_atoms_SU3,
+    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear,
+    const std::vector<double>& flat_field_SU2,
+    const std::vector<double>& flat_onsite_SU2,
+    const std::vector<double>& flat_bilinear_SU2,
+    const std::vector<size_t>& flat_partners_SU2,
+    const std::vector<size_t>& num_bilinear_per_site_SU2,
+    const std::vector<double>& flat_field_SU3,
+    const std::vector<double>& flat_onsite_SU3,
+    const std::vector<double>& flat_bilinear_SU3,
+    const std::vector<size_t>& flat_partners_SU3,
+    const std::vector<size_t>& num_bilinear_per_site_SU3,
+    const std::vector<double>& flat_mixed_bilinear,
+    const std::vector<size_t>& flat_mixed_partners_SU2,
+    const std::vector<size_t>& flat_mixed_partners_SU3,
+    const std::vector<size_t>& num_mixed_per_site_SU2
+) {
+    GPUMixedLatticeDataHandle* handle = new GPUMixedLatticeDataHandle();
+    
+    // Use the internal create function
+    handle->data = mixed_gpu::create_gpu_mixed_lattice_data_internal(
+        lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
+        lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
+        max_bilinear_SU2, max_bilinear_SU3, max_mixed_bilinear,
+        flat_field_SU2, flat_onsite_SU2, flat_bilinear_SU2, 
+        flat_partners_SU2, num_bilinear_per_site_SU2,
+        flat_field_SU3, flat_onsite_SU3, flat_bilinear_SU3, 
+        flat_partners_SU3, num_bilinear_per_site_SU3,
+        flat_mixed_bilinear, flat_mixed_partners_SU2, 
+        flat_mixed_partners_SU3, num_mixed_per_site_SU2
+    );
+    
+    return handle;
+}
+
+void destroy_gpu_mixed_lattice_data(GPUMixedLatticeDataHandle* handle) {
+    if (handle) {
+        // GPUMixedLatticeData uses thrust vectors which auto-deallocate
+        delete handle;
+    }
+}
+
+void set_gpu_pulse_SU2(
+    GPUMixedLatticeDataHandle* handle,
+    const std::vector<double>& flat_field_drive,
+    double pulse_amp, double pulse_width, double pulse_freq,
+    double t_pulse_1, double t_pulse_2
+) {
+    if (!handle) return;
+    
+    mixed_gpu::set_gpu_pulse_SU2(handle->data, flat_field_drive, 
+                                  pulse_amp, pulse_width, pulse_freq, 
+                                  t_pulse_1, t_pulse_2);
+}
+
+void set_gpu_pulse_SU3(
+    GPUMixedLatticeDataHandle* handle,
+    const std::vector<double>& flat_field_drive,
+    double pulse_amp, double pulse_width, double pulse_freq,
+    double t_pulse_1, double t_pulse_2
+) {
+    if (!handle) return;
+    
+    mixed_gpu::set_gpu_pulse_SU3(handle->data, flat_field_drive, 
+                                  pulse_amp, pulse_width, pulse_freq, 
+                                  t_pulse_1, t_pulse_2);
+}
+
+void set_gpu_mixed_spins(
+    GPUMixedLatticeDataHandle* handle,
+    const std::vector<double>& flat_spins
+) {
+    if (!handle) return;
+    
+    handle->state.resize(flat_spins.size());
+    thrust::copy(flat_spins.begin(), flat_spins.end(), handle->state.begin());
+    handle->has_state = true;
+}
+
+void get_gpu_mixed_spins(
+    GPUMixedLatticeDataHandle* handle,
+    std::vector<double>& flat_spins
+) {
+    if (!handle || !handle->has_state) return;
+    
+    flat_spins.resize(handle->state.size());
+    thrust::copy(handle->state.begin(), handle->state.end(), flat_spins.begin());
+}
+
+void integrate_mixed_gpu(
+    GPUMixedLatticeDataHandle* handle,
+    double T_start,
+    double T_end,
+    double dt,
+    size_t save_interval,
+    std::vector<std::pair<double, std::vector<double>>>& trajectory,
+    const std::string& method
+) {
+    if (!handle || !handle->has_state) return;
+    
+    GPUMixedODESystem system(handle->data);
+    mixed_gpu::integrate_mixed_gpu(system, handle->state, T_start, T_end, dt, 
+                                    save_interval, trajectory, method);
+}
+
+void step_mixed_gpu(
+    GPUMixedLatticeDataHandle* handle,
+    double t,
+    double dt,
+    const std::string& method
+) {
+    if (!handle || !handle->has_state) return;
+    
+    GPUMixedODESystem system(handle->data);
+    mixed_gpu::step_mixed_gpu(system, handle->state, t, dt, method);
+}
+
+void compute_magnetization_mixed_gpu(
+    GPUMixedLatticeDataHandle* handle,
+    std::vector<double>& mag_SU2,
+    std::vector<double>& mag_staggered_SU2,
+    std::vector<double>& mag_SU3,
+    std::vector<double>& mag_staggered_SU3
+) {
+    if (!handle || !handle->has_state) return;
+    
+    size_t spin_dim_SU2 = handle->data.spin_dim_SU2;
+    size_t spin_dim_SU3 = handle->data.spin_dim_SU3;
+    
+    mag_SU2.resize(spin_dim_SU2);
+    mag_staggered_SU2.resize(spin_dim_SU2);
+    mag_SU3.resize(spin_dim_SU3);
+    mag_staggered_SU3.resize(spin_dim_SU3);
+    
+    mixed_gpu::compute_magnetization_mixed_gpu(
+        handle->data, handle->state,
+        mag_SU2.data(), mag_staggered_SU2.data(),
+        mag_SU3.data(), mag_staggered_SU3.data()
+    );
+}
+
+void normalize_spins_mixed_gpu(
+    GPUMixedLatticeDataHandle* handle,
+    double spin_length_SU2,
+    double spin_length_SU3
+) {
+    if (!handle || !handle->has_state) return;
+    
+    mixed_gpu::normalize_spins_mixed_gpu(
+        handle->state,
+        handle->data.lattice_size_SU2, handle->data.spin_dim_SU2, spin_length_SU2,
+        handle->data.lattice_size_SU3, handle->data.spin_dim_SU3, spin_length_SU3
+    );
+}
+
+void get_mixed_lattice_dims(
+    GPUMixedLatticeDataHandle* handle,
+    size_t& lattice_size_SU2, size_t& spin_dim_SU2, size_t& N_atoms_SU2,
+    size_t& lattice_size_SU3, size_t& spin_dim_SU3, size_t& N_atoms_SU3
+) {
+    if (!handle) {
+        lattice_size_SU2 = spin_dim_SU2 = N_atoms_SU2 = 0;
+        lattice_size_SU3 = spin_dim_SU3 = N_atoms_SU3 = 0;
+        return;
+    }
+    
+    lattice_size_SU2 = handle->data.lattice_size_SU2;
+    spin_dim_SU2 = handle->data.spin_dim_SU2;
+    N_atoms_SU2 = handle->data.N_atoms_SU2;
+    lattice_size_SU3 = handle->data.lattice_size_SU3;
+    spin_dim_SU3 = handle->data.spin_dim_SU3;
+    N_atoms_SU3 = handle->data.N_atoms_SU3;
 }
 
 } // namespace mixed_gpu

@@ -635,8 +635,9 @@ struct GPUODESystem {
 
 /**
  * Create GPU lattice data from host arrays
+ * Internal function - use the API version (create_gpu_lattice_data returning a handle) for C++ code
  */
-GPULatticeData create_gpu_lattice_data(
+GPULatticeData create_gpu_lattice_data_internal(
     size_t lattice_size,
     size_t spin_dim,
     size_t N_atoms,

@@ -24,6 +24,11 @@
 #include "hdf5_io.h"
 #endif
 
+// GPU support: API header for all C++ TUs, full .cuh only for CUDA TUs
+#ifdef CUDA_ENABLED
+#include "lattice_gpu_api.h"
+#endif
+
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
 #include "lattice_gpu.cuh"
 #endif
@@ -2460,11 +2465,10 @@ public:
                            string out_dir = "", size_t save_interval = 100,
                            string method = "dopri5", bool use_gpu = false) {
         if (use_gpu) {
-#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+#ifdef CUDA_ENABLED
             molecular_dynamics_gpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
 #else
-            std::cerr << "Warning: GPU support not available in this compilation unit." << endl;
-            std::cerr << "GPU methods require CUDA compilation (.cu files)" << endl;
+            std::cerr << "Warning: GPU support not available (compiled without CUDA_ENABLED)." << endl;
             std::cerr << "Falling back to CPU implementation." << endl;
             molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
 #endif
@@ -3055,12 +3059,12 @@ public:
                string method = "dopri5", bool use_gpu = false) {
         
         if (use_gpu) {
-#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+#ifdef CUDA_ENABLED
             return single_pulse_drive_gpu(field_in, t_B, pulse_amp, pulse_width, pulse_freq, 
                             T_start, T_end, step_size, method);
 #else
-            std::cerr << "Warning: GPU support not available in this compilation unit." << endl;
-            std::cerr << "GPU methods require CUDA compilation (.cu files). Falling back to CPU." << endl;
+            std::cerr << "Warning: GPU support not available (compiled without CUDA_ENABLED)." << endl;
+            std::cerr << "Falling back to CPU implementation." << endl;
             // Fall through to CPU implementation
 #endif
         }
@@ -3137,13 +3141,13 @@ public:
                    string method = "dopri5", bool use_gpu = false) {
         
         if (use_gpu) {
-#if defined(CUDA_ENABLED) && defined(__CUDACC__)
+#ifdef CUDA_ENABLED
             return double_pulse_drive_gpu(field_in_1, t_B_1, field_in_2, t_B_2, 
                                 pulse_amp, pulse_width, pulse_freq,
                                 T_start, T_end, step_size, method);
 #else
-            std::cerr << "Warning: GPU support not available in this compilation unit." << endl;
-            std::cerr << "GPU methods require CUDA compilation (.cu files). Falling back to CPU." << endl;
+            std::cerr << "Warning: GPU support not available (compiled without CUDA_ENABLED)." << endl;
+            std::cerr << "Falling back to CPU implementation." << endl;
             // Fall through to CPU implementation
 #endif
         }
@@ -3590,6 +3594,292 @@ private:
         return trajectory;
     }
 #endif // defined(CUDA_ENABLED) && defined(__CUDACC__)
+
+// =============================================================================
+// GPU Implementation using opaque API (for C++ TUs compiled with g++)
+// This section is used when CUDA_ENABLED but not compiling with NVCC
+// =============================================================================
+#if defined(CUDA_ENABLED) && !defined(__CUDACC__)
+private:
+    // GPU data handle (opaque pointer managed by CUDA library)
+    mutable gpu::GPULatticeDataHandle* gpu_handle_ = nullptr;
+    mutable bool gpu_data_initialized_ = false;
+    
+    /**
+     * Ensure GPU lattice data is initialized (lazy initialization)
+     * Uses the opaque API from lattice_gpu_api.h
+     */
+    void ensure_gpu_data_initialized() const {
+        if (gpu_data_initialized_) return;
+        
+        // Flatten field data
+        vector<double> flat_field;
+        flat_field.reserve(lattice_size * spin_dim);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t d = 0; d < spin_dim; ++d) {
+                flat_field.push_back(field[i](d));
+            }
+        }
+        
+        // Flatten onsite interaction matrices
+        vector<double> flat_onsite;
+        flat_onsite.reserve(lattice_size * spin_dim * spin_dim);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t r = 0; r < spin_dim; ++r) {
+                for (size_t c = 0; c < spin_dim; ++c) {
+                    flat_onsite.push_back(onsite_interaction[i](r, c));
+                }
+            }
+        }
+        
+        // Flatten bilinear interaction data
+        vector<double> flat_bilinear;
+        vector<size_t> flat_partners;
+        vector<size_t> num_bilinear_per_site;
+        
+        flat_bilinear.reserve(lattice_size * num_bi * spin_dim * spin_dim);
+        flat_partners.reserve(lattice_size * num_bi);
+        num_bilinear_per_site.reserve(lattice_size);
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            num_bilinear_per_site.push_back(bilinear_partners[i].size());
+            for (size_t n = 0; n < num_bi; ++n) {
+                if (n < bilinear_partners[i].size()) {
+                    flat_partners.push_back(bilinear_partners[i][n]);
+                    for (size_t r = 0; r < spin_dim; ++r) {
+                        for (size_t c = 0; c < spin_dim; ++c) {
+                            flat_bilinear.push_back(bilinear_interaction[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_partners.push_back(0);
+                    for (size_t j = 0; j < spin_dim * spin_dim; ++j) {
+                        flat_bilinear.push_back(0.0);
+                    }
+                }
+            }
+        }
+        
+        // Create GPU data using opaque API
+        gpu_handle_ = gpu::create_gpu_lattice_data(
+            lattice_size, spin_dim, N_atoms, num_bi,
+            flat_field, flat_onsite, flat_bilinear, 
+            flat_partners, num_bilinear_per_site
+        );
+        
+        gpu_data_initialized_ = true;
+    }
+    
+    /**
+     * Update GPU pulse parameters
+     */
+    void update_gpu_pulse() const {
+        if (!gpu_handle_) return;
+        
+        vector<double> flat_field_drive;
+        flat_field_drive.reserve(2 * N_atoms * spin_dim);
+        for (size_t p = 0; p < 2; ++p) {
+            for (size_t d = 0; d < field_drive[p].size(); ++d) {
+                flat_field_drive.push_back(field_drive[p](d));
+            }
+        }
+        
+        gpu::set_gpu_pulse(
+            gpu_handle_,
+            flat_field_drive,
+            field_drive_amp,
+            field_drive_width,
+            field_drive_freq,
+            t_pulse[0],
+            t_pulse[1]
+        );
+    }
+    
+    /**
+     * GPU version of molecular_dynamics using opaque API
+     */
+    void molecular_dynamics_gpu(double T_start, double T_end, double dt_initial,
+                           string out_dir = "", size_t save_interval = 100,
+                           string method = "dopri5") {
+#ifndef HDF5_ENABLED
+        std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
+        return;
+#else
+        if (!out_dir.empty()) {
+            std::filesystem::create_directories(out_dir);
+        }
+        
+        cout << "Running molecular dynamics with GPU acceleration: t=" << T_start << " → " << T_end << endl;
+        cout << "Integration method: " << method << " (GPU via API)" << endl;
+        cout << "Step size: " << dt_initial << endl;
+        
+        // Ensure GPU data is initialized
+        ensure_gpu_data_initialized();
+        
+        // Transfer initial state to GPU
+        ODEState h_state = spins_to_state(spins);
+        gpu::set_gpu_spins(gpu_handle_, h_state);
+        
+        // Create HDF5 writer
+        std::unique_ptr<HDF5MDWriter> hdf5_writer;
+        if (!out_dir.empty()) {
+            string hdf5_file = out_dir + "/trajectory.h5";
+            cout << "Writing trajectory to HDF5 file: " << hdf5_file << endl;
+            hdf5_writer = std::make_unique<HDF5MDWriter>(
+                hdf5_file, lattice_size, spin_dim, N_atoms, 
+                dim1, dim2, dim3, method + "_gpu_api", 
+                dt_initial, T_start, T_end, save_interval, spin_length, 
+                &site_positions, 10000);
+        }
+        
+        // Integrate on GPU
+        std::vector<std::pair<double, std::vector<double>>> trajectory;
+        gpu::integrate_gpu(gpu_handle_, T_start, T_end, dt_initial, 
+                          save_interval, trajectory, method);
+        
+        // Write trajectory to HDF5 (post-processing on CPU)
+        size_t save_count = 0;
+        for (const auto& [t, state_vec] : trajectory) {
+            double M_local_arr[8] = {0};
+            double M_antiferro_arr[8] = {0};
+            
+            compute_magnetizations_from_flat(state_vec.data(), 
+                lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            
+            SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            
+            if (hdf5_writer) {
+                hdf5_writer->write_flat_step(t, M_antiferro, M_local, state_vec.data());
+                save_count++;
+            }
+            
+            // Progress output
+            if (save_count % 10 == 0) {
+                double E = total_energy_flat(state_vec.data()) / lattice_size;
+                cout << "t=" << t << ", E/N=" << E << ", |M|=" << M_local.norm() << endl;
+            }
+        }
+        
+        // Close HDF5 file
+        if (hdf5_writer) {
+            hdf5_writer->close();
+            cout << "HDF5 trajectory saved with " << save_count << " snapshots" << endl;
+        }
+        
+        cout << "GPU molecular dynamics complete!" << endl;
+#endif
+    }
+    
+    /**
+     * GPU version of single_pulse_drive using opaque API
+     */
+    vector<pair<double, array<SpinVector, 3>>> single_pulse_drive_gpu(
+               const vector<SpinVector>& field_in, double t_B,
+               double pulse_amp, double pulse_width, double pulse_freq,
+               double T_start, double T_end, double step_size,
+               string method = "dopri5") {
+        
+        // Set up pulse
+        set_pulse(field_in, t_B, vector<SpinVector>(N_atoms, SpinVector::Zero(spin_dim)), 
+                 0.0, pulse_amp, pulse_width, pulse_freq);
+        
+        // Ensure GPU data is initialized
+        ensure_gpu_data_initialized();
+        update_gpu_pulse();
+        
+        // Transfer initial state to GPU
+        ODEState h_state = spins_to_state(spins);
+        gpu::set_gpu_spins(gpu_handle_, h_state);
+        
+        // Integrate on GPU
+        std::vector<std::pair<double, std::vector<double>>> raw_trajectory;
+        gpu::integrate_gpu(gpu_handle_, T_start, T_end, step_size, 
+                          1, raw_trajectory, method);
+        
+        // Convert raw trajectory to magnetization trajectory
+        vector<pair<double, array<SpinVector, 3>>> trajectory;
+        trajectory.reserve(raw_trajectory.size());
+        
+        for (const auto& [t, state_vec] : raw_trajectory) {
+            double M_local_arr[8] = {0};
+            double M_antiferro_arr[8] = {0};
+            double M_global_arr[8] = {0};
+            
+            compute_magnetizations_from_flat(state_vec.data(), 
+                lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            
+            SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
+            
+            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+        }
+        
+        // Reset pulse
+        field_drive[0] = SpinVector::Zero(N_atoms * spin_dim);
+        field_drive[1] = SpinVector::Zero(N_atoms * spin_dim);
+        field_drive_amp = 0.0;
+        
+        return trajectory;
+    }
+    
+    /**
+     * GPU version of double_pulse_drive using opaque API
+     */
+    vector<pair<double, array<SpinVector, 3>>> double_pulse_drive_gpu(
+                   const vector<SpinVector>& field_in_1, double t_B_1,
+                   const vector<SpinVector>& field_in_2, double t_B_2,
+                   double pulse_amp, double pulse_width, double pulse_freq,
+                   double T_start, double T_end, double step_size,
+                   string method = "dopri5") {
+        
+        // Set up two-pulse configuration
+        set_pulse(field_in_1, t_B_1, field_in_2, t_B_2, 
+                 pulse_amp, pulse_width, pulse_freq);
+        
+        // Ensure GPU data is initialized
+        ensure_gpu_data_initialized();
+        update_gpu_pulse();
+        
+        // Transfer initial state to GPU
+        ODEState h_state = spins_to_state(spins);
+        gpu::set_gpu_spins(gpu_handle_, h_state);
+        
+        // Integrate on GPU
+        std::vector<std::pair<double, std::vector<double>>> raw_trajectory;
+        gpu::integrate_gpu(gpu_handle_, T_start, T_end, step_size, 
+                          1, raw_trajectory, method);
+        
+        // Convert raw trajectory to magnetization trajectory
+        vector<pair<double, array<SpinVector, 3>>> trajectory;
+        trajectory.reserve(raw_trajectory.size());
+        
+        for (const auto& [t, state_vec] : raw_trajectory) {
+            double M_local_arr[8] = {0};
+            double M_antiferro_arr[8] = {0};
+            double M_global_arr[8] = {0};
+            
+            compute_magnetizations_from_flat(state_vec.data(), 
+                lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            
+            SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
+            
+            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+        }
+        
+        // Reset pulse
+        field_drive[0] = SpinVector::Zero(N_atoms * spin_dim);
+        field_drive[1] = SpinVector::Zero(N_atoms * spin_dim);
+        field_drive_amp = 0.0;
+        
+        return trajectory;
+    }
+#endif // defined(CUDA_ENABLED) && !defined(__CUDACC__)
 
 };
 

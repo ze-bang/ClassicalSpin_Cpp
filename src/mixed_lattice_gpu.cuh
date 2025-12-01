@@ -564,8 +564,9 @@ public:
 
 /**
  * Create GPU mixed lattice data from host arrays
+ * Internal function - use the API version (returning a handle) for C++ code
  */
-GPUMixedLatticeData create_gpu_mixed_lattice_data(
+GPUMixedLatticeData create_gpu_mixed_lattice_data_internal(
     size_t lattice_size_SU2, size_t spin_dim_SU2, size_t N_atoms_SU2,
     size_t lattice_size_SU3, size_t spin_dim_SU3, size_t N_atoms_SU3,
     size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear,
