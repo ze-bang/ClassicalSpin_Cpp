@@ -217,6 +217,76 @@ void cross_product_SU2_device(double* result, const double* a, const double* b);
 __device__
 void cross_product_SU3_device(double* result, const double* a, const double* b);
 
+// ======================= Shared Device Functions for Local Field Computation =======================
+
+/**
+ * Initialize local field with external field
+ */
+__device__
+void init_local_field_device(double* local_field, const double* external_field, size_t spin_dim);
+
+/**
+ * Add on-site interaction contribution: local_field -= A * spin
+ */
+__device__
+void add_onsite_contribution_device(double* local_field, const double* onsite_matrix, 
+                                     const double* spin, double* temp, size_t spin_dim);
+
+/**
+ * Add bilinear interaction contribution: local_field -= J * partner_spin
+ */
+__device__
+void add_bilinear_contribution_device(double* local_field, const double* J_matrix,
+                                       const double* partner_spin, double* temp, size_t spin_dim);
+
+/**
+ * Add trilinear interaction contribution: local_field -= T * spin1 * spin2
+ */
+__device__
+void add_trilinear_contribution_device(double* local_field, const double* T_tensor,
+                                        const double* spin1, const double* spin2, 
+                                        double* temp, size_t spin_dim);
+
+/**
+ * Add drive field contribution to local field
+ */
+__device__
+void add_drive_field_device(double* local_field,
+                            const double* field_drive_1, const double* field_drive_2,
+                            size_t atom, double amplitude, double width, double frequency,
+                            double t_pulse_1, double t_pulse_2, double curr_time,
+                            size_t spin_dim);
+
+/**
+ * Compute Landau-Lifshitz derivative: dsdt = spin × local_field
+ */
+__device__
+void compute_ll_derivative_device(double* dsdt, const double* spin, 
+                                   const double* local_field, size_t spin_dim);
+
+/**
+ * Compute local field for a single site (unified function)
+ * Computes: H_local = H_ext - A*S - sum_j J_ij*S_j - sum_jk T_ijk*S_j*S_k
+ */
+__device__
+void compute_local_field_device(
+    double* local_field,
+    const double* d_spins,
+    int site,
+    const double* field,
+    const double* onsite_interaction,
+    const double* bilinear_interaction,
+    const size_t* bilinear_partners,
+    const double* trilinear_interaction,
+    const size_t* trilinear_partners,
+    size_t num_bilinear,
+    size_t max_bilinear,
+    size_t num_trilinear,
+    size_t max_trilinear,
+    size_t lattice_size,
+    size_t spin_dim
+);
+
 // ======================= Kernel Declarations =======================
 
 /**

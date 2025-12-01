@@ -20,127 +20,12 @@ __device__ inline double atomicAdd_double(double* address, double val) {
 #define ATOMIC_ADD_DOUBLE(addr, val) atomicAdd(addr, val)
 #endif
 
-// ======================= Device Helper Functions =======================
+// ======================= Device Helper Functions (Mixed Lattice Specific) =======================
 
-__device__
-double dot_device(const double* a, const double* b, size_t n) {
-    double result = 0.0;
-    if (n <= 4) {
-        switch (n) {
-            case 4: result += a[3] * b[3]; [[fallthrough]];
-            case 3: result += a[2] * b[2]; [[fallthrough]];
-            case 2: result += a[1] * b[1]; [[fallthrough]];
-            case 1: result += a[0] * b[0]; break;
-            default: break;
-        }
-    } else {
-        #pragma unroll 8
-        for (size_t i = 0; i < n; ++i) {
-            result += a[i] * b[i];
-        }
-    }
-    return result;
-}
-
-__device__
-double contract_device(const double* spin1, const double* matrix, const double* spin2, size_t n) {
-    double result = 0.0;
-    if (n == 3) {
-        result = spin1[0] * (matrix[0] * spin2[0] + matrix[1] * spin2[1] + matrix[2] * spin2[2]) +
-                 spin1[1] * (matrix[3] * spin2[0] + matrix[4] * spin2[1] + matrix[5] * spin2[2]) +
-                 spin1[2] * (matrix[6] * spin2[0] + matrix[7] * spin2[1] + matrix[8] * spin2[2]);
-    } else if (n == 8) {
-        double temp_results[8];
-        #pragma unroll
-        for (size_t i = 0; i < 8; ++i) {
-            temp_results[i] = 0.0;
-            #pragma unroll
-            for (size_t j = 0; j < 8; ++j) {
-                temp_results[i] += matrix[i * 8 + j] * spin2[j];
-            }
-            result += spin1[i] * temp_results[i];
-        }
-    } else {
-        #pragma unroll 4
-        for (size_t i = 0; i < n; ++i) {
-            double temp = 0.0;
-            #pragma unroll 4
-            for (size_t j = 0; j < n; ++j) {
-                temp += matrix[i * n + j] * spin2[j];
-            }
-            result += spin1[i] * temp;
-        }
-    }
-    return result;
-}
-
-__device__
-void multiply_matrix_vector_device(double* result, const double* matrix, const double* vector, size_t n) {
-    if (n == 3) {
-        result[0] = matrix[0] * vector[0] + matrix[1] * vector[1] + matrix[2] * vector[2];
-        result[1] = matrix[3] * vector[0] + matrix[4] * vector[1] + matrix[5] * vector[2];
-        result[2] = matrix[6] * vector[0] + matrix[7] * vector[1] + matrix[8] * vector[2];
-    } else if (n == 8) {
-        #pragma unroll
-        for (size_t i = 0; i < 8; ++i) {
-            double temp = 0.0;
-            #pragma unroll
-            for (size_t j = 0; j < 8; ++j) {
-                temp += matrix[i * 8 + j] * vector[j];
-            }
-            result[i] = temp;
-        }
-    } else {
-        #pragma unroll 4
-        for (size_t i = 0; i < n; ++i) {
-            result[i] = 0.0;
-            #pragma unroll 4
-            for (size_t j = 0; j < n; ++j) {
-                result[i] += matrix[i * n + j] * vector[j];
-            }
-        }
-    }
-}
-
-__device__
-void cross_product_SU2_device(double* result, const double* a, const double* b) {
-    result[0] = a[1] * b[2] - a[2] * b[1];
-    result[1] = a[2] * b[0] - a[0] * b[2];
-    result[2] = a[0] * b[1] - a[1] * b[0];
-}
-
-__device__
-void cross_product_SU3_device(double* result, const double* a, const double* b) {
-    constexpr double sqrt3_2 = 0.86602540378443864676372317075294; // sqrt(3)/2
-    
-    // Component 0 (λ_1): f_{123}, f_{147}, f_{156}
-    result[0] = a[1]*b[2] - a[2]*b[1] + 0.5*(a[3]*b[6] - a[6]*b[3]) - 0.5*(a[4]*b[5] - a[5]*b[4]);
-    
-    // Component 1 (λ_2): f_{213}, f_{246}, f_{257}
-    result[1] = a[2]*b[0] - a[0]*b[2] + 0.5*(a[3]*b[5] - a[5]*b[3]) + 0.5*(a[4]*b[6] - a[6]*b[4]);
-    
-    // Component 2 (λ_3): f_{312}, f_{345}, f_{367}
-    result[2] = a[0]*b[1] - a[1]*b[0] + 0.5*(a[3]*b[4] - a[4]*b[3]) - 0.5*(a[5]*b[6] - a[6]*b[5]);
-    
-    // Component 3 (λ_4): f_{147}, f_{246}, f_{345}, f_{458}
-    result[3] = 0.5*(a[6]*b[0] - a[0]*b[6]) + 0.5*(a[5]*b[1] - a[1]*b[5]) + 
-                0.5*(a[4]*b[2] - a[2]*b[4]) + sqrt3_2*(a[4]*b[7] - a[7]*b[4]);
-    
-    // Component 4 (λ_5): f_{156}, f_{257}, f_{345}, f_{458}
-    result[4] = -0.5*(a[5]*b[0] - a[0]*b[5]) + 0.5*(a[6]*b[1] - a[1]*b[6]) + 
-                0.5*(a[2]*b[3] - a[3]*b[2]) + sqrt3_2*(a[7]*b[3] - a[3]*b[7]);
-    
-    // Component 5 (λ_6): f_{156}, f_{246}, f_{367}, f_{678}
-    result[5] = -0.5*(a[0]*b[4] - a[4]*b[0]) + 0.5*(a[1]*b[3] - a[3]*b[1]) - 
-                0.5*(a[6]*b[2] - a[2]*b[6]) + sqrt3_2*(a[6]*b[7] - a[7]*b[6]);
-    
-    // Component 6 (λ_7): f_{147}, f_{257}, f_{367}, f_{678}
-    result[6] = 0.5*(a[0]*b[3] - a[3]*b[0]) + 0.5*(a[1]*b[4] - a[4]*b[1]) - 
-                0.5*(a[2]*b[5] - a[5]*b[2]) + sqrt3_2*(a[7]*b[5] - a[5]*b[7]);
-    
-    // Component 7 (λ_8): f_{458}, f_{678}
-    result[7] = sqrt3_2*(a[3]*b[4] - a[4]*b[3]) + sqrt3_2*(a[5]*b[6] - a[6]*b[5]);
-}
+// Note: Common device functions (dot_device, contract_device, multiply_matrix_vector_device,
+// cross_product_SU2_device, cross_product_SU3_device, init_local_field_device, 
+// add_onsite_contribution_device, add_bilinear_contribution_device, add_drive_field_device,
+// compute_ll_derivative_device) are now provided by lattice_gpu.cuh
 
 /**
  * Mixed bilinear contraction for SU(2)-SU(3) coupling
@@ -155,6 +40,181 @@ void multiply_mixed_matrix_vector_device(double* result, const double* matrix,
         result[i] = 0.0;
         for (size_t j = 0; j < n_in; ++j) {
             result[i] += matrix[i * n_in + j] * vector[j];
+        }
+    }
+}
+
+/**
+ * Mixed bilinear contraction with transpose for SU(3)-SU(2) coupling
+ * result_j = sum_i J_{ij}^T * spin2_i = sum_i J_{ji} * spin2_i
+ * J is stored as n_rows x n_cols, so transpose gives n_cols x n_rows
+ */
+__device__
+void multiply_mixed_matrix_transpose_vector_device(double* result, const double* matrix, 
+                                                    const double* vector, 
+                                                    size_t n_rows, size_t n_cols) {
+    // matrix is n_rows x n_cols (stored row-major)
+    // result has n_cols components
+    for (size_t j = 0; j < n_cols; ++j) {
+        result[j] = 0.0;
+        for (size_t i = 0; i < n_rows; ++i) {
+            result[j] += matrix[i * n_cols + j] * vector[i];
+        }
+    }
+}
+
+/**
+ * Add mixed SU(2)-SU(3) bilinear contribution to local field
+ * local_field -= J_mixed * partner_spin (non-square matrix multiplication)
+ */
+__device__
+void add_mixed_bilinear_contribution_device(double* local_field, const double* J_mixed,
+                                             const double* partner_spin, double* temp,
+                                             size_t spin_dim_out, size_t spin_dim_in) {
+    multiply_mixed_matrix_vector_device(temp, J_mixed, partner_spin, spin_dim_out, spin_dim_in);
+    for (size_t i = 0; i < spin_dim_out; ++i) {
+        local_field[i] -= temp[i];
+    }
+}
+
+/**
+ * Add mixed SU(3)-SU(2) bilinear contribution (transpose) to local field
+ * local_field -= J_mixed^T * partner_spin
+ */
+__device__
+void add_mixed_bilinear_transpose_contribution_device(double* local_field, const double* J_mixed,
+                                                       const double* partner_spin, double* temp,
+                                                       size_t spin_dim_rows, size_t spin_dim_cols) {
+    multiply_mixed_matrix_transpose_vector_device(temp, J_mixed, partner_spin, spin_dim_rows, spin_dim_cols);
+    for (size_t j = 0; j < spin_dim_cols; ++j) {
+        local_field[j] -= temp[j];
+    }
+}
+
+/**
+ * Compute local field for SU(2) site in mixed lattice (unified function)
+ * Includes SU(2)-SU(2) bilinear and SU(2)-SU(3) mixed bilinear interactions
+ */
+__device__
+void compute_local_field_SU2_device(
+    double* local_field,
+    const double* d_spins_SU2,
+    const double* d_spins_SU3,
+    int site,
+    const double* field,
+    const double* onsite_interaction,
+    const double* bilinear_interaction,
+    const size_t* bilinear_partners,
+    const size_t* bilinear_counts,
+    const double* mixed_bilinear_interaction,
+    const size_t* mixed_bilinear_partners_SU3,
+    const size_t* mixed_bilinear_counts_SU2,
+    size_t max_bilinear,
+    size_t max_mixed_bilinear,
+    size_t lattice_size_SU2,
+    size_t lattice_size_SU3,
+    size_t spin_dim_SU2,
+    size_t spin_dim_SU3
+) {
+    const double* spin_here = &d_spins_SU2[site * spin_dim_SU2];
+    double temp[8];
+    
+    // Initialize with external field
+    init_local_field_device(local_field, &field[site * spin_dim_SU2], spin_dim_SU2);
+    
+    // On-site interaction: H_local -= A * S
+    add_onsite_contribution_device(local_field,
+        &onsite_interaction[site * spin_dim_SU2 * spin_dim_SU2],
+        spin_here, temp, spin_dim_SU2);
+    
+    // Bilinear SU(2)-SU(2) interactions
+    size_t num_neighbors = bilinear_counts[site];
+    for (size_t n = 0; n < num_neighbors && n < max_bilinear; ++n) {
+        size_t partner = bilinear_partners[site * max_bilinear + n];
+        if (partner < lattice_size_SU2) {
+            const double* partner_spin = &d_spins_SU2[partner * spin_dim_SU2];
+            const double* J = &bilinear_interaction[
+                (site * max_bilinear + n) * spin_dim_SU2 * spin_dim_SU2];
+            
+            add_bilinear_contribution_device(local_field, J, partner_spin, temp, spin_dim_SU2);
+        }
+    }
+    
+    // Mixed SU(2)-SU(3) bilinear interactions
+    size_t num_mixed = mixed_bilinear_counts_SU2[site];
+    for (size_t n = 0; n < num_mixed && n < max_mixed_bilinear; ++n) {
+        size_t partner_SU3 = mixed_bilinear_partners_SU3[site * max_mixed_bilinear + n];
+        if (partner_SU3 < lattice_size_SU3) {
+            const double* partner_spin = &d_spins_SU3[partner_SU3 * spin_dim_SU3];
+            const double* J_mixed = &mixed_bilinear_interaction[
+                (site * max_mixed_bilinear + n) * spin_dim_SU2 * spin_dim_SU3];
+            
+            add_mixed_bilinear_contribution_device(local_field, J_mixed, partner_spin, 
+                                                    temp, spin_dim_SU2, spin_dim_SU3);
+        }
+    }
+}
+
+/**
+ * Compute local field for SU(3) site in mixed lattice (unified function)
+ * Includes SU(3)-SU(3) bilinear and SU(3)-SU(2) mixed bilinear interactions
+ */
+__device__
+void compute_local_field_SU3_device(
+    double* local_field,
+    const double* d_spins_SU2,
+    const double* d_spins_SU3,
+    int site,
+    const double* field,
+    const double* onsite_interaction,
+    const double* bilinear_interaction,
+    const size_t* bilinear_partners,
+    const size_t* bilinear_counts,
+    const double* mixed_bilinear_interaction,
+    const size_t* mixed_bilinear_partners_SU2,
+    const size_t* mixed_bilinear_counts_SU3,
+    size_t max_bilinear,
+    size_t max_mixed_bilinear,
+    size_t lattice_size_SU2,
+    size_t lattice_size_SU3,
+    size_t spin_dim_SU2,
+    size_t spin_dim_SU3
+) {
+    const double* spin_here = &d_spins_SU3[site * spin_dim_SU3];
+    double temp[8];
+    
+    // Initialize with external field
+    init_local_field_device(local_field, &field[site * spin_dim_SU3], spin_dim_SU3);
+    
+    // On-site interaction: H_local -= A * S
+    add_onsite_contribution_device(local_field,
+        &onsite_interaction[site * spin_dim_SU3 * spin_dim_SU3],
+        spin_here, temp, spin_dim_SU3);
+    
+    // Bilinear SU(3)-SU(3) interactions
+    size_t num_neighbors = bilinear_counts[site];
+    for (size_t n = 0; n < num_neighbors && n < max_bilinear; ++n) {
+        size_t partner = bilinear_partners[site * max_bilinear + n];
+        if (partner < lattice_size_SU3) {
+            const double* partner_spin = &d_spins_SU3[partner * spin_dim_SU3];
+            const double* J = &bilinear_interaction[
+                (site * max_bilinear + n) * spin_dim_SU3 * spin_dim_SU3];
+            
+            add_bilinear_contribution_device(local_field, J, partner_spin, temp, spin_dim_SU3);
+        }
+    }
+    
+    // Mixed SU(3)-SU(2) bilinear interactions (transpose)
+    size_t num_mixed = mixed_bilinear_counts_SU3[site];
+    for (size_t n = 0; n < num_mixed && n < max_mixed_bilinear; ++n) {
+        size_t partner_SU2 = mixed_bilinear_partners_SU2[site * max_mixed_bilinear + n];
+        if (partner_SU2 < lattice_size_SU2) {
+            const double* partner_spin = &d_spins_SU2[partner_SU2 * spin_dim_SU2];
+            const double* J_mixed = &mixed_bilinear_interaction[
+                (site * max_mixed_bilinear + n) * spin_dim_SU2 * spin_dim_SU3];
+            
+            add_mixed_bilinear_transpose_contribution_device(local_field, J_mixed, partner_spin, 
+                                                              temp, spin_dim_SU2, spin_dim_SU3);
         }
     }
 }
@@ -180,75 +240,31 @@ void LLG_SU2_kernel(
     const double* spin_here = &d_spins_SU2[site * dims.spin_dim_SU2];
     double* local_field = &d_local_field[site * dims.spin_dim_SU2];
     double* dsdt = &d_dsdt[site * dims.spin_dim_SU2];
-    double temp[8];  // Max dimension
     
-    // Initialize with external field
-    for (size_t i = 0; i < dims.spin_dim_SU2; ++i) {
-        local_field[i] = interactions_SU2.field[site * dims.spin_dim_SU2 + i];
-    }
+    // Compute local field using unified device function
+    compute_local_field_SU2_device(
+        local_field, d_spins_SU2, d_spins_SU3, site,
+        interactions_SU2.field,
+        interactions_SU2.onsite_interaction,
+        interactions_SU2.bilinear_interaction,
+        interactions_SU2.bilinear_partners,
+        interactions_SU2.bilinear_counts,
+        mixed_interactions.bilinear_interaction,
+        mixed_interactions.bilinear_partners_SU3,
+        mixed_interactions.bilinear_counts_SU2,
+        neighbors.max_bilinear_SU2, neighbors.max_mixed_bilinear,
+        dims.lattice_size_SU2, dims.lattice_size_SU3,
+        dims.spin_dim_SU2, dims.spin_dim_SU3
+    );
     
-    // On-site interaction: H_local -= A * S
-    multiply_matrix_vector_device(temp, 
-        &interactions_SU2.onsite_interaction[site * dims.spin_dim_SU2 * dims.spin_dim_SU2], 
-        spin_here, dims.spin_dim_SU2);
-    for (size_t i = 0; i < dims.spin_dim_SU2; ++i) {
-        local_field[i] -= temp[i];
-    }
+    // Add drive field
+    add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
+                           site % dims.N_atoms_SU2, field_drive.amplitude, field_drive.width,
+                           field_drive.frequency, field_drive.t_pulse_1, field_drive.t_pulse_2,
+                           time_params.curr_time, dims.spin_dim_SU2);
     
-    // Bilinear SU(2)-SU(2) interactions: H_local -= sum_j J_ij * S_j
-    size_t num_neighbors = interactions_SU2.bilinear_counts[site];
-    for (size_t n = 0; n < num_neighbors && n < neighbors.max_bilinear_SU2; ++n) {
-        size_t partner = interactions_SU2.bilinear_partners[site * neighbors.max_bilinear_SU2 + n];
-        if (partner < dims.lattice_size_SU2) {
-            const double* partner_spin = &d_spins_SU2[partner * dims.spin_dim_SU2];
-            const double* J = &interactions_SU2.bilinear_interaction[
-                (site * neighbors.max_bilinear_SU2 + n) * dims.spin_dim_SU2 * dims.spin_dim_SU2];
-            
-            multiply_matrix_vector_device(temp, J, partner_spin, dims.spin_dim_SU2);
-            for (size_t i = 0; i < dims.spin_dim_SU2; ++i) {
-                local_field[i] -= temp[i];
-            }
-        }
-    }
-    
-    // Mixed SU(2)-SU(3) bilinear interactions: H_local -= sum_j J_mixed * S3_j
-    size_t num_mixed = mixed_interactions.bilinear_counts_SU2[site];
-    for (size_t n = 0; n < num_mixed && n < neighbors.max_mixed_bilinear; ++n) {
-        size_t partner_SU3 = mixed_interactions.bilinear_partners_SU3[site * neighbors.max_mixed_bilinear + n];
-        if (partner_SU3 < dims.lattice_size_SU3) {
-            const double* partner_spin = &d_spins_SU3[partner_SU3 * dims.spin_dim_SU3];
-            const double* J_mixed = &mixed_interactions.bilinear_interaction[
-                (site * neighbors.max_mixed_bilinear + n) * dims.spin_dim_SU2 * dims.spin_dim_SU3];
-            
-            // Contract: result_i = sum_j J_{ij} * S3_j
-            for (size_t i = 0; i < dims.spin_dim_SU2; ++i) {
-                double contrib = 0.0;
-                for (size_t j = 0; j < dims.spin_dim_SU3; ++j) {
-                    contrib += J_mixed[i * dims.spin_dim_SU3 + j] * partner_spin[j];
-                }
-                local_field[i] -= contrib;
-            }
-        }
-    }
-    
-    // Add drive field if pulse amplitude is non-zero
-    if (field_drive.amplitude > 0.0) {
-        size_t atom = site % dims.N_atoms_SU2;
-        double t1_diff = time_params.curr_time - field_drive.t_pulse_1;
-        double t2_diff = time_params.curr_time - field_drive.t_pulse_2;
-        double env1 = exp(-t1_diff * t1_diff / (2.0 * field_drive.width * field_drive.width));
-        double env2 = exp(-t2_diff * t2_diff / (2.0 * field_drive.width * field_drive.width));
-        double osc = cos(field_drive.frequency * time_params.curr_time);
-        
-        for (size_t i = 0; i < dims.spin_dim_SU2; ++i) {
-            double drive1 = field_drive.field_drive_1[atom * dims.spin_dim_SU2 + i];
-            double drive2 = field_drive.field_drive_2[atom * dims.spin_dim_SU2 + i];
-            local_field[i] += field_drive.amplitude * osc * (env1 * drive1 + env2 * drive2);
-        }
-    }
-    
-    // Compute Landau-Lifshitz derivative: dS/dt = S × H_eff
-    cross_product_SU2_device(dsdt, spin_here, local_field);
+    // Compute Landau-Lifshitz derivative
+    compute_ll_derivative_device(dsdt, spin_here, local_field, dims.spin_dim_SU2);
 }
 
 __global__
@@ -270,77 +286,31 @@ void LLG_SU3_kernel(
     const double* spin_here = &d_spins_SU3[site * dims.spin_dim_SU3];
     double* local_field = &d_local_field[site * dims.spin_dim_SU3];
     double* dsdt = &d_dsdt[dims.SU3_offset + site * dims.spin_dim_SU3];
-    double temp[8];
     
-    // Initialize with external field
-    for (size_t i = 0; i < dims.spin_dim_SU3; ++i) {
-        local_field[i] = interactions_SU3.field[site * dims.spin_dim_SU3 + i];
-    }
-    
-    // On-site interaction: H_local -= A * S
-    multiply_matrix_vector_device(temp, 
-        &interactions_SU3.onsite_interaction[site * dims.spin_dim_SU3 * dims.spin_dim_SU3], 
-        spin_here, dims.spin_dim_SU3);
-    for (size_t i = 0; i < dims.spin_dim_SU3; ++i) {
-        local_field[i] -= temp[i];
-    }
-    
-    // Bilinear SU(3)-SU(3) interactions
-    size_t num_neighbors = interactions_SU3.bilinear_counts[site];
-    for (size_t n = 0; n < num_neighbors && n < neighbors.max_bilinear_SU3; ++n) {
-        size_t partner = interactions_SU3.bilinear_partners[site * neighbors.max_bilinear_SU3 + n];
-        if (partner < dims.lattice_size_SU3) {
-            const double* partner_spin = &d_spins_SU3[partner * dims.spin_dim_SU3];
-            const double* J = &interactions_SU3.bilinear_interaction[
-                (site * neighbors.max_bilinear_SU3 + n) * dims.spin_dim_SU3 * dims.spin_dim_SU3];
-            
-            multiply_matrix_vector_device(temp, J, partner_spin, dims.spin_dim_SU3);
-            for (size_t i = 0; i < dims.spin_dim_SU3; ++i) {
-                local_field[i] -= temp[i];
-            }
-        }
-    }
-    
-    // Mixed SU(3)-SU(2) bilinear interactions: H_local -= sum_j J_mixed^T * S2_j
-    // Note: For SU(3) sites, we use the transpose of the mixed coupling
-    size_t num_mixed = mixed_interactions.bilinear_counts_SU3[site];
-    for (size_t n = 0; n < num_mixed && n < neighbors.max_mixed_bilinear; ++n) {
-        size_t partner_SU2 = mixed_interactions.bilinear_partners_SU2[site * neighbors.max_mixed_bilinear + n];
-        if (partner_SU2 < dims.lattice_size_SU2) {
-            const double* partner_spin = &d_spins_SU2[partner_SU2 * dims.spin_dim_SU2];
-            const double* J_mixed = &mixed_interactions.bilinear_interaction[
-                (site * neighbors.max_mixed_bilinear + n) * dims.spin_dim_SU2 * dims.spin_dim_SU3];
-            
-            // Contract transpose: result_j = sum_i J_{ij}^T * S2_i = sum_i J_{ji} * S2_i
-            // J is stored as spin_dim_SU2 x spin_dim_SU3, so transpose is spin_dim_SU3 x spin_dim_SU2
-            for (size_t j = 0; j < dims.spin_dim_SU3; ++j) {
-                double contrib = 0.0;
-                for (size_t i = 0; i < dims.spin_dim_SU2; ++i) {
-                    contrib += J_mixed[i * dims.spin_dim_SU3 + j] * partner_spin[i];
-                }
-                local_field[j] -= contrib;
-            }
-        }
-    }
+    // Compute local field using unified device function
+    compute_local_field_SU3_device(
+        local_field, d_spins_SU2, d_spins_SU3, site,
+        interactions_SU3.field,
+        interactions_SU3.onsite_interaction,
+        interactions_SU3.bilinear_interaction,
+        interactions_SU3.bilinear_partners,
+        interactions_SU3.bilinear_counts,
+        mixed_interactions.bilinear_interaction,
+        mixed_interactions.bilinear_partners_SU2,
+        mixed_interactions.bilinear_counts_SU3,
+        neighbors.max_bilinear_SU3, neighbors.max_mixed_bilinear,
+        dims.lattice_size_SU2, dims.lattice_size_SU3,
+        dims.spin_dim_SU2, dims.spin_dim_SU3
+    );
     
     // Add drive field
-    if (field_drive.amplitude > 0.0) {
-        size_t atom = site % dims.N_atoms_SU3;
-        double t1_diff = time_params.curr_time - field_drive.t_pulse_1;
-        double t2_diff = time_params.curr_time - field_drive.t_pulse_2;
-        double env1 = exp(-t1_diff * t1_diff / (2.0 * field_drive.width * field_drive.width));
-        double env2 = exp(-t2_diff * t2_diff / (2.0 * field_drive.width * field_drive.width));
-        double osc = cos(field_drive.frequency * time_params.curr_time);
-        
-        for (size_t i = 0; i < dims.spin_dim_SU3; ++i) {
-            double drive1 = field_drive.field_drive_1[atom * dims.spin_dim_SU3 + i];
-            double drive2 = field_drive.field_drive_2[atom * dims.spin_dim_SU3 + i];
-            local_field[i] += field_drive.amplitude * osc * (env1 * drive1 + env2 * drive2);
-        }
-    }
+    add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
+                           site % dims.N_atoms_SU3, field_drive.amplitude, field_drive.width,
+                           field_drive.frequency, field_drive.t_pulse_1, field_drive.t_pulse_2,
+                           time_params.curr_time, dims.spin_dim_SU3);
     
     // Compute Landau-Lifshitz derivative
-    cross_product_SU3_device(dsdt, spin_here, local_field);
+    compute_ll_derivative_device(dsdt, spin_here, local_field, dims.spin_dim_SU3);
 }
 
 __global__

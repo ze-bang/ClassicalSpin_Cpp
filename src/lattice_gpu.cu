@@ -249,6 +249,177 @@ void cross_product_SU3_device(double* result, const double* a, const double* b) 
     result[7] = sqrt3_2*(a[3]*b[4] - a[4]*b[3]) + sqrt3_2*(a[5]*b[6] - a[6]*b[5]);
 }
 
+// ======================= Shared Device Functions for Local Field Computation =======================
+
+/**
+ * Initialize local field with external field
+ * Used by both lattice and mixed_lattice kernels
+ */
+__device__
+void init_local_field_device(double* local_field, const double* external_field, size_t spin_dim) {
+    for (size_t i = 0; i < spin_dim; ++i) {
+        local_field[i] = external_field[i];
+    }
+}
+
+/**
+ * Add on-site interaction contribution: local_field -= A * spin
+ * Used by both lattice and mixed_lattice kernels
+ */
+__device__
+void add_onsite_contribution_device(double* local_field, const double* onsite_matrix, 
+                                     const double* spin, double* temp, size_t spin_dim) {
+    multiply_matrix_vector_device(temp, onsite_matrix, spin, spin_dim);
+    for (size_t i = 0; i < spin_dim; ++i) {
+        local_field[i] -= temp[i];
+    }
+}
+
+/**
+ * Add bilinear interaction contribution: local_field -= J * partner_spin
+ * Used by both lattice and mixed_lattice kernels
+ */
+__device__
+void add_bilinear_contribution_device(double* local_field, const double* J_matrix,
+                                       const double* partner_spin, double* temp, size_t spin_dim) {
+    multiply_matrix_vector_device(temp, J_matrix, partner_spin, spin_dim);
+    for (size_t i = 0; i < spin_dim; ++i) {
+        local_field[i] -= temp[i];
+    }
+}
+
+/**
+ * Add trilinear interaction contribution: local_field -= T * spin1 * spin2
+ * Used by both lattice and mixed_lattice kernels
+ */
+__device__
+void add_trilinear_contribution_device(double* local_field, const double* T_tensor,
+                                        const double* spin1, const double* spin2, 
+                                        double* temp, size_t spin_dim) {
+    contract_trilinear_field_device(temp, T_tensor, spin1, spin2, spin_dim);
+    for (size_t i = 0; i < spin_dim; ++i) {
+        local_field[i] -= temp[i];
+    }
+}
+
+/**
+ * Add drive field contribution to local field
+ * Used by both lattice and mixed_lattice kernels
+ * @param local_field Output local field array
+ * @param field_drive_1 First pulse component [N_atoms * spin_dim]
+ * @param field_drive_2 Second pulse component [N_atoms * spin_dim]
+ * @param atom Atom index within unit cell (site % N_atoms)
+ * @param amplitude Pulse amplitude
+ * @param width Gaussian width
+ * @param frequency Oscillation frequency
+ * @param t_pulse_1 Center time of first pulse
+ * @param t_pulse_2 Center time of second pulse
+ * @param curr_time Current simulation time
+ * @param spin_dim Spin dimension
+ */
+__device__
+void add_drive_field_device(double* local_field,
+                            const double* field_drive_1, const double* field_drive_2,
+                            size_t atom, double amplitude, double width, double frequency,
+                            double t_pulse_1, double t_pulse_2, double curr_time,
+                            size_t spin_dim) {
+    if (amplitude > 0.0) {
+        double t1_diff = curr_time - t_pulse_1;
+        double t2_diff = curr_time - t_pulse_2;
+        double env1 = exp(-t1_diff * t1_diff / (2.0 * width * width));
+        double env2 = exp(-t2_diff * t2_diff / (2.0 * width * width));
+        double osc = cos(frequency * curr_time);
+        
+        for (size_t i = 0; i < spin_dim; ++i) {
+            local_field[i] += amplitude * osc * (
+                env1 * field_drive_1[atom * spin_dim + i] +
+                env2 * field_drive_2[atom * spin_dim + i]
+            );
+        }
+    }
+}
+
+/**
+ * Compute Landau-Lifshitz derivative: dsdt = H_eff × spin
+ * Used by both lattice and mixed_lattice kernels
+ */
+__device__
+void compute_ll_derivative_device(double* dsdt, const double* spin, 
+                                   const double* local_field, size_t spin_dim) {
+    if (spin_dim == 3) {
+        cross_product_SU2_device(dsdt, local_field, spin);
+    } else if (spin_dim == 8) {
+        cross_product_SU3_device(dsdt, local_field, spin);
+    } else {
+        // Generic case - zero for now
+        for (size_t i = 0; i < spin_dim; ++i) {
+            dsdt[i] = 0.0;
+        }
+    }
+}
+
+/**
+ * Compute local field for a single site (unified function)
+ * Used by compute_local_field_kernel and LLG_kernel
+ * Computes: H_local = H_ext - A*S - sum_j J_ij*S_j - sum_jk T_ijk*S_j*S_k
+ */
+__device__
+void compute_local_field_device(
+    double* local_field,
+    const double* d_spins,
+    int site,
+    const double* field,
+    const double* onsite_interaction,
+    const double* bilinear_interaction,
+    const size_t* bilinear_partners,
+    const double* trilinear_interaction,
+    const size_t* trilinear_partners,
+    size_t num_bilinear,
+    size_t max_bilinear,
+    size_t num_trilinear,
+    size_t max_trilinear,
+    size_t lattice_size,
+    size_t spin_dim
+) {
+    const double* spin_here = &d_spins[site * spin_dim];
+    double temp[8];
+    
+    // Initialize with external field
+    init_local_field_device(local_field, &field[site * spin_dim], spin_dim);
+    
+    // On-site interaction: H_local -= A * S
+    add_onsite_contribution_device(local_field, 
+        &onsite_interaction[site * spin_dim * spin_dim], 
+        spin_here, temp, spin_dim);
+    
+    // Bilinear interactions: H_local -= sum_j J_ij * S_j
+    for (size_t n = 0; n < num_bilinear && n < max_bilinear; ++n) {
+        size_t partner = bilinear_partners[site * max_bilinear + n];
+        if (partner < lattice_size) {
+            const double* partner_spin = &d_spins[partner * spin_dim];
+            const double* J = &bilinear_interaction[
+                site * max_bilinear * spin_dim * spin_dim + n * spin_dim * spin_dim];
+            
+            add_bilinear_contribution_device(local_field, J, partner_spin, temp, spin_dim);
+        }
+    }
+    
+    // Trilinear interactions: H_local -= sum_{jk} T_ijk * S_j * S_k
+    for (size_t n = 0; n < num_trilinear && n < max_trilinear; ++n) {
+        size_t p1 = trilinear_partners[site * max_trilinear * 2 + n * 2];
+        size_t p2 = trilinear_partners[site * max_trilinear * 2 + n * 2 + 1];
+        if (p1 < lattice_size && p2 < lattice_size) {
+            const double* spin1 = &d_spins[p1 * spin_dim];
+            const double* spin2 = &d_spins[p2 * spin_dim];
+            const double* T = &trilinear_interaction[
+                site * max_trilinear * spin_dim * spin_dim * spin_dim + 
+                n * spin_dim * spin_dim * spin_dim];
+            
+            add_trilinear_contribution_device(local_field, T, spin1, spin2, temp, spin_dim);
+        }
+    }
+}
+
 // ======================= Kernel Implementations =======================
 
 __global__
@@ -263,54 +434,21 @@ void compute_local_field_kernel(
     int site = blockIdx.x * blockDim.x + threadIdx.x;
     if (site >= lattice_size) return;
     
-    const double* spin_here = &d_spins[site * spin_dim];
     double* local_field = &d_local_field[site * spin_dim];
     
-    // Initialize with external field
-    for (size_t i = 0; i < spin_dim; ++i) {
-        local_field[i] = interactions.field[site * spin_dim + i];
-    }
-    
-    // On-site interaction: H_local += A * S
-    double temp[8]; // Max spin_dim = 8 for SU(3)
-    multiply_matrix_vector_device(temp, &interactions.onsite_interaction[site * spin_dim * spin_dim], 
-                                   spin_here, spin_dim);
-    for (size_t i = 0; i < spin_dim; ++i) {
-        local_field[i] -= temp[i];
-    }
-    
-    // Bilinear interactions: H_local += sum_j J_ij * S_j
-    for (size_t n = 0; n < neighbors.num_bilinear && n < neighbors.max_bilinear; ++n) {
-        size_t partner = interactions.bilinear_partners[site * neighbors.max_bilinear + n];
-        if (partner < lattice_size) {
-            const double* partner_spin = &d_spins[partner * spin_dim];
-            const double* J = &interactions.bilinear_interaction[
-                site * neighbors.max_bilinear * spin_dim * spin_dim + n * spin_dim * spin_dim];
-            
-            multiply_matrix_vector_device(temp, J, partner_spin, spin_dim);
-            for (size_t i = 0; i < spin_dim; ++i) {
-                local_field[i] -= temp[i];
-            }
-        }
-    }
-    
-    // Trilinear interactions: H_local += sum_{jk} T_ijk * S_j * S_k
-    for (size_t n = 0; n < neighbors.num_trilinear && n < neighbors.max_trilinear; ++n) {
-        size_t p1 = interactions.trilinear_partners[site * neighbors.max_trilinear * 2 + n * 2];
-        size_t p2 = interactions.trilinear_partners[site * neighbors.max_trilinear * 2 + n * 2 + 1];
-        if (p1 < lattice_size && p2 < lattice_size) {
-            const double* spin1 = &d_spins[p1 * spin_dim];
-            const double* spin2 = &d_spins[p2 * spin_dim];
-            const double* T = &interactions.trilinear_interaction[
-                site * neighbors.max_trilinear * spin_dim * spin_dim * spin_dim + 
-                n * spin_dim * spin_dim * spin_dim];
-            
-            contract_trilinear_field_device(temp, T, spin1, spin2, spin_dim);
-            for (size_t i = 0; i < spin_dim; ++i) {
-                local_field[i] -= temp[i];
-            }
-        }
-    }
+    // Compute local field using unified device function
+    compute_local_field_device(
+        local_field, d_spins, site,
+        interactions.field,
+        interactions.onsite_interaction,
+        interactions.bilinear_interaction,
+        interactions.bilinear_partners,
+        interactions.trilinear_interaction,
+        interactions.trilinear_partners,
+        neighbors.num_bilinear, neighbors.max_bilinear,
+        neighbors.num_trilinear, neighbors.max_trilinear,
+        lattice_size, spin_dim
+    );
 }
 
 __global__
@@ -325,25 +463,13 @@ void add_drive_field_kernel(
     int site = blockIdx.x * blockDim.x + threadIdx.x;
     if (site >= lattice_size) return;
     
-    size_t atom = site % N_atoms;
     double* local_field = &d_local_field[site * spin_dim];
     
-    // Gaussian envelope
-    double t1_diff = curr_time - field_drive.t_pulse_1;
-    double t2_diff = curr_time - field_drive.t_pulse_2;
-    double env1 = exp(-t1_diff * t1_diff / (2.0 * field_drive.width * field_drive.width));
-    double env2 = exp(-t2_diff * t2_diff / (2.0 * field_drive.width * field_drive.width));
-    
-    // Oscillating factor
-    double osc = cos(field_drive.frequency * curr_time);
-    
-    // Add pulse contributions
-    for (size_t i = 0; i < spin_dim; ++i) {
-        local_field[i] += field_drive.amplitude * osc * (
-            env1 * field_drive.field_drive_1[atom * spin_dim + i] +
-            env2 * field_drive.field_drive_2[atom * spin_dim + i]
-        );
-    }
+    // Add drive field using shared function
+    add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
+                           site % N_atoms, field_drive.amplitude, field_drive.width,
+                           field_drive.frequency, field_drive.t_pulse_1, field_drive.t_pulse_2,
+                           curr_time, spin_dim);
 }
 
 __global__
@@ -361,18 +487,8 @@ void landau_lifshitz_kernel(
     const double* H_eff = &d_local_field[site * spin_dim];
     double* dsdt = &d_dsdt[site * spin_dim];
     
-    // dS/dt = S × H_eff
-    if (spin_dim == 3) {
-        cross_product_SU2_device(dsdt, spin, H_eff);
-    } else if (spin_dim == 8) {
-        cross_product_SU3_device(dsdt, spin, H_eff);
-    } else {
-        // Generic cross product using structure constants would go here
-        // For now, just zero out
-        for (size_t i = 0; i < spin_dim; ++i) {
-            dsdt[i] = 0.0;
-        }
-    }
+    // dS/dt = H_eff × S (using shared function)
+    compute_ll_derivative_device(dsdt, spin, H_eff, spin_dim);
 }
 
 __global__
@@ -394,76 +510,29 @@ void LLG_kernel(
     const double* spin_here = &d_spins[site * spin_dim];
     double* local_field = &d_local_field[site * spin_dim];
     double* dsdt = &d_dsdt[site * spin_dim];
-    double temp[8];
     
-    // Initialize with external field
-    for (size_t i = 0; i < spin_dim; ++i) {
-        local_field[i] = interactions.field[site * spin_dim + i];
-    }
-    
-    // On-site interaction
-    multiply_matrix_vector_device(temp, &interactions.onsite_interaction[site * spin_dim * spin_dim], 
-                                   spin_here, spin_dim);
-    for (size_t i = 0; i < spin_dim; ++i) {
-        local_field[i] -= temp[i];
-    }
-    
-    // Bilinear interactions
-    for (size_t n = 0; n < neighbors.num_bilinear && n < neighbors.max_bilinear; ++n) {
-        size_t partner = interactions.bilinear_partners[site * neighbors.max_bilinear + n];
-        if (partner < lattice_size) {
-            const double* partner_spin = &d_spins[partner * spin_dim];
-            const double* J = &interactions.bilinear_interaction[
-                site * neighbors.max_bilinear * spin_dim * spin_dim + n * spin_dim * spin_dim];
-            
-            multiply_matrix_vector_device(temp, J, partner_spin, spin_dim);
-            for (size_t i = 0; i < spin_dim; ++i) {
-                local_field[i] -= temp[i];
-            }
-        }
-    }
-    
-    // Trilinear interactions
-    for (size_t n = 0; n < neighbors.num_trilinear && n < neighbors.max_trilinear; ++n) {
-        size_t p1 = interactions.trilinear_partners[site * neighbors.max_trilinear * 2 + n * 2];
-        size_t p2 = interactions.trilinear_partners[site * neighbors.max_trilinear * 2 + n * 2 + 1];
-        if (p1 < lattice_size && p2 < lattice_size) {
-            const double* spin1 = &d_spins[p1 * spin_dim];
-            const double* spin2 = &d_spins[p2 * spin_dim];
-            const double* T = &interactions.trilinear_interaction[
-                site * neighbors.max_trilinear * spin_dim * spin_dim * spin_dim + 
-                n * spin_dim * spin_dim * spin_dim];
-            
-            contract_trilinear_field_device(temp, T, spin1, spin2, spin_dim);
-            for (size_t i = 0; i < spin_dim; ++i) {
-                local_field[i] -= temp[i];
-            }
-        }
-    }
+    // Compute local field using unified device function
+    compute_local_field_device(
+        local_field, d_spins, site,
+        interactions.field,
+        interactions.onsite_interaction,
+        interactions.bilinear_interaction,
+        interactions.bilinear_partners,
+        interactions.trilinear_interaction,
+        interactions.trilinear_partners,
+        neighbors.num_bilinear, neighbors.max_bilinear,
+        neighbors.num_trilinear, neighbors.max_trilinear,
+        lattice_size, spin_dim
+    );
     
     // Add drive field
-    if (field_drive.amplitude > 0.0) {
-        size_t atom = site % N_atoms;
-        double t1_diff = time_params.curr_time - field_drive.t_pulse_1;
-        double t2_diff = time_params.curr_time - field_drive.t_pulse_2;
-        double env1 = exp(-t1_diff * t1_diff / (2.0 * field_drive.width * field_drive.width));
-        double env2 = exp(-t2_diff * t2_diff / (2.0 * field_drive.width * field_drive.width));
-        double osc = cos(field_drive.frequency * time_params.curr_time);
-        
-        for (size_t i = 0; i < spin_dim; ++i) {
-            local_field[i] += field_drive.amplitude * osc * (
-                env1 * field_drive.field_drive_1[atom * spin_dim + i] +
-                env2 * field_drive.field_drive_2[atom * spin_dim + i]
-            );
-        }
-    }
+    add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
+                           site % N_atoms, field_drive.amplitude, field_drive.width,
+                           field_drive.frequency, field_drive.t_pulse_1, field_drive.t_pulse_2,
+                           time_params.curr_time, spin_dim);
     
-    // Compute Landau-Lifshitz derivative: dS/dt = S × H_eff
-    if (spin_dim == 3) {
-        cross_product_SU2_device(dsdt, spin_here, local_field);
-    } else if (spin_dim == 8) {
-        cross_product_SU3_device(dsdt, spin_here, local_field);
-    }
+    // Compute Landau-Lifshitz derivative
+    compute_ll_derivative_device(dsdt, spin_here, local_field, spin_dim);
 }
 
 __global__
@@ -953,11 +1022,11 @@ void LLG_flat_kernel(
         }
     }
     
-    // Compute Landau-Lifshitz derivative: dS/dt = S × H_eff
+    // Compute Landau-Lifshitz derivative: dS/dt = H_eff × S
     if (spin_dim == 3) {
-        cross_product_SU2_device(dsdt, spin_here, local_field);
+        cross_product_SU2_device(dsdt, local_field, spin_here);
     } else if (spin_dim == 8) {
-        cross_product_SU3_device(dsdt, spin_here, local_field);
+        cross_product_SU3_device(dsdt, local_field, spin_here);
     }
 }
 

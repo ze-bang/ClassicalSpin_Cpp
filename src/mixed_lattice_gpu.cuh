@@ -20,17 +20,7 @@
  * The mixed_gpu:: namespace provides the interface between CPU MixedLattice and GPU kernels.
  */
 
-#include <cuda_runtime.h>
-#include <device_launch_parameters.h>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#include <thrust/copy.h>
-#include <thrust/transform.h>
-#include <thrust/reduce.h>
-#include <cmath>
-#include <iostream>
-#include <vector>
-#include <utility>
+#include "lattice_gpu.cuh"  // Include base GPU functions and structures
 #include <string>
 
 // ======================= GPU Data Structures for Mixed Lattice =======================
@@ -379,6 +369,88 @@ void cross_product_SU2_device(double* result, const double* a, const double* b);
  */
 __device__
 void cross_product_SU3_device(double* result, const double* a, const double* b);
+
+/**
+ * Mixed matrix-vector multiplication: result = matrix * vector (non-square)
+ */
+__device__
+void multiply_mixed_matrix_vector_device(double* result, const double* matrix, 
+                                          const double* vector, 
+                                          size_t n_rows, size_t n_cols);
+
+/**
+ * Mixed matrix-vector multiplication with transpose: result = matrix^T * vector
+ */
+__device__
+void multiply_mixed_matrix_transpose_vector_device(double* result, const double* matrix, 
+                                                    const double* vector, 
+                                                    size_t n_rows, size_t n_cols);
+
+/**
+ * Add mixed SU(2)-SU(3) bilinear contribution to local field
+ */
+__device__
+void add_mixed_bilinear_contribution_device(double* local_field, const double* J_mixed,
+                                             const double* partner_spin, double* temp,
+                                             size_t spin_dim_out, size_t spin_dim_in);
+
+/**
+ * Add mixed SU(3)-SU(2) bilinear contribution (transpose) to local field
+ */
+__device__
+void add_mixed_bilinear_transpose_contribution_device(double* local_field, const double* J_mixed,
+                                                       const double* partner_spin, double* temp,
+                                                       size_t spin_dim_rows, size_t spin_dim_cols);
+
+/**
+ * Compute local field for SU(2) site in mixed lattice (unified function)
+ */
+__device__
+void compute_local_field_SU2_device(
+    double* local_field,
+    const double* d_spins_SU2,
+    const double* d_spins_SU3,
+    int site,
+    const double* field,
+    const double* onsite_interaction,
+    const double* bilinear_interaction,
+    const size_t* bilinear_partners,
+    const size_t* bilinear_counts,
+    const double* mixed_bilinear_interaction,
+    const size_t* mixed_bilinear_partners_SU3,
+    const size_t* mixed_bilinear_counts_SU2,
+    size_t max_bilinear,
+    size_t max_mixed_bilinear,
+    size_t lattice_size_SU2,
+    size_t lattice_size_SU3,
+    size_t spin_dim_SU2,
+    size_t spin_dim_SU3
+);
+
+/**
+ * Compute local field for SU(3) site in mixed lattice (unified function)
+ */
+__device__
+void compute_local_field_SU3_device(
+    double* local_field,
+    const double* d_spins_SU2,
+    const double* d_spins_SU3,
+    int site,
+    const double* field,
+    const double* onsite_interaction,
+    const double* bilinear_interaction,
+    const size_t* bilinear_partners,
+    const size_t* bilinear_counts,
+    const double* mixed_bilinear_interaction,
+    const size_t* mixed_bilinear_partners_SU2,
+    const size_t* mixed_bilinear_counts_SU3,
+    size_t max_bilinear,
+    size_t max_mixed_bilinear,
+    size_t lattice_size_SU2,
+    size_t lattice_size_SU3,
+    size_t spin_dim_SU2,
+    size_t spin_dim_SU3
+);
 
 // ======================= Kernel Declarations =======================
 
