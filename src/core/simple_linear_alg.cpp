@@ -6,7 +6,7 @@
  * in the header.
  */
 
-#include "simple_linear_alg.h"
+#include "classical_spin/core/simple_linear_alg.h"
 
 // Static member initialization
 unsigned __int128 lehman_state = 1;

@@ -1,4 +1,4 @@
-#include "gpu_common_helpers.cuh"
+#include "classical_spin/gpu/gpu_common_helpers.cuh"
 
 // ======================= Common GPU Kernels =======================
 // 

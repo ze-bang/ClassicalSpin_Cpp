@@ -1,6 +1,6 @@
-#include "mixed_lattice_gpu.cuh"
-#include "mixed_lattice_gpu_api.h"
-#include "gpu_common_helpers.cuh"
+#include "classical_spin/gpu/mixed_lattice_gpu.cuh"
+#include "classical_spin/gpu/mixed_lattice_gpu_api.h"
+#include "classical_spin/gpu/gpu_common_helpers.cuh"
 
 namespace mixed_gpu {
 

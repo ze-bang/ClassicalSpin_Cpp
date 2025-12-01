@@ -1,8 +1,8 @@
-#include "unified_config.h"
-#include "unitcell.h"
-#include "unitcell_builders.h"
-#include "lattice.h"
-#include "mixed_lattice.h"
+#include "classical_spin/core/unified_config.h"
+#include "classical_spin/core/unitcell.h"
+#include "classical_spin/core/unitcell_builders.h"
+#include "classical_spin/lattice/lattice.h"
+#include "classical_spin/lattice/mixed_lattice.h"
 #include <mpi.h>
 #include <iostream>
 #include <memory>

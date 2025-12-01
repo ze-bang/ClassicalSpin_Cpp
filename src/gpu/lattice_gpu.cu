@@ -1,6 +1,6 @@
-#include "lattice_gpu.cuh"
-#include "lattice_gpu_api.h"
-#include "gpu_common_helpers.cuh"
+#include "classical_spin/gpu/lattice_gpu.cuh"
+#include "classical_spin/gpu/lattice_gpu_api.h"
+#include "classical_spin/gpu/gpu_common_helpers.cuh"
 
 namespace gpu {
 

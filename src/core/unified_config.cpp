@@ -6,7 +6,7 @@
  * compile times by avoiding recompilation when only the config changes.
  */
 
-#include "unified_config.h"
+#include "classical_spin/core/unified_config.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>

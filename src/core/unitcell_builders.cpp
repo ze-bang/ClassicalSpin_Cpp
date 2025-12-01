@@ -6,7 +6,7 @@
  * These are separated from the main simulation code to reduce compile time.
  */
 
-#include "unitcell_builders.h"
+#include "classical_spin/core/unitcell_builders.h"
 #include <cmath>
 
 using namespace std;
