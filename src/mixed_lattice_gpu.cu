@@ -1,25 +1,9 @@
 #include "mixed_lattice_gpu.cuh"
+#include "gpu_common_helpers.cuh"
 
 namespace mixed_gpu {
 
-// ======================= Double atomicAdd for older architectures =======================
-
-#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ < 600
-__device__ inline double atomicAdd_double(double* address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
-    do {
-        assumed = old;
-        old = atomicCAS(address_as_ull, assumed,
-                        __double_as_longlong(val + __longlong_as_double(assumed)));
-    } while (assumed != old);
-    return __longlong_as_double(old);
-}
-#define ATOMIC_ADD_DOUBLE(addr, val) atomicAdd_double(addr, val)
-#else
-#define ATOMIC_ADD_DOUBLE(addr, val) atomicAdd(addr, val)
-#endif
-
+// Common device functions and kernels are now in gpu_common_helpers.cu/cuh
 // ======================= Device Helper Functions (Mixed Lattice Specific) =======================
 
 // Note: Common device functions (dot_device, contract_device, multiply_matrix_vector_device,
@@ -63,33 +47,7 @@ void multiply_mixed_matrix_transpose_vector_device(double* result, const double*
     }
 }
 
-/**
- * Add mixed SU(2)-SU(3) bilinear contribution to local field
- * local_field -= J_mixed * partner_spin (non-square matrix multiplication)
- */
-__device__
-void add_mixed_bilinear_contribution_device(double* local_field, const double* J_mixed,
-                                             const double* partner_spin, double* temp,
-                                             size_t spin_dim_out, size_t spin_dim_in) {
-    multiply_mixed_matrix_vector_device(temp, J_mixed, partner_spin, spin_dim_out, spin_dim_in);
-    for (size_t i = 0; i < spin_dim_out; ++i) {
-        local_field[i] -= temp[i];
-    }
-}
 
-/**
- * Add mixed SU(3)-SU(2) bilinear contribution (transpose) to local field
- * local_field -= J_mixed^T * partner_spin
- */
-__device__
-void add_mixed_bilinear_transpose_contribution_device(double* local_field, const double* J_mixed,
-                                                       const double* partner_spin, double* temp,
-                                                       size_t spin_dim_rows, size_t spin_dim_cols) {
-    multiply_mixed_matrix_transpose_vector_device(temp, J_mixed, partner_spin, spin_dim_rows, spin_dim_cols);
-    for (size_t j = 0; j < spin_dim_cols; ++j) {
-        local_field[j] -= temp[j];
-    }
-}
 
 /**
  * Compute local field for SU(2) site in mixed lattice (unified function)
@@ -119,28 +77,25 @@ void compute_local_field_SU2_device(
     const double* spin_here = &d_spins_SU2[site * spin_dim_SU2];
     double temp[8];
     
-    // Initialize with external field
-    init_local_field_device(local_field, &field[site * spin_dim_SU2], spin_dim_SU2);
+    // Initialize: H = -B
+    ::init_local_field_device(local_field, &field[site * spin_dim_SU2], spin_dim_SU2);
     
-    // On-site interaction: H_local -= A * S
-    add_onsite_contribution_device(local_field,
-        &onsite_interaction[site * spin_dim_SU2 * spin_dim_SU2],
-        spin_here, temp, spin_dim_SU2);
+    // On-site: H += 2*A*S (factor 2 from derivative of quadratic term)
+    ::add_onsite_contribution_device(local_field, &onsite_interaction[site * spin_dim_SU2 * spin_dim_SU2],
+                                     spin_here, temp, spin_dim_SU2, 2.0);
     
-    // Bilinear SU(2)-SU(2) interactions
+    // Bilinear SU(2)-SU(2): H += sum_j J_ij * S_j
     size_t num_neighbors = bilinear_counts[site];
     for (size_t n = 0; n < num_neighbors && n < max_bilinear; ++n) {
         size_t partner = bilinear_partners[site * max_bilinear + n];
         if (partner < lattice_size_SU2) {
-            const double* partner_spin = &d_spins_SU2[partner * spin_dim_SU2];
-            const double* J = &bilinear_interaction[
-                (site * max_bilinear + n) * spin_dim_SU2 * spin_dim_SU2];
-            
-            add_bilinear_contribution_device(local_field, J, partner_spin, temp, spin_dim_SU2);
+            ::add_bilinear_contribution_device(local_field,
+                &bilinear_interaction[(site * max_bilinear + n) * spin_dim_SU2 * spin_dim_SU2],
+                &d_spins_SU2[partner * spin_dim_SU2], temp, spin_dim_SU2);
         }
     }
     
-    // Mixed SU(2)-SU(3) bilinear interactions
+    // Mixed SU(2)-SU(3): H += sum_j J_mixed * S3_j
     size_t num_mixed = mixed_bilinear_counts_SU2[site];
     for (size_t n = 0; n < num_mixed && n < max_mixed_bilinear; ++n) {
         size_t partner_SU3 = mixed_bilinear_partners_SU3[site * max_mixed_bilinear + n];
@@ -149,8 +104,10 @@ void compute_local_field_SU2_device(
             const double* J_mixed = &mixed_bilinear_interaction[
                 (site * max_mixed_bilinear + n) * spin_dim_SU2 * spin_dim_SU3];
             
-            add_mixed_bilinear_contribution_device(local_field, J_mixed, partner_spin, 
-                                                    temp, spin_dim_SU2, spin_dim_SU3);
+            multiply_mixed_matrix_vector_device(temp, J_mixed, partner_spin, spin_dim_SU2, spin_dim_SU3);
+            for (size_t i = 0; i < spin_dim_SU2; ++i) {
+                local_field[i] += temp[i];
+            }
         }
     }
 }
@@ -183,28 +140,25 @@ void compute_local_field_SU3_device(
     const double* spin_here = &d_spins_SU3[site * spin_dim_SU3];
     double temp[8];
     
-    // Initialize with external field
-    init_local_field_device(local_field, &field[site * spin_dim_SU3], spin_dim_SU3);
+    // Initialize: H = -B
+    ::init_local_field_device(local_field, &field[site * spin_dim_SU3], spin_dim_SU3);
     
-    // On-site interaction: H_local -= A * S
-    add_onsite_contribution_device(local_field,
-        &onsite_interaction[site * spin_dim_SU3 * spin_dim_SU3],
-        spin_here, temp, spin_dim_SU3);
+    // On-site: H += 2*A*S (factor 2 from derivative of quadratic term)
+    ::add_onsite_contribution_device(local_field, &onsite_interaction[site * spin_dim_SU3 * spin_dim_SU3],
+                                     spin_here, temp, spin_dim_SU3, 2.0);
     
-    // Bilinear SU(3)-SU(3) interactions
+    // Bilinear SU(3)-SU(3): H += sum_j J_ij * S_j
     size_t num_neighbors = bilinear_counts[site];
     for (size_t n = 0; n < num_neighbors && n < max_bilinear; ++n) {
         size_t partner = bilinear_partners[site * max_bilinear + n];
         if (partner < lattice_size_SU3) {
-            const double* partner_spin = &d_spins_SU3[partner * spin_dim_SU3];
-            const double* J = &bilinear_interaction[
-                (site * max_bilinear + n) * spin_dim_SU3 * spin_dim_SU3];
-            
-            add_bilinear_contribution_device(local_field, J, partner_spin, temp, spin_dim_SU3);
+            ::add_bilinear_contribution_device(local_field,
+                &bilinear_interaction[(site * max_bilinear + n) * spin_dim_SU3 * spin_dim_SU3],
+                &d_spins_SU3[partner * spin_dim_SU3], temp, spin_dim_SU3);
         }
     }
     
-    // Mixed SU(3)-SU(2) bilinear interactions (transpose)
+    // Mixed SU(3)-SU(2): H += sum_j J_mixed^T * S2_j
     size_t num_mixed = mixed_bilinear_counts_SU3[site];
     for (size_t n = 0; n < num_mixed && n < max_mixed_bilinear; ++n) {
         size_t partner_SU2 = mixed_bilinear_partners_SU2[site * max_mixed_bilinear + n];
@@ -213,8 +167,10 @@ void compute_local_field_SU3_device(
             const double* J_mixed = &mixed_bilinear_interaction[
                 (site * max_mixed_bilinear + n) * spin_dim_SU2 * spin_dim_SU3];
             
-            add_mixed_bilinear_transpose_contribution_device(local_field, J_mixed, partner_spin, 
-                                                              temp, spin_dim_SU2, spin_dim_SU3);
+            multiply_mixed_matrix_transpose_vector_device(temp, J_mixed, partner_spin, spin_dim_SU2, spin_dim_SU3);
+            for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                local_field[j] += temp[j];
+            }
         }
     }
 }
@@ -258,13 +214,13 @@ void LLG_SU2_kernel(
     );
     
     // Add drive field
-    add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
+    ::add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
                            site % dims.N_atoms_SU2, field_drive.amplitude, field_drive.width,
                            field_drive.frequency, field_drive.t_pulse_1, field_drive.t_pulse_2,
                            time_params.curr_time, dims.spin_dim_SU2);
     
     // Compute Landau-Lifshitz derivative
-    compute_ll_derivative_device(dsdt, spin_here, local_field, dims.spin_dim_SU2);
+    ::compute_ll_derivative_device(dsdt, spin_here, local_field, dims.spin_dim_SU2);
 }
 
 __global__
@@ -304,113 +260,13 @@ void LLG_SU3_kernel(
     );
     
     // Add drive field
-    add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
+    ::add_drive_field_device(local_field, field_drive.field_drive_1, field_drive.field_drive_2,
                            site % dims.N_atoms_SU3, field_drive.amplitude, field_drive.width,
                            field_drive.frequency, field_drive.t_pulse_1, field_drive.t_pulse_2,
                            time_params.curr_time, dims.spin_dim_SU3);
     
     // Compute Landau-Lifshitz derivative
-    compute_ll_derivative_device(dsdt, spin_here, local_field, dims.spin_dim_SU3);
-}
-
-__global__
-void update_arrays_kernel(
-    double* out,
-    const double* in1, double a1,
-    const double* in2, double a2,
-    size_t size
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= size) return;
-    out[idx] = a1 * in1[idx] + a2 * in2[idx];
-}
-
-__global__
-void update_arrays_three_kernel(
-    double* out,
-    const double* in1, double a1,
-    const double* in2, double a2,
-    const double* in3, double a3,
-    size_t size
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= size) return;
-    out[idx] = a1 * in1[idx] + a2 * in2[idx] + a3 * in3[idx];
-}
-
-__global__
-void normalize_spins_kernel(
-    double* d_spins,
-    double spin_length,
-    size_t lattice_size,
-    size_t spin_dim
-) {
-    int site = blockIdx.x * blockDim.x + threadIdx.x;
-    if (site >= lattice_size) return;
-    
-    double* spin = &d_spins[site * spin_dim];
-    double norm = 0.0;
-    for (size_t i = 0; i < spin_dim; ++i) {
-        norm += spin[i] * spin[i];
-    }
-    norm = sqrt(norm);
-    
-    if (norm > 1e-10) {
-        for (size_t i = 0; i < spin_dim; ++i) {
-            spin[i] = spin[i] * spin_length / norm;
-        }
-    }
-}
-
-__global__
-void compute_magnetization_kernel(
-    const double* d_spins,
-    double* d_mag_local,
-    double* d_mag_staggered,
-    size_t lattice_size,
-    size_t spin_dim,
-    size_t N_atoms
-) {
-    __shared__ double s_mag_local;
-    __shared__ double s_mag_staggered;
-    
-    int tid = threadIdx.x;
-    int component = blockIdx.x;
-    
-    if (tid == 0) {
-        s_mag_local = 0.0;
-        s_mag_staggered = 0.0;
-    }
-    __syncthreads();
-    
-    if (component >= spin_dim) return;
-    
-    double local_sum = 0.0;
-    double staggered_sum = 0.0;
-    
-    for (size_t i = tid; i < lattice_size; i += blockDim.x) {
-        double spin_val = d_spins[i * spin_dim + component];
-        local_sum += spin_val;
-        int sign = 1 - 2 * ((i % N_atoms) & 1);
-        staggered_sum += spin_val * sign;
-    }
-    
-    // Warp reduction
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
-        staggered_sum += __shfl_down_sync(0xffffffff, staggered_sum, offset);
-    }
-    
-    if ((tid % warpSize) == 0) {
-        ATOMIC_ADD_DOUBLE(&s_mag_local, local_sum);
-        ATOMIC_ADD_DOUBLE(&s_mag_staggered, staggered_sum);
-    }
-    __syncthreads();
-    
-    if (tid == 0) {
-        d_mag_local[component] = s_mag_local / double(lattice_size);
-        d_mag_staggered[component] = s_mag_staggered / double(lattice_size);
-    }
+    ::compute_ll_derivative_device(dsdt, spin_here, local_field, dims.spin_dim_SU3);
 }
 
 // ======================= GPUMixedODESystem Implementation =======================
@@ -604,7 +460,7 @@ void step_mixed_gpu(
         double* d_k = thrust::raw_pointer_cast(k.data());
         
         system(state, k, t);
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k, dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k, dt, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "rk2" || method == "midpoint") {
@@ -615,11 +471,11 @@ void step_mixed_gpu(
         double* d_tmp = thrust::raw_pointer_cast(tmp.data());
         
         system(state, k1, t);
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, 0.5 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, 0.5 * dt, array_size);
         cudaDeviceSynchronize();
         
         system(tmp, k2, t + 0.5 * dt);
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k2, dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k2, dt, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "rk4") {
@@ -633,27 +489,27 @@ void step_mixed_gpu(
         double* d_tmp = thrust::raw_pointer_cast(tmp.data());
         
         system(state, k1, t);
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, 0.5 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, 0.5 * dt, array_size);
         cudaDeviceSynchronize();
         
         system(tmp, k2, t + 0.5 * dt);
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k2, 0.5 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k2, 0.5 * dt, array_size);
         cudaDeviceSynchronize();
         
         system(tmp, k3, t + 0.5 * dt);
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k3, dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k3, dt, array_size);
         cudaDeviceSynchronize();
         
         system(tmp, k4, t + dt);
         
         // Combine: y_{n+1} = y + (h/6) * (k1 + 2*k2 + 2*k3 + k4)
-        update_arrays_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k2, 2.0, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k2, 2.0, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k3, 2.0, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k3, 2.0, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k4, 1.0, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k4, 1.0, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, dt / 6.0, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, dt / 6.0, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "dopri5") {
@@ -680,56 +536,56 @@ void step_mixed_gpu(
         
         system(state, k1, t);
         
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a21 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a21 * dt, array_size);
         cudaDeviceSynchronize();
         system(tmp, k2, t + c2 * dt);
         
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a31 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a31 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a32 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a32 * dt, array_size);
         cudaDeviceSynchronize();
         system(tmp, k3, t + c3 * dt);
         
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a41 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a41 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a42 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a42 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a43 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a43 * dt, array_size);
         cudaDeviceSynchronize();
         system(tmp, k4, t + c4 * dt);
         
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a51 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a51 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a52 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a52 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a53 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a53 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a54 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a54 * dt, array_size);
         cudaDeviceSynchronize();
         system(tmp, k5, t + c5 * dt);
         
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a61 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a61 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a62 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a62 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a63 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a63 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a64 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a64 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k5, a65 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k5, a65 * dt, array_size);
         cudaDeviceSynchronize();
         system(tmp, k6, t + c6 * dt);
         
         // Final combination
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, b1 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, b1 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k3, b3 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k3, b3 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k4, b4 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k4, b4 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k5, b5 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k5, b5 * dt, array_size);
         cudaDeviceSynchronize();
-        update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k6, b6 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k6, b6 * dt, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "ssprk53") {
@@ -757,27 +613,27 @@ void step_mixed_gpu(
         
         // Stage 1
         system(state, k, t);
-        update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k, b10 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k, b10 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 2
         system(tmp, k, t + c1 * dt);
-        update_arrays_kernel<<<grid, block>>>(d_u, d_tmp, 1.0, d_k, b21 * dt, array_size);
+        ::update_arrays_kernel<<<grid, block>>>(d_u, d_tmp, 1.0, d_k, b21 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 3
         system(u, k, t + c2 * dt);
-        update_arrays_three_kernel<<<grid, block>>>(d_tmp, d_state, a30, d_u, a32, d_k, b32 * dt, array_size);
+        ::update_arrays_three_kernel<<<grid, block>>>(d_tmp, d_state, a30, d_u, a32, d_k, b32 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 4
         system(tmp, k, t + c3 * dt);
-        update_arrays_three_kernel<<<grid, block>>>(d_tmp, d_state, a40, d_tmp, a43, d_k, b43 * dt, array_size);
+        ::update_arrays_three_kernel<<<grid, block>>>(d_tmp, d_state, a40, d_tmp, a43, d_k, b43 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 5 (final)
         system(tmp, k, t + c4 * dt);
-        update_arrays_three_kernel<<<grid, block>>>(d_state, d_u, a52, d_tmp, a54, d_k, b54 * dt, array_size);
+        ::update_arrays_three_kernel<<<grid, block>>>(d_state, d_u, a52, d_tmp, a54, d_k, b54 * dt, array_size);
         cudaDeviceSynchronize();
         
     } else {
@@ -838,7 +694,7 @@ void compute_magnetization_mixed_gpu(
     
     // Compute SU(2) magnetization
     const int threads_per_block = 256;
-    compute_magnetization_kernel<<<data.spin_dim_SU2, threads_per_block>>>(
+    ::compute_magnetization_kernel<<<data.spin_dim_SU2, threads_per_block>>>(
         d_state,
         thrust::raw_pointer_cast(d_mag_local_SU2.data()),
         thrust::raw_pointer_cast(d_mag_staggered_SU2.data()),
@@ -848,7 +704,7 @@ void compute_magnetization_mixed_gpu(
     );
     
     // Compute SU(3) magnetization
-    compute_magnetization_kernel<<<data.spin_dim_SU3, threads_per_block>>>(
+    ::compute_magnetization_kernel<<<data.spin_dim_SU3, threads_per_block>>>(
         d_state + data.SU3_offset(),
         thrust::raw_pointer_cast(d_mag_local_SU3.data()),
         thrust::raw_pointer_cast(d_mag_staggered_SU3.data()),
@@ -878,7 +734,7 @@ void normalize_spins_mixed_gpu(
     {
         dim3 block(BLOCK_SIZE);
         dim3 grid((lattice_size_SU2 + BLOCK_SIZE - 1) / BLOCK_SIZE);
-        normalize_spins_kernel<<<grid, block>>>(d_state, spin_length_SU2, lattice_size_SU2, spin_dim_SU2);
+        ::normalize_spins_kernel<<<grid, block>>>(d_state, spin_length_SU2, lattice_size_SU2, spin_dim_SU2);
     }
     
     // Normalize SU(3) spins
@@ -886,7 +742,7 @@ void normalize_spins_mixed_gpu(
         dim3 block(BLOCK_SIZE);
         dim3 grid((lattice_size_SU3 + BLOCK_SIZE - 1) / BLOCK_SIZE);
         size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
-        normalize_spins_kernel<<<grid, block>>>(d_state + SU3_offset, spin_length_SU3, lattice_size_SU3, spin_dim_SU3);
+        ::normalize_spins_kernel<<<grid, block>>>(d_state + SU3_offset, spin_length_SU3, lattice_size_SU3, spin_dim_SU3);
     }
     
     cudaDeviceSynchronize();

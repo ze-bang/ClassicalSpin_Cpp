@@ -264,29 +264,6 @@ __device__
 void compute_ll_derivative_device(double* dsdt, const double* spin, 
                                    const double* local_field, size_t spin_dim);
 
-/**
- * Compute local field for a single site (unified function)
- * Computes: H_local = H_ext - A*S - sum_j J_ij*S_j - sum_jk T_ijk*S_j*S_k
- */
-__device__
-void compute_local_field_device(
-    double* local_field,
-    const double* d_spins,
-    int site,
-    const double* field,
-    const double* onsite_interaction,
-    const double* bilinear_interaction,
-    const size_t* bilinear_partners,
-    const double* trilinear_interaction,
-    const size_t* trilinear_partners,
-    size_t num_bilinear,
-    size_t max_bilinear,
-    size_t num_trilinear,
-    size_t max_trilinear,
-    size_t lattice_size,
-    size_t spin_dim
-);
-
 // ======================= Kernel Declarations =======================
 
 /**
@@ -316,19 +293,8 @@ void add_drive_field_kernel(
 );
 
 /**
- * Compute Landau-Lifshitz derivatives: dS/dt = S × H_eff
- */
-__global__
-void landau_lifshitz_kernel(
-    double* d_dsdt,
-    const double* d_spins,
-    const double* d_local_field,
-    size_t lattice_size,
-    size_t spin_dim
-);
-
-/**
- * Combined LLG kernel: compute local field and derivatives in one pass
+ * Combined Landau-Lifshitz kernel: compute local field and derivatives in one pass
+ * Computes dS/dt = S × H_eff where H_eff includes all interaction contributions
  */
 __global__
 void LLG_kernel(
