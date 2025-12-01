@@ -30,6 +30,7 @@
 #include <thrust/copy.h>
 #include <thrust/transform.h>
 #include <thrust/reduce.h>
+#include "mixed_lattice_gpu.cuh"
 #endif
 
 // Optional profiling instrumentation
@@ -3239,8 +3240,68 @@ private:
         double t_pulse_1_SU3;
     };
     
+    // GPU data cache for avoiding repeated transfers (analogous to Lattice::gpu_data_cache_)
+    mutable mixed_gpu::GPUMixedLatticeData gpu_mixed_data_cache_;
+    mutable bool gpu_mixed_data_initialized_ = false;
+    
     /**
-     * Transfer mixed lattice data to GPU
+     * Ensure GPU mixed lattice data is initialized (lazy initialization)
+     * Uses the modular mixed_gpu:: implementation from mixed_lattice_gpu.cuh/cu
+     */
+    void ensure_gpu_mixed_data_initialized() const {
+        if (gpu_mixed_data_initialized_) return;
+        gpu_mixed_data_cache_ = create_gpu_mixed_data();
+        gpu_mixed_data_initialized_ = true;
+    }
+    
+    /**
+     * Update GPU pulse parameters for SU(2) sublattice
+     */
+    void update_gpu_pulse_SU2() const {
+        std::vector<double> flat_field_drive;
+        flat_field_drive.reserve(2 * N_atoms_SU2 * spin_dim_SU2);
+        for (size_t p = 0; p < 2; ++p) {
+            for (size_t d = 0; d < field_drive_SU2[p].size(); ++d) {
+                flat_field_drive.push_back(field_drive_SU2[p](d));
+            }
+        }
+        
+        mixed_gpu::set_gpu_pulse_SU2(
+            gpu_mixed_data_cache_,
+            flat_field_drive,
+            field_drive_amp_SU2,
+            field_drive_width_SU2,
+            field_drive_freq_SU2,
+            t_pulse_SU2[0],
+            t_pulse_SU2[1]
+        );
+    }
+    
+    /**
+     * Update GPU pulse parameters for SU(3) sublattice
+     */
+    void update_gpu_pulse_SU3() const {
+        std::vector<double> flat_field_drive;
+        flat_field_drive.reserve(2 * N_atoms_SU3 * spin_dim_SU3);
+        for (size_t p = 0; p < 2; ++p) {
+            for (size_t d = 0; d < field_drive_SU3[p].size(); ++d) {
+                flat_field_drive.push_back(field_drive_SU3[p](d));
+            }
+        }
+        
+        mixed_gpu::set_gpu_pulse_SU3(
+            gpu_mixed_data_cache_,
+            flat_field_drive,
+            field_drive_amp_SU3,
+            field_drive_width_SU3,
+            field_drive_freq_SU3,
+            t_pulse_SU3[0],
+            t_pulse_SU3[1]
+        );
+    }
+    
+    /**
+     * Transfer mixed lattice data to GPU (LEGACY - use ensure_gpu_mixed_data_initialized instead)
      */
     GPUMixedLatticeData transfer_mixed_lattice_data_to_gpu() const {
         GPUMixedLatticeData gpu_data;
@@ -3370,22 +3431,173 @@ private:
     }
     
     /**
-     * GPU ODE system function
-     * For mixed lattice, this needs to handle both SU(2) and SU(3) spins
+     * Convert mixed lattice data to the new GPU format (mixed_gpu::GPUMixedLatticeData)
+     * This provides a clean interface for the modular GPU implementation
+     */
+    mixed_gpu::GPUMixedLatticeData create_gpu_mixed_data() const {
+        // Flatten SU(2) field
+        std::vector<double> flat_field_SU2;
+        flat_field_SU2.reserve(lattice_size_SU2 * spin_dim_SU2);
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                flat_field_SU2.push_back(field_SU2[i](d));
+            }
+        }
+        
+        // Flatten SU(2) onsite
+        std::vector<double> flat_onsite_SU2;
+        flat_onsite_SU2.reserve(lattice_size_SU2 * spin_dim_SU2 * spin_dim_SU2);
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                    flat_onsite_SU2.push_back(onsite_interaction_SU2[i](r, c));
+                }
+            }
+        }
+        
+        // Compute max bilinear neighbors for SU(2)
+        size_t max_bi_SU2 = 0;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            max_bi_SU2 = std::max(max_bi_SU2, bilinear_partners_SU2[i].size());
+        }
+        
+        // Flatten SU(2) bilinear (padded to max_bi_SU2)
+        std::vector<double> flat_bilinear_SU2;
+        std::vector<size_t> flat_partners_SU2;
+        std::vector<size_t> num_bi_per_site_SU2;
+        flat_bilinear_SU2.reserve(lattice_size_SU2 * max_bi_SU2 * spin_dim_SU2 * spin_dim_SU2);
+        flat_partners_SU2.reserve(lattice_size_SU2 * max_bi_SU2);
+        
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            num_bi_per_site_SU2.push_back(bilinear_partners_SU2[i].size());
+            for (size_t n = 0; n < max_bi_SU2; ++n) {
+                if (n < bilinear_partners_SU2[i].size()) {
+                    flat_partners_SU2.push_back(bilinear_partners_SU2[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            flat_bilinear_SU2.push_back(bilinear_interaction_SU2[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_partners_SU2.push_back(SIZE_MAX);  // Invalid partner
+                    for (size_t j = 0; j < spin_dim_SU2 * spin_dim_SU2; ++j) {
+                        flat_bilinear_SU2.push_back(0.0);
+                    }
+                }
+            }
+        }
+        
+        // Flatten SU(3) field
+        std::vector<double> flat_field_SU3;
+        flat_field_SU3.reserve(lattice_size_SU3 * spin_dim_SU3);
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                flat_field_SU3.push_back(field_SU3[i](d));
+            }
+        }
+        
+        // Flatten SU(3) onsite
+        std::vector<double> flat_onsite_SU3;
+        flat_onsite_SU3.reserve(lattice_size_SU3 * spin_dim_SU3 * spin_dim_SU3);
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            for (size_t r = 0; r < spin_dim_SU3; ++r) {
+                for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                    flat_onsite_SU3.push_back(onsite_interaction_SU3[i](r, c));
+                }
+            }
+        }
+        
+        // Compute max bilinear neighbors for SU(3)
+        size_t max_bi_SU3 = 0;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            max_bi_SU3 = std::max(max_bi_SU3, bilinear_partners_SU3[i].size());
+        }
+        
+        // Flatten SU(3) bilinear
+        std::vector<double> flat_bilinear_SU3;
+        std::vector<size_t> flat_partners_SU3;
+        std::vector<size_t> num_bi_per_site_SU3;
+        flat_bilinear_SU3.reserve(lattice_size_SU3 * max_bi_SU3 * spin_dim_SU3 * spin_dim_SU3);
+        flat_partners_SU3.reserve(lattice_size_SU3 * max_bi_SU3);
+        
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            num_bi_per_site_SU3.push_back(bilinear_partners_SU3[i].size());
+            for (size_t n = 0; n < max_bi_SU3; ++n) {
+                if (n < bilinear_partners_SU3[i].size()) {
+                    flat_partners_SU3.push_back(bilinear_partners_SU3[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU3; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            flat_bilinear_SU3.push_back(bilinear_interaction_SU3[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_partners_SU3.push_back(SIZE_MAX);
+                    for (size_t j = 0; j < spin_dim_SU3 * spin_dim_SU3; ++j) {
+                        flat_bilinear_SU3.push_back(0.0);
+                    }
+                }
+            }
+        }
+        
+        // Compute max mixed bilinear neighbors
+        size_t max_mixed_bi = 0;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            max_mixed_bi = std::max(max_mixed_bi, mixed_bilinear_partners_SU2[i].size());
+        }
+        
+        // Flatten mixed bilinear
+        std::vector<double> flat_mixed_bilinear;
+        std::vector<size_t> flat_mixed_partners_SU2;
+        std::vector<size_t> flat_mixed_partners_SU3;
+        std::vector<size_t> num_mixed_per_site_SU2;
+        
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            num_mixed_per_site_SU2.push_back(mixed_bilinear_partners_SU2[i].size());
+            for (size_t n = 0; n < max_mixed_bi; ++n) {
+                if (n < mixed_bilinear_partners_SU2[i].size()) {
+                    flat_mixed_partners_SU2.push_back(i);
+                    flat_mixed_partners_SU3.push_back(mixed_bilinear_partners_SU2[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            flat_mixed_bilinear.push_back(mixed_bilinear_interaction_SU2[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_mixed_partners_SU2.push_back(SIZE_MAX);
+                    flat_mixed_partners_SU3.push_back(SIZE_MAX);
+                    for (size_t j = 0; j < spin_dim_SU2 * spin_dim_SU3; ++j) {
+                        flat_mixed_bilinear.push_back(0.0);
+                    }
+                }
+            }
+        }
+        
+        return mixed_gpu::create_gpu_mixed_lattice_data(
+            lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
+            lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
+            max_bi_SU2, max_bi_SU3, max_mixed_bi,
+            flat_field_SU2, flat_onsite_SU2, flat_bilinear_SU2, flat_partners_SU2, num_bi_per_site_SU2,
+            flat_field_SU3, flat_onsite_SU3, flat_bilinear_SU3, flat_partners_SU3, num_bi_per_site_SU3,
+            flat_mixed_bilinear, flat_mixed_partners_SU2, flat_mixed_partners_SU3, num_mixed_per_site_SU2
+        );
+    }
+    
+    /**
+     * GPU ODE system function - DEPRECATED, use mixed_gpu::GPUMixedODESystem instead
+     * Kept for backward compatibility
      */
     void ode_system_gpu(const thrust::device_vector<double>& x, 
                        thrust::device_vector<double>& dxdt, 
                        double t,
                        const GPUMixedLatticeData& d_data) const {
-        // Placeholder: In full implementation, this would call CUDA kernels
-        // For now, fall back to CPU computation
+        // This is now a legacy wrapper - the real implementation is in mixed_lattice_gpu.cu
+        // For backward compatibility, we still support the old interface
         thrust::host_vector<double> h_x = x;
         thrust::host_vector<double> h_dxdt(x.size());
         
         ODEState x_state(h_x.begin(), h_x.end());
         ODEState dxdt_state(h_dxdt.size());
         
-        // Call the existing landau_lifshitz method (non-const version needed)
         const_cast<MixedLattice*>(this)->landau_lifshitz(x_state, dxdt_state, t);
         
         std::copy(dxdt_state.begin(), dxdt_state.end(), h_dxdt.begin());
@@ -3393,16 +3605,48 @@ private:
     }
     
     /**
-     * GPU integration wrapper - optimized version for mixed lattice
+     * GPU integration - pure GPU implementation without host-device ping-pong
      * 
-     * NOTE: This is a hybrid CPU/GPU approach. The ODE integration runs on CPU using Boost.Odeint,
-     * but the system function evaluation (Landau-Lifshitz) runs on GPU. This avoids per-evaluation
-     * memory transfers by:
-     * 1. Keeping intermediate integration state on GPU between evaluations within a step
-     * 2. Only transferring final state back to CPU between integration steps
+     * Uses the modular mixed_gpu:: implementation from mixed_lattice_gpu.cuh/cu
+     * This keeps all state on GPU during integration, only copying back at save intervals.
      * 
-     * For pure GPU integration, one would need to implement custom steppers with thrust operations,
-     * which Boost.Odeint supports but requires careful template specialization to avoid include conflicts.
+     * @param state Device state vector (modified in-place)
+     * @param T_start Start time
+     * @param T_end End time
+     * @param dt_step Time step
+     * @param observer Observer function called at save intervals
+     * @param method Integration method: "euler", "rk2", "rk4", "dopri5", "ssprk53", etc.
+     */
+    template<typename Observer>
+    void integrate_pure_gpu(mixed_gpu::GPUMixedLatticeData& gpu_data,
+                            mixed_gpu::GPUState& state,
+                            double T_start, double T_end, double dt_step,
+                            Observer observer, const std::string& method) {
+        mixed_gpu::GPUMixedODESystem system(gpu_data);
+        
+        double t = T_start;
+        size_t step = 0;
+        
+        while (t < T_end) {
+            // Call observer at each step
+            observer(state, t);
+            
+            // Perform one integration step
+            mixed_gpu::step_mixed_gpu(system, state, t, dt_step, method);
+            
+            t += dt_step;
+            step++;
+        }
+        
+        // Final observer call
+        observer(state, t);
+    }
+    
+    /**
+     * GPU integration wrapper - DEPRECATED hybrid CPU/GPU approach
+     * 
+     * Use integrate_pure_gpu() for better performance.
+     * This method is kept for backward compatibility.
      */
     template<typename System, typename Observer>
     void integrate_ode_system_gpu(System system_func, thrust::device_vector<double>& state,
@@ -3443,7 +3687,7 @@ private:
     }
     
     /**
-     * GPU version of molecular_dynamics
+     * GPU version of molecular_dynamics - uses pure GPU integration
      */
     void molecular_dynamics_gpu(double T_start, double T_end, double dt_initial,
                                const string& out_dir = "", size_t save_interval = 100,
@@ -3455,16 +3699,16 @@ private:
 #else
         ensure_directory_exists(out_dir);
         
-        cout << "Running mixed lattice molecular dynamics with GPU acceleration: t=" << T_start << " → " << T_end << endl;
+        cout << "Running mixed lattice molecular dynamics with pure GPU acceleration: t=" << T_start << " → " << T_end << endl;
         cout << "Integration method: " << method << endl;
         cout << "Initial step size: " << dt_initial << endl;
         
+        // Create GPU mixed lattice data using the new modular implementation
+        auto gpu_data = create_gpu_mixed_data();
+        
         // Transfer initial state to GPU
         ODEState state = spins_to_state();
-        thrust::device_vector<double> d_state(state.begin(), state.end());
-        
-        // Transfer lattice data to GPU (interaction matrices, fields, etc.)
-        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        mixed_gpu::GPUState d_state(state.begin(), state.end());
         
         // Create HDF5 writer with comprehensive metadata
         std::unique_ptr<HDF5MixedMDWriter> hdf5_writer;
@@ -3481,17 +3725,17 @@ private:
                 &site_positions_SU2, &site_positions_SU3, 10000);
         }
         
-        // Observer for saving data
+        // Observer for saving data (called at each step)
         size_t step_count = 0;
         size_t save_count = 0;
         thrust::host_vector<double> h_state;
         
-        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
+        auto observer = [&](const mixed_gpu::GPUState& d_x, double t) {
             if (step_count % save_interval == 0) {
-                // Copy state back to host for I/O
+                // Copy state back to host for I/O (only at save intervals)
                 h_state = d_x;
                 
-                // Compute magnetizations directly from flat state (zero allocation)
+                // Compute magnetizations directly from flat state
                 SpinVector M_SU2 = SpinVector::Zero(spin_dim_SU2);
                 SpinVector M_SU3 = SpinVector::Zero(spin_dim_SU3);
                 SpinVector M_SU2_antiferro = SpinVector::Zero(spin_dim_SU2);
@@ -3512,10 +3756,10 @@ private:
                 M_SU3 = Eigen::Map<Eigen::VectorXd>(M_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 
-                // Compute accurate energy density directly from flat state (on CPU - could be optimized to GPU)
+                // Compute energy density
                 double E = total_energy_flat(thrust::raw_pointer_cast(h_state.data())) / (lattice_size_SU2 + lattice_size_SU3);
                 
-                // Write to HDF5 directly from flat state (no conversion needed)
+                // Write to HDF5
                 if (hdf5_writer) {
                     hdf5_writer->write_flat_step(t, 
                                                 M_SU2_antiferro, M_SU2, 
@@ -3534,17 +3778,8 @@ private:
             ++step_count;
         };
         
-        // Create GPU ODE system
-        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
-                                                        thrust::device_vector<double>& dxdt, 
-                                                        double t) {
-            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
-        };
-        
-        // Integrate on GPU
-        auto [abs_tol, rel_tol] = get_integration_tolerances(method);
-        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, dt_initial,
-                                observer, method, true, abs_tol, rel_tol);
+        // Use the new pure GPU integration (no host-device ping-pong)
+        integrate_pure_gpu(gpu_data, d_state, T_start, T_end, dt_initial, observer, method);
         
         // Note: MixedLattice::spins_SU2 and spins_SU3 remain unchanged (initial configuration preserved)
         // The evolved state is stored in the device vector 'd_state'
@@ -3568,97 +3803,91 @@ private:
     single_pulse_drive_gpu(const vector<SpinVector>& field_in_SU2,
               const vector<SpinVector>& field_in_SU3,
               double t_B,
-              double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
-              double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
+              double pulse_amp_SU2_in, double pulse_width_SU2_in, double pulse_freq_SU2_in,
+              double pulse_amp_SU3_in, double pulse_width_SU3_in, double pulse_freq_SU3_in,
               double T_start, double T_end, double step_size,
               string method = "dopri5") {
         
-        // Set up pulses for both sublattices
+        // Set up pulses for both sublattices (on CPU side first)
         set_pulse_SU2(field_in_SU2, t_B, 
                      vector<SpinVector>(N_atoms_SU2, SpinVector::Zero(spin_dim_SU2)), 0.0,
-                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
+                     pulse_amp_SU2_in, pulse_width_SU2_in, pulse_freq_SU2_in);
         
         set_pulse_SU3(field_in_SU3, t_B,
                      vector<SpinVector>(N_atoms_SU3, SpinVector::Zero(spin_dim_SU3)), 0.0,
-                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
+                     pulse_amp_SU3_in, pulse_width_SU3_in, pulse_freq_SU3_in);
         
-        // Transfer data to GPU
-        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        // Ensure GPU data is initialized and update pulse parameters
+        ensure_gpu_mixed_data_initialized();
+        update_gpu_pulse_SU2();
+        update_gpu_pulse_SU3();
         
         // Storage for trajectory
         vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> trajectory;
         
         // Initial state on GPU
         ODEState state = spins_to_state();
-        thrust::device_vector<double> d_state(state.begin(), state.end());
+        mixed_gpu::GPUState d_state(state.begin(), state.end());
         
-        // Observer
-        double last_save_time = T_start;
-        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
-            if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
-                thrust::host_vector<double> x = d_x;
-                
-                size_t total_SU2 = lattice_size_SU2 * spin_dim_SU2;
-                
-                // Compute SU(2) magnetizations
-                double M_local_SU2_arr[8] = {0};
-                double M_antiferro_SU2_arr[8] = {0};
-                double M_global_SU2_arr[8] = {0};
-                
-                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 0, 
-                    lattice_size_SU2, spin_dim_SU2, M_local_SU2_arr, M_antiferro_SU2_arr);
-                
-                // Transform to global frame using sublattice frame
-                for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    size_t atom = i % N_atoms_SU2;
-                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                            M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[i * spin_dim_SU2 + nu];
-                        }
+        // Pure GPU integration (all computation on device, only copy back at save intervals)
+        std::vector<std::pair<double, std::vector<double>>> raw_trajectory;
+        mixed_gpu::GPUMixedODESystem gpu_system(gpu_mixed_data_cache_);
+        
+        // Calculate save interval (save every step for this function)
+        size_t save_interval = 1;
+        mixed_gpu::integrate_mixed_gpu(gpu_system, d_state, T_start, T_end, step_size,
+                                       save_interval, raw_trajectory, method);
+        
+        // Convert raw trajectory to magnetization trajectory (post-processing on CPU)
+        for (const auto& [t, state_vec] : raw_trajectory) {
+            size_t total_SU2 = lattice_size_SU2 * spin_dim_SU2;
+            
+            // Compute SU(2) magnetizations
+            double M_local_SU2_arr[8] = {0};
+            double M_antiferro_SU2_arr[8] = {0};
+            double M_global_SU2_arr[8] = {0};
+            
+            compute_sublattice_magnetizations_from_flat(state_vec.data(), 0, 
+                lattice_size_SU2, spin_dim_SU2, M_local_SU2_arr, M_antiferro_SU2_arr);
+            
+            // Transform to global frame using sublattice frame
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                size_t atom = i % N_atoms_SU2;
+                for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                    for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * state_vec[i * spin_dim_SU2 + nu];
                     }
                 }
-                
-                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_global_SU2 = Eigen::Map<Eigen::VectorXd>(M_global_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                
-                // Compute SU(3) magnetizations
-                double M_local_SU3_arr[8] = {0};
-                double M_antiferro_SU3_arr[8] = {0};
-                double M_global_SU3_arr[8] = {0};
-                
-                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), total_SU2, 
-                    lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
-                    
-                // Transform to global frame using sublattice frame
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    size_t atom = i % N_atoms_SU3;
-                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                            M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[total_SU2 + i * spin_dim_SU3 + nu];
-                        }
-                    }
-                }
-                
-                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                SpinVector M_global_SU3 = Eigen::Map<Eigen::VectorXd>(M_global_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                
-                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2, M_global_SU2}, {M_antiferro_SU3, M_local_SU3, M_global_SU3}}});
-                last_save_time = t;
             }
-        };
-        
-        // System function
-        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
-                                                        thrust::device_vector<double>& dxdt, 
-                                                        double t) {
-            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
-        };
-        
-        // Integrate on GPU
-        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
+            
+            SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            SpinVector M_global_SU2 = Eigen::Map<Eigen::VectorXd>(M_global_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            
+            // Compute SU(3) magnetizations
+            double M_local_SU3_arr[8] = {0};
+            double M_antiferro_SU3_arr[8] = {0};
+            double M_global_SU3_arr[8] = {0};
+            
+            compute_sublattice_magnetizations_from_flat(state_vec.data(), total_SU2, 
+                lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
+                
+            // Transform to global frame using sublattice frame
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                size_t atom = i % N_atoms_SU3;
+                for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                    for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
+                    }
+                }
+            }
+            
+            SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            SpinVector M_global_SU3 = Eigen::Map<Eigen::VectorXd>(M_global_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            
+            trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2, M_global_SU2}, {M_antiferro_SU3, M_local_SU3, M_global_SU3}}});
+        }
         
         // Reset pulses
         field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
@@ -3674,6 +3903,7 @@ private:
     
     /**
      * GPU version of double_pulse_drive for mixed lattice
+     * Uses pure GPU integration (all computation on device, only copy back for post-processing)
      */
     vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>>
     double_pulse_drive_gpu(const vector<SpinVector>& field_in_1_SU2,
@@ -3682,95 +3912,89 @@ private:
                   const vector<SpinVector>& field_in_2_SU2,
                   const vector<SpinVector>& field_in_2_SU3,
                   double t_B_2,
-                  double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
-                  double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
+                  double pulse_amp_SU2_in, double pulse_width_SU2_in, double pulse_freq_SU2_in,
+                  double pulse_amp_SU3_in, double pulse_width_SU3_in, double pulse_freq_SU3_in,
                   double T_start, double T_end, double step_size,
                   string method = "dopri5") {
         
-        // Set up two-pulse configuration for both sublattices
+        // Set up two-pulse configuration for both sublattices (on CPU side first)
         set_pulse_SU2(field_in_1_SU2, t_B_1, field_in_2_SU2, t_B_2,
-                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2);
+                     pulse_amp_SU2_in, pulse_width_SU2_in, pulse_freq_SU2_in);
         
         set_pulse_SU3(field_in_1_SU3, t_B_1, field_in_2_SU3, t_B_2,
-                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3);
+                     pulse_amp_SU3_in, pulse_width_SU3_in, pulse_freq_SU3_in);
         
-        // Transfer data to GPU
-        auto d_lattice_data = transfer_mixed_lattice_data_to_gpu();
+        // Ensure GPU data is initialized and update pulse parameters
+        ensure_gpu_mixed_data_initialized();
+        update_gpu_pulse_SU2();
+        update_gpu_pulse_SU3();
         
         // Storage for trajectory
         vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> trajectory;
         
         // Initial state on GPU
         ODEState state = spins_to_state();
-        thrust::device_vector<double> d_state(state.begin(), state.end());
+        mixed_gpu::GPUState d_state(state.begin(), state.end());
         
-        // Observer
-        double last_save_time = T_start;
-        auto observer = [&](const thrust::device_vector<double>& d_x, double t) {
-            if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
-                thrust::host_vector<double> x = d_x;
-                
-                size_t total_SU2 = lattice_size_SU2 * spin_dim_SU2;
-                
-                // Compute SU(2) magnetizations
-                double M_local_SU2_arr[3] = {0};
-                double M_antiferro_SU2_arr[3] = {0};
-                double M_global_SU2_arr[3] = {0};
-                
-                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), 0, 
-                    lattice_size_SU2, spin_dim_SU2, M_local_SU2_arr, M_antiferro_SU2_arr);
-                
-                // Transform to global frame using sublattice frame
-                for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    size_t atom = i % N_atoms_SU2;
-                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                            M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[i * spin_dim_SU2 + nu];
-                        }
+        // Pure GPU integration (all computation on device)
+        std::vector<std::pair<double, std::vector<double>>> raw_trajectory;
+        mixed_gpu::GPUMixedODESystem gpu_system(gpu_mixed_data_cache_);
+        
+        // Calculate save interval (save every step for this function)
+        size_t save_interval = 1;
+        mixed_gpu::integrate_mixed_gpu(gpu_system, d_state, T_start, T_end, step_size,
+                                       save_interval, raw_trajectory, method);
+        
+        // Convert raw trajectory to magnetization trajectory (post-processing on CPU)
+        for (const auto& [t, state_vec] : raw_trajectory) {
+            size_t total_SU2 = lattice_size_SU2 * spin_dim_SU2;
+            
+            // Compute SU(2) magnetizations
+            double M_local_SU2_arr[8] = {0};
+            double M_antiferro_SU2_arr[8] = {0};
+            double M_global_SU2_arr[8] = {0};
+            
+            compute_sublattice_magnetizations_from_flat(state_vec.data(), 0, 
+                lattice_size_SU2, spin_dim_SU2, M_local_SU2_arr, M_antiferro_SU2_arr);
+            
+            // Transform to global frame using sublattice frame
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                size_t atom = i % N_atoms_SU2;
+                for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                    for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * state_vec[i * spin_dim_SU2 + nu];
                     }
                 }
-                
-                SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_global_SU2 = Eigen::Map<Eigen::VectorXd>(M_global_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                
-                // Compute SU(3) magnetizations
-                double M_local_SU3_arr[8] = {0};
-                double M_antiferro_SU3_arr[8] = {0};
-                double M_global_SU3_arr[8] = {0};
-                
-                compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(x.data()), total_SU2, 
-                    lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
-                    
-                // Transform to global frame using sublattice frame
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    size_t atom = i % N_atoms_SU3;
-                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                            M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[total_SU2 + i * spin_dim_SU3 + nu];
-                        }
-                    }
-                }
-                
-                SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                SpinVector M_global_SU3 = Eigen::Map<Eigen::VectorXd>(M_global_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                
-                trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2, M_global_SU2}, {M_antiferro_SU3, M_local_SU3, M_global_SU3}}});
-                last_save_time = t;
             }
-        };
-        
-        // System function
-        auto gpu_system_func = [this, &d_lattice_data](const thrust::device_vector<double>& x, 
-                                                        thrust::device_vector<double>& dxdt, 
-                                                        double t) {
-            this->ode_system_gpu(x, dxdt, t, d_lattice_data);
-        };
-        
-        // Integrate on GPU
-        integrate_ode_system_gpu(gpu_system_func, d_state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
+            
+            SpinVector M_local_SU2 = Eigen::Map<Eigen::VectorXd>(M_local_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            SpinVector M_antiferro_SU2 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            SpinVector M_global_SU2 = Eigen::Map<Eigen::VectorXd>(M_global_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            
+            // Compute SU(3) magnetizations
+            double M_local_SU3_arr[8] = {0};
+            double M_antiferro_SU3_arr[8] = {0};
+            double M_global_SU3_arr[8] = {0};
+            
+            compute_sublattice_magnetizations_from_flat(state_vec.data(), total_SU2, 
+                lattice_size_SU3, spin_dim_SU3, M_local_SU3_arr, M_antiferro_SU3_arr);
+                
+            // Transform to global frame using sublattice frame
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                size_t atom = i % N_atoms_SU3;
+                for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                    for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
+                    }
+                }
+            }
+            
+            SpinVector M_local_SU3 = Eigen::Map<Eigen::VectorXd>(M_local_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            SpinVector M_antiferro_SU3 = Eigen::Map<Eigen::VectorXd>(M_antiferro_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            SpinVector M_global_SU3 = Eigen::Map<Eigen::VectorXd>(M_global_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            
+            trajectory.push_back({t, {{M_antiferro_SU2, M_local_SU2, M_global_SU2}, {M_antiferro_SU3, M_local_SU3, M_global_SU3}}});
+        }
         
         // Reset pulses
         field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
