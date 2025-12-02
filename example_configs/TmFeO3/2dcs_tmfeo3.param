@@ -1,6 +1,6 @@
 # TmFeO3 2D Coherent Spectroscopy
 # Corresponds to: TmFeO3_2DCS.cpp
-# Usage: mpirun -np N ./unified_simulation 2dcs_tmfeo3.param
+# Usage: mpirun -np N ./spin_solver 2dcs_tmfeo3.param
 
 # Simulation Type
 system = tmfeo3

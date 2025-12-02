@@ -1,6 +1,6 @@
 # Kitaev Honeycomb 2D Coherent Spectroscopy
 # Corresponds to: nonlinearspectroscopy_kitaev_honeycomb function
-# Usage: ./unified_simulation 2dcs_kitaev.param
+# Usage: ./spin_solver 2dcs_kitaev.param
 
 # Simulation Type
 system = honeycomb_kitaev
@@ -33,15 +33,15 @@ pump_frequency = 0.33
 pump_time = 0.0             # Not used in 2DCS scan
 
 # 2DCS Scan Parameters
-tau_start = -200.0          # Delay time start
-tau_end = 0.0               # Delay time end
-tau_step = 0.2              # Delay time step
+tau_start = 0          # Delay time start
+tau_end = 600               # Delay time end
+tau_step = 0.25              # Delay time step
 
 # Time evolution after pump
-md_time_start = -200.0
-md_time_end = 200.0
-md_timestep = 0.2
+md_time_start = 0.0
+md_time_end = 600.0
+md_timestep = 0.25
 
 # Output
 output_dir = KITAEV_2DCS
-save_observables = true
+save_observables = false

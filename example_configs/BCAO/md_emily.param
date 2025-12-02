@@ -1,6 +1,6 @@
 # BCAO Honeycomb Molecular Dynamics - Emily Model
 # Corresponds to: molecular_dynamic_BCAO_emily.cpp
-# Usage: ./unified_simulation md_emily.param
+# Usage: ./spin_solver md_emily.param
 
 # Simulation Type
 system = honeycomb_bcao

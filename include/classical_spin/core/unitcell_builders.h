@@ -8,19 +8,19 @@
 #ifndef UNITCELL_BUILDERS_H
 #define UNITCELL_BUILDERS_H
 
-#include "unified_config.h"
+#include "spin_config.h"
 #include "unitcell.h"
 
 // Build BCAO honeycomb unit cell
-UnitCell build_bcao_honeycomb(const UnifiedConfig& config);
+UnitCell build_bcao_honeycomb(const SpinConfig& config);
 
 // Build Kitaev honeycomb unit cell
-UnitCell build_kitaev_honeycomb(const UnifiedConfig& config);
+UnitCell build_kitaev_honeycomb(const SpinConfig& config);
 
 // Build pyrochlore unit cell
-UnitCell build_pyrochlore(const UnifiedConfig& config);
+UnitCell build_pyrochlore(const SpinConfig& config);
 
 // Build TmFeO3 mixed unit cell (SU2 Fe + SU3 Tm)
-MixedUnitCell build_tmfeo3(const UnifiedConfig& config);
+MixedUnitCell build_tmfeo3(const SpinConfig& config);
 
 #endif // UNITCELL_BUILDERS_H

@@ -1,6 +1,6 @@
 # BCAO Honeycomb Parallel Tempering - Emily Model
 # Corresponds to: parallel_tempering_BCAO_emily.cpp
-# Usage: mpirun -np 48 ./unified_simulation pt_emily.param
+# Usage: mpirun -np 48 ./spin_solver pt_emily.param
 
 # Simulation Type
 system = honeycomb_bcao

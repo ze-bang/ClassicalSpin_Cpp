@@ -1,723 +1,302 @@
 # ClassicalSpin_Cpp
 
-**Unified Framework for Classical Spin Dynamics Simulations**
-
-A high-performance C++/CUDA simulation framework for studying frustrated magnetic systems including BCAO, Kitaev honeycomb models, pyrochlore lattices, and mixed SU(2)×SU(3) systems like TmFeO₃. Features comprehensive parameter sweep capabilities for systematic phase diagram exploration.
-
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![License](https://img.shields.io/badge/license-MIT-blue)]()
-[![C++](https://img.shields.io/badge/C%2B%2B-17-blue)]()
-[![CUDA](https://img.shields.io/badge/CUDA-11.0+-green)]()
-[![MPI](https://img.shields.io/badge/MPI-OpenMPI-orange)]()
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Supported Systems](#supported-systems)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Parameter Sweeps](#parameter-sweeps)
-- [Documentation](#documentation)
-- [Examples](#examples)
-- [Output Format](#output-format)
-- [Performance](#performance)
-- [Contributing](#contributing)
-- [Citation](#citation)
-- [License](#license)
-
----
-
-## Overview
-
-This framework provides a **unified interface** for running various types of classical spin dynamics simulations, replacing the legacy collection of specialized run scripts with a single, flexible, parameter-driven executable.
-
-### Key Advantages
-
-- **Single Executable:** One binary (`unified_simulation`) handles all simulation types
-- **Parameter Files:** Human-readable config files instead of hard-coded parameters
-- **N-Dimensional Parameter Sweeps:** Explore 1D, 2D, 3D+ parameter spaces systematically
-- **Comprehensive I/O:** HDF5 output with full metadata for reproducibility
-- **MPI Support:** Scalable parallel tempering, field scans, and parameter sweeps
-- **GPU Acceleration:** CUDA support for TmFeO₃ 2DCS simulations
-- **Well-Documented:** Extensive examples and documentation
-
----
+A high-performance C++/CUDA framework for simulating classical spin systems on various lattice geometries. This software package provides efficient implementations of Monte Carlo methods (simulated annealing, parallel tempering) and molecular dynamics simulations for studying magnetic materials.
 
 ## Features
 
-### Simulation Methods
+- **Multiple Lattice Types**
+  - Honeycomb lattice (BCAO, Kitaev models)
+  - Pyrochlore lattice
+  - TmFeO3 mixed lattice (SU(2) + SU(3) spins)
+  - Extensible architecture for custom lattices
 
-| Method | Description | Use Case |
-|--------|-------------|----------|
-| **Simulated Annealing** | Monte Carlo with exponential cooling | Ground state search |
-| **Parallel Tempering** | MPI replica exchange across temperatures | Phase transitions, critical phenomena |
-| **Molecular Dynamics** | Classical spin equations of motion | Spin wave dynamics, thermalization |
-| **Pump-Probe** | Time-resolved spectroscopy | Ultrafast magnetization dynamics |
-| **2DCS** | Two-dimensional coherent spectroscopy | Nonlinear optical response |
-| **Parameter Sweep** | N-dimensional parameter space exploration | Phase diagrams, systematic studies |
+- **Simulation Methods**
+  - Simulated Annealing (SA)
+  - Parallel Tempering (PT) with MPI
+  - Molecular Dynamics (MD)
+  - Pump-Probe spectroscopy
+  - 2D Coherent Spectroscopy (2DCS)
+  - N-dimensional parameter sweeps
 
-### Physical Systems
+- **High Performance**
+  - CUDA GPU acceleration for MD and spectroscopy
+  - MPI parallelization for PT and parameter sweeps
+  - OpenMP for shared-memory parallelism
+  - Optimized numerical routines with Eigen3
 
-<table>
-<tr>
-<th>System</th>
-<th>Lattice</th>
-<th>Spin Type</th>
-<th>Key Interactions</th>
-</tr>
-<tr>
-<td><b>BCAO</b><br>(BCAO)</td>
-<td>Honeycomb</td>
-<td>SU(2)</td>
-<td>
-  • Anisotropic J1 exchange<br>
-  • DM interactions (D, E, F, G)<br>
-  • J3 third-neighbor coupling<br>
-  • Anisotropic g-factors
-</td>
-</tr>
-<tr>
-<td><b>Kitaev Honeycomb</b></td>
-<td>Honeycomb</td>
-<td>SU(2)</td>
-<td>
-  • Kitaev interaction (K)<br>
-  • Symmetric off-diagonal (Γ, Γ')<br>
-  • Heisenberg exchange (J)
-</td>
-</tr>
-<tr>
-<td><b>Pyrochlore</b></td>
-<td>Pyrochlore</td>
-<td>SU(2)</td>
-<td>
-  • Anisotropic exchange (Jxx, Jyy, Jzz)<br>
-  • g-tensor anisotropy<br>
-  • Rotation angle θ
-</td>
-</tr>
-<tr>
-<td><b>TmFeO₃</b></td>
-<td>Orthorhombic</td>
-<td>SU(2) + SU(3)</td>
-<td>
-  • Fe-Fe exchange (J1, J2)<br>
-  • Fe single-ion anisotropy (K)<br>
-  • Tm CEF splitting (e1, e2)<br>
-  • Fe-Tm coupling (χ)
-</td>
-</tr>
-</table>
+- **Flexible Configuration**
+  - Simple parameter file format
+  - Support for arbitrary Hamiltonian parameters
+  - Field scans and parameter sweeps
+  - HDF5 output for large datasets
 
-### Technical Features
+## Requirements
 
-- **Modern C++17** with Eigen for linear algebra
-- **CUDA Acceleration** for intensive spectroscopy calculations
-- **HDF5 I/O** with compression and chunking
-- **Boost.Odeint** integration for advanced ODE solvers (dopri5, rk78, Bulirsch-Stoer)
-- **MPI** parallelization via OpenMPI/MPICH
-- **Flexible Configuration** with `.param` files
-- **N-dimensional Parameter Sweeps** with automatic MPI distribution
-- **Comprehensive Metadata** for full reproducibility
+- CMake 3.18+
+- C++20 compatible compiler (GCC 10+, Clang 12+)
+- CUDA Toolkit 11.0+ (for GPU support)
+- MPI implementation (OpenMPI, MPICH, etc.)
+- Eigen3 3.3+
+- Boost 1.65+
+- HDF5 with C++ bindings
 
----
+### Ubuntu/Debian Installation
 
-## Supported Systems
-
-### Experimental Platforms
-
-- Linux (Ubuntu 20.04+, CentOS 7+, Arch)
-- macOS (10.15+)
-- WSL2 (Windows Subsystem for Linux)
-
-### Dependencies
-
-**Required:**
-- C++17 compiler (GCC ≥9.0, Clang ≥10.0)
-- CMake ≥3.15
-- Eigen3 ≥3.3
-- HDF5 ≥1.10 (with C++ bindings)
-- Boost ≥1.65 (headers only)
-
-**Optional:**
-- OpenMPI or MPICH (for parallel tempering)
-- CUDA ≥11.0 (for GPU-accelerated 2DCS)
-
----
-
-## Installation
-
-### 1. Install Dependencies
-
-**Ubuntu/Debian:**
 ```bash
-sudo apt update
-sudo apt install -y build-essential cmake \
-    libeigen3-dev libhdf5-dev libboost-all-dev \
-    libopenmpi-dev openmpi-bin
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential cmake \
+    libopenmpi-dev openmpi-bin \
+    libeigen3-dev \
+    libboost-all-dev \
+    libhdf5-dev libhdf5-cpp-103
 ```
 
-**macOS (Homebrew):**
-```bash
-brew install cmake eigen hdf5 boost open-mpi
-```
+For CUDA support, install the [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit).
 
-**CentOS/RHEL:**
-```bash
-sudo yum install -y gcc-c++ cmake3 \
-    eigen3-devel hdf5-devel boost-devel \
-    openmpi-devel
-```
-
-### 2. Clone Repository
+## Building
 
 ```bash
-git clone https://github.com/yourusername/ClassicalSpin_Cpp.git
+# Clone the repository
+git clone https://github.com/ze-bang/ClassicalSpin_Cpp.git
 cd ClassicalSpin_Cpp
+
+# Create build directory
+mkdir build && cd build
+
+# Configure (Release build recommended)
+cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# Build (use all available cores)
+cmake --build . -j$(nproc)
 ```
 
-### 3. Build
+The main executable `spin_solver` will be created in the `build/` directory.
 
-```bash
-mkdir -p build
-cd build
-cmake ..
-make -j$(nproc)
-```
+### Build Options
 
-**Build with CUDA support:**
-```bash
-cmake -DUSE_CUDA=ON ..
-make -j$(nproc)
-```
-
-### 4. Verify Installation
-
-```bash
-./unified_simulation --version
-./unified_simulation --help
-```
-
----
+| Option | Default | Description |
+|--------|---------|-------------|
+| `CMAKE_BUILD_TYPE` | Release | Build type (Debug/Release) |
+| `CMAKE_CUDA_ARCHITECTURES` | 60;75;80;86;89 | Target GPU architectures |
 
 ## Quick Start
 
-### Example 1: Molecular Dynamics (BCAO)
+### Basic Usage
 
 ```bash
-# Run MD simulation with Emily model parameters
-./build/unified_simulation example_configs/BCAO/md_emily.param
+# Run a simulation with a parameter file
+./build/spin_solver config.param
+
+# Run with MPI for parallel tempering
+mpirun -np 16 ./build/spin_solver example_configs/BCAO/pt_emily.param
+
+# Run parameter sweep
+mpirun -np 8 ./build/spin_solver example_configs/param_sweeps/parameter_sweep_example.param
 ```
 
-**Output:**
-- HDF5 file: `BCAO_emily_md/md_trajectory.h5`
-- Contains: spin configurations, magnetization vs. time
-
-### Example 2: Parallel Tempering (with MPI)
+### Example: BCAO Honeycomb Simulated Annealing
 
 ```bash
-# Run parallel tempering with 48 temperature replicas
-mpirun -np 48 ./build/unified_simulation example_configs/BCAO/pt_emily.param
+./build/spin_solver example_configs/BCAO/sa_emily.param
 ```
 
-### Example 3: 2DCS Spectroscopy (Kitaev)
+### Example: Kitaev Model Molecular Dynamics
 
 ```bash
-# Run 2D coherent spectroscopy
-./build/unified_simulation example_configs/Kitaev/2dcs_kitaev.param
+./build/spin_solver example_configs/Kitaev/md_kitaev.param
 ```
 
-### Example 4: Field Scan (Pyrochlore)
+### Example: Pyrochlore Field Scan
 
 ```bash
-# Scan magnetic field from 0 to 5 T with 20 MPI ranks
-mpirun -np 20 ./build/unified_simulation example_configs/Pyrochlore/field_scan.param
+mpirun -np 20 ./build/spin_solver example_configs/Pyrochlore/field_scan.param
 ```
 
----
+## Configuration Files
 
-## Parameter Sweeps
-
-The framework supports **N-dimensional parameter sweeps** for systematic exploration of parameter space. This is essential for generating phase diagrams, studying critical phenomena, and optimizing material parameters.
-
-### 1D Parameter Sweep
-
-Sweep over a single parameter while running a base simulation at each point:
+Configuration files use a simple `key = value` format:
 
 ```ini
-# Sweep Kitaev coupling from -2.0 to 0.0
-system = honeycomb_kitaev
-simulation_mode = parameter_sweep
+# System selection
+system = honeycomb_bcao
+simulation_mode = simulated_annealing
 
-sweep_parameter = K
-sweep_start = -2.0
-sweep_end = 0.0
-sweep_step = 0.1
-sweep_base_simulation = simulated_annealing
-```
+# Lattice size (Lx, Ly, Lz)
+lattice_size = 24, 24, 1
 
-```bash
-# Run with MPI (21 sweep points distributed across 8 ranks)
-mpirun -np 8 ./build/unified_simulation sweep_config.param
-```
+# Temperature range
+T_start = 10.0
+T_end = 0.001
+annealing_steps = 100000
 
-### 2D Parameter Sweep
-
-Create a grid in 2D parameter space:
-
-```ini
-# 2D sweep: J1xy vs field_strength
-sweep_parameters = J1xy, field_strength
-sweep_starts = -10.0, 0.0
-sweep_ends = -5.0, 2.0
-sweep_steps = 1.0, 0.5
-sweep_base_simulation = simulated_annealing
-```
-
-### 3D Parameter Sweep
-
-Map out a 3D phase diagram:
-
-```ini
-# 3D sweep: K vs Gamma vs h (Kitaev model)
-sweep_parameters = K, Gamma, field_strength
-sweep_starts = -2.0, 0.0, 0.0
-sweep_ends = 0.0, 0.5, 1.0
-sweep_steps = 0.5, 0.1, 0.25
-sweep_base_simulation = simulated_annealing
-```
-
-### Supported Base Simulations
-
-| Base Simulation | Alias | Best For |
-|-----------------|-------|----------|
-| `simulated_annealing` | `SA` | Ground state phase diagrams |
-| `parallel_tempering` | `PT` | Complex energy landscapes |
-| `molecular_dynamics` | `MD` | Dynamic properties |
-| `pump_probe` | - | Nonlinear response vs. parameters |
-| `2dcs` | `spectroscopy` | Spectroscopy vs. coupling strengths |
-
-### Sweepable Parameters
-
-Any Hamiltonian or simulation parameter can be swept:
-
-- **Exchange:** `J1xy`, `J1z`, `K`, `Gamma`, `Gammap`, `J`, `J3xy`, `J3z`, `Jxx`, `Jyy`, `Jzz`
-- **DM/Anisotropy:** `D`, `E`, `F`, `G`, `Ka`, `Kc`, `D1`, `D2`
-- **Field:** `field_strength`
-- **Temperature:** `T_end`
-- **Mixed Lattice (TmFeO₃):** `chii`, `e1`, `e2`, `J1ab`, `J1c`
-- **Pump-Probe:** `pump_amplitude`, `pump_frequency`, `probe_time`
-
-### Example Configurations
-
-See [`example_configs/param_sweeps/`](example_configs/param_sweeps/) for complete examples:
-
-| Configuration | Description |
-|---------------|-------------|
-| `parameter_sweep_example.param` | Basic 1D J1xy sweep |
-| `field_sweep_example.param` | Field strength sweep |
-| `2d_parameter_sweep_example.param` | J1xy × field 2D sweep |
-| `3d_parameter_sweep_example.param` | K × Γ × h 3D phase diagram |
-| `2dcs_chii_sweep.param` | 2DCS with χ coupling sweep |
-| `pump_amplitude_sweep.param` | Pump-probe amplitude study |
-
-**See [`PARAMETER_SWEEP_IMPLEMENTATION.md`](PARAMETER_SWEEP_IMPLEMENTATION.md) for complete documentation.**
-
----
-
-## Documentation
-
-### Core Documentation
-
-| Document | Description |
-|----------|-------------|
-| [`example_configs/README.md`](example_configs/README.md) | **Complete guide to example configurations** |
-| [`example_configs/HDF5_OUTPUT_FORMAT.md`](example_configs/HDF5_OUTPUT_FORMAT.md) | **HDF5 file structure reference** |
-| [`PARAMETER_SWEEP_IMPLEMENTATION.md`](PARAMETER_SWEEP_IMPLEMENTATION.md) | **Parameter sweep guide** |
-| [`PUMP_PROBE_2DCS_SWEEP_IMPLEMENTATION.md`](PUMP_PROBE_2DCS_SWEEP_IMPLEMENTATION.md) | **Pump-probe/2DCS sweep guide** |
-| [`UNIFIED_SIMULATION_QUICKREF.md`](UNIFIED_SIMULATION_QUICKREF.md) | Parameter reference |
-| [`CONFIG_PARAMETERS_UPDATE.md`](CONFIG_PARAMETERS_UPDATE.md) | Parameter changes from legacy code |
-
-### Parameter Files
-
-Config files use a simple `key = value` format:
-
-```ini
-# BCAO Molecular Dynamics Example
-system = bcao_honeycomb
-simulation_mode = molecular_dynamics
-
-lattice_size = 36,36,1
-
-# Exchange parameters
+# Hamiltonian parameters
 J1xy = -7.6
 J1z = -1.2
 D = 0.1
-E = -0.1
-J3xy = 2.5
-J3z = -0.85
 
 # Magnetic field
 field_strength = 0.0
-field_direction = 0,1,0
-g_factor = 4.8,4.85,2.5
+field_direction = 0, 1, 0
+g_factor = 4.8, 4.85, 2.5
 
-# Annealing
-T_start = 20.0
-T_end = 1.0
-annealing_steps = 100000
-
-# Molecular dynamics
-md_time_start = 0.0
-md_time_end = 200.0
-md_timestep = 0.01
-md_integrator = rk4
-
-output_dir = BCAO_emily_md
+# Output
+output_dir = output
+save_observables = true
 ```
 
-See [`example_configs/`](example_configs/) for complete examples.
+### Supported Systems
 
----
+| System | Key | Description |
+|--------|-----|-------------|
+| BCAO Honeycomb | `honeycomb_bcao` | Ba₃CoSb₂O₉ with anisotropic exchange |
+| Kitaev Honeycomb | `honeycomb_kitaev` | Kitaev model with K, Γ, Γ' interactions |
+| Pyrochlore | `pyrochlore` | Pyrochlore lattice with exchange anisotropy |
+| TmFeO3 | `tmfeo3` | Mixed Fe (SU2) + Tm (SU3) spins |
 
-## Examples
+### Simulation Modes
 
-### Directory Structure
+| Mode | Key | Description |
+|------|-----|-------------|
+| Simulated Annealing | `simulated_annealing` | Single replica cooling |
+| Parallel Tempering | `parallel_tempering` | Multi-replica with exchanges |
+| Molecular Dynamics | `molecular_dynamics` | Spin dynamics integration |
+| Pump-Probe | `pump_probe` | Magnetic pulse response |
+| 2D Spectroscopy | `2dcs` | Two-pulse coherent spectroscopy |
+| Parameter Sweep | `parameter_sweep` | Systematic parameter exploration |
+
+## Example Configurations
+
+The `example_configs/` directory contains ready-to-use configurations:
 
 ```
 example_configs/
-├── README.md                    # Comprehensive usage guide
-├── HDF5_OUTPUT_FORMAT.md        # Output format documentation
-│
-├── BCAO/                        # BCAO examples
-│   ├── md_emily.param
-│   ├── sa_emily.param
-│   ├── pt_emily.param
-│   └── md_songvilay.param
-│
-├── Kitaev/                      # Kitaev honeycomb examples
-│   ├── md_kitaev.param
-│   └── 2dcs_kitaev.param
-│
-├── Pyrochlore/                  # Pyrochlore examples
-│   ├── md_pyrochlore.param
-│   └── field_scan.param
-│
-├── TmFeO3/                      # TmFeO₃ mixed lattice examples
-│   ├── md_tmfeo3.param
-│   ├── 2dcs_tmfeo3.param
-│   └── sa_tmfeo3_chii_scan.param
-│
-└── param_sweeps/                # N-dimensional parameter sweeps
-    ├── parameter_sweep_example.param      # 1D J1xy sweep
-    ├── field_sweep_example.param          # 1D field sweep
-    ├── 2d_parameter_sweep_example.param   # 2D J1xy × field
-    ├── 3d_parameter_sweep_example.param   # 3D K × Γ × h
-    ├── 2dcs_chii_sweep.param              # 2DCS + chii sweep
-    ├── pump_amplitude_sweep.param         # Pump-probe amplitude
-    └── 2d_pump_probe_sweep_example.param  # 2D pump-probe sweep
+├── BCAO/           # Ba₃CoSb₂O₉ honeycomb configurations
+├── Kitaev/         # Kitaev honeycomb model
+├── Pyrochlore/     # Pyrochlore lattice
+├── TmFeO3/         # TmFeO3 mixed lattice
+└── param_sweeps/   # N-dimensional parameter sweeps
 ```
 
-### Running Examples
-
-**Local workstation:**
-```bash
-cd example_configs/run_scripts
-./local_md.sh ../BCAO/md_emily.param
-```
-
-**SLURM cluster:**
-```bash
-cd example_configs/run_scripts
-sbatch slurm_md.sh ../BCAO/md_emily.param
-```
-
-**With MPI:**
-```bash
-./local_mpi.sh 8 ../BCAO/pt_emily.param
-```
-
----
-
-## Output Format
-
-All simulations output to **HDF5 format** with comprehensive metadata.
-
-### Molecular Dynamics Output
-
-```
-md_trajectory.h5
-├── metadata/
-│   ├── lattice_size, spin_dim, dimensions
-│   ├── integration_method, dt, T_start, T_end
-│   ├── creation_time, code_version
-│   └── positions (optional)
-│
-└── trajectory/
-    ├── times [n_steps]
-    ├── spins [n_steps, n_sites, spin_dim]
-    ├── magnetization_antiferro [n_steps, spin_dim]
-    └── magnetization_local [n_steps, spin_dim]
-```
-
-### Pump-Probe / 2DCS Output
-
-```
-2dcs_output.h5
-├── metadata/
-│   ├── [lattice parameters]
-│   ├── pulse_amp, pulse_width, pulse_freq
-│   ├── tau_start, tau_end, tau_step
-│   └── ground_state_energy
-│
-├── reference/
-│   ├── times, M_antiferro, M_local
-│   
-└── tau_scan/
-    ├── tau_values [n_tau]
-    └── tau_i/
-        ├── M1_*, M01_* (magnetization trajectories)
-```
-
-**See [`example_configs/HDF5_OUTPUT_FORMAT.md`](example_configs/HDF5_OUTPUT_FORMAT.md) for complete specification.**
-
-### Reading Output (Python)
-
-```python
-import h5py
-import numpy as np
-import matplotlib.pyplot as plt
-
-with h5py.File('md_trajectory.h5', 'r') as f:
-    times = f['trajectory/times'][:]
-    mag = f['trajectory/magnetization_antiferro'][:]
-    
-    plt.plot(times, np.linalg.norm(mag, axis=1))
-    plt.xlabel('Time')
-    plt.ylabel('|M_antiferro|')
-    plt.show()
-```
-
----
-
-## Performance
-
-### Benchmarks
-
-**System:** BCAO honeycomb, 36×36×1 lattice (2592 spins)
-
-| Method | Hardware | Performance |
-|--------|----------|-------------|
-| Simulated Annealing | Intel Xeon Gold 6248 | ~50k sweeps/sec |
-| Parallel Tempering | 48 cores MPI | Linear scaling to 48 replicas |
-| Molecular Dynamics | Single core | ~500 timesteps/sec (RK4) |
-| 2DCS (TmFeO₃) | NVIDIA A100 GPU | 10× speedup vs CPU |
-
-### Optimization Tips
-
-1. **Use appropriate integration method:**
-   - `rk4`: Good balance of speed/accuracy
-   - `dopri5`: High accuracy, slower
-   - `verlet`: Fastest, energy-conserving
-
-2. **Tune save interval:** Large `md_save_interval` reduces I/O overhead
-
-3. **Enable compiler optimizations:**
-   ```bash
-   cmake -DCMAKE_BUILD_TYPE=Release ..
-   ```
-
-4. **Use MPI for parameter scans:** Distribute field/temperature points
-
-5. **GPU acceleration:** Enable CUDA for large 2DCS calculations
-
----
-
-## Legacy Code Migration
-
-This framework replaces the legacy `run_scripts/` directory with a unified approach:
-
-| Legacy Script | Unified Config | Notes |
-|---------------|----------------|-------|
-| `molecular_dynamic_BCAO_emily.cpp` | `BCAO/md_emily.param` | Parameters → config file |
-| `parallel_tempering_BCAO_emily.cpp` | `BCAO/pt_emily.param` | MPI-based |
-| `molecular_dynamic_kitaev_honeycomb.cpp` | `Kitaev/md_kitaev.param` | 2DCS included |
-| `molecular_dynamic_pyrochlore.cpp` | `Pyrochlore/md_pyrochlore.param` | Field scans |
-| `TmFeO3_2DCS.cpp` | `TmFeO3/2dcs_tmfeo3.param` | GPU-accelerated |
-
-**See [`example_configs/README.md`](example_configs/README.md) for detailed mapping.**
-
----
+See [example_configs/README.md](example_configs/README.md) for detailed documentation.
 
 ## Project Structure
 
 ```
 ClassicalSpin_Cpp/
-├── src/                         # Source code
-│   ├── unified_simulation.cu    # Main entry point (CUDA/C++)
-│   ├── unified_config.h         # Configuration parser
-│   ├── lattice.h                # Lattice builder
-│   ├── mixed_lattice.h          # Mixed SU(2)/SU(3) lattice
-│   ├── unitcell.h               # Unit cell definitions
-│   ├── hdf5_io.h                # HDF5 I/O utilities
-│   ├── simulation_config.h      # Simulation parameters
-│   └── simple_linear_alg.h      # Linear algebra helpers
-│
-├── example_configs/             # Example parameter files
-│   ├── README.md                # Configuration guide
-│   ├── BCAO/                    # BCAO honeycomb examples
-│   ├── Kitaev/                  # Kitaev honeycomb examples
-│   ├── Pyrochlore/              # Pyrochlore lattice examples
-│   ├── TmFeO3/                  # Mixed SU(2)+SU(3) examples
-│   └── param_sweeps/            # N-dimensional sweep examples
-│
-├── legacy/                      # Legacy run_scripts (reference)
-│   └── run_scripts/             
-│
-├── util/                        # Utility scripts
-│   ├── readers/                 # Output file readers
-│   └── classical_solvers/       # Analytical solvers
-│
-├── pystandard/                  # Python analysis tools
-│   ├── read_md_hdf5.py
-│   └── test_dssf_hdf5.py
-│
-├── build/                       # Build directory
-├── CMakeLists.txt               # CMake configuration
-├── README.md                    # This file
-├── PARAMETER_SWEEP_IMPLEMENTATION.md    # Sweep documentation
-└── PUMP_PROBE_2DCS_SWEEP_IMPLEMENTATION.md  # Spectroscopy sweeps
+├── CMakeLists.txt           # Build configuration
+├── README.md                 # This file
+├── LICENSE                   # MIT License
+├── include/
+│   └── classical_spin/
+│       ├── core/             # Core classes (SpinConfig, UnitCell, etc.)
+│       ├── lattice/          # Lattice implementations
+│       ├── gpu/              # CUDA kernels and GPU helpers
+│       └── io/               # HDF5 I/O utilities
+├── src/
+│   ├── apps/                 # Main executables
+│   │   └── spin_solver.cpp   # Main simulation driver
+│   ├── core/                 # Core implementations
+│   └── gpu/                  # CUDA implementations
+├── example_configs/          # Example parameter files
+├── util/                     # Utility scripts (Python readers, etc.)
+└── legacy/                   # Legacy run scripts (deprecated)
 ```
 
----
+## Key Classes
+
+### SpinConfig
+Configuration structure that holds all simulation parameters. Parse from file with:
+```cpp
+SpinConfig config = SpinConfig::from_file("config.param");
+```
+
+### UnitCell / MixedUnitCell
+Defines the magnetic unit cell including:
+- Lattice vectors
+- Atom positions
+- Exchange interactions
+- Single-ion anisotropies
+- Magnetic fields
+
+### Lattice / MixedLattice
+Full simulation lattice built from unit cells. Provides:
+- Spin initialization
+- Energy calculations
+- Monte Carlo updates
+- Molecular dynamics integration
+- Observable measurements
+
+## Output Files
+
+Simulations produce output in the specified `output_dir`:
+
+```
+output/
+├── sample_0/
+│   ├── positions.txt       # Spin positions
+│   ├── spins.txt          # Final spin configuration
+│   ├── final_energy.txt   # Ground state energy
+│   ├── observables.txt    # Temperature-dependent observables
+│   └── trajectory.h5      # MD trajectory (HDF5)
+└── simulation_parameters.txt  # Copy of input parameters
+```
+
+## GPU Acceleration
+
+Enable GPU acceleration for molecular dynamics:
+
+```ini
+use_gpu = true
+```
+
+Supported operations:
+- Spin dynamics integration (RK4, Dopri5)
+- Energy calculations
+- Pump-probe simulations
+- 2DCS spectroscopy
+
+## Python Utilities
+
+Analysis scripts are provided in `util/`:
+
+```python
+# Read honeycomb lattice results
+python util/readers_new/reader_honeycomb.py output_dir/ plot
+
+# Read pyrochlore results
+python util/readers_new/reader_pyrochlore.py output_dir/ analyze
+```
 
 ## Contributing
 
-Contributions are welcome! Please follow these guidelines:
+Contributions are welcome! Please:
 
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/new-system`)
-3. **Commit** changes with descriptive messages
-4. **Test** thoroughly (add example configs)
-5. **Submit** a pull request
-
-### Adding a New System
-
-1. Define unit cell in `src/unitcell.h`
-2. Add builder function in `src/unified_simulation.cpp`
-3. Update `UnifiedConfig` parser for new parameters
-4. Create example configs in `example_configs/YourSystem/`
-5. Update documentation
-
----
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
 ## Citation
 
-If you use this code in your research, please cite:
+If you use this software in your research, please cite:
 
 ```bibtex
-@software{classicalspin_cpp,
-  title = {ClassicalSpin\_Cpp: Unified Classical Spin Dynamics Framework},
-  author = {Your Name},
-  year = {2024},
-  url = {https://github.com/yourusername/ClassicalSpin_Cpp}
+@software{classical_spin_cpp,
+  author = {Ze-Bang, et al.},
+  title = {ClassicalSpin_Cpp: High-Performance Classical Spin Simulation Framework},
+  url = {https://github.com/ze-bang/ClassicalSpin_Cpp},
+  year = {2024}
 }
 ```
-
-### Related Publications
-
-- **BCAO Emily model:** [Citation]
-- **BCAO Songvilay model:** [Citation]
-- **TmFeO₃ 2DCS:** [Citation]
-
----
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
----
-
 ## Acknowledgments
 
-- **Eigen library:** High-performance linear algebra
-- **HDF5:** Hierarchical data format
-- **Boost.Odeint:** ODE integration
-- **OpenMPI:** MPI implementation
-
----
-
-## Contact
-
-For questions, bug reports, or feature requests, please:
-
-- **Open an issue:** [GitHub Issues](https://github.com/ze-bang/ClassicalSpin_Cpp/issues)
-- **Email:** ze.bang@email.com
-
----
-
-## Quick Reference Card
-
-### Common Commands
-
-```bash
-# Build
-cmake --build build -j$(nproc)
-
-# Single simulation
-./build/unified_simulation config.param
-
-# MPI parallel (field scan, parallel tempering, parameter sweeps)
-mpirun -np N ./build/unified_simulation config.param
-
-# Submit to SLURM
-sbatch example_configs/run_scripts/slurm_md.sh config.param
-
-# Analyze HDF5 output
-h5ls -r output.h5
-python -c "import h5py; f = h5py.File('output.h5'); print(list(f.keys()))"
-```
-
-### Essential Parameters
-
-```ini
-# System selection
-system = bcao_honeycomb | kitaev_honeycomb | pyrochlore | tmfeo3
-
-# Simulation mode
-simulation_mode = simulated_annealing | molecular_dynamics | 
-                  parallel_tempering | pump_probe | 2dcs | parameter_sweep
-
-# Lattice
-lattice_size = Lx,Ly,Lz
-
-# Temperature/Annealing
-T_start = 10.0
-T_end = 0.01
-annealing_steps = 100000
-
-# Molecular Dynamics
-md_time_start = 0.0
-md_time_end = 200.0
-md_timestep = 0.01
-md_integrator = dopri5  # euler, rk2, rk4, rk5, dopri5, rk78, bulirsch_stoer
-
-# Parameter Sweep (N-dimensional)
-sweep_parameters = K, Gamma, field_strength  # 1D, 2D, or 3D+
-sweep_starts = -2.0, 0.0, 0.0
-sweep_ends = 0.0, 0.5, 1.0
-sweep_steps = 0.5, 0.1, 0.25
-sweep_base_simulation = simulated_annealing
-
-# Output
-output_dir = results/
-```
-
----
-
-**Last Updated:** November 28, 2025  
-**Version:** 2.0 (with N-dimensional parameter sweeps)  
-**Build Status:** ✅ Passing
+- [Eigen3](https://eigen.tuxfamily.org/) for linear algebra
+- [Thrust](https://thrust.github.io/) for GPU primitives
+- [HDF5](https://www.hdfgroup.org/solutions/hdf5/) for data storage
+- [Boost](https://www.boost.org/) for utilities

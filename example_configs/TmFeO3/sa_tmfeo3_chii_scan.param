@@ -1,6 +1,6 @@
 # TmFeO3 Simulated Annealing with chii=0.05
 # Based on tmfeo3_config_chii=0.05.param
-# Usage: ./unified_simulation sa_tmfeo3_chii_scan.param
+# Usage: ./spin_solver sa_tmfeo3_chii_scan.param
 
 # Simulation Type
 system = tmfeo3

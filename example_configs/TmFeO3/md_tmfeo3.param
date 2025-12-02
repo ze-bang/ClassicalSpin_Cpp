@@ -1,6 +1,6 @@
 # TmFeO3 Mixed Lattice Molecular Dynamics
 # Corresponds to: molecular_dynamic_TmFeO3.cpp
-# Usage: ./unified_simulation md_tmfeo3.param
+# Usage: ./spin_solver md_tmfeo3.param
 
 # Simulation Type
 system = tmfeo3

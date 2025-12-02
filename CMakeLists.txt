@@ -86,7 +86,7 @@ set(CLASSICAL_SPIN_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(CLASSICAL_SPIN_HEADERS
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/simple_linear_alg.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/simulation_config.h
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/unified_config.h
+    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/spin_config.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/unitcell.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/unitcell_builders.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/lattice.h
@@ -102,7 +102,7 @@ set(CLASSICAL_SPIN_HEADERS
 set(CORE_SOURCES
     src/core/simple_linear_alg.cpp
     src/core/unitcell_builders.cpp
-    src/core/unified_config.cpp
+    src/core/spin_config.cpp
 )
 
 set(GPU_SOURCES
@@ -237,8 +237,8 @@ endfunction()
 # EXECUTABLES
 # ============================================================================
 
-# Main unified simulation executable
-add_optimized_executable(unified_simulation src/apps/unified_simulation.cpp)
+# Main spin solver executable
+add_optimized_executable(spin_solver src/apps/spin_solver.cpp)
 
 
 # ============================================================================

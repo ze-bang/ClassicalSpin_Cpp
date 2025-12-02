@@ -1,12 +1,12 @@
 /**
- * unified_config.cpp - Implementation of configuration parsing
+ * spin_config.cpp - Implementation of configuration parsing
  * 
- * This file contains the implementation of the UnifiedConfig class methods
+ * This file contains the implementation of the SpinConfig class methods
  * that were previously inline in the header file. Separating them reduces
  * compile times by avoiding recompilation when only the config changes.
  */
 
-#include "classical_spin/core/unified_config.h"
+#include "classical_spin/core/spin_config.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -16,8 +16,8 @@
 
 using namespace std;
 
-UnifiedConfig UnifiedConfig::from_file(const string& filename) {
-    UnifiedConfig config;
+SpinConfig SpinConfig::from_file(const string& filename) {
+    SpinConfig config;
     ifstream file(filename);
     
     if (!file.is_open()) {
@@ -263,14 +263,14 @@ UnifiedConfig UnifiedConfig::from_file(const string& filename) {
     return config;
 }
 
-void UnifiedConfig::to_file(const string& filename) const {
+void SpinConfig::to_file(const string& filename) const {
     ofstream file(filename);
     if (!file.is_open()) {
         throw runtime_error("Cannot write config file: " + filename);
     }
     
-    file << "# Unified Simulation Configuration File\n";
-    file << "# Generated automatically\n\n";
+    file << "# Spin Solver Configuration File\n";
+    file << "# Generated automatically\n\n";;
     
     file << "# System\n";
     file << "system = ";
@@ -331,7 +331,7 @@ void UnifiedConfig::to_file(const string& filename) const {
     file.close();
 }
 
-bool UnifiedConfig::validate() const {
+bool SpinConfig::validate() const {
     bool valid = true;
     
     if (num_trials < 1) {
@@ -352,8 +352,8 @@ bool UnifiedConfig::validate() const {
     return valid;
 }
 
-void UnifiedConfig::print() const {
-    cout << "==================== Unified Simulation Configuration ====================\n";
+void SpinConfig::print() const {
+    cout << "==================== Spin Solver Configuration ====================\n";
     cout << "System: ";
     switch (system) {
         case SystemType::HONEYCOMB_BCAO: cout << "BCAO Honeycomb"; break;

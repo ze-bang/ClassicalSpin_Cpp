@@ -11,7 +11,7 @@
 
 using namespace std;
 
-UnitCell build_bcao_honeycomb(const UnifiedConfig& config) {
+UnitCell build_bcao_honeycomb(const SpinConfig& config) {
     const double J1xy = config.get_param("J1xy", -7.6);
     const double J1z = config.get_param("J1z", -1.2);
     const double D = config.get_param("D", 0.1);
@@ -68,7 +68,7 @@ UnitCell build_bcao_honeycomb(const UnifiedConfig& config) {
     return atoms;
 }
 
-UnitCell build_kitaev_honeycomb(const UnifiedConfig& config) {
+UnitCell build_kitaev_honeycomb(const SpinConfig& config) {
     const double K = config.get_param("K", -1.0);
     const double Gamma = config.get_param("Gamma", 0.25);
     const double Gammap = config.get_param("Gammap", -0.02);
@@ -111,7 +111,7 @@ UnitCell build_kitaev_honeycomb(const UnifiedConfig& config) {
     return atoms;
 }
 
-UnitCell build_pyrochlore(const UnifiedConfig& config) {
+UnitCell build_pyrochlore(const SpinConfig& config) {
     const double Jxx = config.get_param("Jxx", 1.0);
     const double Jyy = config.get_param("Jyy", 1.0);
     const double Jzz = config.get_param("Jzz", 1.0);
@@ -196,7 +196,7 @@ UnitCell build_pyrochlore(const UnifiedConfig& config) {
     return atoms;
 }
 
-MixedUnitCell build_tmfeo3(const UnifiedConfig& config) {
+MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double Jai = config.get_param("J1ab", 4.92);
     const double Jbi = Jai;
     const double Jci = config.get_param("J1c", 4.92);

@@ -1,6 +1,6 @@
 # BCAO Honeycomb Simulated Annealing - Emily Model
 # Corresponds to: simulated_annealing_BCAO_emily.cpp
-# Usage: ./unified_simulation sa_emily.param
+# Usage: ./spin_solver sa_emily.param
 
 # Simulation Type
 system = honeycomb_bcao

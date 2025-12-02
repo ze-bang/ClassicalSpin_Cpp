@@ -1,6 +1,6 @@
 # Pyrochlore Molecular Dynamics
 # Corresponds to: molecular_dynamic_pyrochlore.cpp
-# Usage: ./unified_simulation md_pyrochlore.param
+# Usage: ./spin_solver md_pyrochlore.param
 
 # Simulation Type
 system = pyrochlore

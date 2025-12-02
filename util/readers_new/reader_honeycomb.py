@@ -346,14 +346,28 @@ def read_MD_slice(dir, nK, w):
         traceback.print_exc()
         raise
 
-def read_2D_nonlinear(dir):
+def _validate_window(window, name):
+    """Ensure an omega window is either None or a valid (min, max) tuple."""
+    if window is None:
+        return None
+    if (not isinstance(window, (tuple, list)) or len(window) != 2 or
+            window[0] >= window[1]):
+        raise ValueError(f"{name} must be a tuple (min, max) with min < max")
+    return tuple(window)
+
+
+def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
     """Read and compute 2D nonlinear spectroscopy using FFT.
     
     Supports both HDF5 (pump_probe_spectroscopy.h5) and text file formats.
     
     Args:
         dir: Directory containing pump-probe data
+        omega_t_window: Optional (min, max) tuple for ω_t axis limits
+        omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
     """
+    omega_t_window = _validate_window(omega_t_window, "omega_t_window")
+    omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
     hdf5_path = os.path.join(dir, "pump_probe_spectroscopy.h5")
     if os.path.exists(hdf5_path):
         # Read from HDF5 file
@@ -435,11 +449,15 @@ def read_2D_nonlinear(dir):
     # Full spectrum plot
     plt.imshow(M_NL_FF, origin='lower',
                extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-               aspect='auto', cmap='gnuplot2', norm=PowerNorm(gamma=0.3))
+               aspect='auto', cmap='gnuplot2', norm='log')
     plt.xlabel('$\\omega_t$ (rad/time)')
     plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
     plt.colorbar(label='Intensity')
-    plt.savefig(dir + "_NLSPEC.pdf")
+    if omega_t_window is not None:
+        plt.xlim(omega_t_window)
+    if omega_tau_window is not None:
+        plt.ylim(omega_tau_window)
+    plt.savefig(dir + "/M_NLSPEC.pdf")
     plt.clf()
 
 # ============================================================================
@@ -592,7 +610,7 @@ def read_MD_tot(dir):
 # MAIN FUNCTION 2: Aggregate 2D Nonlinear Spectroscopy
 # ============================================================================
 
-def read_2D_nonlinear_tot(dir):
+def read_2D_nonlinear_tot(dir, omega_t_window=None, omega_tau_window=None):
     """Aggregate 2D nonlinear spectroscopy from multiple pump-probe runs.
     
     Processes all subdirectories containing pump-probe data, aggregates
@@ -600,11 +618,15 @@ def read_2D_nonlinear_tot(dir):
     
     Args:
         dir: Parent directory containing subdirectories with pump-probe data
+        omega_t_window: Optional (min, max) tuple for ω_t axis limits
+        omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
     
     Outputs:
         - M_NL_tot.txt: Aggregated nonlinear magnetization in frequency space
         - NLSPEC_tot.pdf: Combined 2D nonlinear spectrum
     """
+    omega_t_window = _validate_window(omega_t_window, "omega_t_window")
+    omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
     directory = os.fsencode(dir)
     A = None
     count = 0
@@ -613,7 +635,9 @@ def read_2D_nonlinear_tot(dir):
         filename = os.fsdecode(file)
         if os.path.isdir(dir + "/" + filename):
             try:
-                read_2D_nonlinear(dir + "/" + filename)
+                read_2D_nonlinear(dir + "/" + filename,
+                                   omega_t_window=omega_t_window,
+                                   omega_tau_window=omega_tau_window)
                 M_NL_data = np.loadtxt(dir + "/" + filename + "/M_NL_FF.txt")
                 
                 if A is None:
@@ -632,10 +656,14 @@ def read_2D_nonlinear_tot(dir):
         np.savetxt(dir + "/M_NL_tot.txt", A)
         
         # Plot aggregated result
-        plt.imshow(A, origin='lower', aspect='auto', cmap='gnuplot2', norm=PowerNorm(gamma=0.3))
+        plt.imshow(A, origin='lower', aspect='auto', cmap='gnuplot2', norm='log')
         plt.xlabel('$\\omega_t$ (rad/time)')
         plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
         plt.colorbar(label='Intensity')
+        if omega_t_window is not None:
+            plt.xlim(omega_t_window)
+        if omega_tau_window is not None:
+            plt.ylim(omega_tau_window)
         plt.savefig(dir + "/NLSPEC_tot.pdf")
         plt.clf()
         print(f"Aggregated {count} runs")
@@ -781,7 +809,7 @@ if __name__ == "__main__":
         read_MD_tot(directory)
     elif function == "pp":
         print("Running: read_2D_nonlinear_tot()")
-        read_2D_nonlinear_tot(directory)
+        read_2D_nonlinear_tot(directory,(-2,2),(-2,2))
     elif function == "spin":
         print("Running: parse_spin_config()")
         parse_spin_config(directory)

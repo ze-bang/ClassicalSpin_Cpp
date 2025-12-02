@@ -106,41 +106,41 @@ The `param_sweeps/` directory contains examples for systematic parameter space e
 cmake --build build -j$(nproc)
 
 # Run simulation
-./build/unified_simulation example_configs/BCAO/md_emily.param
+./build/spin_solver example_configs/BCAO/md_emily.param
 ```
 
 ### 2. Parallel Tempering (MPI)
 
 ```bash
 # Run with N MPI processes (one per temperature replica)
-mpirun -np 48 ./build/unified_simulation example_configs/BCAO/pt_emily.param
+mpirun -np 48 ./build/spin_solver example_configs/BCAO/pt_emily.param
 ```
 
 ### 3. Parameter Sweeps (MPI)
 
 ```bash
 # 1D sweep (sweep points distributed across MPI ranks)
-mpirun -np 8 ./build/unified_simulation example_configs/param_sweeps/parameter_sweep_example.param
+mpirun -np 8 ./build/spin_solver example_configs/param_sweeps/parameter_sweep_example.param
 
 # 2D sweep (creates grid of sweep points)
-mpirun -np 16 ./build/unified_simulation example_configs/param_sweeps/2d_parameter_sweep_example.param
+mpirun -np 16 ./build/spin_solver example_configs/param_sweeps/2d_parameter_sweep_example.param
 
 # 3D phase diagram sweep
-mpirun -np 32 ./build/unified_simulation example_configs/param_sweeps/3d_parameter_sweep_example.param
+mpirun -np 32 ./build/spin_solver example_configs/param_sweeps/3d_parameter_sweep_example.param
 ```
 
 ### 4. Field Scans
 
 ```bash
 # MPI processes will distribute field values
-mpirun -np 20 ./build/unified_simulation example_configs/Pyrochlore/field_scan.param
+mpirun -np 20 ./build/spin_solver example_configs/Pyrochlore/field_scan.param
 ```
 
 ### 4. GPU-Accelerated Simulations
 
 ```bash
 # Set use_gpu = true in config file
-./build/unified_simulation example_configs/TmFeO3/2dcs_tmfeo3.param
+./build/spin_solver example_configs/TmFeO3/2dcs_tmfeo3.param
 ```
 
 ## Configuration File Format
@@ -268,7 +268,7 @@ These configurations have been verified to produce equivalent behavior to the le
 mpirun -np 4 hostname
 
 # Run with debugging
-mpirun -np 4 --mca btl_base_verbose 10 ./build/unified_simulation config.param
+mpirun -np 4 --mca btl_base_verbose 10 ./build/spin_solver config.param
 ```
 
 ### CUDA Issues
@@ -283,19 +283,19 @@ use_gpu = false
 ### File Not Found
 ```bash
 # Use absolute paths
-./build/unified_simulation $(pwd)/example_configs/BCAO/md_emily.param
+./build/spin_solver $(pwd)/example_configs/BCAO/md_emily.param
 ```
 
 ## Creating New Configurations
 
 1. Copy an existing config from the appropriate system directory
 2. Modify parameters as needed
-3. Run with `./build/unified_simulation your_config.param`
+3. Run with `./build/spin_solver your_config.param`
 4. Check `output_dir/simulation_parameters.txt` for verification
 
 ## References
 
 - Legacy scripts: `/legacy/run_scripts/`
-- Source code: `/src/unified_simulation.cpp`
-- Parameter documentation: `UNIFIED_SIMULATION_QUICKREF.md`
+- Source code: `/src/apps/spin_solver.cpp`
+- Parameter documentation: `SPIN_SOLVER_QUICKREF.md`
 - Build instructions: `CMakeLists.txt`

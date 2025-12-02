@@ -1,4 +1,4 @@
-#include "classical_spin/core/unified_config.h"
+#include "classical_spin/core/spin_config.h"
 #include "classical_spin/core/unitcell.h"
 #include "classical_spin/core/unitcell_builders.h"
 #include "classical_spin/lattice/lattice.h"
@@ -23,7 +23,7 @@ using namespace std;
 /**
  * Run simulated annealing
  */
-void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_simulated_annealing(Lattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running simulated annealing..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -79,7 +79,7 @@ void run_simulated_annealing(Lattice& lattice, const UnifiedConfig& config, int 
 /**
  * Run parallel tempering
  */
-void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running parallel tempering with " << size << " replicas..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -134,7 +134,7 @@ void run_parallel_tempering(Lattice& lattice, const UnifiedConfig& config, int r
 /**
  * Run molecular dynamics
  */
-void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_molecular_dynamics(Lattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running molecular dynamics..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -244,7 +244,7 @@ void run_molecular_dynamics(Lattice& lattice, const UnifiedConfig& config, int r
 /**
  * Run pump-probe experiment
  */
-void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running pump-probe simulation..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -393,7 +393,7 @@ void run_pump_probe(Lattice& lattice, const UnifiedConfig& config, int rank, int
  * Run 2D coherent spectroscopy (2DCS) / pump-probe spectroscopy
  * This is equivalent to pump-probe with a delay time (tau) scan
  */
-void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS)..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -543,7 +543,7 @@ void run_2dcs_spectroscopy(Lattice& lattice, const UnifiedConfig& config, int ra
 /**
  * Run simulated annealing for mixed lattice
  */
-void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_simulated_annealing_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running simulated annealing on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -597,7 +597,7 @@ void run_simulated_annealing_mixed(MixedLattice& lattice, const UnifiedConfig& c
 /**
  * Run parallel tempering for mixed lattice
  */
-void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running parallel tempering on mixed lattice with " << size << " replicas..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -652,7 +652,7 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const UnifiedConfig& co
 /**
  * Run molecular dynamics for mixed lattice
  */
-void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_molecular_dynamics_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running molecular dynamics on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -760,7 +760,7 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const UnifiedConfig& co
 /**
  * Run pump-probe experiment for mixed lattice
  */
-void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running pump-probe simulation on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -906,7 +906,7 @@ void run_pump_probe_mixed(MixedLattice& lattice, const UnifiedConfig& config, in
 /**
  * Run 2D coherent spectroscopy (2DCS) for mixed lattice
  */
-void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& config, int rank, int size) {
+void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS) on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -1064,7 +1064,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const UnifiedConfig& con
  * Run parameter sweep for any Hamiltonian parameter
  * Sweeps over specified parameter and runs the base simulation at each point
  */
-void run_parameter_sweep(const UnifiedConfig& base_config, int rank, int size) {
+void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
     // Determine which sweep mode to use
     vector<string> params;
     vector<vector<double>> param_grids;
@@ -1200,7 +1200,7 @@ void run_parameter_sweep(const UnifiedConfig& base_config, int rank, int size) {
         }
         
         // Create modified config for this sweep point
-        UnifiedConfig sweep_config = base_config;
+        SpinConfig sweep_config = base_config;
         sweep_config.simulation = base_config.sweep_base_simulation;
         
         // Apply all parameter values
@@ -1382,9 +1382,9 @@ int main(int argc, char** argv) {
     }
     
     // Load configuration
-    UnifiedConfig config;
+    SpinConfig config;
     try {
-        config = UnifiedConfig::from_file(config_file);
+        config = SpinConfig::from_file(config_file);
     } catch (const exception& e) {
         if (rank == 0) {
             cerr << "Error loading configuration: " << e.what() << endl;

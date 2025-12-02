@@ -1,6 +1,6 @@
 # Pyrochlore Magnetic Field Scan
 # Scans field from h_start to h_end
-# Usage: mpirun -np N ./unified_simulation field_scan.param
+# Usage: mpirun -np N ./spin_solver field_scan.param
 
 # Simulation Type
 system = pyrochlore

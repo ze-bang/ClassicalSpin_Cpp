@@ -1,6 +1,6 @@
 # Kitaev Honeycomb Molecular Dynamics
 # Corresponds to: molecular_dynamic_kitaev_honeycomb.cpp
-# Usage: ./unified_simulation md_kitaev.param
+# Usage: ./spin_solver md_kitaev.param
 
 # Simulation Type
 system = honeycomb_kitaev

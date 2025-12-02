@@ -6,13 +6,14 @@ This directory contains example configurations for N-dimensional parameter sweep
 
 ```bash
 # 1D sweep over K parameter
-mpirun -np 8 ./build/unified_simulation example_configs/param_sweeps/parameter_sweep_example.param
+mpirun -np 8 ./build/spin_solver example_configs/param_sweeps/parameter_sweep_example.param
 
 # 2D sweep over J1xy and field_strength
-mpirun -np 16 ./build/unified_simulation example_configs/param_sweeps/2d_parameter_sweep_example.param
+mpirun -np 16 ./build/spin_solver example_configs/param_sweeps/2d_parameter_sweep_example.param
 
 # 3D phase diagram (K × Γ × field)
-mpirun -np 32 ./build/unified_simulation example_configs/param_sweeps/3d_parameter_sweep_example.param
+mpirun -np 32 ./build/spin_solver example_configs/param_sweeps/3d_parameter_sweep_example.param
+```
 ```
 
 ## Available Examples
@@ -134,7 +135,7 @@ Sweep points are automatically distributed across MPI ranks:
 
 ```bash
 # 21 sweep points across 8 ranks (~3 points each)
-mpirun -np 8 ./build/unified_simulation sweep.param
+mpirun -np 8 ./build/spin_solver sweep.param
 ```
 
 For 2D/3D sweeps, the total number of grid points is:
@@ -155,13 +156,13 @@ The grid points are flattened and distributed round-robin across MPI ranks.
 
 ```bash
 # 1. Coarse scan to identify phases
-mpirun -np 32 ./build/unified_simulation coarse_scan.param
+mpirun -np 32 ./build/spin_solver coarse_scan.param
 
 # 2. Analyze results to identify phase boundaries
 python analyze_phase_diagram.py output_coarse/
 
 # 3. Fine scan near phase boundary
-mpirun -np 64 ./build/unified_simulation fine_scan.param
+mpirun -np 64 ./build/spin_solver fine_scan.param
 
 # 4. Generate final phase diagram
 python plot_phase_diagram.py output_fine/
