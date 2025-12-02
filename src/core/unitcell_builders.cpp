@@ -73,7 +73,6 @@ UnitCell build_kitaev_honeycomb(const SpinConfig& config) {
     const double Gamma = config.get_param("Gamma", 0.25);
     const double Gammap = config.get_param("Gammap", -0.02);
     const double J = config.get_param("J", 0.0);
-    const double h = config.get_param("h", 0.7);
     
     // Use HoneyComb class from unitcell.h
     HoneyComb atoms(3);
