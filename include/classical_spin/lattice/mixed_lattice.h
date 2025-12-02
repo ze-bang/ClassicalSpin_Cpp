@@ -3188,6 +3188,336 @@ public:
         cout << "==========================================" << endl;
     }
 
+    /**
+     * MPI-parallelized pump-probe spectroscopy for mixed lattice
+     * 
+     * Distributes tau delay values across MPI ranks for parallel computation.
+     * Each rank computes a subset of tau values, then rank 0 gathers and writes results.
+     */
+    void pump_probe_spectroscopy_mpi(const vector<SpinVector>& field_in_SU2,
+                                     const vector<SpinVector>& field_in_SU3,
+                                     double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
+                                     double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
+                                     double tau_start, double tau_end, double tau_step,
+                                     double T_start, double T_end, double T_step,
+                                     double Temp_start = 5.0, double Temp_end = 1e-3,
+                                     size_t n_anneal = 1000,
+                                     bool T_zero_quench = false, size_t quench_sweeps = 1000,
+                                     string dir_name = "spectroscopy_mixed",
+                                     string method = "dopri5", bool use_gpu = false) {
+        
+        int rank, mpi_size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+        
+        std::filesystem::create_directories(dir_name);
+        
+        int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+        
+        if (rank == 0) {
+            cout << "\n==========================================" << endl;
+            cout << "Mixed Lattice Pump-Probe (MPI Parallel)" << endl;
+            cout << "==========================================" << endl;
+            cout << "MPI ranks: " << mpi_size << endl;
+            cout << "SU(2) Pulse: amp=" << pulse_amp_SU2 << ", width=" << pulse_width_SU2 
+                 << ", freq=" << pulse_freq_SU2 << endl;
+            cout << "SU(3) Pulse: amp=" << pulse_amp_SU3 << ", width=" << pulse_width_SU3 
+                 << ", freq=" << pulse_freq_SU3 << endl;
+            cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
+            cout << "Total delay points: " << tau_steps << endl;
+            cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            if (use_gpu) {
+                cout << "GPU acceleration: ENABLED (each rank uses assigned GPU)" << endl;
+            }
+        }
+        
+        // Ground state info
+        if (rank == 0) {
+            cout << "\n[1/4] Using current configuration as ground state..." << endl;
+        }
+        double E_ground = energy_density();
+        SpinVector M_ground_SU2 = magnetization_SU2();
+        SpinVector M_ground_SU3 = magnetization_SU3();
+        if (rank == 0) {
+            cout << "  Ground state: E/N = " << E_ground << endl;
+            cout << "    |M_SU2| = " << M_ground_SU2.norm() << endl;
+            cout << "    |M_SU3| = " << M_ground_SU3.norm() << endl;
+        }
+        
+        // Save initial configuration (rank 0 only)
+        if (rank == 0) {
+            save_positions(dir_name + "/positions.txt");
+            save_spin_config(dir_name + "/spins_initial.txt");
+        }
+        
+        // Backup ground state
+        SpinConfigSU2 ground_state_SU2 = spins_SU2;
+        SpinConfigSU3 ground_state_SU3 = spins_SU3;
+        
+        // Reference trajectory M0
+        if (rank == 0) {
+            cout << "\n[2/4] Running reference single-pulse dynamics (M0)..." << endl;
+        }
+        
+        typedef vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> TrajectoryType;
+        
+        auto M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
+                                   pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                   pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                   T_start, T_end, T_step, method, use_gpu);
+        
+        // Restore ground state
+        spins_SU2 = ground_state_SU2;
+        spins_SU3 = ground_state_SU3;
+        
+        // Distribute tau values
+        if (rank == 0) {
+            cout << "\n[3/4] Distributing tau delays across " << mpi_size << " ranks..." << endl;
+        }
+        
+        vector<int> my_tau_indices;
+        vector<double> my_tau_values;
+        for (int i = rank; i < tau_steps; i += mpi_size) {
+            my_tau_indices.push_back(i);
+            my_tau_values.push_back(tau_start + i * tau_step);
+        }
+        
+        // Local trajectories
+        vector<TrajectoryType> local_M1_trajectories;
+        vector<TrajectoryType> local_M01_trajectories;
+        
+        local_M1_trajectories.reserve(my_tau_indices.size());
+        local_M01_trajectories.reserve(my_tau_indices.size());
+        
+        for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
+            double current_tau = my_tau_values[idx];
+            int global_idx = my_tau_indices[idx];
+            
+            cout << "[Rank " << rank << "] Computing tau[" << global_idx << "] = " << current_tau 
+                 << " (" << (idx+1) << "/" << my_tau_indices.size() << ")" << endl;
+            
+            // Restore ground state
+            spins_SU2 = ground_state_SU2;
+            spins_SU3 = ground_state_SU3;
+            
+            // M1: Probe at tau
+            auto M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
+                                pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                T_start, T_end, T_step, method, use_gpu);
+            local_M1_trajectories.push_back(M1_traj);
+            
+            // Restore ground state
+            spins_SU2 = ground_state_SU2;
+            spins_SU3 = ground_state_SU3;
+            
+            // M01: Pump at 0 + Probe at tau
+            auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
+                                     field_in_SU2, field_in_SU3, current_tau,
+                                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                     T_start, T_end, T_step, method, use_gpu);
+            local_M01_trajectories.push_back(M01_traj);
+        }
+        
+        MPI_Barrier(MPI_COMM_WORLD);
+        
+        if (rank == 0) {
+            cout << "\n[4/4] Gathering results from all ranks..." << endl;
+        }
+        
+        // Prepare full arrays
+        vector<TrajectoryType> M1_trajectories(tau_steps);
+        vector<TrajectoryType> M01_trajectories(tau_steps);
+        vector<double> tau_values(tau_steps);
+        
+        for (int i = 0; i < tau_steps; ++i) {
+            tau_values[i] = tau_start + i * tau_step;
+        }
+        
+        // Place local results
+        for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
+            int global_idx = my_tau_indices[idx];
+            M1_trajectories[global_idx] = local_M1_trajectories[idx];
+            M01_trajectories[global_idx] = local_M01_trajectories[idx];
+        }
+        
+        // Gather from all ranks
+        size_t time_points = M0_trajectory.size();
+        // Data per point: time + 3 SU2 vectors + 3 SU3 vectors
+        size_t data_per_point = 1 + 3 * spin_dim_SU2 + 3 * spin_dim_SU3;
+        size_t traj_size = time_points * data_per_point;
+        
+        for (int tau_idx = 0; tau_idx < tau_steps; ++tau_idx) {
+            int owner_rank = tau_idx % mpi_size;
+            
+            if (owner_rank == 0) continue;
+            
+            if (rank == 0) {
+                // Receive from owner
+                vector<double> M1_buffer(traj_size);
+                vector<double> M01_buffer(traj_size);
+                
+                MPI_Recv(M1_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
+                        2 * tau_idx, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M01_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
+                        2 * tau_idx + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                
+                // Deserialize M1
+                M1_trajectories[tau_idx].resize(time_points);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M1_trajectories[tau_idx][t].first = M1_buffer[offset];
+                    // SU2 magnetizations
+                    for (int m = 0; m < 3; ++m) {
+                        M1_trajectories[tau_idx][t].second.first[m] = SpinVector::Zero(spin_dim_SU2);
+                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                            M1_trajectories[tau_idx][t].second.first[m](d) = 
+                                M1_buffer[offset + 1 + m * spin_dim_SU2 + d];
+                        }
+                    }
+                    // SU3 magnetizations
+                    size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
+                    for (int m = 0; m < 3; ++m) {
+                        M1_trajectories[tau_idx][t].second.second[m] = SpinVector::Zero(spin_dim_SU3);
+                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                            M1_trajectories[tau_idx][t].second.second[m](d) = 
+                                M1_buffer[su3_offset + m * spin_dim_SU3 + d];
+                        }
+                    }
+                }
+                
+                // Deserialize M01 (same structure)
+                M01_trajectories[tau_idx].resize(time_points);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M01_trajectories[tau_idx][t].first = M01_buffer[offset];
+                    for (int m = 0; m < 3; ++m) {
+                        M01_trajectories[tau_idx][t].second.first[m] = SpinVector::Zero(spin_dim_SU2);
+                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                            M01_trajectories[tau_idx][t].second.first[m](d) = 
+                                M01_buffer[offset + 1 + m * spin_dim_SU2 + d];
+                        }
+                    }
+                    size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
+                    for (int m = 0; m < 3; ++m) {
+                        M01_trajectories[tau_idx][t].second.second[m] = SpinVector::Zero(spin_dim_SU3);
+                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                            M01_trajectories[tau_idx][t].second.second[m](d) = 
+                                M01_buffer[su3_offset + m * spin_dim_SU3 + d];
+                        }
+                    }
+                }
+                
+            } else if (rank == owner_rank) {
+                // Send to rank 0
+                size_t local_idx = 0;
+                for (size_t i = 0; i < my_tau_indices.size(); ++i) {
+                    if (my_tau_indices[i] == tau_idx) {
+                        local_idx = i;
+                        break;
+                    }
+                }
+                
+                // Serialize M1
+                vector<double> M1_buffer(traj_size);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M1_buffer[offset] = local_M1_trajectories[local_idx][t].first;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                            M1_buffer[offset + 1 + m * spin_dim_SU2 + d] = 
+                                local_M1_trajectories[local_idx][t].second.first[m](d);
+                        }
+                    }
+                    size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                            M1_buffer[su3_offset + m * spin_dim_SU3 + d] = 
+                                local_M1_trajectories[local_idx][t].second.second[m](d);
+                        }
+                    }
+                }
+                
+                // Serialize M01
+                vector<double> M01_buffer(traj_size);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M01_buffer[offset] = local_M01_trajectories[local_idx][t].first;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                            M01_buffer[offset + 1 + m * spin_dim_SU2 + d] = 
+                                local_M01_trajectories[local_idx][t].second.first[m](d);
+                        }
+                    }
+                    size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                            M01_buffer[su3_offset + m * spin_dim_SU3 + d] = 
+                                local_M01_trajectories[local_idx][t].second.second[m](d);
+                        }
+                    }
+                }
+                
+                MPI_Send(M1_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx, MPI_COMM_WORLD);
+                MPI_Send(M01_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx + 1, MPI_COMM_WORLD);
+            }
+        }
+        
+        // Rank 0 writes output
+        if (rank == 0) {
+            string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
+            cout << "\nWriting all data to HDF5 file: " << hdf5_file << endl;
+            
+#ifdef HDF5_ENABLED
+            try {
+                HDF5MixedPumpProbeWriter writer(
+                    hdf5_file,
+                    lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
+                    lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
+                    dim1, dim2, dim3,
+                    spin_length_SU2, spin_length_SU3,
+                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                    T_start, T_end, T_step, method,
+                    tau_start, tau_end, tau_step,
+                    E_ground, M_ground_SU2, M_ground_SU3,
+                    Temp_start, Temp_end, n_anneal,
+                    T_zero_quench, quench_sweeps,
+                    &field_in_SU2, &field_in_SU3,
+                    &site_positions_SU2, &site_positions_SU3
+                );
+                
+                writer.write_reference_trajectory(M0_trajectory);
+                
+                for (int i = 0; i < tau_steps; ++i) {
+                    writer.write_tau_trajectory(i, tau_values[i], M1_trajectories[i], M01_trajectories[i]);
+                }
+                
+                writer.close();
+                cout << "Successfully wrote all data to single HDF5 file" << endl;
+                
+            } catch (H5::Exception& e) {
+                std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
+            }
+#else
+            cout << "Note: HDF5 support not enabled." << endl;
+#endif
+            
+            cout << "\n==========================================" << endl;
+            cout << "Pump-Probe (MPI) Complete!" << endl;
+            cout << "Output directory: " << dir_name << endl;
+            cout << "Total delay points: " << tau_steps << endl;
+            cout << "==========================================" << endl;
+        }
+        
+        // Restore ground state
+        spins_SU2 = ground_state_SU2;
+        spins_SU3 = ground_state_SU3;
+        
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
 // ============================================================
 // GPU Implementation Section
 // ============================================================

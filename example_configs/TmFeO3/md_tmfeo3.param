@@ -7,7 +7,7 @@ system = tmfeo3
 simulation_mode = molecular_dynamics
 
 # Lattice Size (for mixed Fe + Tm lattice)
-lattice_size = 8,8,8
+lattice_size = 12,12,12
 
 # Fe Exchange Interaction Parameters (in meV)
 J1ab = 4.92     # In-plane nearest neighbor
@@ -41,7 +41,7 @@ field_direction = 0,1,0
 # Simulated Annealing (equilibration)
 T_start = 10.0
 T_end = 0.01
-annealing_steps = 1000
+annealing_steps = 10000
 overrelaxation_rate = 1
 use_twist_boundary = false
 gaussian_move = false

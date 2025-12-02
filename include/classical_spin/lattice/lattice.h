@@ -3384,6 +3384,317 @@ public:
         cout << "==========================================" << endl;
     }
 
+    /**
+     * MPI-parallelized pump-probe spectroscopy
+     * 
+     * Distributes tau delay values across MPI ranks for parallel computation.
+     * Each rank computes a subset of tau values, then rank 0 gathers and writes results.
+     * 
+     * This is more efficient than trial-based parallelization when num_trials == 1
+     * since each tau delay is independent and can be computed in parallel.
+     * 
+     * @param field_in        Pulse direction for each sublattice
+     * @param pulse_amp       Pulse amplitude
+     * @param pulse_width     Pulse width (Gaussian)
+     * @param pulse_freq      Pulse frequency
+     * @param tau_start       Starting delay time
+     * @param tau_end         Ending delay time
+     * @param tau_step        Delay time step
+     * @param T_start         Integration start time
+     * @param T_end           Integration end time
+     * @param T_step          Integration time step
+     * @param Temp_start      Annealing start temperature (for equilibration info)
+     * @param Temp_end        Annealing end temperature
+     * @param n_anneal        Number of annealing steps
+     * @param T_zero_quench   Whether T=0 quench was used
+     * @param quench_sweeps   Number of quench sweeps
+     * @param dir_name        Output directory
+     * @param method          ODE integration method
+     * @param use_gpu         Use GPU acceleration
+     */
+    void pump_probe_spectroscopy_mpi(const vector<SpinVector>& field_in,
+                                     double pulse_amp, double pulse_width, double pulse_freq,
+                                     double tau_start, double tau_end, double tau_step,
+                                     double T_start, double T_end, double T_step,
+                                     double Temp_start = 5.0, double Temp_end = 1e-3,
+                                     size_t n_anneal = 1000,
+                                     bool T_zero_quench = false, size_t quench_sweeps = 1000,
+                                     string dir_name = "spectroscopy", string method = "dopri5",
+                                     bool use_gpu = false) {
+        
+        int rank, mpi_size;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+        
+        std::filesystem::create_directories(dir_name);
+        
+        // Calculate total tau steps
+        int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+        
+        if (rank == 0) {
+            cout << "\n==========================================" << endl;
+            cout << "Pump-Probe Spectroscopy (MPI Parallel)" << endl;
+            cout << "==========================================" << endl;
+            cout << "MPI ranks: " << mpi_size << endl;
+            cout << "Pulse parameters:" << endl;
+            cout << "  Amplitude: " << pulse_amp << endl;
+            cout << "  Width: " << pulse_width << endl;
+            cout << "  Frequency: " << pulse_freq << endl;
+            cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
+            cout << "Total delay points: " << tau_steps << endl;
+            cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
+            cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            if (use_gpu) {
+                cout << "GPU acceleration: ENABLED (each rank uses assigned GPU)" << endl;
+            }
+        }
+        
+        // Use current spin configuration as ground state (assumed pre-loaded)
+        if (rank == 0) {
+            cout << "\n[1/4] Using current configuration as ground state..." << endl;
+        }
+        double E_ground = energy_density();
+        SpinVector M_ground = magnetization_local();
+        if (rank == 0) {
+            cout << "  Ground state: E/N = " << E_ground << ", |M| = " << M_ground.norm() << endl;
+        }
+        
+        // Save initial configuration (rank 0 only)
+        if (rank == 0) {
+            save_positions(dir_name + "/positions.txt");
+            save_spin_config(dir_name + "/spins_initial.txt");
+        }
+        
+        // Backup ground state
+        SpinConfig ground_state = spins;
+        
+        // Step 2: Reference single-pulse dynamics (all ranks compute, but only rank 0 keeps result)
+        // Actually all ranks need the same M0, so we can compute once and broadcast
+        if (rank == 0) {
+            cout << "\n[2/4] Running reference single-pulse dynamics (M0)..." << endl;
+            if (use_gpu) cout << "  Using GPU acceleration" << endl;
+        }
+        
+        // All ranks compute M0 (they have same ground state)
+        auto M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
+                                   T_start, T_end, T_step, method, use_gpu);
+        
+        // Restore ground state
+        spins = ground_state;
+        
+        // Step 3: Distribute tau values across ranks
+        if (rank == 0) {
+            cout << "\n[3/4] Distributing tau delays across " << mpi_size << " ranks..." << endl;
+        }
+        
+        // Calculate which tau indices this rank handles
+        vector<int> my_tau_indices;
+        vector<double> my_tau_values;
+        for (int i = rank; i < tau_steps; i += mpi_size) {
+            my_tau_indices.push_back(i);
+            my_tau_values.push_back(tau_start + i * tau_step);
+        }
+        
+        if (rank == 0) {
+            cout << "  Each rank processing " << my_tau_indices.size() << " tau points" << endl;
+        }
+        
+        // Local storage for this rank's trajectories
+        vector<vector<pair<double, array<SpinVector, 3>>>> local_M1_trajectories;
+        vector<vector<pair<double, array<SpinVector, 3>>>> local_M01_trajectories;
+        
+        local_M1_trajectories.reserve(my_tau_indices.size());
+        local_M01_trajectories.reserve(my_tau_indices.size());
+        
+        // Compute trajectories for assigned tau values
+        for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
+            double current_tau = my_tau_values[idx];
+            int global_idx = my_tau_indices[idx];
+            
+            cout << "[Rank " << rank << "] Computing tau[" << global_idx << "] = " << current_tau 
+                 << " (" << (idx+1) << "/" << my_tau_indices.size() << ")" << endl;
+            
+            // Restore ground state
+            spins = ground_state;
+            
+            // M1: Probe pulse only at time tau
+            auto M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
+                                       T_start, T_end, T_step, method, use_gpu);
+            local_M1_trajectories.push_back(M1_trajectory);
+            
+            // Restore ground state again
+            spins = ground_state;
+            
+            // M01: Pump at t=0 + Probe at t=tau
+            auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
+                                            pulse_amp, pulse_width, pulse_freq,
+                                            T_start, T_end, T_step, method, use_gpu);
+            local_M01_trajectories.push_back(M01_trajectory);
+        }
+        
+        // Synchronize before gathering
+        MPI_Barrier(MPI_COMM_WORLD);
+        
+        if (rank == 0) {
+            cout << "\n[4/4] Gathering results from all ranks..." << endl;
+        }
+        
+        // Prepare full arrays for gathering (rank 0 only needs full storage)
+        vector<vector<pair<double, array<SpinVector, 3>>>> M1_trajectories(tau_steps);
+        vector<vector<pair<double, array<SpinVector, 3>>>> M01_trajectories(tau_steps);
+        vector<double> tau_values(tau_steps);
+        
+        // Fill in tau values
+        for (int i = 0; i < tau_steps; ++i) {
+            tau_values[i] = tau_start + i * tau_step;
+        }
+        
+        // Place local results in correct positions
+        for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
+            int global_idx = my_tau_indices[idx];
+            M1_trajectories[global_idx] = local_M1_trajectories[idx];
+            M01_trajectories[global_idx] = local_M01_trajectories[idx];
+        }
+        
+        // Now gather trajectories from all ranks to rank 0
+        // We need to serialize trajectories for MPI communication
+        // Each trajectory point: (time, [M_total, M_staggered, M_local]) with spin_dim components each
+        
+        size_t time_points = M0_trajectory.size();
+        size_t data_per_point = 1 + 3 * spin_dim;  // time + 3 SpinVectors
+        size_t traj_size = time_points * data_per_point;
+        
+        // For each tau index not owned by rank 0, receive from owner
+        for (int tau_idx = 0; tau_idx < tau_steps; ++tau_idx) {
+            int owner_rank = tau_idx % mpi_size;
+            
+            if (owner_rank == 0) {
+                // Rank 0 already has this data
+                continue;
+            }
+            
+            if (rank == 0) {
+                // Rank 0 receives data from owner
+                vector<double> M1_buffer(traj_size);
+                vector<double> M01_buffer(traj_size);
+                
+                MPI_Recv(M1_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
+                        2 * tau_idx, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M01_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
+                        2 * tau_idx + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                
+                // Deserialize M1 trajectory
+                M1_trajectories[tau_idx].resize(time_points);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M1_trajectories[tau_idx][t].first = M1_buffer[offset];
+                    for (int m = 0; m < 3; ++m) {
+                        M1_trajectories[tau_idx][t].second[m] = SpinVector::Zero(spin_dim);
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            M1_trajectories[tau_idx][t].second[m](d) = M1_buffer[offset + 1 + m * spin_dim + d];
+                        }
+                    }
+                }
+                
+                // Deserialize M01 trajectory
+                M01_trajectories[tau_idx].resize(time_points);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M01_trajectories[tau_idx][t].first = M01_buffer[offset];
+                    for (int m = 0; m < 3; ++m) {
+                        M01_trajectories[tau_idx][t].second[m] = SpinVector::Zero(spin_dim);
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            M01_trajectories[tau_idx][t].second[m](d) = M01_buffer[offset + 1 + m * spin_dim + d];
+                        }
+                    }
+                }
+            } else if (rank == owner_rank) {
+                // This rank sends data to rank 0
+                // Find local index for this tau
+                size_t local_idx = 0;
+                for (size_t i = 0; i < my_tau_indices.size(); ++i) {
+                    if (my_tau_indices[i] == tau_idx) {
+                        local_idx = i;
+                        break;
+                    }
+                }
+                
+                // Serialize M1 trajectory
+                vector<double> M1_buffer(traj_size);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M1_buffer[offset] = local_M1_trajectories[local_idx][t].first;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            M1_buffer[offset + 1 + m * spin_dim + d] = local_M1_trajectories[local_idx][t].second[m](d);
+                        }
+                    }
+                }
+                
+                // Serialize M01 trajectory
+                vector<double> M01_buffer(traj_size);
+                for (size_t t = 0; t < time_points; ++t) {
+                    size_t offset = t * data_per_point;
+                    M01_buffer[offset] = local_M01_trajectories[local_idx][t].first;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            M01_buffer[offset + 1 + m * spin_dim + d] = local_M01_trajectories[local_idx][t].second[m](d);
+                        }
+                    }
+                }
+                
+                MPI_Send(M1_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx, MPI_COMM_WORLD);
+                MPI_Send(M01_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx + 1, MPI_COMM_WORLD);
+            }
+        }
+        
+        // Only rank 0 writes output
+        if (rank == 0) {
+            string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
+            cout << "\nWriting all data to single HDF5 file: " << hdf5_file << endl;
+            
+#ifdef HDF5_ENABLED
+            try {
+                HDF5PumpProbeWriter writer(
+                    hdf5_file,
+                    lattice_size, spin_dim, N_atoms, dim1, dim2, dim3, spin_length,
+                    pulse_amp, pulse_width, pulse_freq,
+                    T_start, T_end, T_step, method,
+                    tau_start, tau_end, tau_step,
+                    E_ground, M_ground, Temp_start, Temp_end, n_anneal,
+                    T_zero_quench, quench_sweeps,
+                    &field_in, &site_positions
+                );
+                
+                writer.write_reference_trajectory(M0_trajectory);
+                
+                for (int i = 0; i < tau_steps; ++i) {
+                    writer.write_tau_trajectory(i, tau_values[i], M1_trajectories[i], M01_trajectories[i]);
+                }
+                
+                writer.close();
+                cout << "Successfully wrote all data to single HDF5 file" << endl;
+                
+            } catch (H5::Exception& e) {
+                std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
+            }
+#else
+            cout << "Warning: HDF5 support not enabled. Data not saved to HDF5 file." << endl;
+#endif
+            
+            cout << "\n==========================================" << endl;
+            cout << "Pump-Probe Spectroscopy (MPI) Complete!" << endl;
+            cout << "Output directory: " << dir_name << endl;
+            cout << "Total delay points: " << tau_steps << endl;
+            cout << "==========================================" << endl;
+        }
+        
+        // Restore ground state at end
+        spins = ground_state;
+        
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
     // Note: GPU-accelerated methods use the modular GPU implementation in lattice_gpu.cuh/cu
     // For C++ compilation, use_gpu parameter will automatically fallback to CPU implementation.
 

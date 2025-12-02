@@ -179,6 +179,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "tau_step") {
                 config.tau_step = stod(value);
             }
+            else if (key == "parallel_tau") {
+                config.parallel_tau = parse_bool(value);
+            }
             else if (key == "sweep_parameter") {
                 config.sweep_parameter = value;
                 // For backward compatibility, also populate new arrays

@@ -394,12 +394,24 @@ void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int si
  * This is equivalent to pump-probe with a delay time (tau) scan
  */
 void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank, int size) {
+    // Determine parallelization strategy:
+    // - If num_trials == 1 and parallel_tau is enabled: parallelize over tau (use MPI version)
+    // - If num_trials > 1: parallelize over trials (original behavior)
+    bool use_tau_parallel = (config.num_trials == 1) && config.parallel_tau && (size > 1);
+    
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS)..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
+        if (use_tau_parallel) {
+            cout << "Parallelization mode: tau-parallel (distributing delay points across ranks)" << endl;
+        } else if (config.num_trials > 1) {
+            cout << "Parallelization mode: trial-parallel (distributing trials across ranks)" << endl;
+        } else {
+            cout << "Parallelization mode: single rank" << endl;
+        }
         if (config.use_gpu) {
 #ifdef CUDA_ENABLED
             cout << "GPU acceleration: ENABLED" << endl;
@@ -447,24 +459,23 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
         pump_dir_norm[2] /= norm;
     }
     
-    // Distribute trials across MPI ranks
-    for (int trial = rank; trial < config.num_trials; trial += size) {
-        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+    // Create field directions for all sublattices
+    vector<Eigen::VectorXd> field_dirs;
+    for (size_t i = 0; i < lattice.N_atoms; ++i) {
+        Eigen::VectorXd field_dir(3);
+        field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+        field_dirs.push_back(field_dir);
+    }
+    
+    if (use_tau_parallel) {
+        // Single trial, parallelize over tau values
+        string trial_dir = config.output_dir + "/sample_0";
         filesystem::create_directories(trial_dir);
         
-        if (config.num_trials > 1) {
-            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
-        }
-        
-        // Re-initialize spins for each trial (except first on this rank)
-        if (trial != rank) {
-            lattice.init_random();
-        }
-        
-        // First equilibrate to ground state (skip if spins loaded from file)
+        // Equilibrate to ground state (all ranks do this with same seed for consistency)
         if (config.initial_spin_config.empty()) {
             if (rank == 0) {
-                cout << "\n[1/3] Equilibrating to ground state..." << endl;
+                cout << "\n[1/2] Equilibrating to ground state..." << endl;
             }
             lattice.simulated_annealing(
                 config.T_start,
@@ -475,34 +486,44 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
                 config.gaussian_move,
                 config.cooling_rate,
                 "",
-                config.save_observables,
+                false,  // Don't save observables during equilibration
                 config.T_zero,
                 config.n_deterministics
             );
         } else if (rank == 0) {
-            cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
+            cout << "\n[1/2] Skipping equilibration (using loaded spin configuration)" << endl;
         }
         
-        // Create field directions for all sublattices
-        vector<Eigen::VectorXd> field_dirs;
-        for (size_t i = 0; i < lattice.N_atoms; ++i) {
-            Eigen::VectorXd field_dir(3);
-            field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
-            field_dirs.push_back(field_dir);
+        // Synchronize spins across all ranks to ensure consistent ground state
+        // Broadcast spin configuration from rank 0 to all ranks
+        vector<double> spin_buffer(lattice.lattice_size * lattice.spin_dim);
+        if (rank == 0) {
+            for (size_t i = 0; i < lattice.lattice_size; ++i) {
+                for (size_t d = 0; d < lattice.spin_dim; ++d) {
+                    spin_buffer[i * lattice.spin_dim + d] = lattice.spins[i](d);
+                }
+            }
+        }
+        MPI_Bcast(spin_buffer.data(), spin_buffer.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        if (rank != 0) {
+            for (size_t i = 0; i < lattice.lattice_size; ++i) {
+                for (size_t d = 0; d < lattice.spin_dim; ++d) {
+                    lattice.spins[i](d) = spin_buffer[i * lattice.spin_dim + d];
+                }
+            }
         }
         
         if (rank == 0) {
-            cout << "\n[2/3] Pulse configuration:" << endl;
-            cout << "  Amplitude: " << config.pump_amplitude << endl;
-            cout << "  Width: " << config.pump_width << endl;
-            cout << "  Frequency: " << config.pump_frequency << endl;
+            cout << "\n[2/2] Running MPI-parallel pump-probe spectroscopy..." << endl;
+            cout << "  Pulse amplitude: " << config.pump_amplitude << endl;
+            cout << "  Pulse width: " << config.pump_width << endl;
+            cout << "  Pulse frequency: " << config.pump_frequency << endl;
             cout << "  Direction: [" << pump_dir_norm[0] << ", " 
                  << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
-            cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
         }
         
-        // Run the full 2DCS scan using lattice method
-        lattice.pump_probe_spectroscopy(
+        // Run MPI-parallelized version
+        lattice.pump_probe_spectroscopy_mpi(
             field_dirs,
             config.pump_amplitude,
             config.pump_width,
@@ -523,8 +544,78 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
             config.use_gpu
         );
         
-        cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;
-        cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/pump_probe_spectroscopy.h5" << endl;
+    } else {
+        // Original behavior: distribute trials across MPI ranks
+        for (int trial = rank; trial < config.num_trials; trial += size) {
+            string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+            filesystem::create_directories(trial_dir);
+            
+            if (config.num_trials > 1) {
+                cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+            }
+            
+            // Re-initialize spins for each trial (except first on this rank)
+            if (trial != rank) {
+                lattice.init_random();
+            }
+            
+            // First equilibrate to ground state (skip if spins loaded from file)
+            if (config.initial_spin_config.empty()) {
+                if (rank == 0 || config.num_trials == 1) {
+                    cout << "\n[1/3] Equilibrating to ground state..." << endl;
+                }
+                lattice.simulated_annealing(
+                    config.T_start,
+                    config.T_end,
+                    config.annealing_steps,
+                    config.overrelaxation_rate,
+                    config.use_twist_boundary,
+                    config.gaussian_move,
+                    config.cooling_rate,
+                    "",
+                    config.save_observables,
+                    config.T_zero,
+                    config.n_deterministics
+                );
+            } else if (rank == 0) {
+                cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
+            }
+            
+            if (rank == 0 || config.num_trials == 1) {
+                cout << "\n[2/3] Pulse configuration:" << endl;
+                cout << "  Amplitude: " << config.pump_amplitude << endl;
+                cout << "  Width: " << config.pump_width << endl;
+                cout << "  Frequency: " << config.pump_frequency << endl;
+                cout << "  Direction: [" << pump_dir_norm[0] << ", " 
+                     << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+                cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
+            }
+            
+            // Run the full 2DCS scan using lattice method
+            lattice.pump_probe_spectroscopy(
+                field_dirs,
+                config.pump_amplitude,
+                config.pump_width,
+                config.pump_frequency,
+                config.tau_start,
+                config.tau_end,
+                config.tau_step,
+                config.md_time_start,
+                config.md_time_end,
+                config.md_timestep,
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                false,  // T_zero_quench
+                config.overrelaxation_rate,
+                trial_dir,
+                config.md_integrator,
+                config.use_gpu
+            );
+            
+            cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;
+            cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/pump_probe_spectroscopy.h5" << endl;
+        }
     }
     
     // Synchronize all ranks
@@ -907,12 +998,22 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
  * Run 2D coherent spectroscopy (2DCS) for mixed lattice
  */
 void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
+    // Determine parallelization strategy
+    bool use_tau_parallel = (config.num_trials == 1) && config.parallel_tau && (size > 1);
+    
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS) on mixed lattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
+        if (use_tau_parallel) {
+            cout << "Parallelization mode: tau-parallel (distributing delay points across ranks)" << endl;
+        } else if (config.num_trials > 1) {
+            cout << "Parallelization mode: trial-parallel (distributing trials across ranks)" << endl;
+        } else {
+            cout << "Parallelization mode: single rank" << endl;
+        }
         if (config.use_gpu) {
 #ifdef CUDA_ENABLED
             cout << "GPU acceleration: ENABLED" << endl;
@@ -963,24 +1064,26 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         pump_dir_su3(2) = 1.0;  // Default to λ3
     }
     
-    // Distribute trials across MPI ranks
-    for (int trial = rank; trial < config.num_trials; trial += size) {
-        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+    // Create field directions for all sublattices
+    vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
+    vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
+    
+    for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+        field_dirs_su2[i] = pump_dir_su2;
+    }
+    for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+        field_dirs_su3[i] = pump_dir_su3;
+    }
+    
+    if (use_tau_parallel) {
+        // Single trial, parallelize over tau values
+        string trial_dir = config.output_dir + "/sample_0";
         filesystem::create_directories(trial_dir);
         
-        if (config.num_trials > 1) {
-            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
-        }
-        
-        // Re-initialize spins for each trial (except first on this rank)
-        if (trial != rank) {
-            lattice.init_random();
-        }
-        
-        // First equilibrate to ground state (skip if spins loaded from file)
+        // Equilibrate to ground state
         if (config.initial_spin_config.empty()) {
             if (rank == 0) {
-                cout << "\n[1/3] Equilibrating to ground state..." << endl;
+                cout << "\n[1/2] Equilibrating to ground state..." << endl;
             }
             lattice.simulated_annealing(
                 config.T_start,
@@ -988,37 +1091,62 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 config.annealing_steps,
                 config.gaussian_move,
                 config.cooling_rate,
-                trial_dir,
-                config.save_observables,
+                "",
+                false,
                 config.T_zero,
                 config.n_deterministics
             );
         } else if (rank == 0) {
-            cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
+            cout << "\n[1/2] Skipping equilibration (using loaded spin configuration)" << endl;
         }
         
-        vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
-        vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
-        
-        for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
-            field_dirs_su2[i] = pump_dir_su2;
+        // Synchronize SU2 spins across all ranks
+        vector<double> spin_buffer_su2(lattice.lattice_size_SU2 * lattice.spin_dim_SU2);
+        if (rank == 0) {
+            for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+                for (size_t d = 0; d < lattice.spin_dim_SU2; ++d) {
+                    spin_buffer_su2[i * lattice.spin_dim_SU2 + d] = lattice.spins_SU2[i](d);
+                }
+            }
         }
-        for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
-            field_dirs_su3[i] = pump_dir_su3;
+        MPI_Bcast(spin_buffer_su2.data(), spin_buffer_su2.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        if (rank != 0) {
+            for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+                for (size_t d = 0; d < lattice.spin_dim_SU2; ++d) {
+                    lattice.spins_SU2[i](d) = spin_buffer_su2[i * lattice.spin_dim_SU2 + d];
+                }
+            }
+        }
+        
+        // Synchronize SU3 spins across all ranks
+        vector<double> spin_buffer_su3(lattice.lattice_size_SU3 * lattice.spin_dim_SU3);
+        if (rank == 0) {
+            for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+                for (size_t d = 0; d < lattice.spin_dim_SU3; ++d) {
+                    spin_buffer_su3[i * lattice.spin_dim_SU3 + d] = lattice.spins_SU3[i](d);
+                }
+            }
+        }
+        MPI_Bcast(spin_buffer_su3.data(), spin_buffer_su3.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        if (rank != 0) {
+            for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+                for (size_t d = 0; d < lattice.spin_dim_SU3; ++d) {
+                    lattice.spins_SU3[i](d) = spin_buffer_su3[i * lattice.spin_dim_SU3 + d];
+                }
+            }
         }
         
         if (rank == 0) {
-            cout << "\n[2/3] Pulse configuration:" << endl;
+            cout << "\n[2/2] Running MPI-parallel pump-probe spectroscopy..." << endl;
             cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
             cout << "  SU2 Width: " << config.pump_width << endl;
             cout << "  SU2 Frequency: " << config.pump_frequency << endl;
             cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
             cout << "  SU3 Component: λ" << su3_pump_component << endl;
-            cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
         }
         
-        // Run the full 2DCS scan using mixed lattice method
-        lattice.pump_probe_spectroscopy(
+        // Run MPI-parallelized version
+        lattice.pump_probe_spectroscopy_mpi(
             field_dirs_su2,
             field_dirs_su3,
             config.pump_amplitude,
@@ -1043,8 +1171,80 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             config.use_gpu
         );
         
-        cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;
-        cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
+    } else {
+        // Original behavior: distribute trials across MPI ranks
+        for (int trial = rank; trial < config.num_trials; trial += size) {
+            string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+            filesystem::create_directories(trial_dir);
+            
+            if (config.num_trials > 1) {
+                cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+            }
+            
+            // Re-initialize spins for each trial (except first on this rank)
+            if (trial != rank) {
+                lattice.init_random();
+            }
+            
+            // First equilibrate to ground state (skip if spins loaded from file)
+            if (config.initial_spin_config.empty()) {
+                if (rank == 0 || config.num_trials == 1) {
+                    cout << "\n[1/3] Equilibrating to ground state..." << endl;
+                }
+                lattice.simulated_annealing(
+                    config.T_start,
+                    config.T_end,
+                    config.annealing_steps,
+                    config.gaussian_move,
+                    config.cooling_rate,
+                    trial_dir,
+                    config.save_observables,
+                    config.T_zero,
+                    config.n_deterministics
+                );
+            } else if (rank == 0) {
+                cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
+            }
+            
+            if (rank == 0 || config.num_trials == 1) {
+                cout << "\n[2/3] Pulse configuration:" << endl;
+                cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
+                cout << "  SU2 Width: " << config.pump_width << endl;
+                cout << "  SU2 Frequency: " << config.pump_frequency << endl;
+                cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
+                cout << "  SU3 Component: λ" << su3_pump_component << endl;
+                cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
+            }
+            
+            // Run the full 2DCS scan using mixed lattice method
+            lattice.pump_probe_spectroscopy(
+                field_dirs_su2,
+                field_dirs_su3,
+                config.pump_amplitude,
+                config.pump_width,
+                config.pump_frequency,
+                config.pump_amplitude,
+                config.pump_width,
+                config.pump_frequency,
+                config.tau_start,
+                config.tau_end,
+                config.tau_step,
+                config.md_time_start,
+                config.md_time_end,
+                config.md_timestep,
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                false,  // T_zero_quench
+                config.overrelaxation_rate,
+                trial_dir,
+                config.md_integrator,
+                config.use_gpu
+            );
+            
+            cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;
+            cout << "[Rank " << rank << "] Results saved to: " << trial_dir << "/pump_probe_spectroscopy_mixed.h5" << endl;
+        }
     }
     
     // Synchronize all ranks

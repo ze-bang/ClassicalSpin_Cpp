@@ -378,9 +378,48 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
         tau_values = f['/tau_scan/tau_values'][:]
         tau_step = len(tau_values)
         
-        # Process all 3 components (x, y, z)
+        # Print metadata
+        print(f"  Loaded HDF5: {hdf5_path}")
+        print(f"    Time steps: {len(times)}, t_range: [{times[0]:.4f}, {times[-1]:.4f}]")
+        print(f"    Tau values: {tau_step}, tau_range: [{tau_values[0]:.4f}, {tau_values[-1]:.4f}]")
+        print(f"    M_local shape: {M0_antiferro.shape}")
+        
+        # Print pulse and lattice metadata if available
+        if '/metadata' in f:
+            metadata_grp = f['/metadata']
+            print(f"  Pulse parameters:")
+            if 'pulse_amp' in metadata_grp.attrs:
+                print(f"    Amplitude: {metadata_grp.attrs['pulse_amp']}")
+            if 'pulse_width' in metadata_grp.attrs:
+                print(f"    Width: {metadata_grp.attrs['pulse_width']}")
+            if 'pulse_freq' in metadata_grp.attrs:
+                print(f"    Frequency: {metadata_grp.attrs['pulse_freq']}")
+            print(f"  Lattice parameters:")
+            if 'n_atoms' in metadata_grp.attrs:
+                print(f"    n_atoms: {metadata_grp.attrs['n_atoms']}")
+            if 'spin_dim' in metadata_grp.attrs:
+                print(f"    spin_dim: {metadata_grp.attrs['spin_dim']}")
+            if 'lattice_size' in metadata_grp.attrs:
+                print(f"    lattice_size: {metadata_grp.attrs['lattice_size']}")
+            print(f"  Time evolution:")
+            if 'T_start' in metadata_grp.attrs:
+                print(f"    T_start: {metadata_grp.attrs['T_start']}")
+            if 'T_end' in metadata_grp.attrs:
+                print(f"    T_end: {metadata_grp.attrs['T_end']}")
+            if 'T_step' in metadata_grp.attrs:
+                print(f"    T_step: {metadata_grp.attrs['T_step']}")
+            if 'integration_method' in metadata_grp.attrs:
+                method = metadata_grp.attrs['integration_method']
+                if isinstance(method, bytes):
+                    method = method.decode('utf-8')
+                print(f"    Integration method: {method}")
+        
+        # Process all 3 components (x, y, z) for M_NL, M0, M1, M01
         length = len(M0_antiferro[:, 0])
         M_NL_components = np.zeros((3, tau_step, length))
+        M0_components = np.zeros((3, tau_step, length))  # M0 broadcast to all tau
+        M1_components = np.zeros((3, tau_step, length))
+        M01_components = np.zeros((3, tau_step, length))
         
         for i, tau_val in enumerate(tau_values):
             tau_group = f[f'/tau_scan/tau_{i}']
@@ -394,6 +433,9 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
                 
                 min_len = min(len(M0), len(M1), len(M01), length)
                 M_NL_components[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+                M0_components[comp, i, :min_len] = M0[:min_len]  # Broadcast M0 to all tau slices
+                M1_components[comp, i, :min_len] = M1[:min_len]
+                M01_components[comp, i, :min_len] = M01[:min_len]
         
         dt = times[1] - times[0] if len(times) > 1 else 1.0
         tau = tau_values
@@ -406,6 +448,97 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
     omega_tau = np.fft.fftshift(omega_tau)
     omega_t = np.fft.fftfreq(M_NL.shape[1], dt) * 2 * np.pi
     omega_t = np.fft.fftshift(omega_t)
+    
+    # Helper function for 2D FFT analysis
+    def compute_2d_fft(data):
+        """Compute 2D FFT with proper shifting and flipping."""
+        data_static = np.mean(data)
+        data_dynamic = data - data_static
+        data_FF = np.fft.fft2(data_dynamic)
+        data_FF = np.fft.fftshift(data_FF)
+        data_FF = np.abs(data_FF)
+        data_FF = np.flip(data_FF, axis=1)  # Flip omega_t axis
+        return data_FF
+    
+    # =========================================================================
+    # Analysis for M0, M1, M01 (individual signals)
+    # =========================================================================
+    signal_names = ['M0', 'M1', 'M01']
+    signal_data = [M0_components, M1_components, M01_components]
+    
+    for sig_name, sig_components in zip(signal_names, signal_data):
+        print(f"  Processing {sig_name}...")
+        
+        # Create debug plot for this signal (3 components x 3 plot types)
+        fig_sig, axes_sig = plt.subplots(3, 3, figsize=(15, 12))
+        
+        for comp in range(3):
+            sig_comp = sig_components[comp]
+            
+            # Time domain plot
+            ax_time = axes_sig[comp, 0]
+            for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+            ax_time.set_xlabel('Time index')
+            ax_time.set_ylabel(f'${sig_name}_{{{component_labels[comp]}}}$')
+            ax_time.set_title(f'{component_labels[comp]}-component (time domain)')
+            ax_time.legend(fontsize=6)
+            ax_time.grid(True, alpha=0.3)
+            
+            # 2D time-tau plot
+            ax_2d = axes_sig[comp, 1]
+            im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                              extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+            ax_2d.set_xlabel('Time index')
+            ax_2d.set_ylabel('τ')
+            ax_2d.set_title(f'{component_labels[comp]}-component (τ, t)')
+            plt.colorbar(im, ax=ax_2d)
+            
+            # Frequency domain plot (2D FFT)
+            sig_comp_FF = compute_2d_fft(sig_comp)
+            
+            ax_freq = axes_sig[comp, 2]
+            im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                      norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+            ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+            ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+            ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
+            if omega_t_window is not None:
+                ax_freq.set_xlim(omega_t_window)
+            if omega_tau_window is not None:
+                ax_freq.set_ylim(omega_tau_window)
+            plt.colorbar(im_freq, ax=ax_freq)
+            
+            # Save individual component FFT data
+            np.savetxt(dir + f"/{sig_name}_FF_{component_labels[comp]}.txt", sig_comp_FF)
+        
+        plt.tight_layout()
+        plt.savefig(dir + f"/{sig_name}_components_debug.pdf")
+        plt.clf()
+        plt.close()
+        
+        # Main spectrum plot (z-component)
+        sig_z = sig_components[2]
+        sig_z_FF = compute_2d_fft(sig_z)
+        np.savetxt(dir + f"/{sig_name}_FF.txt", sig_z_FF)
+        
+        plt.imshow(sig_z_FF, origin='lower',
+                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                   aspect='auto', cmap='gnuplot2', norm='linear')
+        plt.xlabel('$\\omega_t$ (rad/time)')
+        plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+        plt.colorbar(label='Intensity')
+        plt.title(f'{sig_name} Spectrum')
+        if omega_t_window is not None:
+            plt.xlim(omega_t_window)
+        if omega_tau_window is not None:
+            plt.ylim(omega_tau_window)
+        plt.savefig(dir + f"/{sig_name}_SPEC.pdf")
+        plt.clf()
+    
+    # =========================================================================
+    # Original M_NL analysis (M01 - M0 - M1)
+    # =========================================================================
     
     # Debug plots: Plot M_NL for each component in time domain and frequency domain
     fig_debug, axes_debug = plt.subplots(3, 3, figsize=(15, 12))
@@ -438,9 +571,13 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
         M_NL_comp_FF = np.fft.fftshift(M_NL_comp_FF)
         M_NL_comp_FF = np.abs(M_NL_comp_FF)
         
+        # Flip omega_t axis to correct direction
+        M_NL_comp_FF = np.flip(M_NL_comp_FF, axis=1)
+        
         ax_freq = axes_debug[comp, 2]
+        # Use flipped omega_t for extent (note: we need to reverse the x extent)
         im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                  norm='log', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                  norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
         ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
         ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
         ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
@@ -467,12 +604,15 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
     M_NL_FF = np.fft.fftshift(M_NL_FF)
     M_NL_FF = np.abs(M_NL_FF)
     
+    # Flip omega_t axis (second dimension) to correct direction
+    M_NL_FF = np.flip(M_NL_FF, axis=1)
+    
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
     
-    # Full spectrum plot
+    # Full spectrum plot (omega_t is now flipped, so extent goes from -omega_t[-1] to -omega_t[0])
     plt.imshow(M_NL_FF, origin='lower',
                extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-               aspect='auto', cmap='gnuplot2', norm='log')
+               aspect='auto', cmap='gnuplot2', norm='linear')
     plt.xlabel('$\\omega_t$ (rad/time)')
     plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
     plt.colorbar(label='Intensity')
@@ -679,7 +819,7 @@ def read_2D_nonlinear_tot(dir, omega_t_window=None, omega_tau_window=None):
         np.savetxt(dir + "/M_NL_tot.txt", A)
         
         # Plot aggregated result
-        plt.imshow(A, origin='lower', aspect='auto', cmap='gnuplot2', norm='log')
+        plt.imshow(A, origin='lower', aspect='auto', cmap='gnuplot2', norm='linear')
         plt.xlabel('$\\omega_t$ (rad/time)')
         plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
         plt.colorbar(label='Intensity')
@@ -832,7 +972,7 @@ if __name__ == "__main__":
         read_MD_tot(directory)
     elif function == "pp":
         print("Running: read_2D_nonlinear_tot()")
-        read_2D_nonlinear_tot(directory,(-2,2),(-2,2))
+        read_2D_nonlinear_tot(directory,(-0.5,0.5),(-0.5,0.5))
     elif function == "spin":
         print("Running: parse_spin_config()")
         parse_spin_config(directory)

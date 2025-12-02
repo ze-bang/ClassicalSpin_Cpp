@@ -27,19 +27,20 @@ use_twist_boundary = false
 
 # Pump-Probe Setup
 pump_direction = 0,0,1      # Pump along z
-pump_amplitude = 0.5
+pump_amplitude = 0.15
 pump_width = 0.38
 pump_frequency = 0.33
 pump_time = 0.0             # Not used in 2DCS scan
 
 # 2DCS Scan Parameters
-tau_start = 0          # Delay time start
-tau_end = 600               # Delay time end
+tau_start = -300          # Delay time start
+tau_end = 300               # Delay time end
 tau_step = 0.25              # Delay time step
+parallel_tau = true         # Enable MPI parallelization over tau when num_trials=1
 
 # Time evolution after pump
-md_time_start = 0.0
-md_time_end = 600.0
+md_time_start = -300.0
+md_time_end = 300.0
 md_timestep = 0.25
 
 # Output

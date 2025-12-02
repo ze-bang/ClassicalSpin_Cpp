@@ -51,6 +51,7 @@ su3_pump_component = 2  # λ3 component (0-7)
 tau_start = 0.0
 tau_end = -20.0
 tau_step = 0.01
+parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
 
 # Time evolution
 md_time_start = -20.0

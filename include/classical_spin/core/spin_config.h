@@ -96,6 +96,7 @@ struct SpinConfig {
     double tau_start = -200.0;
     double tau_end = 200.0;
     double tau_step = 1.0;
+    bool parallel_tau = true;  // If true, parallelize tau loop across MPI ranks when num_trials == 1
     
     // Parameter sweep parameters
     string sweep_parameter = "";      // Name of parameter to sweep (deprecated, use sweep_parameters)
