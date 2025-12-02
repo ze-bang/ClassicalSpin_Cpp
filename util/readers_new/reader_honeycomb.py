@@ -369,67 +369,96 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
     omega_t_window = _validate_window(omega_t_window, "omega_t_window")
     omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
     hdf5_path = os.path.join(dir, "pump_probe_spectroscopy.h5")
-    if os.path.exists(hdf5_path):
-        # Read from HDF5 file
-        with h5py.File(hdf5_path, 'r') as f:
-            times = f['/reference/times'][:]
-            M0_antiferro = f['/reference/M_antiferro'][:]
-            tau_values = f['/tau_scan/tau_values'][:]
-            tau_step = len(tau_values)
-            
-            M0 = M0_antiferro[:, 2]
-            length = len(M0)
-            M_NL = np.zeros((tau_step, length))
-            
-            for i, tau_val in enumerate(tau_values):
-                tau_group = f[f'/tau_scan/tau_{i}']
-                M1_antiferro = tau_group['M1_antiferro'][:]
-                M01_antiferro = tau_group['M01_antiferro'][:]
-                
-                M1 = M1_antiferro[:, 2]
-                M01 = M01_antiferro[:, 2]
-                
-                min_len = min(len(M0), len(M1), len(M01), length)
-                M_NL[i] = M01[:min_len] - M0[:min_len] - M1[:min_len]
-            
-            dt = times[1] - times[0] if len(times) > 1 else 1.0
-            tau = tau_values
-    else:
-        # Fallback to text file format
-        params = {}
-        with open(os.path.dirname(dir) + "/simulation_params.txt", 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('=') and ':' in line:
-                    key, value = line.split(':', 1)
-                    params[key.strip()] = value.strip()
-        
-        tau_start = float(params['tau_start'])
-        tau_end = float(params['tau_end'])
-        tau_step = int(1 + (tau_end - tau_start) / float(params['tau_step_size']))
-        time_start = float(params['T_start'])
-        time_end = float(params['T_end'])
-        time_step = int(1 + (time_end - time_start) / float(params['T_step_size']))
-        
-        M0 = np.loadtxt(dir + "/M_time_0/M0/M_t_f.txt")[:, 2]
-        T = np.linspace(time_start, time_end, int(time_step))
-        dt = T[1] - T[0] if len(T) > 1 else 1.0
-        length = min(len(M0), int(time_step))
-        
-        M_NL = np.zeros((int(tau_step), length))
-        tau = np.linspace(tau_start, tau_end, int(tau_step))
-        
-        directory = os.fsencode(dir)
-        for file in sorted(os.listdir(directory)):
-            filename = os.fsdecode(file)
-            if os.path.isdir(dir + "/" + filename):
-                info = filename.split("_")
-                M1 = np.loadtxt(dir + "/" + filename + "/M1/M_t_f.txt")[:, 2]
-                M01 = np.loadtxt(dir + "/" + filename + "/M01/M_t_f.txt")[:, 2]
-                min_len = min(len(M0), len(M1), len(M01), length)
-                M_NL[int(info[2])] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+    component_labels = ['x', 'y', 'z']
     
-    # Subtract static values for FFT stability
+    # Read from HDF5 file
+    with h5py.File(hdf5_path, 'r') as f:
+        times = f['/reference/times'][:]
+        M0_antiferro = f['/reference/M_local'][:]
+        tau_values = f['/tau_scan/tau_values'][:]
+        tau_step = len(tau_values)
+        
+        # Process all 3 components (x, y, z)
+        length = len(M0_antiferro[:, 0])
+        M_NL_components = np.zeros((3, tau_step, length))
+        
+        for i, tau_val in enumerate(tau_values):
+            tau_group = f[f'/tau_scan/tau_{i}']
+            M1_antiferro = tau_group['M1_local'][:]
+            M01_antiferro = tau_group['M01_local'][:]
+            
+            for comp in range(3):
+                M0 = M0_antiferro[:, comp]
+                M1 = M1_antiferro[:, comp]
+                M01 = M01_antiferro[:, comp]
+                
+                min_len = min(len(M0), len(M1), len(M01), length)
+                M_NL_components[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+        
+        dt = times[1] - times[0] if len(times) > 1 else 1.0
+        tau = tau_values
+
+    # Use z-component for main analysis (backwards compatible)
+    M_NL = M_NL_components[2]
+    
+    # Compute omega arrays (needed for all plots)
+    omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
+    omega_tau = np.fft.fftshift(omega_tau)
+    omega_t = np.fft.fftfreq(M_NL.shape[1], dt) * 2 * np.pi
+    omega_t = np.fft.fftshift(omega_t)
+    
+    # Debug plots: Plot M_NL for each component in time domain and frequency domain
+    fig_debug, axes_debug = plt.subplots(3, 3, figsize=(15, 12))
+    for comp in range(3):
+        M_NL_comp = M_NL_components[comp]
+        
+        # Time domain plot (M_NL vs t for different tau)
+        ax_time = axes_debug[comp, 0]
+        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):  # Plot ~5 tau values
+            ax_time.plot(M_NL_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+        ax_time.set_xlabel('Time index')
+        ax_time.set_ylabel(f'$M_{{NL,{component_labels[comp]}}}$')
+        ax_time.set_title(f'{component_labels[comp]}-component (time domain)')
+        ax_time.legend(fontsize=6)
+        ax_time.grid(True, alpha=0.3)
+        
+        # 2D time-tau plot
+        ax_2d = axes_debug[comp, 1]
+        im = ax_2d.imshow(M_NL_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                          extent=[0, M_NL_comp.shape[1], tau[0], tau[-1]])
+        ax_2d.set_xlabel('Time index')
+        ax_2d.set_ylabel('τ')
+        ax_2d.set_title(f'{component_labels[comp]}-component (τ, t)')
+        plt.colorbar(im, ax=ax_2d)
+        
+        # Frequency domain plot (2D FFT)
+        M_NL_comp_static = np.mean(M_NL_comp)
+        M_NL_comp_dynamic = M_NL_comp - M_NL_comp_static
+        M_NL_comp_FF = np.fft.fft2(M_NL_comp_dynamic)
+        M_NL_comp_FF = np.fft.fftshift(M_NL_comp_FF)
+        M_NL_comp_FF = np.abs(M_NL_comp_FF)
+        
+        ax_freq = axes_debug[comp, 2]
+        im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                  norm='log', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+        ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+        ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+        ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
+        if omega_t_window is not None:
+            ax_freq.set_xlim(omega_t_window)
+        if omega_tau_window is not None:
+            ax_freq.set_ylim(omega_tau_window)
+        plt.colorbar(im_freq, ax=ax_freq)
+        
+        # Save individual component FFT data
+        np.savetxt(dir + f"/M_NL_FF_{component_labels[comp]}.txt", M_NL_comp_FF)
+    
+    plt.tight_layout()
+    plt.savefig(dir + "/M_NL_components_debug.pdf")
+    plt.clf()
+    plt.close()
+    
+    # Subtract static values for FFT stability (z-component for main output)
     M_NL_static = np.mean(M_NL)
     M_NL_dynamic = M_NL - M_NL_static
     
@@ -437,12 +466,6 @@ def read_2D_nonlinear(dir, omega_t_window=None, omega_tau_window=None):
     M_NL_FF = np.fft.fft2(M_NL_dynamic)
     M_NL_FF = np.fft.fftshift(M_NL_FF)
     M_NL_FF = np.abs(M_NL_FF)
-    
-    # Compute omega arrays
-    omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
-    omega_tau = np.fft.fftshift(omega_tau)
-    omega_t = np.fft.fftfreq(len(M0), dt) * 2 * np.pi
-    omega_t = np.fft.fftshift(omega_t)
     
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_FF)
     

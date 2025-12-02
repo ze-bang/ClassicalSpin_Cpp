@@ -2928,21 +2928,29 @@ public:
                 SpinVector M_SU3 = SpinVector::Zero(spin_dim_SU3);
                 SpinVector M_SU2_antiferro = SpinVector::Zero(spin_dim_SU2);
                 SpinVector M_SU3_antiferro = SpinVector::Zero(spin_dim_SU3);
+                SpinVector M_SU2_global = SpinVector::Zero(spin_dim_SU2);
+                SpinVector M_SU3_global = SpinVector::Zero(spin_dim_SU3);
                 
                 double M_SU2_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
+                double M_SU2_global_arr[8] = {0};
                 compute_sublattice_magnetizations_from_flat(x.data(), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
+                compute_magnetization_global_SU2_from_flat(x.data(), M_SU2_global_arr);
                 M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
                 
                 double M_SU3_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
+                double M_SU3_global_arr[8] = {0};
                 size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
                 compute_sublattice_magnetizations_from_flat(x.data(), SU3_offset, 
                     lattice_size_SU3, spin_dim_SU3, M_SU3_arr, M_SU3_antiferro_arr);
+                compute_magnetization_global_SU3_from_flat(x.data(), M_SU3_global_arr);
                 M_SU3 = Eigen::Map<Eigen::VectorXd>(M_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3);
                 
                 // Compute accurate energy density directly from flat state (includes all interactions)
                 double E = total_energy_flat(x.data()) / (lattice_size_SU2 + lattice_size_SU3);
@@ -2950,8 +2958,8 @@ public:
                 // Write to HDF5 directly from flat state (no conversion needed)
                 if (hdf5_writer) {
                     hdf5_writer->write_flat_step(t, 
-                                                M_SU2_antiferro, M_SU2, 
-                                                M_SU3_antiferro, M_SU3,
+                                                M_SU2_antiferro, M_SU2, M_SU2_global,
+                                                M_SU3_antiferro, M_SU3, M_SU3_global,
                                                 x.data());
                     save_count++;
                 }
@@ -4270,23 +4278,28 @@ private:
         // Write trajectory to HDF5
         size_t save_count = 0;
         for (const auto& [t, state_vec] : trajectory) {
-            double M_SU2_arr[8] = {0}, M_SU2_antiferro_arr[8] = {0};
-            double M_SU3_arr[8] = {0}, M_SU3_antiferro_arr[8] = {0};
+            double M_SU2_arr[8] = {0}, M_SU2_antiferro_arr[8] = {0}, M_SU2_global_arr[8] = {0};
+            double M_SU3_arr[8] = {0}, M_SU3_antiferro_arr[8] = {0}, M_SU3_global_arr[8] = {0};
             
             compute_sublattice_magnetizations_from_flat(state_vec.data(), 0, 
                 lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
+            compute_magnetization_global_SU2_from_flat(state_vec.data(), M_SU2_global_arr);
             
             size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
             compute_sublattice_magnetizations_from_flat(state_vec.data(), SU3_offset, 
                 lattice_size_SU3, spin_dim_SU3, M_SU3_arr, M_SU3_antiferro_arr);
+            compute_magnetization_global_SU3_from_flat(state_vec.data(), M_SU3_global_arr);
             
             SpinVector M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
             SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
             SpinVector M_SU3 = Eigen::Map<Eigen::VectorXd>(M_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
             SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
+            SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3);
             
             if (hdf5_writer) {
-                hdf5_writer->write_flat_step(t, M_SU2_antiferro, M_SU2, M_SU3_antiferro, M_SU3, state_vec.data());
+                hdf5_writer->write_flat_step(t, M_SU2_antiferro, M_SU2, M_SU2_global, 
+                                            M_SU3_antiferro, M_SU3, M_SU3_global, state_vec.data());
                 save_count++;
             }
             

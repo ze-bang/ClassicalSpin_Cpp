@@ -22,6 +22,7 @@
  *   - spins [n_steps, n_sites, spin_dim]      : Full spin configuration
  *   - magnetization_antiferro [n_steps, spin_dim] : Antiferromagnetic order parameter
  *   - magnetization_local [n_steps, spin_dim]     : Local magnetization
+ *   - magnetization_global [n_steps, spin_dim]    : Global magnetization (sublattice-frame transformed)
  * 
  * /metadata/
  *   - lattice_size          : Total number of sites
@@ -135,6 +136,10 @@ public:
         mag_local_dataset_ = trajectory_group_.createDataSet(
             "magnetization_local", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
         
+        // Magnetization global dataset [n_steps, spin_dim]
+        mag_global_dataset_ = trajectory_group_.createDataSet(
+            "magnetization_global", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
+        
         // Spins dataset [n_steps, n_sites, spin_dim] - optional, can be huge
         // Only create if user wants full trajectory
         hsize_t spin_dims[3] = {0, lattice_size, spin_dim};
@@ -154,6 +159,7 @@ public:
     void write_step(double time, 
                    const SpinVector& mag_antiferro,
                    const SpinVector& mag_local,
+                   const SpinVector& mag_global,
                    const std::vector<SpinVector>& spins) {
         // Extend datasets
         hsize_t new_size[3];
@@ -195,6 +201,17 @@ public:
         mag_local_dataset_.write(mag_local_data.data(), H5::PredType::NATIVE_DOUBLE, 
                                 mag_mspace, mag_local_fspace);
         
+        // Write magnetization global
+        mag_global_dataset_.extend(new_size);
+        H5::DataSpace mag_global_fspace = mag_global_dataset_.getSpace();
+        mag_global_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        std::vector<double> mag_global_data(spin_dim_);
+        for (size_t i = 0; i < spin_dim_; ++i) {
+            mag_global_data[i] = mag_global(i);
+        }
+        mag_global_dataset_.write(mag_global_data.data(), H5::PredType::NATIVE_DOUBLE, 
+                                mag_mspace, mag_global_fspace);
+        
         // Write spins
         new_size[0] = current_step_ + 1;
         new_size[1] = lattice_size_;
@@ -226,6 +243,7 @@ public:
     void write_flat_step(double time, 
                         const SpinVector& mag_antiferro,
                         const SpinVector& mag_local,
+                        const SpinVector& mag_global,
                         const double* flat_spins) {
         // Extend datasets
         hsize_t new_size[3];
@@ -267,6 +285,17 @@ public:
         mag_local_dataset_.write(mag_local_data.data(), H5::PredType::NATIVE_DOUBLE, 
                                 mag_mspace, mag_local_fspace);
         
+        // Write magnetization global
+        mag_global_dataset_.extend(new_size);
+        H5::DataSpace mag_global_fspace = mag_global_dataset_.getSpace();
+        mag_global_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        std::vector<double> mag_global_data(spin_dim_);
+        for (size_t i = 0; i < spin_dim_; ++i) {
+            mag_global_data[i] = mag_global(i);
+        }
+        mag_global_dataset_.write(mag_global_data.data(), H5::PredType::NATIVE_DOUBLE, 
+                                mag_mspace, mag_global_fspace);
+        
         // Write spins directly from flat array (zero-copy)
         new_size[0] = current_step_ + 1;
         new_size[1] = lattice_size_;
@@ -292,6 +321,7 @@ public:
         times_dataset_.close();
         mag_antiferro_dataset_.close();
         mag_local_dataset_.close();
+        mag_global_dataset_.close();
         spins_dataset_.close();
         trajectory_group_.close();
         metadata_group_.close();
@@ -341,6 +371,7 @@ private:
     H5::DataSet times_dataset_;
     H5::DataSet mag_antiferro_dataset_;
     H5::DataSet mag_local_dataset_;
+    H5::DataSet mag_global_dataset_;
     H5::DataSet spins_dataset_;
 };
 
@@ -353,12 +384,14 @@ private:
  *   - spins [n_steps, n_sites_SU2, spin_dim_SU2]
  *   - magnetization_antiferro [n_steps, spin_dim_SU2]
  *   - magnetization_local [n_steps, spin_dim_SU2]
+ *   - magnetization_global [n_steps, spin_dim_SU2]
  * 
  * /trajectory_SU3/
  *   - times [n_steps]
  *   - spins [n_steps, n_sites_SU3, spin_dim_SU3]
  *   - magnetization_antiferro [n_steps, spin_dim_SU3]
  *   - magnetization_local [n_steps, spin_dim_SU3]
+ *   - magnetization_global [n_steps, spin_dim_SU3]
  * 
  * /metadata_SU2/ and /metadata_SU3/
  *   - lattice_size, spin_dim, n_atoms, dimensions, spin_length, positions
@@ -440,29 +473,29 @@ public:
         
         // Create expandable datasets for SU2
         create_trajectory_datasets(traj_SU2_group_, lattice_size_SU2, spin_dim_SU2,
-                                   times_SU2_ds_, mag_af_SU2_ds_, mag_loc_SU2_ds_, spins_SU2_ds_);
+                                   times_SU2_ds_, mag_af_SU2_ds_, mag_loc_SU2_ds_, mag_glob_SU2_ds_, spins_SU2_ds_);
         
         // Create expandable datasets for SU3
         create_trajectory_datasets(traj_SU3_group_, lattice_size_SU3, spin_dim_SU3,
-                                   times_SU3_ds_, mag_af_SU3_ds_, mag_loc_SU3_ds_, spins_SU3_ds_);
+                                   times_SU3_ds_, mag_af_SU3_ds_, mag_loc_SU3_ds_, mag_glob_SU3_ds_, spins_SU3_ds_);
     }
     
     /**
      * Write a single time step directly from flat state array
      */
     void write_flat_step(double time, 
-                        const SpinVector& mag_af_SU2, const SpinVector& mag_loc_SU2,
-                        const SpinVector& mag_af_SU3, const SpinVector& mag_loc_SU3,
+                        const SpinVector& mag_af_SU2, const SpinVector& mag_loc_SU2, const SpinVector& mag_glob_SU2,
+                        const SpinVector& mag_af_SU3, const SpinVector& mag_loc_SU3, const SpinVector& mag_glob_SU3,
                         const double* flat_state) {
         // Write SU2 data
-        write_step_data(times_SU2_ds_, mag_af_SU2_ds_, mag_loc_SU2_ds_, spins_SU2_ds_,
-                       time, mag_af_SU2, mag_loc_SU2, flat_state, 
+        write_step_data(times_SU2_ds_, mag_af_SU2_ds_, mag_loc_SU2_ds_, mag_glob_SU2_ds_, spins_SU2_ds_,
+                       time, mag_af_SU2, mag_loc_SU2, mag_glob_SU2, flat_state, 
                        lattice_size_SU2_, spin_dim_SU2_, 0);
         
         // Write SU3 data (offset in flat array)
         size_t offset_SU3 = lattice_size_SU2_ * spin_dim_SU2_;
-        write_step_data(times_SU3_ds_, mag_af_SU3_ds_, mag_loc_SU3_ds_, spins_SU3_ds_,
-                       time, mag_af_SU3, mag_loc_SU3, flat_state + offset_SU3,
+        write_step_data(times_SU3_ds_, mag_af_SU3_ds_, mag_loc_SU3_ds_, mag_glob_SU3_ds_, spins_SU3_ds_,
+                       time, mag_af_SU3, mag_loc_SU3, mag_glob_SU3, flat_state + offset_SU3,
                        lattice_size_SU3_, spin_dim_SU3_, 0);
         
         current_step_++;
@@ -472,11 +505,13 @@ public:
         times_SU2_ds_.close();
         mag_af_SU2_ds_.close();
         mag_loc_SU2_ds_.close();
+        mag_glob_SU2_ds_.close();
         spins_SU2_ds_.close();
         
         times_SU3_ds_.close();
         mag_af_SU3_ds_.close();
         mag_loc_SU3_ds_.close();
+        mag_glob_SU3_ds_.close();
         spins_SU3_ds_.close();
         
         traj_SU2_group_.close();
@@ -498,7 +533,7 @@ public:
 private:
     void create_trajectory_datasets(H5::Group& group, size_t lattice_size, size_t spin_dim,
                                    H5::DataSet& times_ds, H5::DataSet& mag_af_ds,
-                                   H5::DataSet& mag_loc_ds, H5::DataSet& spins_ds) {
+                                   H5::DataSet& mag_loc_ds, H5::DataSet& mag_glob_ds, H5::DataSet& spins_ds) {
         // Times dataset
         hsize_t time_dims[1] = {0};
         hsize_t time_maxdims[1] = {H5S_UNLIMITED};
@@ -519,6 +554,7 @@ private:
         mag_prop.setDeflate(6);
         mag_af_ds = group.createDataSet("magnetization_antiferro", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
         mag_loc_ds = group.createDataSet("magnetization_local", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
+        mag_glob_ds = group.createDataSet("magnetization_global", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
         
         // Spins dataset [n_steps, n_sites, spin_dim]
         hsize_t spin_dims[3] = {0, lattice_size, spin_dim};
@@ -531,8 +567,8 @@ private:
         spins_ds = group.createDataSet("spins", H5::PredType::NATIVE_DOUBLE, spin_space, spin_prop);
     }
     
-    void write_step_data(H5::DataSet& times_ds, H5::DataSet& mag_af_ds, H5::DataSet& mag_loc_ds, H5::DataSet& spins_ds,
-                        double time, const SpinVector& mag_af, const SpinVector& mag_loc,
+    void write_step_data(H5::DataSet& times_ds, H5::DataSet& mag_af_ds, H5::DataSet& mag_loc_ds, H5::DataSet& mag_glob_ds, H5::DataSet& spins_ds,
+                        double time, const SpinVector& mag_af, const SpinVector& mag_loc, const SpinVector& mag_glob,
                         const double* flat_spins, size_t lattice_size, size_t spin_dim, size_t step_offset) {
         hsize_t new_size[3];
         size_t step = current_step_ - step_offset;
@@ -567,6 +603,14 @@ private:
         std::vector<double> mag_loc_data(spin_dim);
         for (size_t i = 0; i < spin_dim; ++i) mag_loc_data[i] = mag_loc(i);
         mag_loc_ds.write(mag_loc_data.data(), H5::PredType::NATIVE_DOUBLE, mag_mspace, mag_loc_fspace);
+        
+        // Write magnetization global
+        mag_glob_ds.extend(new_size);
+        H5::DataSpace mag_glob_fspace = mag_glob_ds.getSpace();
+        mag_glob_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        std::vector<double> mag_glob_data(spin_dim);
+        for (size_t i = 0; i < spin_dim; ++i) mag_glob_data[i] = mag_glob(i);
+        mag_glob_ds.write(mag_glob_data.data(), H5::PredType::NATIVE_DOUBLE, mag_mspace, mag_glob_fspace);
         
         // Write spins directly from flat array
         new_size[0] = step + 1;
@@ -623,8 +667,8 @@ private:
     H5::H5File file_;
     H5::Group traj_SU2_group_, traj_SU3_group_;
     H5::Group meta_SU2_group_, meta_SU3_group_, meta_global_group_;
-    H5::DataSet times_SU2_ds_, mag_af_SU2_ds_, mag_loc_SU2_ds_, spins_SU2_ds_;
-    H5::DataSet times_SU3_ds_, mag_af_SU3_ds_, mag_loc_SU3_ds_, spins_SU3_ds_;
+    H5::DataSet times_SU2_ds_, mag_af_SU2_ds_, mag_loc_SU2_ds_, mag_glob_SU2_ds_, spins_SU2_ds_;
+    H5::DataSet times_SU3_ds_, mag_af_SU3_ds_, mag_loc_SU3_ds_, mag_glob_SU3_ds_, spins_SU3_ds_;
 };
 
 /**

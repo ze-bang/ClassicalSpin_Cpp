@@ -277,18 +277,6 @@ Contributions are welcome! Please:
 3. Make your changes
 4. Submit a pull request
 
-## Citation
-
-If you use this software in your research, please cite:
-
-```bibtex
-@software{classical_spin_cpp,
-  author = {Ze-Bang, et al.},
-  title = {ClassicalSpin_Cpp: High-Performance Classical Spin Simulation Framework},
-  url = {https://github.com/ze-bang/ClassicalSpin_Cpp},
-  year = {2024}
-}
-```
 
 ## License
 

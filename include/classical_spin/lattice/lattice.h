@@ -2521,6 +2521,7 @@ public:
                 // Compute magnetizations directly from flat state (zero allocation)
                 double M_local_arr[8] = {0};  // Max spin_dim
                 double M_antiferro_arr[8] = {0};
+                double M_global_arr[8] = {0};
                 
                 for (size_t i = 0; i < lattice_size; ++i) {
                     double sign = (i % 2 == 0) ? 1.0 : -1.0;
@@ -2530,15 +2531,19 @@ public:
                     }
                 }
                 
+                // Compute global magnetization (sublattice-frame transformed)
+                compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
                 SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
                 // Compute accurate energy density directly from flat state (includes bilinear)
                 double E = total_energy_flat(x.data()) / lattice_size;
                 
                 // Write to HDF5 directly from flat state (no conversion needed)
                 if (hdf5_writer) {
-                    hdf5_writer->write_flat_step(t, M_antiferro, M_local, x.data());
+                    hdf5_writer->write_flat_step(t, M_antiferro, M_local, M_global, x.data());
                     save_count++;
                 }
                 
@@ -2628,15 +2633,18 @@ public:
         for (const auto& [t, state_vec] : trajectory) {
             double M_local_arr[8] = {0};
             double M_antiferro_arr[8] = {0};
+            double M_global_arr[8] = {0};
             
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
             SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             if (hdf5_writer) {
-                hdf5_writer->write_flat_step(t, M_antiferro, M_local, state_vec.data());
+                hdf5_writer->write_flat_step(t, M_antiferro, M_local, M_global, state_vec.data());
                 save_count++;
             }
             
@@ -3742,15 +3750,18 @@ private:
         for (const auto& [t, state_vec] : trajectory) {
             double M_local_arr[8] = {0};
             double M_antiferro_arr[8] = {0};
+            double M_global_arr[8] = {0};
             
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
+            compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
             SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             if (hdf5_writer) {
-                hdf5_writer->write_flat_step(t, M_antiferro, M_local, state_vec.data());
+                hdf5_writer->write_flat_step(t, M_antiferro, M_local, M_global, state_vec.data());
                 save_count++;
             }
             
