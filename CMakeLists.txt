@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 project(ClassicalSpin_Cpp LANGUAGES CXX CUDA)
 
+option(CLASSICAL_SPIN_ENABLE_WARNINGS "Enable recommended warning flags" ON)
+option(CLASSICAL_SPIN_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+
 # ============================================================================
 # PROJECT CONFIGURATION
 # ============================================================================
@@ -25,7 +28,14 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # CUDA architectures
-set(CMAKE_CUDA_ARCHITECTURES "60;75;80;86;89" CACHE STRING "CUDA architectures")
+if(NOT CMAKE_CUDA_ARCHITECTURES)
+    set(_classical_spin_default_arch "native")
+    if(DEFINED ENV{CLASSICAL_SPIN_CUDA_ARCHS} AND NOT "$ENV{CLASSICAL_SPIN_CUDA_ARCHS}" STREQUAL "")
+        set(_classical_spin_default_arch "$ENV{CLASSICAL_SPIN_CUDA_ARCHS}")
+    endif()
+    set(CMAKE_CUDA_ARCHITECTURES "${_classical_spin_default_arch}" CACHE STRING "CUDA architectures" FORCE)
+endif()
+unset(_classical_spin_default_arch)
 
 # ============================================================================
 # DEPENDENCIES
@@ -42,6 +52,72 @@ find_package(HDF5 REQUIRED COMPONENTS C CXX)
 # ============================================================================
 # COMPILER FLAGS
 # ============================================================================
+
+# Compiler warnings configuration
+set(CLASSICAL_SPIN_CXX_WARNING_FLAGS "")
+set(CLASSICAL_SPIN_CUDA_WARNING_FLAGS "")
+
+if(CLASSICAL_SPIN_ENABLE_WARNINGS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS
+            -Wall
+            -Wextra
+            -Wformat=2
+            -Wnon-virtual-dtor
+            # Suppress noisy warnings common in scientific computing code:
+            -Wno-sign-compare          # size_t vs int comparisons (very common with Eigen)
+            -Wno-sign-conversion       # signed/unsigned conversions
+            -Wno-conversion            # narrowing conversions (common with Eigen Index types)
+            -Wno-shadow                # constructor parameters shadowing members (common pattern)
+            -Wno-old-style-cast        # C-style casts (from external headers like HDF5)
+            -Wno-deprecated-copy       # deprecated implicit copy operators (HDF5 library issue)
+            -Wno-float-conversion      # float/double conversions
+            -Wno-unused-parameter      # unused parameters in callbacks/interfaces
+            -Wno-pedantic              # strict ISO compliance (e.g., __int128)
+            -Wno-reorder               # member initialization order
+        )
+    elseif(MSVC)
+        list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS /W3 /permissive-)
+    endif()
+
+    if(CMAKE_CUDA_COMPILER)
+        list(APPEND CLASSICAL_SPIN_CUDA_WARNING_FLAGS 
+            -Xcompiler=-Wall 
+            -Xcompiler=-Wextra
+            -Xcompiler=-Wno-sign-compare
+            -Xcompiler=-Wno-sign-conversion
+            -Xcompiler=-Wno-conversion
+            -Xcompiler=-Wno-shadow
+            -Xcompiler=-Wno-old-style-cast
+            -Xcompiler=-Wno-deprecated-copy
+            -Xcompiler=-Wno-float-conversion
+            -Xcompiler=-Wno-unused-parameter
+            -Xcompiler=-Wno-pedantic
+            -Xcompiler=-Wno-reorder
+        )
+    endif()
+
+    if(CLASSICAL_SPIN_WARNINGS_AS_ERRORS)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS -Werror)
+        elseif(MSVC)
+            list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS /WX)
+        endif()
+
+        if(CMAKE_CUDA_COMPILER)
+            list(APPEND CLASSICAL_SPIN_CUDA_WARNING_FLAGS -Xcompiler=-Werror)
+        endif()
+    endif()
+endif()
+
+function(classical_spin_apply_warnings target)
+    if(CLASSICAL_SPIN_ENABLE_WARNINGS)
+        target_compile_options(${target} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:${CLASSICAL_SPIN_CXX_WARNING_FLAGS}>
+            $<$<COMPILE_LANGUAGE:CUDA>:${CLASSICAL_SPIN_CUDA_WARNING_FLAGS}>
+        )
+    endif()
+endfunction()
 
 # CUDA compiler flags
 # --extended-lambda allows __device__ annotation on lambdas (required for Thrust)
@@ -159,6 +235,7 @@ target_include_directories(classical_spin_core PUBLIC
 target_compile_options(classical_spin_core PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPTIMIZATION_FLAGS}>
 )
+classical_spin_apply_warnings(classical_spin_core)
 
 # CUDA library
 if(GPU_SOURCES)
@@ -199,6 +276,7 @@ if(GPU_SOURCES)
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_AMX_WORKAROUND}>
     )
+    classical_spin_apply_warnings(classical_spin_gpu)
 endif()
 
 # ============================================================================
@@ -227,6 +305,7 @@ function(add_optimized_executable exec_name source_file)
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
     )
+    classical_spin_apply_warnings(${exec_name})
     
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set_target_properties(${exec_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
