@@ -1158,7 +1158,7 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
         auto trajectory = lattice.single_pulse_drive(
             field_dirs_su2, field_dirs_su3, config.pump_time,
             config.pump_amplitude, config.pump_width, config.pump_frequency,
-            config.pump_amplitude, config.pump_width, config.pump_frequency,
+            config.pump_amplitude_su3, config.pump_width_su3, config.pump_frequency_su3,
             config.md_time_start, config.md_time_end, config.md_timestep,
             config.md_integrator, config.use_gpu
         );
@@ -1414,9 +1414,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         
         if (rank == 0) {
             cout << "\n[2/2] Running MPI-parallel pump-probe spectroscopy..." << endl;
-            cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
-            cout << "  SU2 Width: " << config.pump_width << endl;
-            cout << "  SU2 Frequency: " << config.pump_frequency << endl;
+            cout << "  SU2 Pulse: amplitude=" << config.pump_amplitude 
+                 << ", width=" << config.pump_width 
+                 << ", frequency=" << config.pump_frequency << endl;
             if (pump_dirs_norm.size() == 1) {
                 cout << "  SU2 Direction: [" << pump_dirs_norm[0][0] << ", " 
                      << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
@@ -1427,6 +1427,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                          << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
                 }
             }
+            cout << "  SU3 Pulse: amplitude=" << config.pump_amplitude_su3 
+                 << ", width=" << config.pump_width_su3 
+                 << ", frequency=" << config.pump_frequency_su3 << endl;
             if (pump_dirs_su3_norm.size() == 1) {
                 cout << "  SU3 Direction (Gell-Mann): [";
                 for (int k = 0; k < 8; ++k) {
@@ -1454,9 +1457,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             config.pump_amplitude,
             config.pump_width,
             config.pump_frequency,
-            config.pump_amplitude,
-            config.pump_width,
-            config.pump_frequency,
+            config.pump_amplitude_su3,
+            config.pump_width_su3,
+            config.pump_frequency_su3,
             config.tau_start,
             config.tau_end,
             config.tau_step,
@@ -1513,9 +1516,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             
             if (rank == 0 || config.num_trials == 1) {
                 cout << "\n[2/3] Pulse configuration:" << endl;
-                cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
-                cout << "  SU2 Width: " << config.pump_width << endl;
-                cout << "  SU2 Frequency: " << config.pump_frequency << endl;
+                cout << "  SU2 Pulse: amplitude=" << config.pump_amplitude 
+                     << ", width=" << config.pump_width 
+                     << ", frequency=" << config.pump_frequency << endl;
                 if (pump_dirs_norm.size() == 1) {
                     cout << "  SU2 Direction: [" << pump_dirs_norm[0][0] << ", " 
                          << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
@@ -1526,6 +1529,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                              << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
                     }
                 }
+                cout << "  SU3 Pulse: amplitude=" << config.pump_amplitude_su3 
+                     << ", width=" << config.pump_width_su3 
+                     << ", frequency=" << config.pump_frequency_su3 << endl;
                 if (pump_dirs_su3_norm.size() == 1) {
                     cout << "  SU3 Direction (Gell-Mann): [";
                     for (int k = 0; k < 8; ++k) {
@@ -1554,9 +1560,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 config.pump_amplitude,
                 config.pump_width,
                 config.pump_frequency,
-                config.pump_amplitude,
-                config.pump_width,
-                config.pump_frequency,
+                config.pump_amplitude_su3,
+                config.pump_width_su3,
+                config.pump_frequency_su3,
                 config.tau_start,
                 config.tau_end,
                 config.tau_step,

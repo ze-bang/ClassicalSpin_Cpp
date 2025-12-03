@@ -81,12 +81,17 @@ struct SpinConfig {
     size_t probe_rate = 2000;
     vector<int> ranks_to_write = {0};
     
-    // Pump-probe parameters
+    // Pump-probe parameters (SU2 / default)
     double pump_amplitude = 1.0;
     double pump_width = 10.0;
     double pump_frequency = 0.0;
     double pump_time = 0.0;
     vector<vector<double>> pump_directions = {{0, 1, 0}};  // Per-sublattice pump directions (general, dimension inferred from lattice)
+    
+    // SU3-specific pump parameters (for mixed lattice systems)
+    double pump_amplitude_su3 = 1.0;
+    double pump_width_su3 = 10.0;
+    double pump_frequency_su3 = 0.0;
     vector<vector<double>> pump_directions_su3 = {{0, 0, 1, 0, 0, 0, 0, 0}};  // Per-sublattice pump directions for SU3 sublattice in mixed systems
     
     double probe_amplitude = 0.1;

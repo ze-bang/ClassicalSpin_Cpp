@@ -155,6 +155,16 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pump_direction") {
                 config.pump_directions = parse_vectorN_list_auto(value, 3);  // Default to 3D, auto-detect dimension
             }
+            // SU3-specific pump parameters
+            else if (key == "pump_amplitude_su3") {
+                config.pump_amplitude_su3 = stod(value);
+            }
+            else if (key == "pump_width_su3") {
+                config.pump_width_su3 = stod(value);
+            }
+            else if (key == "pump_frequency_su3") {
+                config.pump_frequency_su3 = stod(value);
+            }
             else if (key == "pump_direction_su3") {
                 config.pump_directions_su3 = parse_vectorN_list_auto(value, 8);  // Default to 8D for SU3
             }
@@ -334,7 +344,7 @@ void SpinConfig::to_file(const string& filename) const {
     file << "field_strength = " << field_strength << "\n";
     file << "field_direction = " << field_direction[0] << "," << field_direction[1] << "," << field_direction[2] << "\n\n";
     
-    file << "# Pump-Probe Parameters\n";
+    file << "# Pump-Probe Parameters (SU2 / default)\n";
     file << "pump_amplitude = " << pump_amplitude << "\n";
     file << "pump_width = " << pump_width << "\n";
     file << "pump_frequency = " << pump_frequency << "\n";
@@ -345,6 +355,10 @@ void SpinConfig::to_file(const string& filename) const {
         file << pump_directions[i][0] << "," << pump_directions[i][1] << "," << pump_directions[i][2];
     }
     file << "\n";
+    file << "\n# SU3-specific Pump Parameters (for mixed lattice)\n";
+    file << "pump_amplitude_su3 = " << pump_amplitude_su3 << "\n";
+    file << "pump_width_su3 = " << pump_width_su3 << "\n";
+    file << "pump_frequency_su3 = " << pump_frequency_su3 << "\n";
     file << "pump_direction_su3 = ";
     for (size_t i = 0; i < pump_directions_su3.size(); ++i) {
         if (i > 0) file << ",";
