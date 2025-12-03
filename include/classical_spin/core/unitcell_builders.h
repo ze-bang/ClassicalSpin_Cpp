@@ -26,4 +26,7 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config);
 // Build TmFeO3 Fe-only unit cell (SU2 only, no Tm atoms)
 UnitCell build_tmfeo3_fe(const SpinConfig& config);
 
+// Build TmFeO3 Tm-only unit cell (SU3 only, no Fe atoms)
+UnitCell build_tmfeo3_tm(const SpinConfig& config);
+
 #endif // UNITCELL_BUILDERS_H

@@ -517,3 +517,60 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     return Fe_atoms;
 }
 
+UnitCell build_tmfeo3_tm(const SpinConfig& config) {
+    // Crystal field parameters for Tm ions
+    const double e1 = config.get_param("e1", 0.97);
+    const double e2 = config.get_param("e2", 3.97);
+    
+    // Tm-Tm coupling parameters (if any)
+    const double J_tm = config.get_param("J_tm", 0.0);  // Tm-Tm exchange
+    
+    // Use TmFeO3_Tm class from unitcell.h (already has structure)
+    // SU(3) has 8-dimensional spin space (Gell-Mann basis)
+    TmFeO3_Tm Tm_atoms(8);
+    
+    // Set energy splitting (field in SU(3) space)
+    // Tm field scaling factors from config
+    const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
+    const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
+    double alpha = e1 * tm_alpha_scale;
+    double beta = sqrt(3.0) / 3.0 * (2.0 * e2 - e1) * tm_beta_scale;
+    Eigen::VectorXd tm_field(8);
+    tm_field << 0, 0, alpha, 0, 0, 0, 0, beta;
+    
+    Tm_atoms.set_field(tm_field, 0);
+    Tm_atoms.set_field(tm_field, 1);
+    Tm_atoms.set_field(tm_field, 2);
+    Tm_atoms.set_field(tm_field, 3);
+    
+    // Tm-Tm bilinear interactions (if J_tm != 0)
+    if (J_tm != 0.0) {
+        // Simple isotropic coupling between Tm sites
+        Eigen::MatrixXd J_mat = Eigen::MatrixXd::Identity(8, 8) * J_tm;
+        
+        // Nearest neighbor Tm-Tm interactions
+        // Sites 0 and 1 are neighbors in ab-plane
+        Tm_atoms.set_bilinear_interaction(J_mat, 0, 1, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_mat, 0, 1, Eigen::Vector3i(-1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_mat, 2, 3, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_mat, 2, 3, Eigen::Vector3i(1, -1, 0));
+        
+        // Add more neighbor connections as needed
+    }
+    
+    // Onsite anisotropy for Tm (if needed)
+    const double K_tm = config.get_param("K_tm", 0.0);
+    if (K_tm != 0.0) {
+        Eigen::MatrixXd K_mat = Eigen::MatrixXd::Zero(8, 8);
+        // λ3 and λ8 components for easy-axis anisotropy
+        K_mat(2, 2) = K_tm;  // λ3 component
+        K_mat(7, 7) = K_tm;  // λ8 component
+        Tm_atoms.set_onsite_interaction(K_mat, 0);
+        Tm_atoms.set_onsite_interaction(K_mat, 1);
+        Tm_atoms.set_onsite_interaction(K_mat, 2);
+        Tm_atoms.set_onsite_interaction(K_mat, 3);
+    }
+    
+    return Tm_atoms;
+}
+

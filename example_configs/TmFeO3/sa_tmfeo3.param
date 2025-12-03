@@ -1,0 +1,58 @@
+# TmFeO3 Mixed Lattice Molecular Dynamics
+# Corresponds to: molecular_dynamic_TmFeO3.cpp
+# Usage: ./spin_solver md_tmfeo3.param
+
+# Simulation Type
+system = tmfeo3
+simulation_mode = simulated_annealing
+
+# Lattice Size (for mixed Fe + Tm lattice)
+lattice_size = 12,12,12
+
+# Fe Exchange Interaction Parameters (in meV)
+J1ab = 4.92     # In-plane nearest neighbor
+J1c = 4.92      # Out-of-plane nearest neighbor
+J2ab = 0.29     # In-plane next nearest neighbor
+J2c = 0.29      # Out-of-plane next nearest neighbor
+
+# Fe Single-Ion Anisotropy (in meV)
+Ka = 0.0
+Kc = -0.09
+
+# DM Interaction (in meV)
+D1 = 0.0
+D2 = 0.0
+
+# Tm Energy Splitting (in meV)
+e1 = 0.97
+e2 = 3.97
+
+# Tm-O (Fe-Tm coupling) scaling factors
+tm_alpha_scale = 1.0
+tm_beta_scale = 1.0
+
+# Fe-Tm Bilinear Coupling
+chii = 0.0     # χ parameter
+
+# Magnetic Field
+field_strength = 0.0
+field_direction = 0,1,0
+
+# Simulated Annealing (equilibration)
+T_start = 10.0
+T_end = 0.01
+annealing_steps = 1000
+overrelaxation_rate = 1
+use_twist_boundary = false
+gaussian_move = false
+
+# Molecular Dynamics
+md_time_start = 0.0
+md_time_end = 400.0
+md_timestep = 0.01
+md_save_interval = 1
+use_gpu = false
+
+# Output
+output_dir = TmFeO3_sa
+save_observables = true
