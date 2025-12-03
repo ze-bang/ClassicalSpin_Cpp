@@ -23,4 +23,7 @@ UnitCell build_pyrochlore(const SpinConfig& config);
 // Build TmFeO3 mixed unit cell (SU2 Fe + SU3 Tm)
 MixedUnitCell build_tmfeo3(const SpinConfig& config);
 
+// Build TmFeO3 Fe-only unit cell (SU2 only, no Tm atoms)
+UnitCell build_tmfeo3_fe(const SpinConfig& config);
+
 #endif // UNITCELL_BUILDERS_H

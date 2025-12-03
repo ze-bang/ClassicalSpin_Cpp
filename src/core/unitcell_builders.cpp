@@ -392,3 +392,128 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     
     return mixed_uc;
 }
+
+UnitCell build_tmfeo3_fe(const SpinConfig& config) {
+    const double Jai = config.get_param("J1ab", 4.92);
+    const double Jbi = Jai;
+    const double Jci = config.get_param("J1c", 4.92);
+    const double J2ai = config.get_param("J2ab", 0.29);
+    const double J2bi = J2ai;
+    const double J2ci = config.get_param("J2c", 0.29);
+    const double Ka = config.get_param("Ka", 0.0);
+    const double Kc = config.get_param("Kc", -0.09);
+    const double D1 = config.get_param("D1", 0.0);
+    const double D2 = config.get_param("D2", 0.0);
+    const double h = config.field_strength;
+    
+    // Use TmFeO3_Fe class from unitcell.h (already has structure)
+    TmFeO3_Fe Fe_atoms(3);
+    
+    // Local frame transformation (following molecular_dynamic_TmFeO3.cpp exactly)
+    std::array<std::array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
+    
+    // Original exchange matrices in global frame
+    std::array<std::array<double, 3>, 3> Ja_orig = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
+    std::array<std::array<double, 3>, 3> Jb_orig = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
+    std::array<std::array<double, 3>, 3> Jc_orig = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
+    std::array<std::array<double, 3>, 3> J2a_orig = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
+    std::array<std::array<double, 3>, 3> J2b_orig = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
+    std::array<std::array<double, 3>, 3> J2c_orig = {{{J2ci, 0, 0}, {0, J2ci, 0}, {0, 0, J2ci}}};
+    
+    // Transform to local frames: J_local[i][j][a][b] = J_orig[a][b] * eta[i][a] * eta[j][b]
+    std::array<std::array<std::array<std::array<double, 3>, 3>, 4>, 4> Ja, Jb, Jc, J2a, J2b, J2c;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            for (int a = 0; a < 3; a++) {
+                for (int b = 0; b < 3; b++) {
+                    Ja[i][j][a][b] = Ja_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jb[i][j][a][b] = Jb_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jc[i][j][a][b] = Jc_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2a[i][j][a][b] = J2a_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2b[i][j][a][b] = J2b_orig[a][b] * eta[i][a] * eta[j][b];
+                    J2c[i][j][a][b] = J2c_orig[a][b] * eta[i][a] * eta[j][b];
+                }
+            }
+        }
+    }
+    
+    // Convert to Eigen matrices for setting interactions
+    auto to_eigen = [](const std::array<std::array<double, 3>, 3>& arr) {
+        Eigen::Matrix3d mat;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                mat(i, j) = arr[i][j];
+            }
+        }
+        return mat;
+    };
+    
+    // Set Fe-Fe interactions (following exact bond pattern from legacy code)
+    // In-plane interactions (J1 type)
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[1][0]), 1, 0, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[1][0]), 1, 0, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[1][0]), 1, 0, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[1][0]), 1, 0, Eigen::Vector3i(1, 0, 0));
+    
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[2][3]), 2, 3, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[2][3]), 2, 3, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[2][3]), 2, 3, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[2][3]), 2, 3, Eigen::Vector3i(1, 0, 0));
+    
+    // Next nearest neighbor (J2 type, along a and b axes)
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2a[0][0]), 0, 0, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2b[0][0]), 0, 0, Eigen::Vector3i(0, 1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2a[1][1]), 1, 1, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2b[1][1]), 1, 1, Eigen::Vector3i(0, 1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2a[2][2]), 2, 2, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2b[2][2]), 2, 2, Eigen::Vector3i(0, 1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2a[3][3]), 3, 3, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2b[3][3]), 3, 3, Eigen::Vector3i(0, 1, 0));
+    
+    // Out of plane interactions (J1 type along c-axis)
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jc[0][3]), 0, 3, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jc[0][3]), 0, 3, Eigen::Vector3i(0, 0, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jc[1][2]), 1, 2, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jc[1][2]), 1, 2, Eigen::Vector3i(0, 0, 1));
+    
+    // J2 out-of-plane interactions
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(0, 1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(-1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(-1, 1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(0, 0, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(0, 1, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(-1, 0, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[0][2]), 0, 2, Eigen::Vector3i(-1, 1, 1));
+    
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(0, 0, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(0, -1, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(1, 0, 1));
+    Fe_atoms.set_bilinear_interaction(to_eigen(J2c[1][3]), 1, 3, Eigen::Vector3i(1, -1, 1));
+    
+    // Single ion anisotropy (same in all local frames)
+    Eigen::MatrixXd K_mat = Eigen::MatrixXd::Zero(3, 3);
+    K_mat(0, 0) = Ka;
+    K_mat(2, 2) = Kc;
+    Fe_atoms.set_onsite_interaction(K_mat, 0);
+    Fe_atoms.set_onsite_interaction(K_mat, 1);
+    Fe_atoms.set_onsite_interaction(K_mat, 2);
+    Fe_atoms.set_onsite_interaction(K_mat, 3);
+    
+    // External magnetic field
+    Eigen::Vector3d field;
+    field << config.field_direction[0] * h,
+             config.field_direction[1] * h,
+             config.field_direction[2] * h;
+    Fe_atoms.set_field(field, 0);
+    Fe_atoms.set_field(field, 1);
+    Fe_atoms.set_field(field, 2);
+    Fe_atoms.set_field(field, 3);
+    
+    return Fe_atoms;
+}
+

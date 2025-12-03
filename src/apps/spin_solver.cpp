@@ -1488,6 +1488,9 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 case SystemType::PYROCHLORE:
                     uc_ptr = new UnitCell(build_pyrochlore(sweep_config));
                     break;
+                case SystemType::TMFEO3_FE:
+                    uc_ptr = new UnitCell(build_tmfeo3_fe(sweep_config));
+                    break;
                 default:
                     if (rank == 0) {
                         cerr << "Error: Unknown system type for parameter sweep" << endl;
@@ -1686,6 +1689,9 @@ int main(int argc, char** argv) {
                     break;
                 case SystemType::PYROCHLORE:
                     uc_ptr = new UnitCell(build_pyrochlore(config));
+                    break;
+                case SystemType::TMFEO3_FE:
+                    uc_ptr = new UnitCell(build_tmfeo3_fe(config));
                     break;
                 default:
                     if (rank == 0) {

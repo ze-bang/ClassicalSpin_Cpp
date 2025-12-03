@@ -282,6 +282,7 @@ void SpinConfig::to_file(const string& filename) const {
         case SystemType::HONEYCOMB_KITAEV: file << "honeycomb_kitaev"; break;
         case SystemType::PYROCHLORE: file << "pyrochlore"; break;
         case SystemType::TMFEO3: file << "tmfeo3"; break;
+        case SystemType::TMFEO3_FE: file << "tmfeo3_fe"; break;
         case SystemType::CUSTOM: file << "custom"; break;
     }
     file << "\n";
@@ -363,6 +364,7 @@ void SpinConfig::print() const {
         case SystemType::HONEYCOMB_KITAEV: cout << "Kitaev Honeycomb"; break;
         case SystemType::PYROCHLORE: cout << "Pyrochlore"; break;
         case SystemType::TMFEO3: cout << "TmFeO3"; break;
+        case SystemType::TMFEO3_FE: cout << "TmFeO3 (Fe only)"; break;
         case SystemType::CUSTOM: cout << "Custom"; break;
     }
     cout << "\n";
