@@ -86,14 +86,14 @@ struct SpinConfig {
     double pump_width = 10.0;
     double pump_frequency = 0.0;
     double pump_time = 0.0;
-    vector<array<double, 3>> pump_directions = {{0, 1, 0}};  // Per-sublattice pump directions (SU2)
-    vector<array<double, 8>> pump_directions_su3 = {{0, 0, 1, 0, 0, 0, 0, 0}};  // Per-sublattice pump directions (SU3, Gell-Mann basis, default λ3)
+    vector<vector<double>> pump_directions = {{0, 1, 0}};  // Per-sublattice pump directions (general, dimension inferred from lattice)
+    vector<vector<double>> pump_directions_su3 = {{0, 0, 1, 0, 0, 0, 0, 0}};  // Per-sublattice pump directions for SU3 sublattice in mixed systems
     
     double probe_amplitude = 0.1;
     double probe_width = 10.0;
     double probe_frequency = 0.0;
     double probe_time = 50.0;
-    array<double, 3> probe_direction = {0, 1, 0};
+    vector<double> probe_direction = {0, 1, 0};  // Probe direction (dimension inferred from lattice)
     
     // 2DCS spectroscopy parameters (delay time scan)
     double tau_start = -200.0;
@@ -117,8 +117,8 @@ struct SpinConfig {
     
     // Field parameters
     double field_strength = 0.0;
-    array<double, 3> field_direction = {0, 1, 0};
-    array<double, 3> g_factor = {1.0, 1.0, 1.0};  // g-factors or anisotropy
+    vector<double> field_direction = {0, 1, 0};  // Field direction (dimension inferred from lattice)
+    vector<double> g_factor = {1.0, 1.0, 1.0};  // g-factors or anisotropy (dimension inferred from lattice)
     
     // Hamiltonian parameters (generic storage for system-specific parameters)
     map<string, double> hamiltonian_params;
@@ -126,7 +126,7 @@ struct SpinConfig {
     // Initial configuration
     string initial_spin_config = "";  // Empty means random
     bool use_ferromagnetic_init = false;
-    array<double, 3> ferromagnetic_direction = {0, 0, 1};
+    vector<double> ferromagnetic_direction = {0, 0, 1};  // Ferromagnetic init direction (dimension inferred from lattice)
     
     // MPI parameters
     bool use_mpi = true;
@@ -187,8 +187,12 @@ inline SimulationType parse_simulation(const string& str) {
     throw runtime_error("Unknown simulation type: " + str);
 }
 
-inline array<double, 3> parse_vector3(const string& str) {
-    array<double, 3> vec = {0, 0, 0};
+/**
+ * Parse a vector of doubles from a comma-separated string (general dimension)
+ * Format: "1,0,0" or "[1, 0, 0]" or "(1, 0, 0)"
+ */
+inline vector<double> parse_vector(const string& str) {
+    vector<double> vec;
     string s = trim(str);
     // Remove parentheses and brackets
     s.erase(std::remove(s.begin(), s.end(), '('), s.end());
@@ -198,9 +202,21 @@ inline array<double, 3> parse_vector3(const string& str) {
     
     stringstream ss(s);
     string item;
-    int i = 0;
-    while (getline(ss, item, ',') && i < 3) {
-        vec[i++] = stod(trim(item));
+    while (getline(ss, item, ',')) {
+        string trimmed = trim(item);
+        if (!trimmed.empty()) {
+            vec.push_back(stod(trimmed));
+        }
+    }
+    return vec;
+}
+
+// Legacy function for backwards compatibility
+inline array<double, 3> parse_vector3(const string& str) {
+    vector<double> v = parse_vector(str);
+    array<double, 3> vec = {0, 0, 0};
+    for (size_t i = 0; i < min(v.size(), size_t(3)); ++i) {
+        vec[i] = v[i];
     }
     return vec;
 }
@@ -223,13 +239,18 @@ inline array<size_t, 3> parse_size_vector3(const string& str) {
 }
 
 /**
- * Parse a list of 3-vectors from a comma-separated string
+ * Parse a list of N-vectors from a comma-separated string (general dimension)
+ * The dimension is inferred from the specified spin_dim parameter.
  * Supports two formats:
- * 1. Single 3-vector: "1,0,0" -> applies to all sublattices
- * 2. Multiple 3-vectors: "1,0,0,0,1,0,-1,0,0" -> one per sublattice
+ * 1. Single vector: "1,0,0" -> applies to all sublattices
+ * 2. Multiple vectors: "1,0,0,0,1,0,-1,0,0" -> one per sublattice (for spin_dim=3)
+ * 
+ * @param str Input string with comma-separated values
+ * @param spin_dim Dimension of each vector (e.g., 3 for SU2, 8 for SU3)
+ * @return Vector of vectors, each with spin_dim components
  */
-inline vector<array<double, 3>> parse_vector3_list(const string& str) {
-    vector<array<double, 3>> result;
+inline vector<vector<double>> parse_vectorN_list(const string& str, size_t spin_dim) {
+    vector<vector<double>> result;
     string s = trim(str);
     // Remove parentheses and brackets
     s.erase(std::remove(s.begin(), s.end(), '('), s.end());
@@ -242,30 +263,35 @@ inline vector<array<double, 3>> parse_vector3_list(const string& str) {
     stringstream ss(s);
     string item;
     while (getline(ss, item, ',')) {
-        values.push_back(stod(trim(item)));
+        string trimmed = trim(item);
+        if (!trimmed.empty()) {
+            values.push_back(stod(trimmed));
+        }
     }
     
-    // Group into 3-vectors
-    if (values.size() % 3 != 0) {
-        throw runtime_error("pump_direction must have a multiple of 3 values (got " + 
-                           to_string(values.size()) + ")");
+    // Group into N-vectors
+    if (values.size() % spin_dim != 0) {
+        throw runtime_error("pump_direction must have a multiple of " + to_string(spin_dim) + 
+                           " values (got " + to_string(values.size()) + ")");
     }
     
-    for (size_t i = 0; i < values.size(); i += 3) {
-        result.push_back({values[i], values[i+1], values[i+2]});
+    for (size_t i = 0; i < values.size(); i += spin_dim) {
+        vector<double> vec(spin_dim);
+        for (size_t j = 0; j < spin_dim; ++j) {
+            vec[j] = values[i + j];
+        }
+        result.push_back(vec);
     }
     
     return result;
 }
 
 /**
- * Parse a list of 8-vectors from a comma-separated string (for SU3 Gell-Mann basis)
- * Supports two formats:
- * 1. Single 8-vector: "0,0,1,0,0,0,0,0" -> applies to all SU3 sublattices (default λ3)
- * 2. Multiple 8-vectors: "0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0" -> one per SU3 sublattice
+ * Parse a list of vectors from a comma-separated string (dimension auto-detected from total count)
+ * If total values divisible by expected_dim, use that; otherwise treat all values as one vector.
  */
-inline vector<array<double, 8>> parse_vector8_list(const string& str) {
-    vector<array<double, 8>> result;
+inline vector<vector<double>> parse_vectorN_list_auto(const string& str, size_t expected_dim = 3) {
+    vector<vector<double>> result;
     string s = trim(str);
     // Remove parentheses and brackets
     s.erase(std::remove(s.begin(), s.end(), '('), s.end());
@@ -278,20 +304,58 @@ inline vector<array<double, 8>> parse_vector8_list(const string& str) {
     stringstream ss(s);
     string item;
     while (getline(ss, item, ',')) {
-        values.push_back(stod(trim(item)));
+        string trimmed = trim(item);
+        if (!trimmed.empty()) {
+            values.push_back(stod(trimmed));
+        }
     }
     
-    // Group into 8-vectors
-    if (values.size() % 8 != 0) {
-        throw runtime_error("pump_direction_su3 must have a multiple of 8 values (got " + 
-                           to_string(values.size()) + ")");
+    if (values.empty()) {
+        return result;
     }
     
-    for (size_t i = 0; i < values.size(); i += 8) {
-        result.push_back({values[i], values[i+1], values[i+2], values[i+3],
-                          values[i+4], values[i+5], values[i+6], values[i+7]});
+    // If divisible by expected_dim, group accordingly
+    if (values.size() % expected_dim == 0) {
+        for (size_t i = 0; i < values.size(); i += expected_dim) {
+            vector<double> vec(expected_dim);
+            for (size_t j = 0; j < expected_dim; ++j) {
+                vec[j] = values[i + j];
+            }
+            result.push_back(vec);
+        }
+    } else {
+        // Otherwise, treat the whole thing as a single vector
+        result.push_back(values);
     }
     
+    return result;
+}
+
+// Legacy function for backwards compatibility (parse_vector3_list)
+inline vector<array<double, 3>> parse_vector3_list(const string& str) {
+    auto vecs = parse_vectorN_list(str, 3);
+    vector<array<double, 3>> result;
+    for (const auto& v : vecs) {
+        array<double, 3> arr = {0, 0, 0};
+        for (size_t i = 0; i < min(v.size(), size_t(3)); ++i) {
+            arr[i] = v[i];
+        }
+        result.push_back(arr);
+    }
+    return result;
+}
+
+// Legacy function for backwards compatibility (parse_vector8_list)
+inline vector<array<double, 8>> parse_vector8_list(const string& str) {
+    auto vecs = parse_vectorN_list(str, 8);
+    vector<array<double, 8>> result;
+    for (const auto& v : vecs) {
+        array<double, 8> arr = {0, 0, 0, 0, 0, 0, 0, 0};
+        for (size_t i = 0; i < min(v.size(), size_t(8)); ++i) {
+            arr[i] = v[i];
+        }
+        result.push_back(arr);
+    }
     return result;
 }
 

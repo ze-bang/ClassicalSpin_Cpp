@@ -37,16 +37,19 @@ annealing_steps = 1000
 use_twist_boundary = false
 gaussian_move = false
 
+T_zero = true
+
+
 # Pump-Probe Setup
 # For SU(2) spins (Fe)
-pump_direction = 1,1,1,1,-1,-1,-1,1,-1,-1,-1,1  # 4 Fe sublattices
-pump_amplitude = 0.6
-pump_width = 0.1
-pump_frequency = 0.2
+pump_direction = 0,0,0
+pump_amplitude = 1
+pump_width = 0.4
+pump_frequency = 0.3
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
-pump_direction_su3 = 0,0,1,0,0,0,0,0  # λ3 component (default)
+pump_direction_su3 = 0,1,0,0,0,0,0,0  # λ3 component (default)
 
 # 2DCS Scan
 tau_start = 0.0

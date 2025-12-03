@@ -153,10 +153,10 @@ SpinConfig SpinConfig::from_file(const string& filename) {
                 config.pump_time = stod(value);
             }
             else if (key == "pump_direction") {
-                config.pump_directions = parse_vector3_list(value);
+                config.pump_directions = parse_vectorN_list_auto(value, 3);  // Default to 3D, auto-detect dimension
             }
             else if (key == "pump_direction_su3") {
-                config.pump_directions_su3 = parse_vector8_list(value);
+                config.pump_directions_su3 = parse_vectorN_list_auto(value, 8);  // Default to 8D for SU3
             }
             else if (key == "probe_amplitude") {
                 config.probe_amplitude = stod(value);
@@ -171,7 +171,7 @@ SpinConfig SpinConfig::from_file(const string& filename) {
                 config.probe_time = stod(value);
             }
             else if (key == "probe_direction") {
-                config.probe_direction = parse_vector3(value);
+                config.probe_direction = parse_vector(value);
             }
             else if (key == "tau_start") {
                 config.tau_start = stod(value);
@@ -229,18 +229,21 @@ SpinConfig SpinConfig::from_file(const string& filename) {
                 config.field_strength = stod(value);
             }
             else if (key == "field_direction") {
-                config.field_direction = parse_vector3(value);
-                double norm = std::sqrt(
-                    config.field_direction[0]*config.field_direction[0] +
-                    config.field_direction[1]*config.field_direction[1] +
-                    config.field_direction[2]*config.field_direction[2]
-                );
-                for (auto& comp : config.field_direction) {
-                    comp /= norm;
+                config.field_direction = parse_vector(value);
+                // Normalize the field direction
+                double norm = 0.0;
+                for (const auto& comp : config.field_direction) {
+                    norm += comp * comp;
+                }
+                norm = std::sqrt(norm);
+                if (norm > 1e-10) {
+                    for (auto& comp : config.field_direction) {
+                        comp /= norm;
+                    }
                 }
             }
             else if (key == "g_factor") {
-                config.g_factor = parse_vector3(value);
+                config.g_factor = parse_vector(value);
             }
             else if (key == "initial_spin_config") {
                 config.initial_spin_config = value;
@@ -249,7 +252,7 @@ SpinConfig SpinConfig::from_file(const string& filename) {
                 config.use_ferromagnetic_init = parse_bool(value);
             }
             else if (key == "ferromagnetic_direction") {
-                config.ferromagnetic_direction = parse_vector3(value);
+                config.ferromagnetic_direction = parse_vector(value);
             }
             else if (key == "use_mpi") {
                 config.use_mpi = parse_bool(value);

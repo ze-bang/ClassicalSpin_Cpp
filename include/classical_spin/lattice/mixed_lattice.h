@@ -621,21 +621,21 @@ public:
         
         // Bilinear SU(2)-SU(2) interactions
         double bilinear_energy = 0.0;
-        for (size_t i = 0; i < num_bi_SU2; ++i) {
+        for (size_t i = 0; i < bilinear_partners_SU2[site_index].size(); ++i) {
             const size_t partner_idx = bilinear_partners_SU2[site_index][i];
             bilinear_energy += spin_diff.dot(bilinear_interaction_SU2[site_index][i] * spins_SU2[partner_idx]);
         }
         
         // Mixed bilinear SU(2)-SU(3) interactions
         double mixed_bilinear_energy = 0.0;
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_bilinear_partners_SU2[site_index].size(); ++i) {
             const size_t partner_idx = mixed_bilinear_partners_SU2[site_index][i];
             mixed_bilinear_energy += spin_diff.dot(mixed_bilinear_interaction_SU2[site_index][i] * spins_SU3[partner_idx]);
         }
         
         // Trilinear SU(2)-SU(2)-SU(2) interactions
         double trilinear_energy = 0.0;
-        for (size_t i = 0; i < num_tri_SU2; ++i) {
+        for (size_t i = 0; i < trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU2[site_index][i][1];
             const auto& T = trilinear_interaction_SU2[site_index][i];
@@ -654,7 +654,7 @@ public:
         
         // Mixed trilinear SU(2)-SU(2)-SU(3) interactions
         double mixed_trilinear_energy = 0.0;
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU2[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU2[site_index][i];
@@ -689,21 +689,21 @@ public:
         
         // Bilinear SU(3)-SU(3) interactions
         double bilinear_energy = 0.0;
-        for (size_t i = 0; i < num_bi_SU3; ++i) {
+        for (size_t i = 0; i < bilinear_partners_SU3[site_index].size(); ++i) {
             const size_t partner_idx = bilinear_partners_SU3[site_index][i];
             bilinear_energy += spin_diff.dot(bilinear_interaction_SU3[site_index][i] * spins_SU3[partner_idx]);
         }
         
         // Mixed bilinear SU(3)-SU(2) interactions
         double mixed_bilinear_energy = 0.0;
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_bilinear_partners_SU3[site_index].size(); ++i) {
             const size_t partner_idx = mixed_bilinear_partners_SU3[site_index][i];
             mixed_bilinear_energy += spin_diff.dot(mixed_bilinear_interaction_SU3[site_index][i] * spins_SU2[partner_idx]);
         }
         
         // Trilinear SU(3)-SU(3)-SU(3) interactions
         double trilinear_energy = 0.0;
-        for (size_t i = 0; i < num_tri_SU3; ++i) {
+        for (size_t i = 0; i < trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU3[site_index][i][1];
             const auto& T = trilinear_interaction_SU3[site_index][i];
@@ -722,7 +722,7 @@ public:
         
         // Mixed trilinear SU(3)-SU(2)-SU(2) interactions
         double mixed_trilinear_energy = 0.0;
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU3[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU3[site_index][i];
@@ -758,19 +758,19 @@ public:
             energy += spin.dot(onsite_interaction_SU2[i] * spin);
             
             // Bilinear
-            for (size_t j = 0; j < num_bi_SU2; ++j) {
+            for (size_t j = 0; j < bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = bilinear_partners_SU2[i][j];
                 energy += 0.5 * spin.dot(bilinear_interaction_SU2[i][j] * spins_SU2[partner]);
             }
             
             // Mixed bilinear
-            for (size_t j = 0; j < num_bi_SU2_SU3; ++j) {
+            for (size_t j = 0; j < mixed_bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU2[i][j];
                 energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU2[i][j] * spins_SU3[partner]);
             }
             
             // Trilinear
-            for (size_t j = 0; j < num_tri_SU2; ++j) {
+            for (size_t j = 0; j < trilinear_partners_SU2[i].size(); ++j) {
                 const size_t p1 = trilinear_partners_SU2[i][j][0];
                 const size_t p2 = trilinear_partners_SU2[i][j][1];
                 const auto& T = trilinear_interaction_SU2[i][j];
@@ -797,19 +797,19 @@ public:
             energy += spin.dot(onsite_interaction_SU3[i] * spin);
             
             // Bilinear
-            for (size_t j = 0; j < num_bi_SU3; ++j) {
+            for (size_t j = 0; j < bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = bilinear_partners_SU3[i][j];
                 energy += 0.5 * spin.dot(bilinear_interaction_SU3[i][j] * spins_SU3[partner]);
             }
             
             // Mixed bilinear
-            for (size_t j = 0; j < num_bi_SU2_SU3; ++j) {
+            for (size_t j = 0; j < mixed_bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU3[i][j];
                 energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU3[i][j] * spins_SU2[partner]);
             }
             
             // Trilinear
-            for (size_t j = 0; j < num_tri_SU3; ++j) {
+            for (size_t j = 0; j < trilinear_partners_SU3[i].size(); ++j) {
                 const size_t p1 = trilinear_partners_SU3[i][j][0];
                 const size_t p2 = trilinear_partners_SU3[i][j][1];
                 const auto& T = trilinear_interaction_SU3[i][j];
@@ -856,7 +856,7 @@ public:
             }
             
             // Bilinear (half-counted)
-            for (size_t j = 0; j < num_bi_SU2; ++j) {
+            for (size_t j = 0; j < bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = bilinear_partners_SU2[i][j];
                 const double* partner_spin = &state_flat[partner * spin_dim_SU2];
                 for (size_t a = 0; a < spin_dim_SU2; ++a) {
@@ -867,7 +867,7 @@ public:
             }
             
             // Mixed bilinear (half-counted)
-            for (size_t j = 0; j < num_bi_SU2_SU3; ++j) {
+            for (size_t j = 0; j < mixed_bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU2[i][j];
                 const double* partner_spin = &state_flat[offset_SU3 + partner * spin_dim_SU3];
                 for (size_t a = 0; a < spin_dim_SU2; ++a) {
@@ -878,7 +878,7 @@ public:
             }
             
             // Trilinear
-            for (size_t j = 0; j < num_tri_SU2; ++j) {
+            for (size_t j = 0; j < trilinear_partners_SU2[i].size(); ++j) {
                 const size_t p1 = trilinear_partners_SU2[i][j][0];
                 const size_t p2 = trilinear_partners_SU2[i][j][1];
                 const double* spin1 = &state_flat[p1 * spin_dim_SU2];
@@ -914,7 +914,7 @@ public:
             }
             
             // Bilinear (half-counted)
-            for (size_t j = 0; j < num_bi_SU3; ++j) {
+            for (size_t j = 0; j < bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = bilinear_partners_SU3[i][j];
                 const double* partner_spin = &state_flat[offset_SU3 + partner * spin_dim_SU3];
                 for (size_t a = 0; a < spin_dim_SU3; ++a) {
@@ -925,7 +925,7 @@ public:
             }
             
             // Mixed bilinear (half-counted)
-            for (size_t j = 0; j < num_bi_SU2_SU3; ++j) {
+            for (size_t j = 0; j < mixed_bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU3[i][j];
                 const double* partner_spin = &state_flat[partner * spin_dim_SU2];
                 for (size_t a = 0; a < spin_dim_SU3; ++a) {
@@ -936,7 +936,7 @@ public:
             }
             
             // Trilinear
-            for (size_t j = 0; j < num_tri_SU3; ++j) {
+            for (size_t j = 0; j < trilinear_partners_SU3[i].size(); ++j) {
                 const size_t p1 = trilinear_partners_SU3[i][j][0];
                 const size_t p2 = trilinear_partners_SU3[i][j][1];
                 const double* spin1 = &state_flat[offset_SU3 + p1 * spin_dim_SU3];
@@ -1682,17 +1682,17 @@ public:
         H += 2.0 * onsite_interaction_SU2[site_index] * spins_SU2[site_index];
         
         // Bilinear
-        for (size_t i = 0; i < num_bi_SU2; ++i) {
+        for (size_t i = 0; i < bilinear_partners_SU2[site_index].size(); ++i) {
             H += bilinear_interaction_SU2[site_index][i] * spins_SU2[bilinear_partners_SU2[site_index][i]];
         }
         
         // Mixed bilinear
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_bilinear_partners_SU2[site_index].size(); ++i) {
             H += mixed_bilinear_interaction_SU2[site_index][i] * spins_SU3[mixed_bilinear_partners_SU2[site_index][i]];
         }
         
         // Trilinear SU(2)-SU(2)-SU(2) contributions
-        for (size_t i = 0; i < num_tri_SU2; ++i) {
+        for (size_t i = 0; i < trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU2[site_index][i][1];
             const auto& T = trilinear_interaction_SU2[site_index][i];
@@ -1710,7 +1710,7 @@ public:
         }
         
         // Mixed trilinear SU(2)-SU(2)-SU(3) contributions
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU2[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU2[site_index][i];
@@ -1740,17 +1740,17 @@ public:
         H += 2.0 * onsite_interaction_SU3[site_index] * spins_SU3[site_index];
         
         // Bilinear
-        for (size_t i = 0; i < num_bi_SU3; ++i) {
+        for (size_t i = 0; i < bilinear_partners_SU3[site_index].size(); ++i) {
             H += bilinear_interaction_SU3[site_index][i] * spins_SU3[bilinear_partners_SU3[site_index][i]];
         }
         
         // Mixed bilinear
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_bilinear_partners_SU3[site_index].size(); ++i) {
             H += mixed_bilinear_interaction_SU3[site_index][i] * spins_SU2[mixed_bilinear_partners_SU3[site_index][i]];
         }
         
         // Trilinear SU(3)-SU(3)-SU(3) contributions
-        for (size_t i = 0; i < num_tri_SU3; ++i) {
+        for (size_t i = 0; i < trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU3[site_index][i][1];
             const auto& T = trilinear_interaction_SU3[site_index][i];
@@ -1768,7 +1768,7 @@ public:
         }
         
         // Mixed trilinear SU(3)-SU(2)-SU(2) contributions
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU3[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU3[site_index][i];
@@ -2124,7 +2124,7 @@ private:
         }
         
         // Bilinear SU(2)-SU(2): J*S_partner
-        for (size_t n = 0; n < num_bi_SU2; ++n) {
+        for (size_t n = 0; n < bilinear_partners_SU2[site].size(); ++n) {
             const size_t partner = bilinear_partners_SU2[site][n];
             const size_t partner_idx = partner * spin_dim_SU2;
             const auto& J = bilinear_interaction_SU2[site][n];
@@ -2136,7 +2136,7 @@ private:
         }
         
         // Mixed bilinear SU(2)-SU(3)
-        for (size_t n = 0; n < num_bi_SU2_SU3; ++n) {
+        for (size_t n = 0; n < mixed_bilinear_partners_SU2[site].size(); ++n) {
             const size_t partner = mixed_bilinear_partners_SU2[site][n];
             const size_t partner_idx = offset_SU3 + partner * spin_dim_SU3;
             const auto& J = mixed_bilinear_interaction_SU2[site][n];
@@ -2148,7 +2148,7 @@ private:
         }
         
         // Trilinear SU(2)-SU(2)-SU(2): T[a](b,c) * S1[b] * S2[c]
-        for (size_t n = 0; n < num_tri_SU2; ++n) {
+        for (size_t n = 0; n < trilinear_partners_SU2[site].size(); ++n) {
             const size_t p1 = trilinear_partners_SU2[site][n][0];
             const size_t p2 = trilinear_partners_SU2[site][n][1];
             const size_t p1_idx = p1 * spin_dim_SU2;
@@ -2167,7 +2167,7 @@ private:
         }
         
         // Mixed trilinear SU(2)-SU(2)-SU(3): T[a](b,c) * S_SU2[b] * S_SU3[c]
-        for (size_t n = 0; n < num_tri_SU2_SU3; ++n) {
+        for (size_t n = 0; n < mixed_trilinear_partners_SU2[site].size(); ++n) {
             const size_t p1 = mixed_trilinear_partners_SU2[site][n][0];
             const size_t p2 = mixed_trilinear_partners_SU2[site][n][1];
             const size_t p1_idx = p1 * spin_dim_SU2;
@@ -2213,7 +2213,7 @@ private:
         }
         
         // Bilinear SU(3)-SU(3): J*S_partner
-        for (size_t n = 0; n < num_bi_SU3; ++n) {
+        for (size_t n = 0; n < bilinear_partners_SU3[site].size(); ++n) {
             const size_t partner = bilinear_partners_SU3[site][n];
             const size_t partner_idx = offset_SU3 + partner * spin_dim_SU3;
             const auto& J = bilinear_interaction_SU3[site][n];
@@ -2225,7 +2225,7 @@ private:
         }
         
         // Mixed bilinear SU(3)-SU(2)
-        for (size_t n = 0; n < num_bi_SU2_SU3; ++n) {
+        for (size_t n = 0; n < mixed_bilinear_partners_SU3[site].size(); ++n) {
             const size_t partner = mixed_bilinear_partners_SU3[site][n];
             const size_t partner_idx = partner * spin_dim_SU2;
             const auto& J = mixed_bilinear_interaction_SU3[site][n];
@@ -2237,7 +2237,7 @@ private:
         }
         
         // Trilinear SU(3)-SU(3)-SU(3): T[a](b,c) * S1[b] * S2[c]
-        for (size_t n = 0; n < num_tri_SU3; ++n) {
+        for (size_t n = 0; n < trilinear_partners_SU3[site].size(); ++n) {
             const size_t p1 = trilinear_partners_SU3[site][n][0];
             const size_t p2 = trilinear_partners_SU3[site][n][1];
             const size_t p1_idx = offset_SU3 + p1 * spin_dim_SU3;
@@ -2256,7 +2256,7 @@ private:
         }
         
         // Mixed trilinear SU(3)-SU(2)-SU(2): T[a](b,c) * S_SU2_1[b] * S_SU2_2[c]
-        for (size_t n = 0; n < num_tri_SU2_SU3; ++n) {
+        for (size_t n = 0; n < mixed_trilinear_partners_SU3[site].size(); ++n) {
             const size_t p1 = mixed_trilinear_partners_SU3[site][n][0];
             const size_t p2 = mixed_trilinear_partners_SU3[site][n][1];
             const size_t p1_idx = p1 * spin_dim_SU2;
@@ -2357,17 +2357,17 @@ private:
         H += 2.0 * onsite_interaction_SU2[site_index] * curr_spins2[site_index];
         
         // Bilinear
-        for (size_t i = 0; i < num_bi_SU2; ++i) {
+        for (size_t i = 0; i < bilinear_partners_SU2[site_index].size(); ++i) {
             H += bilinear_interaction_SU2[site_index][i] * curr_spins2[bilinear_partners_SU2[site_index][i]];
         }
         
         // Mixed bilinear
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_bilinear_partners_SU2[site_index].size(); ++i) {
             H += mixed_bilinear_interaction_SU2[site_index][i] * curr_spins3[mixed_bilinear_partners_SU2[site_index][i]];
         }
         
         // Trilinear SU(2)-SU(2)-SU(2) contributions
-        for (size_t i = 0; i < num_tri_SU2; ++i) {
+        for (size_t i = 0; i < trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU2[site_index][i][1];
             const auto& T = trilinear_interaction_SU2[site_index][i];
@@ -2384,7 +2384,7 @@ private:
         }
         
         // Mixed trilinear contributions
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU2[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU2[site_index][i];
@@ -2415,17 +2415,17 @@ private:
         H += 2.0 * onsite_interaction_SU3[site_index] * curr_spins3[site_index];
         
         // Bilinear
-        for (size_t i = 0; i < num_bi_SU3; ++i) {
+        for (size_t i = 0; i < bilinear_partners_SU3[site_index].size(); ++i) {
             H += bilinear_interaction_SU3[site_index][i] * curr_spins3[bilinear_partners_SU3[site_index][i]];
         }
         
         // Mixed bilinear
-        for (size_t i = 0; i < num_bi_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_bilinear_partners_SU3[site_index].size(); ++i) {
             H += mixed_bilinear_interaction_SU3[site_index][i] * curr_spins2[mixed_bilinear_partners_SU3[site_index][i]];
         }
         
         // Trilinear SU(3)-SU(3)-SU(3) contributions
-        for (size_t i = 0; i < num_tri_SU3; ++i) {
+        for (size_t i = 0; i < trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU3[site_index][i][1];
             const auto& T = trilinear_interaction_SU3[site_index][i];
@@ -2442,7 +2442,7 @@ private:
         }
         
         // Mixed trilinear contributions
-        for (size_t i = 0; i < num_tri_SU2_SU3; ++i) {
+        for (size_t i = 0; i < mixed_trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU3[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU3[site_index][i];
@@ -2688,53 +2688,30 @@ public:
         double last_save_time = T_start;
         auto observer = [&](const ODEState& x, double t) {
             if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
-                // Compute SU(2) magnetizations directly from flat state
+                // Compute SU(2) magnetizations using helper functions
                 double M_SU2_local_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
                 double M_SU2_global_arr[8] = {0};
                 
                 compute_sublattice_magnetizations_from_flat(x.data(), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
+                compute_magnetization_global_SU2_from_flat(x.data(), M_SU2_global_arr);
                 
-                // Transform to global frame using sublattice frame
-                size_t idx = 0;
-                for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    size_t atom = i % N_atoms_SU2;
-                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                            M_SU2_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
-                        }
-                    }
-                    idx += spin_dim_SU2;
-                }
-                
-                // Compute SU(3) magnetizations
+                // Compute SU(3) magnetizations using helper functions
                 double M_SU3_local_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
                 double M_SU3_global_arr[8] = {0};
                 
-                size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
-                compute_sublattice_magnetizations_from_flat(x.data(), SU3_offset, 
+                compute_sublattice_magnetizations_from_flat(x.data(), lattice_size_SU2 * spin_dim_SU2, 
                     lattice_size_SU3, spin_dim_SU3, M_SU3_local_arr, M_SU3_antiferro_arr);
-                
-                // Transform to global frame using sublattice frame
-                idx = SU3_offset;
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    size_t atom = i % N_atoms_SU3;
-                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                            M_SU3_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
-                        }
-                    }
-                    idx += spin_dim_SU3;
-                }
+                compute_magnetization_global_SU3_from_flat(x.data(), M_SU3_global_arr);
                 
                 SpinVector M_SU2_local = Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
                 SpinVector M_SU3_local = Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3);
                 
                 trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local, M_SU2_global}, {M_SU3_antiferro, M_SU3_local, M_SU3_global}}});
                 last_save_time = t;
@@ -2800,53 +2777,30 @@ public:
         double last_save_time = T_start;
         auto observer = [&](const ODEState& x, double t) {
             if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
-                // Compute SU(2) magnetizations
+                // Compute SU(2) magnetizations using helper functions
                 double M_SU2_local_arr[8] = {0};
                 double M_SU2_antiferro_arr[8] = {0};
                 double M_SU2_global_arr[8] = {0};
                 
                 compute_sublattice_magnetizations_from_flat(x.data(), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
+                compute_magnetization_global_SU2_from_flat(x.data(), M_SU2_global_arr);
                 
-                // Transform to global frame using sublattice frame
-                size_t idx = 0;
-                for (size_t i = 0; i < lattice_size_SU2; ++i) {
-                    size_t atom = i % N_atoms_SU2;
-                    for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                            M_SU2_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
-                        }
-                    }
-                    idx += spin_dim_SU2;
-                }
-                
-                // Compute SU(3) magnetizations
+                // Compute SU(3) magnetizations using helper functions
                 double M_SU3_local_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
                 double M_SU3_global_arr[8] = {0};
                 
-                size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
-                compute_sublattice_magnetizations_from_flat(x.data(), SU3_offset, 
+                compute_sublattice_magnetizations_from_flat(x.data(), lattice_size_SU2 * spin_dim_SU2, 
                     lattice_size_SU3, spin_dim_SU3, M_SU3_local_arr, M_SU3_antiferro_arr);
-                
-                // Transform to global frame using sublattice frame
-                idx = SU3_offset;
-                for (size_t i = 0; i < lattice_size_SU3; ++i) {
-                    size_t atom = i % N_atoms_SU3;
-                    for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
-                        for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                            M_SU3_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
-                        }
-                    }
-                    idx += spin_dim_SU3;
-                }
+                compute_magnetization_global_SU3_from_flat(x.data(), M_SU3_global_arr);
                 
                 SpinVector M_SU2_local = Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2);
                 SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
                 SpinVector M_SU3_local = Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
-                SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3) / double(lattice_size_SU3);
+                SpinVector M_SU3_global = Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3);
                 
                 trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local, M_SU2_global}, {M_SU3_antiferro, M_SU3_local, M_SU3_global}}});
                 last_save_time = t;
