@@ -153,7 +153,10 @@ SpinConfig SpinConfig::from_file(const string& filename) {
                 config.pump_time = stod(value);
             }
             else if (key == "pump_direction") {
-                config.pump_direction = parse_vector3(value);
+                config.pump_directions = parse_vector3_list(value);
+            }
+            else if (key == "pump_direction_su3") {
+                config.pump_directions_su3 = parse_vector8_list(value);
             }
             else if (key == "probe_amplitude") {
                 config.probe_amplitude = stod(value);
@@ -327,6 +330,27 @@ void SpinConfig::to_file(const string& filename) const {
     file << "# Field Parameters\n";
     file << "field_strength = " << field_strength << "\n";
     file << "field_direction = " << field_direction[0] << "," << field_direction[1] << "," << field_direction[2] << "\n\n";
+    
+    file << "# Pump-Probe Parameters\n";
+    file << "pump_amplitude = " << pump_amplitude << "\n";
+    file << "pump_width = " << pump_width << "\n";
+    file << "pump_frequency = " << pump_frequency << "\n";
+    file << "pump_time = " << pump_time << "\n";
+    file << "pump_direction = ";
+    for (size_t i = 0; i < pump_directions.size(); ++i) {
+        if (i > 0) file << ",";
+        file << pump_directions[i][0] << "," << pump_directions[i][1] << "," << pump_directions[i][2];
+    }
+    file << "\n";
+    file << "pump_direction_su3 = ";
+    for (size_t i = 0; i < pump_directions_su3.size(); ++i) {
+        if (i > 0) file << ",";
+        for (size_t j = 0; j < 8; ++j) {
+            if (j > 0) file << ",";
+            file << pump_directions_su3[i][j];
+        }
+    }
+    file << "\n\n";
     
     file << "# Hamiltonian Parameters\n";
     for (const auto& [key, value] : hamiltonian_params) {

@@ -289,14 +289,26 @@ void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int si
 #endif
     
     // Setup pulse field directions (one per sublattice)
-    auto pump_dir_norm = config.pump_direction;
-    double norm = sqrt(pump_dir_norm[0]*pump_dir_norm[0] + 
-                      pump_dir_norm[1]*pump_dir_norm[1] + 
-                      pump_dir_norm[2]*pump_dir_norm[2]);
-    if (norm > 1e-10) {
-        pump_dir_norm[0] /= norm;
-        pump_dir_norm[1] /= norm;
-        pump_dir_norm[2] /= norm;
+    // Normalize all pump directions
+    vector<array<double, 3>> pump_dirs_norm = config.pump_directions;
+    for (auto& dir : pump_dirs_norm) {
+        double norm = sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+        if (norm > 1e-10) {
+            dir[0] /= norm;
+            dir[1] /= norm;
+            dir[2] /= norm;
+        }
+    }
+    
+    // Validate pump direction count: must be 1 (broadcast to all) or match N_atoms
+    if (pump_dirs_norm.size() != 1 && pump_dirs_norm.size() != lattice.N_atoms) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction must have either 1 direction (broadcast to all sublattices) "
+                 << "or exactly " << lattice.N_atoms << " directions (one per sublattice). "
+                 << "Got " << pump_dirs_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
     }
     
     // Distribute trials across MPI ranks
@@ -346,16 +358,27 @@ void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int si
             cout << "Probe: t=" << config.probe_time << ", A=" << config.probe_amplitude << endl;
         }
         
+        // Create field directions for each sublattice
         vector<Eigen::VectorXd> field_dirs;
         for (size_t i = 0; i < lattice.N_atoms; ++i) {
             Eigen::VectorXd field_dir(3);
-            field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+            // Use per-sublattice direction if provided, otherwise broadcast first direction to all
+            size_t dir_idx = (pump_dirs_norm.size() == 1) ? 0 : i;
+            field_dir << pump_dirs_norm[dir_idx][0], pump_dirs_norm[dir_idx][1], pump_dirs_norm[dir_idx][2];
             field_dirs.push_back(field_dir);
         }
         
         if (rank == 0) {
-            cout << "Pulse direction: [" << pump_dir_norm[0] << ", " 
-                 << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+            if (pump_dirs_norm.size() == 1) {
+                cout << "Pulse direction (all sublattices): [" << pump_dirs_norm[0][0] << ", " 
+                     << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
+            } else {
+                cout << "Pulse directions per sublattice:" << endl;
+                for (size_t i = 0; i < pump_dirs_norm.size(); ++i) {
+                    cout << "  Sublattice " << i << ": [" << pump_dirs_norm[i][0] << ", " 
+                         << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
+                }
+            }
         }
         
         // Run single pulse magnetization dynamics
@@ -454,22 +477,35 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
     }
 #endif
     
-    // Setup pulse field directions normalization
-    auto pump_dir_norm = config.pump_direction;
-    double norm = sqrt(pump_dir_norm[0]*pump_dir_norm[0] + 
-                      pump_dir_norm[1]*pump_dir_norm[1] + 
-                      pump_dir_norm[2]*pump_dir_norm[2]);
-    if (norm > 1e-10) {
-        pump_dir_norm[0] /= norm;
-        pump_dir_norm[1] /= norm;
-        pump_dir_norm[2] /= norm;
+    // Setup pulse field directions normalization (per-sublattice)
+    vector<array<double, 3>> pump_dirs_norm = config.pump_directions;
+    for (auto& dir : pump_dirs_norm) {
+        double norm = sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+        if (norm > 1e-10) {
+            dir[0] /= norm;
+            dir[1] /= norm;
+            dir[2] /= norm;
+        }
+    }
+    
+    // Validate pump direction count: must be 1 (broadcast to all) or match N_atoms
+    if (pump_dirs_norm.size() != 1 && pump_dirs_norm.size() != lattice.N_atoms) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction must have either 1 direction (broadcast to all sublattices) "
+                 << "or exactly " << lattice.N_atoms << " directions (one per sublattice). "
+                 << "Got " << pump_dirs_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
     }
     
     // Create field directions for all sublattices
     vector<Eigen::VectorXd> field_dirs;
     for (size_t i = 0; i < lattice.N_atoms; ++i) {
         Eigen::VectorXd field_dir(3);
-        field_dir << pump_dir_norm[0], pump_dir_norm[1], pump_dir_norm[2];
+        // Use per-sublattice direction if provided, otherwise broadcast first direction to all
+        size_t dir_idx = (pump_dirs_norm.size() == 1) ? 0 : i;
+        field_dir << pump_dirs_norm[dir_idx][0], pump_dirs_norm[dir_idx][1], pump_dirs_norm[dir_idx][2];
         field_dirs.push_back(field_dir);
     }
     
@@ -529,8 +565,16 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
             cout << "  Pulse amplitude: " << config.pump_amplitude << endl;
             cout << "  Pulse width: " << config.pump_width << endl;
             cout << "  Pulse frequency: " << config.pump_frequency << endl;
-            cout << "  Direction: [" << pump_dir_norm[0] << ", " 
-                 << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+            if (pump_dirs_norm.size() == 1) {
+                cout << "  Direction: [" << pump_dirs_norm[0][0] << ", " 
+                     << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
+            } else {
+                cout << "  Directions per sublattice:" << endl;
+                for (size_t i = 0; i < pump_dirs_norm.size(); ++i) {
+                    cout << "    Sublattice " << i << ": [" << pump_dirs_norm[i][0] << ", " 
+                         << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
+                }
+            }
         }
         
         // Run MPI-parallelized version
@@ -600,8 +644,16 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
                 cout << "  Amplitude: " << config.pump_amplitude << endl;
                 cout << "  Width: " << config.pump_width << endl;
                 cout << "  Frequency: " << config.pump_frequency << endl;
-                cout << "  Direction: [" << pump_dir_norm[0] << ", " 
-                     << pump_dir_norm[1] << ", " << pump_dir_norm[2] << "]" << endl;
+                if (pump_dirs_norm.size() == 1) {
+                    cout << "  Direction: [" << pump_dirs_norm[0][0] << ", " 
+                         << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
+                } else {
+                    cout << "  Directions per sublattice:" << endl;
+                    for (size_t i = 0; i < pump_dirs_norm.size(); ++i) {
+                        cout << "    Sublattice " << i << ": [" << pump_dirs_norm[i][0] << ", " 
+                             << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
+                    }
+                }
                 cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
             }
             
@@ -909,18 +961,50 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
     }
 #endif
     
-    // Prepare pulse directions
-    SpinVector pump_dir_su2(3);
-    pump_dir_su2 << config.pump_direction[0], config.pump_direction[1], config.pump_direction[2];
-    pump_dir_su2.normalize();
+    // Prepare per-sublattice pulse directions for SU2
+    // Normalize all pump directions
+    vector<array<double, 3>> pump_dirs_norm = config.pump_directions;
+    for (auto& dir : pump_dirs_norm) {
+        double norm = sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+        if (norm > 1e-10) {
+            dir[0] /= norm;
+            dir[1] /= norm;
+            dir[2] /= norm;
+        }
+    }
     
-    // For SU3, pump direction in Gell-Mann basis (default: λ3)
-    const int su3_pump_component = static_cast<int>(config.get_param("su3_pump_component", 2.0));
-    SpinVector pump_dir_su3 = SpinVector::Zero(8);
-    if (su3_pump_component >= 0 && su3_pump_component < 8) {
-        pump_dir_su3(su3_pump_component) = 1.0;
-    } else {
-        pump_dir_su3(2) = 1.0;  // Default to λ3
+    // Validate pump direction count: must be 1 (broadcast to all) or match N_atoms_SU2
+    if (pump_dirs_norm.size() != 1 && pump_dirs_norm.size() != lattice.N_atoms_SU2) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction must have either 1 direction (broadcast to all SU2 sublattices) "
+                 << "or exactly " << lattice.N_atoms_SU2 << " directions (one per SU2 sublattice). "
+                 << "Got " << pump_dirs_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
+    }
+    
+    // Prepare per-sublattice pulse directions for SU3 (Gell-Mann basis)
+    // Normalize all SU3 pump directions
+    vector<array<double, 8>> pump_dirs_su3_norm = config.pump_directions_su3;
+    for (auto& dir : pump_dirs_su3_norm) {
+        double norm = 0.0;
+        for (int k = 0; k < 8; ++k) norm += dir[k]*dir[k];
+        norm = sqrt(norm);
+        if (norm > 1e-10) {
+            for (int k = 0; k < 8; ++k) dir[k] /= norm;
+        }
+    }
+    
+    // Validate SU3 pump direction count: must be 1 (broadcast to all) or match N_atoms_SU3
+    if (pump_dirs_su3_norm.size() != 1 && pump_dirs_su3_norm.size() != lattice.N_atoms_SU3) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction_su3 must have either 1 direction (broadcast to all SU3 sublattices) "
+                 << "or exactly " << lattice.N_atoms_SU3 << " directions (one per SU3 sublattice). "
+                 << "Got " << pump_dirs_su3_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
     }
     
     // Distribute trials across MPI ranks
@@ -965,14 +1049,27 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
             cout << "Setting up pump-probe pulses..." << endl;
         }
         
-        // Create field directions for SU2 (Fe) and SU3 (Tm)
+        // Create field directions for SU2 (Fe) - using per-sublattice directions
         vector<SpinVector> field_dirs_su2(lattice.lattice_size_SU2);
         vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
         
         for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+            size_t atom = i % lattice.N_atoms_SU2;
+            // Use per-sublattice direction if provided, otherwise broadcast first direction to all
+            size_t dir_idx = (pump_dirs_norm.size() == 1) ? 0 : atom;
+            SpinVector pump_dir_su2(3);
+            pump_dir_su2 << pump_dirs_norm[dir_idx][0], pump_dirs_norm[dir_idx][1], pump_dirs_norm[dir_idx][2];
             field_dirs_su2[i] = pump_dir_su2;
         }
         for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+            size_t atom = i % lattice.N_atoms_SU3;
+            // Use per-sublattice direction if provided, otherwise broadcast first direction to all
+            size_t dir_idx = (pump_dirs_su3_norm.size() == 1) ? 0 : atom;
+            SpinVector pump_dir_su3(8);
+            pump_dir_su3 << pump_dirs_su3_norm[dir_idx][0], pump_dirs_su3_norm[dir_idx][1],
+                           pump_dirs_su3_norm[dir_idx][2], pump_dirs_su3_norm[dir_idx][3],
+                           pump_dirs_su3_norm[dir_idx][4], pump_dirs_su3_norm[dir_idx][5],
+                           pump_dirs_su3_norm[dir_idx][6], pump_dirs_su3_norm[dir_idx][7];
             field_dirs_su3[i] = pump_dir_su3;
         }
         
@@ -1070,18 +1167,49 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
     }
 #endif
     
-    // Setup pulse field directions
-    SpinVector pump_dir_su2(3);
-    pump_dir_su2 << config.pump_direction[0], config.pump_direction[1], config.pump_direction[2];
-    pump_dir_su2.normalize();
+    // Setup per-sublattice pulse field directions for SU2
+    vector<array<double, 3>> pump_dirs_norm = config.pump_directions;
+    for (auto& dir : pump_dirs_norm) {
+        double norm = sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+        if (norm > 1e-10) {
+            dir[0] /= norm;
+            dir[1] /= norm;
+            dir[2] /= norm;
+        }
+    }
     
-    // For SU3, pump direction in Gell-Mann basis (default: λ3)
-    const int su3_pump_component = static_cast<int>(config.get_param("su3_pump_component", 2.0));
-    SpinVector pump_dir_su3 = SpinVector::Zero(8);
-    if (su3_pump_component >= 0 && su3_pump_component < 8) {
-        pump_dir_su3(su3_pump_component) = 1.0;
-    } else {
-        pump_dir_su3(2) = 1.0;  // Default to λ3
+    // Validate pump direction count: must be 1 (broadcast to all) or match N_atoms_SU2
+    if (pump_dirs_norm.size() != 1 && pump_dirs_norm.size() != lattice.N_atoms_SU2) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction must have either 1 direction (broadcast to all SU2 sublattices) "
+                 << "or exactly " << lattice.N_atoms_SU2 << " directions (one per SU2 sublattice). "
+                 << "Got " << pump_dirs_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
+    }
+    
+    // Prepare per-sublattice pulse directions for SU3 (Gell-Mann basis)
+    // Normalize all SU3 pump directions
+    vector<array<double, 8>> pump_dirs_su3_norm = config.pump_directions_su3;
+    for (auto& dir : pump_dirs_su3_norm) {
+        double norm = 0.0;
+        for (int k = 0; k < 8; ++k) norm += dir[k]*dir[k];
+        norm = sqrt(norm);
+        if (norm > 1e-10) {
+            for (int k = 0; k < 8; ++k) dir[k] /= norm;
+        }
+    }
+    
+    // Validate SU3 pump direction count: must be 1 (broadcast to all) or match N_atoms_SU3
+    if (pump_dirs_su3_norm.size() != 1 && pump_dirs_su3_norm.size() != lattice.N_atoms_SU3) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction_su3 must have either 1 direction (broadcast to all SU3 sublattices) "
+                 << "or exactly " << lattice.N_atoms_SU3 << " directions (one per SU3 sublattice). "
+                 << "Got " << pump_dirs_su3_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
     }
     
     // Create field directions for all sublattices
@@ -1089,9 +1217,22 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
     vector<SpinVector> field_dirs_su3(lattice.lattice_size_SU3);
     
     for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+        size_t atom = i % lattice.N_atoms_SU2;
+        // Use per-sublattice direction if provided, otherwise broadcast first direction to all
+        size_t dir_idx = (pump_dirs_norm.size() == 1) ? 0 : atom;
+        SpinVector pump_dir_su2(3);
+        pump_dir_su2 << pump_dirs_norm[dir_idx][0], pump_dirs_norm[dir_idx][1], pump_dirs_norm[dir_idx][2];
         field_dirs_su2[i] = pump_dir_su2;
     }
     for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+        size_t atom = i % lattice.N_atoms_SU3;
+        // Use per-sublattice direction if provided, otherwise broadcast first direction to all
+        size_t dir_idx = (pump_dirs_su3_norm.size() == 1) ? 0 : atom;
+        SpinVector pump_dir_su3(8);
+        pump_dir_su3 << pump_dirs_su3_norm[dir_idx][0], pump_dirs_su3_norm[dir_idx][1],
+                       pump_dirs_su3_norm[dir_idx][2], pump_dirs_su3_norm[dir_idx][3],
+                       pump_dirs_su3_norm[dir_idx][4], pump_dirs_su3_norm[dir_idx][5],
+                       pump_dirs_su3_norm[dir_idx][6], pump_dirs_su3_norm[dir_idx][7];
         field_dirs_su3[i] = pump_dir_su3;
     }
     
@@ -1166,8 +1307,34 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
             cout << "  SU2 Width: " << config.pump_width << endl;
             cout << "  SU2 Frequency: " << config.pump_frequency << endl;
-            cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
-            cout << "  SU3 Component: λ" << su3_pump_component << endl;
+            if (pump_dirs_norm.size() == 1) {
+                cout << "  SU2 Direction: [" << pump_dirs_norm[0][0] << ", " 
+                     << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
+            } else {
+                cout << "  SU2 Directions per sublattice:" << endl;
+                for (size_t i = 0; i < pump_dirs_norm.size(); ++i) {
+                    cout << "    Sublattice " << i << ": [" << pump_dirs_norm[i][0] << ", " 
+                         << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
+                }
+            }
+            if (pump_dirs_su3_norm.size() == 1) {
+                cout << "  SU3 Direction (Gell-Mann): [";
+                for (int k = 0; k < 8; ++k) {
+                    if (k > 0) cout << ", ";
+                    cout << pump_dirs_su3_norm[0][k];
+                }
+                cout << "]" << endl;
+            } else {
+                cout << "  SU3 Directions per sublattice (Gell-Mann):" << endl;
+                for (size_t i = 0; i < pump_dirs_su3_norm.size(); ++i) {
+                    cout << "    Sublattice " << i << ": [";
+                    for (int k = 0; k < 8; ++k) {
+                        if (k > 0) cout << ", ";
+                        cout << pump_dirs_su3_norm[i][k];
+                    }
+                    cout << "]" << endl;
+                }
+            }
         }
         
         // Run MPI-parallelized version
@@ -1239,8 +1406,34 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
                 cout << "  SU2 Width: " << config.pump_width << endl;
                 cout << "  SU2 Frequency: " << config.pump_frequency << endl;
-                cout << "  SU2 Direction: [" << pump_dir_su2.transpose() << "]" << endl;
-                cout << "  SU3 Component: λ" << su3_pump_component << endl;
+                if (pump_dirs_norm.size() == 1) {
+                    cout << "  SU2 Direction: [" << pump_dirs_norm[0][0] << ", " 
+                         << pump_dirs_norm[0][1] << ", " << pump_dirs_norm[0][2] << "]" << endl;
+                } else {
+                    cout << "  SU2 Directions per sublattice:" << endl;
+                    for (size_t i = 0; i < pump_dirs_norm.size(); ++i) {
+                        cout << "    Sublattice " << i << ": [" << pump_dirs_norm[i][0] << ", " 
+                             << pump_dirs_norm[i][1] << ", " << pump_dirs_norm[i][2] << "]" << endl;
+                    }
+                }
+                if (pump_dirs_su3_norm.size() == 1) {
+                    cout << "  SU3 Direction (Gell-Mann): [";
+                    for (int k = 0; k < 8; ++k) {
+                        if (k > 0) cout << ", ";
+                        cout << pump_dirs_su3_norm[0][k];
+                    }
+                    cout << "]" << endl;
+                } else {
+                    cout << "  SU3 Directions per sublattice (Gell-Mann):" << endl;
+                    for (size_t i = 0; i < pump_dirs_su3_norm.size(); ++i) {
+                        cout << "    Sublattice " << i << ": [";
+                        for (int k = 0; k < 8; ++k) {
+                            if (k > 0) cout << ", ";
+                            cout << pump_dirs_su3_norm[i][k];
+                        }
+                        cout << "]" << endl;
+                    }
+                }
                 cout << "\n[3/3] Running pump-probe spectroscopy scan..." << endl;
             }
             

@@ -86,7 +86,8 @@ struct SpinConfig {
     double pump_width = 10.0;
     double pump_frequency = 0.0;
     double pump_time = 0.0;
-    array<double, 3> pump_direction = {0, 1, 0};
+    vector<array<double, 3>> pump_directions = {{0, 1, 0}};  // Per-sublattice pump directions (SU2)
+    vector<array<double, 8>> pump_directions_su3 = {{0, 0, 1, 0, 0, 0, 0, 0}};  // Per-sublattice pump directions (SU3, Gell-Mann basis, default λ3)
     
     double probe_amplitude = 0.1;
     double probe_width = 10.0;
@@ -219,6 +220,79 @@ inline array<size_t, 3> parse_size_vector3(const string& str) {
         vec[i++] = stoull(trim(item));
     }
     return vec;
+}
+
+/**
+ * Parse a list of 3-vectors from a comma-separated string
+ * Supports two formats:
+ * 1. Single 3-vector: "1,0,0" -> applies to all sublattices
+ * 2. Multiple 3-vectors: "1,0,0,0,1,0,-1,0,0" -> one per sublattice
+ */
+inline vector<array<double, 3>> parse_vector3_list(const string& str) {
+    vector<array<double, 3>> result;
+    string s = trim(str);
+    // Remove parentheses and brackets
+    s.erase(std::remove(s.begin(), s.end(), '('), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ')'), s.end());
+    s.erase(std::remove(s.begin(), s.end(), '['), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ']'), s.end());
+    
+    // Parse all values
+    vector<double> values;
+    stringstream ss(s);
+    string item;
+    while (getline(ss, item, ',')) {
+        values.push_back(stod(trim(item)));
+    }
+    
+    // Group into 3-vectors
+    if (values.size() % 3 != 0) {
+        throw runtime_error("pump_direction must have a multiple of 3 values (got " + 
+                           to_string(values.size()) + ")");
+    }
+    
+    for (size_t i = 0; i < values.size(); i += 3) {
+        result.push_back({values[i], values[i+1], values[i+2]});
+    }
+    
+    return result;
+}
+
+/**
+ * Parse a list of 8-vectors from a comma-separated string (for SU3 Gell-Mann basis)
+ * Supports two formats:
+ * 1. Single 8-vector: "0,0,1,0,0,0,0,0" -> applies to all SU3 sublattices (default λ3)
+ * 2. Multiple 8-vectors: "0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0" -> one per SU3 sublattice
+ */
+inline vector<array<double, 8>> parse_vector8_list(const string& str) {
+    vector<array<double, 8>> result;
+    string s = trim(str);
+    // Remove parentheses and brackets
+    s.erase(std::remove(s.begin(), s.end(), '('), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ')'), s.end());
+    s.erase(std::remove(s.begin(), s.end(), '['), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ']'), s.end());
+    
+    // Parse all values
+    vector<double> values;
+    stringstream ss(s);
+    string item;
+    while (getline(ss, item, ',')) {
+        values.push_back(stod(trim(item)));
+    }
+    
+    // Group into 8-vectors
+    if (values.size() % 8 != 0) {
+        throw runtime_error("pump_direction_su3 must have a multiple of 8 values (got " + 
+                           to_string(values.size()) + ")");
+    }
+    
+    for (size_t i = 0; i < values.size(); i += 8) {
+        result.push_back({values[i], values[i+1], values[i+2], values[i+3],
+                          values[i+4], values[i+5], values[i+6], values[i+7]});
+    }
+    
+    return result;
 }
 
 inline vector<int> parse_int_list(const string& str) {

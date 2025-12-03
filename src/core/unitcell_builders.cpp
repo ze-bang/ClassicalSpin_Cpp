@@ -543,33 +543,6 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     Tm_atoms.set_field(tm_field, 2);
     Tm_atoms.set_field(tm_field, 3);
     
-    // Tm-Tm bilinear interactions (if J_tm != 0)
-    if (J_tm != 0.0) {
-        // Simple isotropic coupling between Tm sites
-        Eigen::MatrixXd J_mat = Eigen::MatrixXd::Identity(8, 8) * J_tm;
-        
-        // Nearest neighbor Tm-Tm interactions
-        // Sites 0 and 1 are neighbors in ab-plane
-        Tm_atoms.set_bilinear_interaction(J_mat, 0, 1, Eigen::Vector3i(0, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_mat, 0, 1, Eigen::Vector3i(-1, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_mat, 2, 3, Eigen::Vector3i(0, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_mat, 2, 3, Eigen::Vector3i(1, -1, 0));
-        
-        // Add more neighbor connections as needed
-    }
-    
-    // Onsite anisotropy for Tm (if needed)
-    const double K_tm = config.get_param("K_tm", 0.0);
-    if (K_tm != 0.0) {
-        Eigen::MatrixXd K_mat = Eigen::MatrixXd::Zero(8, 8);
-        // λ3 and λ8 components for easy-axis anisotropy
-        K_mat(2, 2) = K_tm;  // λ3 component
-        K_mat(7, 7) = K_tm;  // λ8 component
-        Tm_atoms.set_onsite_interaction(K_mat, 0);
-        Tm_atoms.set_onsite_interaction(K_mat, 1);
-        Tm_atoms.set_onsite_interaction(K_mat, 2);
-        Tm_atoms.set_onsite_interaction(K_mat, 3);
-    }
     
     return Tm_atoms;
 }

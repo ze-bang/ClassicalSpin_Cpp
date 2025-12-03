@@ -180,7 +180,9 @@ use_gpu = true
 - `use_gpu`: Enable CUDA acceleration
 
 **Pump-Probe/2DCS:**
-- `pump_direction`: Field direction vector
+- `pump_direction`: Field direction vector(s). Can be:
+  - Single 3-vector for all sublattices: `0,1,0`
+  - Per-sublattice directions: `1,1,1,1,-1,-1,-1,1,-1,-1,-1,1` (4 sublattices × 3 components)
 - `pump_amplitude`, `pump_width`, `pump_frequency`
 - `pump_time`: Pump pulse center time
 - `tau_start`, `tau_end`, `tau_step`: Delay time scan
