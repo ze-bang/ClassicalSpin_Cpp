@@ -394,6 +394,82 @@ void update_arrays_three_kernel(
 );
 
 /**
+ * Fused RK4 final update: state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+ * Reduces 4 kernel launches to 1
+ */
+__global__
+void rk4_final_update_kernel(
+    double* state,
+    const double* k1, const double* k2,
+    const double* k3, const double* k4,
+    double dt_over_6,
+    size_t size
+);
+
+/**
+ * Fused DOPRI5 final update: state += dt * (b1*k1 + b3*k3 + b4*k4 + b5*k5 + b6*k6)
+ * Reduces 5 kernel launches to 1
+ */
+__global__
+void dopri5_final_update_kernel(
+    double* state,
+    const double* k1, const double* k3,
+    const double* k4, const double* k5, const double* k6,
+    double dt, double b1, double b3, double b4, double b5, double b6,
+    size_t size
+);
+
+/**
+ * Fused update for RK intermediate stage: out = state + dt * (a1*k1 + a2*k2 + ...)
+ * Handles 2-5 terms efficiently
+ */
+__global__
+void rk_stage_update_2_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    double dt,
+    size_t size
+);
+
+__global__
+void rk_stage_update_3_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    const double* k3, double a3,
+    double dt,
+    size_t size
+);
+
+__global__
+void rk_stage_update_4_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    const double* k3, double a3,
+    const double* k4, double a4,
+    double dt,
+    size_t size
+);
+
+__global__
+void rk_stage_update_5_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    const double* k3, double a3,
+    const double* k4, double a4,
+    const double* k5, double a5,
+    double dt,
+    size_t size
+);
+
+/**
  * Normalize spins to specified length
  */
 __global__

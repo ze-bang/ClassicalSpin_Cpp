@@ -33,6 +33,108 @@ void update_arrays_three_kernel(
     out[idx] = a1 * in1[idx] + a2 * in2[idx] + a3 * in3[idx];
 }
 
+// ======================= Fused RK Kernels for Performance =======================
+// These kernels combine multiple array updates to reduce kernel launch overhead
+
+__global__
+void rk4_final_update_kernel(
+    double* state,
+    const double* k1, const double* k2,
+    const double* k3, const double* k4,
+    double dt_over_6,
+    size_t size
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+    
+    // state += (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+    state[idx] += dt_over_6 * (k1[idx] + 2.0 * k2[idx] + 2.0 * k3[idx] + k4[idx]);
+}
+
+__global__
+void dopri5_final_update_kernel(
+    double* state,
+    const double* k1, const double* k3,
+    const double* k4, const double* k5, const double* k6,
+    double dt, double b1, double b3, double b4, double b5, double b6,
+    size_t size
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+    
+    // state += dt * (b1*k1 + b3*k3 + b4*k4 + b5*k5 + b6*k6)
+    state[idx] += dt * (b1 * k1[idx] + b3 * k3[idx] + b4 * k4[idx] + 
+                        b5 * k5[idx] + b6 * k6[idx]);
+}
+
+__global__
+void rk_stage_update_2_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    double dt,
+    size_t size
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+    
+    out[idx] = state[idx] + dt * (a1 * k1[idx] + a2 * k2[idx]);
+}
+
+__global__
+void rk_stage_update_3_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    const double* k3, double a3,
+    double dt,
+    size_t size
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+    
+    out[idx] = state[idx] + dt * (a1 * k1[idx] + a2 * k2[idx] + a3 * k3[idx]);
+}
+
+__global__
+void rk_stage_update_4_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    const double* k3, double a3,
+    const double* k4, double a4,
+    double dt,
+    size_t size
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+    
+    out[idx] = state[idx] + dt * (a1 * k1[idx] + a2 * k2[idx] + 
+                                   a3 * k3[idx] + a4 * k4[idx]);
+}
+
+__global__
+void rk_stage_update_5_kernel(
+    double* out,
+    const double* state,
+    const double* k1, double a1,
+    const double* k2, double a2,
+    const double* k3, double a3,
+    const double* k4, double a4,
+    const double* k5, double a5,
+    double dt,
+    size_t size
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= size) return;
+    
+    out[idx] = state[idx] + dt * (a1 * k1[idx] + a2 * k2[idx] + a3 * k3[idx] + 
+                                   a4 * k4[idx] + a5 * k5[idx]);
+}
+
 __global__
 void normalize_spins_kernel(
     double* d_spins,

@@ -23,8 +23,8 @@ h = 0.7                     # Alternative specification
 # Simulated Annealing (equilibration)
 T_start = 5.0
 T_end = 0.01
-annealing_steps = 1000
-overrelaxation_rate = 1
+annealing_steps = 100000
+overrelaxation_rate = 10
 pt_exchange_frequency = 50
 probe_rate = 2000
 ranks_to_write = 0          # Comma-separated list of ranks to save

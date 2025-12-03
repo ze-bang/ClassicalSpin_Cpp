@@ -24,12 +24,13 @@ T_start = 5.0               # Annealing start
 T_end = 0.001                # Annealing end
 annealing_steps = 1000
 use_twist_boundary = false
+T_zero = true
 
 # Pump-Probe Setup
 pump_direction = 0,0,1      # Pump along z
-pump_amplitude = 0.15
-pump_width = 0.38
-pump_frequency = 0.33
+pump_amplitude = 0.1
+pump_width = 0.4
+pump_frequency = 0.1
 pump_time = 0.0             # Not used in 2DCS scan
 
 # 2DCS Scan Parameters
@@ -42,7 +43,9 @@ parallel_tau = true         # Enable MPI parallelization over tau when num_trial
 md_time_start = -300.0
 md_time_end = 300.0
 md_timestep = 0.25
+md_integrator = rk5
 
 # Output
 output_dir = KITAEV_2DCS
 save_observables = false
+parallel_tau = true

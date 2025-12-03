@@ -113,6 +113,7 @@ void LLG_flat_kernel(
 // Alias kernel names to use common implementations from gpu_common_helpers.cu
 #define update_state_kernel ::update_arrays_kernel
 #define update_state_three_kernel ::update_arrays_three_kernel
+
 void GPUODESystem::operator()(const GPUState& x, GPUState& dxdt, double t) const {
     const int BLOCK_SIZE = 256;
     dim3 block(BLOCK_SIZE);
@@ -140,7 +141,8 @@ void GPUODESystem::operator()(const GPUState& x, GPUState& dxdt, double t) const
         data.lattice_size, data.spin_dim, data.N_atoms, data.max_bilinear
     );
     
-    cudaDeviceSynchronize();
+    // NOTE: No sync here - caller is responsible for synchronization
+    // This allows kernel pipelining when multiple GPU operations follow
 }
 
 /**
@@ -299,102 +301,80 @@ void step_gpu(
     if (method == "euler") {
         // =====================================================================
         // Euler method: y_{n+1} = y_n + h * f(t_n, y_n)
-        // 1st order, 1 function evaluation
+        // 1st order, 1 function evaluation, 1 sync
         // =====================================================================
-        GPUState k(array_size);
-        double* d_k = thrust::raw_pointer_cast(k.data());
+        data.ensure_rk_arrays(array_size, 2);
+        double* d_k1 = thrust::raw_pointer_cast(data.k1.data());
         
-        system(state, k, t);
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k, dt, array_size);
+        system(state, data.k1, t);
+        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, dt, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "rk2" || method == "midpoint") {
         // =====================================================================
         // Modified Midpoint (RK2): 2nd order, 2 function evaluations
-        // k1 = f(t, y)
-        // k2 = f(t + h/2, y + h/2 * k1)
-        // y_{n+1} = y_n + h * k2
+        // Optimized: 2 syncs (down from 2)
         // =====================================================================
-        GPUState k1(array_size), k2(array_size), tmp(array_size);
-        double* d_k1 = thrust::raw_pointer_cast(k1.data());
-        double* d_k2 = thrust::raw_pointer_cast(k2.data());
-        double* d_tmp = thrust::raw_pointer_cast(tmp.data());
+        data.ensure_rk_arrays(array_size, 2);
+        double* d_k1 = thrust::raw_pointer_cast(data.k1.data());
+        double* d_k2 = thrust::raw_pointer_cast(data.k2.data());
+        double* d_tmp = thrust::raw_pointer_cast(data.tmp_state.data());
         
-        // k1 = f(t, y)
-        system(state, k1, t);
-        
-        // tmp = y + h/2 * k1
+        system(state, data.k1, t);
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, 0.5 * dt, array_size);
         cudaDeviceSynchronize();
         
-        // k2 = f(t + h/2, tmp)
-        system(tmp, k2, t + 0.5 * dt);
-        
-        // y_{n+1} = y + h * k2
+        system(data.tmp_state, data.k2, t + 0.5 * dt);
         update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k2, dt, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "rk4") {
         // =====================================================================
         // Classic RK4: 4th order, 4 function evaluations
-        // k1 = f(t, y)
-        // k2 = f(t + h/2, y + h/2 * k1)
-        // k3 = f(t + h/2, y + h/2 * k2)
-        // k4 = f(t + h, y + h * k3)
-        // y_{n+1} = y + h/6 * (k1 + 2*k2 + 2*k3 + k4)
+        // Optimized: 4 syncs (down from 7) using fused final update
         // =====================================================================
-        GPUState k1(array_size), k2(array_size), k3(array_size), k4(array_size);
-        GPUState tmp(array_size);
-        double* d_k1 = thrust::raw_pointer_cast(k1.data());
-        double* d_k2 = thrust::raw_pointer_cast(k2.data());
-        double* d_k3 = thrust::raw_pointer_cast(k3.data());
-        double* d_k4 = thrust::raw_pointer_cast(k4.data());
-        double* d_tmp = thrust::raw_pointer_cast(tmp.data());
+        data.ensure_rk_arrays(array_size, 4);
+        double* d_k1 = thrust::raw_pointer_cast(data.k1.data());
+        double* d_k2 = thrust::raw_pointer_cast(data.k2.data());
+        double* d_k3 = thrust::raw_pointer_cast(data.k3.data());
+        double* d_k4 = thrust::raw_pointer_cast(data.k4.data());
+        double* d_tmp = thrust::raw_pointer_cast(data.tmp_state.data());
         
-        // k1 = f(t, y)
-        system(state, k1, t);
+        // k1 = f(t, y) - no sync needed, system() syncs internally
+        system(state, data.k1, t);
         
         // k2 = f(t + h/2, y + h/2 * k1)
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, 0.5 * dt, array_size);
         cudaDeviceSynchronize();
-        system(tmp, k2, t + 0.5 * dt);
+        system(data.tmp_state, data.k2, t + 0.5 * dt);
         
         // k3 = f(t + h/2, y + h/2 * k2)
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k2, 0.5 * dt, array_size);
         cudaDeviceSynchronize();
-        system(tmp, k3, t + 0.5 * dt);
+        system(data.tmp_state, data.k3, t + 0.5 * dt);
         
         // k4 = f(t + h, y + h * k3)
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k3, dt, array_size);
         cudaDeviceSynchronize();
-        system(tmp, k4, t + dt);
+        system(data.tmp_state, data.k4, t + dt);
         
-        // y_{n+1} = y + h/6 * (k1 + 2*k2 + 2*k3 + k4)
-        // Accumulate: sum = k1 + 2*k2 + 2*k3 + k4
-        update_state_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k2, 2.0, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k3, 2.0, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_k1, d_k1, 1.0, d_k4, 1.0, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, dt / 6.0, array_size);
+        // Fused final update: y_{n+1} = y + (h/6) * (k1 + 2*k2 + 2*k3 + k4)
+        ::rk4_final_update_kernel<<<grid, block>>>(d_state, d_k1, d_k2, d_k3, d_k4, dt / 6.0, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "rk5" || method == "rkck54") {
         // =====================================================================
         // Cash-Karp RK5(4): 5th order, 6 function evaluations
-        // Butcher tableau coefficients for the 5th order solution
+        // Optimized: uses fused stage updates
         // =====================================================================
-        GPUState k1(array_size), k2(array_size), k3(array_size);
-        GPUState k4(array_size), k5(array_size), k6(array_size);
-        GPUState tmp(array_size);
-        double* d_k1 = thrust::raw_pointer_cast(k1.data());
-        double* d_k2 = thrust::raw_pointer_cast(k2.data());
-        double* d_k3 = thrust::raw_pointer_cast(k3.data());
-        double* d_k4 = thrust::raw_pointer_cast(k4.data());
-        double* d_k5 = thrust::raw_pointer_cast(k5.data());
-        double* d_k6 = thrust::raw_pointer_cast(k6.data());
-        double* d_tmp = thrust::raw_pointer_cast(tmp.data());
+        data.ensure_rk_arrays(array_size, 6);
+        double* d_k1 = thrust::raw_pointer_cast(data.k1.data());
+        double* d_k2 = thrust::raw_pointer_cast(data.k2.data());
+        double* d_k3 = thrust::raw_pointer_cast(data.k3.data());
+        double* d_k4 = thrust::raw_pointer_cast(data.k4.data());
+        double* d_k5 = thrust::raw_pointer_cast(data.k5.data());
+        double* d_k6 = thrust::raw_pointer_cast(data.k6.data());
+        double* d_tmp = thrust::raw_pointer_cast(data.tmp_state.data());
         
         // Cash-Karp coefficients
         constexpr double a21 = 1.0/5.0;
@@ -408,79 +388,50 @@ void step_gpu(
         constexpr double b1 = 37.0/378.0, b3 = 250.0/621.0, b4 = 125.0/594.0, b6 = 512.0/1771.0;
         
         // k1 = f(t, y)
-        system(state, k1, t);
+        system(state, data.k1, t);
         
-        // k2 = f(t + c2*h, y + h*a21*k1)
+        // k2 = f(t + c2*h, y + h*a21*k1) - single stage update
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a21 * dt, array_size);
         cudaDeviceSynchronize();
-        system(tmp, k2, t + c2 * dt);
+        system(data.tmp_state, data.k2, t + c2 * dt);
         
-        // k3 = f(t + c3*h, y + h*(a31*k1 + a32*k2))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a31 * dt, array_size);
+        // k3 = f(t + c3*h, y + h*(a31*k1 + a32*k2)) - fused 2-term update
+        ::rk_stage_update_2_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a31, d_k2, a32, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a32 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k3, t + c3 * dt);
+        system(data.tmp_state, data.k3, t + c3 * dt);
         
-        // k4 = f(t + c4*h, y + h*(a41*k1 + a42*k2 + a43*k3))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a41 * dt, array_size);
+        // k4 = f(t + c4*h, y + h*(a41*k1 + a42*k2 + a43*k3)) - fused 3-term update
+        ::rk_stage_update_3_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a41, d_k2, a42, d_k3, a43, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a42 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a43 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k4, t + c4 * dt);
+        system(data.tmp_state, data.k4, t + c4 * dt);
         
-        // k5 = f(t + c5*h, y + h*(a51*k1 + a52*k2 + a53*k3 + a54*k4))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a51 * dt, array_size);
+        // k5 = f(t + c5*h, y + h*(a51*k1 + a52*k2 + a53*k3 + a54*k4)) - fused 4-term update
+        ::rk_stage_update_4_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a51, d_k2, a52, d_k3, a53, d_k4, a54, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a52 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a53 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a54 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k5, t + c5 * dt);
+        system(data.tmp_state, data.k5, t + c5 * dt);
         
-        // k6 = f(t + c6*h, y + h*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a61 * dt, array_size);
+        // k6 = f(t + c6*h, y + h*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5)) - fused 5-term update
+        ::rk_stage_update_5_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a61, d_k2, a62, d_k3, a63, d_k4, a64, d_k5, a65, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a62 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a63 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a64 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k5, a65 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k6, t + c6 * dt);
+        system(data.tmp_state, data.k6, t + c6 * dt);
         
-        // y_{n+1} = y + h*(b1*k1 + b3*k3 + b4*k4 + b6*k6)  (note: b2=b5=0)
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, b1 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k3, b3 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k4, b4 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k6, b6 * dt, array_size);
+        // y_{n+1} = y + h*(b1*k1 + b3*k3 + b4*k4 + b6*k6) - fused final (b2=b5=0)
+        ::dopri5_final_update_kernel<<<grid, block>>>(d_state, d_k1, d_k3, d_k4, d_k6, d_k6, dt, b1, b3, b4, 0.0, b6, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "dopri5") {
         // =====================================================================
         // Dormand-Prince 5(4): 5th order, 7 function evaluations (FSAL)
-        // Default method, good general-purpose choice
+        // Optimized: 6 syncs (down from 20+) using fused kernels
         // =====================================================================
-        GPUState k1(array_size), k2(array_size), k3(array_size), k4(array_size);
-        GPUState k5(array_size), k6(array_size), k7(array_size);
-        GPUState tmp(array_size);
-        double* d_k1 = thrust::raw_pointer_cast(k1.data());
-        double* d_k2 = thrust::raw_pointer_cast(k2.data());
-        double* d_k3 = thrust::raw_pointer_cast(k3.data());
-        double* d_k4 = thrust::raw_pointer_cast(k4.data());
-        double* d_k5 = thrust::raw_pointer_cast(k5.data());
-        double* d_k6 = thrust::raw_pointer_cast(k6.data());
-        double* d_tmp = thrust::raw_pointer_cast(tmp.data());
-        (void)k7;  // k7 not used in fixed-step (used in adaptive for FSAL)
+        data.ensure_rk_arrays(array_size, 6);
+        double* d_k1 = thrust::raw_pointer_cast(data.k1.data());
+        double* d_k2 = thrust::raw_pointer_cast(data.k2.data());
+        double* d_k3 = thrust::raw_pointer_cast(data.k3.data());
+        double* d_k4 = thrust::raw_pointer_cast(data.k4.data());
+        double* d_k5 = thrust::raw_pointer_cast(data.k5.data());
+        double* d_k6 = thrust::raw_pointer_cast(data.k6.data());
+        double* d_tmp = thrust::raw_pointer_cast(data.tmp_state.data());
         
         // Dormand-Prince coefficients
         constexpr double a21 = 1.0/5.0;
@@ -493,63 +444,35 @@ void step_gpu(
         constexpr double b1 = 35.0/384.0, b3 = 500.0/1113.0, b4 = 125.0/192.0, b5 = -2187.0/6784.0, b6 = 11.0/84.0;
         
         // k1 = f(t, y)
-        system(state, k1, t);
+        system(state, data.k1, t);
         
         // k2 = f(t + c2*h, y + h*a21*k1)
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a21 * dt, array_size);
         cudaDeviceSynchronize();
-        system(tmp, k2, t + c2 * dt);
+        system(data.tmp_state, data.k2, t + c2 * dt);
         
-        // k3 = f(t + c3*h, y + h*(a31*k1 + a32*k2))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a31 * dt, array_size);
+        // k3 = f(t + c3*h, y + h*(a31*k1 + a32*k2)) - fused
+        ::rk_stage_update_2_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a31, d_k2, a32, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a32 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k3, t + c3 * dt);
+        system(data.tmp_state, data.k3, t + c3 * dt);
         
-        // k4 = f(t + c4*h, y + h*(a41*k1 + a42*k2 + a43*k3))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a41 * dt, array_size);
+        // k4 = f(t + c4*h, y + h*(a41*k1 + a42*k2 + a43*k3)) - fused
+        ::rk_stage_update_3_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a41, d_k2, a42, d_k3, a43, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a42 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a43 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k4, t + c4 * dt);
+        system(data.tmp_state, data.k4, t + c4 * dt);
         
-        // k5 = f(t + c5*h, y + h*(a51*k1 + a52*k2 + a53*k3 + a54*k4))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a51 * dt, array_size);
+        // k5 = f(t + c5*h, y + h*(a51*k1 + a52*k2 + a53*k3 + a54*k4)) - fused
+        ::rk_stage_update_4_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a51, d_k2, a52, d_k3, a53, d_k4, a54, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a52 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a53 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a54 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k5, t + c5 * dt);
+        system(data.tmp_state, data.k5, t + c5 * dt);
         
-        // k6 = f(t + c6*h, y + h*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5))
-        update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k1, a61 * dt, array_size);
+        // k6 = f(t + c6*h, y + h*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5)) - fused
+        ::rk_stage_update_5_kernel<<<grid, block>>>(d_tmp, d_state, d_k1, a61, d_k2, a62, d_k3, a63, d_k4, a64, d_k5, a65, dt, array_size);
         cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k2, a62 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k3, a63 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k4, a64 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_tmp, d_tmp, 1.0, d_k5, a65 * dt, array_size);
-        cudaDeviceSynchronize();
-        system(tmp, k6, t + c6 * dt);
+        system(data.tmp_state, data.k6, t + c6 * dt);
         
-        // y_{n+1} = y + h*(b1*k1 + b3*k3 + b4*k4 + b5*k5 + b6*k6)  (note: b2=b7=0)
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k1, b1 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k3, b3 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k4, b4 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k5, b5 * dt, array_size);
-        cudaDeviceSynchronize();
-        update_state_kernel<<<grid, block>>>(d_state, d_state, 1.0, d_k6, b6 * dt, array_size);
+        // y_{n+1} = y + h*(b1*k1 + b3*k3 + b4*k4 + b5*k5 + b6*k6) - fused final update
+        ::dopri5_final_update_kernel<<<grid, block>>>(d_state, d_k1, d_k3, d_k4, d_k5, d_k6, dt, b1, b3, b4, b5, b6, array_size);
         cudaDeviceSynchronize();
         
     } else if (method == "rk78" || method == "rkf78") {
@@ -763,6 +686,7 @@ void step_gpu(
         // =====================================================================
         // SSPRK53: Strong Stability Preserving RK, 5 stages, 3rd order
         // Optimized for hyperbolic PDEs and spin dynamics
+        // Uses 3 pre-allocated arrays: k, tmp, u (stored in k1, k2, tmp_state)
         // =====================================================================
         constexpr double a30 = 0.355909775063327;
         constexpr double a32 = 0.644090224936674;
@@ -780,34 +704,36 @@ void step_gpu(
         constexpr double c3 = 0.728985661612188;
         constexpr double c4 = 0.699226135931670;
         
-        GPUState k(array_size), tmp(array_size), u(array_size);
-        double* d_k = thrust::raw_pointer_cast(k.data());
-        double* d_tmp = thrust::raw_pointer_cast(tmp.data());
-        double* d_u = thrust::raw_pointer_cast(u.data());
+        // Use pre-allocated arrays: k1 for k, tmp_state for tmp, k2 for u
+        data.ensure_rk_arrays(array_size, 2);
+        double* d_k = thrust::raw_pointer_cast(data.k1.data());
+        double* d_tmp = thrust::raw_pointer_cast(data.tmp_state.data());
+        double* d_u = thrust::raw_pointer_cast(data.k2.data());
         
         // Stage 1
-        system(state, k, t);
+        system(state, data.k1, t);
         update_state_kernel<<<grid, block>>>(d_tmp, d_state, 1.0, d_k, b10 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 2
-        system(tmp, k, t + c1 * dt);
+        system(data.tmp_state, data.k1, t + c1 * dt);
         update_state_kernel<<<grid, block>>>(d_u, d_tmp, 1.0, d_k, b21 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 3
-        system(u, k, t + c2 * dt);
+        system(data.k2, data.k1, t + c2 * dt);
         update_state_three_kernel<<<grid, block>>>(d_tmp, d_state, a30, d_u, a32, d_k, b32 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 4
-        system(tmp, k, t + c3 * dt);
+        system(data.tmp_state, data.k1, t + c3 * dt);
         update_state_three_kernel<<<grid, block>>>(d_tmp, d_state, a40, d_tmp, a43, d_k, b43 * dt, array_size);
         cudaDeviceSynchronize();
         
         // Stage 5 (final)
-        system(tmp, k, t + c4 * dt);
+        system(data.tmp_state, data.k1, t + c4 * dt);
         update_state_three_kernel<<<grid, block>>>(d_state, d_u, a52, d_tmp, a54, d_k, b54 * dt, array_size);
+        cudaDeviceSynchronize();
         cudaDeviceSynchronize();
         
     } else if (method == "rk54" || method == "rkf54") {

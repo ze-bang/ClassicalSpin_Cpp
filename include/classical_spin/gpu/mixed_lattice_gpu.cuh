@@ -197,7 +197,40 @@ struct GPUMixedLatticeData {
     thrust::device_vector<double> work_3;
     thrust::device_vector<double> local_field;
     
+    // RK stage storage (pre-allocated for high-order methods)
+    thrust::device_vector<double> k1, k2, k3, k4, k5, k6, k7;
+    thrust::device_vector<double> tmp_state;
+    
+    // CUDA streams for concurrent SU2/SU3 kernel execution
+    cudaStream_t stream_SU2 = nullptr;
+    cudaStream_t stream_SU3 = nullptr;
+    bool streams_initialized = false;
+    
     bool initialized = false;
+    
+    /**
+     * Initialize CUDA streams for concurrent execution
+     */
+    void init_streams() {
+        if (!streams_initialized) {
+            cudaStreamCreate(&stream_SU2);
+            cudaStreamCreate(&stream_SU3);
+            streams_initialized = true;
+        }
+    }
+    
+    /**
+     * Destroy CUDA streams
+     */
+    void destroy_streams() {
+        if (streams_initialized) {
+            cudaStreamDestroy(stream_SU2);
+            cudaStreamDestroy(stream_SU3);
+            streams_initialized = false;
+            stream_SU2 = nullptr;
+            stream_SU3 = nullptr;
+        }
+    }
     
     /**
      * Get total state size
@@ -211,6 +244,28 @@ struct GPUMixedLatticeData {
      */
     size_t SU3_offset() const {
         return lattice_size_SU2 * spin_dim_SU2;
+    }
+    
+    /**
+     * Allocate RK working arrays based on method needs
+     */
+    void ensure_rk_arrays(size_t array_size, int stages) {
+        if (k1.size() < array_size) {
+            k1.resize(array_size, 0.0);
+            k2.resize(array_size, 0.0);
+            tmp_state.resize(array_size, 0.0);
+        }
+        if (stages >= 4 && k3.size() < array_size) {
+            k3.resize(array_size, 0.0);
+            k4.resize(array_size, 0.0);
+        }
+        if (stages >= 6 && k5.size() < array_size) {
+            k5.resize(array_size, 0.0);
+            k6.resize(array_size, 0.0);
+        }
+        if (stages >= 7 && k7.size() < array_size) {
+            k7.resize(array_size, 0.0);
+        }
     }
     
     /**

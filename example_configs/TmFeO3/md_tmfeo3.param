@@ -52,8 +52,11 @@ md_time_end = 400.0
 md_timestep = 0.01
 md_save_interval = 1
 md_integrator = rk5
-use_gpu = true
+use_gpu = false
 
 # Output
 output_dir = TmFeO3_md
 save_observables = true
+
+
+initial_spin_config = ../TmFeO3_sa/
