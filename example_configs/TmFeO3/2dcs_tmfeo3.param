@@ -49,6 +49,9 @@ pump_frequency = 0.3
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
+pump_amplitude_su3 = 0.1
+pump_width_su3 = 10.0
+pump_frequency_su3 = 0.0
 pump_direction_su3 = 0,1,0,0,0,0,0,0  # λ3 component (default)
 
 # 2DCS Scan
