@@ -325,11 +325,13 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Fe_atoms.set_field(field, 3);
     
     // Tm atoms - set energy splitting (field in SU(3) space)
+    // For 3-level system with Gell-Mann matrices λ₃=diag(1,-1,0) and λ₈=diag(1,1,-2)/√3
+    // H = -α·λ₃ - β·λ₈ gives E₁-E₀ = 2α = e1 and E₂-E₀ = α + √3·β = e2
     // Tm field scaling factors from config
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
-    double alpha = e1 * tm_alpha_scale;
-    double beta = sqrt(3.0) / 3.0 * (2.0 * e2 - e1) * tm_beta_scale;
+    double alpha = e1 * tm_alpha_scale / 2.0;
+    double beta = sqrt(3.0) / 6.0 * (2.0 * e2 - e1) * tm_beta_scale;
     Eigen::VectorXd tm_field(8);
     tm_field << 0, 0, alpha, 0, 0, 0, 0, beta;
     
@@ -522,8 +524,8 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     // Tm field scaling factors from config
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
-    double alpha = e1 * tm_alpha_scale;
-    double beta = sqrt(3.0) / 3.0 * (2.0 * e2 - e1) * tm_beta_scale;
+    double alpha = e1 * tm_alpha_scale / 2;
+    double beta = sqrt(3.0) / 6.0 * (2.0 * e2 - e1) * tm_beta_scale;
     Eigen::VectorXd tm_field(8);
     tm_field << 0, 0, alpha, 0, 0, 0, 0, beta;
     
