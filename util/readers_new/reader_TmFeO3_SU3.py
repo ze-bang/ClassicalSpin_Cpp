@@ -432,9 +432,10 @@ def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 15,
         _plot_DSSF_components(A_local, w, tick_positions, output_dir, 'local', 
                               spin_dim, w0, wmax)
         
-        # Plot individual components - global frame (3 dipole components)
+        # Plot individual components - global frame
+        global_dim = A_global.shape[2]  # Get dimension from the DSSF result
         _plot_DSSF_components(A_global, w, tick_positions, output_dir, 'global', 
-                              3, w0, wmax)
+                              global_dim, w0, wmax)
         
         # Compute and save gap at Gamma - local frame
         Gamma_point = np.array([[0, 0, 0]])
@@ -461,9 +462,6 @@ def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 15,
                             'local', w0, wmax)
         _plot_DSSF_combined(DSSF_sum_global, w, tick_positions, output_dir, 
                             'global', w0, wmax)
-        
-        # Also plot dipole-only and quadrupole-only contributions
-        _plot_DSSF_by_multipole(A_local, w, tick_positions, output_dir, w0, wmax)
     
     return results
 
@@ -475,8 +473,8 @@ def _plot_DSSF_components(A: np.ndarray, w: np.ndarray, tick_positions: List[int
     g1, g2, g3, g4 = tick_positions
     labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
     
-    # Component names for SU(3)
-    component_names = ['Jx', 'Jy', 'Jz', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5']
+    # Component names for SU(3) - Gell-Mann matrices λ1 through λ8
+    component_names = ['λ1', 'λ2', 'λ3', 'λ4', 'λ5', 'λ6', 'λ7', 'λ8']
     
     for i in range(n_components):
         fig, ax = plt.subplots(figsize=(10, 4))
@@ -516,67 +514,12 @@ def _plot_DSSF_components(A: np.ndarray, w: np.ndarray, tick_positions: List[int
     plt.close()
 
 
-def _plot_DSSF_by_multipole(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
-                            output_dir: str, w0: float, wmax: float):
-    """
-    Plot DSSF separated by multipole order (dipole vs quadrupole).
-    
-    For SU(3), components 0-2 are dipole (Jx, Jy, Jz) and 3-7 are quadrupole.
-    """
-    g1, g2, g3, g4 = tick_positions
-    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
-    
-    spin_dim = A.shape[2]
-    
-    # Dipole contribution (first 3 components)
-    n_dipole = min(3, spin_dim)
-    DSSF_dipole = np.sum([A[:, :, i, i] for i in range(n_dipole)], axis=0)
-    
-    fig, ax = plt.subplots(figsize=(10, 4))
-    C = ax.imshow(DSSF_dipole, origin='lower', extent=[0, g4, w0, wmax],
-                 aspect='auto', interpolation='gaussian', cmap='gnuplot2')
-    ax.axvline(x=g1, color='b', linestyle='dashed')
-    ax.axvline(x=g2, color='b', linestyle='dashed')
-    ax.axvline(x=g3, color='b', linestyle='dashed')
-    ax.axvline(x=g4, color='b', linestyle='dashed')
-    ax.set_xticks([g1, g2, g3, g4])
-    ax.set_xticklabels(labels)
-    ax.set_xlim([0, g4])
-    ax.set_ylabel(r'$\omega$')
-    ax.set_title('Dipole DSSF (Jx + Jy + Jz)')
-    fig.colorbar(C)
-    plt.savefig(os.path.join(output_dir, "DSSF_dipole.pdf"))
-    plt.close()
-    np.savetxt(os.path.join(output_dir, "DSSF_dipole.txt"), DSSF_dipole)
-    
-    # Quadrupole contribution (components 3-7)
-    if spin_dim > 3:
-        DSSF_quadrupole = np.sum([A[:, :, i, i] for i in range(3, spin_dim)], axis=0)
-        
-        fig, ax = plt.subplots(figsize=(10, 4))
-        C = ax.imshow(DSSF_quadrupole, origin='lower', extent=[0, g4, w0, wmax],
-                     aspect='auto', interpolation='gaussian', cmap='gnuplot2')
-        ax.axvline(x=g1, color='b', linestyle='dashed')
-        ax.axvline(x=g2, color='b', linestyle='dashed')
-        ax.axvline(x=g3, color='b', linestyle='dashed')
-        ax.axvline(x=g4, color='b', linestyle='dashed')
-        ax.set_xticks([g1, g2, g3, g4])
-        ax.set_xticklabels(labels)
-        ax.set_xlim([0, g4])
-        ax.set_ylabel(r'$\omega$')
-        ax.set_title('Quadrupole DSSF (Q1 + Q2 + Q3 + Q4 + Q5)')
-        fig.colorbar(C)
-        plt.savefig(os.path.join(output_dir, "DSSF_quadrupole.pdf"))
-        plt.close()
-        np.savetxt(os.path.join(output_dir, "DSSF_quadrupole.txt"), DSSF_quadrupole)
-
-
 def _plot_gap_analysis(w: np.ndarray, DSSF_Gamma: np.ndarray, output_dir: str, 
                        frame_type: str):
     """Plot DSSF at Gamma point for gap analysis."""
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(w, DSSF_Gamma[:, 0])
-    ax.set_xlim([-3, 3])
+    ax.set_xlim([-10, 10])
     ax.set_xlabel(r'$\omega$')
     ax.set_ylabel(r'$S(\Gamma, \omega)$')
     ax.set_title(f'Gap analysis at Gamma ({frame_type} frame)')
@@ -674,98 +617,51 @@ def plot_magnetization_trajectory(filepath: str, output_dir: Optional[str] = Non
         
         spin_dim = M_antiferro.shape[1] if len(M_antiferro.shape) > 1 else 1
         
-        # Component labels for SU(3)
-        labels_full = ['Jx', 'Jy', 'Jz', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5']
+        # Component labels for SU(3) - Gell-Mann matrices
+        labels_full = ['λ1', 'λ2', 'λ3', 'λ4', 'λ5', 'λ6', 'λ7', 'λ8']
         labels = labels_full[:spin_dim]
         
-        # Plot antiferromagnetic magnetization - dipole components
-        n_dipole = min(3, spin_dim)
-        fig, axes = plt.subplots(n_dipole, 1, figsize=(12, 3*n_dipole), sharex=True)
-        if n_dipole == 1:
+        # Plot antiferromagnetic magnetization
+        fig, axes = plt.subplots(spin_dim, 1, figsize=(12, 2*spin_dim), sharex=True)
+        if spin_dim == 1:
             axes = [axes]
-        for i in range(n_dipole):
+        for i in range(spin_dim):
             axes[i].plot(T, M_antiferro[:, i], label=f'$M_{{AF,{labels[i]}}}$')
             axes[i].set_ylabel(f'$M_{{AF,{labels[i]}}}$')
             axes[i].legend()
         axes[-1].set_xlabel('Time')
-        fig.suptitle('Antiferromagnetic Magnetization (Dipole)')
+        fig.suptitle('Antiferromagnetic Magnetization')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'M_antiferro_dipole.pdf'))
+        plt.savefig(os.path.join(output_dir, 'M_antiferro.pdf'))
         plt.close()
         
-        # Plot antiferromagnetic magnetization - quadrupole components
-        if spin_dim > 3:
-            n_quad = spin_dim - 3
-            fig, axes = plt.subplots(n_quad, 1, figsize=(12, 3*n_quad), sharex=True)
-            if n_quad == 1:
-                axes = [axes]
-            for i in range(n_quad):
-                axes[i].plot(T, M_antiferro[:, i+3], label=f'$M_{{AF,{labels[i+3]}}}$')
-                axes[i].set_ylabel(f'$M_{{AF,{labels[i+3]}}}$')
-                axes[i].legend()
-            axes[-1].set_xlabel('Time')
-            fig.suptitle('Antiferromagnetic Magnetization (Quadrupole)')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'M_antiferro_quadrupole.pdf'))
-            plt.close()
-        
-        # Plot local magnetization - dipole components
-        fig, axes = plt.subplots(n_dipole, 1, figsize=(12, 3*n_dipole), sharex=True)
-        if n_dipole == 1:
+        # Plot local magnetization
+        fig, axes = plt.subplots(spin_dim, 1, figsize=(12, 2*spin_dim), sharex=True)
+        if spin_dim == 1:
             axes = [axes]
-        for i in range(n_dipole):
+        for i in range(spin_dim):
             axes[i].plot(T, M_local[:, i], label=f'$M_{{local,{labels[i]}}}$')
             axes[i].set_ylabel(f'$M_{{local,{labels[i]}}}$')
             axes[i].legend()
         axes[-1].set_xlabel('Time')
-        fig.suptitle('Local Magnetization (Dipole)')
+        fig.suptitle('Local Magnetization')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'M_local_dipole.pdf'))
+        plt.savefig(os.path.join(output_dir, 'M_local.pdf'))
         plt.close()
         
-        # Plot local magnetization - quadrupole components
-        if spin_dim > 3:
-            fig, axes = plt.subplots(n_quad, 1, figsize=(12, 3*n_quad), sharex=True)
-            if n_quad == 1:
-                axes = [axes]
-            for i in range(n_quad):
-                axes[i].plot(T, M_local[:, i+3], label=f'$M_{{local,{labels[i+3]}}}$')
-                axes[i].set_ylabel(f'$M_{{local,{labels[i+3]}}}$')
-                axes[i].legend()
-            axes[-1].set_xlabel('Time')
-            fig.suptitle('Local Magnetization (Quadrupole)')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'M_local_quadrupole.pdf'))
-            plt.close()
-        
-        # Plot global magnetization - dipole components
-        fig, axes = plt.subplots(n_dipole, 1, figsize=(12, 3*n_dipole), sharex=True)
-        if n_dipole == 1:
+        # Plot global magnetization
+        fig, axes = plt.subplots(spin_dim, 1, figsize=(12, 2*spin_dim), sharex=True)
+        if spin_dim == 1:
             axes = [axes]
-        for i in range(n_dipole):
+        for i in range(spin_dim):
             axes[i].plot(T, M_global[:, i], label=f'$M_{{global,{labels[i]}}}$')
             axes[i].set_ylabel(f'$M_{{global,{labels[i]}}}$')
             axes[i].legend()
         axes[-1].set_xlabel('Time')
-        fig.suptitle('Global Magnetization (Dipole)')
+        fig.suptitle('Global Magnetization')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'M_global_dipole.pdf'))
+        plt.savefig(os.path.join(output_dir, 'M_global.pdf'))
         plt.close()
-        
-        # Plot global magnetization - quadrupole components
-        if spin_dim > 3:
-            fig, axes = plt.subplots(n_quad, 1, figsize=(12, 3*n_quad), sharex=True)
-            if n_quad == 1:
-                axes = [axes]
-            for i in range(n_quad):
-                axes[i].plot(T, M_global[:, i+3], label=f'$M_{{global,{labels[i+3]}}}$')
-                axes[i].set_ylabel(f'$M_{{global,{labels[i+3]}}}$')
-                axes[i].legend()
-            axes[-1].set_xlabel('Time')
-            fig.suptitle('Global Magnetization (Quadrupole)')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'M_global_quadrupole.pdf'))
-            plt.close()
         
         # Save data
         header = 'time ' + ' '.join(labels)
@@ -784,17 +680,64 @@ def plot_magnetization_trajectory(filepath: str, output_dir: Optional[str] = Non
 # MAIN
 # =============================================================================
 
+def find_trajectory_file(path: str) -> str:
+    """
+    Find the trajectory.h5 file given a path.
+    
+    If path is an HDF5 file, return it directly.
+    If path is a directory, search for trajectory.h5 inside it.
+    
+    Args:
+        path: Path to HDF5 file or directory
+        
+    Returns:
+        Path to the trajectory.h5 file
+    """
+    if os.path.isfile(path) and path.endswith('.h5'):
+        return path
+    
+    if os.path.isdir(path):
+        # Check for trajectory.h5 directly in the directory
+        direct_path = os.path.join(path, 'trajectory.h5')
+        if os.path.exists(direct_path):
+            return direct_path
+        
+        # Check for sample_0/trajectory.h5
+        sample_path = os.path.join(path, 'sample_0', 'trajectory.h5')
+        if os.path.exists(sample_path):
+            return sample_path
+        
+        # Search recursively for any trajectory.h5
+        for root, dirs, files in os.walk(path):
+            if 'trajectory.h5' in files:
+                return os.path.join(root, 'trajectory.h5')
+        
+        raise FileNotFoundError(f"No trajectory.h5 file found in {path}")
+    
+    raise FileNotFoundError(f"Path does not exist or is not a valid HDF5 file: {path}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python reader_TmFeO3_SU3.py <hdf5_file> [analysis_type]")
+        print("Usage: python reader_TmFeO3_SU3.py <hdf5_file_or_directory> [analysis_type]")
         print("  analysis_type: 'md' for molecular dynamics (default), 'mag' for magnetization plots")
+        print("\nExamples:")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_tm_md/sample_0/trajectory.h5 md")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_tm_md/ md")
         sys.exit(1)
     
-    filepath = sys.argv[1]
+    input_path = sys.argv[1]
     analysis_type = sys.argv[2] if len(sys.argv) > 2 else 'md'
     
-    if not os.path.exists(filepath):
-        print(f"Error: File not found: {filepath}")
+    if not os.path.exists(input_path):
+        print(f"Error: Path not found: {input_path}")
+        sys.exit(1)
+    
+    try:
+        filepath = find_trajectory_file(input_path)
+        print(f"Found trajectory file: {filepath}")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
         sys.exit(1)
     
     print(f"Analyzing {filepath} (type: {analysis_type})")

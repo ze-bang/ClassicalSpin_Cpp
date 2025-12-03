@@ -82,6 +82,7 @@ SpinVector cross_prod_SU2(const SpinVector& a, const SpinVector& b) {
 }
 
 // Cross product for SU(3) using structure constants
+// Computes (a × b)_i = sum_{jk} f_{ijk} a_j b_k
 SpinVector cross_prod_SU3(const SpinVector& a, const SpinVector& b) {
     if (a.size() != 8 || b.size() != 8) {
         throw std::invalid_argument("SU3 cross product requires 8D vectors");
@@ -91,9 +92,8 @@ SpinVector cross_prod_SU3(const SpinVector& a, const SpinVector& b) {
     SpinVector result = SpinVector::Zero(8);
     
     for (size_t i = 0; i < 8; ++i) {
-        for (size_t j = 0; j < 8; ++j) {
-            result(i) += (f[i].row(j).array() * b.array()).matrix().dot(a);
-        }
+        // result(i) = sum_j a_j * (sum_k f[i](j,k) * b_k) = a^T * f[i] * b
+        result(i) = a.dot(f[i] * b);
     }
     
     return result;

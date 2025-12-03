@@ -29,7 +29,7 @@ import os
 import sys
 from math import gcd
 from functools import reduce
-from matplotlib.colors import PowerNorm
+from matplotlib.colors import LogNorm, PowerNorm
 from typing import Dict, Tuple, Optional, List, Any
 
 
@@ -214,9 +214,6 @@ def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray,
         # Use global frame transformation for 3-component spins
         A = Spin_global_t(k, S, P)
         # A shape: (n_times, n_sublattices, n_k, 3)
-        # Subtract mean configuration before FFT
-        A_mean = np.mean(A, axis=0, keepdims=True)
-        A = A - A_mean
         # FFT over time dimension
         dt = T[1] - T[0] if len(T) > 1 else 1.0
         A_fft = np.fft.fft(A, axis=0)
@@ -471,7 +468,7 @@ def _plot_DSSF_components(A: np.ndarray, w: np.ndarray, tick_positions: List[int
         fig, ax = plt.subplots(figsize=(10, 4))
         C = ax.imshow(A[:, :, i, i], origin='lower', 
                      extent=[0, g4, w0, wmax],
-                     aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm='log')
+                     aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm=LogNorm())
         ax.axvline(x=g1, color='b', linestyle='dashed')
         ax.axvline(x=g2, color='b', linestyle='dashed')
         ax.axvline(x=g3, color='b', linestyle='dashed')
@@ -522,7 +519,7 @@ def _plot_DSSF_combined(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
     
     fig, ax = plt.subplots(figsize=(10, 4))
     C = ax.imshow(A, origin='lower', extent=[0, g4, w0, wmax],
-                 aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+                 aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm=LogNorm())
     ax.axvline(x=g1, color='b', linestyle='dashed')
     ax.axvline(x=g2, color='b', linestyle='dashed')
     ax.axvline(x=g3, color='b', linestyle='dashed')
@@ -649,17 +646,64 @@ def plot_magnetization_trajectory(filepath: str, output_dir: Optional[str] = Non
 # MAIN
 # =============================================================================
 
+def find_trajectory_file(path: str) -> str:
+    """
+    Find the trajectory.h5 file given a path.
+    
+    If path is an HDF5 file, return it directly.
+    If path is a directory, search for trajectory.h5 inside it.
+    
+    Args:
+        path: Path to HDF5 file or directory
+        
+    Returns:
+        Path to the trajectory.h5 file
+    """
+    if os.path.isfile(path) and path.endswith('.h5'):
+        return path
+    
+    if os.path.isdir(path):
+        # Check for trajectory.h5 directly in the directory
+        direct_path = os.path.join(path, 'trajectory.h5')
+        if os.path.exists(direct_path):
+            return direct_path
+        
+        # Check for sample_0/trajectory.h5
+        sample_path = os.path.join(path, 'sample_0', 'trajectory.h5')
+        if os.path.exists(sample_path):
+            return sample_path
+        
+        # Search recursively for any trajectory.h5
+        for root, dirs, files in os.walk(path):
+            if 'trajectory.h5' in files:
+                return os.path.join(root, 'trajectory.h5')
+        
+        raise FileNotFoundError(f"No trajectory.h5 file found in {path}")
+    
+    raise FileNotFoundError(f"Path does not exist or is not a valid HDF5 file: {path}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python reader_TmFeO3_SU2.py <hdf5_file> [analysis_type]")
+        print("Usage: python reader_TmFeO3_SU2.py <hdf5_file_or_directory> [analysis_type]")
         print("  analysis_type: 'md' for molecular dynamics (default), 'mag' for magnetization plots")
+        print("\nExamples:")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_Fe_md/sample_0/trajectory.h5 md")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_Fe_md/ md")
         sys.exit(1)
     
-    filepath = sys.argv[1]
+    input_path = sys.argv[1]
     analysis_type = sys.argv[2] if len(sys.argv) > 2 else 'md'
     
-    if not os.path.exists(filepath):
-        print(f"Error: File not found: {filepath}")
+    if not os.path.exists(input_path):
+        print(f"Error: Path not found: {input_path}")
+        sys.exit(1)
+    
+    try:
+        filepath = find_trajectory_file(input_path)
+        print(f"Found trajectory file: {filepath}")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
         sys.exit(1)
     
     print(f"Analyzing {filepath} (type: {analysis_type})")

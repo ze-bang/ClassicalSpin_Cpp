@@ -2173,73 +2173,104 @@ public:
     /**
      * Landau-Lifshitz equations (zero-allocation flat array version for ODE integrator)
      * dS/dt = (H_eff - B_drive) × S
+     * 
+     * Pure flat implementation without Eigen conversions for maximum performance.
+     * For SU(2): standard 3D cross product
+     * For SU(3): structure constant contraction (a × b)_i = f_{ijk} a_j b_k
      */
     void landau_lifshitz_flat(const double* state_flat, double* dsdt_flat, double t) const {
         if (spin_dim == 3) {
-            // Optimized 3D cross product
+            // SU(2): Standard cross product dS/dt = H × S
             for (size_t i = 0; i < lattice_size; ++i) {
-                double H_eff[3];
-                get_local_field_flat(state_flat, i, H_eff);
+                const size_t idx = i * 3;
                 
-                // Subtract drive field
-                size_t atom = i % N_atoms;
-                double factor1 = field_drive_amp * 
-                                std::exp(-std::pow((t - t_pulse[0]) / (2.0 * field_drive_width), 2)) *
-                                std::cos(2.0 * M_PI * field_drive_freq * (t - t_pulse[0]));
-                double factor2 = field_drive_amp * 
-                                std::exp(-std::pow((t - t_pulse[1]) / (2.0 * field_drive_width), 2)) *
-                                std::cos(2.0 * M_PI * field_drive_freq * (t - t_pulse[1]));
+                // Get local field (H_eff)
+                double H[3];
+                get_local_field_flat(state_flat, i, H);
                 
-                for (size_t d = 0; d < 3; ++d) {
-                    H_eff[d] -= field_drive[0](atom * 3 + d) * factor1 + 
-                                field_drive[1](atom * 3 + d) * factor2;
+                // Subtract drive field: H = H_eff - B_drive
+                drive_field_at_time_flat(t, i, H);  // Subtracts in-place
+                
+                // Get spin components
+                const double Sx = state_flat[idx + 0];
+                const double Sy = state_flat[idx + 1];
+                const double Sz = state_flat[idx + 2];
+                
+                // Cross product: dS/dt = H × S
+                dsdt_flat[idx + 0] = H[1] * Sz - H[2] * Sy;
+                dsdt_flat[idx + 1] = H[2] * Sx - H[0] * Sz;
+                dsdt_flat[idx + 2] = H[0] * Sy - H[1] * Sx;
+            }
+        } else if (spin_dim == 8) {
+            // SU(3): Structure constant contraction dS_i/dt = f_{ijk} H_j S_k
+            const auto& f = get_SU3_structure();
+            
+            for (size_t site = 0; site < lattice_size; ++site) {
+                const size_t idx = site * 8;
+                
+                // Get local field (H_eff)
+                double H[8];
+                get_local_field_flat(state_flat, site, H);
+                
+                // Subtract drive field: H = H_eff - B_drive
+                drive_field_at_time_flat(t, site, H);  // Subtracts in-place
+                
+                // Get spin pointer
+                const double* S = &state_flat[idx];
+                
+                // Structure constant contraction: dS_i/dt = sum_{jk} f[i](j,k) * H[j] * S[k]
+                for (size_t i = 0; i < 8; ++i) {
+                    double dSdt_i = 0.0;
+                    for (size_t j = 0; j < 8; ++j) {
+                        for (size_t k = 0; k < 8; ++k) {
+                            dSdt_i += f[i](j, k) * H[j] * S[k];
+                        }
+                    }
+                    dsdt_flat[idx + i] = dSdt_i;
                 }
-                
-                // Cross product: H_eff × S
-                const double* S = &state_flat[i * 3];
-                double* dS_dt = &dsdt_flat[i * 3];
-                
-                dS_dt[0] = H_eff[1] * S[2] - H_eff[2] * S[1];
-                dS_dt[1] = H_eff[2] * S[0] - H_eff[0] * S[2];
-                dS_dt[2] = H_eff[0] * S[1] - H_eff[1] * S[0];
             }
         } else {
-            // General case
+            // General case: use cross_product function (fallback)
             for (size_t i = 0; i < lattice_size; ++i) {
-                double H_eff_arr[8];
-                get_local_field_flat(state_flat, i, H_eff_arr);
+                const size_t idx = i * spin_dim;
                 
-                SpinVector H_eff = Eigen::Map<const Eigen::VectorXd>(H_eff_arr, spin_dim);
+                double H_arr[16];  // Max reasonable spin_dim
+                get_local_field_flat(state_flat, i, H_arr);
+                
+                SpinVector H_eff = Eigen::Map<const Eigen::VectorXd>(H_arr, spin_dim);
                 SpinVector B_drive = drive_field_at_time(t, i);
-                SpinVector S_i = Eigen::Map<const Eigen::VectorXd>(&state_flat[i * spin_dim], spin_dim);
+                SpinVector S_i = Eigen::Map<const Eigen::VectorXd>(&state_flat[idx], spin_dim);
                 
                 SpinVector dS_dt = cross_product(H_eff - B_drive, S_i);
                 
                 for (size_t d = 0; d < spin_dim; ++d) {
-                    dsdt_flat[i * spin_dim + d] = dS_dt(d);
+                    dsdt_flat[idx + d] = dS_dt(d);
                 }
             }
         }
     }
     
     /**
-     * Landau-Lifshitz equations: dS/dt = (H_eff - B_drive) × S
-     * Compute dS/dt from current spin configuration and time
-     * 
-     * Note: Sign convention matches original implementation (H × S, not S × H)
+     * Subtract time-dependent drive field from H array (in-place, flat version)
      */
-    SpinConfig landau_lifshitz(const SpinConfig& current_spins, double curr_time,
-                               CrossProductMethod cross_prod) {
-        SpinConfig dsdt(lattice_size);
+    void drive_field_at_time_flat(double t, size_t site_index, double* H) const {
+        const size_t atom = site_index % N_atoms;
         
-        for (size_t i = 0; i < lattice_size; ++i) {
-            SpinVector H_eff = get_local_field_lattice(current_spins, i);
-            SpinVector B_drive = drive_field_at_time(curr_time, i);
-            // dS/dt = (H_eff - B_drive) × S
-            dsdt[i] = cross_prod(H_eff - B_drive, current_spins[i]);
+        const double dt1 = t - t_pulse[0];
+        const double dt2 = t - t_pulse[1];
+        
+        const double factor1 = field_drive_amp * 
+                        std::exp(-std::pow(dt1 / (2.0 * field_drive_width), 2)) *
+                        std::cos(2.0 * M_PI * field_drive_freq * dt1);
+        
+        const double factor2 = field_drive_amp * 
+                        std::exp(-std::pow(dt2 / (2.0 * field_drive_width), 2)) *
+                        std::cos(2.0 * M_PI * field_drive_freq * dt2);
+        
+        for (size_t d = 0; d < spin_dim; ++d) {
+            H[d] -= field_drive[0](atom * spin_dim + d) * factor1 +
+                    field_drive[1](atom * spin_dim + d) * factor2;
         }
-        
-        return dsdt;
     }
 
     /**
