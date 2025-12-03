@@ -211,6 +211,9 @@ void run_molecular_dynamics(Lattice& lattice, const SpinConfig& config, int rank
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
         
+        // Save initial spin configuration before time evolution
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        
         // Run MD
         if (rank == 0) {
             cout << "Starting MD integration..." << endl;
@@ -331,6 +334,9 @@ void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int si
         } else if (rank == 0) {
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
+        
+        // Save initial spin configuration before time evolution
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
         
         // Setup pump pulse
         if (rank == 0) {
@@ -513,6 +519,11 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
             }
         }
         
+        // Save initial spin configuration before time evolution (rank 0 only)
+        if (rank == 0) {
+            lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        }
+        
         if (rank == 0) {
             cout << "\n[2/2] Running MPI-parallel pump-probe spectroscopy..." << endl;
             cout << "  Pulse amplitude: " << config.pump_amplitude << endl;
@@ -580,6 +591,9 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
             } else if (rank == 0) {
                 cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
             }
+            
+            // Save initial spin configuration before time evolution
+            lattice.save_spin_config(trial_dir + "/initial_spins.txt");
             
             if (rank == 0 || config.num_trials == 1) {
                 cout << "\n[2/3] Pulse configuration:" << endl;
@@ -818,6 +832,9 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const SpinConfig& confi
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
         
+        // Save initial spin configuration before time evolution
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        
         // Run MD
         if (rank == 0) {
             cout << "Starting MD integration..." << endl;
@@ -939,6 +956,9 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
         } else if (rank == 0) {
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
         }
+        
+        // Save initial spin configuration before time evolution
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
         
         // Setup pump field directions
         if (rank == 0) {
@@ -1136,6 +1156,11 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             }
         }
         
+        // Save initial spin configuration before time evolution (rank 0 only)
+        if (rank == 0) {
+            lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        }
+        
         if (rank == 0) {
             cout << "\n[2/2] Running MPI-parallel pump-probe spectroscopy..." << endl;
             cout << "  SU2 Amplitude: " << config.pump_amplitude << endl;
@@ -1205,6 +1230,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             } else if (rank == 0) {
                 cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
             }
+            
+            // Save initial spin configuration before time evolution
+            lattice.save_spin_config(trial_dir + "/initial_spins.txt");
             
             if (rank == 0 || config.num_trials == 1) {
                 cout << "\n[2/3] Pulse configuration:" << endl;
