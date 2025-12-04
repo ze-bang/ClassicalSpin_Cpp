@@ -15,8 +15,8 @@
  * H_spin = Σ_<ij> Si · J1 · Sj + Σ_<<<ij>>> Si · J3 · Sj - Σ_i B · Si
  *   (NN J1 and 3rd NN J3 are 3x3 matrices for general anisotropic exchange)
  * 
- * H_phonon = (1/2)(Vx² + Vy²) + (1/2)ω_E²(Qx² + Qy²)
- *          + (1/2)V_R² + (1/2)ω_A²*Q_R² 
+ * H_phonon = (1/2)(Vx² + Vy²) + (1/2)ω_E²(Qx² + Qy²) + (λ_E/4)(Qx² + Qy²)²
+ *          + (1/2)V_R² + (1/2)ω_A²*Q_R² + (λ_A/4)*Q_R⁴
  *          + g3*(Qx² + Qy²)*Q_R
  * 
  * H_sp-ph = Σ_<ij> [λ_xy * Qx * (Si_x*Sj_z + Si_z*Sj_x)
@@ -36,6 +36,7 @@
 #include "unitcell.h"
 #include "simple_linear_alg.h"
 #include <vector>
+#include <array>
 #include <functional>
 #include <random>
 #include <chrono>
@@ -122,6 +123,10 @@ struct PhononParams {
     // Three-phonon coupling: g3 * (Qx² + Qy²) * Q_R
     double g3 = 0.0;        // Cubic phonon-phonon coupling
     
+    // Quartic stabilization terms: (λ_E/4)(Qx² + Qy²)² + (λ_A/4)*Q_R⁴
+    double lambda_E = 0.0;  // E1 mode quartic coefficient (restores stability)
+    double lambda_A = 0.0;  // A1 mode quartic coefficient (restores stability)
+    
     // THz coupling strength
     double Z_star = 1.0;    // Effective charge for E(t) coupling
 };
@@ -129,19 +134,61 @@ struct PhononParams {
 /**
  * Spin-phonon coupling parameters
  * 
- * Coupling form on each bond <ij>:
+ * Uses Kitaev-Heisenberg-Γ-Γ' model with bond-dependent exchange:
+ * H_spin = Σ_<ij>_γ Si · J_γ · Sj  where γ ∈ {x, y, z} is the bond type
+ * 
+ * For honeycomb lattice:
+ *   Jx (x-bond): K on xx, Γ on yz/zy, Γ' on xy/xz  
+ *   Jy (y-bond): K on yy, Γ on xz/zx, Γ' on xy/yz
+ *   Jz (z-bond): K on zz, Γ on xy/yx, Γ' on xz/yz
+ * 
+ * Spin-phonon coupling form on each bond <ij>:
  *   λ_xy * Qx * (Si_x*Sj_z + Si_z*Sj_x)
  * + λ_xy * Qy * (Si_y*Sj_z + Si_z*Sj_y)  
  * + λ_R  * Q_R * (Si_x*Sj_x + Si_y*Sj_y + Si_z*Sj_z)
  */
 struct SpinPhononCouplingParams {
-    // Base exchange matrices (NN and 3rd NN)
-    SpinMatrix J1 = SpinMatrix::Zero(3, 3);   // NN exchange (3x3 matrix)
-    SpinMatrix J3 = SpinMatrix::Zero(3, 3);   // 3rd NN exchange (3x3 matrix)
+    // Kitaev-Heisenberg-Γ-Γ' parameters
+    double J = 0.0;        // Heisenberg coupling
+    double K = -1.0;       // Kitaev coupling
+    double Gamma = 0.25;   // Γ (off-diagonal symmetric) 
+    double Gammap = -0.02; // Γ' (off-diagonal asymmetric)
+    
+    // 3rd NN exchange (isotropic Heisenberg)
+    double J3 = 0.0;
     
     // Spin-phonon coupling strengths
     double lambda_xy = 0.0;  // Coupling for E1 mode (Qx, Qy)
     double lambda_R = 0.0;   // Coupling for A1 mode (Q_R)
+    
+    // Build bond-dependent exchange matrices
+    SpinMatrix get_Jx() const {
+        SpinMatrix Jx = SpinMatrix::Zero(3, 3);
+        Jx << J + K, Gammap, Gammap,
+              Gammap, J, Gamma,
+              Gammap, Gamma, J;
+        return Jx;
+    }
+    
+    SpinMatrix get_Jy() const {
+        SpinMatrix Jy = SpinMatrix::Zero(3, 3);
+        Jy << J, Gammap, Gamma,
+              Gammap, J + K, Gammap,
+              Gamma, Gammap, J;
+        return Jy;
+    }
+    
+    SpinMatrix get_Jz() const {
+        SpinMatrix Jz = SpinMatrix::Zero(3, 3);
+        Jz << J, Gamma, Gammap,
+              Gamma, J, Gammap,
+              Gammap, Gammap, J + K;
+        return Jz;
+    }
+    
+    SpinMatrix get_J3_matrix() const {
+        return J3 * SpinMatrix::Identity(3, 3);
+    }
 };
 
 /**
@@ -549,6 +596,85 @@ public:
                             double cooling_rate = 0.9,
                             string out_dir = "",
                             bool save_observables = true);
+    
+    // ============================================================
+    // SINGLE/DOUBLE PULSE DRIVE (for 2DCS)
+    // ============================================================
+    
+    /**
+     * Magnetization trajectory data type
+     * Returns: (time, [M_antiferro, M_local, M_global])
+     */
+    using MagTrajectory = vector<std::pair<double, std::array<Eigen::Vector3d, 3>>>;
+    
+    /**
+     * Single pulse THz drive on phonon E1 mode
+     * Drive is applied via the DriveParams (pulse 1)
+     * @param t_pulse   Center time of pulse
+     * @param E0        Pulse amplitude
+     * @param sigma     Gaussian width
+     * @param omega     Carrier frequency
+     * @param theta     Polarization angle (0=x, π/2=y)
+     * @return Trajectory of (time, [M_antiferro, M_local, M_global])
+     */
+    MagTrajectory single_pulse_drive(double t_pulse, double E0, double sigma, double omega,
+                                     double theta,
+                                     double T_start, double T_end, double dt_step,
+                                     const string& method = "dopri5");
+    
+    /**
+     * Double pulse THz drive (pump + probe)
+     * Uses both pulses in DriveParams
+     * @return Trajectory of (time, [M_antiferro, M_local, M_global])
+     */
+    MagTrajectory double_pulse_drive(double t_pump, double t_probe,
+                                     double E0_pump, double E0_probe,
+                                     double sigma_pump, double sigma_probe,
+                                     double omega_pump, double omega_probe,
+                                     double theta_pump, double theta_probe,
+                                     double T_start, double T_end, double dt_step,
+                                     const string& method = "dopri5");
+    
+    /**
+     * Complete 2D coherent spectroscopy (2DCS) workflow
+     * 
+     * Performs pump-probe spectroscopy with THz pulses driving the E1 phonon mode:
+     * 1. Uses current spin configuration as ground state
+     * 2. Runs reference single-pulse dynamics M0 (pump at t=0)
+     * 3. Scans delay times (tau) to measure:
+     *    - M1(t, tau): Response to probe pulse at time tau only
+     *    - M01(t, tau): Response to pump (t=0) + probe (t=tau)
+     * 
+     * Nonlinear signal extraction: M_NL = M01 - M0 - M1
+     * 
+     * @param E0           THz pulse amplitude
+     * @param sigma        Gaussian pulse width
+     * @param omega        Pulse carrier frequency
+     * @param theta        Polarization angle
+     * @param tau_start    Initial delay time
+     * @param tau_end      Final delay time  
+     * @param tau_step     Delay time step
+     * @param T_start      Integration start time
+     * @param T_end        Integration end time
+     * @param T_step       Integration timestep
+     * @param dir_name     Output directory
+     * @param method       ODE integration method
+     */
+    void pump_probe_spectroscopy(double E0, double sigma, double omega, double theta,
+                                double tau_start, double tau_end, double tau_step,
+                                double T_start, double T_end, double T_step,
+                                const string& dir_name = "spectroscopy",
+                                const string& method = "dopri5");
+    
+    /**
+     * MPI-parallelized 2DCS spectroscopy
+     * Distributes tau values across MPI ranks
+     */
+    void pump_probe_spectroscopy_mpi(double E0, double sigma, double omega, double theta,
+                                    double tau_start, double tau_end, double tau_step,
+                                    double T_start, double T_end, double T_step,
+                                    const string& dir_name = "spectroscopy",
+                                    const string& method = "dopri5");
     
     // ============================================================
     // I/O

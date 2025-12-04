@@ -13,6 +13,8 @@
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <filesystem>
+#include <mpi.h>
 
 #ifdef HDF5_ENABLED
 #include <H5Cpp.h>
@@ -114,6 +116,12 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         j3_partners[i].clear();
     }
     
+    // Build bond-dependent Kitaev-Heisenberg-Γ-Γ' exchange matrices
+    SpinMatrix Jx = sp_params.get_Jx();
+    SpinMatrix Jy = sp_params.get_Jy();
+    SpinMatrix Jz = sp_params.get_Jz();
+    SpinMatrix J3_mat = sp_params.get_J3_matrix();
+    
     // Build NN interactions on honeycomb
     // For honeycomb lattice with 2 atoms per unit cell:
     // - x-bond (type 0): connects (i,j,k,0) to (i,j-1,k,1)
@@ -126,38 +134,38 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                 size_t site0 = flatten_index(i, j, k, 0);  // Sublattice A
                 size_t site1 = flatten_index(i, j, k, 1);  // Sublattice B
                 
-                // x-bond
+                // x-bond (use Jx matrix)
                 size_t partner_x = flatten_index_periodic(i, j-1, k, 1);
-                nn_interaction[site0].push_back(sp_params.J1);
+                nn_interaction[site0].push_back(Jx);
                 nn_partners[site0].push_back(partner_x);
                 nn_bond_types[site0].push_back(0);
                 // Reverse bond
-                nn_interaction[partner_x].push_back(sp_params.J1.transpose());
+                nn_interaction[partner_x].push_back(Jx.transpose());
                 nn_partners[partner_x].push_back(site0);
                 nn_bond_types[partner_x].push_back(0);
                 
-                // y-bond
+                // y-bond (use Jy matrix)
                 size_t partner_y = flatten_index_periodic(i+1, j-1, k, 1);
-                nn_interaction[site0].push_back(sp_params.J1);
+                nn_interaction[site0].push_back(Jy);
                 nn_partners[site0].push_back(partner_y);
                 nn_bond_types[site0].push_back(1);
                 // Reverse bond
-                nn_interaction[partner_y].push_back(sp_params.J1.transpose());
+                nn_interaction[partner_y].push_back(Jy.transpose());
                 nn_partners[partner_y].push_back(site0);
                 nn_bond_types[partner_y].push_back(1);
                 
-                // z-bond (same unit cell)
-                nn_interaction[site0].push_back(sp_params.J1);
+                // z-bond (use Jz matrix, same unit cell)
+                nn_interaction[site0].push_back(Jz);
                 nn_partners[site0].push_back(site1);
                 nn_bond_types[site0].push_back(2);
                 // Reverse bond
-                nn_interaction[site1].push_back(sp_params.J1.transpose());
+                nn_interaction[site1].push_back(Jz.transpose());
                 nn_partners[site1].push_back(site0);
                 nn_bond_types[site1].push_back(2);
                 
-                // 3rd NN interactions
+                // 3rd NN interactions (isotropic Heisenberg J3)
                 // On honeycomb, 3rd NN are at distance 2a, connecting same sublattice
-                if (sp_params.J3.norm() > 1e-12) {
+                if (std::abs(sp_params.J3) > 1e-12) {
                     // 3rd NN offsets for sublattice A
                     vector<std::tuple<int,int,int,size_t>> j3_offsets = {
                         {1, 0, 0, 0}, {-1, 0, 0, 0}, {0, 1, 0, 0}, {0, -1, 0, 0}, {1, -1, 0, 0}, {-1, 1, 0, 0}
@@ -167,9 +175,9 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                         size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, atom);
                         // Only add if partner > site0 to avoid double counting
                         if (partner_j3 > site0) {
-                            j3_interaction[site0].push_back(sp_params.J3);
+                            j3_interaction[site0].push_back(J3_mat);
                             j3_partners[site0].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(sp_params.J3.transpose());
+                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
                             j3_partners[partner_j3].push_back(site0);
                         }
                     }
@@ -178,9 +186,9 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                     for (const auto& [di, dj, dk, atom_offset] : j3_offsets) {
                         size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, 1);
                         if (partner_j3 > site1) {
-                            j3_interaction[site1].push_back(sp_params.J3);
+                            j3_interaction[site1].push_back(J3_mat);
                             j3_partners[site1].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(sp_params.J3.transpose());
+                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
                             j3_partners[partner_j3].push_back(site1);
                         }
                     }
@@ -189,12 +197,14 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         }
     }
     
-    cout << "Set PhononLattice parameters:" << endl;
-    cout << "  J1 matrix:" << endl << sp_params.J1 << endl;
-    cout << "  J3 matrix:" << endl << sp_params.J3 << endl;
+    cout << "Set PhononLattice parameters (Kitaev-Heisenberg-Γ-Γ'):" << endl;
+    cout << "  J=" << sp_params.J << ", K=" << sp_params.K 
+         << ", Γ=" << sp_params.Gamma << ", Γ'=" << sp_params.Gammap << endl;
+    cout << "  J3=" << sp_params.J3 << endl;
     cout << "  λ_xy=" << sp_params.lambda_xy << ", λ_R=" << sp_params.lambda_R << endl;
     cout << "  Phonon: ω_E=" << ph_params.omega_E << ", ω_A=" << ph_params.omega_A
          << ", g3=" << ph_params.g3 << endl;
+    cout << "  Quartic: λ_E=" << ph_params.lambda_E << ", λ_A=" << ph_params.lambda_A << endl;
     cout << "  Drive: E0_1=" << dr_params.E0_1 << ", ω_1=" << dr_params.omega_1 << endl;
 }
 
@@ -242,12 +252,17 @@ double PhononLattice::phonon_energy() const {
     double V_E = 0.5 * phonon_params.omega_E * phonon_params.omega_E * Q_E_sq;
     
     // A1 potential: (1/2)ω_A² Q_R²
-    double V_A = 0.5 * phonon_params.omega_A * phonon_params.omega_A * phonons.Q_R * phonons.Q_R;
+    double Q_R_sq = phonons.Q_R * phonons.Q_R;
+    double V_A = 0.5 * phonon_params.omega_A * phonon_params.omega_A * Q_R_sq;
     
     // Three-phonon coupling: g3*(Qx² + Qy²)*Q_R
     double V_3ph = phonon_params.g3 * Q_E_sq * phonons.Q_R;
     
-    return T + V_E + V_A + V_3ph;
+    // Quartic stabilization: (λ_E/4)(Qx² + Qy²)² + (λ_A/4)*Q_R⁴
+    double V_4E = 0.25 * phonon_params.lambda_E * Q_E_sq * Q_E_sq;
+    double V_4A = 0.25 * phonon_params.lambda_A * Q_R_sq * Q_R_sq;
+    
+    return T + V_E + V_A + V_3ph + V_4E + V_4A;
 }
 
 double PhononLattice::spin_phonon_energy() const {
@@ -409,27 +424,33 @@ void PhononLattice::phonon_derivatives(
     double Ex, Ey;
     drive_params.E_field(t, Ex, Ey);
     
-    // E1 mode (Qx): d²Qx/dt² = -ω_E²Qx - 2g3*Qx*Q_R - γ_E*Vx - ∂H_sp-ph/∂Qx + Z*Ex
+    // Precompute common terms
+    double Q_E_sq = ph.Q_x * ph.Q_x + ph.Q_y * ph.Q_y;
+    double Q_R_sq = ph.Q_R * ph.Q_R;
+    
+    // E1 mode (Qx): d²Qx/dt² = -ω_E²Qx - 2g3*Qx*Q_R - λ_E*(Qx²+Qy²)*Qx - γ_E*Vx - ∂H_sp-ph/∂Qx + Z*Ex
     dQx = ph.V_x;
     dVx = -phonon_params.omega_E * phonon_params.omega_E * ph.Q_x
           - 2.0 * phonon_params.g3 * ph.Q_x * ph.Q_R
+          - phonon_params.lambda_E * Q_E_sq * ph.Q_x  // Quartic: ∂/∂Qx[(λ_E/4)(Qx²+Qy²)²] = λ_E*(Qx²+Qy²)*Qx
           - phonon_params.gamma_E * ph.V_x
           - dH_dQx_val
           + phonon_params.Z_star * Ex;
     
-    // E1 mode (Qy): d²Qy/dt² = -ω_E²Qy - 2g3*Qy*Q_R - γ_E*Vy - ∂H_sp-ph/∂Qy + Z*Ey
+    // E1 mode (Qy): d²Qy/dt² = -ω_E²Qy - 2g3*Qy*Q_R - λ_E*(Qx²+Qy²)*Qy - γ_E*Vy - ∂H_sp-ph/∂Qy + Z*Ey
     dQy = ph.V_y;
     dVy = -phonon_params.omega_E * phonon_params.omega_E * ph.Q_y
           - 2.0 * phonon_params.g3 * ph.Q_y * ph.Q_R
+          - phonon_params.lambda_E * Q_E_sq * ph.Q_y  // Quartic: ∂/∂Qy[(λ_E/4)(Qx²+Qy²)²] = λ_E*(Qx²+Qy²)*Qy
           - phonon_params.gamma_E * ph.V_y
           - dH_dQy_val
           + phonon_params.Z_star * Ey;
     
-    // A1 mode (Q_R): d²Q_R/dt² = -ω_A²Q_R - g3*(Qx²+Qy²) - γ_A*V_R - ∂H_sp-ph/∂Q_R
-    double Q_E_sq = ph.Q_x * ph.Q_x + ph.Q_y * ph.Q_y;
+    // A1 mode (Q_R): d²Q_R/dt² = -ω_A²Q_R - g3*(Qx²+Qy²) - λ_A*Q_R³ - γ_A*V_R - ∂H_sp-ph/∂Q_R
     dQR = ph.V_R;
     dVR = -phonon_params.omega_A * phonon_params.omega_A * ph.Q_R
           - phonon_params.g3 * Q_E_sq
+          - phonon_params.lambda_A * Q_R_sq * ph.Q_R  // Quartic: ∂/∂Q_R[(λ_A/4)*Q_R⁴] = λ_A*Q_R³
           - phonon_params.gamma_A * ph.V_R
           - dH_dQR_val;
 }
@@ -983,6 +1004,731 @@ void PhononLattice::save_positions(const string& filename) const {
     }
     
     file.close();
+}
+
+// ============================================================
+// 2DCS SPECTROSCOPY
+// ============================================================
+
+PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
+    double t_pulse, double E0, double sigma, double omega, double theta,
+    double T_start, double T_end, double step_size, const string& method) {
+    
+    // Set up single pulse
+    drive_params.E0_1 = E0;
+    drive_params.omega_1 = omega;
+    drive_params.t_1 = t_pulse;
+    drive_params.sigma_1 = sigma;
+    drive_params.phi_1 = 0.0;
+    drive_params.theta_1 = theta;
+    
+    // Disable second pulse
+    drive_params.E0_2 = 0.0;
+    
+    // Storage for trajectory
+    MagTrajectory trajectory;
+    
+    // Build initial state from spins + phonons
+    ODEState state(state_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        state[i*spin_dim + 0] = spins[i](0);
+        state[i*spin_dim + 1] = spins[i](1);
+        state[i*spin_dim + 2] = spins[i](2);
+    }
+    phonons.to_array(&state[spin_dim * lattice_size]);
+    
+    // Create ODE system wrapper
+    auto system_func = [this](const ODEState& x, ODEState& dxdt, double t) {
+        this->ode_system(x, dxdt, t);
+    };
+    
+    // Observer to collect magnetization at regular intervals
+    double last_save_time = T_start;
+    auto observer = [&](const ODEState& x, double t) {
+        if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
+            // Compute magnetizations directly from flat state
+            Eigen::Vector3d M_local = Eigen::Vector3d::Zero();
+            Eigen::Vector3d M_antiferro = Eigen::Vector3d::Zero();
+            Eigen::Vector3d M_global = Eigen::Vector3d::Zero();
+            
+            for (size_t i = 0; i < lattice_size; ++i) {
+                double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                Eigen::Vector3d S(x[i*spin_dim], x[i*spin_dim+1], x[i*spin_dim+2]);
+                M_local += S;
+                M_antiferro += sign * S;
+                M_global += S;
+            }
+            M_local /= double(lattice_size);
+            M_antiferro /= double(lattice_size);
+            
+            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+            last_save_time = t;
+        }
+    };
+    
+    // Integrate
+    integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                        observer, method, false, 1e-10, 1e-10);
+    
+    // Reset drive
+    drive_params.E0_1 = 0.0;
+    
+    return trajectory;
+}
+
+PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
+    double t_pump, double t_probe,
+    double E0_pump, double E0_probe,
+    double sigma_pump, double sigma_probe,
+    double omega_pump, double omega_probe,
+    double theta_pump, double theta_probe,
+    double T_start, double T_end, double step_size, const string& method) {
+    
+    // Set up pump (pulse 1)
+    drive_params.E0_1 = E0_pump;
+    drive_params.omega_1 = omega_pump;
+    drive_params.t_1 = t_pump;
+    drive_params.sigma_1 = sigma_pump;
+    drive_params.phi_1 = 0.0;
+    drive_params.theta_1 = theta_pump;
+    
+    // Set up probe (pulse 2)
+    drive_params.E0_2 = E0_probe;
+    drive_params.omega_2 = omega_probe;
+    drive_params.t_2 = t_probe;
+    drive_params.sigma_2 = sigma_probe;
+    drive_params.phi_2 = 0.0;
+    drive_params.theta_2 = theta_probe;
+    
+    // Storage for trajectory
+    MagTrajectory trajectory;
+    
+    // Build initial state from spins + phonons
+    ODEState state(state_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        state[i*spin_dim + 0] = spins[i](0);
+        state[i*spin_dim + 1] = spins[i](1);
+        state[i*spin_dim + 2] = spins[i](2);
+    }
+    phonons.to_array(&state[spin_dim * lattice_size]);
+    
+    // Create ODE system wrapper
+    auto system_func = [this](const ODEState& x, ODEState& dxdt, double t) {
+        this->ode_system(x, dxdt, t);
+    };
+    
+    // Observer to collect magnetization at regular intervals
+    double last_save_time = T_start;
+    auto observer = [&](const ODEState& x, double t) {
+        if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
+            // Compute magnetizations directly from flat state
+            Eigen::Vector3d M_local = Eigen::Vector3d::Zero();
+            Eigen::Vector3d M_antiferro = Eigen::Vector3d::Zero();
+            Eigen::Vector3d M_global = Eigen::Vector3d::Zero();
+            
+            for (size_t i = 0; i < lattice_size; ++i) {
+                double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                Eigen::Vector3d S(x[i*spin_dim], x[i*spin_dim+1], x[i*spin_dim+2]);
+                M_local += S;
+                M_antiferro += sign * S;
+                M_global += S;
+            }
+            M_local /= double(lattice_size);
+            M_antiferro /= double(lattice_size);
+            
+            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+            last_save_time = t;
+        }
+    };
+    
+    // Integrate
+    integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                        observer, method, false, 1e-10, 1e-10);
+    
+    // Reset drive
+    drive_params.E0_1 = 0.0;
+    drive_params.E0_2 = 0.0;
+    
+    return trajectory;
+}
+
+void PhononLattice::pump_probe_spectroscopy(
+    double E0, double sigma, double omega, double theta,
+    double tau_start, double tau_end, double tau_step,
+    double T_start, double T_end, double T_step,
+    const string& dir_name, const string& method) {
+    
+    std::filesystem::create_directories(dir_name);
+    
+    cout << "\n==========================================" << endl;
+    cout << "Pump-Probe Spectroscopy (PhononLattice)" << endl;
+    cout << "==========================================" << endl;
+    cout << "Pulse parameters:" << endl;
+    cout << "  Amplitude: " << E0 << endl;
+    cout << "  Width: " << sigma << endl;
+    cout << "  Frequency: " << omega << endl;
+    cout << "  Polarization: " << theta << " rad" << endl;
+    cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
+    cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
+    
+    // Use current configuration as ground state
+    cout << "\n[1/3] Using current configuration as ground state..." << endl;
+    double E_ground = energy_density();
+    SpinVector M_ground = magnetization();
+    cout << "  Ground state: E/N = " << E_ground << ", |M| = " << M_ground.norm() << endl;
+    
+    // Save initial configuration
+    save_positions(dir_name + "/positions.txt");
+    save_spin_config(dir_name + "/spins_initial.txt");
+    
+    // Backup ground state
+    SpinConfig ground_state = spins;
+    PhononState ground_phonons = phonons;
+    
+    // Step 2: Reference single-pulse dynamics (pump at t=0)
+    cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
+    auto M0_trajectory = single_pulse_drive(0.0, E0, sigma, omega, theta,
+                                            T_start, T_end, T_step, method);
+    
+    // Restore ground state
+    spins = ground_state;
+    phonons = ground_phonons;
+    
+    // Step 3: Delay time scan
+    int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+    cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
+    
+    // Store all trajectories
+    vector<MagTrajectory> M1_trajectories;
+    vector<MagTrajectory> M01_trajectories;
+    vector<double> tau_values;
+    
+    M1_trajectories.reserve(tau_steps);
+    M01_trajectories.reserve(tau_steps);
+    tau_values.reserve(tau_steps);
+    
+    double current_tau = tau_start;
+    for (int i = 0; i < tau_steps; ++i) {
+        cout << "\n--- Delay time " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
+        
+        tau_values.push_back(current_tau);
+        
+        // M1: Probe pulse only at time tau
+        spins = ground_state;
+        phonons = ground_phonons;
+        cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
+        auto M1_trajectory = single_pulse_drive(current_tau, E0, sigma, omega, theta,
+                                                T_start, T_end, T_step, method);
+        M1_trajectories.push_back(M1_trajectory);
+        
+        // M01: Pump at t=0 + Probe at t=tau
+        spins = ground_state;
+        phonons = ground_phonons;
+        cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
+        auto M01_trajectory = double_pulse_drive(0.0, current_tau,
+                                                 E0, E0, sigma, sigma, omega, omega, theta, theta,
+                                                 T_start, T_end, T_step, method);
+        M01_trajectories.push_back(M01_trajectory);
+        
+        current_tau += tau_step;
+    }
+    
+#ifdef HDF5_ENABLED
+    // Write to HDF5
+    string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
+    cout << "\nWriting all data to HDF5 file: " << hdf5_file << endl;
+    
+    try {
+        H5::H5File file(hdf5_file, H5F_ACC_TRUNC);
+        
+        // Create groups
+        H5::Group params_group = file.createGroup("/parameters");
+        H5::Group ref_group = file.createGroup("/reference");
+        H5::Group scan_group = file.createGroup("/delay_scan");
+        
+        // Write parameters
+        {
+            hsize_t dims[1] = {1};
+            H5::DataSpace scalar_space(1, dims);
+            
+            H5::DataSet ds = params_group.createDataSet("E0", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&E0, H5::PredType::NATIVE_DOUBLE);
+            
+            ds = params_group.createDataSet("sigma", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&sigma, H5::PredType::NATIVE_DOUBLE);
+            
+            ds = params_group.createDataSet("omega", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&omega, H5::PredType::NATIVE_DOUBLE);
+            
+            ds = params_group.createDataSet("theta", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&theta, H5::PredType::NATIVE_DOUBLE);
+            
+            ds = params_group.createDataSet("E_ground", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&E_ground, H5::PredType::NATIVE_DOUBLE);
+        }
+        
+        // Write tau values
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(tau_values.size())};
+            H5::DataSpace space(1, dims);
+            H5::DataSet ds = scan_group.createDataSet("tau_values", H5::PredType::NATIVE_DOUBLE, space);
+            ds.write(tau_values.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+        
+        // Write M0 reference trajectory
+        {
+            size_t n_times = M0_trajectory.size();
+            vector<double> times(n_times);
+            vector<double> M_antiferro(n_times * 3);
+            vector<double> M_local(n_times * 3);
+            
+            for (size_t t = 0; t < n_times; ++t) {
+                times[t] = M0_trajectory[t].first;
+                for (int d = 0; d < 3; ++d) {
+                    M_antiferro[t*3 + d] = M0_trajectory[t].second[0](d);
+                    M_local[t*3 + d] = M0_trajectory[t].second[1](d);
+                }
+            }
+            
+            hsize_t dims1[1] = {n_times};
+            H5::DataSpace space1(1, dims1);
+            H5::DataSet ds = ref_group.createDataSet("time", H5::PredType::NATIVE_DOUBLE, space1);
+            ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            hsize_t dims2[2] = {n_times, 3};
+            H5::DataSpace space2(2, dims2);
+            ds = ref_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
+            ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            ds = ref_group.createDataSet("M_local", H5::PredType::NATIVE_DOUBLE, space2);
+            ds.write(M_local.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+        
+        // Write delay-dependent trajectories
+        for (size_t i = 0; i < tau_values.size(); ++i) {
+            string group_name = "/delay_scan/tau_" + std::to_string(i);
+            H5::Group tau_group = file.createGroup(group_name);
+            
+            // Write tau value
+            {
+                hsize_t dims[1] = {1};
+                H5::DataSpace space(1, dims);
+                H5::DataSet ds = tau_group.createDataSet("tau", H5::PredType::NATIVE_DOUBLE, space);
+                ds.write(&tau_values[i], H5::PredType::NATIVE_DOUBLE);
+            }
+            
+            // Write M1 trajectory
+            {
+                const auto& traj = M1_trajectories[i];
+                size_t n_times = traj.size();
+                vector<double> times(n_times);
+                vector<double> M_antiferro(n_times * 3);
+                
+                for (size_t t = 0; t < n_times; ++t) {
+                    times[t] = traj[t].first;
+                    for (int d = 0; d < 3; ++d) {
+                        M_antiferro[t*3 + d] = traj[t].second[0](d);
+                    }
+                }
+                
+                H5::Group m1_group = tau_group.createGroup("M1");
+                hsize_t dims1[1] = {n_times};
+                H5::DataSpace space1(1, dims1);
+                H5::DataSet ds = m1_group.createDataSet("time", H5::PredType::NATIVE_DOUBLE, space1);
+                ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                hsize_t dims2[2] = {n_times, 3};
+                H5::DataSpace space2(2, dims2);
+                ds = m1_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
+                ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+            }
+            
+            // Write M01 trajectory
+            {
+                const auto& traj = M01_trajectories[i];
+                size_t n_times = traj.size();
+                vector<double> times(n_times);
+                vector<double> M_antiferro(n_times * 3);
+                
+                for (size_t t = 0; t < n_times; ++t) {
+                    times[t] = traj[t].first;
+                    for (int d = 0; d < 3; ++d) {
+                        M_antiferro[t*3 + d] = traj[t].second[0](d);
+                    }
+                }
+                
+                H5::Group m01_group = tau_group.createGroup("M01");
+                hsize_t dims1[1] = {n_times};
+                H5::DataSpace space1(1, dims1);
+                H5::DataSet ds = m01_group.createDataSet("time", H5::PredType::NATIVE_DOUBLE, space1);
+                ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                hsize_t dims2[2] = {n_times, 3};
+                H5::DataSpace space2(2, dims2);
+                ds = m01_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
+                ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+            }
+        }
+        
+        file.close();
+        cout << "Successfully wrote all data to HDF5 file" << endl;
+        
+    } catch (H5::Exception& e) {
+        std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
+    }
+#else
+    cout << "Warning: HDF5 support not enabled. Data not saved to HDF5 file." << endl;
+    cout << "  Rebuild with -DHDF5_ENABLED to enable HDF5 output." << endl;
+#endif
+    
+    // Restore ground state
+    spins = ground_state;
+    phonons = ground_phonons;
+    
+    cout << "\n==========================================" << endl;
+    cout << "Pump-Probe Spectroscopy Complete!" << endl;
+    cout << "Output directory: " << dir_name << endl;
+    cout << "Total delay points: " << tau_steps << endl;
+    cout << "==========================================" << endl;
+}
+
+void PhononLattice::pump_probe_spectroscopy_mpi(
+    double E0, double sigma, double omega, double theta,
+    double tau_start, double tau_end, double tau_step,
+    double T_start, double T_end, double T_step,
+    const string& dir_name, const string& method) {
+    
+    int rank, mpi_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+    
+    std::filesystem::create_directories(dir_name);
+    
+    // Calculate total tau steps
+    int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+    
+    if (rank == 0) {
+        cout << "\n==========================================" << endl;
+        cout << "Pump-Probe Spectroscopy (MPI Parallel)" << endl;
+        cout << "==========================================" << endl;
+        cout << "MPI ranks: " << mpi_size << endl;
+        cout << "Pulse parameters:" << endl;
+        cout << "  Amplitude: " << E0 << endl;
+        cout << "  Width: " << sigma << endl;
+        cout << "  Frequency: " << omega << endl;
+        cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
+        cout << "Total delay points: " << tau_steps << endl;
+        cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+    }
+    
+    // Use current configuration as ground state
+    double E_ground = energy_density();
+    if (rank == 0) {
+        cout << "\n[1/4] Using current configuration as ground state..." << endl;
+        cout << "  Ground state: E/N = " << E_ground << endl;
+        save_positions(dir_name + "/positions.txt");
+        save_spin_config(dir_name + "/spins_initial.txt");
+    }
+    
+    // Backup ground state
+    SpinConfig ground_state = spins;
+    PhononState ground_phonons = phonons;
+    
+    // Compute M0 on rank 0
+    MagTrajectory M0_trajectory;
+    if (rank == 0) {
+        cout << "\n[2/4] Computing reference trajectory (M0)..." << endl;
+        M0_trajectory = single_pulse_drive(0.0, E0, sigma, omega, theta,
+                                           T_start, T_end, T_step, method);
+        spins = ground_state;
+        phonons = ground_phonons;
+    }
+    
+    // Distribute tau values across ranks
+    vector<int> tau_counts(mpi_size), tau_offsets(mpi_size);
+    int base_count = tau_steps / mpi_size;
+    int remainder = tau_steps % mpi_size;
+    
+    for (int r = 0; r < mpi_size; ++r) {
+        tau_counts[r] = base_count + (r < remainder ? 1 : 0);
+        tau_offsets[r] = (r == 0) ? 0 : tau_offsets[r-1] + tau_counts[r-1];
+    }
+    
+    int my_start = tau_offsets[rank];
+    int my_count = tau_counts[rank];
+    
+    if (rank == 0) {
+        cout << "\n[3/4] Parallel delay scan..." << endl;
+    }
+    
+    // Each rank computes its subset of tau values
+    vector<double> my_tau_values(my_count);
+    vector<MagTrajectory> my_M1_trajectories(my_count);
+    vector<MagTrajectory> my_M01_trajectories(my_count);
+    
+    for (int i = 0; i < my_count; ++i) {
+        int global_idx = my_start + i;
+        double current_tau = tau_start + global_idx * tau_step;
+        my_tau_values[i] = current_tau;
+        
+        cout << "[Rank " << rank << "] tau = " << current_tau 
+             << " (" << (i+1) << "/" << my_count << ")" << endl;
+        
+        // M1: Probe only
+        spins = ground_state;
+        phonons = ground_phonons;
+        my_M1_trajectories[i] = single_pulse_drive(current_tau, E0, sigma, omega, theta,
+                                                   T_start, T_end, T_step, method);
+        
+        // M01: Pump + Probe
+        spins = ground_state;
+        phonons = ground_phonons;
+        my_M01_trajectories[i] = double_pulse_drive(0.0, current_tau,
+                                                    E0, E0, sigma, sigma, omega, omega, theta, theta,
+                                                    T_start, T_end, T_step, method);
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Gather results to rank 0
+    if (rank == 0) {
+        cout << "\n[4/4] Gathering results and writing output..." << endl;
+        
+        // Collect all trajectories
+        vector<double> all_tau_values(tau_steps);
+        vector<MagTrajectory> all_M1_trajectories(tau_steps);
+        vector<MagTrajectory> all_M01_trajectories(tau_steps);
+        
+        // Copy rank 0 data
+        for (int i = 0; i < my_count; ++i) {
+            all_tau_values[i] = my_tau_values[i];
+            all_M1_trajectories[i] = my_M1_trajectories[i];
+            all_M01_trajectories[i] = my_M01_trajectories[i];
+        }
+        
+        // Receive from other ranks
+        for (int r = 1; r < mpi_size; ++r) {
+            for (int i = 0; i < tau_counts[r]; ++i) {
+                int global_idx = tau_offsets[r] + i;
+                double tau_val;
+                MPI_Recv(&tau_val, 1, MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                all_tau_values[global_idx] = tau_val;
+                
+                // Receive M1 trajectory size and data
+                int traj_size;
+                MPI_Recv(&traj_size, 1, MPI_INT, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                
+                vector<double> m1_buffer(traj_size * 7);  // t, M_antiferro(3), M_local(3)
+                MPI_Recv(m1_buffer.data(), traj_size * 7, MPI_DOUBLE, r, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                
+                all_M1_trajectories[global_idx].resize(traj_size);
+                for (int t = 0; t < traj_size; ++t) {
+                    all_M1_trajectories[global_idx][t].first = m1_buffer[t*7];
+                    all_M1_trajectories[global_idx][t].second[0] = Eigen::Vector3d(
+                        m1_buffer[t*7+1], m1_buffer[t*7+2], m1_buffer[t*7+3]);
+                    all_M1_trajectories[global_idx][t].second[1] = Eigen::Vector3d(
+                        m1_buffer[t*7+4], m1_buffer[t*7+5], m1_buffer[t*7+6]);
+                    all_M1_trajectories[global_idx][t].second[2] = Eigen::Vector3d::Zero();
+                }
+                
+                // Receive M01 trajectory
+                MPI_Recv(&traj_size, 1, MPI_INT, r, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                
+                vector<double> m01_buffer(traj_size * 7);
+                MPI_Recv(m01_buffer.data(), traj_size * 7, MPI_DOUBLE, r, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                
+                all_M01_trajectories[global_idx].resize(traj_size);
+                for (int t = 0; t < traj_size; ++t) {
+                    all_M01_trajectories[global_idx][t].first = m01_buffer[t*7];
+                    all_M01_trajectories[global_idx][t].second[0] = Eigen::Vector3d(
+                        m01_buffer[t*7+1], m01_buffer[t*7+2], m01_buffer[t*7+3]);
+                    all_M01_trajectories[global_idx][t].second[1] = Eigen::Vector3d(
+                        m01_buffer[t*7+4], m01_buffer[t*7+5], m01_buffer[t*7+6]);
+                    all_M01_trajectories[global_idx][t].second[2] = Eigen::Vector3d::Zero();
+                }
+            }
+        }
+        
+#ifdef HDF5_ENABLED
+        // Write HDF5 (same as serial version)
+        string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
+        cout << "Writing to: " << hdf5_file << endl;
+        
+        try {
+            H5::H5File file(hdf5_file, H5F_ACC_TRUNC);
+            
+            H5::Group params_group = file.createGroup("/parameters");
+            H5::Group ref_group = file.createGroup("/reference");
+            H5::Group scan_group = file.createGroup("/delay_scan");
+            
+            // Write parameters
+            {
+                hsize_t dims[1] = {1};
+                H5::DataSpace scalar_space(1, dims);
+                
+                H5::DataSet ds = params_group.createDataSet("E0", H5::PredType::NATIVE_DOUBLE, scalar_space);
+                ds.write(&E0, H5::PredType::NATIVE_DOUBLE);
+                
+                ds = params_group.createDataSet("sigma", H5::PredType::NATIVE_DOUBLE, scalar_space);
+                ds.write(&sigma, H5::PredType::NATIVE_DOUBLE);
+                
+                ds = params_group.createDataSet("omega", H5::PredType::NATIVE_DOUBLE, scalar_space);
+                ds.write(&omega, H5::PredType::NATIVE_DOUBLE);
+            }
+            
+            // Write tau values
+            {
+                hsize_t dims[1] = {static_cast<hsize_t>(all_tau_values.size())};
+                H5::DataSpace space(1, dims);
+                H5::DataSet ds = scan_group.createDataSet("tau_values", H5::PredType::NATIVE_DOUBLE, space);
+                ds.write(all_tau_values.data(), H5::PredType::NATIVE_DOUBLE);
+            }
+            
+            // Write M0 reference
+            {
+                size_t n_times = M0_trajectory.size();
+                vector<double> times(n_times);
+                vector<double> M_antiferro(n_times * 3);
+                
+                for (size_t t = 0; t < n_times; ++t) {
+                    times[t] = M0_trajectory[t].first;
+                    for (int d = 0; d < 3; ++d) {
+                        M_antiferro[t*3 + d] = M0_trajectory[t].second[0](d);
+                    }
+                }
+                
+                hsize_t dims1[1] = {n_times};
+                H5::DataSpace space1(1, dims1);
+                H5::DataSet ds = ref_group.createDataSet("time", H5::PredType::NATIVE_DOUBLE, space1);
+                ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                hsize_t dims2[2] = {n_times, 3};
+                H5::DataSpace space2(2, dims2);
+                ds = ref_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
+                ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+            }
+            
+            // Write delay-dependent data
+            for (size_t i = 0; i < all_tau_values.size(); ++i) {
+                string group_name = "/delay_scan/tau_" + std::to_string(i);
+                H5::Group tau_group = file.createGroup(group_name);
+                
+                {
+                    hsize_t dims[1] = {1};
+                    H5::DataSpace space(1, dims);
+                    H5::DataSet ds = tau_group.createDataSet("tau", H5::PredType::NATIVE_DOUBLE, space);
+                    ds.write(&all_tau_values[i], H5::PredType::NATIVE_DOUBLE);
+                }
+                
+                // M1
+                {
+                    const auto& traj = all_M1_trajectories[i];
+                    size_t n_times = traj.size();
+                    vector<double> times(n_times);
+                    vector<double> M_af(n_times * 3);
+                    
+                    for (size_t t = 0; t < n_times; ++t) {
+                        times[t] = traj[t].first;
+                        for (int d = 0; d < 3; ++d) {
+                            M_af[t*3 + d] = traj[t].second[0](d);
+                        }
+                    }
+                    
+                    H5::Group m1_group = tau_group.createGroup("M1");
+                    hsize_t dims1[1] = {n_times};
+                    H5::DataSpace space1(1, dims1);
+                    H5::DataSet ds = m1_group.createDataSet("time", H5::PredType::NATIVE_DOUBLE, space1);
+                    ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+                    
+                    hsize_t dims2[2] = {n_times, 3};
+                    H5::DataSpace space2(2, dims2);
+                    ds = m1_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
+                    ds.write(M_af.data(), H5::PredType::NATIVE_DOUBLE);
+                }
+                
+                // M01
+                {
+                    const auto& traj = all_M01_trajectories[i];
+                    size_t n_times = traj.size();
+                    vector<double> times(n_times);
+                    vector<double> M_af(n_times * 3);
+                    
+                    for (size_t t = 0; t < n_times; ++t) {
+                        times[t] = traj[t].first;
+                        for (int d = 0; d < 3; ++d) {
+                            M_af[t*3 + d] = traj[t].second[0](d);
+                        }
+                    }
+                    
+                    H5::Group m01_group = tau_group.createGroup("M01");
+                    hsize_t dims1[1] = {n_times};
+                    H5::DataSpace space1(1, dims1);
+                    H5::DataSet ds = m01_group.createDataSet("time", H5::PredType::NATIVE_DOUBLE, space1);
+                    ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+                    
+                    hsize_t dims2[2] = {n_times, 3};
+                    H5::DataSpace space2(2, dims2);
+                    ds = m01_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
+                    ds.write(M_af.data(), H5::PredType::NATIVE_DOUBLE);
+                }
+            }
+            
+            file.close();
+            cout << "Successfully wrote HDF5 file" << endl;
+            
+        } catch (H5::Exception& e) {
+            std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
+        }
+#else
+        cout << "Warning: HDF5 not enabled" << endl;
+#endif
+        
+        cout << "\n==========================================" << endl;
+        cout << "Pump-Probe Spectroscopy Complete!" << endl;
+        cout << "==========================================" << endl;
+        
+    } else {
+        // Send data to rank 0
+        for (int i = 0; i < my_count; ++i) {
+            MPI_Send(&my_tau_values[i], 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            
+            // Send M1 trajectory
+            int traj_size = static_cast<int>(my_M1_trajectories[i].size());
+            MPI_Send(&traj_size, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);
+            
+            vector<double> m1_buffer(traj_size * 7);
+            for (int t = 0; t < traj_size; ++t) {
+                m1_buffer[t*7] = my_M1_trajectories[i][t].first;
+                m1_buffer[t*7+1] = my_M1_trajectories[i][t].second[0](0);
+                m1_buffer[t*7+2] = my_M1_trajectories[i][t].second[0](1);
+                m1_buffer[t*7+3] = my_M1_trajectories[i][t].second[0](2);
+                m1_buffer[t*7+4] = my_M1_trajectories[i][t].second[1](0);
+                m1_buffer[t*7+5] = my_M1_trajectories[i][t].second[1](1);
+                m1_buffer[t*7+6] = my_M1_trajectories[i][t].second[1](2);
+            }
+            MPI_Send(m1_buffer.data(), traj_size * 7, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
+            
+            // Send M01 trajectory
+            traj_size = static_cast<int>(my_M01_trajectories[i].size());
+            MPI_Send(&traj_size, 1, MPI_INT, 0, 3, MPI_COMM_WORLD);
+            
+            vector<double> m01_buffer(traj_size * 7);
+            for (int t = 0; t < traj_size; ++t) {
+                m01_buffer[t*7] = my_M01_trajectories[i][t].first;
+                m01_buffer[t*7+1] = my_M01_trajectories[i][t].second[0](0);
+                m01_buffer[t*7+2] = my_M01_trajectories[i][t].second[0](1);
+                m01_buffer[t*7+3] = my_M01_trajectories[i][t].second[0](2);
+                m01_buffer[t*7+4] = my_M01_trajectories[i][t].second[1](0);
+                m01_buffer[t*7+5] = my_M01_trajectories[i][t].second[1](1);
+                m01_buffer[t*7+6] = my_M01_trajectories[i][t].second[1](2);
+            }
+            MPI_Send(m01_buffer.data(), traj_size * 7, MPI_DOUBLE, 0, 4, MPI_COMM_WORLD);
+        }
+    }
+    
+    // Restore ground state
+    spins = ground_state;
+    phonons = ground_phonons;
 }
 
 // Explicit template instantiation
