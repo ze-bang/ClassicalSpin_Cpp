@@ -167,7 +167,7 @@ set(CLASSICAL_SPIN_HEADERS
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/unitcell_builders.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/mixed_lattice.h
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/ncto_lattice.h
+    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/phonon_lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/gpu_common_helpers.cuh
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/lattice_gpu.cuh
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/lattice_gpu_api.h
@@ -180,7 +180,7 @@ set(CORE_SOURCES
     src/core/simple_linear_alg.cpp
     src/core/unitcell_builders.cpp
     src/core/spin_config.cpp
-    src/core/ncto_lattice.cpp
+    src/core/phonon_lattice.cpp
 )
 
 set(GPU_SOURCES

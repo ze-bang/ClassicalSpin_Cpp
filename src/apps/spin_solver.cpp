@@ -3,7 +3,7 @@
 #include "classical_spin/core/unitcell_builders.h"
 #include "classical_spin/lattice/lattice.h"
 #include "classical_spin/lattice/mixed_lattice.h"
-#include "classical_spin/lattice/ncto_lattice.h"
+#include "classical_spin/lattice/phonon_lattice.h"
 #include <mpi.h>
 #include <iostream>
 #include <memory>
@@ -746,59 +746,66 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
 }
 
 // ============================================================================
-// NCTO (SPIN-PHONON) SIMULATION RUNNERS
+// PhononLattice (SPIN-PHONON) SIMULATION RUNNERS
 // ============================================================================
 
 /**
- * Build NCTO parameters from SpinConfig
+ * Build PhononLattice parameters from SpinConfig
  */
-void build_ncto_params(const SpinConfig& config, 
-                       NCTOSpinPhononParams& sp_params,
-                       NCTOPhononParams& ph_params,
-                       NCTODriveParams& dr_params) {
-    // Spin-phonon coupling parameters
-    sp_params.J1_0 = config.get_param("J", 0.0);
-    sp_params.K_0 = config.get_param("K", -1.0);
-    sp_params.Gamma_0 = config.get_param("Gamma", 0.25);
-    sp_params.Gammap_0 = config.get_param("Gammap", -0.02);
-    sp_params.J3 = config.get_param("J3", 0.0);
-    sp_params.lambda_J = config.get_param("lambda_J", 0.0);
-    sp_params.lambda_K = config.get_param("lambda_K", 0.0);
-    sp_params.lambda_Gamma = config.get_param("lambda_Gamma", 0.0);
-    sp_params.lambda_Gammap = config.get_param("lambda_Gammap", 0.0);
+void build_phonon_params(const SpinConfig& config, 
+                         SpinPhononCouplingParams& sp_params,
+                         PhononParams& ph_params,
+                         DriveParams& dr_params) {
+    // Spin interaction parameters
+    // J1 is a 3x3 matrix - for isotropic coupling: J1 = J * Identity
+    double J_val = config.get_param("J", 0.0);
+    double K_val = config.get_param("K", -1.0);
+    double Gamma_val = config.get_param("Gamma", 0.25);
+    double Gammap_val = config.get_param("Gammap", -0.02);
     
-    // Phonon parameters (effective masses = 1, absorbed into frequency definitions)
-    ph_params.omega_IR = config.get_param("omega_IR", 1.0);
-    ph_params.omega_R = config.get_param("omega_R", 0.5);
-    ph_params.gamma_IR = config.get_param("gamma_IR", 0.1);
-    ph_params.gamma_R = config.get_param("gamma_R", 0.05);
-    ph_params.beta = config.get_param("beta", 0.0);
-    ph_params.g = config.get_param("g_phonon", 0.0);  // Nonlinear coupling
+    // Build J1 matrix (can be bond-dependent but here we use average)
+    // For honeycomb Kitaev-type: J1 = J*I + K*diag(Kx,Ky,Kz) + Γ*off-diag
+    sp_params.J1 = Eigen::Matrix3d::Zero();
+    sp_params.J1(0,0) = J_val + K_val;
+    sp_params.J1(1,1) = J_val + K_val; 
+    sp_params.J1(2,2) = J_val + K_val;
+    sp_params.J1(0,1) = Gamma_val + Gammap_val;
+    sp_params.J1(1,0) = Gamma_val + Gammap_val;
+    sp_params.J1(0,2) = Gamma_val + Gammap_val;
+    sp_params.J1(2,0) = Gamma_val + Gammap_val;
+    sp_params.J1(1,2) = Gamma_val + Gammap_val;
+    sp_params.J1(2,1) = Gamma_val + Gammap_val;
+    
+    // 3rd neighbor (J3) - isotropic Heisenberg by default
+    double J3_val = config.get_param("J3", 0.0);
+    sp_params.J3 = J3_val * Eigen::Matrix3d::Identity();
+    
+    // Spin-phonon coupling strengths
+    sp_params.lambda_xy = config.get_param("lambda_xy", 0.0);
+    sp_params.lambda_R = config.get_param("lambda_R", 0.0);
+    
+    // Phonon parameters
+    ph_params.omega_E = config.get_param("omega_E", 1.0);
+    ph_params.omega_A = config.get_param("omega_A", 0.5);
+    ph_params.gamma_E = config.get_param("gamma_E", 0.1);
+    ph_params.gamma_A = config.get_param("gamma_A", 0.05);
+    ph_params.g3 = config.get_param("g3", 0.0);  // Three-phonon coupling
     ph_params.Z_star = config.get_param("Z_star", 1.0);  // Effective charge
     
-    // Drive parameters (pulse 1)
+    // Drive parameters (single pulse on E1 mode)
     dr_params.E0_1 = config.pump_amplitude;
-    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : ph_params.omega_IR;
+    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : ph_params.omega_E;
     dr_params.t_1 = config.pump_time;
     dr_params.sigma_1 = config.pump_width;
     dr_params.phi_1 = config.get_param("pump_phase", 0.0);
-    dr_params.theta_1 = config.get_param("pump_polarization", 0.0);  // 0 = x-polarized
-    
-    // Drive parameters (pulse 2)
-    dr_params.E0_2 = config.probe_amplitude;
-    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : ph_params.omega_IR;
-    dr_params.t_2 = config.probe_time;
-    dr_params.sigma_2 = config.probe_width;
-    dr_params.phi_2 = config.get_param("probe_phase", 0.0);
-    dr_params.theta_2 = config.get_param("probe_polarization", 0.0);
 }
 
 /**
- * Run simulated annealing for NCTO lattice (spin subsystem only)
+ * Run simulated annealing for PhononLattice (spin subsystem only)
  */
-void run_simulated_annealing_ncto(NCTOLattice& lattice, const SpinConfig& config, int rank, int size) {
+void run_simulated_annealing_phonon(PhononLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
-        cout << "Running simulated annealing on NCTO lattice (spin subsystem)..." << endl;
+        cout << "Running simulated annealing on PhononLattice (spin subsystem)..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
     }
@@ -838,16 +845,16 @@ void run_simulated_annealing_ncto(NCTOLattice& lattice, const SpinConfig& config
     MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
-        cout << "NCTO simulated annealing completed (" << config.num_trials << " trials)." << endl;
+        cout << "PhononLattice simulated annealing completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
 /**
- * Run molecular dynamics for NCTO lattice (full spin-phonon dynamics)
+ * Run molecular dynamics for PhononLattice (full spin-phonon dynamics)
  */
-void run_molecular_dynamics_ncto(NCTOLattice& lattice, const SpinConfig& config, int rank, int size) {
+void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
-        cout << "Running spin-phonon molecular dynamics on NCTO lattice..." << endl;
+        cout << "Running spin-phonon molecular dynamics on PhononLattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
     }
@@ -911,16 +918,16 @@ void run_molecular_dynamics_ncto(NCTOLattice& lattice, const SpinConfig& config,
     MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
-        cout << "NCTO spin-phonon dynamics completed (" << config.num_trials << " trials)." << endl;
+        cout << "PhononLattice spin-phonon dynamics completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
 /**
- * Run pump-probe for NCTO lattice (THz driving IR phonon)
+ * Run pump-probe for PhononLattice (THz driving IR phonon)
  */
-void run_pump_probe_ncto(NCTOLattice& lattice, const SpinConfig& config, int rank, int size) {
+void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
-        cout << "Running THz pump-probe on NCTO lattice..." << endl;
+        cout << "Running THz pump-probe on PhononLattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
         cout << "\nDrive parameters:" << endl;
@@ -986,7 +993,7 @@ void run_pump_probe_ncto(NCTOLattice& lattice, const SpinConfig& config, int ran
     MPI_Barrier(MPI_COMM_WORLD);
     
     if (rank == 0) {
-        cout << "NCTO THz pump-probe completed (" << config.num_trials << " trials)." << endl;
+        cout << "PhononLattice THz pump-probe completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -2211,34 +2218,34 @@ int main(int argc, char** argv) {
     // Build system and run simulation
     try {
         if (config.system == SystemType::NCTO) {
-            // NCTO spin-phonon coupled system
+            // PhononLattice spin-phonon coupled system (honeycomb)
             if (rank == 0) {
-                cout << "\nBuilding NCTO spin-phonon lattice..." << endl;
+                cout << "\nBuilding PhononLattice spin-phonon lattice..." << endl;
             }
             
-            NCTOLattice ncto_lattice(config.lattice_size[0],
-                                     config.lattice_size[1],
-                                     config.lattice_size[2],
-                                     config.spin_length);
+            PhononLattice phonon_lattice(config.lattice_size[0],
+                                         config.lattice_size[1],
+                                         config.lattice_size[2],
+                                         config.spin_length);
             
             // Build parameters from config
-            NCTOSpinPhononParams sp_params;
-            NCTOPhononParams ph_params;
-            NCTODriveParams dr_params;
-            build_ncto_params(config, sp_params, ph_params, dr_params);
+            SpinPhononCouplingParams sp_params;
+            PhononParams ph_params;
+            DriveParams dr_params;
+            build_phonon_params(config, sp_params, ph_params, dr_params);
             
             // Set parameters (this builds the interaction matrices)
-            ncto_lattice.set_parameters(sp_params, ph_params, dr_params);
+            phonon_lattice.set_parameters(sp_params, ph_params, dr_params);
             
             // Set Gilbert damping if specified
-            ncto_lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);
+            phonon_lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);
             
             // Set magnetic field
             Eigen::Vector3d B;
             B << config.field_strength * config.field_direction[0],
                  config.field_strength * config.field_direction[1],
                  config.field_strength * config.field_direction[2];
-            ncto_lattice.set_field(B);
+            phonon_lattice.set_field(B);
             
             // Initialize spins
             if (config.use_ferromagnetic_init) {
@@ -2246,27 +2253,27 @@ int main(int argc, char** argv) {
                 dir << config.ferromagnetic_direction[0],
                        config.ferromagnetic_direction[1],
                        config.ferromagnetic_direction[2];
-                ncto_lattice.init_ferromagnetic(dir);
+                phonon_lattice.init_ferromagnetic(dir);
             } else if (!config.initial_spin_config.empty()) {
-                ncto_lattice.load_spin_config(config.initial_spin_config);
+                phonon_lattice.load_spin_config(config.initial_spin_config);
             } else {
-                ncto_lattice.init_random();
+                phonon_lattice.init_random();
             }
             
             // Run simulation
             switch (config.simulation) {
                 case SimulationType::SIMULATED_ANNEALING:
-                    run_simulated_annealing_ncto(ncto_lattice, config, rank, size);
+                    run_simulated_annealing_phonon(phonon_lattice, config, rank, size);
                     break;
                 case SimulationType::MOLECULAR_DYNAMICS:
-                    run_molecular_dynamics_ncto(ncto_lattice, config, rank, size);
+                    run_molecular_dynamics_phonon(phonon_lattice, config, rank, size);
                     break;
                 case SimulationType::PUMP_PROBE:
-                    run_pump_probe_ncto(ncto_lattice, config, rank, size);
+                    run_pump_probe_phonon(phonon_lattice, config, rank, size);
                     break;
                 default:
                     if (rank == 0) {
-                        cerr << "Simulation type not supported for NCTO lattice. "
+                        cerr << "Simulation type not supported for PhononLattice. "
                              << "Supported: SA, MD, pump_probe" << endl;
                     }
                     break;
