@@ -24,7 +24,7 @@ e1 = 0.97
 e2 = 3.97
 tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
-chii = 0.05
+chii = 0.0
 
 # Field
 field_strength = 0.0
@@ -39,8 +39,6 @@ gaussian_move = false
 
 T_zero = true
 
-spin_length = 2.5
-spin_length_su3 = 1
 
 # Pump-Probe Setup
 # For SU(2) spins (Fe)
@@ -67,7 +65,7 @@ md_time_start = -100.0
 md_time_end = 100.0
 md_timestep = 0.1
 md_integrator = rk4
-use_gpu = false              # Recommended for TmFeO3 2DCS
+use_gpu = true              # Recommended for TmFeO3 2DCS
 
 # Output
 output_dir = TmFeO3_2DCS

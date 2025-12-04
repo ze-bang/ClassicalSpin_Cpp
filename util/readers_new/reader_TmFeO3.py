@@ -939,19 +939,76 @@ def get_metadata_from_hdf5(filepath: str) -> Dict[str, Any]:
 # MAIN
 # =============================================================================
 
+def find_hdf5_file(path: str, analysis_type: str) -> str:
+    """
+    Find the appropriate HDF5 file given a path.
+    
+    If path is a directory, search for the expected HDF5 file based on analysis type.
+    If path is a file, return it directly.
+    
+    Args:
+        path: Path to file or directory
+        analysis_type: 'md' or '2dcs'
+        
+    Returns:
+        Path to the HDF5 file
+    """
+    if os.path.isfile(path):
+        return path
+    
+    if os.path.isdir(path):
+        # Expected filenames based on analysis type
+        if analysis_type == '2dcs':
+            expected_files = ['pump_probe_spectroscopy.h5']
+        else:  # md
+            expected_files = ['trajectory.h5']
+        
+        # Search in the directory and subdirectories
+        for root, dirs, files in os.walk(path):
+            for expected in expected_files:
+                if expected in files:
+                    return os.path.join(root, expected)
+        
+        # If not found, list available .h5 files
+        h5_files = []
+        for root, dirs, files in os.walk(path):
+            for f in files:
+                if f.endswith('.h5'):
+                    h5_files.append(os.path.join(root, f))
+        
+        if h5_files:
+            print(f"Expected HDF5 file not found. Available .h5 files:")
+            for f in h5_files:
+                print(f"  {f}")
+            # Return the first one found
+            return h5_files[0]
+        
+        raise FileNotFoundError(f"No HDF5 files found in {path}")
+    
+    raise FileNotFoundError(f"Path does not exist: {path}")
+
+
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python reader_TmFeO3_hdf5.py <hdf5_file> [analysis_type]")
+        print("Usage: python reader_TmFeO3_hdf5.py <hdf5_file_or_directory> [analysis_type]")
         print("  analysis_type: 'md' for molecular dynamics, '2dcs' for 2D spectroscopy")
+        print("  If a directory is provided, the script will search for the appropriate HDF5 file.")
         sys.exit(1)
     
-    filepath = sys.argv[1]
+    input_path = sys.argv[1]
     analysis_type = sys.argv[2] if len(sys.argv) > 2 else 'md'
     
-    if not os.path.exists(filepath):
-        print(f"Error: File not found: {filepath}")
+    if not os.path.exists(input_path):
+        print(f"Error: Path not found: {input_path}")
+        sys.exit(1)
+    
+    try:
+        filepath = find_hdf5_file(input_path, analysis_type)
+        print(f"Using HDF5 file: {filepath}")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
         sys.exit(1)
     
     print(f"Analyzing {filepath} (type: {analysis_type})")
