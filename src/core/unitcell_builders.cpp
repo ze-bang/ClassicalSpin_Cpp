@@ -325,13 +325,15 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Fe_atoms.set_field(field, 3);
     
     // Tm atoms - set energy splitting (field in SU(3) space)
-    // For 3-level system with Gell-Mann matrices λ₃=diag(1,-1,0) and λ₈=diag(1,1,-2)/√3
-    // H = -α·λ₃ - β·λ₈ gives E₁-E₀ = 2α = e1 and E₂-E₀ = α + √3·β = e2
-    // Tm field scaling factors from config
+    // For a 3-level system with energies 0, e1, e2, the Hamiltonian is H = diag(0, e1, e2)
+    // In the Gell-Mann basis with S_a = λ_a/2, we have E = -B · S = -(1/2) B · λ
+    // Matching diagonal elements gives:
+    //   B_3 = e1 (coefficient of λ_3)
+    //   B_8 = (2*e2 - e1) / sqrt(3) (coefficient of λ_8)
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
-    double alpha = e1 * tm_alpha_scale / 2.0;
-    double beta = sqrt(3.0) / 6.0 * (2.0 * e2 - e1) * tm_beta_scale;
+    double alpha = e1 * tm_alpha_scale;
+    double beta = (2.0 * e2 - e1) / sqrt(3.0) * tm_beta_scale;
     Eigen::VectorXd tm_field(8);
     tm_field << 0, 0, alpha, 0, 0, 0, 0, beta;
     
@@ -521,11 +523,15 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     TmFeO3_Tm Tm_atoms(8);
     
     // Set energy splitting (field in SU(3) space)
-    // Tm field scaling factors from config
+    // For a 3-level system with energies 0, e1, e2, the Hamiltonian is H = diag(0, e1, e2)
+    // In the Gell-Mann basis with S_a = λ_a/2, we have E = -B · S = -(1/2) B · λ
+    // Matching diagonal elements gives:
+    //   B_3 = e1 (coefficient of λ_3)
+    //   B_8 = (2*e2 - e1) / sqrt(3) (coefficient of λ_8)
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
-    double alpha = e1 * tm_alpha_scale / 2;
-    double beta = sqrt(3.0) / 6.0 * (2.0 * e2 - e1) * tm_beta_scale;
+    double alpha = e1 * tm_alpha_scale;
+    double beta = (2.0 * e2 - e1) / sqrt(3.0) * tm_beta_scale;
     Eigen::VectorXd tm_field(8);
     tm_field << 0, 0, alpha, 0, 0, 0, 0, beta;
     
