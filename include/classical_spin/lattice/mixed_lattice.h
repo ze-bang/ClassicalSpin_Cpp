@@ -1148,17 +1148,22 @@ public:
                 }
             }
             
-            // Save intermediate configuration
-            if (!out_dir.empty() && temp_step % 50 == 0) {
-                save_spin_config_to_dir(out_dir, "spins_T=" + std::to_string(T));
-            }
-            
             // Cool down
             T *= cooling_rate;
             ++temp_step;
         }
         
         cout << "Final energy density: " << energy_density() << endl;
+        
+        // Save spin config after annealing (before deterministic sweeps)
+        if (!out_dir.empty()) {
+            save_spin_config_to_dir(out_dir, "spins_T=" + std::to_string(T_end));
+        }
+        
+        // Final measurements if requested (before deterministic sweeps)
+        if (save_observables && !out_dir.empty()) {
+            perform_final_measurements(T_end, sigma, gaussian_move, out_dir);
+        }
         
         // T=0 deterministic sweeps if requested
         if (T_zero && n_deterministics > 0) {
@@ -1177,17 +1182,11 @@ public:
                 }
             }
             cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
-        }
-        
-        // Final measurements if requested
-        if (save_observables && !out_dir.empty()) {
-            perform_final_measurements(T_end, sigma, gaussian_move, out_dir);
-        }
-        
-        // Save final configuration
-        if (!out_dir.empty()) {
-            save_spin_config_to_dir(out_dir, "spins_final");
-            save_positions_to_dir(out_dir);
+            // Save final configuration
+            if (!out_dir.empty()) {
+                save_spin_config_to_dir(out_dir, "spins_T=0");
+                save_positions_to_dir(out_dir);
+            }
         }
     }
 
@@ -1531,7 +1530,7 @@ public:
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
                 ensure_directory_exists(rank_dir);
                 
-                save_spin_config(rank_dir + "/spins_final.dat");
+                save_spin_config_to_dir(rank_dir, "spins_T=" + std::to_string(curr_Temp));
                 
                 // Save energy time series
                 ofstream energy_file(rank_dir + "/energy.txt");

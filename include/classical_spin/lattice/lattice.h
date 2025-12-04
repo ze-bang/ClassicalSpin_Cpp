@@ -1585,17 +1585,23 @@ public:
                 }
             }
             
-            // Save intermediate configuration
-            if (!out_dir.empty() && temp_step % 50 == 0) {
-                save_spin_config(out_dir + "/spins_T=" + std::to_string(T) + ".dat");
-            }
-            
             // Cool down
             T *= cooling_rate;
             ++temp_step;
         }
         
         cout << "Final energy density: " << energy_density() << endl;
+        
+        // Save spin config after annealing (before deterministic sweeps)
+        if (!out_dir.empty()) {
+            save_spin_config(out_dir + "/spins_T=" + std::to_string(T) + ".txt");
+        }
+        
+        // Final measurements if requested (before deterministic sweeps)
+        if (save_observables && !out_dir.empty()) {
+            perform_final_measurements(T_end, sigma, gaussian_move, 
+                                      overrelaxation_rate, out_dir);
+        }
         
         // T=0 deterministic sweeps if requested
         if (T_zero && n_deterministics > 0) {
@@ -1610,17 +1616,10 @@ public:
                 }
             }
             cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
-        }
-        
-        // Final measurements if requested
-        if (save_observables && !out_dir.empty()) {
-            perform_final_measurements(T_end, sigma, gaussian_move, 
-                                      overrelaxation_rate, out_dir);
-        }
-        
-        // Save final configuration
-        if (!out_dir.empty()) {
-            save_spin_config(out_dir + "/spins_final.dat");
+            // Save final configuration
+            if (!out_dir.empty()) {
+                save_spin_config(out_dir + "/spins_T=0.txt");
+            }
         }
     }
 
@@ -1775,7 +1774,7 @@ public:
         }
         
         if (!out_dir.empty()) {
-            save_spin_config(out_dir + "/spins_final.dat");
+            save_spin_config(out_dir + "/spins_T=" + std::to_string(T) + ".txt");
         }
     }
 
@@ -2016,7 +2015,7 @@ public:
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
                 save_observables(rank_dir, energies, magnetizations);
-                save_spin_config(rank_dir + "/spins_final.dat");
+                save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
             }
             
             // Root process saves heat capacity
