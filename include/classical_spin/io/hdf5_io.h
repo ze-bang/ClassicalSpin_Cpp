@@ -1289,4 +1289,419 @@ private:
     H5::Group tau_scan_group_;
 };
 
+/**
+ * HDF5 Writer for NCTO spin-phonon molecular dynamics trajectories
+ * 
+ * File structure:
+ * /trajectory/
+ *   - times [n_steps]                         : Time points
+ *   - spins [n_steps, n_sites, 3]             : Full spin configuration
+ *   - magnetization [n_steps, 3]              : Total magnetization
+ *   - staggered_magnetization [n_steps, 3]    : Staggered (AF) order parameter
+ *   - phonons [n_steps, 6]                    : Phonon state (Qx, Qy, Q_R, Vx, Vy, V_R)
+ *   - energy [n_steps]                        : Energy per site
+ * 
+ * /metadata/
+ *   - Lattice parameters: lattice_size, dim1, dim2, dim3, spin_length
+ *   - Integration parameters: method, dt_initial, T_start, T_end, save_interval
+ *   - Phonon parameters: omega_IR, omega_R, gamma_IR, gamma_R, beta, g, Z_star
+ *   - Spin-phonon parameters: J1_0, K_0, Gamma_0, J3, lambda_J, lambda_K, lambda_Gamma
+ *   - Drive parameters: E0_1, omega_1, t_1, sigma_1, E0_2, omega_2, t_2, sigma_2
+ *   - positions [n_sites, 3]: Site positions (optional)
+ */
+class HDF5NCTOMDWriter {
+public:
+    HDF5NCTOMDWriter(const std::string& filename, 
+                     size_t lattice_size, 
+                     size_t dim1, size_t dim2, size_t dim3,
+                     const std::string& method,
+                     double dt_initial,
+                     double T_start,
+                     double T_end,
+                     size_t save_interval,
+                     float spin_length = 1.0,
+                     const std::vector<Eigen::Vector3d>* positions = nullptr,
+                     size_t reserve_steps = 1000)
+        : filename_(filename),
+          lattice_size_(lattice_size),
+          current_step_(0)
+    {
+        // Create HDF5 file
+        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        
+        // Create groups
+        trajectory_group_ = file_.createGroup("/trajectory");
+        metadata_group_ = file_.createGroup("/metadata");
+        
+        // Get current timestamp
+        std::time_t now = std::time(nullptr);
+        char time_str[100];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+        
+        // Write metadata
+        write_scalar_attribute(metadata_group_, "lattice_size", lattice_size);
+        write_scalar_attribute(metadata_group_, "dim1", dim1);
+        write_scalar_attribute(metadata_group_, "dim2", dim2);
+        write_scalar_attribute(metadata_group_, "dim3", dim3);
+        write_string_attribute(metadata_group_, "integration_method", method);
+        write_double_attribute(metadata_group_, "dt_initial", dt_initial);
+        write_double_attribute(metadata_group_, "T_start", T_start);
+        write_double_attribute(metadata_group_, "T_end", T_end);
+        write_scalar_attribute(metadata_group_, "save_interval", save_interval);
+        write_double_attribute(metadata_group_, "spin_length", spin_length);
+        write_string_attribute(metadata_group_, "creation_time", std::string(time_str));
+        write_string_attribute(metadata_group_, "code_version", "ClassicalSpin_Cpp v1.0");
+        write_string_attribute(metadata_group_, "file_format", "HDF5_NCTO_MD_v1.0");
+        write_string_attribute(metadata_group_, "lattice_type", "honeycomb_kitaev");
+        
+        // Write site positions if provided [lattice_size, 3]
+        if (positions != nullptr && positions->size() == lattice_size) {
+            hsize_t pos_dims[2] = {lattice_size, 3};
+            H5::DataSpace pos_space(2, pos_dims);
+            H5::DataSet pos_dataset = metadata_group_.createDataSet(
+                "positions", H5::PredType::NATIVE_DOUBLE, pos_space);
+            
+            std::vector<double> pos_data(lattice_size * 3);
+            for (size_t i = 0; i < lattice_size; ++i) {
+                pos_data[i * 3 + 0] = (*positions)[i](0);
+                pos_data[i * 3 + 1] = (*positions)[i](1);
+                pos_data[i * 3 + 2] = (*positions)[i](2);
+            }
+            pos_dataset.write(pos_data.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+        
+        // Create expandable trajectory datasets
+        // Times dataset [n_steps]
+        hsize_t time_dims[1] = {0};
+        hsize_t time_maxdims[1] = {H5S_UNLIMITED};
+        hsize_t time_chunk[1] = {1000};
+        H5::DataSpace time_space(1, time_dims, time_maxdims);
+        H5::DSetCreatPropList time_prop;
+        time_prop.setChunk(1, time_chunk);
+        time_prop.setDeflate(6);
+        times_dataset_ = trajectory_group_.createDataSet(
+            "times", H5::PredType::NATIVE_DOUBLE, time_space, time_prop);
+        
+        // Magnetization dataset [n_steps, 3]
+        hsize_t mag_dims[2] = {0, 3};
+        hsize_t mag_maxdims[2] = {H5S_UNLIMITED, 3};
+        hsize_t mag_chunk[2] = {100, 3};
+        H5::DataSpace mag_space(2, mag_dims, mag_maxdims);
+        H5::DSetCreatPropList mag_prop;
+        mag_prop.setChunk(2, mag_chunk);
+        mag_prop.setDeflate(6);
+        magnetization_dataset_ = trajectory_group_.createDataSet(
+            "magnetization", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
+        
+        // Staggered magnetization dataset [n_steps, 3]
+        stag_magnetization_dataset_ = trajectory_group_.createDataSet(
+            "staggered_magnetization", H5::PredType::NATIVE_DOUBLE, mag_space, mag_prop);
+        
+        // Phonon dataset [n_steps, 6] (Qx, Qy, Q_R, Vx, Vy, V_R)
+        hsize_t ph_dims[2] = {0, 6};
+        hsize_t ph_maxdims[2] = {H5S_UNLIMITED, 6};
+        hsize_t ph_chunk[2] = {100, 6};
+        H5::DataSpace ph_space(2, ph_dims, ph_maxdims);
+        H5::DSetCreatPropList ph_prop;
+        ph_prop.setChunk(2, ph_chunk);
+        ph_prop.setDeflate(6);
+        phonons_dataset_ = trajectory_group_.createDataSet(
+            "phonons", H5::PredType::NATIVE_DOUBLE, ph_space, ph_prop);
+        
+        // Energy dataset [n_steps]
+        energy_dataset_ = trajectory_group_.createDataSet(
+            "energy", H5::PredType::NATIVE_DOUBLE, time_space, time_prop);
+        
+        // Spins dataset [n_steps, n_sites, 3]
+        hsize_t spin_dims[3] = {0, lattice_size, 3};
+        hsize_t spin_maxdims[3] = {H5S_UNLIMITED, lattice_size, 3};
+        hsize_t spin_chunk[3] = {1, lattice_size, 3};
+        H5::DataSpace spin_space(3, spin_dims, spin_maxdims);
+        H5::DSetCreatPropList spin_prop;
+        spin_prop.setChunk(3, spin_chunk);
+        spin_prop.setDeflate(6);
+        spins_dataset_ = trajectory_group_.createDataSet(
+            "spins", H5::PredType::NATIVE_DOUBLE, spin_space, spin_prop);
+    }
+    
+    /**
+     * Write phonon parameters to metadata
+     */
+    void write_phonon_params(double omega_IR, double omega_R,
+                            double gamma_IR, double gamma_R,
+                            double beta, double g, double Z_star) {
+        H5::Group phonon_group = metadata_group_.createGroup("phonon_params");
+        write_double_attribute(phonon_group, "omega_IR", omega_IR);
+        write_double_attribute(phonon_group, "omega_R", omega_R);
+        write_double_attribute(phonon_group, "gamma_IR", gamma_IR);
+        write_double_attribute(phonon_group, "gamma_R", gamma_R);
+        write_double_attribute(phonon_group, "beta", beta);
+        write_double_attribute(phonon_group, "g", g);
+        write_double_attribute(phonon_group, "Z_star", Z_star);
+    }
+    
+    /**
+     * Write spin-phonon coupling parameters to metadata
+     */
+    void write_spin_phonon_params(double J1_0, double K_0, double Gamma_0, double Gammap_0,
+                                  double J3, double lambda_J, double lambda_K,
+                                  double lambda_Gamma, double lambda_Gammap) {
+        H5::Group sp_group = metadata_group_.createGroup("spin_phonon_params");
+        write_double_attribute(sp_group, "J1_0", J1_0);
+        write_double_attribute(sp_group, "K_0", K_0);
+        write_double_attribute(sp_group, "Gamma_0", Gamma_0);
+        write_double_attribute(sp_group, "Gammap_0", Gammap_0);
+        write_double_attribute(sp_group, "J3", J3);
+        write_double_attribute(sp_group, "lambda_J", lambda_J);
+        write_double_attribute(sp_group, "lambda_K", lambda_K);
+        write_double_attribute(sp_group, "lambda_Gamma", lambda_Gamma);
+        write_double_attribute(sp_group, "lambda_Gammap", lambda_Gammap);
+    }
+    
+    /**
+     * Write THz drive parameters to metadata
+     */
+    void write_drive_params(double E0_1, double omega_1, double t_1, double sigma_1, double phi_1, double theta_1,
+                           double E0_2, double omega_2, double t_2, double sigma_2, double phi_2, double theta_2) {
+        H5::Group drive_group = metadata_group_.createGroup("drive_params");
+        write_double_attribute(drive_group, "E0_1", E0_1);
+        write_double_attribute(drive_group, "omega_1", omega_1);
+        write_double_attribute(drive_group, "t_1", t_1);
+        write_double_attribute(drive_group, "sigma_1", sigma_1);
+        write_double_attribute(drive_group, "phi_1", phi_1);
+        write_double_attribute(drive_group, "theta_1", theta_1);
+        write_double_attribute(drive_group, "E0_2", E0_2);
+        write_double_attribute(drive_group, "omega_2", omega_2);
+        write_double_attribute(drive_group, "t_2", t_2);
+        write_double_attribute(drive_group, "sigma_2", sigma_2);
+        write_double_attribute(drive_group, "phi_2", phi_2);
+        write_double_attribute(drive_group, "theta_2", theta_2);
+    }
+    
+    /**
+     * Write a single time step
+     * 
+     * @param time   Current time
+     * @param M      Total magnetization
+     * @param Ms     Staggered magnetization
+     * @param phonon_state  Phonon state array [Qx, Qy, Q_R, Vx, Vy, V_R]
+     * @param energy Energy per site
+     * @param spins  Spin configuration [lattice_size, 3]
+     */
+    void write_step(double time, 
+                   const Eigen::Vector3d& M,
+                   const Eigen::Vector3d& Ms,
+                   const double* phonon_state,
+                   double energy,
+                   const std::vector<Eigen::Vector3d>& spins) {
+        hsize_t new_size[3];
+        
+        // Write time
+        new_size[0] = current_step_ + 1;
+        times_dataset_.extend(new_size);
+        H5::DataSpace time_fspace = times_dataset_.getSpace();
+        hsize_t time_offset[1] = {current_step_};
+        hsize_t time_count[1] = {1};
+        time_fspace.selectHyperslab(H5S_SELECT_SET, time_count, time_offset);
+        H5::DataSpace time_mspace(1, time_count);
+        times_dataset_.write(&time, H5::PredType::NATIVE_DOUBLE, time_mspace, time_fspace);
+        
+        // Write magnetization
+        new_size[0] = current_step_ + 1;
+        new_size[1] = 3;
+        magnetization_dataset_.extend(new_size);
+        H5::DataSpace mag_fspace = magnetization_dataset_.getSpace();
+        hsize_t mag_offset[2] = {current_step_, 0};
+        hsize_t mag_count[2] = {1, 3};
+        mag_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        H5::DataSpace mag_mspace(2, mag_count);
+        double mag_data[3] = {M(0), M(1), M(2)};
+        magnetization_dataset_.write(mag_data, H5::PredType::NATIVE_DOUBLE, mag_mspace, mag_fspace);
+        
+        // Write staggered magnetization
+        stag_magnetization_dataset_.extend(new_size);
+        H5::DataSpace stag_fspace = stag_magnetization_dataset_.getSpace();
+        stag_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        double stag_data[3] = {Ms(0), Ms(1), Ms(2)};
+        stag_magnetization_dataset_.write(stag_data, H5::PredType::NATIVE_DOUBLE, mag_mspace, stag_fspace);
+        
+        // Write phonon state [6]
+        new_size[0] = current_step_ + 1;
+        new_size[1] = 6;
+        phonons_dataset_.extend(new_size);
+        H5::DataSpace ph_fspace = phonons_dataset_.getSpace();
+        hsize_t ph_offset[2] = {current_step_, 0};
+        hsize_t ph_count[2] = {1, 6};
+        ph_fspace.selectHyperslab(H5S_SELECT_SET, ph_count, ph_offset);
+        H5::DataSpace ph_mspace(2, ph_count);
+        phonons_dataset_.write(phonon_state, H5::PredType::NATIVE_DOUBLE, ph_mspace, ph_fspace);
+        
+        // Write energy
+        new_size[0] = current_step_ + 1;
+        energy_dataset_.extend(new_size);
+        H5::DataSpace e_fspace = energy_dataset_.getSpace();
+        hsize_t e_offset[1] = {current_step_};
+        hsize_t e_count[1] = {1};
+        e_fspace.selectHyperslab(H5S_SELECT_SET, e_count, e_offset);
+        H5::DataSpace e_mspace(1, e_count);
+        energy_dataset_.write(&energy, H5::PredType::NATIVE_DOUBLE, e_mspace, e_fspace);
+        
+        // Write spins
+        new_size[0] = current_step_ + 1;
+        new_size[1] = lattice_size_;
+        new_size[2] = 3;
+        spins_dataset_.extend(new_size);
+        H5::DataSpace spin_fspace = spins_dataset_.getSpace();
+        hsize_t spin_offset[3] = {current_step_, 0, 0};
+        hsize_t spin_count[3] = {1, lattice_size_, 3};
+        spin_fspace.selectHyperslab(H5S_SELECT_SET, spin_count, spin_offset);
+        H5::DataSpace spin_mspace(3, spin_count);
+        
+        std::vector<double> spin_data(lattice_size_ * 3);
+        for (size_t i = 0; i < lattice_size_; ++i) {
+            spin_data[i * 3 + 0] = spins[i](0);
+            spin_data[i * 3 + 1] = spins[i](1);
+            spin_data[i * 3 + 2] = spins[i](2);
+        }
+        spins_dataset_.write(spin_data.data(), H5::PredType::NATIVE_DOUBLE, spin_mspace, spin_fspace);
+        
+        current_step_++;
+    }
+    
+    /**
+     * Write a single time step with flat spin array (zero-copy optimization)
+     */
+    void write_flat_step(double time, 
+                        const Eigen::Vector3d& M,
+                        const Eigen::Vector3d& Ms,
+                        const double* phonon_state,
+                        double energy,
+                        const double* flat_spins) {
+        hsize_t new_size[3];
+        
+        // Write time
+        new_size[0] = current_step_ + 1;
+        times_dataset_.extend(new_size);
+        H5::DataSpace time_fspace = times_dataset_.getSpace();
+        hsize_t time_offset[1] = {current_step_};
+        hsize_t time_count[1] = {1};
+        time_fspace.selectHyperslab(H5S_SELECT_SET, time_count, time_offset);
+        H5::DataSpace time_mspace(1, time_count);
+        times_dataset_.write(&time, H5::PredType::NATIVE_DOUBLE, time_mspace, time_fspace);
+        
+        // Write magnetization
+        new_size[0] = current_step_ + 1;
+        new_size[1] = 3;
+        magnetization_dataset_.extend(new_size);
+        H5::DataSpace mag_fspace = magnetization_dataset_.getSpace();
+        hsize_t mag_offset[2] = {current_step_, 0};
+        hsize_t mag_count[2] = {1, 3};
+        mag_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        H5::DataSpace mag_mspace(2, mag_count);
+        double mag_data[3] = {M(0), M(1), M(2)};
+        magnetization_dataset_.write(mag_data, H5::PredType::NATIVE_DOUBLE, mag_mspace, mag_fspace);
+        
+        // Write staggered magnetization
+        stag_magnetization_dataset_.extend(new_size);
+        H5::DataSpace stag_fspace = stag_magnetization_dataset_.getSpace();
+        stag_fspace.selectHyperslab(H5S_SELECT_SET, mag_count, mag_offset);
+        double stag_data[3] = {Ms(0), Ms(1), Ms(2)};
+        stag_magnetization_dataset_.write(stag_data, H5::PredType::NATIVE_DOUBLE, mag_mspace, stag_fspace);
+        
+        // Write phonon state [6]
+        new_size[0] = current_step_ + 1;
+        new_size[1] = 6;
+        phonons_dataset_.extend(new_size);
+        H5::DataSpace ph_fspace = phonons_dataset_.getSpace();
+        hsize_t ph_offset[2] = {current_step_, 0};
+        hsize_t ph_count[2] = {1, 6};
+        ph_fspace.selectHyperslab(H5S_SELECT_SET, ph_count, ph_offset);
+        H5::DataSpace ph_mspace(2, ph_count);
+        phonons_dataset_.write(phonon_state, H5::PredType::NATIVE_DOUBLE, ph_mspace, ph_fspace);
+        
+        // Write energy
+        new_size[0] = current_step_ + 1;
+        energy_dataset_.extend(new_size);
+        H5::DataSpace e_fspace = energy_dataset_.getSpace();
+        hsize_t e_offset[1] = {current_step_};
+        hsize_t e_count[1] = {1};
+        e_fspace.selectHyperslab(H5S_SELECT_SET, e_count, e_offset);
+        H5::DataSpace e_mspace(1, e_count);
+        energy_dataset_.write(&energy, H5::PredType::NATIVE_DOUBLE, e_mspace, e_fspace);
+        
+        // Write spins directly from flat array
+        new_size[0] = current_step_ + 1;
+        new_size[1] = lattice_size_;
+        new_size[2] = 3;
+        spins_dataset_.extend(new_size);
+        H5::DataSpace spin_fspace = spins_dataset_.getSpace();
+        hsize_t spin_offset[3] = {current_step_, 0, 0};
+        hsize_t spin_count[3] = {1, lattice_size_, 3};
+        spin_fspace.selectHyperslab(H5S_SELECT_SET, spin_count, spin_offset);
+        H5::DataSpace spin_mspace(3, spin_count);
+        spins_dataset_.write(flat_spins, H5::PredType::NATIVE_DOUBLE, spin_mspace, spin_fspace);
+        
+        current_step_++;
+    }
+    
+    /**
+     * Close the file and flush all buffers
+     */
+    void close() {
+        times_dataset_.close();
+        magnetization_dataset_.close();
+        stag_magnetization_dataset_.close();
+        phonons_dataset_.close();
+        energy_dataset_.close();
+        spins_dataset_.close();
+        trajectory_group_.close();
+        metadata_group_.close();
+        file_.close();
+    }
+    
+    ~HDF5NCTOMDWriter() {
+        try {
+            if (file_.getId() > 0) {
+                close();
+            }
+        } catch (...) {}
+    }
+    
+private:
+    void write_scalar_attribute(H5::Group& group, const std::string& name, hsize_t value) {
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(
+            name, H5::PredType::NATIVE_HSIZE, attr_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &value);
+    }
+    
+    void write_double_attribute(H5::Group& group, const std::string& name, double value) {
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(
+            name, H5::PredType::NATIVE_DOUBLE, attr_space);
+        attr.write(H5::PredType::NATIVE_DOUBLE, &value);
+    }
+    
+    void write_string_attribute(H5::Group& group, const std::string& name, const std::string& value) {
+        H5::StrType str_type(H5::PredType::C_S1, value.size() + 1);
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(name, str_type, attr_space);
+        attr.write(str_type, value.c_str());
+    }
+    
+    std::string filename_;
+    size_t lattice_size_;
+    size_t current_step_;
+    
+    H5::H5File file_;
+    H5::Group trajectory_group_;
+    H5::Group metadata_group_;
+    H5::DataSet times_dataset_;
+    H5::DataSet magnetization_dataset_;
+    H5::DataSet stag_magnetization_dataset_;
+    H5::DataSet phonons_dataset_;
+    H5::DataSet energy_dataset_;
+    H5::DataSet spins_dataset_;
+};
+
 #endif // HDF5_IO_H

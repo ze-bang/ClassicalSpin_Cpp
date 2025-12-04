@@ -183,7 +183,7 @@ def Spin_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
 def Spin_global_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     """
     Compute time-dependent spin structure factor in global frame.
-    Transforms spins from local sublattice frames to global frame.
+    Transforms spins from local sublattice frames to global frame using eta.
     
     Args:
         k: k-points array [n_k, 3]
@@ -191,19 +191,28 @@ def Spin_global_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
         P: Site positions [n_sites, 3]
         
     Returns:
-        results: [n_times, n_sublattices, n_k, 3] complex array
+        results: [n_times, n_k, 3] complex array (same as Spin_t)
     """
     n_sublattices = 4
-    size = int(len(P) / n_sublattices)
+    N = S.shape[1]
     n_times = S.shape[0]
-    tS = np.zeros((n_times, n_sublattices, len(k), 3), dtype=np.complex128)
     
+    # eta[sublattice, component] gives the sign for each spin component
+    eta = np.array([[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]])
+    
+    # Transform spins to global frame: S_global = S_local * eta (elementwise per sublattice)
+    S_global = S[:, :, :3].copy()
     for i in range(n_sublattices):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
-        tS[:, i, :, :] = contract('tjs, ij, sp->tip', S[:, i*size:(i+1)*size, :3], 
-                                   ffact, localframe[:, i, :]) / np.sqrt(size)
+        S_global[:, i::n_sublattices, :] *= eta[i]
     
-    return tS
+    # Now compute structure factor same as Spin_t
+    results = np.zeros((n_times, len(k), 3), dtype=np.complex128)
+    ffact = np.exp(1j * contract('ik,jk->ij', k, P))
+    
+    for t in range(n_times):
+        results[t] = contract('js, ij->is', S_global[t], ffact) / np.sqrt(N)
+    
+    return results
 
 
 def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray, 
@@ -225,40 +234,26 @@ def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray,
     if global_frame and S.shape[2] >= 3:
         # Use global frame transformation for 3-component spins
         A = Spin_global_t(k, S, P)
-        # A shape: (n_times, n_sublattices, n_k, 3)
-        # Subtract mean configuration before FFT
-        A_mean = np.mean(A, axis=0, keepdims=True)
-        A = A - A_mean
-        # FFT over time dimension
-        dt = T[1] - T[0] if len(T) > 1 else 1.0
-        A_fft = np.fft.fft(A, axis=0)
-        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
-        
-        # Select closest frequencies to w
-        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
-        Somega = A_fft[indices] / np.sqrt(len(T))
-        
-        read = np.real(contract('wnia, wnib->wiab', Somega, np.conj(Somega)))
-        return read
+        # A shape: (n_times, n_k, 3) - same as Spin_t
     else:
         # Use local frame (original implementation)
         A = Spin_t(k, S, P)
-        
-        # Subtract mean configuration before FFT
-        A_mean = np.mean(A, axis=0, keepdims=True)
-        A = A - A_mean
-        
-        # FFT over time dimension
-        dt = T[1] - T[0] if len(T) > 1 else 1.0
-        A_fft = np.fft.fft(A, axis=0)
-        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
-        
-        # Select closest frequencies to w
-        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
-        Somega = A_fft[indices] / np.sqrt(len(T))
-        
-        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
-        return read
+    
+    # Subtract mean configuration before FFT
+    A_mean = np.mean(A, axis=0, keepdims=True)
+    A = A - A_mean
+    
+    # FFT over time dimension
+    dt = T[1] - T[0] if len(T) > 1 else 1.0
+    A_fft = np.fft.fft(A, axis=0)
+    fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+    
+    # Select closest frequencies to w
+    indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
+    Somega = A_fft[indices] / np.sqrt(len(T))
+    
+    read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
+    return read
 
 
 # =============================================================================
@@ -498,7 +493,7 @@ class PumpProbeHDF5:
 # MAIN ANALYSIS FUNCTIONS
 # =============================================================================
 
-def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 15,
+def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 70,
                  output_dir: Optional[str] = None) -> Dict[str, np.ndarray]:
     """
     Read molecular dynamics trajectory from HDF5 and compute DSSF.

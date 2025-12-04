@@ -747,12 +747,40 @@ public:
     }
 
     /**
-     * Compute total energy of the system
+     * Compute total energy of the system as sum of SU2 and SU3 contributions
      */
     double total_energy() const {
+        return total_energy_SU2() + total_energy_SU3();
+    }
+
+    /**
+     * Compute energy density (energy per site)
+     */
+    double energy_density() const {
+        return total_energy() / (lattice_size_SU2 + lattice_size_SU3);
+    }
+
+    /**
+     * Compute energy density for SU(2) sector (energy per SU2 site)
+     */
+    double energy_density_SU2() const {
+        return total_energy_SU2() / lattice_size_SU2;
+    }
+
+    /**
+     * Compute energy density for SU(3) sector (energy per SU3 site)
+     */
+    double energy_density_SU3() const {
+        return total_energy_SU3() / lattice_size_SU3;
+    }
+
+    /**
+     * Compute total energy of the SU(2) sublattice only
+     * Includes SU2-SU2 interactions, SU2 field/onsite, and half of mixed interactions
+     */
+    double total_energy_SU2() const {
         double energy = 0.0;
         
-        // SU(2) contributions
         for (size_t i = 0; i < lattice_size_SU2; ++i) {
             const auto& spin = spins_SU2[i];
             
@@ -760,25 +788,24 @@ public:
             energy -= spin.dot(field_SU2[i]);
             energy += spin.dot(onsite_interaction_SU2[i] * spin);
             
-            // Bilinear
+            // Bilinear SU2-SU2
             for (size_t j = 0; j < bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = bilinear_partners_SU2[i][j];
                 energy += 0.5 * spin.dot(bilinear_interaction_SU2[i][j] * spins_SU2[partner]);
             }
             
-            // Mixed bilinear
+            // Mixed bilinear SU2-SU3 (count half for SU2)
             for (size_t j = 0; j < mixed_bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU2[i][j];
-                energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU2[i][j] * spins_SU3[partner]);
+                energy += 0.25 * spin.dot(mixed_bilinear_interaction_SU2[i][j] * spins_SU3[partner]);
             }
             
-            // Trilinear
+            // Trilinear SU2-SU2-SU2
             for (size_t j = 0; j < trilinear_partners_SU2[i].size(); ++j) {
                 const size_t p1 = trilinear_partners_SU2[i][j][0];
                 const size_t p2 = trilinear_partners_SU2[i][j][1];
                 const auto& T = trilinear_interaction_SU2[i][j];
                 
-                // Proper tensor contraction: sum_abc T[a](b,c) * S_i[a] * S1[b] * S2[c]
                 for (size_t a = 0; a < spin_dim_SU2; ++a) {
                     double temp = 0.0;
                     for (size_t b = 0; b < spin_dim_SU2; ++b) {
@@ -791,7 +818,16 @@ public:
             }
         }
         
-        // SU(3) contributions
+        return energy;
+    }
+
+    /**
+     * Compute total energy of the SU(3) sublattice only
+     * Includes SU3-SU3 interactions, SU3 field/onsite, and half of mixed interactions
+     */
+    double total_energy_SU3() const {
+        double energy = 0.0;
+        
         for (size_t i = 0; i < lattice_size_SU3; ++i) {
             const auto& spin = spins_SU3[i];
             
@@ -799,25 +835,24 @@ public:
             energy -= spin.dot(field_SU3[i]);
             energy += spin.dot(onsite_interaction_SU3[i] * spin);
             
-            // Bilinear
+            // Bilinear SU3-SU3
             for (size_t j = 0; j < bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = bilinear_partners_SU3[i][j];
                 energy += 0.5 * spin.dot(bilinear_interaction_SU3[i][j] * spins_SU3[partner]);
             }
             
-            // Mixed bilinear
+            // Mixed bilinear SU3-SU2 (count half for SU3)
             for (size_t j = 0; j < mixed_bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU3[i][j];
-                energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU3[i][j] * spins_SU2[partner]);
+                energy += 0.25 * spin.dot(mixed_bilinear_interaction_SU3[i][j] * spins_SU2[partner]);
             }
             
-            // Trilinear
+            // Trilinear SU3-SU3-SU3
             for (size_t j = 0; j < trilinear_partners_SU3[i].size(); ++j) {
                 const size_t p1 = trilinear_partners_SU3[i][j][0];
                 const size_t p2 = trilinear_partners_SU3[i][j][1];
                 const auto& T = trilinear_interaction_SU3[i][j];
                 
-                // Proper tensor contraction: sum_abc T[a](b,c) * S_i[a] * S1[b] * S2[c]
                 for (size_t a = 0; a < spin_dim_SU3; ++a) {
                     double temp = 0.0;
                     for (size_t b = 0; b < spin_dim_SU3; ++b) {
@@ -959,13 +994,6 @@ public:
         }
         
         return energy;
-    }
-
-    /**
-     * Compute energy density
-     */
-    double energy_density() const {
-        return total_energy() / (lattice_size_SU2 + lattice_size_SU3);
     }
 
     // ============================================================
@@ -1153,11 +1181,19 @@ public:
             ++temp_step;
         }
         
-        cout << "Final energy density: " << energy_density() << endl;
+        double E_total = total_energy();
+        double E_SU2 = total_energy_SU2();
+        double E_SU3 = total_energy_SU3();
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        cout << "Final energy density: " << E_total / total_sites << endl;
+        cout << "  Total Energy:     " << E_total << endl;
+        cout << "  SU2 Energy:       " << E_SU2 << " (E/N_SU2 = " << E_SU2 / lattice_size_SU2 << ")" << endl;
+        cout << "  SU3 Energy:       " << E_SU3 << " (E/N_SU3 = " << E_SU3 / lattice_size_SU3 << ")" << endl;
         
         // Save spin config after annealing (before deterministic sweeps)
         if (!out_dir.empty()) {
             save_spin_config_to_dir(out_dir, "spins_T=" + std::to_string(T_end));
+            save_energy_to_dir(out_dir, "energy_T=" + std::to_string(T_end));
         }
         
         // Final measurements if requested (before deterministic sweeps)
@@ -1181,10 +1217,17 @@ public:
                          << ", |M_SU3|=" << M_SU3.norm() << endl;
                 }
             }
-            cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
+            double E_total_final = total_energy();
+            double E_SU2_final = total_energy_SU2();
+            double E_SU3_final = total_energy_SU3();
+            cout << "Deterministic sweeps completed. Final energy: " << E_total_final / (lattice_size_SU2 + lattice_size_SU3) << endl;
+            cout << "  Total Energy:     " << E_total_final << endl;
+            cout << "  SU2 Energy:       " << E_SU2_final << " (E/N_SU2 = " << E_SU2_final / lattice_size_SU2 << ")" << endl;
+            cout << "  SU3 Energy:       " << E_SU3_final << " (E/N_SU3 = " << E_SU3_final / lattice_size_SU3 << ")" << endl;
             // Save final configuration
             if (!out_dir.empty()) {
                 save_spin_config_to_dir(out_dir, "spins_T=0");
+                save_energy_to_dir(out_dir, "energy_T=0");
                 save_positions_to_dir(out_dir);
             }
         }
@@ -2586,6 +2629,35 @@ public:
     }
 
     /**
+     * Save energy information to a directory
+     * Creates: energy.txt with total, SU2, and SU3 energies (both total and per-site)
+     */
+    void save_energy_to_dir(const string& dir, const string& prefix = "energy") const {
+        double E_total = total_energy();
+        double E_SU2 = total_energy_SU2();
+        double E_SU3 = total_energy_SU3();
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        
+        ofstream file(dir + "/" + prefix + ".txt");
+        file << std::setprecision(15);
+        file << "# Energy summary" << endl;
+        file << "# N_SU2 = " << lattice_size_SU2 << endl;
+        file << "# N_SU3 = " << lattice_size_SU3 << endl;
+        file << "# N_total = " << total_sites << endl;
+        file << "#" << endl;
+        file << "# Total energies:" << endl;
+        file << "E_total = " << E_total << endl;
+        file << "E_SU2 = " << E_SU2 << endl;
+        file << "E_SU3 = " << E_SU3 << endl;
+        file << "#" << endl;
+        file << "# Energy per site:" << endl;
+        file << "E_total/N = " << E_total / total_sites << endl;
+        file << "E_SU2/N_SU2 = " << E_SU2 / lattice_size_SU2 << endl;
+        file << "E_SU3/N_SU3 = " << E_SU3 / lattice_size_SU3 << endl;
+        file.close();
+    }
+
+    /**
      * Load spin configuration
      */
     void load_spin_config(const string& filename) {
@@ -3065,9 +3137,14 @@ public:
         // Use current spin configuration as ground state (assumed pre-loaded)
         cout << "\n[1/3] Using current configuration as ground state..." << endl;
         double E_ground = energy_density();
+        double E_ground_SU2 = total_energy_SU2();
+        double E_ground_SU3 = total_energy_SU3();
         SpinVector M_ground_SU2 = magnetization_SU2();
         SpinVector M_ground_SU3 = magnetization_SU3();
         cout << "  Ground state: E/N = " << E_ground << endl;
+        cout << "    Total Energy:     " << total_energy() << endl;
+        cout << "    SU2 Energy:       " << E_ground_SU2 << " (E/N_SU2 = " << E_ground_SU2 / lattice_size_SU2 << ")" << endl;
+        cout << "    SU3 Energy:       " << E_ground_SU3 << " (E/N_SU3 = " << E_ground_SU3 / lattice_size_SU3 << ")" << endl;
         cout << "    |M_SU2| = " << M_ground_SU2.norm() << endl;
         cout << "    |M_SU3| = " << M_ground_SU3.norm() << endl;
         
@@ -3246,10 +3323,15 @@ public:
             cout << "\n[1/4] Using current configuration as ground state..." << endl;
         }
         double E_ground = energy_density();
+        double E_ground_SU2 = total_energy_SU2();
+        double E_ground_SU3 = total_energy_SU3();
         SpinVector M_ground_SU2 = magnetization_SU2();
         SpinVector M_ground_SU3 = magnetization_SU3();
         if (rank == 0) {
             cout << "  Ground state: E/N = " << E_ground << endl;
+            cout << "    Total Energy:     " << total_energy() << endl;
+            cout << "    SU2 Energy:       " << E_ground_SU2 << " (E/N_SU2 = " << E_ground_SU2 / lattice_size_SU2 << ")" << endl;
+            cout << "    SU3 Energy:       " << E_ground_SU3 << " (E/N_SU3 = " << E_ground_SU3 / lattice_size_SU3 << ")" << endl;
             cout << "    |M_SU2| = " << M_ground_SU2.norm() << endl;
             cout << "    |M_SU3| = " << M_ground_SU3.norm() << endl;
         }
@@ -3258,6 +3340,7 @@ public:
         if (rank == 0) {
             save_positions_to_dir(dir_name);
             save_spin_config_to_dir(dir_name, "spins_initial");
+            save_energy_to_dir(dir_name, "energy_initial");
         }
         
         // Backup ground state

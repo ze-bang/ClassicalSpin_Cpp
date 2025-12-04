@@ -14,6 +14,11 @@
 #include "classical_spin/lattice/ncto_lattice.h"
 #include <fstream>
 #include <iomanip>
+#include <memory>
+
+#ifdef HDF5_ENABLED
+#include <H5Cpp.h>
+#endif
 
 namespace odeint = boost::numeric::odeint;
 
@@ -514,6 +519,12 @@ void NCTOLattice::integrate_ode_system(System system_func, ODEState& state,
 void NCTOLattice::molecular_dynamics(double T_start, double T_end, double dt_initial,
                                      string out_dir, size_t save_interval,
                                      string method) {
+#ifndef HDF5_ENABLED
+    std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
+    std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
+    return;
+#endif
+    
     if (!out_dir.empty()) {
         std::filesystem::create_directories(out_dir);
     }
@@ -525,13 +536,38 @@ void NCTOLattice::molecular_dynamics(double T_start, double T_end, double dt_ini
     // Convert current state to flat ODE state vector
     ODEState state = to_state();
     
-    // Open output file for trajectory
-    std::ofstream traj_file;
+#ifdef HDF5_ENABLED
+    // Create HDF5 writer with comprehensive metadata
+    std::unique_ptr<HDF5NCTOMDWriter> hdf5_writer;
     if (!out_dir.empty()) {
-        traj_file.open(out_dir + "/trajectory.txt");
-        traj_file << "# time Mx My Mz Mstag_x Mstag_y Mstag_z Qx Qy Q_R E\n";
-        traj_file << std::scientific << std::setprecision(8);
+        string hdf5_file = out_dir + "/trajectory.h5";
+        cout << "Writing trajectory to HDF5 file: " << hdf5_file << endl;
+        hdf5_writer = std::make_unique<HDF5NCTOMDWriter>(
+            hdf5_file, lattice_size, 
+            dim1, dim2, dim3, method, 
+            dt_initial, T_start, T_end, save_interval, spin_length, 
+            &site_positions, 10000);
+        
+        // Write parameter metadata
+        hdf5_writer->write_phonon_params(
+            phonon_params.omega_IR, phonon_params.omega_R,
+            phonon_params.gamma_IR, phonon_params.gamma_R,
+            phonon_params.beta, phonon_params.g, phonon_params.Z_star);
+        
+        hdf5_writer->write_spin_phonon_params(
+            spin_phonon_params.J1_0, spin_phonon_params.K_0,
+            spin_phonon_params.Gamma_0, spin_phonon_params.Gammap_0,
+            spin_phonon_params.J3,
+            spin_phonon_params.lambda_J, spin_phonon_params.lambda_K,
+            spin_phonon_params.lambda_Gamma, spin_phonon_params.lambda_Gammap);
+        
+        hdf5_writer->write_drive_params(
+            drive_params.E0_1, drive_params.omega_1, drive_params.t_1,
+            drive_params.sigma_1, drive_params.phi_1, drive_params.theta_1,
+            drive_params.E0_2, drive_params.omega_2, drive_params.t_2,
+            drive_params.sigma_2, drive_params.phi_2, drive_params.theta_2);
     }
+#endif
     
     // Observer to save data at specified intervals
     size_t step_count = 0;
@@ -545,13 +581,16 @@ void NCTOLattice::molecular_dynamics(double T_start, double T_end, double dt_ini
             Eigen::Vector3d Ms = staggered_magnetization();
             double E = energy_density();
             
-            if (traj_file.is_open()) {
-                traj_file << t << " "
-                         << M(0) << " " << M(1) << " " << M(2) << " "
-                         << Ms(0) << " " << Ms(1) << " " << Ms(2) << " "
-                         << phonons.Q_x << " " << phonons.Q_y << " " << phonons.Q_R << " "
-                         << E << "\n";
+#ifdef HDF5_ENABLED
+            if (hdf5_writer) {
+                // Get phonon state as array
+                double ph_state[6];
+                phonons.to_array(ph_state);
+                
+                // Write to HDF5 using flat spin data from state vector
+                hdf5_writer->write_flat_step(t, M, Ms, ph_state, E, x.data());
             }
+#endif
             
             if (step_count % (save_interval * 10) == 0) {
                 cout << "t=" << t << ", E=" << E 
@@ -577,11 +616,13 @@ void NCTOLattice::molecular_dynamics(double T_start, double T_end, double dt_ini
     
     // Update internal state with final configuration
     from_state(state);
-    
-    if (traj_file.is_open()) {
-        traj_file.close();
-        cout << "Trajectory saved to " << out_dir << "/trajectory.txt" << endl;
+
+#ifdef HDF5_ENABLED
+    if (hdf5_writer) {
+        hdf5_writer->close();
+        cout << "HDF5 trajectory saved with " << save_count << " snapshots" << endl;
     }
+#endif
     
     cout << "NCTO dynamics complete! (" << step_count << " steps, " << save_count << " saved)" << endl;
 }
@@ -595,6 +636,10 @@ void NCTOLattice::simulated_annealing(double T_start, double T_end, size_t n_ste
                                       double cooling_rate,
                                       string out_dir,
                                       bool save_observables) {
+#ifndef HDF5_ENABLED
+    std::cerr << "Warning: HDF5 support not enabled. Simulated annealing output will be limited." << endl;
+#endif
+    
     cout << "Running NCTO simulated annealing (spin subsystem only)..." << endl;
     cout << "T: " << T_start << " → " << T_end << ", steps: " << n_steps << endl;
     
@@ -606,11 +651,36 @@ void NCTOLattice::simulated_annealing(double T_start, double T_end, size_t n_ste
         std::filesystem::create_directories(out_dir);
     }
     
-    std::ofstream obs_file;
+#ifdef HDF5_ENABLED
+    // Create HDF5 file for annealing observables
+    std::unique_ptr<H5::H5File> h5file;
+    std::unique_ptr<H5::Group> annealing_group;
+    std::unique_ptr<H5::Group> metadata_group;
+    std::vector<double> steps_data, temps_data, energies_data, acc_rates_data;
+    
     if (save_observables && !out_dir.empty()) {
-        obs_file.open(out_dir + "/annealing.txt");
-        obs_file << "# step T E acc_rate\n";
+        h5file = std::make_unique<H5::H5File>(out_dir + "/annealing.h5", H5F_ACC_TRUNC);
+        annealing_group = std::make_unique<H5::Group>(h5file->createGroup("/annealing"));
+        metadata_group = std::make_unique<H5::Group>(h5file->createGroup("/metadata"));
+        
+        // Write metadata
+        {
+            H5::DataSpace scalar_space(H5S_SCALAR);
+            H5::Attribute attr = metadata_group->createAttribute("T_start", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            attr.write(H5::PredType::NATIVE_DOUBLE, &T_start);
+            attr = metadata_group->createAttribute("T_end", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            attr.write(H5::PredType::NATIVE_DOUBLE, &T_end);
+            attr = metadata_group->createAttribute("n_steps", H5::PredType::NATIVE_HSIZE, scalar_space);
+            attr.write(H5::PredType::NATIVE_HSIZE, &n_steps);
+            attr = metadata_group->createAttribute("cooling_rate", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            attr.write(H5::PredType::NATIVE_DOUBLE, &cooling_rate);
+            attr = metadata_group->createAttribute("overrelax_rate", H5::PredType::NATIVE_HSIZE, scalar_space);
+            attr.write(H5::PredType::NATIVE_HSIZE, &overrelax_rate);
+            attr = metadata_group->createAttribute("lattice_size", H5::PredType::NATIVE_HSIZE, scalar_space);
+            attr.write(H5::PredType::NATIVE_HSIZE, &lattice_size);
+        }
     }
+#endif
     
     double T = T_start;
     size_t accepted = 0;
@@ -671,9 +741,15 @@ void NCTOLattice::simulated_annealing(double T_start, double T_end, size_t n_ste
         }
         
         // Save observables
-        if (save_observables && step % 100 == 0 && obs_file.is_open()) {
-            double acc_rate = double(accepted) / total_moves;
-            obs_file << step << " " << T << " " << energy_density() << " " << acc_rate << "\n";
+        if (save_observables && step % 100 == 0) {
+#ifdef HDF5_ENABLED
+            if (h5file) {
+                steps_data.push_back(static_cast<double>(step));
+                temps_data.push_back(T);
+                energies_data.push_back(energy_density());
+                acc_rates_data.push_back(double(accepted) / total_moves);
+            }
+#endif
         }
         
         // Cool down
@@ -681,9 +757,30 @@ void NCTOLattice::simulated_annealing(double T_start, double T_end, size_t n_ste
         if (T < T_end) T = T_end;
     }
     
-    if (obs_file.is_open()) {
-        obs_file.close();
+#ifdef HDF5_ENABLED
+    // Write accumulated data to HDF5
+    if (h5file && !steps_data.empty()) {
+        hsize_t dims[1] = {steps_data.size()};
+        H5::DataSpace dataspace(1, dims);
+        
+        H5::DataSet steps_ds = annealing_group->createDataSet("steps", H5::PredType::NATIVE_DOUBLE, dataspace);
+        steps_ds.write(steps_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        H5::DataSet temps_ds = annealing_group->createDataSet("temperature", H5::PredType::NATIVE_DOUBLE, dataspace);
+        temps_ds.write(temps_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        H5::DataSet energy_ds = annealing_group->createDataSet("energy", H5::PredType::NATIVE_DOUBLE, dataspace);
+        energy_ds.write(energies_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        H5::DataSet acc_ds = annealing_group->createDataSet("acceptance_rate", H5::PredType::NATIVE_DOUBLE, dataspace);
+        acc_ds.write(acc_rates_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        annealing_group->close();
+        metadata_group->close();
+        h5file->close();
+        cout << "Annealing data saved to " << out_dir << "/annealing.h5" << endl;
     }
+#endif
     
     cout << "Simulated annealing complete! Final E=" << energy_density() << endl;
 }
@@ -691,6 +788,131 @@ void NCTOLattice::simulated_annealing(double T_start, double T_end, size_t n_ste
 // ============================================================
 // I/O
 // ============================================================
+
+#ifdef HDF5_ENABLED
+void NCTOLattice::save_spin_config_hdf5(const string& filename) const {
+    H5::H5File file(filename, H5F_ACC_TRUNC);
+    
+    // Create spins dataset [lattice_size, 3]
+    hsize_t dims[2] = {lattice_size, 3};
+    H5::DataSpace dataspace(2, dims);
+    H5::DataSet dataset = file.createDataSet("spins", H5::PredType::NATIVE_DOUBLE, dataspace);
+    
+    std::vector<double> spin_data(lattice_size * 3);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        spin_data[i * 3 + 0] = spins[i](0);
+        spin_data[i * 3 + 1] = spins[i](1);
+        spin_data[i * 3 + 2] = spins[i](2);
+    }
+    dataset.write(spin_data.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Write metadata
+    H5::DataSpace scalar_space(H5S_SCALAR);
+    H5::Attribute attr = file.createAttribute("lattice_size", H5::PredType::NATIVE_HSIZE, scalar_space);
+    attr.write(H5::PredType::NATIVE_HSIZE, &lattice_size);
+    attr = file.createAttribute("spin_length", H5::PredType::NATIVE_FLOAT, scalar_space);
+    attr.write(H5::PredType::NATIVE_FLOAT, &spin_length);
+    
+    file.close();
+}
+
+void NCTOLattice::load_spin_config_hdf5(const string& filename) {
+    H5::H5File file(filename, H5F_ACC_RDONLY);
+    H5::DataSet dataset = file.openDataSet("spins");
+    
+    std::vector<double> spin_data(lattice_size * 3);
+    dataset.read(spin_data.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        spins[i](0) = spin_data[i * 3 + 0];
+        spins[i](1) = spin_data[i * 3 + 1];
+        spins[i](2) = spin_data[i * 3 + 2];
+        spins[i] = spins[i].normalized() * spin_length;
+    }
+    
+    file.close();
+}
+
+void NCTOLattice::save_state_hdf5(const string& filename) const {
+    H5::H5File file(filename, H5F_ACC_TRUNC);
+    
+    // Create groups
+    H5::Group spin_group = file.createGroup("/spins");
+    H5::Group phonon_group = file.createGroup("/phonons");
+    H5::Group metadata_group = file.createGroup("/metadata");
+    
+    // Save spins [lattice_size, 3]
+    {
+        hsize_t dims[2] = {lattice_size, 3};
+        H5::DataSpace dataspace(2, dims);
+        H5::DataSet dataset = spin_group.createDataSet("configuration", H5::PredType::NATIVE_DOUBLE, dataspace);
+        
+        std::vector<double> spin_data(lattice_size * 3);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            spin_data[i * 3 + 0] = spins[i](0);
+            spin_data[i * 3 + 1] = spins[i](1);
+            spin_data[i * 3 + 2] = spins[i](2);
+        }
+        dataset.write(spin_data.data(), H5::PredType::NATIVE_DOUBLE);
+    }
+    
+    // Save phonon state [6]
+    {
+        hsize_t dims[1] = {6};
+        H5::DataSpace dataspace(1, dims);
+        H5::DataSet dataset = phonon_group.createDataSet("state", H5::PredType::NATIVE_DOUBLE, dataspace);
+        
+        double ph_data[6];
+        phonons.to_array(ph_data);
+        dataset.write(ph_data, H5::PredType::NATIVE_DOUBLE);
+    }
+    
+    // Save metadata
+    H5::DataSpace scalar_space(H5S_SCALAR);
+    {
+        H5::Attribute attr = metadata_group.createAttribute("lattice_size", H5::PredType::NATIVE_HSIZE, scalar_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &lattice_size);
+        attr = metadata_group.createAttribute("dim1", H5::PredType::NATIVE_HSIZE, scalar_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &dim1);
+        attr = metadata_group.createAttribute("dim2", H5::PredType::NATIVE_HSIZE, scalar_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &dim2);
+        attr = metadata_group.createAttribute("dim3", H5::PredType::NATIVE_HSIZE, scalar_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &dim3);
+        attr = metadata_group.createAttribute("spin_length", H5::PredType::NATIVE_FLOAT, scalar_space);
+        attr.write(H5::PredType::NATIVE_FLOAT, &spin_length);
+    }
+    
+    file.close();
+}
+
+void NCTOLattice::load_state_hdf5(const string& filename) {
+    H5::H5File file(filename, H5F_ACC_RDONLY);
+    
+    // Load spins
+    {
+        H5::DataSet dataset = file.openDataSet("/spins/configuration");
+        std::vector<double> spin_data(lattice_size * 3);
+        dataset.read(spin_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            spins[i](0) = spin_data[i * 3 + 0];
+            spins[i](1) = spin_data[i * 3 + 1];
+            spins[i](2) = spin_data[i * 3 + 2];
+            spins[i] = spins[i].normalized() * spin_length;
+        }
+    }
+    
+    // Load phonon state
+    {
+        H5::DataSet dataset = file.openDataSet("/phonons/state");
+        double ph_data[6];
+        dataset.read(ph_data, H5::PredType::NATIVE_DOUBLE);
+        phonons.from_array(ph_data);
+    }
+    
+    file.close();
+}
+#endif
 
 void NCTOLattice::save_spin_config(const string& filename) const {
     std::ofstream file(filename);

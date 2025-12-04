@@ -7,7 +7,7 @@ system = tmfeo3
 simulation_mode = molecular_dynamics
 
 # Lattice Size (for mixed Fe + Tm lattice)
-lattice_size = 12,12,12
+lattice_size = 4,4,4
 
 # Fe Exchange Interaction Parameters (in meV)
 J1ab = 4.92     # In-plane nearest neighbor
@@ -58,5 +58,3 @@ use_gpu = false
 output_dir = TmFeO3_md
 save_observables = true
 
-
-initial_spin_config = ../TmFeO3_sa/

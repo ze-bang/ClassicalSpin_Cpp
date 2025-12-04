@@ -53,11 +53,12 @@
 #include <numeric>
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <mpi.h>
 #include <boost/numeric/odeint.hpp>
 
 #ifdef HDF5_ENABLED
-#include "hdf5_io.h"
+#include "classical_spin/io/hdf5_io.h"
 #endif
 
 using std::vector;
@@ -585,8 +586,29 @@ public:
     // SIMULATION METHODS
     // ============================================================
     
+private:
     /**
-     * Generic ODE integration wrapper
+     * Helper: Execute ODE integration with selected method
+     * Centralizes integrator selection logic to reduce code duplication
+     * 
+     * @param system_func   ODE system function (dx/dt = f(x, t))
+     * @param state         Initial state vector (modified in-place)
+     * @param T_start       Integration start time
+     * @param T_end         Integration end time
+     * @param dt_step       Time step (fixed for const methods, initial for adaptive)
+     * @param observer      Observer function called at each step
+     * @param method        Integration method (see list below)
+     * @param use_adaptive  If true, use integrate_adaptive; if false, use integrate_const
+     * @param abs_tol       Absolute tolerance for adaptive methods
+     * @param rel_tol       Relative tolerance for adaptive methods
+     * 
+     * Available methods:
+     * - "euler": Explicit Euler (1st order, simple, inaccurate)
+     * - "rk2" or "midpoint": Runge-Kutta 2nd order
+     * - "rk4": Classic Runge-Kutta 4th order (good balance, fixed step)
+     * - "dopri5": Dormand-Prince 5(4) (default, recommended for general use)
+     * - "rk78" or "rkf78": Runge-Kutta-Fehlberg 7(8) (high accuracy, expensive)
+     * - "bulirsch_stoer" or "bs": Bulirsch-Stoer (very high accuracy, expensive)
      */
     template<typename System, typename Observer>
     void integrate_ode_system(System system_func, ODEState& state,
@@ -594,9 +616,19 @@ public:
                              Observer observer, const string& method,
                              bool use_adaptive = false,
                              double abs_tol = 1e-6, double rel_tol = 1e-6);
-    
+
+public:
     /**
-     * Run molecular dynamics simulation
+     * Run molecular dynamics simulation using Boost.Odeint
+     * Requires HDF5 for output.
+     * 
+     * @param T_start       Start time
+     * @param T_end         End time  
+     * @param dt_initial    Initial step size (adaptive methods will adjust)
+     * @param out_dir       Output directory for trajectory HDF5 file
+     * @param save_interval Number of steps between saves
+     * @param method        Integration method: "euler", "rk2", "rk4", "dopri5" (default),
+     *                      "rk78", "bulirsch_stoer"
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
@@ -605,6 +637,14 @@ public:
     /**
      * Run simulated annealing for spin subsystem only
      * (Phonons kept at equilibrium during thermal equilibration)
+     * 
+     * @param T_start        Starting temperature
+     * @param T_end          Ending temperature
+     * @param n_steps        Number of annealing steps
+     * @param overrelax_rate Overrelaxation sweep frequency (0 = disabled)
+     * @param cooling_rate   Geometric cooling factor per step
+     * @param out_dir        Output directory for HDF5 file
+     * @param save_observables Whether to save observables during annealing
      */
     void simulated_annealing(double T_start, double T_end, size_t n_steps,
                             size_t overrelax_rate = 0,
@@ -616,18 +656,40 @@ public:
     // I/O
     // ============================================================
     
+#ifdef HDF5_ENABLED
     /**
-     * Save spin configuration to file
+     * Save spin configuration to HDF5 file
+     */
+    void save_spin_config_hdf5(const string& filename) const;
+    
+    /**
+     * Load spin configuration from HDF5 file
+     */
+    void load_spin_config_hdf5(const string& filename);
+    
+    /**
+     * Save complete state (spins + phonons) to HDF5 file
+     */
+    void save_state_hdf5(const string& filename) const;
+    
+    /**
+     * Load complete state (spins + phonons) from HDF5 file
+     */
+    void load_state_hdf5(const string& filename);
+#endif
+    
+    /**
+     * Save spin configuration to text file (legacy format)
      */
     void save_spin_config(const string& filename) const;
     
     /**
-     * Load spin configuration from file
+     * Load spin configuration from text file (legacy format)
      */
     void load_spin_config(const string& filename);
     
     /**
-     * Save positions to file
+     * Save positions to text file
      */
     void save_positions(const string& filename) const;
     
