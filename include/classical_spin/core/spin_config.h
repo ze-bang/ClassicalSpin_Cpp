@@ -43,6 +43,7 @@ struct SpinConfig {
     SystemType system = SystemType::HONEYCOMB_BCAO;
     array<size_t, 3> lattice_size = {24, 24, 1};
     float spin_length = 1.0;
+    float spin_length_su3 = 1.0;  // Magnitude of SU(3) spin vectors (for mixed lattice systems)
     
     // Simulation method
     SimulationType simulation = SimulationType::SIMULATED_ANNEALING;

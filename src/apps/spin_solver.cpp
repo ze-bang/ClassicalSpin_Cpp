@@ -1970,7 +1970,7 @@ int main(int argc, char** argv) {
                                        config.lattice_size[1],
                                        config.lattice_size[2],
                                        config.spin_length,
-                                       config.spin_length);
+                                       config.spin_length_su3);
             
             // Initialize spins
             if (config.use_ferromagnetic_init) {

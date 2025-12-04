@@ -59,6 +59,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "spin_length") {
                 config.spin_length = stof(value);
             }
+            else if (key == "spin_length_su3") {
+                config.spin_length_su3 = stof(value);
+            }
             else if (key == "simulation_mode") {
                 config.simulation = parse_simulation(value);
             }
@@ -304,7 +307,8 @@ void SpinConfig::to_file(const string& filename) const {
     }
     file << "\n";
     file << "lattice_size = " << lattice_size[0] << "," << lattice_size[1] << "," << lattice_size[2] << "\n";
-    file << "spin_length = " << spin_length << "\n\n";
+    file << "spin_length = " << spin_length << "\n";
+    file << "spin_length_su3 = " << spin_length_su3 << "\n\n";
     
     file << "# Simulation Type\n";
     file << "simulation = ";

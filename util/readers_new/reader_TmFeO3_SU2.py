@@ -533,6 +533,292 @@ def _plot_DSSF_combined(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
 
 
 # =============================================================================
+# 2D COHERENT SPECTROSCOPY ANALYSIS
+# =============================================================================
+
+def _validate_window(window, name):
+    """Ensure an omega window is either None or a valid (min, max) tuple."""
+    if window is None:
+        return None
+    if (not isinstance(window, (tuple, list)) or len(window) != 2 or
+            window[0] >= window[1]):
+        raise ValueError(f"{name} must be a tuple (min, max) with min < max")
+    return tuple(window)
+
+
+def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None,
+                      omega_tau_window: Optional[Tuple[float, float]] = None):
+    """Read and compute 2D nonlinear spectroscopy using FFT.
+    
+    Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
+    response M_NL = M01 - M0 - M1, then performs 2D FFT to get the 2D spectrum.
+    
+    Args:
+        dir: Directory containing pump_probe_spectroscopy.h5
+        omega_t_window: Optional (min, max) tuple for ω_t axis limits
+        omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
+    """
+    omega_t_window = _validate_window(omega_t_window, "omega_t_window")
+    omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
+    hdf5_path = os.path.join(dir, "pump_probe_spectroscopy.h5")
+    component_labels = ['x', 'y', 'z']
+    
+    # Read from HDF5 file
+    with h5py.File(hdf5_path, 'r') as f:
+        times = f['/reference/times'][:]
+        M0_antiferro = f['/reference/M_local'][:]
+        tau_values = f['/tau_scan/tau_values'][:]
+        tau_step = len(tau_values)
+        
+        # Print metadata
+        print(f"  Loaded HDF5: {hdf5_path}")
+        print(f"    Time steps: {len(times)}, t_range: [{times[0]:.4f}, {times[-1]:.4f}]")
+        print(f"    Tau values: {tau_step}, tau_range: [{tau_values[0]:.4f}, {tau_values[-1]:.4f}]")
+        print(f"    M_local shape: {M0_antiferro.shape}")
+        
+        # Print pulse and lattice metadata if available
+        if '/metadata' in f:
+            metadata_grp = f['/metadata']
+            print(f"  Pulse parameters:")
+            if 'pulse_amp' in metadata_grp.attrs:
+                print(f"    Amplitude: {metadata_grp.attrs['pulse_amp']}")
+            if 'pulse_width' in metadata_grp.attrs:
+                print(f"    Width: {metadata_grp.attrs['pulse_width']}")
+            if 'pulse_freq' in metadata_grp.attrs:
+                print(f"    Frequency: {metadata_grp.attrs['pulse_freq']}")
+            print(f"  Lattice parameters:")
+            if 'n_atoms' in metadata_grp.attrs:
+                print(f"    n_atoms: {metadata_grp.attrs['n_atoms']}")
+            if 'spin_dim' in metadata_grp.attrs:
+                print(f"    spin_dim: {metadata_grp.attrs['spin_dim']}")
+            if 'lattice_size' in metadata_grp.attrs:
+                print(f"    lattice_size: {metadata_grp.attrs['lattice_size']}")
+            print(f"  Time evolution:")
+            if 'T_start' in metadata_grp.attrs:
+                print(f"    T_start: {metadata_grp.attrs['T_start']}")
+            if 'T_end' in metadata_grp.attrs:
+                print(f"    T_end: {metadata_grp.attrs['T_end']}")
+            if 'T_step' in metadata_grp.attrs:
+                print(f"    T_step: {metadata_grp.attrs['T_step']}")
+            if 'integration_method' in metadata_grp.attrs:
+                method = metadata_grp.attrs['integration_method']
+                if isinstance(method, bytes):
+                    method = method.decode('utf-8')
+                print(f"    Integration method: {method}")
+        
+        # Process all 3 components (x, y, z) for M_NL, M0, M1, M01
+        length = len(M0_antiferro[:, 0])
+        M_NL_components = np.zeros((3, tau_step, length))
+        M0_components = np.zeros((3, tau_step, length))  # M0 broadcast to all tau
+        M1_components = np.zeros((3, tau_step, length))
+        M01_components = np.zeros((3, tau_step, length))
+        
+        for i, tau_val in enumerate(tau_values):
+            tau_group = f[f'/tau_scan/tau_{i}']
+            M1_antiferro = tau_group['M1_local'][:]
+            M01_antiferro = tau_group['M01_local'][:]
+            
+            for comp in range(3):
+                M0 = M0_antiferro[:, comp]
+                M1 = M1_antiferro[:, comp]
+                M01 = M01_antiferro[:, comp]
+                
+                min_len = min(len(M0), len(M1), len(M01), length)
+                M_NL_components[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+                M0_components[comp, i, :min_len] = M0[:min_len]  # Broadcast M0 to all tau slices
+                M1_components[comp, i, :min_len] = M1[:min_len]
+                M01_components[comp, i, :min_len] = M01[:min_len]
+        
+        dt = times[1] - times[0] if len(times) > 1 else 1.0
+        tau = tau_values
+
+    # Use z-component for main analysis (backwards compatible)
+    M_NL = M_NL_components[2]
+    
+    # Compute omega arrays (needed for all plots)
+    omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
+    omega_tau = np.fft.fftshift(omega_tau)
+    omega_t = np.fft.fftfreq(M_NL.shape[1], dt) * 2 * np.pi
+    omega_t = np.fft.fftshift(omega_t)
+    
+    # Helper function for 2D FFT analysis
+    def compute_2d_fft(data):
+        """Compute 2D FFT with proper shifting and flipping."""
+        data_static = np.mean(data)
+        data_dynamic = data - data_static
+        data_FF = np.fft.fft2(data_dynamic)
+        data_FF = np.fft.fftshift(data_FF)
+        data_FF = np.abs(data_FF)
+        data_FF = np.flip(data_FF, axis=1)  # Flip omega_t axis
+        return data_FF
+    
+    # =========================================================================
+    # Analysis for M0, M1, M01 (individual signals)
+    # =========================================================================
+    signal_names = ['M0', 'M1', 'M01']
+    signal_data = [M0_components, M1_components, M01_components]
+    
+    for sig_name, sig_components in zip(signal_names, signal_data):
+        print(f"  Processing {sig_name}...")
+        
+        # Create debug plot for this signal (3 components x 3 plot types)
+        fig_sig, axes_sig = plt.subplots(3, 3, figsize=(15, 12))
+        
+        for comp in range(3):
+            sig_comp = sig_components[comp]
+            
+            # Time domain plot
+            ax_time = axes_sig[comp, 0]
+            for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+            ax_time.set_xlabel('Time index')
+            ax_time.set_ylabel(f'${sig_name}_{{{component_labels[comp]}}}$')
+            ax_time.set_title(f'{component_labels[comp]}-component (time domain)')
+            ax_time.legend(fontsize=6)
+            ax_time.grid(True, alpha=0.3)
+            
+            # 2D time-tau plot
+            ax_2d = axes_sig[comp, 1]
+            im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                              extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+            ax_2d.set_xlabel('Time index')
+            ax_2d.set_ylabel('τ')
+            ax_2d.set_title(f'{component_labels[comp]}-component (τ, t)')
+            plt.colorbar(im, ax=ax_2d)
+            
+            # Frequency domain plot (2D FFT)
+            sig_comp_FF = compute_2d_fft(sig_comp)
+            
+            ax_freq = axes_sig[comp, 2]
+            im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                      norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+            ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+            ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+            ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
+            if omega_t_window is not None:
+                ax_freq.set_xlim(omega_t_window)
+            if omega_tau_window is not None:
+                ax_freq.set_ylim(omega_tau_window)
+            plt.colorbar(im_freq, ax=ax_freq)
+            
+            # Save individual component FFT data
+            np.savetxt(os.path.join(dir, f"{sig_name}_FF_{component_labels[comp]}.txt"), sig_comp_FF)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
+        plt.clf()
+        plt.close()
+        
+        # Main spectrum plot (z-component)
+        sig_z = sig_components[2]
+        sig_z_FF = compute_2d_fft(sig_z)
+        np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_z_FF)
+        
+        plt.imshow(sig_z_FF, origin='lower',
+                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                   aspect='auto', cmap='gnuplot2', norm='linear')
+        plt.xlabel('$\\omega_t$ (rad/time)')
+        plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+        plt.colorbar(label='Intensity')
+        plt.title(f'{sig_name} Spectrum')
+        if omega_t_window is not None:
+            plt.xlim(omega_t_window)
+        if omega_tau_window is not None:
+            plt.ylim(omega_tau_window)
+        plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"))
+        plt.clf()
+    
+    # =========================================================================
+    # Original M_NL analysis (M01 - M0 - M1)
+    # =========================================================================
+    
+    # Debug plots: Plot M_NL for each component in time domain and frequency domain
+    fig_debug, axes_debug = plt.subplots(3, 3, figsize=(15, 12))
+    for comp in range(3):
+        M_NL_comp = M_NL_components[comp]
+        
+        # Time domain plot (M_NL vs t for different tau)
+        ax_time = axes_debug[comp, 0]
+        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):  # Plot ~5 tau values
+            ax_time.plot(M_NL_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+        ax_time.set_xlabel('Time index')
+        ax_time.set_ylabel(f'$M_{{NL,{component_labels[comp]}}}$')
+        ax_time.set_title(f'{component_labels[comp]}-component (time domain)')
+        ax_time.legend(fontsize=6)
+        ax_time.grid(True, alpha=0.3)
+        
+        # 2D time-tau plot
+        ax_2d = axes_debug[comp, 1]
+        im = ax_2d.imshow(M_NL_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                          extent=[0, M_NL_comp.shape[1], tau[0], tau[-1]])
+        ax_2d.set_xlabel('Time index')
+        ax_2d.set_ylabel('τ')
+        ax_2d.set_title(f'{component_labels[comp]}-component (τ, t)')
+        plt.colorbar(im, ax=ax_2d)
+        
+        # Frequency domain plot (2D FFT)
+        M_NL_comp_static = np.mean(M_NL_comp)
+        M_NL_comp_dynamic = M_NL_comp - M_NL_comp_static
+        M_NL_comp_FF = np.fft.fft2(M_NL_comp_dynamic)
+        M_NL_comp_FF = np.fft.fftshift(M_NL_comp_FF)
+        M_NL_comp_FF = np.abs(M_NL_comp_FF)
+        
+        # Flip omega_t axis to correct direction
+        M_NL_comp_FF = np.flip(M_NL_comp_FF, axis=1)
+        
+        ax_freq = axes_debug[comp, 2]
+        im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                  norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+        ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+        ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+        ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
+        if omega_t_window is not None:
+            ax_freq.set_xlim(omega_t_window)
+        if omega_tau_window is not None:
+            ax_freq.set_ylim(omega_tau_window)
+        plt.colorbar(im_freq, ax=ax_freq)
+        
+        # Save individual component FFT data
+        np.savetxt(os.path.join(dir, f"M_NL_FF_{component_labels[comp]}.txt"), M_NL_comp_FF)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(dir, "M_NL_components_debug.pdf"))
+    plt.clf()
+    plt.close()
+    
+    # Subtract static values for FFT stability (z-component for main output)
+    M_NL_static = np.mean(M_NL)
+    M_NL_dynamic = M_NL - M_NL_static
+    
+    # Perform 2D FFT
+    M_NL_FF = np.fft.fft2(M_NL_dynamic)
+    M_NL_FF = np.fft.fftshift(M_NL_FF)
+    M_NL_FF = np.abs(M_NL_FF)
+    
+    # Flip omega_t axis (second dimension) to correct direction
+    M_NL_FF = np.flip(M_NL_FF, axis=1)
+    
+    np.savetxt(os.path.join(dir, "M_NL_FF.txt"), M_NL_FF)
+    
+    # Full spectrum plot
+    plt.imshow(M_NL_FF, origin='lower',
+               extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+               aspect='auto', cmap='gnuplot2', norm='linear')
+    plt.xlabel('$\\omega_t$ (rad/time)')
+    plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+    plt.colorbar(label='Intensity')
+    if omega_t_window is not None:
+        plt.xlim(omega_t_window)
+    if omega_tau_window is not None:
+        plt.ylim(omega_tau_window)
+    plt.savefig(os.path.join(dir, "M_NLSPEC.pdf"))
+    plt.clf()
+    
+    print(f"  2D nonlinear spectroscopy analysis complete.")
+    print(f"  Output files saved to: {dir}")
+
+
+# =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
@@ -686,10 +972,13 @@ def find_trajectory_file(path: str) -> str:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python reader_TmFeO3_SU2.py <hdf5_file_or_directory> [analysis_type]")
-        print("  analysis_type: 'md' for molecular dynamics (default), 'mag' for magnetization plots")
+        print("  analysis_type: 'md' for molecular dynamics (default)")
+        print("                 'mag' for magnetization plots")
+        print("                 '2dcs' for 2D coherent spectroscopy")
         print("\nExamples:")
         print("  python reader_TmFeO3_SU2.py ./TmFeO3_Fe_md/sample_0/trajectory.h5 md")
         print("  python reader_TmFeO3_SU2.py ./TmFeO3_Fe_md/ md")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_2DCS/sample_0/ 2dcs")
         sys.exit(1)
     
     input_path = sys.argv[1]
@@ -699,28 +988,56 @@ if __name__ == "__main__":
         print(f"Error: Path not found: {input_path}")
         sys.exit(1)
     
-    try:
-        filepath = find_trajectory_file(input_path)
-        print(f"Found trajectory file: {filepath}")
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-    
-    print(f"Analyzing {filepath} (type: {analysis_type})")
-    print("\nHDF5 Structure:")
-    print("-" * 50)
-    print_hdf5_structure(filepath)
-    print("-" * 50)
-    
-    if analysis_type == 'md':
-        print("\nRunning MD analysis (DSSF computation)...")
-        results = read_MD_hdf5(filepath)
-        print(f"Results keys: {list(results.keys())}")
-    elif analysis_type == 'mag':
-        print("\nPlotting magnetization trajectories...")
-        plot_magnetization_trajectory(filepath)
+    if analysis_type == '2dcs':
+        # For 2DCS, we need a directory containing pump_probe_spectroscopy.h5
+        if os.path.isfile(input_path):
+            # If a file is given, use its directory
+            dir_path = os.path.dirname(input_path)
+        else:
+            dir_path = input_path
+        
+        # Check for pump_probe_spectroscopy.h5 in directory or sample_0 subdirectory
+        hdf5_path = os.path.join(dir_path, "pump_probe_spectroscopy.h5")
+        if not os.path.exists(hdf5_path):
+            sample_path = os.path.join(dir_path, "sample_0", "pump_probe_spectroscopy.h5")
+            if os.path.exists(sample_path):
+                dir_path = os.path.join(dir_path, "sample_0")
+                hdf5_path = sample_path
+            else:
+                print(f"Error: No pump_probe_spectroscopy.h5 found in {dir_path}")
+                sys.exit(1)
+        
+        print(f"Analyzing 2D coherent spectroscopy data in: {dir_path}")
+        print("\nHDF5 Structure:")
+        print("-" * 50)
+        print_hdf5_structure(hdf5_path)
+        print("-" * 50)
+        
+        print("\nRunning 2D nonlinear spectroscopy analysis...")
+        read_2D_nonlinear(dir_path)
     else:
-        print(f"Unknown analysis type: {analysis_type}")
-        sys.exit(1)
+        try:
+            filepath = find_trajectory_file(input_path)
+            print(f"Found trajectory file: {filepath}")
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+        
+        print(f"Analyzing {filepath} (type: {analysis_type})")
+        print("\nHDF5 Structure:")
+        print("-" * 50)
+        print_hdf5_structure(filepath)
+        print("-" * 50)
+        
+        if analysis_type == 'md':
+            print("\nRunning MD analysis (DSSF computation)...")
+            results = read_MD_hdf5(filepath)
+            print(f"Results keys: {list(results.keys())}")
+        elif analysis_type == 'mag':
+            print("\nPlotting magnetization trajectories...")
+            plot_magnetization_trajectory(filepath)
+        else:
+            print(f"Unknown analysis type: {analysis_type}")
+            sys.exit(1)
     
     print("\nAnalysis complete!")

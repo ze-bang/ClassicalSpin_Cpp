@@ -7,7 +7,7 @@ system = tmfeo3_tm
 simulation_mode = simulated_annealing
 
 # Lattice Size
-lattice_size = 8,8,8
+lattice_size = 1,1,1
 
 # Tm Energy Splitting (in meV)
 # These define the crystal field splitting for the Tm ions
