@@ -3,6 +3,7 @@
 #include "classical_spin/core/unitcell_builders.h"
 #include "classical_spin/lattice/lattice.h"
 #include "classical_spin/lattice/mixed_lattice.h"
+#include "classical_spin/lattice/ncto_lattice.h"
 #include <mpi.h>
 #include <iostream>
 #include <memory>
@@ -744,6 +745,251 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
     }
 }
 
+// ============================================================================
+// NCTO (SPIN-PHONON) SIMULATION RUNNERS
+// ============================================================================
+
+/**
+ * Build NCTO parameters from SpinConfig
+ */
+void build_ncto_params(const SpinConfig& config, 
+                       NCTOSpinPhononParams& sp_params,
+                       NCTOPhononParams& ph_params,
+                       NCTODriveParams& dr_params) {
+    // Spin-phonon coupling parameters
+    sp_params.J1_0 = config.get_param("J", 0.0);
+    sp_params.K_0 = config.get_param("K", -1.0);
+    sp_params.Gamma_0 = config.get_param("Gamma", 0.25);
+    sp_params.Gammap_0 = config.get_param("Gammap", -0.02);
+    sp_params.J3 = config.get_param("J3", 0.0);
+    sp_params.lambda_J = config.get_param("lambda_J", 0.0);
+    sp_params.lambda_K = config.get_param("lambda_K", 0.0);
+    sp_params.lambda_Gamma = config.get_param("lambda_Gamma", 0.0);
+    sp_params.lambda_Gammap = config.get_param("lambda_Gammap", 0.0);
+    
+    // Phonon parameters (effective masses = 1, absorbed into frequency definitions)
+    ph_params.omega_IR = config.get_param("omega_IR", 1.0);
+    ph_params.omega_R = config.get_param("omega_R", 0.5);
+    ph_params.gamma_IR = config.get_param("gamma_IR", 0.1);
+    ph_params.gamma_R = config.get_param("gamma_R", 0.05);
+    ph_params.beta = config.get_param("beta", 0.0);
+    ph_params.g = config.get_param("g_phonon", 0.0);  // Nonlinear coupling
+    ph_params.Z_star = config.get_param("Z_star", 1.0);  // Effective charge
+    
+    // Drive parameters (pulse 1)
+    dr_params.E0_1 = config.pump_amplitude;
+    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : ph_params.omega_IR;
+    dr_params.t_1 = config.pump_time;
+    dr_params.sigma_1 = config.pump_width;
+    dr_params.phi_1 = config.get_param("pump_phase", 0.0);
+    dr_params.theta_1 = config.get_param("pump_polarization", 0.0);  // 0 = x-polarized
+    
+    // Drive parameters (pulse 2)
+    dr_params.E0_2 = config.probe_amplitude;
+    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : ph_params.omega_IR;
+    dr_params.t_2 = config.probe_time;
+    dr_params.sigma_2 = config.probe_width;
+    dr_params.phi_2 = config.get_param("probe_phase", 0.0);
+    dr_params.theta_2 = config.get_param("probe_polarization", 0.0);
+}
+
+/**
+ * Run simulated annealing for NCTO lattice (spin subsystem only)
+ */
+void run_simulated_annealing_ncto(NCTOLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running simulated annealing on NCTO lattice (spin subsystem)..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+    }
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.simulated_annealing(
+            config.T_start,
+            config.T_end,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.cooling_rate,
+            trial_dir,
+            config.save_observables
+        );
+        
+        // Save final configuration
+        lattice.save_positions(trial_dir + "/positions.txt");
+        lattice.save_spin_config(trial_dir + "/spins.txt");
+        lattice.print_state();
+        
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "NCTO simulated annealing completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
+/**
+ * Run molecular dynamics for NCTO lattice (full spin-phonon dynamics)
+ */
+void run_molecular_dynamics_ncto(NCTOLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running spin-phonon molecular dynamics on NCTO lattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+    }
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // First equilibrate at low temperature (spin subsystem only)
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating spin subsystem..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.cooling_rate,
+                "",
+                false
+            );
+        } else {
+            lattice.load_spin_config(config.initial_spin_config);
+        }
+        
+        // Save initial spin configuration before time evolution
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        
+        // Run spin-phonon MD
+        if (rank == 0) {
+            cout << "Starting spin-phonon dynamics..." << endl;
+            cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
+            cout << "Timestep: " << config.md_timestep << endl;
+            cout << "Integration method: " << config.md_integrator << endl;
+        }
+        
+        lattice.molecular_dynamics(
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            trial_dir,
+            config.md_save_interval,
+            config.md_integrator
+        );
+        
+        lattice.print_state();
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "NCTO spin-phonon dynamics completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
+/**
+ * Run pump-probe for NCTO lattice (THz driving IR phonon)
+ */
+void run_pump_probe_ncto(NCTOLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running THz pump-probe on NCTO lattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+        cout << "\nDrive parameters:" << endl;
+        cout << "  Pump amplitude: " << config.pump_amplitude << endl;
+        cout << "  Pump frequency: " << config.pump_frequency << endl;
+        cout << "  Pump time: " << config.pump_time << endl;
+        cout << "  Pump width: " << config.pump_width << endl;
+    }
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+        }
+        
+        // Re-initialize for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // Equilibrate spin subsystem
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating spin subsystem..." << endl;
+            }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.cooling_rate,
+                "",
+                false
+            );
+        } else {
+            lattice.load_spin_config(config.initial_spin_config);
+        }
+        
+        // Save initial configuration
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        
+        // Run spin-phonon dynamics with THz drive
+        if (rank == 0) {
+            cout << "Starting THz-driven spin-phonon dynamics..." << endl;
+        }
+        
+        lattice.molecular_dynamics(
+            config.md_time_start,
+            config.md_time_end,
+            config.md_timestep,
+            trial_dir,
+            config.md_save_interval,
+            config.md_integrator
+        );
+        
+        lattice.print_state();
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "NCTO THz pump-probe completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
 /**
  * Run simulated annealing for mixed lattice
  */
@@ -1121,7 +1367,7 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
         }
         
         // Save initial spin configuration before time evolution
-        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
         
         // Setup pump field directions
         if (rank == 0) {
@@ -1415,7 +1661,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         
         // Save initial spin configuration before time evolution (rank 0 only)
         if (rank == 0) {
-            lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+            lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
         }
         
         if (rank == 0) {
@@ -1518,7 +1764,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             }
             
             // Save initial spin configuration before time evolution
-            lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+            lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
             
             if (rank == 0 || config.num_trials == 1) {
                 cout << "\n[2/3] Pulse configuration:" << endl;
@@ -1964,7 +2210,68 @@ int main(int argc, char** argv) {
     
     // Build system and run simulation
     try {
-        if (config.system == SystemType::TMFEO3) {
+        if (config.system == SystemType::NCTO) {
+            // NCTO spin-phonon coupled system
+            if (rank == 0) {
+                cout << "\nBuilding NCTO spin-phonon lattice..." << endl;
+            }
+            
+            NCTOLattice ncto_lattice(config.lattice_size[0],
+                                     config.lattice_size[1],
+                                     config.lattice_size[2],
+                                     config.spin_length);
+            
+            // Build parameters from config
+            NCTOSpinPhononParams sp_params;
+            NCTOPhononParams ph_params;
+            NCTODriveParams dr_params;
+            build_ncto_params(config, sp_params, ph_params, dr_params);
+            
+            // Set parameters (this builds the interaction matrices)
+            ncto_lattice.set_parameters(sp_params, ph_params, dr_params);
+            
+            // Set Gilbert damping if specified
+            ncto_lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);
+            
+            // Set magnetic field
+            Eigen::Vector3d B;
+            B << config.field_strength * config.field_direction[0],
+                 config.field_strength * config.field_direction[1],
+                 config.field_strength * config.field_direction[2];
+            ncto_lattice.set_field(B);
+            
+            // Initialize spins
+            if (config.use_ferromagnetic_init) {
+                Eigen::Vector3d dir;
+                dir << config.ferromagnetic_direction[0],
+                       config.ferromagnetic_direction[1],
+                       config.ferromagnetic_direction[2];
+                ncto_lattice.init_ferromagnetic(dir);
+            } else if (!config.initial_spin_config.empty()) {
+                ncto_lattice.load_spin_config(config.initial_spin_config);
+            } else {
+                ncto_lattice.init_random();
+            }
+            
+            // Run simulation
+            switch (config.simulation) {
+                case SimulationType::SIMULATED_ANNEALING:
+                    run_simulated_annealing_ncto(ncto_lattice, config, rank, size);
+                    break;
+                case SimulationType::MOLECULAR_DYNAMICS:
+                    run_molecular_dynamics_ncto(ncto_lattice, config, rank, size);
+                    break;
+                case SimulationType::PUMP_PROBE:
+                    run_pump_probe_ncto(ncto_lattice, config, rank, size);
+                    break;
+                default:
+                    if (rank == 0) {
+                        cerr << "Simulation type not supported for NCTO lattice. "
+                             << "Supported: SA, MD, pump_probe" << endl;
+                    }
+                    break;
+            }
+        } else if (config.system == SystemType::TMFEO3) {
             // Mixed SU(2)+SU(3) system
             if (rank == 0) {
                 cout << "\nBuilding TmFeO3 system..." << endl;

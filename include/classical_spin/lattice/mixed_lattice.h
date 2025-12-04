@@ -194,8 +194,8 @@ public:
         lattice_size_SU3 = N_atoms_SU3 * dim1 * dim2 * dim3;
         
         cout << "Initializing mixed lattice with dimensions: " << dim1 << " x " << dim2 << " x " << dim3 << endl;
-        cout << "SU(2): " << lattice_size_SU2 << " sites (" << N_atoms_SU2 << " atoms/cell, spin_dim=" << spin_dim_SU2 << ")" << endl;
-        cout << "SU(3): " << lattice_size_SU3 << " sites (" << N_atoms_SU3 << " atoms/cell, spin_dim=" << spin_dim_SU3 << ")" << endl;
+        cout << "SU(2): " << lattice_size_SU2 << " sites (" << N_atoms_SU2 << " atoms/cell, spin_dim=" << spin_dim_SU2 << ", spin_length=" << spin_length_SU2 << ")" << endl;
+        cout << "SU(3): " << lattice_size_SU3 << " sites (" << N_atoms_SU3 << " atoms/cell, spin_dim=" << spin_dim_SU3 << ", spin_length=" << spin_length_SU3 << ")" << endl;
 
         // Initialize arrays
         spins_SU2.resize(lattice_size_SU2);
@@ -1150,7 +1150,7 @@ public:
             
             // Save intermediate configuration
             if (!out_dir.empty() && temp_step % 50 == 0) {
-                save_spin_config(out_dir + "/spins_T=" + std::to_string(T) + ".dat");
+                save_spin_config_to_dir(out_dir, "spins_T=" + std::to_string(T));
             }
             
             // Cool down
@@ -1186,8 +1186,8 @@ public:
         
         // Save final configuration
         if (!out_dir.empty()) {
-            save_spin_config(out_dir + "/spins_final.dat");
-            save_positions(out_dir + "/positions_SU2.dat");
+            save_spin_config_to_dir(out_dir, "spins_final");
+            save_positions_to_dir(out_dir);
         }
     }
 
@@ -2559,6 +2559,34 @@ public:
     }
 
     /**
+     * Save spin configuration to a directory with clean naming
+     * Creates: spins_SU2.txt and spins_SU3.txt in the directory
+     */
+    void save_spin_config_to_dir(const string& dir, const string& prefix = "spins") const {
+        // SU(2) spins
+        {
+            ofstream file(dir + "/" + prefix + "_SU2.txt");
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                for (size_t j = 0; j < spin_dim_SU2; ++j) {
+                    file << spins_SU2[i](j) << " ";
+                }
+                file << "\n";
+            }
+        }
+        
+        // SU(3) spins
+        {
+            ofstream file(dir + "/" + prefix + "_SU3.txt");
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                    file << spins_SU3[i](j) << " ";
+                }
+                file << "\n";
+            }
+        }
+    }
+
+    /**
      * Load spin configuration
      */
     void load_spin_config(const string& filename) {
@@ -2594,7 +2622,7 @@ public:
     }
 
     /**
-     * Save site positions
+     * Save site positions (legacy naming - appends _SU2.txt/_SU3.txt to filename)
      */
     void save_positions(const string& filename) const {
         // SU(2) positions
@@ -2610,6 +2638,32 @@ public:
         // SU(3) positions
         {
             ofstream file(filename + "_SU3.txt");
+            for (size_t i = 0; i < lattice_size_SU3; ++i) {
+                file << site_positions_SU3[i](0) << " "
+                     << site_positions_SU3[i](1) << " "
+                     << site_positions_SU3[i](2) << "\n";
+            }
+        }
+    }
+
+    /**
+     * Save site positions to a directory with clean naming
+     * Creates: positions_SU2.txt and positions_SU3.txt in the directory
+     */
+    void save_positions_to_dir(const string& dir) const {
+        // SU(2) positions
+        {
+            ofstream file(dir + "/positions_SU2.txt");
+            for (size_t i = 0; i < lattice_size_SU2; ++i) {
+                file << site_positions_SU2[i](0) << " "
+                     << site_positions_SU2[i](1) << " "
+                     << site_positions_SU2[i](2) << "\n";
+            }
+        }
+        
+        // SU(3) positions
+        {
+            ofstream file(dir + "/positions_SU3.txt");
             for (size_t i = 0; i < lattice_size_SU3; ++i) {
                 file << site_positions_SU3[i](0) << " "
                      << site_positions_SU3[i](1) << " "
@@ -3019,8 +3073,8 @@ public:
         cout << "    |M_SU3| = " << M_ground_SU3.norm() << endl;
         
         // Save initial configuration
-        save_positions(dir_name + "/positions.txt");
-        save_spin_config(dir_name + "/spins_initial.txt");
+        save_positions_to_dir(dir_name);
+        save_spin_config_to_dir(dir_name, "spins_initial");
         
         // Backup ground state
         SpinConfigSU2 ground_state_SU2 = spins_SU2;
@@ -3203,8 +3257,8 @@ public:
         
         // Save initial configuration (rank 0 only)
         if (rank == 0) {
-            save_positions(dir_name + "/positions.txt");
-            save_spin_config(dir_name + "/spins_initial.txt");
+            save_positions_to_dir(dir_name);
+            save_spin_config_to_dir(dir_name, "spins_initial");
         }
         
         // Backup ground state

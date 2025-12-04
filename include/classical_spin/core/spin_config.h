@@ -23,6 +23,7 @@ enum class SystemType {
     TMFEO3,                   // TmFeO3 (mixed SU2+SU3)
     TMFEO3_FE,                // TmFeO3 Fe-only (SU2 only, no Tm)
     TMFEO3_TM,                // TmFeO3 Tm-only (SU3 only, no Fe)
+    NCTO,                     // NCTO spin-phonon coupled honeycomb
     CUSTOM                    // Custom from JSON
 };
 
@@ -177,6 +178,7 @@ inline SystemType parse_system(const string& str) {
     if (s == "tmfeo3" || s == "TMFEO3" || s == "TmFeO3") return SystemType::TMFEO3;
     if (s == "tmfeo3_fe" || s == "TMFEO3_FE" || s == "TmFeO3_Fe") return SystemType::TMFEO3_FE;
     if (s == "tmfeo3_tm" || s == "TMFEO3_TM" || s == "TmFeO3_Tm") return SystemType::TMFEO3_TM;
+    if (s == "ncto" || s == "NCTO" || s == "Na2Co2TeO6") return SystemType::NCTO;
     if (s == "custom" || s == "CUSTOM") return SystemType::CUSTOM;
     throw runtime_error("Unknown system type: " + str);
 }

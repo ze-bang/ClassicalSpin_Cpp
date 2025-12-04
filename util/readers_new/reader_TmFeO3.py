@@ -711,184 +711,493 @@ def _plot_DSSF_combined(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
     plt.close()
 
 
-def read_2DCS_hdf5(filepath: str, mag_type: str = 'global', 
-                   omega_range: float = 3.0, freq_step: float = 0.1,
-                   output_dir: Optional[str] = None) -> Dict[str, np.ndarray]:
-    """
-    Read 2D coherent spectroscopy data from HDF5 and compute nonlinear response.
+def _validate_window(window, name):
+    """Ensure an omega window is either None or a valid (min, max) tuple."""
+    if window is None:
+        return None
+    if (not isinstance(window, (tuple, list)) or len(window) != 2 or
+            window[0] >= window[1]):
+        raise ValueError(f"{name} must be a (min, max) tuple with min < max")
+    return tuple(window)
+
+
+def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None,
+                      omega_tau_window: Optional[Tuple[float, float]] = None) -> Dict[str, np.ndarray]:
+    """Read and compute 2D nonlinear spectroscopy using FFT for mixed SU(2)+SU(3) systems.
     
-    The nonlinear response is computed as:
-        M_NL(tau, t) = M01(tau, t) - M0(t) - M1(tau, t)
+    Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
+    response M_NL = M01 - M0 - M1, then performs 2D FFT to get the 2D spectrum.
     
-    Then Fourier transformed over both tau and t to get the 2D spectrum.
+    Processes both SU(2) and SU(3) sublattices separately.
     
     Args:
-        filepath: Path to pump_probe_spectroscopy.h5 file
-        mag_type: Type of magnetization to use ('antiferro', 'local', 'global')
-        omega_range: Maximum frequency range
-        freq_step: Frequency step size
-        output_dir: Directory for output plots
+        dir: Directory containing pump_probe_spectroscopy.h5
+        omega_t_window: Optional (min, max) tuple for ω_t axis limits
+        omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         
     Returns:
-        Dictionary with 2DCS results
+        Dictionary with 2DCS results for both sublattices
     """
-    if output_dir is None:
-        output_dir = os.path.dirname(filepath)
+    omega_t_window = _validate_window(omega_t_window, "omega_t_window")
+    omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
+    hdf5_path = os.path.join(dir, "pump_probe_spectroscopy.h5")
+    
+    # Component labels
+    component_labels_SU2 = ['x', 'y', 'z']
+    component_labels_SU3 = ['λ1', 'λ2', 'λ3', 'λ4', 'λ5', 'λ6', 'λ7', 'λ8']
     
     results = {}
     
-    with PumpProbeHDF5(filepath) as reader:
-        # Get tau values
-        tau_values = reader.get_tau_values()
-        n_tau = len(tau_values)
+    # Read from HDF5 file
+    with h5py.File(hdf5_path, 'r') as f:
+        times = f['/reference/times'][:]
+        tau_values = f['/tau_scan/tau_values'][:]
+        tau_step = len(tau_values)
         
-        # Get reference times
-        times = reader.get_reference_times()
-        n_times = len(times)
+        # Print metadata
+        print(f"  Loaded HDF5: {hdf5_path}")
+        print(f"    Time steps: {len(times)}, t_range: [{times[0]:.4f}, {times[-1]:.4f}]")
+        print(f"    Tau values: {tau_step}, tau_range: [{tau_values[0]:.4f}, {tau_values[-1]:.4f}]")
         
-        # Frequency grids
-        w_pump = np.arange(0, omega_range, freq_step)  # Pump frequency (tau)
-        w_probe = np.arange(-omega_range, omega_range, freq_step)  # Probe frequency (t)
+        # Print pulse and lattice metadata if available
+        if '/metadata' in f:
+            metadata_grp = f['/metadata']
+            print(f"  Pulse parameters:")
+            for attr in ['pulse_amp', 'pulse_width', 'pulse_freq']:
+                if attr in metadata_grp.attrs:
+                    print(f"    {attr}: {metadata_grp.attrs[attr]}")
+            print(f"  Lattice parameters:")
+            for attr in ['n_atoms', 'spin_dim', 'lattice_size']:
+                if attr in metadata_grp.attrs:
+                    print(f"    {attr}: {metadata_grp.attrs[attr]}")
         
-        # Process SU2
-        for sublattice in ['SU2', 'SU3']:
-            spin_dim = reader.metadata.get(f'spin_dim_{sublattice}', 3 if sublattice == 'SU2' else 8)
-            if spin_dim is None:
-                continue
-            spin_dim = int(spin_dim)
-            
-            try:
-                # Get reference (M0) trajectory
-                M0 = reader.get_reference_magnetization(mag_type, sublattice)
-                
-                # Initialize nonlinear spectrum
-                M_NL_FF = np.zeros((len(w_pump), len(w_probe), spin_dim), dtype=complex)
-                
-                # Compute M0 in frequency domain
-                M0_phase = np.exp(1j * np.outer(w_probe, times))
-                M0_w = contract('ta, wt->wa', M0, M0_phase)
-                
-                # Process each tau value
-                for i_tau in range(n_tau):
-                    try:
-                        current_tau = reader.get_tau_value(i_tau)
-                        
-                        # Get M1 and M01 trajectories
-                        M1 = reader.get_tau_trajectory(i_tau, 'M1', mag_type, sublattice)
-                        M01 = reader.get_tau_trajectory(i_tau, 'M01', mag_type, sublattice)
-                        
-                        # Transform to frequency domain
-                        M1_phase = np.exp(1j * np.outer(w_probe, times))
-                        M01_phase = np.exp(1j * np.outer(w_probe, times))
-                        
-                        M1_w = contract('ta, wt->wa', M1, M1_phase)
-                        M01_w = contract('ta, wt->wa', M01, M01_phase)
-                        
-                        # Compute nonlinear response
-                        M_NL_here = M01_w - M0_w - M1_w
-                        
-                        # Apply tau phase factor
-                        ffactau = np.exp(-1j * w_pump * current_tau) / n_tau
-                        M_NL_FF += contract('wa, e->ewa', M_NL_here, ffactau)
-                        
-                    except Exception as e:
-                        print(f"Error processing tau_{i_tau}: {e}")
-                        continue
-                
-                # Store results
-                M_NL_FF_abs = np.abs(M_NL_FF)
-                results[f'M_NL_FF_{sublattice}'] = M_NL_FF_abs
-                
-                # Plot and save
-                _plot_2DCS(M_NL_FF_abs, w_pump, w_probe, output_dir, sublattice, 
-                          mag_type, omega_range, spin_dim)
-                
-            except Exception as e:
-                print(f"Error processing {sublattice}: {e}")
-                continue
+        dt = times[1] - times[0] if len(times) > 1 else 1.0
+        tau = tau_values
         
-        results['w_pump'] = w_pump
-        results['w_probe'] = w_probe
+        # Compute omega arrays
+        omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
+        omega_tau = np.fft.fftshift(omega_tau)
+        omega_t = np.fft.fftfreq(len(times), dt) * 2 * np.pi
+        omega_t = np.fft.fftshift(omega_t)
+        
+        results['omega_tau'] = omega_tau
+        results['omega_t'] = omega_t
         results['tau_values'] = tau_values
+        
+        # Helper function for 2D FFT analysis
+        def compute_2d_fft(data):
+            """Compute 2D FFT with proper shifting and flipping."""
+            data_static = np.mean(data)
+            data_dynamic = data - data_static
+            data_FF = np.fft.fft2(data_dynamic)
+            data_FF = np.fft.fftshift(data_FF)
+            data_FF = np.abs(data_FF)
+            data_FF = np.flip(data_FF, axis=1)  # Flip omega_t axis
+            return data_FF
+        
+        # =====================================================================
+        # Process SU(2) sublattice
+        # =====================================================================
+        if '/reference/M_local_SU2' in f:
+            print("\n  Processing SU(2) sublattice...")
+            M0_SU2 = f['/reference/M_local_SU2'][:]
+            spin_dim_SU2 = M0_SU2.shape[1]
+            length = len(M0_SU2[:, 0])
+            
+            # Initialize arrays for all components
+            M_NL_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+            M0_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+            M1_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+            M01_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+            
+            for i, tau_val in enumerate(tau_values):
+                tau_group = f[f'/tau_scan/tau_{i}']
+                M1_SU2 = tau_group['M1_local_SU2'][:]
+                M01_SU2 = tau_group['M01_local_SU2'][:]
+                
+                for comp in range(spin_dim_SU2):
+                    M0 = M0_SU2[:, comp]
+                    M1 = M1_SU2[:, comp]
+                    M01 = M01_SU2[:, comp]
+                    
+                    min_len = min(len(M0), len(M1), len(M01), length)
+                    M_NL_SU2[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+                    M0_comp_SU2[comp, i, :min_len] = M0[:min_len]
+                    M1_comp_SU2[comp, i, :min_len] = M1[:min_len]
+                    M01_comp_SU2[comp, i, :min_len] = M01[:min_len]
+            
+            # Process individual signals (M0, M1, M01)
+            for sig_name, sig_components in [('M0_SU2', M0_comp_SU2), ('M1_SU2', M1_comp_SU2), ('M01_SU2', M01_comp_SU2)]:
+                print(f"    Processing {sig_name}...")
+                
+                # Create debug plot
+                n_rows = min(spin_dim_SU2, 3)
+                fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
+                if n_rows == 1:
+                    axes_sig = axes_sig.reshape(1, -1)
+                
+                for comp in range(n_rows):
+                    sig_comp = sig_components[comp]
+                    label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
+                    
+                    # Time domain plot
+                    ax_time = axes_sig[comp, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
+                    ax_time.set_title(f'{label}-component (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+                    
+                    # 2D time-tau plot
+                    ax_2d = axes_sig[comp, 1]
+                    im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'{label}-component (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+                    
+                    # Frequency domain plot
+                    sig_comp_FF = compute_2d_fft(sig_comp)
+                    ax_freq = axes_sig[comp, 2]
+                    im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                    ax_freq.set_title(f'{label}-component (freq domain)')
+                    if omega_t_window is not None:
+                        ax_freq.set_xlim(omega_t_window)
+                    if omega_tau_window is not None:
+                        ax_freq.set_ylim(omega_tau_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+                    
+                    np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
+                
+                plt.tight_layout()
+                plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
+                plt.clf()
+                plt.close()
+                
+                # Main spectrum plot (z-component for SU2)
+                sig_z = sig_components[2] if spin_dim_SU2 > 2 else sig_components[0]
+                sig_z_FF = compute_2d_fft(sig_z)
+                np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_z_FF)
+                results[f'{sig_name}_FF'] = sig_z_FF
+                
+                plt.imshow(sig_z_FF, origin='lower',
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                           aspect='auto', cmap='gnuplot2', norm='linear')
+                plt.xlabel('$\\omega_t$ (rad/time)')
+                plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+                plt.colorbar(label='Intensity')
+                plt.title(f'{sig_name} Spectrum')
+                if omega_t_window is not None:
+                    plt.xlim(omega_t_window)
+                if omega_tau_window is not None:
+                    plt.ylim(omega_tau_window)
+                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"))
+                plt.clf()
+            
+            # M_NL analysis for SU2
+            print("    Processing M_NL_SU2...")
+            n_rows = min(spin_dim_SU2, 3)
+            fig_debug, axes_debug = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
+            if n_rows == 1:
+                axes_debug = axes_debug.reshape(1, -1)
+            
+            for comp in range(n_rows):
+                M_NL_comp = M_NL_SU2[comp]
+                label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
+                
+                # Time domain plot
+                ax_time = axes_debug[comp, 0]
+                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                    ax_time.plot(M_NL_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                ax_time.set_xlabel('Time index')
+                ax_time.set_ylabel(f'$M_{{NL,{label}}}$')
+                ax_time.set_title(f'{label}-component (time domain)')
+                ax_time.legend(fontsize=6)
+                ax_time.grid(True, alpha=0.3)
+                
+                # 2D time-tau plot
+                ax_2d = axes_debug[comp, 1]
+                im = ax_2d.imshow(M_NL_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                  extent=[0, M_NL_comp.shape[1], tau[0], tau[-1]])
+                ax_2d.set_xlabel('Time index')
+                ax_2d.set_ylabel('τ')
+                ax_2d.set_title(f'{label}-component (τ, t)')
+                plt.colorbar(im, ax=ax_2d)
+                
+                # Frequency domain plot
+                M_NL_comp_FF = compute_2d_fft(M_NL_comp)
+                ax_freq = axes_debug[comp, 2]
+                im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                          norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+                ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                ax_freq.set_title(f'{label}-component (freq domain)')
+                if omega_t_window is not None:
+                    ax_freq.set_xlim(omega_t_window)
+                if omega_tau_window is not None:
+                    ax_freq.set_ylim(omega_tau_window)
+                plt.colorbar(im_freq, ax=ax_freq)
+                
+                np.savetxt(os.path.join(dir, f"M_NL_SU2_FF_{label}.txt"), M_NL_comp_FF)
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(dir, "M_NL_SU2_components_debug.pdf"))
+            plt.clf()
+            plt.close()
+            
+            # Main M_NL spectrum for SU2 (z-component)
+            M_NL_z = M_NL_SU2[2] if spin_dim_SU2 > 2 else M_NL_SU2[0]
+            M_NL_z_FF = compute_2d_fft(M_NL_z)
+            np.savetxt(os.path.join(dir, "M_NL_SU2_FF.txt"), M_NL_z_FF)
+            results['M_NL_SU2_FF'] = M_NL_z_FF
+            
+            plt.imshow(M_NL_z_FF, origin='lower',
+                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                       aspect='auto', cmap='gnuplot2', norm='linear')
+            plt.xlabel('$\\omega_t$ (rad/time)')
+            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(label='Intensity')
+            plt.title('$M_{NL}$ Spectrum (SU(2))')
+            if omega_t_window is not None:
+                plt.xlim(omega_t_window)
+            if omega_tau_window is not None:
+                plt.ylim(omega_tau_window)
+            plt.savefig(os.path.join(dir, "M_NL_SU2_SPEC.pdf"))
+            plt.clf()
+        
+        # =====================================================================
+        # Process SU(3) sublattice
+        # =====================================================================
+        if '/reference/M_local_SU3' in f:
+            print("\n  Processing SU(3) sublattice...")
+            M0_SU3 = f['/reference/M_local_SU3'][:]
+            spin_dim_SU3 = M0_SU3.shape[1]
+            length = len(M0_SU3[:, 0])
+            
+            # Initialize arrays for all components
+            M_NL_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+            M0_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+            M1_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+            M01_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+            
+            for i, tau_val in enumerate(tau_values):
+                tau_group = f[f'/tau_scan/tau_{i}']
+                M1_SU3 = tau_group['M1_local_SU3'][:]
+                M01_SU3 = tau_group['M01_local_SU3'][:]
+                
+                for comp in range(spin_dim_SU3):
+                    M0 = M0_SU3[:, comp]
+                    M1 = M1_SU3[:, comp]
+                    M01 = M01_SU3[:, comp]
+                    
+                    min_len = min(len(M0), len(M1), len(M01), length)
+                    M_NL_SU3[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
+                    M0_comp_SU3[comp, i, :min_len] = M0[:min_len]
+                    M1_comp_SU3[comp, i, :min_len] = M1[:min_len]
+                    M01_comp_SU3[comp, i, :min_len] = M01[:min_len]
+            
+            # Process individual signals (M0, M1, M01)
+            for sig_name, sig_components in [('M0_SU3', M0_comp_SU3), ('M1_SU3', M1_comp_SU3), ('M01_SU3', M01_comp_SU3)]:
+                print(f"    Processing {sig_name}...")
+                
+                # Create debug plot
+                n_rows = min(spin_dim_SU3, 8)
+                fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
+                if n_rows == 1:
+                    axes_sig = axes_sig.reshape(1, -1)
+                
+                for comp in range(n_rows):
+                    sig_comp = sig_components[comp]
+                    label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
+                    
+                    # Time domain plot
+                    ax_time = axes_sig[comp, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
+                    ax_time.set_title(f'{label}-component (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+                    
+                    # 2D time-tau plot
+                    ax_2d = axes_sig[comp, 1]
+                    im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'{label}-component (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+                    
+                    # Frequency domain plot
+                    sig_comp_FF = compute_2d_fft(sig_comp)
+                    ax_freq = axes_sig[comp, 2]
+                    im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                    ax_freq.set_title(f'{label}-component (freq domain)')
+                    if omega_t_window is not None:
+                        ax_freq.set_xlim(omega_t_window)
+                    if omega_tau_window is not None:
+                        ax_freq.set_ylim(omega_tau_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+                    
+                    np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
+                
+                plt.tight_layout()
+                plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
+                plt.clf()
+                plt.close()
+                
+                # Total spectrum (sum over components)
+                sig_total_FF = np.zeros_like(compute_2d_fft(sig_components[0]))
+                for comp in range(spin_dim_SU3):
+                    sig_total_FF += compute_2d_fft(sig_components[comp])
+                np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_total_FF)
+                results[f'{sig_name}_FF'] = sig_total_FF
+                
+                plt.imshow(sig_total_FF, origin='lower',
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                           aspect='auto', cmap='gnuplot2', norm='linear')
+                plt.xlabel('$\\omega_t$ (rad/time)')
+                plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+                plt.colorbar(label='Intensity')
+                plt.title(f'{sig_name} Spectrum (total)')
+                if omega_t_window is not None:
+                    plt.xlim(omega_t_window)
+                if omega_tau_window is not None:
+                    plt.ylim(omega_tau_window)
+                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"))
+                plt.clf()
+            
+            # M_NL analysis for SU3
+            print("    Processing M_NL_SU3...")
+            n_rows = min(spin_dim_SU3, 8)
+            fig_debug, axes_debug = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
+            if n_rows == 1:
+                axes_debug = axes_debug.reshape(1, -1)
+            
+            for comp in range(n_rows):
+                M_NL_comp = M_NL_SU3[comp]
+                label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
+                
+                # Time domain plot
+                ax_time = axes_debug[comp, 0]
+                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                    ax_time.plot(M_NL_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                ax_time.set_xlabel('Time index')
+                ax_time.set_ylabel(f'$M_{{NL,{label}}}$')
+                ax_time.set_title(f'{label}-component (time domain)')
+                ax_time.legend(fontsize=6)
+                ax_time.grid(True, alpha=0.3)
+                
+                # 2D time-tau plot
+                ax_2d = axes_debug[comp, 1]
+                im = ax_2d.imshow(M_NL_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                  extent=[0, M_NL_comp.shape[1], tau[0], tau[-1]])
+                ax_2d.set_xlabel('Time index')
+                ax_2d.set_ylabel('τ')
+                ax_2d.set_title(f'{label}-component (τ, t)')
+                plt.colorbar(im, ax=ax_2d)
+                
+                # Frequency domain plot
+                M_NL_comp_FF = compute_2d_fft(M_NL_comp)
+                ax_freq = axes_debug[comp, 2]
+                im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                          norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+                ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                ax_freq.set_title(f'{label}-component (freq domain)')
+                if omega_t_window is not None:
+                    ax_freq.set_xlim(omega_t_window)
+                if omega_tau_window is not None:
+                    ax_freq.set_ylim(omega_tau_window)
+                plt.colorbar(im_freq, ax=ax_freq)
+                
+                np.savetxt(os.path.join(dir, f"M_NL_SU3_FF_{label}.txt"), M_NL_comp_FF)
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(dir, "M_NL_SU3_components_debug.pdf"))
+            plt.clf()
+            plt.close()
+            
+            # Total M_NL spectrum for SU3 (sum over components)
+            M_NL_total_FF = np.zeros_like(compute_2d_fft(M_NL_SU3[0]))
+            for comp in range(spin_dim_SU3):
+                M_NL_total_FF += compute_2d_fft(M_NL_SU3[comp])
+            np.savetxt(os.path.join(dir, "M_NL_SU3_FF.txt"), M_NL_total_FF)
+            results['M_NL_SU3_FF'] = M_NL_total_FF
+            
+            plt.imshow(M_NL_total_FF, origin='lower',
+                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                       aspect='auto', cmap='gnuplot2', norm='linear')
+            plt.xlabel('$\\omega_t$ (rad/time)')
+            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(label='Intensity')
+            plt.title('$M_{NL}$ Spectrum (SU(3) total)')
+            if omega_t_window is not None:
+                plt.xlim(omega_t_window)
+            if omega_tau_window is not None:
+                plt.ylim(omega_tau_window)
+            plt.savefig(os.path.join(dir, "M_NL_SU3_SPEC.pdf"))
+            plt.clf()
+        
+        # =====================================================================
+        # Combined SU(2) + SU(3) spectrum
+        # =====================================================================
+        if 'M_NL_SU2_FF' in results and 'M_NL_SU3_FF' in results:
+            print("\n  Computing combined SU(2)+SU(3) spectrum...")
+            M_NL_combined = results['M_NL_SU2_FF'] + results['M_NL_SU3_FF']
+            np.savetxt(os.path.join(dir, "M_NL_combined_FF.txt"), M_NL_combined)
+            results['M_NL_combined_FF'] = M_NL_combined
+            
+            plt.imshow(M_NL_combined, origin='lower',
+                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                       aspect='auto', cmap='gnuplot2', norm='linear')
+            plt.xlabel('$\\omega_t$ (rad/time)')
+            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(label='Intensity')
+            plt.title('$M_{NL}$ Spectrum (SU(2) + SU(3))')
+            if omega_t_window is not None:
+                plt.xlim(omega_t_window)
+            if omega_tau_window is not None:
+                plt.ylim(omega_tau_window)
+            plt.savefig(os.path.join(dir, "M_NL_combined_SPEC.pdf"))
+            plt.clf()
+    
+    print(f"\n  2D nonlinear spectroscopy analysis complete.")
+    print(f"  Output files saved to: {dir}")
     
     return results
 
 
-def _plot_2DCS(M_NL_FF: np.ndarray, w_pump: np.ndarray, w_probe: np.ndarray,
-               output_dir: str, sublattice: str, mag_type: str, 
-               omega_range: float, spin_dim: int):
-    """Plot 2D coherent spectroscopy results."""
-    real_range = omega_range * 4.92 / 4.14  # Convert to THz
-    extent = [0, real_range, -real_range, real_range]
-    
-    for i in range(spin_dim):
-        M_NL_here = M_NL_FF[:, :, i]
-        
-        # Save raw data
-        np.savetxt(os.path.join(output_dir, f"M_NL_FF_{sublattice}_{i}.txt"), M_NL_here)
-        
-        # Linear scale plot
-        plt.figure(figsize=(10, 8))
-        plt.imshow(M_NL_here.T, origin='lower', extent=extent,
-                  aspect='auto', interpolation='lanczos', cmap='gnuplot2')
-        plt.colorbar(label='Amplitude')
-        plt.xlabel(r'$\omega_{\tau}$ (THz)')
-        plt.ylabel(r'$\omega_{t}$ (THz)')
-        plt.title(f'2D Nonlinear Spectrum ({sublattice}, component {i})')
-        plt.savefig(os.path.join(output_dir, f"NLSPEC_{sublattice}_{i}_{mag_type}.pdf"),
-                   dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Log scale plot
-        plt.figure(figsize=(10, 8))
-        plt.imshow(M_NL_here.T, origin='lower', extent=extent,
-                  aspect='auto', interpolation='lanczos', cmap='gnuplot2',
-                  norm=PowerNorm(gamma=0.5))
-        plt.colorbar(label='Amplitude (sqrt scale)')
-        plt.xlabel(r'$\omega_{\tau}$ (THz)')
-        plt.ylabel(r'$\omega_{t}$ (THz)')
-        plt.title(f'2D Nonlinear Spectrum ({sublattice}, component {i})')
-        plt.savefig(os.path.join(output_dir, f"NLSPEC_{sublattice}_{i}_{mag_type}_log.pdf"),
-                   dpi=300, bbox_inches='tight')
-        plt.close()
-
-
-def read_2DCS_combined_hdf5(filepath: str, omega_range: float = 3.0,
-                            freq_step: float = 0.1,
-                            output_dir: Optional[str] = None) -> Dict[str, np.ndarray]:
+def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float, float]] = None,
+                            omega_tau_window: Optional[Tuple[float, float]] = None) -> Dict[str, np.ndarray]:
     """
-    Read 2D coherent spectroscopy data and combine SU(2) and SU(3) contributions.
+    Read 2D coherent spectroscopy data and compute nonlinear spectra for both sublattices.
+    
+    Wrapper that finds the appropriate directory and calls read_2D_nonlinear.
     
     Args:
         filepath: Path to pump_probe_spectroscopy.h5 file
-        omega_range: Maximum frequency range
-        freq_step: Frequency step size
-        output_dir: Directory for output plots
+        omega_t_window: Optional (min, max) tuple for ω_t axis limits  
+        omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         
     Returns:
-        Dictionary with combined 2DCS results
+        Dictionary with 2DCS results for SU(2), SU(3), and combined
     """
-    if output_dir is None:
-        output_dir = os.path.dirname(filepath)
+    output_dir = os.path.dirname(filepath)
+    if output_dir == '':
+        output_dir = '.'
     
-    # Get individual results
-    results_global = read_2DCS_hdf5(filepath, 'global', omega_range, freq_step, output_dir)
-    results_local = read_2DCS_hdf5(filepath, 'local', omega_range, freq_step, output_dir)
-    
-    # Combine results
-    combined = {}
-    combined['w_pump'] = results_global.get('w_pump')
-    combined['w_probe'] = results_global.get('w_probe')
-    combined['tau_values'] = results_global.get('tau_values')
-    
-    # Sum SU2 and SU3 contributions for global
-    for key in ['M_NL_FF_SU2', 'M_NL_FF_SU3']:
-        if key in results_global:
-            combined[f'{key}_global'] = results_global[key]
-        if key in results_local:
-            combined[f'{key}_local'] = results_local[key]
-    
-    return combined
+    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window)
 
 
 # =============================================================================
