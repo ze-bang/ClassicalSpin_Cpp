@@ -159,16 +159,19 @@ void compute_local_field_SU3_device(
         }
     }
     
-    // Mixed SU(3)-SU(2): H += sum_j J_mixed^T * S2_j
+    // Mixed SU(3)-SU(2): H += sum_j J_mixed * S2_j
+    // Now using directly uploaded 8x3 matrix (spin_dim_SU3 x spin_dim_SU2)
     size_t num_mixed = mixed_bilinear_counts_SU3[site];
     for (size_t n = 0; n < num_mixed && n < max_mixed_bilinear; ++n) {
         size_t partner_SU2 = mixed_bilinear_partners_SU2[site * max_mixed_bilinear + n];
         if (partner_SU2 < lattice_size_SU2) {
             const double* partner_spin = &d_spins_SU2[partner_SU2 * spin_dim_SU2];
             const double* J_mixed = &mixed_bilinear_interaction[
-                (site * max_mixed_bilinear + n) * spin_dim_SU2 * spin_dim_SU3];
+                (site * max_mixed_bilinear + n) * spin_dim_SU3 * spin_dim_SU2];
             
-            multiply_mixed_matrix_transpose_vector_device(temp, J_mixed, partner_spin, spin_dim_SU2, spin_dim_SU3);
+            // J_mixed is 8x3 (spin_dim_SU3 x spin_dim_SU2), partner_spin is 3-dim
+            // result is 8-dim
+            multiply_mixed_matrix_vector_device(temp, J_mixed, partner_spin, spin_dim_SU3, spin_dim_SU2);
             for (size_t j = 0; j < spin_dim_SU3; ++j) {
                 local_field[j] += temp[j];
             }
@@ -206,10 +209,10 @@ void LLG_SU2_kernel(
         interactions_SU2.bilinear_interaction,
         interactions_SU2.bilinear_partners,
         interactions_SU2.bilinear_counts,
-        mixed_interactions.bilinear_interaction,
-        mixed_interactions.bilinear_partners_SU3,
+        mixed_interactions.bilinear_interaction_SU2,
+        mixed_interactions.bilinear_partners_SU3_for_SU2,
         mixed_interactions.bilinear_counts_SU2,
-        neighbors.max_bilinear_SU2, neighbors.max_mixed_bilinear,
+        neighbors.max_bilinear_SU2, mixed_interactions.max_mixed_bilinear_SU2,
         dims.lattice_size_SU2, dims.lattice_size_SU3,
         dims.spin_dim_SU2, dims.spin_dim_SU3
     );
@@ -252,10 +255,10 @@ void LLG_SU3_kernel(
         interactions_SU3.bilinear_interaction,
         interactions_SU3.bilinear_partners,
         interactions_SU3.bilinear_counts,
-        mixed_interactions.bilinear_interaction,
-        mixed_interactions.bilinear_partners_SU2,
+        mixed_interactions.bilinear_interaction_SU3,
+        mixed_interactions.bilinear_partners_SU2_for_SU3,
         mixed_interactions.bilinear_counts_SU3,
-        neighbors.max_bilinear_SU3, neighbors.max_mixed_bilinear,
+        neighbors.max_bilinear_SU3, mixed_interactions.max_mixed_bilinear_SU3,
         dims.lattice_size_SU2, dims.lattice_size_SU3,
         dims.spin_dim_SU2, dims.spin_dim_SU3
     );
@@ -348,7 +351,7 @@ void GPUMixedODESystem::operator()(const GPUState& x, GPUState& dxdt, double t) 
 GPUMixedLatticeData create_gpu_mixed_lattice_data_internal(
     size_t lattice_size_SU2, size_t spin_dim_SU2, size_t N_atoms_SU2,
     size_t lattice_size_SU3, size_t spin_dim_SU3, size_t N_atoms_SU3,
-    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear,
+    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear, size_t max_mixed_bilinear_SU3,
     const std::vector<double>& flat_field_SU2,
     const std::vector<double>& flat_onsite_SU2,
     const std::vector<double>& flat_bilinear_SU2,
@@ -362,7 +365,10 @@ GPUMixedLatticeData create_gpu_mixed_lattice_data_internal(
     const std::vector<double>& flat_mixed_bilinear,
     const std::vector<size_t>& flat_mixed_partners_SU2,
     const std::vector<size_t>& flat_mixed_partners_SU3,
-    const std::vector<size_t>& num_mixed_per_site_SU2
+    const std::vector<size_t>& num_mixed_per_site_SU2,
+    const std::vector<double>& flat_mixed_bilinear_SU3,
+    const std::vector<size_t>& flat_mixed_partners_SU2_from_SU3,
+    const std::vector<size_t>& num_mixed_per_site_SU3
 ) {
     GPUMixedLatticeData data;
     
@@ -376,6 +382,7 @@ GPUMixedLatticeData create_gpu_mixed_lattice_data_internal(
     data.max_bilinear_SU2 = max_bilinear_SU2;
     data.max_bilinear_SU3 = max_bilinear_SU3;
     data.max_mixed_bilinear = max_mixed_bilinear;
+    data.max_mixed_bilinear_SU3 = max_mixed_bilinear_SU3;
     
     size_t total_size = data.state_size();
     
@@ -393,11 +400,16 @@ GPUMixedLatticeData create_gpu_mixed_lattice_data_internal(
     data.bilinear_idx_SU3 = thrust::device_vector<size_t>(flat_partners_SU3.begin(), flat_partners_SU3.end());
     data.bilinear_counts_SU3 = thrust::device_vector<size_t>(num_bilinear_per_site_SU3.begin(), num_bilinear_per_site_SU3.end());
     
-    // Copy mixed interaction data
+    // Copy mixed interaction data from SU2 perspective (for SU2 kernel)
     data.mixed_bilinear_vals = thrust::device_vector<double>(flat_mixed_bilinear.begin(), flat_mixed_bilinear.end());
     data.mixed_bilinear_idx_SU2 = thrust::device_vector<size_t>(flat_mixed_partners_SU2.begin(), flat_mixed_partners_SU2.end());
     data.mixed_bilinear_idx_SU3 = thrust::device_vector<size_t>(flat_mixed_partners_SU3.begin(), flat_mixed_partners_SU3.end());
     data.mixed_bilinear_counts_SU2 = thrust::device_vector<size_t>(num_mixed_per_site_SU2.begin(), num_mixed_per_site_SU2.end());
+    
+    // Copy mixed interaction data from SU3 perspective (for SU3 kernel)
+    data.mixed_bilinear_vals_SU3 = thrust::device_vector<double>(flat_mixed_bilinear_SU3.begin(), flat_mixed_bilinear_SU3.end());
+    data.mixed_bilinear_partners_SU3 = thrust::device_vector<size_t>(flat_mixed_partners_SU2_from_SU3.begin(), flat_mixed_partners_SU2_from_SU3.end());
+    data.mixed_bilinear_counts_SU3 = thrust::device_vector<size_t>(num_mixed_per_site_SU3.begin(), num_mixed_per_site_SU3.end());
     
     // Initialize working arrays
     data.work_1.resize(total_size, 0.0);
@@ -741,7 +753,7 @@ struct GPUMixedLatticeDataHandle {
 GPUMixedLatticeDataHandle* create_gpu_mixed_lattice_data(
     size_t lattice_size_SU2, size_t spin_dim_SU2, size_t N_atoms_SU2,
     size_t lattice_size_SU3, size_t spin_dim_SU3, size_t N_atoms_SU3,
-    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear,
+    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear, size_t max_mixed_bilinear_SU3,
     const std::vector<double>& flat_field_SU2,
     const std::vector<double>& flat_onsite_SU2,
     const std::vector<double>& flat_bilinear_SU2,
@@ -755,7 +767,10 @@ GPUMixedLatticeDataHandle* create_gpu_mixed_lattice_data(
     const std::vector<double>& flat_mixed_bilinear,
     const std::vector<size_t>& flat_mixed_partners_SU2,
     const std::vector<size_t>& flat_mixed_partners_SU3,
-    const std::vector<size_t>& num_mixed_per_site_SU2
+    const std::vector<size_t>& num_mixed_per_site_SU2,
+    const std::vector<double>& flat_mixed_bilinear_SU3,
+    const std::vector<size_t>& flat_mixed_partners_SU2_from_SU3,
+    const std::vector<size_t>& num_mixed_per_site_SU3
 ) {
     GPUMixedLatticeDataHandle* handle = new GPUMixedLatticeDataHandle();
     
@@ -763,13 +778,14 @@ GPUMixedLatticeDataHandle* create_gpu_mixed_lattice_data(
     handle->data = mixed_gpu::create_gpu_mixed_lattice_data_internal(
         lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
         lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
-        max_bilinear_SU2, max_bilinear_SU3, max_mixed_bilinear,
+        max_bilinear_SU2, max_bilinear_SU3, max_mixed_bilinear, max_mixed_bilinear_SU3,
         flat_field_SU2, flat_onsite_SU2, flat_bilinear_SU2, 
         flat_partners_SU2, num_bilinear_per_site_SU2,
         flat_field_SU3, flat_onsite_SU3, flat_bilinear_SU3, 
         flat_partners_SU3, num_bilinear_per_site_SU3,
         flat_mixed_bilinear, flat_mixed_partners_SU2, 
-        flat_mixed_partners_SU3, num_mixed_per_site_SU2
+        flat_mixed_partners_SU3, num_mixed_per_site_SU2,
+        flat_mixed_bilinear_SU3, flat_mixed_partners_SU2_from_SU3, num_mixed_per_site_SU3
     );
     
     return handle;

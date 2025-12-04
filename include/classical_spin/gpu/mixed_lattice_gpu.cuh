@@ -66,15 +66,23 @@ struct InteractionDataSU3GPU {
 
 /**
  * Mixed interaction data (SU2-SU3 coupling) on GPU
+ * 
+ * Two perspectives are stored:
+ * - From SU2 side: bilinear_interaction_SU2 (3x8), indexed by SU2 site
+ * - From SU3 side: bilinear_interaction_SU3 (8x3), indexed by SU3 site
  */
 struct MixedInteractionDataGPU {
-    // Mixed bilinear: J_ab * S2_a * S3_b
-    double* bilinear_interaction;       // [total_mixed_bilinear * spin_dim_SU2 * spin_dim_SU3]
-    size_t* bilinear_partners_SU2;      // SU(2) site indices
-    size_t* bilinear_partners_SU3;      // SU(3) site indices
-    size_t* bilinear_counts_SU2;        // Number of mixed neighbors per SU(2) site
-    size_t* bilinear_counts_SU3;        // Number of mixed neighbors per SU(3) site
-    size_t max_mixed_bilinear;
+    // For SU2 kernel: H_SU2 += J * S3, where J is 3x8
+    double* bilinear_interaction_SU2;    // Indexed by SU2: [site * max + n] -> 3x8 matrix
+    size_t* bilinear_partners_SU3_for_SU2; // SU3 partner for (SU2 site, n)
+    size_t* bilinear_counts_SU2;         // Num mixed neighbors per SU2 site
+    size_t max_mixed_bilinear_SU2;       // Max mixed neighbors from SU2 perspective
+    
+    // For SU3 kernel: H_SU3 += J * S2, where J is 8x3
+    double* bilinear_interaction_SU3;    // Indexed by SU3: [site * max + n] -> 8x3 matrix
+    size_t* bilinear_partners_SU2_for_SU3; // SU2 partner for (SU3 site, n)
+    size_t* bilinear_counts_SU3;         // Num mixed neighbors per SU3 site
+    size_t max_mixed_bilinear_SU3;       // Max mixed neighbors from SU3 perspective
 };
 
 /**
@@ -164,11 +172,17 @@ struct GPUMixedLatticeData {
     thrust::device_vector<size_t> trilinear_idx_SU3;
     thrust::device_vector<size_t> trilinear_counts_SU3;
     
-    // Mixed SU(2)-SU(3) interactions
-    thrust::device_vector<double> mixed_bilinear_vals;
-    thrust::device_vector<size_t> mixed_bilinear_idx_SU2;
-    thrust::device_vector<size_t> mixed_bilinear_idx_SU3;
-    thrust::device_vector<size_t> mixed_bilinear_counts_SU2;
+    // Mixed SU(2)-SU(3) interactions (from SU(2) perspective - for SU2 kernel)
+    thrust::device_vector<double> mixed_bilinear_vals;        // Indexed by SU2 site: [site * max + n] -> 3x8 matrix (row-major)
+    thrust::device_vector<size_t> mixed_bilinear_idx_SU2;     // Not used directly
+    thrust::device_vector<size_t> mixed_bilinear_idx_SU3;     // SU3 partner for (SU2 site, n)
+    thrust::device_vector<size_t> mixed_bilinear_counts_SU2;  // Num mixed neighbors per SU2 site
+    
+    // Mixed SU(3)-SU(2) interactions (from SU(3) perspective - for SU3 kernel)
+    thrust::device_vector<double> mixed_bilinear_vals_SU3;       // Indexed by SU3 site: [site * max + n] -> 8x3 matrix (row-major)
+    thrust::device_vector<size_t> mixed_bilinear_partners_SU3;   // SU2 partner for (SU3 site, n)
+    thrust::device_vector<size_t> mixed_bilinear_counts_SU3;     // Num mixed neighbors per SU3 site
+    size_t max_mixed_bilinear_SU3 = 0;  // Max mixed neighbors from SU3 perspective
     
     // Field drive (pulses)
     thrust::device_vector<double> field_drive_SU2;  // [2 * N_atoms_SU2 * spin_dim_SU2]
@@ -348,15 +362,21 @@ struct GPUMixedLatticeData {
     
     /**
      * Build mixed interaction data struct for kernel calls
+     * Provides both SU2-perspective and SU3-perspective data
      */
     MixedInteractionDataGPU get_mixed_interactions() const {
         MixedInteractionDataGPU mixed;
-        mixed.bilinear_interaction = const_cast<double*>(thrust::raw_pointer_cast(mixed_bilinear_vals.data()));
-        mixed.bilinear_partners_SU2 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_idx_SU2.data()));
-        mixed.bilinear_partners_SU3 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_idx_SU3.data()));
+        // For SU2 kernel: uses 3x8 matrices indexed by SU2 site
+        mixed.bilinear_interaction_SU2 = const_cast<double*>(thrust::raw_pointer_cast(mixed_bilinear_vals.data()));
+        mixed.bilinear_partners_SU3_for_SU2 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_idx_SU3.data()));
         mixed.bilinear_counts_SU2 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_counts_SU2.data()));
-        mixed.bilinear_counts_SU3 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_counts_SU2.data()));  // TODO: separate counts
-        mixed.max_mixed_bilinear = max_mixed_bilinear;
+        mixed.max_mixed_bilinear_SU2 = max_mixed_bilinear;
+        
+        // For SU3 kernel: uses 8x3 matrices indexed by SU3 site
+        mixed.bilinear_interaction_SU3 = const_cast<double*>(thrust::raw_pointer_cast(mixed_bilinear_vals_SU3.data()));
+        mixed.bilinear_partners_SU2_for_SU3 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_partners_SU3.data()));
+        mixed.bilinear_counts_SU3 = const_cast<size_t*>(thrust::raw_pointer_cast(mixed_bilinear_counts_SU3.data()));
+        mixed.max_mixed_bilinear_SU3 = max_mixed_bilinear_SU3;
         return mixed;
     }
     

@@ -57,15 +57,15 @@ pump_direction_su3 = 0,1,0,0,0,0,0,0  # λ3 component (default)
 # 2DCS Scan
 tau_start = -100.0
 tau_end = 100.0
-tau_step = 0.01
+tau_step = 0.1
 parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
 
 # Time evolution
 md_time_start = -100.0
 md_time_end = 100.0
-md_timestep = 0.01
+md_timestep = 0.1
 md_integrator = rk4
-use_gpu = true              # Recommended for TmFeO3 2DCS
+use_gpu = false              # Recommended for TmFeO3 2DCS
 
 # Output
 output_dir = TmFeO3_2DCS

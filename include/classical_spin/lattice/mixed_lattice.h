@@ -3840,13 +3840,19 @@ private:
             }
         }
         
-        // Compute max mixed bilinear neighbors
+        // Compute max mixed bilinear neighbors from SU2 perspective
         size_t max_mixed_bi = 0;
         for (size_t i = 0; i < lattice_size_SU2; ++i) {
             max_mixed_bi = std::max(max_mixed_bi, mixed_bilinear_partners_SU2[i].size());
         }
         
-        // Flatten mixed bilinear
+        // Compute max mixed bilinear neighbors from SU3 perspective
+        size_t max_mixed_bi_SU3 = 0;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            max_mixed_bi_SU3 = std::max(max_mixed_bi_SU3, mixed_bilinear_partners_SU3[i].size());
+        }
+        
+        // Flatten mixed bilinear from SU2 perspective (3x8 matrices)
         std::vector<double> flat_mixed_bilinear;
         std::vector<size_t> flat_mixed_partners_SU2;
         std::vector<size_t> flat_mixed_partners_SU3;
@@ -3873,13 +3879,39 @@ private:
             }
         }
         
+        // Flatten mixed bilinear from SU3 perspective (8x3 matrices)
+        std::vector<double> flat_mixed_bilinear_SU3;
+        std::vector<size_t> flat_mixed_partners_SU2_from_SU3;
+        std::vector<size_t> num_mixed_per_site_SU3;
+        
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            num_mixed_per_site_SU3.push_back(mixed_bilinear_partners_SU3[i].size());
+            for (size_t n = 0; n < max_mixed_bi_SU3; ++n) {
+                if (n < mixed_bilinear_partners_SU3[i].size()) {
+                    flat_mixed_partners_SU2_from_SU3.push_back(mixed_bilinear_partners_SU3[i][n]);
+                    // mixed_bilinear_interaction_SU3[i][n] is 8x3 (spin_dim_SU3 x spin_dim_SU2)
+                    for (size_t r = 0; r < spin_dim_SU3; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            flat_mixed_bilinear_SU3.push_back(mixed_bilinear_interaction_SU3[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_mixed_partners_SU2_from_SU3.push_back(SIZE_MAX);
+                    for (size_t j = 0; j < spin_dim_SU3 * spin_dim_SU2; ++j) {
+                        flat_mixed_bilinear_SU3.push_back(0.0);
+                    }
+                }
+            }
+        }
+        
         return mixed_gpu::create_gpu_mixed_lattice_data(
             lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
             lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
-            max_bi_SU2, max_bi_SU3, max_mixed_bi,
+            max_bi_SU2, max_bi_SU3, max_mixed_bi, max_mixed_bi_SU3,
             flat_field_SU2, flat_onsite_SU2, flat_bilinear_SU2, flat_partners_SU2, num_bi_per_site_SU2,
             flat_field_SU3, flat_onsite_SU3, flat_bilinear_SU3, flat_partners_SU3, num_bi_per_site_SU3,
-            flat_mixed_bilinear, flat_mixed_partners_SU2, flat_mixed_partners_SU3, num_mixed_per_site_SU2
+            flat_mixed_bilinear, flat_mixed_partners_SU2, flat_mixed_partners_SU3, num_mixed_per_site_SU2,
+            flat_mixed_bilinear_SU3, flat_mixed_partners_SU2_from_SU3, num_mixed_per_site_SU3
         );
     }
     
@@ -4448,22 +4480,74 @@ private:
         flatten_SU3_data(flat_field_SU3, flat_onsite_SU3, flat_bilinear_SU3,
                         flat_partners_SU3, num_bi_per_site_SU3);
         
-        // Flatten mixed bilinear interactions (placeholder - needs actual implementation)
+        // Compute max mixed bilinear neighbors
+        size_t max_mixed_bi = 0;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            max_mixed_bi = std::max(max_mixed_bi, mixed_bilinear_partners_SU2[i].size());
+        }
+        size_t max_mixed_bi_SU3 = 0;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            max_mixed_bi_SU3 = std::max(max_mixed_bi_SU3, mixed_bilinear_partners_SU3[i].size());
+        }
+        
+        // Flatten mixed bilinear from SU2 perspective (3x8 matrices)
         vector<double> flat_mixed_bilinear;
-        vector<size_t> flat_mixed_partners_SU2, flat_mixed_partners_SU3, num_mixed_per_site;
-        // TODO: Implement proper mixed interaction flattening
+        vector<size_t> flat_mixed_partners_SU2, flat_mixed_partners_SU3, num_mixed_per_site_SU2;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            num_mixed_per_site_SU2.push_back(mixed_bilinear_partners_SU2[i].size());
+            for (size_t n = 0; n < max_mixed_bi; ++n) {
+                if (n < mixed_bilinear_partners_SU2[i].size()) {
+                    flat_mixed_partners_SU2.push_back(i);
+                    flat_mixed_partners_SU3.push_back(mixed_bilinear_partners_SU2[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU2; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            flat_mixed_bilinear.push_back(mixed_bilinear_interaction_SU2[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_mixed_partners_SU2.push_back(SIZE_MAX);
+                    flat_mixed_partners_SU3.push_back(SIZE_MAX);
+                    for (size_t j = 0; j < spin_dim_SU2 * spin_dim_SU3; ++j) {
+                        flat_mixed_bilinear.push_back(0.0);
+                    }
+                }
+            }
+        }
+        
+        // Flatten mixed bilinear from SU3 perspective (8x3 matrices)
+        vector<double> flat_mixed_bilinear_SU3;
+        vector<size_t> flat_mixed_partners_SU2_from_SU3, num_mixed_per_site_SU3;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            num_mixed_per_site_SU3.push_back(mixed_bilinear_partners_SU3[i].size());
+            for (size_t n = 0; n < max_mixed_bi_SU3; ++n) {
+                if (n < mixed_bilinear_partners_SU3[i].size()) {
+                    flat_mixed_partners_SU2_from_SU3.push_back(mixed_bilinear_partners_SU3[i][n]);
+                    for (size_t r = 0; r < spin_dim_SU3; ++r) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            flat_mixed_bilinear_SU3.push_back(mixed_bilinear_interaction_SU3[i][n](r, c));
+                        }
+                    }
+                } else {
+                    flat_mixed_partners_SU2_from_SU3.push_back(SIZE_MAX);
+                    for (size_t j = 0; j < spin_dim_SU3 * spin_dim_SU2; ++j) {
+                        flat_mixed_bilinear_SU3.push_back(0.0);
+                    }
+                }
+            }
+        }
         
         // Create GPU handle
         gpu_mixed_handle_ = mixed_gpu::create_gpu_mixed_lattice_data(
             lattice_size_SU2, spin_dim_SU2, N_atoms_SU2,
             lattice_size_SU3, spin_dim_SU3, N_atoms_SU3,
-            num_bi_SU2, num_bi_SU3, num_bi_SU2_SU3,
+            num_bi_SU2, num_bi_SU3, max_mixed_bi, max_mixed_bi_SU3,
             flat_field_SU2, flat_onsite_SU2, flat_bilinear_SU2,
             flat_partners_SU2, num_bi_per_site_SU2,
             flat_field_SU3, flat_onsite_SU3, flat_bilinear_SU3,
             flat_partners_SU3, num_bi_per_site_SU3,
             flat_mixed_bilinear, flat_mixed_partners_SU2,
-            flat_mixed_partners_SU3, num_mixed_per_site
+            flat_mixed_partners_SU3, num_mixed_per_site_SU2,
+            flat_mixed_bilinear_SU3, flat_mixed_partners_SU2_from_SU3, num_mixed_per_site_SU3
         );
         
         gpu_mixed_data_initialized_ = true;

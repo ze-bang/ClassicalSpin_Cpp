@@ -42,7 +42,8 @@ struct GPUMixedLatticeDataHandle;
  * @param N_atoms_SU3 Number of SU(3) atoms per unit cell
  * @param max_bilinear_SU2 Maximum bilinear neighbors for SU(2)
  * @param max_bilinear_SU3 Maximum bilinear neighbors for SU(3)
- * @param max_mixed_bilinear Maximum mixed bilinear neighbors
+ * @param max_mixed_bilinear Maximum mixed bilinear neighbors (from SU2 perspective)
+ * @param max_mixed_bilinear_SU3 Maximum mixed bilinear neighbors (from SU3 perspective)
  * @param flat_field_SU2 Flattened SU(2) external field
  * @param flat_onsite_SU2 Flattened SU(2) onsite matrices
  * @param flat_bilinear_SU2 Flattened SU(2)-SU(2) bilinear matrices
@@ -53,16 +54,19 @@ struct GPUMixedLatticeDataHandle;
  * @param flat_bilinear_SU3 Flattened SU(3)-SU(3) bilinear matrices
  * @param flat_partners_SU3 Flattened SU(3) bilinear partner indices
  * @param num_bilinear_per_site_SU3 Number of SU(3) bilinear neighbors per site
- * @param flat_mixed_bilinear Flattened SU(2)-SU(3) mixed bilinear matrices
- * @param flat_mixed_partners_SU2 Mixed partner indices (SU(2) side)
- * @param flat_mixed_partners_SU3 Mixed partner indices (SU(3) side)
+ * @param flat_mixed_bilinear Flattened SU(2)-SU(3) mixed bilinear matrices (3x8, from SU2 perspective)
+ * @param flat_mixed_partners_SU2 Mixed partner indices (SU(2) side - not used)
+ * @param flat_mixed_partners_SU3 SU(3) partner indices for each (SU2 site, n) pair
  * @param num_mixed_per_site_SU2 Number of mixed neighbors per SU(2) site
+ * @param flat_mixed_bilinear_SU3 Flattened SU(3)-SU(2) mixed bilinear matrices (8x3, from SU3 perspective)
+ * @param flat_mixed_partners_SU2_from_SU3 SU(2) partner indices for each (SU3 site, n) pair
+ * @param num_mixed_per_site_SU3 Number of mixed neighbors per SU(3) site
  * @return Opaque handle to GPU data (managed internally)
  */
 GPUMixedLatticeDataHandle* create_gpu_mixed_lattice_data(
     size_t lattice_size_SU2, size_t spin_dim_SU2, size_t N_atoms_SU2,
     size_t lattice_size_SU3, size_t spin_dim_SU3, size_t N_atoms_SU3,
-    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear,
+    size_t max_bilinear_SU2, size_t max_bilinear_SU3, size_t max_mixed_bilinear, size_t max_mixed_bilinear_SU3,
     const std::vector<double>& flat_field_SU2,
     const std::vector<double>& flat_onsite_SU2,
     const std::vector<double>& flat_bilinear_SU2,
@@ -76,7 +80,10 @@ GPUMixedLatticeDataHandle* create_gpu_mixed_lattice_data(
     const std::vector<double>& flat_mixed_bilinear,
     const std::vector<size_t>& flat_mixed_partners_SU2,
     const std::vector<size_t>& flat_mixed_partners_SU3,
-    const std::vector<size_t>& num_mixed_per_site_SU2
+    const std::vector<size_t>& num_mixed_per_site_SU2,
+    const std::vector<double>& flat_mixed_bilinear_SU3,
+    const std::vector<size_t>& flat_mixed_partners_SU2_from_SU3,
+    const std::vector<size_t>& num_mixed_per_site_SU3
 );
 
 /**
