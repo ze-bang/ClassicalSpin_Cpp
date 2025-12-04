@@ -43,30 +43,30 @@ T_zero = true
 # Pump-Probe Setup
 # For SU(2) spins (Fe)
 pump_direction = 0,0,0
-pump_amplitude = 1
+pump_amplitude = 0
 pump_width = 0.4
 pump_frequency = 0.3
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
-pump_amplitude_su3 = 0.1
-pump_width_su3 = 10.0
-pump_frequency_su3 = 0.0
+pump_amplitude = 0.3
+pump_width = 0.5
+pump_frequency = 0.2
 pump_direction_su3 = 0,1,0,0,0,0,0,0  # λ3 component (default)
 
 # 2DCS Scan
-tau_start = 0.0
-tau_end = -20.0
+tau_start = -100.0
+tau_end = 100.0
 tau_step = 0.01
 parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
 
 # Time evolution
-md_time_start = -20.0
-md_time_end = 20.0
+md_time_start = -100.0
+md_time_end = 100.0
 md_timestep = 0.01
 md_integrator = rk4
 use_gpu = true              # Recommended for TmFeO3 2DCS
 
 # Output
 output_dir = TmFeO3_2DCS
-save_observables = true
+save_observables = false

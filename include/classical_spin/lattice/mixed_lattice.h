@@ -542,11 +542,14 @@ public:
                             int pk = static_cast<int>(k) + bi.offset(2);
                             size_t partner_idx = flatten_index_periodic(pi, pj, pk, bi.partner, N_atoms_SU3);
                             
-                            mixed_bilinear_interaction_SU2[site_idx].push_back(bi.interaction);
+                            // bi.interaction is N_SU3 x N_SU2 (8x3)
+                            // For SU2 energy: S2.dot(J * S3), need J to be N_SU2 x N_SU3 (3x8)
+                            // For SU3 energy: S3.dot(J * S2), need J to be N_SU3 x N_SU2 (8x3)
+                            mixed_bilinear_interaction_SU2[site_idx].push_back(bi.interaction.transpose());
                             mixed_bilinear_partners_SU2[site_idx].push_back(partner_idx);
                             
-                            // Add symmetric contribution to SU(3) side
-                            mixed_bilinear_interaction_SU3[partner_idx].push_back(bi.interaction.transpose());
+                            // Add symmetric contribution to SU(3) side (no transpose needed)
+                            mixed_bilinear_interaction_SU3[partner_idx].push_back(bi.interaction);
                             mixed_bilinear_partners_SU3[partner_idx].push_back(site_idx);
                         }
                     }

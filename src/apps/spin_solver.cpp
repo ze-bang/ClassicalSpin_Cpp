@@ -558,27 +558,30 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
         string trial_dir = config.output_dir + "/sample_0";
         filesystem::create_directories(trial_dir);
         
-        // Equilibrate to ground state (all ranks do this with same seed for consistency)
+        // Equilibrate to ground state (only rank 0)
         if (config.initial_spin_config.empty()) {
             if (rank == 0) {
                 cout << "\n[1/2] Equilibrating to ground state..." << endl;
+                lattice.simulated_annealing(
+                    config.T_start,
+                    config.T_end,
+                    config.annealing_steps,
+                    config.overrelaxation_rate,
+                    config.use_twist_boundary,
+                    config.gaussian_move,
+                    config.cooling_rate,
+                    "",
+                    false,  // Don't save observables during equilibration
+                    config.T_zero,
+                    config.n_deterministics
+                );
             }
-            lattice.simulated_annealing(
-                config.T_start,
-                config.T_end,
-                config.annealing_steps,
-                config.overrelaxation_rate,
-                config.use_twist_boundary,
-                config.gaussian_move,
-                config.cooling_rate,
-                "",
-                false,  // Don't save observables during equilibration
-                config.T_zero,
-                config.n_deterministics
-            );
         } else if (rank == 0) {
             cout << "\n[1/2] Skipping equilibration (using loaded spin configuration)" << endl;
         }
+        
+        // Wait for rank 0 to finish annealing
+        MPI_Barrier(MPI_COMM_WORLD);
         
         // Synchronize spins across all ranks to ensure consistent ground state
         // Broadcast spin configuration from rank 0 to all ranks
@@ -1351,25 +1354,28 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         string trial_dir = config.output_dir + "/sample_0";
         filesystem::create_directories(trial_dir);
         
-        // Equilibrate to ground state
+        // Equilibrate to ground state (only rank 0)
         if (config.initial_spin_config.empty()) {
             if (rank == 0) {
                 cout << "\n[1/2] Equilibrating to ground state..." << endl;
+                lattice.simulated_annealing(
+                    config.T_start,
+                    config.T_end,
+                    config.annealing_steps,
+                    config.gaussian_move,
+                    config.cooling_rate,
+                    "",
+                    false,
+                    config.T_zero,
+                    config.n_deterministics
+                );
             }
-            lattice.simulated_annealing(
-                config.T_start,
-                config.T_end,
-                config.annealing_steps,
-                config.gaussian_move,
-                config.cooling_rate,
-                "",
-                false,
-                config.T_zero,
-                config.n_deterministics
-            );
         } else if (rank == 0) {
             cout << "\n[1/2] Skipping equilibration (using loaded spin configuration)" << endl;
         }
+        
+        // Wait for rank 0 to finish annealing
+        MPI_Barrier(MPI_COMM_WORLD);
         
         // Synchronize SU2 spins across all ranks
         vector<double> spin_buffer_su2(lattice.lattice_size_SU2 * lattice.spin_dim_SU2);
