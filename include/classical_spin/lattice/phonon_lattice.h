@@ -418,14 +418,37 @@ public:
     /**
      * Compute local energy for a spin at a given site
      * E = -B·S + Σ_j S^T J_ij S_j (for NN, 2nd NN, 3rd NN)
+     *   + spin-phonon coupling terms
+     * 
+     * Note: This counts the full bond energy for each neighbor, so summing
+     * site_energy over all sites will double-count pair interactions.
+     * Use total_energy() for the correctly counted total energy.
      */
     double site_energy(const Eigen::Vector3d& spin_here, size_t site) const {
         double E = -spin_here.dot(field[site]);
         
-        // NN interactions
+        // Phonon coordinates (for spin-phonon coupling)
+        double Qx = phonons.Q_x;
+        double Qy = phonons.Q_y;
+        double QR = phonons.Q_R;
+        double lxy = spin_phonon_params.lambda_xy;
+        double lR = spin_phonon_params.lambda_R;
+        
+        // NN interactions (includes spin-phonon coupling)
         for (size_t n = 0; n < nn_partners[site].size(); ++n) {
             size_t j = nn_partners[site][n];
-            E += spin_here.dot(nn_interaction[site][n] * spins[j]);
+            const Eigen::Vector3d& Sj = spins[j];
+            
+            // Pure spin-spin interaction
+            E += spin_here.dot(nn_interaction[site][n] * Sj);
+            
+            // Spin-phonon coupling
+            // λ_xy * Qx * (Si_x * Sj_z + Si_z * Sj_x)
+            E += lxy * Qx * (spin_here(0) * Sj(2) + spin_here(2) * Sj(0));
+            // λ_xy * Qy * (Si_y * Sj_z + Si_z * Sj_y)
+            E += lxy * Qy * (spin_here(1) * Sj(2) + spin_here(2) * Sj(1));
+            // λ_R * Q_R * (Si · Sj)
+            E += lR * QR * spin_here.dot(Sj);
         }
         // 2nd NN interactions
         for (size_t n = 0; n < j2_partners[site].size(); ++n) {
@@ -443,6 +466,11 @@ public:
     /**
      * Compute energy difference for a proposed spin flip (optimized for Metropolis)
      * dE = E(new_spin) - E(old_spin)
+     * 
+     * Includes:
+     * - Zeeman energy change
+     * - NN, 2nd NN, 3rd NN spin-spin interaction changes
+     * - Spin-phonon coupling energy change (if phonons are non-zero)
      */
     double site_energy_diff(const Eigen::Vector3d& new_spin, 
                            const Eigen::Vector3d& old_spin, 
@@ -450,17 +478,34 @@ public:
         Eigen::Vector3d delta = new_spin - old_spin;
         double dE = -delta.dot(field[site]);
         
-        // NN interactions
+        // Phonon coordinates (for spin-phonon coupling)
+        double Qx = phonons.Q_x;
+        double Qy = phonons.Q_y;
+        double QR = phonons.Q_R;
+        double lxy = spin_phonon_params.lambda_xy;
+        double lR = spin_phonon_params.lambda_R;
+        
+        // NN interactions (includes spin-phonon coupling)
         for (size_t n = 0; n < nn_partners[site].size(); ++n) {
             size_t j = nn_partners[site][n];
-            dE += delta.dot(nn_interaction[site][n] * spins[j]);
+            const Eigen::Vector3d& Sj = spins[j];
+            
+            // Pure spin-spin interaction
+            dE += delta.dot(nn_interaction[site][n] * Sj);
+            
+            // Spin-phonon coupling: λ_xy * Qx * (ΔSi_x * Sj_z + ΔSi_z * Sj_x)
+            dE += lxy * Qx * (delta(0) * Sj(2) + delta(2) * Sj(0));
+            // Spin-phonon coupling: λ_xy * Qy * (ΔSi_y * Sj_z + ΔSi_z * Sj_y)
+            dE += lxy * Qy * (delta(1) * Sj(2) + delta(2) * Sj(1));
+            // Spin-phonon coupling: λ_R * Q_R * (ΔSi · Sj)
+            dE += lR * QR * delta.dot(Sj);
         }
-        // 2nd NN interactions
+        // 2nd NN interactions (no spin-phonon coupling on 2nd NN)
         for (size_t n = 0; n < j2_partners[site].size(); ++n) {
             size_t j = j2_partners[site][n];
             dE += delta.dot(j2_interaction[site][n] * spins[j]);
         }
-        // 3rd NN interactions
+        // 3rd NN interactions (no spin-phonon coupling on 3rd NN)
         for (size_t n = 0; n < j3_partners[site].size(); ++n) {
             size_t j = j3_partners[site][n];
             dE += delta.dot(j3_interaction[site][n] * spins[j]);
@@ -679,15 +724,17 @@ public:
     /**
      * Simulated annealing for spin subsystem
      * 
-     * @param T_start         Starting temperature
-     * @param T_end           Final temperature
-     * @param n_steps         Number of MC sweeps per temperature
-     * @param overrelax_rate  Overrelaxation frequency (0 = disabled)
-     * @param cooling_rate    Temperature cooling factor (T *= cooling_rate each step)
-     * @param out_dir         Output directory for saving configs
-     * @param save_observables  Whether to save observables to HDF5
-     * @param T_zero          Whether to perform deterministic sweeps at T=0
-     * @param n_deterministics Number of deterministic sweeps at T=0
+     * @param T_start              Starting temperature
+     * @param T_end                Final temperature
+     * @param n_steps              Number of MC sweeps per temperature
+     * @param overrelax_rate       Overrelaxation frequency (0 = disabled)
+     * @param cooling_rate         Temperature cooling factor (T *= cooling_rate each step)
+     * @param out_dir              Output directory for saving configs
+     * @param save_observables     Whether to save observables to HDF5
+     * @param T_zero               Whether to perform deterministic sweeps at T=0
+     * @param n_deterministics     Number of deterministic sweeps at T=0
+     * @param adiabatic_phonons    If true, relax phonons to equilibrium at each temperature step
+     *                             (Born-Oppenheimer approximation for phonons)
      */
     void simulated_annealing(double T_start, double T_end, size_t n_steps,
                             size_t overrelax_rate = 0,
@@ -695,7 +742,8 @@ public:
                             string out_dir = "",
                             bool save_observables = true,
                             bool T_zero = false,
-                            size_t n_deterministics = 1000);
+                            size_t n_deterministics = 1000,
+                            bool adiabatic_phonons = false);
     
     /**
      * Deterministic T=0 sweep: align each spin with its local field

@@ -864,12 +864,18 @@ void PhononLattice::simulated_annealing(
     double T_start, double T_end, size_t n_steps,
     size_t overrelax_rate, double cooling_rate,
     string out_dir, bool save_observables,
-    bool T_zero, size_t n_deterministics) 
+    bool T_zero, size_t n_deterministics,
+    bool adiabatic_phonons) 
 {
-    cout << "Starting PhononLattice simulated annealing (spin subsystem only)..." << endl;
+    cout << "Starting PhononLattice simulated annealing..." << endl;
     cout << "T: " << T_start << " → " << T_end << ", sweeps per temp: " << n_steps << endl;
+    if (adiabatic_phonons) {
+        cout << "Adiabatic phonons ENABLED: phonons will be relaxed at each temperature step" << endl;
+    } else {
+        cout << "Adiabatic phonons DISABLED: phonons will be kept at Q=0 during MC" << endl;
+    }
     
-    // Keep phonons at equilibrium
+    // Initialize phonons to zero (will be updated if adiabatic_phonons is true)
     phonons = PhononState();
     
     if (!out_dir.empty()) {
@@ -879,6 +885,7 @@ void PhononLattice::simulated_annealing(
 #ifdef HDF5_ENABLED
     std::unique_ptr<H5::H5File> h5file;
     vector<double> steps_data, temps_data, energies_data, acc_rates_data;
+    vector<double> Qx_data, Qy_data, QR_data;  // Track phonons if adiabatic
     
     if (save_observables && !out_dir.empty()) {
         h5file = std::make_unique<H5::H5File>(out_dir + "/annealing.h5", H5F_ACC_TRUNC);
@@ -901,6 +908,11 @@ void PhononLattice::simulated_annealing(
             }
         }
         
+        // If using adiabatic phonons, relax phonons to equilibrium for current spin configuration
+        if (adiabatic_phonons) {
+            relax_phonons(1e-10, 1000, 1.0);
+        }
+        
         // Calculate acceptance rate (only counts Metropolis moves, not overrelaxation)
         double acceptance = double(accepted) / double(n_steps * lattice_size);
         
@@ -913,8 +925,12 @@ void PhononLattice::simulated_annealing(
                  << ", E/N=" << std::fixed << std::setprecision(6) << E 
                  << ", acc=" << std::fixed << std::setprecision(4) << acceptance
                  << ", |M|=" << std::fixed << std::setprecision(4) << M.norm()
-                 << ", |M_stag|=" << std::fixed << std::setprecision(4) << M_stag.norm()
-                 << endl;
+                 << ", |M_stag|=" << std::fixed << std::setprecision(4) << M_stag.norm();
+            if (adiabatic_phonons) {
+                cout << ", |Q_E|=" << std::fixed << std::setprecision(4) << E1_amplitude()
+                     << ", Q_R=" << std::fixed << std::setprecision(4) << phonons.Q_R;
+            }
+            cout << endl;
         }
         
 #ifdef HDF5_ENABLED
@@ -923,6 +939,11 @@ void PhononLattice::simulated_annealing(
             temps_data.push_back(T);
             energies_data.push_back(energy_density());
             acc_rates_data.push_back(acceptance);
+            if (adiabatic_phonons) {
+                Qx_data.push_back(phonons.Q_x);
+                Qy_data.push_back(phonons.Q_y);
+                QR_data.push_back(phonons.Q_R);
+            }
         }
 #endif
         
@@ -940,6 +961,10 @@ void PhononLattice::simulated_annealing(
     cout << "Final energy density: " << E_final << endl;
     cout << "Final magnetization: [" << M_final.transpose() << "], |M|=" << M_final.norm() << endl;
     cout << "Final staggered M: [" << M_stag_final.transpose() << "], |M_stag|=" << M_stag_final.norm() << endl;
+    if (adiabatic_phonons) {
+        cout << "Phonons: Qx=" << phonons.Q_x << ", Qy=" << phonons.Q_y << ", Q_R=" << phonons.Q_R << endl;
+        cout << "|Q_E|=" << E1_amplitude() << endl;
+    }
     cout << "====================================" << endl;
     
 #ifdef HDF5_ENABLED
@@ -957,6 +982,15 @@ void PhononLattice::simulated_annealing(
         ds = ann_group.createDataSet("acceptance_rate", H5::PredType::NATIVE_DOUBLE, dataspace);
         ds.write(acc_rates_data.data(), H5::PredType::NATIVE_DOUBLE);
         
+        if (adiabatic_phonons && !Qx_data.empty()) {
+            ds = ann_group.createDataSet("Qx", H5::PredType::NATIVE_DOUBLE, dataspace);
+            ds.write(Qx_data.data(), H5::PredType::NATIVE_DOUBLE);
+            ds = ann_group.createDataSet("Qy", H5::PredType::NATIVE_DOUBLE, dataspace);
+            ds.write(Qy_data.data(), H5::PredType::NATIVE_DOUBLE);
+            ds = ann_group.createDataSet("QR", H5::PredType::NATIVE_DOUBLE, dataspace);
+            ds.write(QR_data.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+        
         h5file->close();
         cout << "Annealing data saved to " << out_dir << "/annealing.h5" << endl;
     }
@@ -969,9 +1003,29 @@ void PhononLattice::simulated_annealing(
     
     // T=0 deterministic sweeps if requested
     if (T_zero && n_deterministics > 0) {
+        // Energy breakdown BEFORE deterministic sweeps
+        cout << "\n=== Energy BEFORE deterministic sweeps ===" << endl;
+        cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
+        cout << "  Phonon energy:     " << phonon_energy() << endl;
+        cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
+        cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
+        cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
+        
         cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
         deterministic_sweep(n_deterministics);
-        cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
+        
+        // If using adiabatic phonons, relax phonons again after deterministic sweeps
+        if (adiabatic_phonons) {
+            relax_phonons(1e-10, 1000, 1.0);
+        }
+        
+        // Energy breakdown AFTER deterministic sweeps
+        cout << "\n=== Energy AFTER deterministic sweeps ===" << endl;
+        cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
+        cout << "  Phonon energy:     " << phonon_energy() << endl;
+        cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
+        cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
+        cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
         
         // Save final configuration after T=0 sweeps
         if (!out_dir.empty()) {
@@ -1083,6 +1137,14 @@ bool PhononLattice::relax_phonons(double tol, size_t max_iter, double damping) {
     
     cout << "  Equilibrium phonons: Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
     cout << "  |Q_E| = " << std::sqrt(Qx*Qx + Qy*Qy) << endl;
+    
+    // Energy breakdown AFTER phonon relaxation
+    cout << "  --- Energy after phonon relaxation ---" << endl;
+    cout << "    Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
+    cout << "    Phonon energy:     " << phonon_energy() << endl;
+    cout << "    Spin-phonon energy: " << spin_phonon_energy() << endl;
+    cout << "    Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
+    
     return true;
 }
 
@@ -1097,10 +1159,7 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         relax_phonons(1e-10, 1000, 1.0);
         
         // Step 2: Relax spins for current phonon configuration
-        // (deterministic sweeps align spins with local field, which includes phonon terms)
-        for (size_t s = 0; s < spin_sweeps_per_iter; ++s) {
-            deterministic_sweep(1);
-        }
+        deterministic_sweep(spin_sweeps_per_iter);
         
         // Check convergence
         double curr_energy = total_energy();
@@ -1119,7 +1178,12 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         
         if (dE < tol && dQ < tol) {
             cout << "  Joint relaxation converged in " << iter << " iterations!" << endl;
-            cout << "  Final: E=" << curr_energy << ", |Q_E|=" << curr_Q_E << endl;
+            cout << "\n=== Energy AFTER joint relaxation (equilibrium state) ===" << endl;
+            cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
+            cout << "  Phonon energy:     " << phonon_energy() << endl;
+            cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
+            cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
+            cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
             return true;
         }
         
@@ -1128,6 +1192,12 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
     }
     
     cout << "  WARNING: Joint relaxation did not fully converge after " << max_iter << " iterations" << endl;
+    cout << "\n=== Energy after " << max_iter << " iterations ===" << endl;
+    cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
+    cout << "  Phonon energy:     " << phonon_energy() << endl;
+    cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
+    cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
+    cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
     return false;
 }
 
@@ -1146,8 +1216,9 @@ void PhononLattice::deterministic_sweep(size_t num_sweeps) {
             if (norm < 1e-15) {
                 continue;
             } else {
-                // Align spin antiparallel to local field (minimizes energy)
-                spins[i] = -local_field / norm * spin_length;
+                // Align spin PARALLEL to local field (minimizes energy)
+                // H_eff = -∂H/∂Si, so Si should point along H_eff to minimize E = -Si·H_eff
+                spins[i] = local_field / norm * spin_length;
             }
             count++;
         }

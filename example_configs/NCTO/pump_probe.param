@@ -63,12 +63,12 @@ lambda_R = 0.0           # A1 mode coupling
 # E1 mode (IR-active doublet)
 omega_E = 8            # E1 frequency (meV or THz)
 gamma_E = 1            # E1 damping
-lambda_E = 0.01          # Quartic stabilization
+lambda_E = 10          # Quartic stabilization
 
 # A1 mode (Raman singlet)
 omega_A = 16            # A1 frequency
 gamma_A = 0.0            # A1 damping
-lambda_A = 0.01          # Quartic stabilization
+lambda_A = 10          # Quartic stabilization
 
 # Three-phonon coupling (ionic Raman mechanism)
 g3 = 0.5                 # Cubic coupling: g3 * Q_R * (Qx² + Qy²)

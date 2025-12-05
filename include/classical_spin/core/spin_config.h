@@ -66,6 +66,7 @@ struct SpinConfig {
     bool deterministic = false;
     bool T_zero = false;
     size_t n_deterministics = 1000;
+    bool adiabatic_phonons = false;  // If true, relax phonons at each temperature step (Born-Oppenheimer)
     
     // Molecular dynamics parameters
     double md_time_start = 0.0;

@@ -107,6 +107,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "n_deterministics") {
                 config.n_deterministics = stoull(value);
             }
+            else if (key == "adiabatic_phonons") {
+                config.adiabatic_phonons = parse_bool(value);
+            }
             else if (key == "md_time_start") {
                 config.md_time_start = stod(value);
             }

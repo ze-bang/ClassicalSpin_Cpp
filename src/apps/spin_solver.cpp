@@ -834,7 +834,8 @@ void run_simulated_annealing_phonon(PhononLattice& lattice, const SpinConfig& co
             trial_dir,
             config.save_observables,
             config.T_zero,
-            config.n_deterministics
+            config.n_deterministics,
+            config.adiabatic_phonons
         );
         
         // Save final configuration
@@ -890,7 +891,8 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+                config.adiabatic_phonons
             );
         } else {
             lattice.load_spin_config(config.initial_spin_config);
@@ -977,7 +979,8 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+                config.adiabatic_phonons
             );
         } else {
             lattice.load_spin_config(config.initial_spin_config);
@@ -1076,7 +1079,8 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+                config.adiabatic_phonons
             );
         } else {
             lattice.load_spin_config(config.initial_spin_config);
