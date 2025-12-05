@@ -88,7 +88,7 @@ lambda_R = 0.0           # A1 mode spin-phonon coupling (Raman)
 # Temperature schedule: T(n) = T_start * cooling_rate^n until T < T_end
 T_start = 10.0           # Initial temperature (meV)
 T_end = 1e-4             # Final temperature (essentially T=0)
-annealing_steps = 100000 # Total MC sweeps
+annealing_steps = 10000 # Total MC sweeps
 cooling_rate = 0.95      # Geometric cooling factor
 
 # Overrelaxation: perform spin reflection every N sweeps (speeds up)

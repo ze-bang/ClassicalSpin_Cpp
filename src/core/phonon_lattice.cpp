@@ -810,6 +810,40 @@ void PhononLattice::molecular_dynamics(
 }
 
 // ============================================================
+// MONTE CARLO METHODS
+// ============================================================
+
+size_t PhononLattice::metropolis_sweep(double T) {
+    size_t accepted = 0;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d old_spin = spins[i];
+        Eigen::Vector3d new_spin = gen_random_spin();
+        
+        double dE = site_energy_diff(new_spin, old_spin, i);
+        
+        if (dE < 0 || random_double_lehman(0, 1) < std::exp(-dE / T)) {
+            spins[i] = new_spin;
+            accepted++;
+        }
+    }
+    return accepted;
+}
+
+void PhononLattice::overrelaxation_sweep() {
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H = get_local_field(i);
+        double norm = H.norm();
+        if (norm > 1e-10) {
+            H /= norm;
+            // Reflect spin about local field direction
+            spins[i] = 2.0 * H.dot(spins[i]) * H - spins[i];
+            spins[i] = spins[i].normalized() * spin_length;
+        }
+    }
+}
+
+// ============================================================
 // SIMULATED ANNEALING
 // ============================================================
 
@@ -843,73 +877,21 @@ void PhononLattice::simulated_annealing(
     
     while (T > T_end) {
         size_t accepted = 0;
-        size_t total_moves = 0;
         
         // Perform n_steps sweeps at this temperature
         for (size_t step = 0; step < n_steps; ++step) {
-            // Metropolis sweep
-            for (size_t i = 0; i < lattice_size; ++i) {
-                Eigen::Vector3d old_spin = spins[i];
-                
-                // Compute old local energy
-                double E_old = -old_spin.dot(field[i]);
-                for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-                    size_t j = nn_partners[i][n];
-                    E_old += old_spin.dot(nn_interaction[i][n] * spins[j]);
-                }
-                for (size_t n = 0; n < j2_partners[i].size(); ++n) {
-                    size_t j = j2_partners[i][n];
-                    E_old += old_spin.dot(j2_interaction[i][n] * spins[j]);
-                }
-                for (size_t n = 0; n < j3_partners[i].size(); ++n) {
-                    size_t j = j3_partners[i][n];
-                    E_old += old_spin.dot(j3_interaction[i][n] * spins[j]);
-                }
-                
-                // Propose new spin
-                Eigen::Vector3d new_spin = gen_random_spin();
-                
-                // Compute new local energy
-                double E_new = -new_spin.dot(field[i]);
-                for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-                    size_t j = nn_partners[i][n];
-                    E_new += new_spin.dot(nn_interaction[i][n] * spins[j]);
-                }
-                for (size_t n = 0; n < j2_partners[i].size(); ++n) {
-                    size_t j = j2_partners[i][n];
-                    E_new += new_spin.dot(j2_interaction[i][n] * spins[j]);
-                }
-                for (size_t n = 0; n < j3_partners[i].size(); ++n) {
-                    size_t j = j3_partners[i][n];
-                    E_new += new_spin.dot(j3_interaction[i][n] * spins[j]);
-                }
-                
-                // Metropolis accept/reject
-                double dE = E_new - E_old;
-                if (dE < 0 || random_double_lehman(0, 1) < std::exp(-dE / T)) {
-                    spins[i] = new_spin;
-                    accepted++;
-                }
-                total_moves++;
-            }
+            accepted += metropolis_sweep(T);
             
             // Overrelaxation
             if (overrelax_rate > 0 && step % overrelax_rate == 0) {
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    Eigen::Vector3d H = get_local_field(i);
-                    if (H.norm() > 1e-10) {
-                        H.normalize();
-                        spins[i] = 2.0 * H.dot(spins[i]) * H - spins[i];
-                        spins[i] = spins[i].normalized() * spin_length;
-                    }
-                }
+                overrelaxation_sweep();
             }
         }
         
-        // Calculate acceptance rate
+        // Calculate acceptance rate (normalize differently if overrelaxation is used)
         double acceptance = (overrelax_rate > 0) ? 
-            double(accepted) / double(n_steps) * overrelax_rate : 
-            double(accepted) / double(total_moves);
+            double(accepted) / double(n_steps * lattice_size) * overrelax_rate : 
+            double(accepted) / double(n_steps * lattice_size);
         
         // Progress report every 10 temperature steps or near the end
         if (temp_step % 10 == 0 || T <= T_end * 1.5) {
@@ -981,9 +963,8 @@ void PhononLattice::simulated_annealing(
             deterministic_sweep(1);
             
             if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
-                double E = energy_density();
                 cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
-                     << ", E/N=" << E << endl;
+                     << ", E/N=" << energy_density() << endl;
             }
         }
         cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;

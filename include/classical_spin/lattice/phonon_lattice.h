@@ -416,7 +416,60 @@ public:
     // ============================================================
     
     /**
-     * Pure spin energy (NN + 3rd NN + Zeeman)
+     * Compute local energy for a spin at a given site
+     * E = -B·S + Σ_j S^T J_ij S_j (for NN, 2nd NN, 3rd NN)
+     */
+    double site_energy(const Eigen::Vector3d& spin_here, size_t site) const {
+        double E = -spin_here.dot(field[site]);
+        
+        // NN interactions
+        for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+            size_t j = nn_partners[site][n];
+            E += spin_here.dot(nn_interaction[site][n] * spins[j]);
+        }
+        // 2nd NN interactions
+        for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+            size_t j = j2_partners[site][n];
+            E += spin_here.dot(j2_interaction[site][n] * spins[j]);
+        }
+        // 3rd NN interactions
+        for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+            size_t j = j3_partners[site][n];
+            E += spin_here.dot(j3_interaction[site][n] * spins[j]);
+        }
+        return E;
+    }
+    
+    /**
+     * Compute energy difference for a proposed spin flip (optimized for Metropolis)
+     * dE = E(new_spin) - E(old_spin)
+     */
+    double site_energy_diff(const Eigen::Vector3d& new_spin, 
+                           const Eigen::Vector3d& old_spin, 
+                           size_t site) const {
+        Eigen::Vector3d delta = new_spin - old_spin;
+        double dE = -delta.dot(field[site]);
+        
+        // NN interactions
+        for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+            size_t j = nn_partners[site][n];
+            dE += delta.dot(nn_interaction[site][n] * spins[j]);
+        }
+        // 2nd NN interactions
+        for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+            size_t j = j2_partners[site][n];
+            dE += delta.dot(j2_interaction[site][n] * spins[j]);
+        }
+        // 3rd NN interactions
+        for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+            size_t j = j3_partners[site][n];
+            dE += delta.dot(j3_interaction[site][n] * spins[j]);
+        }
+        return dE;
+    }
+    
+    /**
+     * Pure spin energy (NN + 2nd NN + 3rd NN + Zeeman)
      */
     double spin_energy() const;
     
@@ -605,6 +658,23 @@ public:
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
                            string method = "dopri5");
+    
+    // ============================================================
+    // MONTE CARLO METHODS
+    // ============================================================
+    
+    /**
+     * Single Metropolis sweep over all spins
+     * @param T  Temperature
+     * @return Number of accepted moves
+     */
+    size_t metropolis_sweep(double T);
+    
+    /**
+     * Single overrelaxation sweep over all spins
+     * Reflects each spin about its local field (energy-conserving)
+     */
+    void overrelaxation_sweep();
     
     /**
      * Simulated annealing for spin subsystem
