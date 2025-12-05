@@ -888,10 +888,8 @@ void PhononLattice::simulated_annealing(
             }
         }
         
-        // Calculate acceptance rate (normalize differently if overrelaxation is used)
-        double acceptance = (overrelax_rate > 0) ? 
-            double(accepted) / double(n_steps * lattice_size) * overrelax_rate : 
-            double(accepted) / double(n_steps * lattice_size);
+        // Calculate acceptance rate (only counts Metropolis moves, not overrelaxation)
+        double acceptance = double(accepted) / double(n_steps * lattice_size);
         
         // Progress report every 10 temperature steps or near the end
         if (temp_step % 10 == 0 || T <= T_end * 1.5) {
