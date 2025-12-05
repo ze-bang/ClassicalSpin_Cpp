@@ -900,10 +900,17 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
         
         // Relax phonons to equilibrium for the current spin configuration
         // This finds the joint spin-phonon equilibrium before time evolution
-        if (rank == 0) {
-            cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+        // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
+        if (config.relax_phonons || config.adiabatic_phonons) {
+            if (rank == 0) {
+                cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+            }
+            lattice.relax_joint();
+        } else {
+            if (rank == 0) {
+                cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;
+            }
         }
-        lattice.relax_joint();
         
         // Save initial spin configuration before time evolution
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
@@ -987,10 +994,17 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         }
         
         // Relax spins and phonons to joint equilibrium
-        if (rank == 0) {
-            cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+        // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
+        if (config.relax_phonons || config.adiabatic_phonons) {
+            if (rank == 0) {
+                cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+            }
+            lattice.relax_joint();
+        } else {
+            if (rank == 0) {
+                cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;
+            }
         }
-        lattice.relax_joint();
         
         // Save initial configuration
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
@@ -1087,10 +1101,17 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
         }
         
         // Relax spins and phonons to joint equilibrium before 2DCS
-        if (rank == 0) {
-            cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+        // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
+        if (config.relax_phonons || config.adiabatic_phonons) {
+            if (rank == 0) {
+                cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+            }
+            lattice.relax_joint();
+        } else {
+            if (rank == 0) {
+                cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;
+            }
         }
-        lattice.relax_joint();
         
         // Run 2DCS workflow
         if (size > 1) {
