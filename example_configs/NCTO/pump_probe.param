@@ -36,6 +36,8 @@ J = 0.0                  # Heisenberg coupling (meV)
 K = -1.0                 # Kitaev coupling (meV, ferromagnetic)
 Gamma = 0.25             # Gamma coupling (meV)
 Gammap = -0.02           # Gamma' coupling (meV)
+J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # Third-neighbor Heisenberg (meV)
 
 # External magnetic field

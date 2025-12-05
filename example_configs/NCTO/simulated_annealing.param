@@ -41,6 +41,10 @@ K = -1.0                 # Kitaev (ferromagnetic K < 0)
 Gamma = 0.25             # Γ coupling
 Gammap = -0.02           # Γ' coupling
 
+# 2nd NN Heisenberg (sublattice-dependent)
+J2_A = 0.0               # 2nd NN coupling on sublattice A
+J2_B = 0.0               # 2nd NN coupling on sublattice B
+
 # 3rd NN Heisenberg
 J3 = 0.0
 

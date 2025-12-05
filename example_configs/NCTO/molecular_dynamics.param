@@ -37,6 +37,8 @@ J = 0.0                  # Heisenberg (meV)
 K = -1.0                 # Kitaev (FM, meV)
 Gamma = 0.25             # Γ (meV)
 Gammap = -0.02           # Γ' (meV)
+J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # 3rd NN Heisenberg (meV)
 
 # External magnetic field

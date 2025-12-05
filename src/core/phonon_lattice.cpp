@@ -40,6 +40,8 @@ PhononLattice::PhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
     nn_interaction.resize(lattice_size);
     nn_partners.resize(lattice_size);
     nn_bond_types.resize(lattice_size);
+    j2_interaction.resize(lattice_size);
+    j2_partners.resize(lattice_size);
     j3_interaction.resize(lattice_size);
     j3_partners.resize(lattice_size);
     
@@ -112,6 +114,8 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         nn_interaction[i].clear();
         nn_partners[i].clear();
         nn_bond_types[i].clear();
+        j2_interaction[i].clear();
+        j2_partners[i].clear();
         j3_interaction[i].clear();
         j3_partners[i].clear();
     }
@@ -120,6 +124,8 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
     SpinMatrix Jx = sp_params.get_Jx();
     SpinMatrix Jy = sp_params.get_Jy();
     SpinMatrix Jz = sp_params.get_Jz();
+    SpinMatrix J2_A_mat = sp_params.get_J2_A_matrix();
+    SpinMatrix J2_B_mat = sp_params.get_J2_B_matrix();
     SpinMatrix J3_mat = sp_params.get_J3_matrix();
     
     // Build NN interactions on honeycomb
@@ -163,6 +169,40 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                 nn_partners[site1].push_back(site0);
                 nn_bond_types[site1].push_back(2);
                 
+                // 2nd NN interactions (isotropic Heisenberg, sublattice-dependent)
+                // On honeycomb, 2nd NN connect same sublattice at distance sqrt(3)*a
+                // 2nd NN offsets: (±1, 0), (0, ±1), (±1, ∓1) in lattice coordinates
+                // These connect A-A and B-B sites with different couplings J2_A and J2_B
+                if (std::abs(sp_params.J2_A) > 1e-12 || std::abs(sp_params.J2_B) > 1e-12) {
+                    // 2nd NN offset vectors (same for both sublattices in lattice coords)
+                    vector<std::tuple<int,int,int>> j2_offsets = {
+                        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {1, -1, 0}, {-1, 1, 0}
+                    };
+                    
+                    // 2nd NN for sublattice A (site0) with coupling J2_A
+                    for (const auto& [di, dj, dk] : j2_offsets) {
+                        size_t partner_j2 = flatten_index_periodic(i+di, j+dj, k+dk, 0);
+                        // Only add if partner > site0 to avoid double counting
+                        if (partner_j2 > site0) {
+                            j2_interaction[site0].push_back(J2_A_mat);
+                            j2_partners[site0].push_back(partner_j2);
+                            j2_interaction[partner_j2].push_back(J2_A_mat.transpose());
+                            j2_partners[partner_j2].push_back(site0);
+                        }
+                    }
+                    
+                    // 2nd NN for sublattice B (site1) with coupling J2_B
+                    for (const auto& [di, dj, dk] : j2_offsets) {
+                        size_t partner_j2 = flatten_index_periodic(i+di, j+dj, k+dk, 1);
+                        if (partner_j2 > site1) {
+                            j2_interaction[site1].push_back(J2_B_mat);
+                            j2_partners[site1].push_back(partner_j2);
+                            j2_interaction[partner_j2].push_back(J2_B_mat.transpose());
+                            j2_partners[partner_j2].push_back(site1);
+                        }
+                    }
+                }
+                
                 // 3rd NN interactions (isotropic Heisenberg J3)
                 // On honeycomb, 3rd NN are at distance 2a, connecting same sublattice
                 if (std::abs(sp_params.J3) > 1e-12) {
@@ -200,6 +240,7 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
     cout << "Set PhononLattice parameters (Kitaev-Heisenberg-Γ-Γ'):" << endl;
     cout << "  J=" << sp_params.J << ", K=" << sp_params.K 
          << ", Γ=" << sp_params.Gamma << ", Γ'=" << sp_params.Gammap << endl;
+    cout << "  J2_A=" << sp_params.J2_A << ", J2_B=" << sp_params.J2_B << endl;
     cout << "  J3=" << sp_params.J3 << endl;
     cout << "  λ_xy=" << sp_params.lambda_xy << ", λ_R=" << sp_params.lambda_R << endl;
     cout << "  Phonon: ω_E=" << ph_params.omega_E << ", ω_A=" << ph_params.omega_A
@@ -227,6 +268,15 @@ double PhononLattice::spin_energy() const {
             if (j > i) {  // Avoid double counting
                 const Eigen::Vector3d& Sj = spins[j];
                 E += Si.dot(nn_interaction[i][n] * Sj);
+            }
+        }
+        
+        // 2nd NN interactions
+        for (size_t n = 0; n < j2_partners[i].size(); ++n) {
+            size_t j = j2_partners[i][n];
+            if (j > i) {  // Avoid double counting
+                const Eigen::Vector3d& Sj = spins[j];
+                E += Si.dot(j2_interaction[i][n] * Sj);
             }
         }
         
@@ -400,6 +450,13 @@ SpinVector PhononLattice::get_local_field(size_t site) const {
         H -= lR * QR * Sj;
     }
     
+    // 2nd NN contributions
+    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+        size_t j = j2_partners[site][n];
+        const Eigen::Vector3d& Sj = spins[j];
+        H -= j2_interaction[site][n] * Sj;
+    }
+    
     // 3rd NN contributions
     for (size_t n = 0; n < j3_partners[site].size(); ++n) {
         size_t j = j3_partners[site][n];
@@ -518,6 +575,14 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             H(1) -= lxy * Qy * Sj(2);
             H(2) -= lxy * Qy * Sj(1);
             H -= lR * QR * Sj;
+        }
+        
+        // 2nd NN interactions
+        for (size_t n = 0; n < j2_partners[i].size(); ++n) {
+            size_t j = j2_partners[i][n];
+            const size_t jdx = j * spin_dim;
+            Eigen::Vector3d Sj(x[jdx], x[jdx+1], x[jdx+2]);
+            H -= j2_interaction[i][n] * Sj;
         }
         
         // 3rd NN interactions

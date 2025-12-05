@@ -763,6 +763,10 @@ void build_phonon_params(const SpinConfig& config,
     sp_params.Gamma = config.get_param("Gamma", 0.25);
     sp_params.Gammap = config.get_param("Gammap", -0.02);
     
+    // 2nd neighbor (J2) - isotropic Heisenberg, sublattice-dependent
+    sp_params.J2_A = config.get_param("J2_A", 0.0);
+    sp_params.J2_B = config.get_param("J2_B", 0.0);
+    
     // 3rd neighbor (J3) - isotropic Heisenberg
     sp_params.J3 = config.get_param("J3", 0.0);
     

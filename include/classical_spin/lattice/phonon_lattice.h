@@ -3,7 +3,8 @@
  * @brief Spin-phonon coupled honeycomb lattice
  * 
  * This implements a honeycomb lattice with:
- * - Generic NN and 3rd NN spin-spin interactions (bilinear matrix form)
+ * - Generic NN, 2nd NN, and 3rd NN spin-spin interactions (bilinear matrix form)
+ * - Sublattice-dependent 2nd NN coupling (J2_A for sublattice A, J2_B for sublattice B)
  * - Two phonon modes: E1 (Qx, Qy) and A1 (Q_R)
  * - Three-phonon coupling: g3 * (Qx² + Qy²) * Q_R
  * - Spin-phonon coupling: Qx*(SxSz + SzSx) + Qy*(SySz + SzSy) + Q_R*(SxSx + SySy + SzSz)
@@ -12,8 +13,9 @@
  * Hamiltonian:
  * H = H_spin + H_phonon + H_sp-ph + H_drive
  * 
- * H_spin = Σ_<ij> Si · J1 · Sj + Σ_<<<ij>>> Si · J3 · Sj - Σ_i B · Si
- *   (NN J1 and 3rd NN J3 are 3x3 matrices for general anisotropic exchange)
+ * H_spin = Σ_<ij> Si · J1 · Sj + Σ_<<ij>>_A J2_A Si·Sj + Σ_<<ij>>_B J2_B Si·Sj
+ *        + Σ_<<<ij>>> Si · J3 · Sj - Σ_i B · Si
+ *   (NN J1 is bond-dependent Kitaev-Heisenberg-Γ-Γ', 2nd and 3rd NN are isotropic Heisenberg)
  * 
  * H_phonon = (1/2)(Vx² + Vy²) + (1/2)ω_E²(Qx² + Qy²) + (λ_E/4)(Qx² + Qy²)²
  *          + (1/2)V_R² + (1/2)ω_A²*Q_R² + (λ_A/4)*Q_R⁴
@@ -154,6 +156,10 @@ struct SpinPhononCouplingParams {
     double Gamma = 0.25;   // Γ (off-diagonal symmetric) 
     double Gammap = -0.02; // Γ' (off-diagonal asymmetric)
     
+    // 2nd NN exchange (isotropic Heisenberg, sublattice-dependent)
+    double J2_A = 0.0;     // 2nd NN coupling on sublattice A
+    double J2_B = 0.0;     // 2nd NN coupling on sublattice B
+    
     // 3rd NN exchange (isotropic Heisenberg)
     double J3 = 0.0;
     
@@ -188,6 +194,14 @@ struct SpinPhononCouplingParams {
     
     SpinMatrix get_J3_matrix() const {
         return J3 * SpinMatrix::Identity(3, 3);
+    }
+    
+    SpinMatrix get_J2_A_matrix() const {
+        return J2_A * SpinMatrix::Identity(3, 3);
+    }
+    
+    SpinMatrix get_J2_B_matrix() const {
+        return J2_B * SpinMatrix::Identity(3, 3);
     }
 };
 
@@ -261,6 +275,10 @@ public:
     vector<vector<SpinMatrix>> nn_interaction;      // J1 matrices
     vector<vector<size_t>> nn_partners;             // NN partner indices
     vector<vector<int>> nn_bond_types;              // Bond type (0,1,2 for x,y,z bonds)
+    
+    // 2nd NN interactions (sublattice-dependent)
+    vector<vector<SpinMatrix>> j2_interaction;      // J2 matrices (J2_A or J2_B depending on sublattice)
+    vector<vector<size_t>> j2_partners;             // 2nd NN partner indices
     
     // 3rd NN interactions
     vector<vector<SpinMatrix>> j3_interaction;      // J3 matrices  

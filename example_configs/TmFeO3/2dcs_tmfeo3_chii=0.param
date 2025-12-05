@@ -63,7 +63,7 @@ parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
 # Time evolution
 md_time_start = -100.0
 md_time_end = 100.0
-md_timestep = 0.1
+md_timestep = 0.01
 md_integrator = rk4
 use_gpu = true              # Recommended for TmFeO3 2DCS
 

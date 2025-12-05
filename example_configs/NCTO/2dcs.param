@@ -36,6 +36,8 @@ J = 0.0                  # Heisenberg
 K = -1.0                 # Kitaev (FM)
 Gamma = 0.25             # Γ
 Gammap = -0.02           # Γ'
+J2_A = 0.0               # 2nd NN Heisenberg (sublattice A)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B)
 J3 = 0.0                 # 3rd NN Heisenberg
 
 # External field
@@ -90,15 +92,15 @@ probe_width = 5.0
 # ============================================
 # DELAY TIME SCAN (τ)
 # ============================================
-tau_start = 0.0          # Starting delay
-tau_end = 50.0           # Final delay
+tau_start = -100.0          # Starting delay
+tau_end = 100.0           # Final delay
 tau_step = 2.0           # Delay increment
 # Total delay points: (tau_end - tau_start) / tau_step + 1 = 26
 
 # ============================================
 # TIME EVOLUTION (for each pulse sequence)
 # ============================================
-md_time_start = -20.0    # Start before pump (to capture equilibrium)
+md_time_start = -100.0    # Start before pump (to capture equilibrium)
 md_time_end = 100.0      # End time (should be > tau_end + pulse_width)
 md_timestep = 0.05       # Integration timestep
 md_save_interval = 1     # Save every N steps

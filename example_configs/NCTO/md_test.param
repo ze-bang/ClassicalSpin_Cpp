@@ -28,6 +28,8 @@ J = 0.0
 K = -1.0
 Gamma = 0.25
 Gammap = 0.0
+J2_A = 0.0               # 2nd NN Heisenberg (sublattice A)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B)
 J3 = 0.0
 
 # No external field
