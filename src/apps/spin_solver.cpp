@@ -1061,7 +1061,8 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
         if (size > 1) {
             // Use MPI-parallel version
             lattice.pump_probe_spectroscopy_mpi(
-                pulse_amp, pulse_width, pulse_freq, pulse_theta,
+                pulse_theta,
+                pulse_amp, pulse_width, pulse_freq,
                 tau_start, tau_end, tau_step,
                 config.md_time_start, config.md_time_end, config.md_timestep,
                 trial_dir, config.md_integrator
@@ -1069,7 +1070,8 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
         } else {
             // Single-rank version
             lattice.pump_probe_spectroscopy(
-                pulse_amp, pulse_width, pulse_freq, pulse_theta,
+                pulse_theta,
+                pulse_amp, pulse_width, pulse_freq,
                 tau_start, tau_end, tau_step,
                 config.md_time_start, config.md_time_end, config.md_timestep,
                 trial_dir, config.md_integrator

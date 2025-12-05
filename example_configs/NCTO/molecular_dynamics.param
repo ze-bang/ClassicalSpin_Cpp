@@ -1,0 +1,119 @@
+# NCTO Spin-Phonon Molecular Dynamics Configuration
+# ===================================================
+# 
+# This configuration runs full spin-phonon coupled molecular dynamics
+# on the NCTO honeycomb lattice. The system evolves according to:
+#
+# Spins:   dS/dt = S × H_eff - α S × (S × H_eff)  [LLG equation]
+# Phonons: d²Q/dt² = -∂H/∂Q - γ dQ/dt + Z* E(t)   [Driven damped oscillator]
+#
+# A THz pulse can drive the E1 phonon mode, which then couples to 
+# the spin system through spin-phonon coupling terms.
+
+# System type
+system = NCTO
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 16,16,1
+
+# Simulation type
+simulation_mode = MD
+
+# Output directory
+output_dir = NCTO_md
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN: Kitaev-Heisenberg-Γ-Γ'
+# ============================================
+# Bond-dependent exchange on honeycomb lattice
+#
+# For γ-bond (γ = x, y, z):
+# J_γ = J·I + K·diag_γ + Γ·off-diag + Γ'·cross-terms
+
+J = 0.0                  # Heisenberg (meV)
+K = -1.0                 # Kitaev (FM, meV)
+Gamma = 0.25             # Γ (meV)
+Gammap = -0.02           # Γ' (meV)
+J3 = 0.0                 # 3rd NN Heisenberg (meV)
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PHONON PARAMETERS
+# ============================================
+# E1 mode (IR-active doublet)
+omega_E = 5.0            # Frequency
+gamma_E = 0.1            # Damping rate
+lambda_E = 0.05          # Quartic stabilization
+
+# A1 mode (Raman singlet)
+omega_A = 2.5            # Frequency
+gamma_A = 0.05           # Damping rate
+lambda_A = 0.05          # Quartic stabilization
+
+# Three-phonon coupling: g3 * Q_R * (Qx² + Qy²)
+# This is the ionic Raman mechanism
+g3 = 0.1
+
+# Effective charge for THz coupling
+Z_star = 1.0
+
+# ============================================
+# SPIN-PHONON COUPLING
+# ============================================
+lambda_xy = 0.1          # E1 mode (modulates anisotropic exchange)
+lambda_R = 0.05          # A1 mode (modulates isotropic exchange)
+
+# ============================================
+# THz DRIVE (optional single pulse)
+# ============================================
+# Set pump_amplitude = 0 for free evolution without drive
+
+pump_amplitude = 0.5     # THz E-field amplitude (0 = no drive)
+pump_frequency = 5.0     # Match omega_E for resonance
+pump_time = 50.0         # Pulse center time
+pump_width = 10.0        # Gaussian width σ
+pump_phase = 0.0         # CEP phase
+pump_polarization = 0.0  # 0 = x-polarized
+
+# Second pulse (set amplitude = 0 to disable)
+probe_amplitude = 0.0
+probe_frequency = 5.0
+probe_time = 100.0
+probe_width = 10.0
+
+# ============================================
+# MOLECULAR DYNAMICS PARAMETERS
+# ============================================
+md_time_start = 0.0      # Start time
+md_time_end = 200.0      # End time
+md_timestep = 0.01       # Integration timestep (should be << 1/omega_E)
+md_save_interval = 10    # Save observables every N steps
+md_integrator = dopri5   # Options: dopri5, rk4, rk45, etc.
+
+# Gilbert damping for spin dynamics (energy dissipation)
+alpha_gilbert = 0.01
+
+# ============================================
+# EQUILIBRATION
+# ============================================
+# Anneal spin subsystem before dynamics
+T_start = 5.0
+T_end = 1e-4
+annealing_steps = 50000
+cooling_rate = 0.95
+overrelaxation_rate = 5
+
+# ============================================
+# INITIALIZATION
+# ============================================
+# Random initial spins (will be annealed)
+# use_ferromagnetic_init = false
+
+# Or specify initial configuration:
+# initial_spin_config = path/to/spins.txt

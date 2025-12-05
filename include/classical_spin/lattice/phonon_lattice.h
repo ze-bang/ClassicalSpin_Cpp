@@ -609,34 +609,51 @@ public:
     
     /**
      * Single pulse THz drive on phonon E1 mode
-     * Drive is applied via the DriveParams (pulse 1)
-     * @param t_pulse   Center time of pulse
-     * @param E0        Pulse amplitude
-     * @param sigma     Gaussian width
-     * @param omega     Carrier frequency
-     * @param theta     Polarization angle (0=x, π/2=y)
+     * Matches lattice.h::single_pulse_drive signature (adapted for phonon drive)
+     * 
+     * @param polarization  THz field polarization angle (0=x, π/2=y)
+     * @param t_B           Center time of pulse
+     * @param pulse_amp     Pulse amplitude (E-field strength)
+     * @param pulse_width   Gaussian width (sigma)
+     * @param pulse_freq    Carrier frequency
+     * @param T_start       Integration start time
+     * @param T_end         Integration end time
+     * @param step_size     Integration timestep
+     * @param method        ODE integration method
      * @return Trajectory of (time, [M_antiferro, M_local, M_global])
      */
-    MagTrajectory single_pulse_drive(double t_pulse, double E0, double sigma, double omega,
-                                     double theta,
-                                     double T_start, double T_end, double dt_step,
+    MagTrajectory single_pulse_drive(double polarization, double t_B,
+                                     double pulse_amp, double pulse_width, double pulse_freq,
+                                     double T_start, double T_end, double step_size,
                                      const string& method = "dopri5");
     
     /**
      * Double pulse THz drive (pump + probe)
-     * Uses both pulses in DriveParams
+     * Matches lattice.h::double_pulse_drive signature (adapted for phonon drive)
+     * Both pulses share the same amplitude, width, and frequency
+     * 
+     * @param polarization_1  Pump pulse polarization angle
+     * @param t_B_1           Pump pulse center time
+     * @param polarization_2  Probe pulse polarization angle
+     * @param t_B_2           Probe pulse center time
+     * @param pulse_amp       Pulse amplitude (shared)
+     * @param pulse_width     Gaussian width (shared)
+     * @param pulse_freq      Carrier frequency (shared)
+     * @param T_start         Integration start time
+     * @param T_end           Integration end time
+     * @param step_size       Integration timestep
+     * @param method          ODE integration method
      * @return Trajectory of (time, [M_antiferro, M_local, M_global])
      */
-    MagTrajectory double_pulse_drive(double t_pump, double t_probe,
-                                     double E0_pump, double E0_probe,
-                                     double sigma_pump, double sigma_probe,
-                                     double omega_pump, double omega_probe,
-                                     double theta_pump, double theta_probe,
-                                     double T_start, double T_end, double dt_step,
+    MagTrajectory double_pulse_drive(double polarization_1, double t_B_1,
+                                     double polarization_2, double t_B_2,
+                                     double pulse_amp, double pulse_width, double pulse_freq,
+                                     double T_start, double T_end, double step_size,
                                      const string& method = "dopri5");
     
     /**
      * Complete 2D coherent spectroscopy (2DCS) workflow
+     * Matches lattice.h::pump_probe_spectroscopy signature (adapted for phonon drive)
      * 
      * Performs pump-probe spectroscopy with THz pulses driving the E1 phonon mode:
      * 1. Uses current spin configuration as ground state
@@ -647,20 +664,21 @@ public:
      * 
      * Nonlinear signal extraction: M_NL = M01 - M0 - M1
      * 
-     * @param E0           THz pulse amplitude
-     * @param sigma        Gaussian pulse width
-     * @param omega        Pulse carrier frequency
-     * @param theta        Polarization angle
-     * @param tau_start    Initial delay time
-     * @param tau_end      Final delay time  
-     * @param tau_step     Delay time step
-     * @param T_start      Integration start time
-     * @param T_end        Integration end time
-     * @param T_step       Integration timestep
-     * @param dir_name     Output directory
-     * @param method       ODE integration method
+     * @param polarization  THz field polarization angle
+     * @param pulse_amp     THz pulse amplitude
+     * @param pulse_width   Gaussian pulse width
+     * @param pulse_freq    Pulse carrier frequency
+     * @param tau_start     Initial delay time
+     * @param tau_end       Final delay time  
+     * @param tau_step      Delay time step
+     * @param T_start       Integration start time
+     * @param T_end         Integration end time
+     * @param T_step        Integration timestep
+     * @param dir_name      Output directory
+     * @param method        ODE integration method
      */
-    void pump_probe_spectroscopy(double E0, double sigma, double omega, double theta,
+    void pump_probe_spectroscopy(double polarization,
+                                double pulse_amp, double pulse_width, double pulse_freq,
                                 double tau_start, double tau_end, double tau_step,
                                 double T_start, double T_end, double T_step,
                                 const string& dir_name = "spectroscopy",
@@ -670,7 +688,8 @@ public:
      * MPI-parallelized 2DCS spectroscopy
      * Distributes tau values across MPI ranks
      */
-    void pump_probe_spectroscopy_mpi(double E0, double sigma, double omega, double theta,
+    void pump_probe_spectroscopy_mpi(double polarization,
+                                    double pulse_amp, double pulse_width, double pulse_freq,
                                     double tau_start, double tau_end, double tau_step,
                                     double T_start, double T_end, double T_step,
                                     const string& dir_name = "spectroscopy",

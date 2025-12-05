@@ -1,0 +1,80 @@
+# NCTO Simple Molecular Dynamics Configuration
+# =============================================
+# 
+# Simple MD test for spin-phonon dynamics without THz drive.
+# Tests the coupled spin-phonon equations of motion.
+
+# System type
+system = NCTO
+
+# Lattice dimensions
+lattice_size = 8,8,1
+
+# Simulation type
+simulation = molecular_dynamics
+
+# Output directory
+output_dir = NCTO_md
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN PARAMETERS
+# ============================================
+
+# Kitaev model
+J = 0.0
+K = -1.0
+Gamma = 0.25
+Gammap = 0.0
+J3 = 0.0
+
+# No external field
+field_strength = 0.0
+
+# ============================================
+# SPIN-PHONON COUPLING
+# ============================================
+
+# Strong coupling to test dynamics
+lambda_K = 0.2
+
+# ============================================
+# PHONON PARAMETERS
+# ============================================
+# Note: Effective masses = 1 (absorbed into definitions)
+
+omega_IR = 5.0    # IR mode frequency ω_IR
+omega_R = 2.5     # Raman mode frequency ω_R
+gamma_IR = 0.1    # IR mode damping γ_IR
+gamma_R = 0.05    # Raman mode damping γ_R
+beta = 0.01       # Q_R^4 anharmonic stabilization
+g_phonon = 0.1    # g * Q_R * (Qx² + Qy²) nonlinear coupling
+Z_star = 1.0      # Effective charge for THz-IR coupling
+
+# ============================================
+# NO DRIVE (free evolution)
+# ============================================
+
+pump_amplitude = 0.0
+probe_amplitude = 0.0
+
+# ============================================
+# MD PARAMETERS
+# ============================================
+
+md_time_start = 0.0
+md_time_end = 100.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = rk4
+
+# ============================================
+# THERMAL EQUILIBRATION
+# ============================================
+
+T_start = 5.0
+T_end = 0.01
+annealing_steps = 20000
+cooling_rate = 0.95

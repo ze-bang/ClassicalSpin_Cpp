@@ -1011,16 +1011,17 @@ void PhononLattice::save_positions(const string& filename) const {
 // ============================================================
 
 PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
-    double t_pulse, double E0, double sigma, double omega, double theta,
+    double polarization, double t_B,
+    double pulse_amp, double pulse_width, double pulse_freq,
     double T_start, double T_end, double step_size, const string& method) {
     
     // Set up single pulse
-    drive_params.E0_1 = E0;
-    drive_params.omega_1 = omega;
-    drive_params.t_1 = t_pulse;
-    drive_params.sigma_1 = sigma;
+    drive_params.E0_1 = pulse_amp;
+    drive_params.omega_1 = pulse_freq;
+    drive_params.t_1 = t_B;
+    drive_params.sigma_1 = pulse_width;
     drive_params.phi_1 = 0.0;
-    drive_params.theta_1 = theta;
+    drive_params.theta_1 = polarization;
     
     // Disable second pulse
     drive_params.E0_2 = 0.0;
@@ -1077,28 +1078,26 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
 }
 
 PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
-    double t_pump, double t_probe,
-    double E0_pump, double E0_probe,
-    double sigma_pump, double sigma_probe,
-    double omega_pump, double omega_probe,
-    double theta_pump, double theta_probe,
+    double polarization_1, double t_B_1,
+    double polarization_2, double t_B_2,
+    double pulse_amp, double pulse_width, double pulse_freq,
     double T_start, double T_end, double step_size, const string& method) {
     
     // Set up pump (pulse 1)
-    drive_params.E0_1 = E0_pump;
-    drive_params.omega_1 = omega_pump;
-    drive_params.t_1 = t_pump;
-    drive_params.sigma_1 = sigma_pump;
+    drive_params.E0_1 = pulse_amp;
+    drive_params.omega_1 = pulse_freq;
+    drive_params.t_1 = t_B_1;
+    drive_params.sigma_1 = pulse_width;
     drive_params.phi_1 = 0.0;
-    drive_params.theta_1 = theta_pump;
+    drive_params.theta_1 = polarization_1;
     
     // Set up probe (pulse 2)
-    drive_params.E0_2 = E0_probe;
-    drive_params.omega_2 = omega_probe;
-    drive_params.t_2 = t_probe;
-    drive_params.sigma_2 = sigma_probe;
+    drive_params.E0_2 = pulse_amp;
+    drive_params.omega_2 = pulse_freq;
+    drive_params.t_2 = t_B_2;
+    drive_params.sigma_2 = pulse_width;
     drive_params.phi_2 = 0.0;
-    drive_params.theta_2 = theta_probe;
+    drive_params.theta_2 = polarization_2;
     
     // Storage for trajectory
     MagTrajectory trajectory;
@@ -1153,7 +1152,8 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
 }
 
 void PhononLattice::pump_probe_spectroscopy(
-    double E0, double sigma, double omega, double theta,
+    double polarization,
+    double pulse_amp, double pulse_width, double pulse_freq,
     double tau_start, double tau_end, double tau_step,
     double T_start, double T_end, double T_step,
     const string& dir_name, const string& method) {
@@ -1164,10 +1164,10 @@ void PhononLattice::pump_probe_spectroscopy(
     cout << "Pump-Probe Spectroscopy (PhononLattice)" << endl;
     cout << "==========================================" << endl;
     cout << "Pulse parameters:" << endl;
-    cout << "  Amplitude: " << E0 << endl;
-    cout << "  Width: " << sigma << endl;
-    cout << "  Frequency: " << omega << endl;
-    cout << "  Polarization: " << theta << " rad" << endl;
+    cout << "  Amplitude: " << pulse_amp << endl;
+    cout << "  Width: " << pulse_width << endl;
+    cout << "  Frequency: " << pulse_freq << endl;
+    cout << "  Polarization: " << polarization << " rad" << endl;
     cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
     cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
     
@@ -1187,7 +1187,8 @@ void PhononLattice::pump_probe_spectroscopy(
     
     // Step 2: Reference single-pulse dynamics (pump at t=0)
     cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
-    auto M0_trajectory = single_pulse_drive(0.0, E0, sigma, omega, theta,
+    auto M0_trajectory = single_pulse_drive(polarization, 0.0, 
+                                            pulse_amp, pulse_width, pulse_freq,
                                             T_start, T_end, T_step, method);
     
     // Restore ground state
@@ -1217,7 +1218,8 @@ void PhononLattice::pump_probe_spectroscopy(
         spins = ground_state;
         phonons = ground_phonons;
         cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
-        auto M1_trajectory = single_pulse_drive(current_tau, E0, sigma, omega, theta,
+        auto M1_trajectory = single_pulse_drive(polarization, current_tau,
+                                                pulse_amp, pulse_width, pulse_freq,
                                                 T_start, T_end, T_step, method);
         M1_trajectories.push_back(M1_trajectory);
         
@@ -1225,8 +1227,8 @@ void PhononLattice::pump_probe_spectroscopy(
         spins = ground_state;
         phonons = ground_phonons;
         cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
-        auto M01_trajectory = double_pulse_drive(0.0, current_tau,
-                                                 E0, E0, sigma, sigma, omega, omega, theta, theta,
+        auto M01_trajectory = double_pulse_drive(polarization, 0.0, polarization, current_tau,
+                                                 pulse_amp, pulse_width, pulse_freq,
                                                  T_start, T_end, T_step, method);
         M01_trajectories.push_back(M01_trajectory);
         
@@ -1251,17 +1253,17 @@ void PhononLattice::pump_probe_spectroscopy(
             hsize_t dims[1] = {1};
             H5::DataSpace scalar_space(1, dims);
             
-            H5::DataSet ds = params_group.createDataSet("E0", H5::PredType::NATIVE_DOUBLE, scalar_space);
-            ds.write(&E0, H5::PredType::NATIVE_DOUBLE);
+            H5::DataSet ds = params_group.createDataSet("pulse_amp", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&pulse_amp, H5::PredType::NATIVE_DOUBLE);
             
-            ds = params_group.createDataSet("sigma", H5::PredType::NATIVE_DOUBLE, scalar_space);
-            ds.write(&sigma, H5::PredType::NATIVE_DOUBLE);
+            ds = params_group.createDataSet("pulse_width", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&pulse_width, H5::PredType::NATIVE_DOUBLE);
             
-            ds = params_group.createDataSet("omega", H5::PredType::NATIVE_DOUBLE, scalar_space);
-            ds.write(&omega, H5::PredType::NATIVE_DOUBLE);
+            ds = params_group.createDataSet("pulse_freq", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&pulse_freq, H5::PredType::NATIVE_DOUBLE);
             
-            ds = params_group.createDataSet("theta", H5::PredType::NATIVE_DOUBLE, scalar_space);
-            ds.write(&theta, H5::PredType::NATIVE_DOUBLE);
+            ds = params_group.createDataSet("polarization", H5::PredType::NATIVE_DOUBLE, scalar_space);
+            ds.write(&polarization, H5::PredType::NATIVE_DOUBLE);
             
             ds = params_group.createDataSet("E_ground", H5::PredType::NATIVE_DOUBLE, scalar_space);
             ds.write(&E_ground, H5::PredType::NATIVE_DOUBLE);
@@ -1393,7 +1395,8 @@ void PhononLattice::pump_probe_spectroscopy(
 }
 
 void PhononLattice::pump_probe_spectroscopy_mpi(
-    double E0, double sigma, double omega, double theta,
+    double polarization,
+    double pulse_amp, double pulse_width, double pulse_freq,
     double tau_start, double tau_end, double tau_step,
     double T_start, double T_end, double T_step,
     const string& dir_name, const string& method) {
@@ -1413,9 +1416,9 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         cout << "==========================================" << endl;
         cout << "MPI ranks: " << mpi_size << endl;
         cout << "Pulse parameters:" << endl;
-        cout << "  Amplitude: " << E0 << endl;
-        cout << "  Width: " << sigma << endl;
-        cout << "  Frequency: " << omega << endl;
+        cout << "  Amplitude: " << pulse_amp << endl;
+        cout << "  Width: " << pulse_width << endl;
+        cout << "  Frequency: " << pulse_freq << endl;
         cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
         cout << "Total delay points: " << tau_steps << endl;
         cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
@@ -1438,7 +1441,8 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
     MagTrajectory M0_trajectory;
     if (rank == 0) {
         cout << "\n[2/4] Computing reference trajectory (M0)..." << endl;
-        M0_trajectory = single_pulse_drive(0.0, E0, sigma, omega, theta,
+        M0_trajectory = single_pulse_drive(polarization, 0.0,
+                                           pulse_amp, pulse_width, pulse_freq,
                                            T_start, T_end, T_step, method);
         spins = ground_state;
         phonons = ground_phonons;
@@ -1477,14 +1481,15 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         // M1: Probe only
         spins = ground_state;
         phonons = ground_phonons;
-        my_M1_trajectories[i] = single_pulse_drive(current_tau, E0, sigma, omega, theta,
+        my_M1_trajectories[i] = single_pulse_drive(polarization, current_tau,
+                                                   pulse_amp, pulse_width, pulse_freq,
                                                    T_start, T_end, T_step, method);
         
         // M01: Pump + Probe
         spins = ground_state;
         phonons = ground_phonons;
-        my_M01_trajectories[i] = double_pulse_drive(0.0, current_tau,
-                                                    E0, E0, sigma, sigma, omega, omega, theta, theta,
+        my_M01_trajectories[i] = double_pulse_drive(polarization, 0.0, polarization, current_tau,
+                                                    pulse_amp, pulse_width, pulse_freq,
                                                     T_start, T_end, T_step, method);
     }
     
@@ -1566,14 +1571,14 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                 hsize_t dims[1] = {1};
                 H5::DataSpace scalar_space(1, dims);
                 
-                H5::DataSet ds = params_group.createDataSet("E0", H5::PredType::NATIVE_DOUBLE, scalar_space);
-                ds.write(&E0, H5::PredType::NATIVE_DOUBLE);
+                H5::DataSet ds = params_group.createDataSet("pulse_amp", H5::PredType::NATIVE_DOUBLE, scalar_space);
+                ds.write(&pulse_amp, H5::PredType::NATIVE_DOUBLE);
                 
-                ds = params_group.createDataSet("sigma", H5::PredType::NATIVE_DOUBLE, scalar_space);
-                ds.write(&sigma, H5::PredType::NATIVE_DOUBLE);
+                ds = params_group.createDataSet("pulse_width", H5::PredType::NATIVE_DOUBLE, scalar_space);
+                ds.write(&pulse_width, H5::PredType::NATIVE_DOUBLE);
                 
-                ds = params_group.createDataSet("omega", H5::PredType::NATIVE_DOUBLE, scalar_space);
-                ds.write(&omega, H5::PredType::NATIVE_DOUBLE);
+                ds = params_group.createDataSet("pulse_freq", H5::PredType::NATIVE_DOUBLE, scalar_space);
+                ds.write(&pulse_freq, H5::PredType::NATIVE_DOUBLE);
             }
             
             // Write tau values
