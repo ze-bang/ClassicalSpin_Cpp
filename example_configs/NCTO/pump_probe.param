@@ -15,7 +15,7 @@
 system = NCTO
 
 # Lattice dimensions (honeycomb, 2D)
-lattice_size = 24,24,1
+lattice_size = 8,8,1
 
 # Simulation type
 simulation_mode = pump_probe
@@ -62,16 +62,16 @@ lambda_R = 0.0           # A1 mode coupling
 
 # E1 mode (IR-active doublet)
 omega_E = 8            # E1 frequency (meV or THz)
-gamma_E = 0.5            # E1 damping
+gamma_E = 1            # E1 damping
 lambda_E = 0.01          # Quartic stabilization
 
 # A1 mode (Raman singlet)
 omega_A = 16            # A1 frequency
-gamma_A = 0.1            # A1 damping
+gamma_A = 0.0            # A1 damping
 lambda_A = 0.01          # Quartic stabilization
 
 # Three-phonon coupling (ionic Raman mechanism)
-g3 = 0.2                 # Cubic coupling: g3 * Q_R * (Qx² + Qy²)
+g3 = 0.5                 # Cubic coupling: g3 * Q_R * (Qx² + Qy²)
 
 # Effective charge for THz coupling: H_drive = -Z* [Ex Qx + Ey Qy]
 Z_star = 1.0
@@ -114,11 +114,11 @@ alpha_gilbert = 0.01
 
 # Temperature sweep (simulated annealing)
 T_start = 10.0
-T_end = 0.001
+T_end = 0.01
+T_zero = true
 annealing_steps = 50000
-cooling_rate = 0.95
+cooling_rate = 0.9
 overrelaxation_rate = 5
-initial_spin_config = NCTO_sa/sample_0/spins.txt
 
 # ============================================
 # INITIALIZATION

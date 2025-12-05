@@ -970,14 +970,7 @@ void PhononLattice::simulated_annealing(
     // T=0 deterministic sweeps if requested
     if (T_zero && n_deterministics > 0) {
         cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
-        for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
-            deterministic_sweep(1);
-            
-            if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
-                cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
-                     << ", E/N=" << energy_density() << endl;
-            }
-        }
+        deterministic_sweep(n_deterministics);
         cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
         
         // Save final configuration after T=0 sweeps
@@ -1091,6 +1084,51 @@ bool PhononLattice::relax_phonons(double tol, size_t max_iter, double damping) {
     cout << "  Equilibrium phonons: Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
     cout << "  |Q_E| = " << std::sqrt(Qx*Qx + Qy*Qy) << endl;
     return true;
+}
+
+bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_per_iter) {
+    cout << "Joint spin-phonon relaxation to find true steady state..." << endl;
+    
+    double prev_energy = total_energy();
+    double prev_Q_E = E1_amplitude();
+    
+    for (size_t iter = 0; iter < max_iter; ++iter) {
+        // Step 1: Relax phonons for current spin configuration
+        relax_phonons(1e-10, 1000, 1.0);
+        
+        // Step 2: Relax spins for current phonon configuration
+        // (deterministic sweeps align spins with local field, which includes phonon terms)
+        for (size_t s = 0; s < spin_sweeps_per_iter; ++s) {
+            deterministic_sweep(1);
+        }
+        
+        // Check convergence
+        double curr_energy = total_energy();
+        double curr_Q_E = E1_amplitude();
+        
+        double dE = std::abs(curr_energy - prev_energy);
+        double dQ = std::abs(curr_Q_E - prev_Q_E);
+        
+        if (iter % 10 == 0 || (dE < tol && dQ < tol)) {
+            cout << "  Joint relax iter " << iter 
+                 << ": E=" << curr_energy 
+                 << ", |Q_E|=" << curr_Q_E
+                 << ", dE=" << dE 
+                 << ", dQ=" << dQ << endl;
+        }
+        
+        if (dE < tol && dQ < tol) {
+            cout << "  Joint relaxation converged in " << iter << " iterations!" << endl;
+            cout << "  Final: E=" << curr_energy << ", |Q_E|=" << curr_Q_E << endl;
+            return true;
+        }
+        
+        prev_energy = curr_energy;
+        prev_Q_E = curr_Q_E;
+    }
+    
+    cout << "  WARNING: Joint relaxation did not fully converge after " << max_iter << " iterations" << endl;
+    return false;
 }
 
 // ============================================================

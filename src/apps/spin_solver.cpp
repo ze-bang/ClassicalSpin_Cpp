@@ -897,11 +897,11 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
         }
         
         // Relax phonons to equilibrium for the current spin configuration
-        // This finds the steady state Q values before time evolution
+        // This finds the joint spin-phonon equilibrium before time evolution
         if (rank == 0) {
-            cout << "Relaxing phonons to steady state..." << endl;
+            cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
         }
-        lattice.relax_phonons();
+        lattice.relax_joint();
         
         // Save initial spin configuration before time evolution
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
@@ -983,11 +983,11 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
             lattice.load_spin_config(config.initial_spin_config);
         }
         
-        // Relax phonons to equilibrium for the current spin configuration
+        // Relax spins and phonons to joint equilibrium
         if (rank == 0) {
-            cout << "Relaxing phonons to steady state..." << endl;
+            cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
         }
-        lattice.relax_phonons();
+        lattice.relax_joint();
         
         // Save initial configuration
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
@@ -1082,11 +1082,11 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
             lattice.load_spin_config(config.initial_spin_config);
         }
         
-        // Relax phonons to equilibrium for the current spin configuration
+        // Relax spins and phonons to joint equilibrium before 2DCS
         if (rank == 0) {
-            cout << "Relaxing phonons to steady state before 2DCS..." << endl;
+            cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
         }
-        lattice.relax_phonons();
+        lattice.relax_joint();
         
         // Run 2DCS workflow
         if (size > 1) {

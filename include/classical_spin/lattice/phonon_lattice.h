@@ -725,6 +725,23 @@ public:
      */
     bool relax_phonons(double tol = 1e-8, size_t max_iter = 10000, double damping = 1.0);
     
+    /**
+     * Joint spin-phonon relaxation to find true steady state.
+     * 
+     * Iterates between:
+     * 1. Relaxing phonons to equilibrium for current spin configuration
+     * 2. Relaxing spins (deterministic sweeps) for current phonon configuration
+     * 
+     * This finds the self-consistent equilibrium where both spins and phonons
+     * are stationary. Required for proper energy conservation in dynamics.
+     * 
+     * @param tol                   Convergence tolerance for energy and Q changes
+     * @param max_iter              Maximum joint relaxation iterations
+     * @param spin_sweeps_per_iter  Number of deterministic spin sweeps per iteration
+     * @return true if converged, false if max_iter reached
+     */
+    bool relax_joint(double tol = 1e-6, size_t max_iter = 100, size_t spin_sweeps_per_iter = 10);
+    
     // ============================================================
     // SINGLE/DOUBLE PULSE DRIVE (for 2DCS)
     // ============================================================
