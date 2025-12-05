@@ -1958,15 +1958,21 @@ public:
      * Convert flat state vector to spin configurations
      */
     void state_to_spins(const ODEState& state, SpinConfigSU2& spins2, SpinConfigSU3& spins3) const {
+        // Resize output vectors
+        spins2.resize(lattice_size_SU2);
+        spins3.resize(lattice_size_SU3);
+        
         size_t idx = 0;
         // Unpack SU(2) spins
         for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            spins2[i] = SpinVector(spin_dim_SU2);
             for (size_t j = 0; j < spin_dim_SU2; ++j) {
                 spins2[i](j) = state[idx++];
             }
         }
         // Unpack SU(3) spins
         for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            spins3[i] = SpinVector(spin_dim_SU3);
             for (size_t j = 0; j < spin_dim_SU3; ++j) {
                 spins3[i](j) = state[idx++];
             }

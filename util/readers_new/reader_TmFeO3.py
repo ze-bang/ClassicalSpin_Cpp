@@ -749,11 +749,6 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         tau_values = f['/tau_scan/tau_values'][:]
         tau_step = len(tau_values)
         
-        # Print metadata
-        print(f"  Loaded HDF5: {hdf5_path}")
-        print(f"    Time steps: {len(times)}, t_range: [{times[0]:.4f}, {times[-1]:.4f}]")
-        print(f"    Tau values: {tau_step}, tau_range: [{tau_values[0]:.4f}, {tau_values[-1]:.4f}]")
-        
         # Print pulse and lattice metadata if available
         if '/metadata' in f:
             metadata_grp = f['/metadata']
