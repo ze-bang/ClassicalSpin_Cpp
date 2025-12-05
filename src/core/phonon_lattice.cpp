@@ -993,6 +993,107 @@ void PhononLattice::simulated_annealing(
 }
 
 // ============================================================
+// PHONON RELAXATION
+// ============================================================
+
+bool PhononLattice::relax_phonons(double tol, size_t max_iter, double damping) {
+    cout << "Relaxing phonons to equilibrium for current spin configuration..." << endl;
+    
+    // Compute spin-phonon coupling derivatives (fixed for current spin config)
+    double dH_dQx_spin = dH_dQx();
+    double dH_dQy_spin = dH_dQy();
+    double dH_dQR_spin = dH_dQR();
+    
+    cout << "  Spin-phonon forces: dH/dQx=" << dH_dQx_spin 
+         << ", dH/dQy=" << dH_dQy_spin 
+         << ", dH/dQR=" << dH_dQR_spin << endl;
+    
+    double omega_E_sq = phonon_params.omega_E * phonon_params.omega_E;
+    double omega_A_sq = phonon_params.omega_A * phonon_params.omega_A;
+    double lambda_E = phonon_params.lambda_E;
+    double lambda_A = phonon_params.lambda_A;
+    double g3 = phonon_params.g3;
+    
+    // For the case without quartic terms and small g3, we can solve analytically:
+    // At equilibrium: omega_E^2 * Qx + dH_sp/dQx = 0
+    //                 omega_E^2 * Qy + dH_sp/dQy = 0
+    //                 omega_A^2 * QR + g3*(Qx^2+Qy^2) + dH_sp/dQR = 0
+    
+    // Start with the linear approximation (ignoring quartic and g3 coupling)
+    double Qx = -dH_dQx_spin / omega_E_sq;
+    double Qy = -dH_dQy_spin / omega_E_sq;
+    double QR = -dH_dQR_spin / omega_A_sq;
+    
+    // If g3 is non-zero, iterate to include coupling
+    // QR_eq = -(g3 * (Qx^2 + Qy^2) + dH_dQR_spin) / omega_A^2
+    double Q_E_sq = Qx*Qx + Qy*Qy;
+    QR = -(g3 * Q_E_sq + dH_dQR_spin) / omega_A_sq;
+    
+    // For quartic terms, use Newton-Raphson iteration
+    if (lambda_E > 1e-10 || lambda_A > 1e-10 || std::abs(g3) > 1e-10) {
+        cout << "  Using iterative solver for nonlinear terms..." << endl;
+        
+        for (size_t iter = 0; iter < max_iter; ++iter) {
+            Q_E_sq = Qx*Qx + Qy*Qy;
+            
+            // Gradient (residual): should be zero at equilibrium
+            // F_x = omega_E^2 * Qx + lambda_E * Q_E^2 * Qx + 2*g3*Qx*QR + dH_dQx_spin
+            double F_x = omega_E_sq * Qx + lambda_E * Q_E_sq * Qx 
+                       + 2.0 * g3 * Qx * QR + dH_dQx_spin;
+            double F_y = omega_E_sq * Qy + lambda_E * Q_E_sq * Qy 
+                       + 2.0 * g3 * Qy * QR + dH_dQy_spin;
+            double F_R = omega_A_sq * QR + lambda_A * QR * QR * QR 
+                       + g3 * Q_E_sq + dH_dQR_spin;
+            
+            double residual = std::sqrt(F_x*F_x + F_y*F_y + F_R*F_R);
+            
+            if (residual < tol) {
+                phonons.Q_x = Qx;
+                phonons.Q_y = Qy;
+                phonons.Q_R = QR;
+                phonons.V_x = 0.0;
+                phonons.V_y = 0.0;
+                phonons.V_R = 0.0;
+                
+                cout << "  Phonon relaxation converged in " << iter << " iterations!" << endl;
+                cout << "  Equilibrium: Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
+                cout << "  |Q_E| = " << std::sqrt(Qx*Qx + Qy*Qy) << endl;
+                return true;
+            }
+            
+            // Jacobian diagonal elements (approximate, ignoring off-diagonal)
+            double J_xx = omega_E_sq + lambda_E * (3.0*Qx*Qx + Qy*Qy) + 2.0*g3*QR;
+            double J_yy = omega_E_sq + lambda_E * (Qx*Qx + 3.0*Qy*Qy) + 2.0*g3*QR;
+            double J_RR = omega_A_sq + 3.0*lambda_A*QR*QR;
+            
+            // Damped Newton step (diagonal approximation)
+            double step_size = damping;
+            if (J_xx > 1e-10) Qx -= step_size * F_x / J_xx;
+            if (J_yy > 1e-10) Qy -= step_size * F_y / J_yy;
+            if (J_RR > 1e-10) QR -= step_size * F_R / J_RR;
+            
+            if (iter % 100 == 0 && iter > 0) {
+                cout << "  iter=" << iter << ", |F|=" << residual 
+                     << ", Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
+            }
+        }
+        
+        cout << "  WARNING: Phonon relaxation did not fully converge after " << max_iter << " iterations!" << endl;
+    }
+    
+    phonons.Q_x = Qx;
+    phonons.Q_y = Qy;
+    phonons.Q_R = QR;
+    phonons.V_x = 0.0;
+    phonons.V_y = 0.0;
+    phonons.V_R = 0.0;
+    
+    cout << "  Equilibrium phonons: Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
+    cout << "  |Q_E| = " << std::sqrt(Qx*Qx + Qy*Qy) << endl;
+    return true;
+}
+
+// ============================================================
 // DETERMINISTIC SWEEP
 // ============================================================
 

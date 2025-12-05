@@ -96,7 +96,6 @@ probe_width = 1.0
 tau_start = -100.0          # Starting delay
 tau_end = 100.0           # Final delay
 tau_step = 0.1           # Delay increment
-# Total delay points: (tau_end - tau_start) / tau_step + 1 = 26
 
 # ============================================
 # TIME EVOLUTION (for each pulse sequence)

@@ -704,6 +704,27 @@ public:
      */
     void deterministic_sweep(size_t num_sweeps);
     
+    /**
+     * Relax phonon coordinates to equilibrium for current spin configuration.
+     * 
+     * Finds the static equilibrium Q values that minimize the total energy
+     * for fixed spins. This should be called after simulated annealing and
+     * before molecular dynamics to ensure a proper steady state.
+     * 
+     * The equilibrium satisfies:
+     *   ω_E² Qx + λ_E (Qx²+Qy²) Qx + 2 g3 Qx Q_R + ∂H_sp/∂Qx = 0
+     *   ω_E² Qy + λ_E (Qx²+Qy²) Qy + 2 g3 Qy Q_R + ∂H_sp/∂Qy = 0  
+     *   ω_A² Q_R + λ_A Q_R³ + g3 (Qx²+Qy²) + ∂H_sp/∂Q_R = 0
+     * 
+     * Uses damped dynamics to find equilibrium (overdamped relaxation).
+     * 
+     * @param tol         Convergence tolerance for |dQ/dt|
+     * @param max_iter    Maximum relaxation iterations
+     * @param damping     Damping coefficient for overdamped dynamics
+     * @return true if converged, false if max_iter reached
+     */
+    bool relax_phonons(double tol = 1e-8, size_t max_iter = 10000, double damping = 1.0);
+    
     // ============================================================
     // SINGLE/DOUBLE PULSE DRIVE (for 2DCS)
     // ============================================================

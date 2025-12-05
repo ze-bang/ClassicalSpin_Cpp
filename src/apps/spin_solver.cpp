@@ -896,6 +896,13 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
             lattice.load_spin_config(config.initial_spin_config);
         }
         
+        // Relax phonons to equilibrium for the current spin configuration
+        // This finds the steady state Q values before time evolution
+        if (rank == 0) {
+            cout << "Relaxing phonons to steady state..." << endl;
+        }
+        lattice.relax_phonons();
+        
         // Save initial spin configuration before time evolution
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
         
@@ -975,6 +982,12 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
+        
+        // Relax phonons to equilibrium for the current spin configuration
+        if (rank == 0) {
+            cout << "Relaxing phonons to steady state..." << endl;
+        }
+        lattice.relax_phonons();
         
         // Save initial configuration
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
@@ -1068,6 +1081,12 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
+        
+        // Relax phonons to equilibrium for the current spin configuration
+        if (rank == 0) {
+            cout << "Relaxing phonons to steady state before 2DCS..." << endl;
+        }
+        lattice.relax_phonons();
         
         // Run 2DCS workflow
         if (size > 1) {
