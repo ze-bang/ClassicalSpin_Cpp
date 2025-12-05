@@ -757,18 +757,18 @@ void build_phonon_params(const SpinConfig& config,
                          SpinPhononCouplingParams& sp_params,
                          PhononParams& ph_params,
                          DriveParams& dr_params) {
-    // Kitaev-Heisenberg-Γ-Γ' spin interaction parameters
-    sp_params.J = config.get_param("J", 0.0);
-    sp_params.K = config.get_param("K", -1.0);
-    sp_params.Gamma = config.get_param("Gamma", 0.25);
-    sp_params.Gammap = config.get_param("Gammap", -0.02);
+    // Kitaev-Heisenberg-Γ-Γ' spin interaction parameters (Songvilay defaults)
+    sp_params.J = config.get_param("J", -0.1);
+    sp_params.K = config.get_param("K", -9.0);
+    sp_params.Gamma = config.get_param("Gamma", 1.8);
+    sp_params.Gammap = config.get_param("Gammap", 0.3);
     
     // 2nd neighbor (J2) - isotropic Heisenberg, sublattice-dependent
-    sp_params.J2_A = config.get_param("J2_A", 0.0);
-    sp_params.J2_B = config.get_param("J2_B", 0.0);
+    sp_params.J2_A = config.get_param("J2_A", 0.3);
+    sp_params.J2_B = config.get_param("J2_B", 0.3);
     
     // 3rd neighbor (J3) - isotropic Heisenberg
-    sp_params.J3 = config.get_param("J3", 0.0);
+    sp_params.J3 = config.get_param("J3", 0.9);
     
     // Spin-phonon coupling strengths
     sp_params.lambda_xy = config.get_param("lambda_xy", 0.0);

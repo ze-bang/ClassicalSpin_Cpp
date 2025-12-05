@@ -32,13 +32,13 @@ num_trials = 1
 
 # Kitaev-Heisenberg-Gamma model (at Q_R = 0)
 # H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α)]
-J = 0.0                  # Heisenberg coupling (meV)
-K = -1.0                 # Kitaev coupling (meV, ferromagnetic)
-Gamma = 0.25             # Gamma coupling (meV)
-Gammap = -0.02           # Gamma' coupling (meV)
-J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
-J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
-J3 = 0.0                 # Third-neighbor Heisenberg (meV)
+J = -0.1                 # Heisenberg coupling (meV)
+K = -9.0                 # Kitaev coupling (meV, ferromagnetic)
+Gamma = 1.8              # Gamma coupling (meV)
+Gammap = 0.3             # Gamma' coupling (meV)
+J2_A = 0.3               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0.3               # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0.9                 # Third-neighbor Heisenberg (meV)
 
 # External magnetic field
 field_strength = 0.0

@@ -33,13 +33,13 @@ num_trials = 1
 # For γ-bond (γ = x, y, z):
 # J_γ = J·I + K·diag_γ + Γ·off-diag + Γ'·cross-terms
 
-J = 0.0                  # Heisenberg (meV)
-K = -1.0                 # Kitaev (FM, meV)
-Gamma = 0.25             # Γ (meV)
-Gammap = -0.02           # Γ' (meV)
-J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
-J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
-J3 = 0.0                 # 3rd NN Heisenberg (meV)
+J = -0.1                 # Heisenberg (meV)
+K = -9.0                 # Kitaev (FM, meV)
+Gamma = 1.8              # Γ (meV)
+Gammap = 0.3             # Γ' (meV)
+J2_A = 0.3               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0.3               # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0.9                 # 3rd NN Heisenberg (meV)
 
 # External magnetic field
 field_strength = 0.0

@@ -30,15 +30,15 @@ output_dir = NCTO_2dcs
 num_trials = 1
 
 # ============================================
-# SPIN HAMILTONIAN: Kitaev-Heisenberg-Γ-Γ'
+# SPIN HAMILTONIAN: Kitaev-Heisenberg-Γ-Γ' (Songvilay)
 # ============================================
-J = 0.0                  # Heisenberg
-K = -1.0                 # Kitaev (FM)
-Gamma = 0.25             # Γ
-Gammap = -0.02           # Γ'
-J2_A = 0.0               # 2nd NN Heisenberg (sublattice A)
-J2_B = 0.0               # 2nd NN Heisenberg (sublattice B)
-J3 = 0.0                 # 3rd NN Heisenberg
+J = -0.1                 # Heisenberg
+K = -9.0                 # Kitaev (FM)
+Gamma = 1.8              # Γ
+Gammap = 0.3             # Γ'
+J2_A = 0.3               # 2nd NN Heisenberg (sublattice A)
+J2_B = 0.3               # 2nd NN Heisenberg (sublattice B)
+J3 = 0.9                 # 3rd NN Heisenberg
 
 # External field
 field_strength = 0.0

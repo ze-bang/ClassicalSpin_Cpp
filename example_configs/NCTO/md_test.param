@@ -23,14 +23,14 @@ num_trials = 1
 # SPIN PARAMETERS
 # ============================================
 
-# Kitaev model
-J = 0.0
-K = -1.0
-Gamma = 0.25
-Gammap = 0.0
-J2_A = 0.0               # 2nd NN Heisenberg (sublattice A)
-J2_B = 0.0               # 2nd NN Heisenberg (sublattice B)
-J3 = 0.0
+# Kitaev model (Songvilay parameters)
+J = -0.1
+K = -9.0
+Gamma = 1.8
+Gammap = 0.3
+J2_A = 0.3               # 2nd NN Heisenberg (sublattice A)
+J2_B = 0.3               # 2nd NN Heisenberg (sublattice B)
+J3 = 0.9
 
 # No external field
 field_strength = 0.0

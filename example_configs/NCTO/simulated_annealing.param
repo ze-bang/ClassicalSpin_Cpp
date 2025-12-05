@@ -35,18 +35,18 @@ num_trials = 1
 #                        + Γ'(S_i^γ S_j^α + S_i^γ S_j^β + S_i^α S_j^γ + S_i^β S_j^γ)]
 #        + J3 Σ_<<ij>> S_i·S_j
 
-# NN exchange (meV units)
-J = 0.0                  # Heisenberg (isotropic)
-K = -1.0                 # Kitaev (ferromagnetic K < 0)
-Gamma = 0.25             # Γ coupling
-Gammap = -0.02           # Γ' coupling
+# NN exchange (Songvilay parameters, meV units)
+J = -0.1                 # Heisenberg (isotropic)
+K = -9.0                 # Kitaev (ferromagnetic K < 0)
+Gamma = 1.8              # Γ coupling
+Gammap = 0.3             # Γ' coupling
 
 # 2nd NN Heisenberg (sublattice-dependent)
-J2_A = 0.0               # 2nd NN coupling on sublattice A
-J2_B = 0.0               # 2nd NN coupling on sublattice B
+J2_A = 0.3               # 2nd NN coupling on sublattice A
+J2_B = 0.3               # 2nd NN coupling on sublattice B
 
 # 3rd NN Heisenberg
-J3 = 0.0
+J3 = 0.9
 
 # External magnetic field
 field_strength = 0.0

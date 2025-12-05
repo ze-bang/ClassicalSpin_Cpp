@@ -150,18 +150,18 @@ struct PhononParams {
  * + λ_R  * Q_R * (Si_x*Sj_x + Si_y*Sj_y + Si_z*Sj_z)
  */
 struct SpinPhononCouplingParams {
-    // Kitaev-Heisenberg-Γ-Γ' parameters
-    double J = 0.0;        // Heisenberg coupling
-    double K = -1.0;       // Kitaev coupling
-    double Gamma = 0.25;   // Γ (off-diagonal symmetric) 
-    double Gammap = -0.02; // Γ' (off-diagonal asymmetric)
+    // Kitaev-Heisenberg-Γ-Γ' parameters (Songvilay defaults)
+    double J = -0.1;       // Heisenberg coupling
+    double K = -9.0;       // Kitaev coupling
+    double Gamma = 1.8;    // Γ (off-diagonal symmetric) 
+    double Gammap = 0.3;   // Γ' (off-diagonal asymmetric)
     
     // 2nd NN exchange (isotropic Heisenberg, sublattice-dependent)
-    double J2_A = 0.0;     // 2nd NN coupling on sublattice A
-    double J2_B = 0.0;     // 2nd NN coupling on sublattice B
+    double J2_A = 0.3;     // 2nd NN coupling on sublattice A
+    double J2_B = 0.3;     // 2nd NN coupling on sublattice B
     
     // 3rd NN exchange (isotropic Heisenberg)
-    double J3 = 0.0;
+    double J3 = 0.9;
     
     // Spin-phonon coupling strengths
     double lambda_xy = 0.0;  // Coupling for E1 mode (Qx, Qy)
