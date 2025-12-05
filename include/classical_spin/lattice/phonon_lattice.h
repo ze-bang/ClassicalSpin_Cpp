@@ -608,12 +608,31 @@ public:
     
     /**
      * Simulated annealing for spin subsystem
+     * 
+     * @param T_start         Starting temperature
+     * @param T_end           Final temperature
+     * @param n_steps         Number of MC sweeps per temperature
+     * @param overrelax_rate  Overrelaxation frequency (0 = disabled)
+     * @param cooling_rate    Temperature cooling factor (T *= cooling_rate each step)
+     * @param out_dir         Output directory for saving configs
+     * @param save_observables  Whether to save observables to HDF5
+     * @param T_zero          Whether to perform deterministic sweeps at T=0
+     * @param n_deterministics Number of deterministic sweeps at T=0
      */
     void simulated_annealing(double T_start, double T_end, size_t n_steps,
                             size_t overrelax_rate = 0,
                             double cooling_rate = 0.9,
                             string out_dir = "",
-                            bool save_observables = true);
+                            bool save_observables = true,
+                            bool T_zero = false,
+                            size_t n_deterministics = 1000);
+    
+    /**
+     * Deterministic T=0 sweep: align each spin with its local field
+     * 
+     * @param num_sweeps  Number of sweeps to perform
+     */
+    void deterministic_sweep(size_t num_sweeps);
     
     // ============================================================
     // SINGLE/DOUBLE PULSE DRIVE (for 2DCS)

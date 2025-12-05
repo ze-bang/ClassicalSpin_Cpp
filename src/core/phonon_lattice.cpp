@@ -816,10 +816,11 @@ void PhononLattice::molecular_dynamics(
 void PhononLattice::simulated_annealing(
     double T_start, double T_end, size_t n_steps,
     size_t overrelax_rate, double cooling_rate,
-    string out_dir, bool save_observables) 
+    string out_dir, bool save_observables,
+    bool T_zero, size_t n_deterministics) 
 {
-    cout << "Running PhononLattice simulated annealing (spin subsystem only)..." << endl;
-    cout << "T: " << T_start << " → " << T_end << ", steps: " << n_steps << endl;
+    cout << "Starting PhononLattice simulated annealing (spin subsystem only)..." << endl;
+    cout << "T: " << T_start << " → " << T_end << ", sweeps per temp: " << n_steps << endl;
     
     // Keep phonons at equilibrium
     phonons = PhononState();
@@ -838,73 +839,115 @@ void PhononLattice::simulated_annealing(
 #endif
     
     double T = T_start;
-    size_t accepted = 0;
-    size_t total_moves = 0;
+    size_t temp_step = 0;
     
-    for (size_t step = 0; step < n_steps; ++step) {
-        // Metropolis sweep
-        for (size_t i = 0; i < lattice_size; ++i) {
-            Eigen::Vector3d old_spin = spins[i];
-            
-            // Compute old local energy
-            double E_old = -old_spin.dot(field[i]);
-            for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-                size_t j = nn_partners[i][n];
-                E_old += old_spin.dot(nn_interaction[i][n] * spins[j]);
-            }
-            for (size_t n = 0; n < j3_partners[i].size(); ++n) {
-                size_t j = j3_partners[i][n];
-                E_old += old_spin.dot(j3_interaction[i][n] * spins[j]);
-            }
-            
-            // Propose new spin
-            Eigen::Vector3d new_spin = gen_random_spin();
-            
-            // Compute new local energy
-            double E_new = -new_spin.dot(field[i]);
-            for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-                size_t j = nn_partners[i][n];
-                E_new += new_spin.dot(nn_interaction[i][n] * spins[j]);
-            }
-            for (size_t n = 0; n < j3_partners[i].size(); ++n) {
-                size_t j = j3_partners[i][n];
-                E_new += new_spin.dot(j3_interaction[i][n] * spins[j]);
-            }
-            
-            // Metropolis accept/reject
-            double dE = E_new - E_old;
-            if (dE < 0 || random_double_lehman(0, 1) < std::exp(-dE / T)) {
-                spins[i] = new_spin;
-                accepted++;
-            }
-            total_moves++;
-        }
+    while (T > T_end) {
+        size_t accepted = 0;
+        size_t total_moves = 0;
         
-        // Overrelaxation
-        if (overrelax_rate > 0 && step % overrelax_rate == 0) {
+        // Perform n_steps sweeps at this temperature
+        for (size_t step = 0; step < n_steps; ++step) {
+            // Metropolis sweep
             for (size_t i = 0; i < lattice_size; ++i) {
-                Eigen::Vector3d H = get_local_field(i);
-                if (H.norm() > 1e-10) {
-                    H.normalize();
-                    spins[i] = 2.0 * H.dot(spins[i]) * H - spins[i];
-                    spins[i] = spins[i].normalized() * spin_length;
+                Eigen::Vector3d old_spin = spins[i];
+                
+                // Compute old local energy
+                double E_old = -old_spin.dot(field[i]);
+                for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+                    size_t j = nn_partners[i][n];
+                    E_old += old_spin.dot(nn_interaction[i][n] * spins[j]);
+                }
+                for (size_t n = 0; n < j2_partners[i].size(); ++n) {
+                    size_t j = j2_partners[i][n];
+                    E_old += old_spin.dot(j2_interaction[i][n] * spins[j]);
+                }
+                for (size_t n = 0; n < j3_partners[i].size(); ++n) {
+                    size_t j = j3_partners[i][n];
+                    E_old += old_spin.dot(j3_interaction[i][n] * spins[j]);
+                }
+                
+                // Propose new spin
+                Eigen::Vector3d new_spin = gen_random_spin();
+                
+                // Compute new local energy
+                double E_new = -new_spin.dot(field[i]);
+                for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+                    size_t j = nn_partners[i][n];
+                    E_new += new_spin.dot(nn_interaction[i][n] * spins[j]);
+                }
+                for (size_t n = 0; n < j2_partners[i].size(); ++n) {
+                    size_t j = j2_partners[i][n];
+                    E_new += new_spin.dot(j2_interaction[i][n] * spins[j]);
+                }
+                for (size_t n = 0; n < j3_partners[i].size(); ++n) {
+                    size_t j = j3_partners[i][n];
+                    E_new += new_spin.dot(j3_interaction[i][n] * spins[j]);
+                }
+                
+                // Metropolis accept/reject
+                double dE = E_new - E_old;
+                if (dE < 0 || random_double_lehman(0, 1) < std::exp(-dE / T)) {
+                    spins[i] = new_spin;
+                    accepted++;
+                }
+                total_moves++;
+            }
+            
+            // Overrelaxation
+            if (overrelax_rate > 0 && step % overrelax_rate == 0) {
+                for (size_t i = 0; i < lattice_size; ++i) {
+                    Eigen::Vector3d H = get_local_field(i);
+                    if (H.norm() > 1e-10) {
+                        H.normalize();
+                        spins[i] = 2.0 * H.dot(spins[i]) * H - spins[i];
+                        spins[i] = spins[i].normalized() * spin_length;
+                    }
                 }
             }
         }
         
+        // Calculate acceptance rate
+        double acceptance = (overrelax_rate > 0) ? 
+            double(accepted) / double(n_steps) * overrelax_rate : 
+            double(accepted) / double(total_moves);
+        
+        // Progress report every 10 temperature steps or near the end
+        if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+            double E = energy_density();
+            Eigen::Vector3d M = magnetization();
+            Eigen::Vector3d M_stag = staggered_magnetization();
+            cout << "T=" << std::scientific << std::setprecision(4) << T 
+                 << ", E/N=" << std::fixed << std::setprecision(6) << E 
+                 << ", acc=" << std::fixed << std::setprecision(4) << acceptance
+                 << ", |M|=" << std::fixed << std::setprecision(4) << M.norm()
+                 << ", |M_stag|=" << std::fixed << std::setprecision(4) << M_stag.norm()
+                 << endl;
+        }
+        
 #ifdef HDF5_ENABLED
-        if (save_observables && step % 100 == 0 && h5file) {
-            steps_data.push_back(static_cast<double>(step));
+        if (save_observables && h5file) {
+            steps_data.push_back(static_cast<double>(temp_step));
             temps_data.push_back(T);
             energies_data.push_back(energy_density());
-            acc_rates_data.push_back(double(accepted) / total_moves);
+            acc_rates_data.push_back(acceptance);
         }
 #endif
         
-        // Cool
+        // Cool down
         T *= cooling_rate;
-        if (T < T_end) T = T_end;
+        ++temp_step;
     }
+    
+    // Final report
+    double E_final = energy_density();
+    Eigen::Vector3d M_final = magnetization();
+    Eigen::Vector3d M_stag_final = staggered_magnetization();
+    cout << "\n=== Simulated Annealing Complete ===" << endl;
+    cout << "Temperature steps: " << temp_step << endl;
+    cout << "Final energy density: " << E_final << endl;
+    cout << "Final magnetization: [" << M_final.transpose() << "], |M|=" << M_final.norm() << endl;
+    cout << "Final staggered M: [" << M_stag_final.transpose() << "], |M_stag|=" << M_stag_final.norm() << endl;
+    cout << "====================================" << endl;
     
 #ifdef HDF5_ENABLED
     if (h5file && !steps_data.empty()) {
@@ -926,7 +969,58 @@ void PhononLattice::simulated_annealing(
     }
 #endif
     
-    cout << "Simulated annealing complete! Final E=" << energy_density() << endl;
+    // Save spin config after annealing (before deterministic sweeps)
+    if (!out_dir.empty()) {
+        save_spin_config(out_dir + "/spins_T=" + std::to_string(T_end) + ".txt");
+    }
+    
+    // T=0 deterministic sweeps if requested
+    if (T_zero && n_deterministics > 0) {
+        cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
+        for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
+            deterministic_sweep(1);
+            
+            if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
+                double E = energy_density();
+                cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
+                     << ", E/N=" << E << endl;
+            }
+        }
+        cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
+        
+        // Save final configuration after T=0 sweeps
+        if (!out_dir.empty()) {
+            save_spin_config(out_dir + "/spins_T=0.txt");
+            cout << "Final spin config saved to " << out_dir << "/spins_T=0.txt" << endl;
+        }
+    } else if (!out_dir.empty()) {
+        // If no T=0 sweeps, just save the final config
+        save_spin_config(out_dir + "/spins_final.txt");
+        cout << "Final spin config saved to " << out_dir << "/spins_final.txt" << endl;
+    }
+}
+
+// ============================================================
+// DETERMINISTIC SWEEP
+// ============================================================
+
+void PhononLattice::deterministic_sweep(size_t num_sweeps) {
+    for (size_t sweep = 0; sweep < num_sweeps; ++sweep) {
+        size_t count = 0;
+        while (count < lattice_size) {
+            size_t i = random_int_lehman(lattice_size);
+            Eigen::Vector3d local_field = get_local_field(i);
+            double norm = local_field.norm();
+            
+            if (norm < 1e-15) {
+                continue;
+            } else {
+                // Align spin antiparallel to local field (minimizes energy)
+                spins[i] = -local_field / norm * spin_length;
+            }
+            count++;
+        }
+    }
 }
 
 // ============================================================

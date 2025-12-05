@@ -14,7 +14,7 @@
 system = NCTO
 
 # Lattice dimensions (honeycomb, 2D)
-lattice_size = 16,16,1
+lattice_size = 24,24,1
 
 # Simulation type
 simulation_mode = SA
@@ -93,6 +93,7 @@ cooling_rate = 0.95      # Geometric cooling factor
 
 # Overrelaxation: perform spin reflection every N sweeps (speeds up)
 overrelaxation_rate = 5
+T_zero = true
 
 # ============================================
 # INITIALIZATION
