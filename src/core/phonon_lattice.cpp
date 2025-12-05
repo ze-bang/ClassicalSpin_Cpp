@@ -129,10 +129,17 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
     SpinMatrix J3_mat = sp_params.get_J3_matrix();
     
     // Build NN interactions on honeycomb
-    // For honeycomb lattice with 2 atoms per unit cell:
-    // - x-bond (type 0): connects (i,j,k,0) to (i,j-1,k,1)
-    // - y-bond (type 1): connects (i,j,k,0) to (i+1,j-1,k,1)  
-    // - z-bond (type 2): connects (i,j,k,0) to (i,j,k,1)
+    // Honeycomb lattice structure:
+    //   - Lattice vectors: a1 = (1, 0, 0), a2 = (0.5, √3/2, 0)
+    //   - Sublattice A at (0, 0, 0), Sublattice B at (0, 1/√3, 0)
+    //   - NN distance: 1/√3 ≈ 0.577  (3 neighbors, A↔B)
+    //   - 2nd NN distance: 1.0        (6 neighbors, A↔A, B↔B)  
+    //   - 3rd NN distance: 2/√3 ≈ 1.155 (3 neighbors, A↔B)
+    //
+    // NN bonds (Kitaev bond types):
+    //   - z-bond (type 2): A(i,j,k) → B(i,j,k)     [same unit cell]
+    //   - x-bond (type 0): A(i,j,k) → B(i,j-1,k)   [offset (0,-1,0)]
+    //   - y-bond (type 1): A(i,j,k) → B(i+1,j-1,k) [offset (1,-1,0)]
     
     for (size_t i = 0; i < dim1; ++i) {
         for (size_t j = 0; j < dim2; ++j) {
@@ -204,15 +211,17 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                 }
                 
                 // 3rd NN interactions (isotropic Heisenberg J3)
-                // On honeycomb, 3rd NN are at distance 2a, connecting same sublattice
+                // On honeycomb, 3rd NN are at distance 2/sqrt(3), connecting OPPOSITE sublattices (A↔B)
+                // 3rd NN offsets from A(i,j,k,0) to B: (+1,-2,1), (-1,0,1), (+1,0,1)
+                // 3rd NN offsets from B(i,j,k,1) to A: (-1,+2,0), (-1,0,0), (+1,0,0)
                 if (std::abs(sp_params.J3) > 1e-12) {
-                    // 3rd NN offsets for sublattice A
-                    vector<std::tuple<int,int,int,size_t>> j3_offsets = {
-                        {1, 0, 0, 0}, {-1, 0, 0, 0}, {0, 1, 0, 0}, {0, -1, 0, 0}, {1, -1, 0, 0}, {-1, 1, 0, 0}
+                    // 3rd NN from sublattice A (site0) to sublattice B
+                    vector<std::tuple<int,int,int>> j3_A_to_B_offsets = {
+                        {1, -2, 0}, {-1, 0, 0}, {1, 0, 0}
                     };
                     
-                    for (const auto& [di, dj, dk, atom] : j3_offsets) {
-                        size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, atom);
+                    for (const auto& [di, dj, dk] : j3_A_to_B_offsets) {
+                        size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, 1);  // Connect to sublattice B
                         // Only add if partner > site0 to avoid double counting
                         if (partner_j3 > site0) {
                             j3_interaction[site0].push_back(J3_mat);
@@ -222,9 +231,13 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                         }
                     }
                     
-                    // 3rd NN for sublattice B (site1)
-                    for (const auto& [di, dj, dk, atom_offset] : j3_offsets) {
-                        size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, 1);
+                    // 3rd NN from sublattice B (site1) to sublattice A
+                    vector<std::tuple<int,int,int>> j3_B_to_A_offsets = {
+                        {-1, 2, 0}, {-1, 0, 0}, {1, 0, 0}
+                    };
+                    
+                    for (const auto& [di, dj, dk] : j3_B_to_A_offsets) {
+                        size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, 0);  // Connect to sublattice A
                         if (partner_j3 > site1) {
                             j3_interaction[site1].push_back(J3_mat);
                             j3_partners[site1].push_back(partner_j3);

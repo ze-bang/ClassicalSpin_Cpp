@@ -15,7 +15,7 @@
 system = NCTO
 
 # Lattice dimensions (honeycomb, 2D)
-lattice_size = 16,16,1
+lattice_size = 24,24,1
 
 # Simulation type
 simulation_mode = pump_probe
@@ -61,12 +61,12 @@ lambda_R = 0.0           # A1 mode coupling
 # Note: Effective masses are set to 1 (absorbed into frequency/coupling definitions)
 
 # E1 mode (IR-active doublet)
-omega_E = 5.0            # E1 frequency (meV or THz)
+omega_E = 8            # E1 frequency (meV or THz)
 gamma_E = 0.5            # E1 damping
 lambda_E = 0.01          # Quartic stabilization
 
 # A1 mode (Raman singlet)
-omega_A = 2.5            # A1 frequency
+omega_A = 16            # A1 frequency
 gamma_A = 0.1            # A1 damping
 lambda_A = 0.01          # Quartic stabilization
 
@@ -82,9 +82,9 @@ Z_star = 1.0
 
 # Pump pulse (THz driving IR mode)
 pump_amplitude = 1.0     # Electric field amplitude
-pump_frequency = 5.0     # Should match omega_E for resonant driving
-pump_time = 50.0         # Pulse center time
-pump_width = 10.0        # Gaussian width (FWHM ~ 2.35 * width)
+pump_frequency = 8.0     # Should match omega_E for resonant driving
+pump_time = 0.0         # Pulse center time
+pump_width = 1.0        # Gaussian width (FWHM ~ 2.35 * width)
 pump_phase = 0.0         # Carrier-envelope phase
 pump_polarization = 0.0  # 0 = x-polarized, π/2 = y-polarized
 
@@ -99,11 +99,11 @@ probe_width = 10.0
 # ============================================
 
 # Time integration
-md_time_start = 0.0
-md_time_end = 500.0
+md_time_start = -300.0
+md_time_end = 300.0
 md_timestep = 0.01
-md_save_interval = 10
-md_integrator = dopri5
+md_save_interval = 1
+md_integrator = rk4
 
 # Gilbert damping for spins (optional)
 alpha_gilbert = 0.01
@@ -118,6 +118,7 @@ T_end = 0.001
 annealing_steps = 50000
 cooling_rate = 0.95
 overrelaxation_rate = 5
+initial_spin_config = NCTO_sa/sample_0/spins.txt
 
 # ============================================
 # INITIALIZATION
