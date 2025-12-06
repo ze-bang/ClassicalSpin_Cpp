@@ -55,6 +55,14 @@
 #include <mpi.h>
 #include <boost/numeric/odeint.hpp>
 
+// Include Boost uBLAS for implicit solvers (rosenbrock4, implicit_euler)
+#include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/odeint/stepper/rosenbrock4.hpp>
+#include <boost/numeric/odeint/stepper/rosenbrock4_controller.hpp>
+#include <boost/numeric/odeint/stepper/rosenbrock4_dense_output.hpp>
+#include <boost/numeric/odeint/stepper/implicit_euler.hpp>
+
 #ifdef HDF5_ENABLED
 #include "classical_spin/io/hdf5_io.h"
 #endif
@@ -789,6 +797,8 @@ private:
      * Generic ODE integrator with support for multiple methods
      * 
      * Available methods:
+     * 
+     * EXPLICIT METHODS (recommended for non-stiff problems):
      * - "euler": Explicit Euler (1st order)
      * - "rk2" or "midpoint": Runge-Kutta 2nd order
      * - "rk4": Classic Runge-Kutta 4th order (fixed step)
@@ -799,6 +809,13 @@ private:
      * - "bulirsch_stoer" or "bs": Bulirsch-Stoer (very high accuracy)
      * - "adams_bashforth" or "ab": Adams-Bashforth 5-step multistep
      * - "adams_moulton" or "am": Adams-Bashforth-Moulton predictor-corrector
+     * 
+     * IMPLICIT METHODS (recommended for stiff problems):
+     * - "rosenbrock4" or "rb4": Rosenbrock 4th order (stiff systems, uses numerical Jacobian)
+     * - "implicit_euler" or "ie": Implicit Euler (1st order, very stable for stiff systems)
+     * 
+     * Note: Implicit methods use numerical Jacobian approximation via finite differences.
+     * They are more stable for stiff problems but computationally more expensive.
      */
     template<typename System, typename Observer>
     void integrate_ode_system(System system_func, ODEState& state,

@@ -759,6 +759,156 @@ void PhononLattice::integrate_ode_system(
         // Adams-Bashforth-Moulton predictor-corrector (higher accuracy multistep)
         odeint::adams_bashforth_moulton<5, ODEState> stepper;
         odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
+    } else if (method == "rosenbrock4" || method == "rb4") {
+        // Rosenbrock 4th order implicit method (good for stiff systems)
+        // Uses numerical Jacobian approximation via finite differences
+        using ublas_state = boost::numeric::ublas::vector<double>;
+        using ublas_matrix = boost::numeric::ublas::matrix<double>;
+        
+        const size_t N = state.size();
+        const double eps_jac = 1e-8;  // Finite difference step for Jacobian
+        
+        // Convert std::vector state to ublas::vector
+        ublas_state ublas_x(N);
+        for (size_t i = 0; i < N; ++i) {
+            ublas_x(i) = state[i];
+        }
+        
+        // Create wrapper for system function that works with ublas types
+        // Must be templated to work with both ublas and std::vector types
+        auto ublas_system = [&system_func, N](const ublas_state& x, ublas_state& dxdt, double t) {
+            ODEState x_vec(N), dxdt_vec(N);
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            system_func(x_vec, dxdt_vec, t);
+            for (size_t i = 0; i < N; ++i) dxdt(i) = dxdt_vec[i];
+        };
+        
+        // Create numerical Jacobian function
+        auto ublas_jacobian = [&system_func, N, eps_jac](const ublas_state& x, ublas_matrix& J, double t, ublas_state& dfdt) {
+            ODEState x_vec(N), dxdt_base(N), dxdt_pert(N);
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            
+            // Compute base derivative
+            system_func(x_vec, dxdt_base, t);
+            
+            // Compute Jacobian columns by finite differences
+            J.resize(N, N);
+            for (size_t j = 0; j < N; ++j) {
+                double x_orig = x_vec[j];
+                double h = eps_jac * std::max(1.0, std::abs(x_orig));
+                x_vec[j] = x_orig + h;
+                system_func(x_vec, dxdt_pert, t);
+                x_vec[j] = x_orig;
+                
+                for (size_t i = 0; i < N; ++i) {
+                    J(i, j) = (dxdt_pert[i] - dxdt_base[i]) / h;
+                }
+            }
+            
+            // Compute df/dt by finite differences in time
+            double h_t = eps_jac * std::max(1.0, std::abs(t));
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            system_func(x_vec, dxdt_pert, t + h_t);
+            for (size_t i = 0; i < N; ++i) {
+                dfdt(i) = (dxdt_pert[i] - dxdt_base[i]) / h_t;
+            }
+        };
+        
+        // Create implicit system as pair of (system, jacobian)
+        auto implicit_system = std::make_pair(ublas_system, ublas_jacobian);
+        
+        // Create ublas observer wrapper
+        auto ublas_observer = [&observer, N](const ublas_state& x, double t) {
+            ODEState x_vec(N);
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            observer(x_vec, t);
+        };
+        
+        // Use rosenbrock4 with dense output for adaptive stepping
+        // Note: rosenbrock4<double> means double is the value_type (scalar type)
+        //       The state type is automatically ublas::vector<double>
+        if (use_adaptive) {
+            odeint::integrate_adaptive(
+                odeint::make_dense_output<odeint::rosenbrock4<double>>(abs_tol, rel_tol),
+                implicit_system, ublas_x, T_start, T_end, dt_step, ublas_observer);
+        } else {
+            odeint::integrate_const(
+                odeint::make_dense_output<odeint::rosenbrock4<double>>(abs_tol, rel_tol),
+                implicit_system, ublas_x, T_start, T_end, dt_step, ublas_observer);
+        }
+        
+        // Copy result back to std::vector state
+        for (size_t i = 0; i < N; ++i) {
+            state[i] = ublas_x(i);
+        }
+    } else if (method == "implicit_euler" || method == "ie") {
+        // Implicit Euler method (1st order, very stable for stiff systems)
+        // Uses numerical Jacobian approximation via finite differences
+        using ublas_state = boost::numeric::ublas::vector<double>;
+        using ublas_matrix = boost::numeric::ublas::matrix<double>;
+        
+        const size_t N = state.size();
+        const double eps_jac = 1e-8;
+        
+        // Convert to ublas state
+        ublas_state ublas_x(N);
+        for (size_t i = 0; i < N; ++i) {
+            ublas_x(i) = state[i];
+        }
+        
+        // Create wrapper for system function
+        auto ublas_system = [&system_func, N](const ublas_state& x, ublas_state& dxdt, double t) {
+            ODEState x_vec(N), dxdt_vec(N);
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            system_func(x_vec, dxdt_vec, t);
+            for (size_t i = 0; i < N; ++i) dxdt(i) = dxdt_vec[i];
+        };
+        
+        // Create numerical Jacobian function for implicit_euler
+        // Note: implicit_euler uses 3-argument Jacobian: (x, J, t) without dfdt
+        auto ublas_jacobian = [&system_func, N, eps_jac](const ublas_state& x, ublas_matrix& J, double t) {
+            ODEState x_vec(N), dxdt_base(N), dxdt_pert(N);
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            
+            system_func(x_vec, dxdt_base, t);
+            
+            J.resize(N, N);
+            for (size_t j = 0; j < N; ++j) {
+                double x_orig = x_vec[j];
+                double h = eps_jac * std::max(1.0, std::abs(x_orig));
+                x_vec[j] = x_orig + h;
+                system_func(x_vec, dxdt_pert, t);
+                x_vec[j] = x_orig;
+                
+                for (size_t i = 0; i < N; ++i) {
+                    J(i, j) = (dxdt_pert[i] - dxdt_base[i]) / h;
+                }
+            }
+        };
+        
+        auto implicit_system = std::make_pair(ublas_system, ublas_jacobian);
+        
+        // Create ublas observer wrapper
+        auto ublas_observer = [&observer, N](const ublas_state& x, double t) {
+            ODEState x_vec(N);
+            for (size_t i = 0; i < N; ++i) x_vec[i] = x(i);
+            observer(x_vec, t);
+        };
+        
+        // Implicit Euler integration with manual stepping
+        // Note: implicit_euler<double> uses ublas::vector<double> as state
+        odeint::implicit_euler<double> stepper;
+        double t = T_start;
+        while (t < T_end) {
+            stepper.do_step(implicit_system, ublas_x, t, dt_step);
+            t += dt_step;
+            ublas_observer(ublas_x, t);
+        }
+        
+        // Copy result back
+        for (size_t i = 0; i < N; ++i) {
+            state[i] = ublas_x(i);
+        }
     } else if (method == "velocity_verlet" || method == "verlet" || 
                method == "symplectic_rkn" || method == "symrkn" ||
                method == "symplectic" || method == "sym") {
@@ -772,8 +922,9 @@ void PhononLattice::integrate_ode_system(
     } else {
         // Default to dopri5 if unknown method specified
         cout << "Warning: Unknown method '" << method << "', using dopri5" << endl;
-        cout << "Available methods: euler, rk2/midpoint, rk4, rk5/rkck54, rk54/rkf54, dopri5, " << endl;
-        cout << "                   rk78/rkf78, bulirsch_stoer/bs, adams_bashforth/ab, adams_moulton/am" << endl;
+        cout << "Available explicit methods: euler, rk2/midpoint, rk4, rk5/rkck54, rk54/rkf54, dopri5, " << endl;
+        cout << "                            rk78/rkf78, bulirsch_stoer/bs, adams_bashforth/ab, adams_moulton/am" << endl;
+        cout << "Available implicit methods: rosenbrock4/rb4, implicit_euler/ie" << endl;
         if (use_adaptive) {
             odeint::integrate_adaptive(
                 odeint::make_controlled<odeint::runge_kutta_dopri5<ODEState>>(abs_tol, rel_tol),
