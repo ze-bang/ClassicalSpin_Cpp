@@ -750,16 +750,16 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         tau_step = len(tau_values)
         
         # Print pulse and lattice metadata if available
-        if '/metadata' in f:
-            metadata_grp = f['/metadata']
-            print(f"  Pulse parameters:")
-            for attr in ['pulse_amp', 'pulse_width', 'pulse_freq']:
-                if attr in metadata_grp.attrs:
-                    print(f"    {attr}: {metadata_grp.attrs[attr]}")
-            print(f"  Lattice parameters:")
-            for attr in ['n_atoms', 'spin_dim', 'lattice_size']:
-                if attr in metadata_grp.attrs:
-                    print(f"    {attr}: {metadata_grp.attrs[attr]}")
+        # if '/metadata' in f:
+        #     metadata_grp = f['/metadata']
+            # print(f"  Pulse parameters:")
+            # for attr in ['pulse_amp', 'pulse_width', 'pulse_freq']:
+            #     if attr in metadata_grp.attrs:
+            #         print(f"    {attr}: {metadata_grp.attrs[attr]}")
+            # print(f"  Lattice parameters:")
+            # for attr in ['n_atoms', 'spin_dim', 'lattice_size']:
+            #     if attr in metadata_grp.attrs:
+            #         print(f"    {attr}: {metadata_grp.attrs[attr]}")
         
         dt = times[1] - times[0] if len(times) > 1 else 1.0
         tau = tau_values
