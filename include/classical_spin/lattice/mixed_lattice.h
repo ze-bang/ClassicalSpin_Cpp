@@ -158,6 +158,21 @@ public:
     double field_drive_freq_SU3;              // Pulse frequency for SU(3)
     double field_drive_width_SU3;             // Pulse width (Gaussian) for SU(3)
 
+    // ============================================================
+    // LOCAL FIELD CACHING FOR OPTIMIZED MONTE CARLO
+    // ============================================================
+    // Cached local fields for each site (used in interleaved sweeps)
+    mutable vector<SpinVector> cached_local_field_SU2;
+    mutable vector<SpinVector> cached_local_field_SU3;
+    mutable vector<bool> field_valid_SU2;  // Whether cached field is valid
+    mutable vector<bool> field_valid_SU3;  // Whether cached field is valid
+    mutable bool use_field_caching;        // Enable/disable caching mode
+
+    // Reverse lookup: which SU3 sites are affected by changes to each SU2 site
+    vector<vector<size_t>> mixed_bilinear_reverse_SU2;  // SU2[i] -> list of SU3 sites coupled to it
+    // Reverse lookup: which SU2 sites are affected by changes to each SU3 site  
+    vector<vector<size_t>> mixed_bilinear_reverse_SU3;  // SU3[i] -> list of SU2 sites coupled to it
+
     /**
      * Constructor: Build a mixed lattice from two unit cells
      * 
@@ -282,6 +297,16 @@ public:
 
         // Build mixed SU(2)-SU(3) interactions
         build_mixed_interactions(mixed_uc, num_bi_SU2_SU3, num_tri_SU2_SU3);
+
+        // Initialize local field caching infrastructure
+        cached_local_field_SU2.resize(lattice_size_SU2);
+        cached_local_field_SU3.resize(lattice_size_SU3);
+        field_valid_SU2.resize(lattice_size_SU2, false);
+        field_valid_SU3.resize(lattice_size_SU3, false);
+        use_field_caching = false;  // Disabled by default
+
+        // Build reverse lookup tables for mixed interactions
+        build_reverse_lookup_tables();
 
         cout << "Mixed lattice initialization complete!" << endl;
         cout << "SU(2) - Max bilinear: " << num_bi_SU2 << ", Max trilinear: " << num_tri_SU2 << endl;
@@ -612,6 +637,198 @@ public:
         }
 
         cout << "Mixed interactions built successfully!" << endl;
+    }
+
+    // ============================================================
+    // LOCAL FIELD CACHING INFRASTRUCTURE
+    // ============================================================
+
+    /**
+     * Build reverse lookup tables for mixed bilinear interactions
+     * 
+     * These tables enable efficient cache invalidation:
+     * - mixed_bilinear_reverse_SU2[i] = list of SU(3) sites whose fields depend on SU(2) site i
+     * - mixed_bilinear_reverse_SU3[i] = list of SU(2) sites whose fields depend on SU(3) site i
+     */
+    void build_reverse_lookup_tables() {
+        // Initialize reverse lookup tables
+        mixed_bilinear_reverse_SU2.resize(lattice_size_SU2);
+        mixed_bilinear_reverse_SU3.resize(lattice_size_SU3);
+        
+        // Build reverse lookup from SU(2) -> SU(3)
+        // When SU(2) site i changes, we need to invalidate SU(3) sites that couple to it
+        for (size_t su3_site = 0; su3_site < lattice_size_SU3; ++su3_site) {
+            for (size_t n = 0; n < mixed_bilinear_partners_SU3[su3_site].size(); ++n) {
+                size_t su2_partner = mixed_bilinear_partners_SU3[su3_site][n];
+                mixed_bilinear_reverse_SU2[su2_partner].push_back(su3_site);
+            }
+        }
+        
+        // Build reverse lookup from SU(3) -> SU(2)
+        // When SU(3) site i changes, we need to invalidate SU(2) sites that couple to it
+        for (size_t su2_site = 0; su2_site < lattice_size_SU2; ++su2_site) {
+            for (size_t n = 0; n < mixed_bilinear_partners_SU2[su2_site].size(); ++n) {
+                size_t su3_partner = mixed_bilinear_partners_SU2[su2_site][n];
+                mixed_bilinear_reverse_SU3[su3_partner].push_back(su2_site);
+            }
+        }
+        
+        // Remove duplicates in reverse lookup tables
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            std::sort(mixed_bilinear_reverse_SU2[i].begin(), mixed_bilinear_reverse_SU2[i].end());
+            mixed_bilinear_reverse_SU2[i].erase(
+                std::unique(mixed_bilinear_reverse_SU2[i].begin(), mixed_bilinear_reverse_SU2[i].end()),
+                mixed_bilinear_reverse_SU2[i].end());
+        }
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            std::sort(mixed_bilinear_reverse_SU3[i].begin(), mixed_bilinear_reverse_SU3[i].end());
+            mixed_bilinear_reverse_SU3[i].erase(
+                std::unique(mixed_bilinear_reverse_SU3[i].begin(), mixed_bilinear_reverse_SU3[i].end()),
+                mixed_bilinear_reverse_SU3[i].end());
+        }
+        
+        // Report statistics
+        size_t max_reverse_SU2 = 0, max_reverse_SU3 = 0;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            max_reverse_SU2 = std::max(max_reverse_SU2, mixed_bilinear_reverse_SU2[i].size());
+        }
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            max_reverse_SU3 = std::max(max_reverse_SU3, mixed_bilinear_reverse_SU3[i].size());
+        }
+        if (max_reverse_SU2 > 0 || max_reverse_SU3 > 0) {
+            cout << "Reverse lookup tables built: max SU2->SU3=" << max_reverse_SU2 
+                 << ", max SU3->SU2=" << max_reverse_SU3 << endl;
+        }
+    }
+
+    /**
+     * Enable or disable local field caching mode
+     * 
+     * When enabled, local fields are cached and only invalidated when
+     * neighboring spins change. This is beneficial for interleaved sweeps
+     * with mixed interactions.
+     */
+    void enable_field_caching(bool enable = true) {
+        use_field_caching = enable;
+        if (enable) {
+            invalidate_all_fields();
+        }
+    }
+
+    /**
+     * Initialize field cache by computing all local fields
+     */
+    void init_field_cache() const {
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            if (!field_valid_SU2[i]) {
+                cached_local_field_SU2[i] = get_local_field_SU2(i);
+                field_valid_SU2[i] = true;
+            }
+        }
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            if (!field_valid_SU3[i]) {
+                cached_local_field_SU3[i] = get_local_field_SU3(i);
+                field_valid_SU3[i] = true;
+            }
+        }
+    }
+
+    /**
+     * Invalidate all cached fields
+     */
+    void invalidate_all_fields() const {
+        std::fill(field_valid_SU2.begin(), field_valid_SU2.end(), false);
+        std::fill(field_valid_SU3.begin(), field_valid_SU3.end(), false);
+    }
+
+    /**
+     * Invalidate fields affected by an SU(2) spin update
+     * 
+     * When SU(2) site i is updated:
+     * - All SU(2) sites coupled to i via bilinear/trilinear interactions
+     * - All SU(3) sites coupled to i via mixed interactions
+     */
+    void invalidate_fields_from_SU2_update(size_t su2_site) const {
+        // Invalidate the updated site itself
+        field_valid_SU2[su2_site] = false;
+        
+        // Invalidate SU(2) neighbors (bilinear partners)
+        for (size_t partner : bilinear_partners_SU2[su2_site]) {
+            field_valid_SU2[partner] = false;
+        }
+        
+        // Invalidate SU(2) trilinear partners
+        for (const auto& partners : trilinear_partners_SU2[su2_site]) {
+            field_valid_SU2[partners[0]] = false;
+            field_valid_SU2[partners[1]] = false;
+        }
+        
+        // Invalidate SU(3) sites coupled via mixed bilinear
+        for (size_t su3_site : mixed_bilinear_reverse_SU2[su2_site]) {
+            field_valid_SU3[su3_site] = false;
+        }
+        
+        // Invalidate SU(2) and SU(3) sites coupled via mixed trilinear
+        for (const auto& partners : mixed_trilinear_partners_SU2[su2_site]) {
+            field_valid_SU2[partners[0]] = false;  // SU(2) partner
+            field_valid_SU3[partners[1]] = false;  // SU(3) partner
+        }
+    }
+
+    /**
+     * Invalidate fields affected by an SU(3) spin update
+     * 
+     * When SU(3) site i is updated:
+     * - All SU(3) sites coupled to i via bilinear/trilinear interactions
+     * - All SU(2) sites coupled to i via mixed interactions
+     */
+    void invalidate_fields_from_SU3_update(size_t su3_site) const {
+        // Invalidate the updated site itself
+        field_valid_SU3[su3_site] = false;
+        
+        // Invalidate SU(3) neighbors (bilinear partners)
+        for (size_t partner : bilinear_partners_SU3[su3_site]) {
+            field_valid_SU3[partner] = false;
+        }
+        
+        // Invalidate SU(3) trilinear partners
+        for (const auto& partners : trilinear_partners_SU3[su3_site]) {
+            field_valid_SU3[partners[0]] = false;
+            field_valid_SU3[partners[1]] = false;
+        }
+        
+        // Invalidate SU(2) sites coupled via mixed bilinear
+        for (size_t su2_site : mixed_bilinear_reverse_SU3[su3_site]) {
+            field_valid_SU2[su2_site] = false;
+        }
+        
+        // Invalidate SU(2) and SU(3) sites coupled via mixed trilinear (SU3-SU2-SU2)
+        for (const auto& partners : mixed_trilinear_partners_SU3[su3_site]) {
+            field_valid_SU2[partners[0]] = false;  // SU(2) partner 1
+            field_valid_SU2[partners[1]] = false;  // SU(2) partner 2
+        }
+    }
+
+    /**
+     * Get cached local field for SU(2) site (computes if invalid)
+     */
+    SpinVector get_cached_local_field_SU2(size_t site_index) const {
+        if (!field_valid_SU2[site_index]) {
+            cached_local_field_SU2[site_index] = get_local_field_SU2(site_index);
+            field_valid_SU2[site_index] = true;
+        }
+        return cached_local_field_SU2[site_index];
+    }
+
+    /**
+     * Get cached local field for SU(3) site (computes if invalid)
+     */
+    SpinVector get_cached_local_field_SU3(size_t site_index) const {
+        if (!field_valid_SU3[site_index]) {
+            cached_local_field_SU3[site_index] = get_local_field_SU3(site_index);
+            field_valid_SU3[site_index] = true;
+        }
+        return cached_local_field_SU3[site_index];
     }
 
     // ============================================================
@@ -1009,49 +1226,210 @@ public:
     // ============================================================
 
     /**
-     * Single Metropolis sweep over both sublattices
+     * Single Metropolis sweep over both sublattices (sequential: SU2 then SU3)
+     * 
+     * Optimized with:
+     * - Precomputed inverse temperature
+     * - Batched random number generation
+     * - Branchless acceptance criterion
      */
     double metropolis(double T, bool gaussian_move = false, double sigma = 60.0) {
+        if (T <= 0) return 0.0;
+        
         size_t accepted = 0;
         const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        const double inv_T = 1.0 / T;  // Precompute inverse temperature
+        
+        // Batch size for random number pre-generation
+        constexpr size_t BATCH_SIZE = 64;
+        vector<size_t> random_sites(BATCH_SIZE);
+        vector<double> random_uniforms(BATCH_SIZE);
         
         // Sweep SU(2) sublattice
-        for (size_t n = 0; n < lattice_size_SU2; ++n) {
-            size_t i = random_int_lehman(lattice_size_SU2);
+        for (size_t batch_start = 0; batch_start < lattice_size_SU2; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, lattice_size_SU2);
+            const size_t current_batch_size = batch_end - batch_start;
             
-            SpinVector new_spin;
-            if (gaussian_move) {
-                new_spin = spins_SU2[i] + gen_random_spin(sigma, spin_dim_SU2);
-                new_spin *= spin_length_SU2 / new_spin.norm();
-            } else {
-                new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+            // Pre-generate random numbers for this batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                random_sites[j] = random_int_lehman(lattice_size_SU2);
+                random_uniforms[j] = random_double_lehman(0, 1);
             }
             
-            double dE = site_energy_SU2_diff(new_spin, spins_SU2[i], i);
-            
-            if (dE <= 0 || random_double_lehman(0, 1) < exp(-dE / T)) {
-                spins_SU2[i] = new_spin;
-                accepted++;
+            // Process batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                const size_t i = random_sites[j];
+                const double rand_uniform = random_uniforms[j];
+                
+                SpinVector new_spin;
+                if (gaussian_move) {
+                    new_spin = spins_SU2[i] + gen_random_spin(sigma, spin_dim_SU2);
+                    double norm = new_spin.norm();
+                    if (norm > 1e-12) new_spin *= spin_length_SU2 / norm;
+                    else new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+                } else {
+                    new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+                }
+                
+                const double dE = site_energy_SU2_diff(new_spin, spins_SU2[i], i);
+                
+                // Branchless acceptance: avoid branch misprediction
+                const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                if (accept) {
+                    spins_SU2[i] = new_spin;
+                    accepted++;
+                }
             }
         }
         
         // Sweep SU(3) sublattice
-        for (size_t n = 0; n < lattice_size_SU3; ++n) {
-            size_t i = random_int_lehman(lattice_size_SU3);
+        for (size_t batch_start = 0; batch_start < lattice_size_SU3; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, lattice_size_SU3);
+            const size_t current_batch_size = batch_end - batch_start;
             
-            SpinVector new_spin;
-            if (gaussian_move) {
-                new_spin = spins_SU3[i] + gen_random_spin(sigma, spin_dim_SU3);
-                new_spin *= spin_length_SU3 / new_spin.norm();
-            } else {
-                new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+            // Pre-generate random numbers for this batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                random_sites[j] = random_int_lehman(lattice_size_SU3);
+                random_uniforms[j] = random_double_lehman(0, 1);
             }
             
-            double dE = site_energy_SU3_diff(new_spin, spins_SU3[i], i);
+            // Process batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                const size_t i = random_sites[j];
+                const double rand_uniform = random_uniforms[j];
+                
+                SpinVector new_spin;
+                if (gaussian_move) {
+                    new_spin = spins_SU3[i] + gen_random_spin(sigma, spin_dim_SU3);
+                    double norm = new_spin.norm();
+                    if (norm > 1e-12) new_spin *= spin_length_SU3 / norm;
+                    else new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+                } else {
+                    new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+                }
+                
+                const double dE = site_energy_SU3_diff(new_spin, spins_SU3[i], i);
+                
+                // Branchless acceptance
+                const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                if (accept) {
+                    spins_SU3[i] = new_spin;
+                    accepted++;
+                }
+            }
+        }
+        
+        return double(accepted) / double(total_sites);
+    }
+
+    /**
+     * Interleaved Metropolis sweep: alternates between SU(2) and SU(3) updates
+     * 
+     * This improves equilibration when mixed bilinear interactions are non-zero,
+     * as changes in one sublattice immediately affect the other sublattice's
+     * energy landscape during the same sweep.
+     * 
+     * Uses local field caching with lazy invalidation for efficiency.
+     * 
+     * Optimized with:
+     * - Precomputed inverse temperature
+     * - Batched random number generation
+     * - Branchless acceptance criterion
+     * 
+     * @param T           Temperature
+     * @param gaussian_move Use Gaussian moves (true) or uniform random (false)
+     * @param sigma       Width of Gaussian moves
+     * @return            Acceptance rate
+     */
+    double metropolis_interleaved(double T, bool gaussian_move = false, double sigma = 60.0) {
+        if (T <= 0) return 0.0;
+        
+        size_t accepted = 0;
+        const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        const double inv_T = 1.0 / T;  // Precompute inverse temperature
+        
+        // Determine whether to use caching (beneficial when mixed interactions exist)
+        const bool has_mixed = (num_bi_SU2_SU3 > 0 || num_tri_SU2_SU3 > 0);
+        if (has_mixed && use_field_caching) {
+            // Initialize all cached fields
+            init_field_cache();
+        }
+        
+        // Batch size for random number pre-generation
+        constexpr size_t BATCH_SIZE = 64;
+        vector<size_t> random_sublattice(BATCH_SIZE);  // Which sublattice to update
+        vector<size_t> random_sites(BATCH_SIZE);        // Site within sublattice
+        vector<double> random_uniforms(BATCH_SIZE);     // For acceptance
+        
+        for (size_t batch_start = 0; batch_start < total_sites; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, total_sites);
+            const size_t current_batch_size = batch_end - batch_start;
             
-            if (dE <= 0 || random_double_lehman(0, 1) < exp(-dE / T)) {
-                spins_SU3[i] = new_spin;
-                accepted++;
+            // Pre-generate random numbers for this batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                random_sublattice[j] = random_int_lehman(total_sites);
+                random_uniforms[j] = random_double_lehman(0, 1);
+            }
+            
+            // Process batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                // Probabilistically choose which sublattice to update
+                const bool update_SU2 = (random_sublattice[j] < lattice_size_SU2);
+                const double rand_uniform = random_uniforms[j];
+                
+                if (update_SU2) {
+                    const size_t i = random_int_lehman(lattice_size_SU2);
+                    
+                    SpinVector new_spin;
+                    if (gaussian_move) {
+                        new_spin = spins_SU2[i] + gen_random_spin(sigma, spin_dim_SU2);
+                        double norm = new_spin.norm();
+                        if (norm > 1e-12) new_spin *= spin_length_SU2 / norm;
+                        else new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+                    } else {
+                        new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+                    }
+                    
+                    const double dE = site_energy_SU2_diff(new_spin, spins_SU2[i], i);
+                    
+                    // Branchless acceptance
+                    const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                    if (accept) {
+                        spins_SU2[i] = new_spin;
+                        accepted++;
+                        
+                        // Invalidate cached fields for affected sites
+                        if (has_mixed && use_field_caching) {
+                            invalidate_fields_from_SU2_update(i);
+                        }
+                    }
+                } else {
+                    const size_t i = random_int_lehman(lattice_size_SU3);
+                    
+                    SpinVector new_spin;
+                    if (gaussian_move) {
+                        new_spin = spins_SU3[i] + gen_random_spin(sigma, spin_dim_SU3);
+                        double norm = new_spin.norm();
+                        if (norm > 1e-12) new_spin *= spin_length_SU3 / norm;
+                        else new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+                    } else {
+                        new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+                    }
+                    
+                    const double dE = site_energy_SU3_diff(new_spin, spins_SU3[i], i);
+                    
+                    // Branchless acceptance
+                    const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+                    if (accept) {
+                        spins_SU3[i] = new_spin;
+                        accepted++;
+                        
+                        // Invalidate cached fields for affected sites
+                        if (has_mixed && use_field_caching) {
+                            invalidate_fields_from_SU3_update(i);
+                        }
+                    }
+                }
             }
         }
         
@@ -1084,6 +1462,114 @@ public:
             if (norm > 1e-12) {
                 double proj = 2.0 * spins_SU3[i].dot(local_field) / norm;
                 spins_SU3[i] = local_field * proj - spins_SU3[i];
+            }
+        }
+    }
+
+    /**
+     * Interleaved over-relaxation sweep (microcanonical)
+     * 
+     * Alternates between SU(2) and SU(3) updates, ensuring that changes
+     * in one sublattice are immediately reflected in the local field
+     * computation of the other sublattice during the same sweep.
+     * 
+     * Uses local field caching with lazy invalidation for efficiency
+     * when mixed interactions are present.
+     */
+    void overrelaxation_interleaved() {
+        const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        const bool has_mixed = (num_bi_SU2_SU3 > 0 || num_tri_SU2_SU3 > 0);
+        
+        // Initialize field cache if using caching mode
+        if (has_mixed && use_field_caching) {
+            init_field_cache();
+        }
+        
+        for (size_t n = 0; n < total_sites; ++n) {
+            // Probabilistically choose which sublattice to update
+            bool update_SU2 = (random_int_lehman(total_sites) < lattice_size_SU2);
+            
+            if (update_SU2) {
+                size_t i = random_int_lehman(lattice_size_SU2);
+                SpinVector local_field = (has_mixed && use_field_caching) ? 
+                    get_cached_local_field_SU2(i) : get_local_field_SU2(i);
+                double norm = local_field.squaredNorm();
+                
+                if (norm > 1e-12) {
+                    double proj = 2.0 * spins_SU2[i].dot(local_field) / norm;
+                    spins_SU2[i] = local_field * proj - spins_SU2[i];
+                    
+                    // Invalidate affected fields
+                    if (has_mixed && use_field_caching) {
+                        invalidate_fields_from_SU2_update(i);
+                    }
+                }
+            } else {
+                size_t i = random_int_lehman(lattice_size_SU3);
+                SpinVector local_field = (has_mixed && use_field_caching) ?
+                    get_cached_local_field_SU3(i) : get_local_field_SU3(i);
+                double norm = local_field.squaredNorm();
+                
+                if (norm > 1e-12) {
+                    double proj = 2.0 * spins_SU3[i].dot(local_field) / norm;
+                    spins_SU3[i] = local_field * proj - spins_SU3[i];
+                    
+                    // Invalidate affected fields
+                    if (has_mixed && use_field_caching) {
+                        invalidate_fields_from_SU3_update(i);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Interleaved deterministic sweep with caching
+     * 
+     * Zero-temperature relaxation that alternates between sublattices
+     * and uses local field caching for efficiency.
+     */
+    void deterministic_sweep_interleaved() {
+        const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        const bool has_mixed = (num_bi_SU2_SU3 > 0 || num_tri_SU2_SU3 > 0);
+        
+        // Initialize field cache if using caching mode
+        if (has_mixed && use_field_caching) {
+            init_field_cache();
+        }
+        
+        for (size_t n = 0; n < total_sites; ++n) {
+            // Probabilistically choose which sublattice to update
+            bool update_SU2 = (random_int_lehman(total_sites) < lattice_size_SU2);
+            
+            if (update_SU2) {
+                size_t i = random_int_lehman(lattice_size_SU2);
+                SpinVector local_field = (has_mixed && use_field_caching) ? 
+                    get_cached_local_field_SU2(i) : get_local_field_SU2(i);
+                double norm = local_field.norm();
+                
+                if (norm > 1e-12) {
+                    spins_SU2[i] = -local_field / norm * spin_length_SU2;
+                    
+                    // Invalidate affected fields
+                    if (has_mixed && use_field_caching) {
+                        invalidate_fields_from_SU2_update(i);
+                    }
+                }
+            } else {
+                size_t i = random_int_lehman(lattice_size_SU3);
+                SpinVector local_field = (has_mixed && use_field_caching) ?
+                    get_cached_local_field_SU3(i) : get_local_field_SU3(i);
+                double norm = local_field.norm();
+                
+                if (norm > 1e-12) {
+                    spins_SU3[i] = -local_field / norm * spin_length_SU3;
+                    
+                    // Invalidate affected fields
+                    if (has_mixed && use_field_caching) {
+                        invalidate_fields_from_SU3_update(i);
+                    }
+                }
             }
         }
     }
@@ -1458,11 +1944,13 @@ public:
     /**
      * Parallel tempering with MPI for mixed lattice
      * Matches structure and features from Lattice::parallel_tempering
+     * 
+     * Automatically uses interleaved sweeps when mixed interactions are present.
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
-                           bool gaussian_move = true) {
+                           bool gaussian_move = true, bool use_interleaved = true) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -1487,6 +1975,14 @@ public:
         int swap_accept = 0;
         double curr_accept = 0;
         
+        // Determine if we should use interleaved mode (beneficial with mixed interactions)
+        const bool has_mixed = (num_bi_SU2_SU3 > 0 || num_tri_SU2_SU3 > 0);
+        const bool do_interleaved = use_interleaved && has_mixed;
+        
+        if (rank == 0 && do_interleaved) {
+            cout << "Using interleaved sweeps (mixed interactions detected)" << endl;
+        }
+        
         vector<double> energies;
         vector<pair<SpinVector, SpinVector>> magnetizations; // (SU2, SU3)
         size_t expected_samples = n_measure / probe_rate + 100;
@@ -1499,12 +1995,24 @@ public:
         cout << "Rank " << rank << ": Equilibrating..." << endl;
         for (size_t i = 0; i < n_anneal; ++i) {
             if (overrelaxation_rate > 0) {
-                overrelaxation();
+                if (do_interleaved) {
+                    overrelaxation_interleaved();
+                } else {
+                    overrelaxation();
+                }
                 if (i % overrelaxation_rate == 0) {
-                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                    if (do_interleaved) {
+                        curr_accept += metropolis_interleaved(curr_Temp, gaussian_move, sigma);
+                    } else {
+                        curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                    }
                 }
             } else {
-                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                if (do_interleaved) {
+                    curr_accept += metropolis_interleaved(curr_Temp, gaussian_move, sigma);
+                } else {
+                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                }
             }
             
             // Attempt replica exchange
@@ -1517,12 +2025,24 @@ public:
         cout << "Rank " << rank << ": Measuring..." << endl;
         for (size_t i = 0; i < n_measure; ++i) {
             if (overrelaxation_rate > 0) {
-                overrelaxation();
+                if (do_interleaved) {
+                    overrelaxation_interleaved();
+                } else {
+                    overrelaxation();
+                }
                 if (i % overrelaxation_rate == 0) {
-                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                    if (do_interleaved) {
+                        curr_accept += metropolis_interleaved(curr_Temp, gaussian_move, sigma);
+                    } else {
+                        curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                    }
                 }
             } else {
-                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                if (do_interleaved) {
+                    curr_accept += metropolis_interleaved(curr_Temp, gaussian_move, sigma);
+                } else {
+                    curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
+                }
             }
             
             if (swap_rate > 0 && i % swap_rate == 0) {
@@ -2567,18 +3087,43 @@ private:
     /**
      * Helper: Perform MC sweeps with optional overrelaxation
      * Returns sum of acceptance rates from metropolis calls
+     * 
+     * @param n_sweeps Number of sweeps to perform
+     * @param T Temperature
+     * @param gaussian_move Use Gaussian moves
+     * @param sigma Gaussian move width
+     * @param overrelaxation_rate Perform overrelaxation every N sweeps (0 = disabled)
+     * @param interleaved Use interleaved sweeps (better for mixed interactions)
      */
     double perform_mc_sweeps(size_t n_sweeps, double T, bool gaussian_move, 
-                            double& sigma, size_t overrelaxation_rate = 0) {
+                            double& sigma, size_t overrelaxation_rate = 0,
+                            bool interleaved = true) {
         double acc_sum = 0.0;
+        
+        // Check if we have mixed interactions - if so, prefer interleaved mode
+        const bool has_mixed = (num_bi_SU2_SU3 > 0 || num_tri_SU2_SU3 > 0);
+        const bool use_interleaved = interleaved && has_mixed;
+        
         for (size_t i = 0; i < n_sweeps; ++i) {
             if (overrelaxation_rate > 0) {
-                overrelaxation();
+                if (use_interleaved) {
+                    overrelaxation_interleaved();
+                } else {
+                    overrelaxation();
+                }
                 if (i % overrelaxation_rate == 0) {
-                    acc_sum += metropolis(T, gaussian_move, sigma);
+                    if (use_interleaved) {
+                        acc_sum += metropolis_interleaved(T, gaussian_move, sigma);
+                    } else {
+                        acc_sum += metropolis(T, gaussian_move, sigma);
+                    }
                 }
             } else {
-                acc_sum += metropolis(T, gaussian_move, sigma);
+                if (use_interleaved) {
+                    acc_sum += metropolis_interleaved(T, gaussian_move, sigma);
+                } else {
+                    acc_sum += metropolis(T, gaussian_move, sigma);
+                }
             }
         }
         

@@ -1059,6 +1059,11 @@ public:
     /**
      * Metropolis sweep with local spin updates
      * Returns acceptance rate
+     * 
+     * Optimized with:
+     * - Precomputed inverse temperature (beta)
+     * - Batched random number generation
+     * - Branchless acceptance criterion
      */
     double metropolis(double T, bool gaussian_move = false, double sigma = 60.0) {
         if (T <= 0) return 0.0;
@@ -1066,21 +1071,40 @@ public:
         const double beta = 1.0 / T;
         size_t accepted = 0;
         
-        for (size_t count = 0; count < lattice_size; ++count) {
-            size_t site = random_int_lehman(lattice_size);
+        // Batch size for random number pre-generation
+        constexpr size_t BATCH_SIZE = 64;
+        vector<size_t> random_sites(BATCH_SIZE);
+        vector<double> random_uniforms(BATCH_SIZE);
+        
+        for (size_t batch_start = 0; batch_start < lattice_size; batch_start += BATCH_SIZE) {
+            const size_t batch_end = std::min(batch_start + BATCH_SIZE, lattice_size);
+            const size_t current_batch_size = batch_end - batch_start;
             
-            // Generate new spin
-            SpinVector new_spin = gaussian_move ? 
-                gaussian_spin_move(spins[site], sigma) :
-                gen_random_spin(spin_length);
+            // Pre-generate random numbers for this batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                random_sites[j] = random_int_lehman(lattice_size);
+                random_uniforms[j] = random_double_lehman(0.0, 1.0);
+            }
             
-            // Compute energy change
-            double dE = site_energy_diff(new_spin, spins[site], site);
-            
-            // Metropolis criterion
-            if (dE < 0.0 || random_double_lehman(0.0, 1.0) < std::exp(-beta * dE)) {
-                spins[site] = new_spin;
-                ++accepted;
+            // Process batch
+            for (size_t j = 0; j < current_batch_size; ++j) {
+                const size_t site = random_sites[j];
+                const double rand_uniform = random_uniforms[j];
+                
+                // Generate new spin
+                SpinVector new_spin = gaussian_move ? 
+                    gaussian_spin_move(spins[site], sigma) :
+                    gen_random_spin(spin_length);
+                
+                // Compute energy change
+                const double dE = site_energy_diff(new_spin, spins[site], site);
+                
+                // Branchless acceptance: avoid branch misprediction
+                const bool accept = (dE < 0.0) | (rand_uniform < std::exp(-beta * dE));
+                if (accept) {
+                    spins[site] = new_spin;
+                    ++accepted;
+                }
             }
         }
         
