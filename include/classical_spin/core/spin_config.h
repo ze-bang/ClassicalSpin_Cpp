@@ -74,7 +74,18 @@ struct SpinConfig {
     double md_time_end = 100.0;
     double md_timestep = 0.01;
     size_t md_save_interval = 1;  // Save every N steps
-    string md_integrator = "dopri5";  // euler, rk2, rk4, rk5, dopri5, rk78, bulirsch_stoer
+    // Available integrators:
+    //   euler       - Explicit Euler (1st order, simple, inaccurate)
+    //   rk2/midpoint- Runge-Kutta 2nd order / modified midpoint
+    //   rk4         - Classic Runge-Kutta 4th order (good balance, fixed step)
+    //   rk5/rkck54  - Cash-Karp 5(4) adaptive (good for smooth problems)
+    //   rk54/rkf54  - Runge-Kutta-Fehlberg 5(4) adaptive (equivalent to rkck54)
+    //   dopri5      - Dormand-Prince 5(4) adaptive (default, recommended)
+    //   rk78/rkf78  - Runge-Kutta-Fehlberg 7(8) (high accuracy, expensive)
+    //   bulirsch_stoer/bs - Bulirsch-Stoer (very high accuracy, expensive)
+    //   adams_bashforth/ab - Adams-Bashforth 5-step multistep (efficient for smooth problems)
+    //   adams_moulton/am   - Adams-Bashforth-Moulton predictor-corrector (more accurate multistep)
+    string md_integrator = "dopri5";
     bool use_gpu = false;
     
     // Parallel tempering parameters

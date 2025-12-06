@@ -98,6 +98,19 @@ UnitCell build_kitaev_honeycomb(const SpinConfig& config) {
     atoms.set_bilinear_interaction(Jy, 0, 1, Eigen::Vector3i(1, -1, 0));
     atoms.set_bilinear_interaction(Jz, 0, 1, Eigen::Vector3i(0, 0, 0));
     
+    // Set Kitaev local frame for honeycomb sublattices
+    // Transforms from local Kitaev basis to global cubic frame:
+    // Local basis: x' = (1,1,-2)/√6, y' = (-1,1,0)/√2, z' = (1,1,1)/√3
+    // S_global = R * S_local where columns of R are the local basis vectors
+    Eigen::Matrix3d kitaev_frame;
+    kitaev_frame << 1.0/std::sqrt(6.0), -1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
+                    1.0/std::sqrt(6.0),  1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
+                   -2.0/std::sqrt(6.0),  0.0,                1.0/std::sqrt(3.0);
+    
+    // Both honeycomb sublattices use the same local frame
+    atoms.set_sublattice_frame(kitaev_frame, 0);
+    atoms.set_sublattice_frame(kitaev_frame, 1);
+    
     // Set magnetic field
     Eigen::Vector3d field;
     field << config.field_strength * config.field_direction[0],

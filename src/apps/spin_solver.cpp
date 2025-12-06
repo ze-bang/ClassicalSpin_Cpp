@@ -992,7 +992,7 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
-        
+        lattice.set_ordering_pattern();
         // Relax spins and phonons to joint equilibrium
         // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
         if (config.relax_phonons || config.adiabatic_phonons) {

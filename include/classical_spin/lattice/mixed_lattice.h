@@ -1989,10 +1989,22 @@ public:
      * @param T_end End time
      * @param dt_step Time step (initial for adaptive methods)
      * @param observer Observer function called at intervals
-     * @param method Integration method: "euler", "rk2", "rk4", "rk5", "dopri5" (default), "rk78", "bulirsch_stoer"
+     * @param method Integration method (see list below)
      * @param use_adaptive Use adaptive stepping (if method supports it)
      * @param abs_tol Absolute tolerance for adaptive methods
      * @param rel_tol Relative tolerance for adaptive methods
+     * 
+     * Available methods:
+     * - "euler": Explicit Euler (1st order, simple, inaccurate)
+     * - "rk2" or "midpoint": Runge-Kutta 2nd order
+     * - "rk4": Classic Runge-Kutta 4th order (good balance, fixed step)
+     * - "rk5" or "rkck54": Cash-Karp 5(4) (adaptive, good for smooth problems)
+     * - "rk54" or "rkf54": Runge-Kutta-Fehlberg 5(4) (adaptive)
+     * - "dopri5": Dormand-Prince 5(4) (default, recommended for general use)
+     * - "rk78" or "rkf78": Runge-Kutta-Fehlberg 7(8) (high accuracy, expensive)
+     * - "bulirsch_stoer" or "bs": Bulirsch-Stoer (very high accuracy, expensive)
+     * - "adams_bashforth" or "ab": Adams-Bashforth 5-step multistep (efficient for smooth problems)
+     * - "adams_moulton" or "am": Adams-Bashforth-Moulton predictor-corrector (more accurate)
      */
     template<typename System, typename Observer>
     void integrate_ode_system(System system_func, ODEState& state,
@@ -2077,8 +2089,18 @@ public:
                     system_func, state, T_start, T_end, dt_step, observer
                 );
             }
+        } else if (method == "adams_bashforth" || method == "ab") {
+            // Adams-Bashforth 5-step multistep method (efficient for smooth problems)
+            odeint::adams_bashforth<5, ODEState> stepper;
+            odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
+        } else if (method == "adams_moulton" || method == "am") {
+            // Adams-Bashforth-Moulton predictor-corrector (higher accuracy multistep)
+            odeint::adams_bashforth_moulton<5, ODEState> stepper;
+            odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
         } else {
             cout << "Warning: Unknown method '" << method << "', using dopri5" << endl;
+            cout << "Available methods: euler, rk2/midpoint, rk4, rk5/rkck54, rk54/rkf54, dopri5, " << endl;
+            cout << "                   rk78/rkf78, bulirsch_stoer/bs, adams_bashforth/ab, adams_moulton/am" << endl;
             if (use_adaptive) {
                 odeint::integrate_adaptive(
                     odeint::make_controlled<odeint::runge_kutta_dopri5<ODEState>>(abs_tol, rel_tol),

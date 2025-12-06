@@ -2361,6 +2361,8 @@ private:
      * - "dopri5": Dormand-Prince 5(4) (default, recommended for general use)
      * - "rk78" or "rkf78": Runge-Kutta-Fehlberg 7(8) (high accuracy, expensive)
      * - "bulirsch_stoer" or "bs": Bulirsch-Stoer (very high accuracy, expensive)
+     * - "adams_bashforth" or "ab": Adams-Bashforth 5-step multistep (efficient for smooth problems)
+     * - "adams_moulton" or "am": Adams-Bashforth-Moulton predictor-corrector (more accurate)
      */
     template<typename System, typename Observer>
     void integrate_ode_system(System system_func, ODEState& state,
@@ -2453,9 +2455,19 @@ private:
                     system_func, state, T_start, T_end, dt_step, observer
                 );
             }
+        } else if (method == "adams_bashforth" || method == "ab") {
+            // Adams-Bashforth 5-step multistep method (efficient for smooth problems)
+            odeint::adams_bashforth<5, ODEState> stepper;
+            odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
+        } else if (method == "adams_moulton" || method == "am") {
+            // Adams-Bashforth-Moulton predictor-corrector (higher accuracy multistep)
+            odeint::adams_bashforth_moulton<5, ODEState> stepper;
+            odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
         } else {
             // Default to dopri5 if unknown method specified
             cout << "Warning: Unknown method '" << method << "', using dopri5" << endl;
+            cout << "Available methods: euler, rk2/midpoint, rk4, rk5/rkck54, rk54/rkf54, dopri5, " << endl;
+            cout << "                   rk78/rkf78, bulirsch_stoer/bs, adams_bashforth/ab, adams_moulton/am" << endl;
             if (use_adaptive) {
                 odeint::integrate_adaptive(
                     odeint::make_controlled<odeint::runge_kutta_dopri5<ODEState>>(abs_tol, rel_tol),
@@ -2487,8 +2499,8 @@ public:
      * @param dt_initial    Initial step size (adaptive methods will adjust)
      * @param out_dir       Output directory for trajectories
      * @param save_interval Number of steps between saves
-     * @param method        Integration method: "euler", "rk2", "rk4", "rk5", "dopri5" (default),
-     *                      "rk78", "bulirsch_stoer", "adams_bashforth", etc. (see integrate_ode_system)
+     * @param method        Integration method: euler, rk2, rk4, rk5/rkck54, rk54/rkf54, dopri5 (default),
+     *                      rk78/rkf78, bulirsch_stoer/bs, adams_bashforth/ab, adams_moulton/am
      * @param use_gpu       Enable GPU acceleration with Thrust (requires CUDA)
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,

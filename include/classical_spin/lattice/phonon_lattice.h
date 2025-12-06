@@ -298,6 +298,16 @@ public:
     // ODE state size
     size_t state_size;
     
+    // Sublattice local frames for global-to-local spin transformations
+    // For Kitaev honeycomb, transforms from local Kitaev basis to global cubic frame
+    // sublattice_frames[atom] is a 3x3 rotation matrix: S_global = R * S_local
+    std::array<SpinMatrix, N_atoms> sublattice_frames;
+    
+    // Custom ordering vector (set from initial spin configuration)
+    // Used to compute order parameter along the ground state ordering direction
+    SpinConfig ordering_pattern;
+    bool has_ordering_pattern = false;
+    
     /**
      * Constructor
      */
@@ -678,6 +688,92 @@ public:
     }
     
     /**
+     * Global magnetization (transformed from local Kitaev frame to global cubic frame)
+     * M_global = Σ R * S_local / N
+     * where R is the sublattice frame transformation matrix
+     */
+    Eigen::Vector3d magnetization_global() const {
+        Eigen::Vector3d M = Eigen::Vector3d::Zero();
+        for (size_t i = 0; i < lattice_size; ++i) {
+            size_t atom = i % N_atoms;
+            // Transform spin from local to global frame
+            M += sublattice_frames[atom] * spins[i];
+        }
+        return M / lattice_size;
+    }
+    
+    /**
+     * Set the ordering pattern from current spin configuration
+     * This should be called after simulated annealing/equilibration to capture
+     * the ground state ordering for computing custom order parameters
+     */
+    void set_ordering_pattern() {
+        ordering_pattern = spins;
+        has_ordering_pattern = true;
+    }
+    
+    /**
+     * Set ordering pattern from provided spin configuration
+     */
+    void set_ordering_pattern(const SpinConfig& pattern) {
+        if (pattern.size() != lattice_size) {
+            throw std::invalid_argument("Ordering pattern size mismatch");
+        }
+        ordering_pattern = pattern;
+        has_ordering_pattern = true;
+    }
+    
+    /**
+     * Compute custom order parameter based on the ordering pattern
+     * Projects current spin configuration onto the initial ordering pattern
+     * O = Σ S_i · S_i^(0) / N
+     * where S_i^(0) is the initial ordering pattern
+     */
+    double custom_order_parameter() const {
+        if (!has_ordering_pattern) {
+            return 0.0;
+        }
+        double O = 0.0;
+        for (size_t i = 0; i < lattice_size; ++i) {
+            O += spins[i].dot(ordering_pattern[i]);
+        }
+        return O / lattice_size;
+    }
+    
+    /**
+     * Compute custom magnetization projected onto ordering pattern (per sublattice)
+     * Returns vector of order parameters: [O_total, O_A, O_B]
+     * where O_A = Σ_{i∈A} S_i · S_i^(0) / N_A and similarly for O_B
+     */
+    Eigen::Vector3d custom_order_parameter_sublattice() const {
+        if (!has_ordering_pattern) {
+            return Eigen::Vector3d::Zero();
+        }
+        double O_total = 0.0;
+        double O_A = 0.0;
+        double O_B = 0.0;
+        size_t N_A = 0, N_B = 0;
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            double proj = spins[i].dot(ordering_pattern[i]);
+            O_total += proj;
+            if (i % N_atoms == 0) {
+                O_A += proj;
+                N_A++;
+            } else {
+                O_B += proj;
+                N_B++;
+            }
+        }
+        
+        Eigen::Vector3d result;
+        result << O_total / lattice_size,
+                  (N_A > 0) ? O_A / N_A : 0.0,
+                  (N_B > 0) ? O_B / N_B : 0.0;
+        return result;
+    }
+    
+    /**
      * E1 phonon amplitude
      */
     double E1_amplitude() const {
@@ -689,6 +785,21 @@ public:
     // ============================================================
     
 private:
+    /**
+     * Generic ODE integrator with support for multiple methods
+     * 
+     * Available methods:
+     * - "euler": Explicit Euler (1st order)
+     * - "rk2" or "midpoint": Runge-Kutta 2nd order
+     * - "rk4": Classic Runge-Kutta 4th order (fixed step)
+     * - "rk5" or "rkck54": Cash-Karp 5(4) adaptive
+     * - "rk54" or "rkf54": Runge-Kutta-Fehlberg 5(4) adaptive
+     * - "dopri5": Dormand-Prince 5(4) adaptive (default, recommended)
+     * - "rk78" or "rkf78": Runge-Kutta-Fehlberg 7(8) (high accuracy)
+     * - "bulirsch_stoer" or "bs": Bulirsch-Stoer (very high accuracy)
+     * - "adams_bashforth" or "ab": Adams-Bashforth 5-step multistep
+     * - "adams_moulton" or "am": Adams-Bashforth-Moulton predictor-corrector
+     */
     template<typename System, typename Observer>
     void integrate_ode_system(System system_func, ODEState& state,
                              double T_start, double T_end, double dt_step,
@@ -699,6 +810,14 @@ private:
 public:
     /**
      * Run molecular dynamics simulation
+     * 
+     * @param T_start        Start time
+     * @param T_end          End time
+     * @param dt_initial     Initial/fixed time step
+     * @param out_dir        Output directory for trajectories
+     * @param save_interval  Steps between saves
+     * @param method         Integration method: euler, rk2, rk4, rk5, dopri5 (default),
+     *                       rk78, bulirsch_stoer, adams_bashforth, adams_moulton
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
@@ -796,9 +915,10 @@ public:
     
     /**
      * Magnetization trajectory data type
-     * Returns: (time, [M_antiferro, M_local, M_global])
+     * Returns: (time, [M_antiferro, M_local, M_global, (O_custom, 0, 0)])
+     * The 4th element stores the custom order parameter in the x-component
      */
-    using MagTrajectory = vector<std::pair<double, std::array<Eigen::Vector3d, 3>>>;
+    using MagTrajectory = vector<std::pair<double, std::array<Eigen::Vector3d, 4>>>;
     
     /**
      * Single pulse THz drive on phonon E1 mode

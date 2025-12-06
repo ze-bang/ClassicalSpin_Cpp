@@ -45,6 +45,20 @@ PhononLattice::PhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
     j3_interaction.resize(lattice_size);
     j3_partners.resize(lattice_size);
     
+    // Initialize Kitaev local frame for honeycomb lattice
+    // The Kitaev local frame transforms from local coordinates to the global cubic frame
+    // Local basis: x' = (1,1,-2)/√6, y' = (-1,1,0)/√2, z' = (1,1,1)/√3
+    // This is the same for both sublattices in the honeycomb lattice
+    // S_global = R * S_local where columns of R are the local basis vectors
+    SpinMatrix kitaev_frame(3, 3);
+    kitaev_frame << 1.0/std::sqrt(6.0), -1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
+                    1.0/std::sqrt(6.0),  1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
+                   -2.0/std::sqrt(6.0),  0.0,                1.0/std::sqrt(3.0);
+    
+    // Both sublattices use the same local frame
+    sublattice_frames[0] = kitaev_frame;
+    sublattice_frames[1] = kitaev_frame;
+    
     // Initialize RNG
     seed_lehman(std::chrono::system_clock::now().time_since_epoch().count() * 2 + 1);
     
@@ -53,6 +67,7 @@ PhononLattice::PhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
     cout << "Total spin sites: " << lattice_size << endl;
     cout << "Phonon DOF: " << PhononState::N_DOF << " (Qx, Qy, Q_R, Vx, Vy, V_R)" << endl;
     cout << "Total ODE state size: " << state_size << endl;
+    cout << "Kitaev local frame initialized (same for both sublattices)" << endl;
     
     // Build lattice
     build_honeycomb();
@@ -608,10 +623,6 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
         
         // LLG equation
         Eigen::Vector3d dSdt = Si.cross(H);
-        if (alpha_gilbert > 0) {
-            dSdt += alpha_gilbert * Si.cross(Si.cross(H)) / spin_length;
-        }
-        
         dxdt[idx] = dSdt(0);
         dxdt[idx+1] = dSdt(1);
         dxdt[idx+2] = dSdt(2);
@@ -636,6 +647,29 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
 // ODE INTEGRATION
 // ============================================================
 
+/**
+ * Generic ODE integrator with support for multiple methods
+ * 
+ * Available methods:
+ * - "euler": Explicit Euler (1st order, simple, inaccurate)
+ * - "rk2" or "midpoint": Runge-Kutta 2nd order / modified midpoint
+ * - "rk4": Classic Runge-Kutta 4th order (good balance, fixed step)
+ * - "rk5" or "rkck54": Cash-Karp 5(4) (adaptive, good for smooth problems)
+ * - "rk54" or "rkf54": Runge-Kutta-Fehlberg 5(4) (adaptive, equivalent to rkck54)
+ * - "dopri5": Dormand-Prince 5(4) (default, recommended for general use)
+ * - "rk78" or "rkf78": Runge-Kutta-Fehlberg 7(8) (high accuracy, expensive)
+ * - "bulirsch_stoer" or "bs": Bulirsch-Stoer (very high accuracy, expensive)
+ * - "adams_bashforth" or "ab": Adams-Bashforth 5-step multistep (efficient for smooth problems)
+ * - "adams_moulton" or "am": Adams-Bashforth-Moulton 5-step predictor-corrector (more accurate)
+ * - "velocity_verlet", "verlet", "symplectic": Falls back to rk4 (symplectic methods need pair<q,p> state)
+ * 
+ * For spin-phonon dynamics, recommended methods are:
+ * - dopri5: Good default for most problems (adaptive 5th order)
+ * - rk78: When high accuracy is needed (adaptive 7th-8th order)
+ * - bulirsch_stoer: For very high accuracy requirements
+ * - rk4: When fixed step is preferred (simple, robust)
+ * - adams_moulton: Efficient for smooth long-time evolution (multistep)
+ */
 template<typename System, typename Observer>
 void PhononLattice::integrate_ode_system(
     System system_func, ODEState& state,
@@ -646,18 +680,45 @@ void PhononLattice::integrate_ode_system(
     namespace odeint = boost::numeric::odeint;
     
     if (method == "euler") {
+        // Explicit Euler method (1st order, simple but inaccurate)
         odeint::integrate_const(
             odeint::euler<ODEState>(),
             system_func, state, T_start, T_end, dt_step, observer);
     } else if (method == "rk2" || method == "midpoint") {
+        // Modified midpoint method (2nd order)
         odeint::integrate_const(
             odeint::modified_midpoint<ODEState>(),
             system_func, state, T_start, T_end, dt_step, observer);
     } else if (method == "rk4") {
+        // Classic fixed-step RK4 (4th order, good balance)
         odeint::integrate_const(
             odeint::runge_kutta4<ODEState>(),
             system_func, state, T_start, T_end, dt_step, observer);
+    } else if (method == "rk5" || method == "rkck54") {
+        // Cash-Karp 5(4) adaptive method
+        if (use_adaptive) {
+            odeint::integrate_adaptive(
+                odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
+                system_func, state, T_start, T_end, dt_step, observer);
+        } else {
+            odeint::integrate_const(
+                odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
+                system_func, state, T_start, T_end, dt_step, observer);
+        }
+    } else if (method == "rk54" || method == "rkf54") {
+        // Runge-Kutta-Fehlberg 5(4) adaptive method
+        // Note: boost::odeint doesn't have a separate rkf54, use cash_karp54 as equivalent
+        if (use_adaptive) {
+            odeint::integrate_adaptive(
+                odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
+                system_func, state, T_start, T_end, dt_step, observer);
+        } else {
+            odeint::integrate_const(
+                odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
+                system_func, state, T_start, T_end, dt_step, observer);
+        }
     } else if (method == "dopri5") {
+        // Dormand-Prince 5(4) adaptive method (default, recommended)
         if (use_adaptive) {
             odeint::integrate_adaptive(
                 odeint::make_controlled<odeint::runge_kutta_dopri5<ODEState>>(abs_tol, rel_tol),
@@ -668,6 +729,7 @@ void PhononLattice::integrate_ode_system(
                 system_func, state, T_start, T_end, dt_step, observer);
         }
     } else if (method == "rk78" || method == "rkf78") {
+        // Runge-Kutta-Fehlberg 7(8) (very high accuracy)
         if (use_adaptive) {
             odeint::integrate_adaptive(
                 odeint::make_controlled<odeint::runge_kutta_fehlberg78<ODEState>>(abs_tol, rel_tol),
@@ -678,6 +740,7 @@ void PhononLattice::integrate_ode_system(
                 system_func, state, T_start, T_end, dt_step, observer);
         }
     } else if (method == "bulirsch_stoer" || method == "bs") {
+        // Bulirsch-Stoer method (very high accuracy, expensive)
         if (use_adaptive) {
             odeint::integrate_adaptive(
                 odeint::bulirsch_stoer<ODEState>(abs_tol, rel_tol),
@@ -687,8 +750,30 @@ void PhononLattice::integrate_ode_system(
                 odeint::bulirsch_stoer<ODEState>(abs_tol, rel_tol),
                 system_func, state, T_start, T_end, dt_step, observer);
         }
+    } else if (method == "adams_bashforth" || method == "ab") {
+        // Adams-Bashforth 5-step multistep method (efficient for smooth problems)
+        // Uses rk4 for initial steps, then switches to multistep
+        odeint::adams_bashforth<5, ODEState> stepper;
+        odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
+    } else if (method == "adams_moulton" || method == "am") {
+        // Adams-Bashforth-Moulton predictor-corrector (higher accuracy multistep)
+        odeint::adams_bashforth_moulton<5, ODEState> stepper;
+        odeint::integrate_const(stepper, system_func, state, T_start, T_end, dt_step, observer);
+    } else if (method == "velocity_verlet" || method == "verlet" || 
+               method == "symplectic_rkn" || method == "symrkn" ||
+               method == "symplectic" || method == "sym") {
+        // Symplectic methods require special pair<q,p> state type
+        // For flat vector state, use high-order method with small timestep for energy conservation
+        cout << "Note: symplectic methods require pair<q,p> state; using rk4 (fixed step) as alternative" << endl;
+        cout << "      For better energy conservation, reduce timestep or use bulirsch_stoer" << endl;
+        odeint::integrate_const(
+            odeint::runge_kutta4<ODEState>(),
+            system_func, state, T_start, T_end, dt_step, observer);
     } else {
+        // Default to dopri5 if unknown method specified
         cout << "Warning: Unknown method '" << method << "', using dopri5" << endl;
+        cout << "Available methods: euler, rk2/midpoint, rk4, rk5/rkck54, rk54/rkf54, dopri5, " << endl;
+        cout << "                   rk78/rkf78, bulirsch_stoer/bs, adams_bashforth/ab, adams_moulton/am" << endl;
         if (use_adaptive) {
             odeint::integrate_adaptive(
                 odeint::make_controlled<odeint::runge_kutta_dopri5<ODEState>>(abs_tol, rel_tol),
@@ -709,6 +794,12 @@ void PhononLattice::molecular_dynamics(
     double T_start, double T_end, double dt_initial,
     string out_dir, size_t save_interval, string method) 
 {
+#ifndef HDF5_ENABLED
+    std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
+    std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
+    return;
+#endif
+
     if (!out_dir.empty()) {
         std::filesystem::create_directories(out_dir);
     }
@@ -721,33 +812,23 @@ void PhononLattice::molecular_dynamics(
     ODEState state = to_state();
     
 #ifdef HDF5_ENABLED
-    std::unique_ptr<H5::H5File> h5file;
-    std::unique_ptr<H5::Group> traj_group;
-    std::unique_ptr<H5::Group> meta_group;
+    // Create HDF5 writer with comprehensive metadata (like Lattice class)
+    std::unique_ptr<HDF5MDWriter> hdf5_writer;
     
-    vector<double> times, energies;
-    vector<double> Mx, My, Mz;
+    // Storage for phonon trajectory (appended separately since HDF5MDWriter doesn't handle phonons)
+    vector<double> times_phonon;
     vector<double> Qx_traj, Qy_traj, QR_traj;
+    vector<double> Vx_traj, Vy_traj, VR_traj;
+    vector<double> energy_traj;
     
     if (!out_dir.empty()) {
         string hdf5_file = out_dir + "/trajectory.h5";
-        cout << "Writing trajectory to: " << hdf5_file << endl;
-        h5file = std::make_unique<H5::H5File>(hdf5_file, H5F_ACC_TRUNC);
-        traj_group = std::make_unique<H5::Group>(h5file->createGroup("/trajectory"));
-        meta_group = std::make_unique<H5::Group>(h5file->createGroup("/metadata"));
-        
-        // Write metadata
-        H5::DataSpace scalar_space(H5S_SCALAR);
-        auto write_scalar = [&](const string& name, double val) {
-            H5::Attribute attr = meta_group->createAttribute(name, H5::PredType::NATIVE_DOUBLE, scalar_space);
-            attr.write(H5::PredType::NATIVE_DOUBLE, &val);
-        };
-        write_scalar("omega_E", phonon_params.omega_E);
-        write_scalar("omega_A", phonon_params.omega_A);
-        write_scalar("g3", phonon_params.g3);
-        write_scalar("lambda_xy", spin_phonon_params.lambda_xy);
-        write_scalar("lambda_R", spin_phonon_params.lambda_R);
-        write_scalar("dt", dt_initial);
+        cout << "Writing trajectory to HDF5 file: " << hdf5_file << endl;
+        hdf5_writer = std::make_unique<HDF5MDWriter>(
+            hdf5_file, lattice_size, spin_dim, N_atoms, 
+            dim1, dim2, dim3, method, 
+            dt_initial, T_start, T_end, save_interval, spin_length, 
+            &site_positions, 10000);
     }
 #endif
     
@@ -756,27 +837,61 @@ void PhononLattice::molecular_dynamics(
     
     auto observer = [&](const ODEState& x, double t) {
         if (step_count % save_interval == 0) {
-            const_cast<PhononLattice*>(this)->from_state(x);
+            // Extract spin part of state (excluding phonon DOF)
+            const size_t spin_state_size = spin_dim * lattice_size;
             
-            Eigen::Vector3d M = magnetization();
-            double E = energy_density();
+            // Compute magnetizations directly from flat state (zero allocation)
+            Eigen::Vector3d M_local = Eigen::Vector3d::Zero();
+            Eigen::Vector3d M_staggered = Eigen::Vector3d::Zero();
+            
+            for (size_t i = 0; i < lattice_size; ++i) {
+                double sign = (i % N_atoms == 0) ? 1.0 : -1.0;  // Sublattice alternation
+                for (size_t d = 0; d < spin_dim; ++d) {
+                    M_local(d) += x[i * spin_dim + d];
+                    M_staggered(d) += sign * x[i * spin_dim + d];
+                }
+            }
+            M_local /= lattice_size;
+            M_staggered /= lattice_size;
+            
+            // M_global is same as M_local for PhononLattice (no frame transformation)
+            Eigen::Vector3d M_global = M_local;
+            
+            // Extract phonon state from end of ODE state vector
+            double Qx = x[spin_state_size];
+            double Qy = x[spin_state_size + 1];
+            double QR = x[spin_state_size + 2];
+            double Vx = x[spin_state_size + 3];
+            double Vy = x[spin_state_size + 4];
+            double VR = x[spin_state_size + 5];
             
 #ifdef HDF5_ENABLED
-            if (h5file) {
-                times.push_back(t);
-                energies.push_back(E);
-                Mx.push_back(M(0)); My.push_back(M(1)); Mz.push_back(M(2));
-                Qx_traj.push_back(phonons.Q_x);
-                Qy_traj.push_back(phonons.Q_y);
-                QR_traj.push_back(phonons.Q_R);
+            // Write full spin configuration to HDF5 (like Lattice class)
+            if (hdf5_writer) {
+                hdf5_writer->write_flat_step(t, M_staggered, M_local, M_global, x.data());
+                
+                // Store phonon data for later writing
+                times_phonon.push_back(t);
+                Qx_traj.push_back(Qx);
+                Qy_traj.push_back(Qy);
+                QR_traj.push_back(QR);
+                Vx_traj.push_back(Vx);
+                Vy_traj.push_back(Vy);
+                VR_traj.push_back(VR);
+                
+                // Compute energy for monitoring
+                const_cast<PhononLattice*>(this)->from_state(x);
+                energy_traj.push_back(energy_density());
             }
 #endif
             
+            // Progress output
             if (step_count % (save_interval * 10) == 0) {
-                cout << "t=" << t << ", E=" << E 
-                     << ", |M|=" << M.norm()
-                     << ", |Q_E|=" << E1_amplitude()
-                     << ", Q_R=" << phonons.Q_R << endl;
+                double E1_amp = std::sqrt(Qx*Qx + Qy*Qy);
+                cout << "t=" << t << ", |M|=" << M_local.norm()
+                     << ", |M_stag|=" << M_staggered.norm()
+                     << ", |Q_E|=" << E1_amp
+                     << ", Q_R=" << QR << endl;
             }
             
             save_count++;
@@ -788,34 +903,68 @@ void PhononLattice::molecular_dynamics(
         this->ode_system(x, dxdt, t);
     };
     
+    // Integrate using selected method
+    double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
+    double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
     integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
-                        observer, method, true, 1e-6, 1e-6);
+                        observer, method, true, abs_tol, rel_tol);
     
     from_state(state);
     
 #ifdef HDF5_ENABLED
-    if (h5file && !times.empty()) {
-        hsize_t dims[1] = {times.size()};
+    // Write phonon trajectory data to HDF5 file
+    if (hdf5_writer && !times_phonon.empty()) {
+        // Get the underlying HDF5 file handle to add phonon data
+        // We need to close the main writer first, then reopen to add phonon group
+        hdf5_writer->close();
+        
+        // Reopen file in append mode to add phonon trajectory
+        string hdf5_file = out_dir + "/trajectory.h5";
+        H5::H5File h5file(hdf5_file, H5F_ACC_RDWR);
+        
+        // Create phonon trajectory group
+        H5::Group phonon_group = h5file.createGroup("/phonon_trajectory");
+        
+        hsize_t dims[1] = {times_phonon.size()};
         H5::DataSpace dataspace(1, dims);
         
         auto write_dataset = [&](const string& name, const vector<double>& data) {
-            H5::DataSet ds = traj_group->createDataSet(name, H5::PredType::NATIVE_DOUBLE, dataspace);
+            H5::DataSet ds = phonon_group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dataspace);
             ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
         };
         
-        write_dataset("time", times);
-        write_dataset("energy", energies);
-        write_dataset("Mx", Mx);
-        write_dataset("My", My);
-        write_dataset("Mz", Mz);
         write_dataset("Qx", Qx_traj);
         write_dataset("Qy", Qy_traj);
         write_dataset("QR", QR_traj);
+        write_dataset("Vx", Vx_traj);
+        write_dataset("Vy", Vy_traj);
+        write_dataset("VR", VR_traj);
+        write_dataset("energy", energy_traj);
         
-        traj_group->close();
-        meta_group->close();
-        h5file->close();
-        cout << "HDF5 trajectory saved with " << save_count << " snapshots" << endl;
+        // Write phonon parameters as metadata
+        H5::Group meta_group = h5file.openGroup("/metadata");
+        H5::DataSpace scalar_space(H5S_SCALAR);
+        
+        auto write_scalar = [&](const string& name, double val) {
+            H5::Attribute attr = meta_group.createAttribute(name, H5::PredType::NATIVE_DOUBLE, scalar_space);
+            attr.write(H5::PredType::NATIVE_DOUBLE, &val);
+        };
+        
+        write_scalar("omega_E", phonon_params.omega_E);
+        write_scalar("omega_A", phonon_params.omega_A);
+        write_scalar("g3", phonon_params.g3);
+        write_scalar("gamma_E", phonon_params.gamma_E);
+        write_scalar("gamma_A", phonon_params.gamma_A);
+        write_scalar("lambda_E", phonon_params.lambda_E);
+        write_scalar("lambda_A", phonon_params.lambda_A);
+        write_scalar("lambda_xy", spin_phonon_params.lambda_xy);
+        write_scalar("lambda_R", spin_phonon_params.lambda_R);
+        
+        phonon_group.close();
+        meta_group.close();
+        h5file.close();
+        
+        cout << "HDF5 trajectory saved with " << save_count << " snapshots (full spin + phonon)" << endl;
     }
 #endif
     
@@ -1412,18 +1561,29 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
             Eigen::Vector3d M_local = Eigen::Vector3d::Zero();
             Eigen::Vector3d M_antiferro = Eigen::Vector3d::Zero();
             Eigen::Vector3d M_global = Eigen::Vector3d::Zero();
+            double O_custom = 0.0;
             
             for (size_t i = 0; i < lattice_size; ++i) {
                 double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                size_t atom = i % N_atoms;
                 Eigen::Vector3d S(x[i*spin_dim], x[i*spin_dim+1], x[i*spin_dim+2]);
                 M_local += S;
                 M_antiferro += sign * S;
-                M_global += S;
+                // Transform to global frame using sublattice frame
+                M_global += sublattice_frames[atom] * S;
+                // Custom order parameter projection
+                if (has_ordering_pattern) {
+                    O_custom += S.dot(ordering_pattern[i]);
+                }
             }
             M_local /= double(lattice_size);
             M_antiferro /= double(lattice_size);
+            M_global /= double(lattice_size);
+            O_custom /= double(lattice_size);
             
-            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+            // Store custom order parameter in 4th element (x component)
+            Eigen::Vector3d O_vec(O_custom, 0.0, 0.0);
+            trajectory.push_back({t, {M_antiferro, M_local, M_global, O_vec}});
             last_save_time = t;
         }
     };
@@ -1485,18 +1645,29 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
             Eigen::Vector3d M_local = Eigen::Vector3d::Zero();
             Eigen::Vector3d M_antiferro = Eigen::Vector3d::Zero();
             Eigen::Vector3d M_global = Eigen::Vector3d::Zero();
+            double O_custom = 0.0;
             
             for (size_t i = 0; i < lattice_size; ++i) {
                 double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                size_t atom = i % N_atoms;
                 Eigen::Vector3d S(x[i*spin_dim], x[i*spin_dim+1], x[i*spin_dim+2]);
                 M_local += S;
                 M_antiferro += sign * S;
-                M_global += S;
+                // Transform to global frame using sublattice frame
+                M_global += sublattice_frames[atom] * S;
+                // Custom order parameter projection
+                if (has_ordering_pattern) {
+                    O_custom += S.dot(ordering_pattern[i]);
+                }
             }
             M_local /= double(lattice_size);
             M_antiferro /= double(lattice_size);
+            M_global /= double(lattice_size);
+            O_custom /= double(lattice_size);
             
-            trajectory.push_back({t, {M_antiferro, M_local, M_global}});
+            // Store custom order parameter in 4th element (x component)
+            Eigen::Vector3d O_vec(O_custom, 0.0, 0.0);
+            trajectory.push_back({t, {M_antiferro, M_local, M_global, O_vec}});
             last_save_time = t;
         }
     };
@@ -1536,7 +1707,13 @@ void PhononLattice::pump_probe_spectroscopy(
     cout << "\n[1/3] Using current configuration as ground state..." << endl;
     double E_ground = energy_density();
     SpinVector M_ground = magnetization();
+    SpinVector M_ground_global = magnetization_global();
     cout << "  Ground state: E/N = " << E_ground << ", |M| = " << M_ground.norm() << endl;
+    cout << "  Global magnetization: " << M_ground_global.transpose() << endl;
+    
+    // Set the ordering pattern from current (equilibrated) configuration
+    set_ordering_pattern();
+    cout << "  Ordering pattern captured from ground state" << endl;
     
     // Save initial configuration
     save_positions(dir_name + "/positions.txt");
@@ -1644,13 +1821,17 @@ void PhononLattice::pump_probe_spectroscopy(
             vector<double> times(n_times);
             vector<double> M_antiferro(n_times * 3);
             vector<double> M_local(n_times * 3);
+            vector<double> M_global(n_times * 3);
+            vector<double> O_custom(n_times);
             
             for (size_t t = 0; t < n_times; ++t) {
                 times[t] = M0_trajectory[t].first;
                 for (int d = 0; d < 3; ++d) {
                     M_antiferro[t*3 + d] = M0_trajectory[t].second[0](d);
                     M_local[t*3 + d] = M0_trajectory[t].second[1](d);
+                    M_global[t*3 + d] = M0_trajectory[t].second[2](d);
                 }
+                O_custom[t] = M0_trajectory[t].second[3](0);  // Custom order stored in x-component
             }
             
             hsize_t dims1[1] = {n_times};
@@ -1665,6 +1846,12 @@ void PhononLattice::pump_probe_spectroscopy(
             
             ds = ref_group.createDataSet("M_local", H5::PredType::NATIVE_DOUBLE, space2);
             ds.write(M_local.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            ds = ref_group.createDataSet("M_global", H5::PredType::NATIVE_DOUBLE, space2);
+            ds.write(M_global.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            ds = ref_group.createDataSet("O_custom", H5::PredType::NATIVE_DOUBLE, space1);
+            ds.write(O_custom.data(), H5::PredType::NATIVE_DOUBLE);
         }
         
         // Write delay-dependent trajectories
@@ -1686,12 +1873,16 @@ void PhononLattice::pump_probe_spectroscopy(
                 size_t n_times = traj.size();
                 vector<double> times(n_times);
                 vector<double> M_antiferro(n_times * 3);
+                vector<double> M_global(n_times * 3);
+                vector<double> O_custom(n_times);
                 
                 for (size_t t = 0; t < n_times; ++t) {
                     times[t] = traj[t].first;
                     for (int d = 0; d < 3; ++d) {
                         M_antiferro[t*3 + d] = traj[t].second[0](d);
+                        M_global[t*3 + d] = traj[t].second[2](d);
                     }
+                    O_custom[t] = traj[t].second[3](0);
                 }
                 
                 H5::Group m1_group = tau_group.createGroup("M1");
@@ -1704,6 +1895,12 @@ void PhononLattice::pump_probe_spectroscopy(
                 H5::DataSpace space2(2, dims2);
                 ds = m1_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
                 ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                ds = m1_group.createDataSet("M_global", H5::PredType::NATIVE_DOUBLE, space2);
+                ds.write(M_global.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                ds = m1_group.createDataSet("O_custom", H5::PredType::NATIVE_DOUBLE, space1);
+                ds.write(O_custom.data(), H5::PredType::NATIVE_DOUBLE);
             }
             
             // Write M01 trajectory
@@ -1712,12 +1909,16 @@ void PhononLattice::pump_probe_spectroscopy(
                 size_t n_times = traj.size();
                 vector<double> times(n_times);
                 vector<double> M_antiferro(n_times * 3);
+                vector<double> M_global(n_times * 3);
+                vector<double> O_custom(n_times);
                 
                 for (size_t t = 0; t < n_times; ++t) {
                     times[t] = traj[t].first;
                     for (int d = 0; d < 3; ++d) {
                         M_antiferro[t*3 + d] = traj[t].second[0](d);
+                        M_global[t*3 + d] = traj[t].second[2](d);
                     }
+                    O_custom[t] = traj[t].second[3](0);
                 }
                 
                 H5::Group m01_group = tau_group.createGroup("M01");
@@ -1730,6 +1931,12 @@ void PhononLattice::pump_probe_spectroscopy(
                 H5::DataSpace space2(2, dims2);
                 ds = m01_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
                 ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                ds = m01_group.createDataSet("M_global", H5::PredType::NATIVE_DOUBLE, space2);
+                ds.write(M_global.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                ds = m01_group.createDataSet("O_custom", H5::PredType::NATIVE_DOUBLE, space1);
+                ds.write(O_custom.data(), H5::PredType::NATIVE_DOUBLE);
             }
         }
         
@@ -1955,12 +2162,16 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                 size_t n_times = M0_trajectory.size();
                 vector<double> times(n_times);
                 vector<double> M_antiferro(n_times * 3);
+                vector<double> M_global(n_times * 3);
+                vector<double> O_custom(n_times);
                 
                 for (size_t t = 0; t < n_times; ++t) {
                     times[t] = M0_trajectory[t].first;
                     for (int d = 0; d < 3; ++d) {
                         M_antiferro[t*3 + d] = M0_trajectory[t].second[0](d);
+                        M_global[t*3 + d] = M0_trajectory[t].second[2](d);
                     }
+                    O_custom[t] = M0_trajectory[t].second[3](0);
                 }
                 
                 hsize_t dims1[1] = {n_times};
@@ -1972,6 +2183,12 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                 H5::DataSpace space2(2, dims2);
                 ds = ref_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
                 ds.write(M_antiferro.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                ds = ref_group.createDataSet("M_global", H5::PredType::NATIVE_DOUBLE, space2);
+                ds.write(M_global.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                ds = ref_group.createDataSet("O_custom", H5::PredType::NATIVE_DOUBLE, space1);
+                ds.write(O_custom.data(), H5::PredType::NATIVE_DOUBLE);
             }
             
             // Write delay-dependent data
@@ -1992,12 +2209,16 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                     size_t n_times = traj.size();
                     vector<double> times(n_times);
                     vector<double> M_af(n_times * 3);
+                    vector<double> M_global(n_times * 3);
+                    vector<double> O_custom(n_times);
                     
                     for (size_t t = 0; t < n_times; ++t) {
                         times[t] = traj[t].first;
                         for (int d = 0; d < 3; ++d) {
                             M_af[t*3 + d] = traj[t].second[0](d);
+                            M_global[t*3 + d] = traj[t].second[2](d);
                         }
+                        O_custom[t] = traj[t].second[3](0);
                     }
                     
                     H5::Group m1_group = tau_group.createGroup("M1");
@@ -2010,6 +2231,12 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                     H5::DataSpace space2(2, dims2);
                     ds = m1_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
                     ds.write(M_af.data(), H5::PredType::NATIVE_DOUBLE);
+                    
+                    ds = m1_group.createDataSet("M_global", H5::PredType::NATIVE_DOUBLE, space2);
+                    ds.write(M_global.data(), H5::PredType::NATIVE_DOUBLE);
+                    
+                    ds = m1_group.createDataSet("O_custom", H5::PredType::NATIVE_DOUBLE, space1);
+                    ds.write(O_custom.data(), H5::PredType::NATIVE_DOUBLE);
                 }
                 
                 // M01
@@ -2018,12 +2245,16 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                     size_t n_times = traj.size();
                     vector<double> times(n_times);
                     vector<double> M_af(n_times * 3);
+                    vector<double> M_global(n_times * 3);
+                    vector<double> O_custom(n_times);
                     
                     for (size_t t = 0; t < n_times; ++t) {
                         times[t] = traj[t].first;
                         for (int d = 0; d < 3; ++d) {
                             M_af[t*3 + d] = traj[t].second[0](d);
+                            M_global[t*3 + d] = traj[t].second[2](d);
                         }
+                        O_custom[t] = traj[t].second[3](0);
                     }
                     
                     H5::Group m01_group = tau_group.createGroup("M01");
@@ -2036,6 +2267,12 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
                     H5::DataSpace space2(2, dims2);
                     ds = m01_group.createDataSet("M_antiferro", H5::PredType::NATIVE_DOUBLE, space2);
                     ds.write(M_af.data(), H5::PredType::NATIVE_DOUBLE);
+                    
+                    ds = m01_group.createDataSet("M_global", H5::PredType::NATIVE_DOUBLE, space2);
+                    ds.write(M_global.data(), H5::PredType::NATIVE_DOUBLE);
+                    
+                    ds = m01_group.createDataSet("O_custom", H5::PredType::NATIVE_DOUBLE, space1);
+                    ds.write(O_custom.data(), H5::PredType::NATIVE_DOUBLE);
                 }
             }
             
