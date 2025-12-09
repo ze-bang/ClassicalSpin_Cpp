@@ -266,7 +266,7 @@ void sim_BCAO_honeycomb(size_t num_trials, double h, array<double, 3> field_dir,
     // Run requested trials
     for (size_t trial_id : trials_to_run) {
         filesystem::create_directories(dir + "/" + std::to_string(trial_id));
-        lattice<3, 2, 24, 24, 1> MC(&atoms, 0.5, true);
+        lattice<3, 2, 18, 18, 1> MC(&atoms, 0.5, true);
         // auto SA_params = MC.tune_simulated_annealing(0.5, 10.0, false, 20, 1000, 0.7, 0.05);
         // {
         //     std::ostringstream oss;
@@ -587,7 +587,7 @@ void magnetic_field_scan(size_t num_steps, double h_start, double h_end, array<d
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    num_trials = 20; // Fixed number of trials for field scan
+    num_trials = 5; // Fixed number of trials for field scan
     vector<double> h_values;
     if (num_steps > 0) {
         double step = (h_end - h_start) / num_steps;
