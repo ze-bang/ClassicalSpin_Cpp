@@ -1,0 +1,39 @@
+# Example: 2D pump-probe sweep
+# Sweeps pump amplitude and probe delay time
+
+system = honeycomb_kitaev
+lattice_size = 12, 12, 1
+
+simulation_mode = parameter_sweep
+
+# 2D sweep: pump amplitude vs probe delay
+sweep_parameters = pump_amplitude, probe_time
+sweep_starts = 0.0, 20.0
+sweep_ends = 2.0, 100.0
+sweep_steps = 0.5, 20.0
+
+sweep_base_simulation = pump_probe
+
+# Pump-probe parameters
+pump_width = 10.0
+pump_time = 0.0
+pump_direction = 0, 1, 0
+
+probe_amplitude = 0.1
+probe_width = 10.0
+probe_direction = 0, 1, 0
+
+# MD settings
+md_time_start = -20.0
+md_time_end = 120.0
+md_timestep = 0.01
+md_save_interval = 5
+
+output_dir = output_2d_pump_probe_sweep
+num_trials = 1
+
+# Kitaev parameters
+K = -1.0
+Gamma = 0.25
+field_strength = 0.5
+field_direction = 1, 1, 1

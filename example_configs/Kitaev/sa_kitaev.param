@@ -1,0 +1,33 @@
+# Kitaev Honeycomb Simulated Annealing
+# Corresponds to: molecular_dynamic_kitaev_honeycomb.cpp
+# Usage: ./spin_solver sa_kitaev.param
+
+# Simulation Type
+system = honeycomb_kitaev
+simulation_mode = simulated_annealing
+
+# Lattice Size
+lattice_size = 12,12,1
+
+# Kitaev Model Parameters
+K = -1.0        # Kitaev interaction
+Gamma = 0.25    # Symmetric off-diagonal exchange
+Gammap = -0.02  # Second symmetric off-diagonal
+J = 0.0         # Heisenberg exchange
+
+# Magnetic Field
+field_strength = 0.7        # Field strength
+field_direction = 0.577,0.577,0.577  # [111] direction normalized
+h = 0.7                     # Alternative specification
+
+# Simulated Annealing (equilibration)
+T_start = 5.0
+T_end = 0.01
+annealing_steps = 1000
+overrelaxation_rate = 1
+use_twist_boundary = false
+
+
+# Output
+output_dir = KITAEV_sa
+save_observables = true

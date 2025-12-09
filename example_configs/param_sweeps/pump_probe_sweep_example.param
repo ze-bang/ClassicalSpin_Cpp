@@ -1,0 +1,55 @@
+# Example configuration for pump-probe parameter sweep
+# Sweeps over pump amplitude while running pump-probe experiments
+
+# System specification
+system = honeycomb_kitaev
+lattice_size = 16, 16, 1
+spin_length = 1.0
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# Parameter sweep settings
+sweep_parameter = pump_amplitude     # Sweep over pump pulse amplitude
+sweep_start = 0.0                    # Starting amplitude
+sweep_end = 2.0                      # Ending amplitude
+sweep_step = 0.2                     # Step size
+sweep_base_simulation = pump_probe   # Run pump-probe at each point
+
+# Pump-probe parameters
+pump_amplitude = 1.0                 # Will be overridden by sweep
+pump_width = 10.0
+pump_frequency = 0.0
+pump_time = 0.0
+pump_direction = 0, 1, 0
+
+probe_amplitude = 0.1
+probe_width = 10.0
+probe_frequency = 0.0
+probe_time = 50.0
+probe_direction = 0, 1, 0
+
+# MD settings for pump-probe
+md_time_start = -50.0
+md_time_end = 150.0
+md_timestep = 0.01
+md_save_interval = 5
+md_integrator = dopri5
+use_gpu = false
+
+# Output
+output_dir = output_sweep_pump_amplitude
+num_trials = 1
+
+# Hamiltonian parameters (Kitaev model)
+K = -1.0
+Gamma = 0.25
+Gammap = -0.02
+J = 0.0
+
+# Field
+field_strength = 0.5
+field_direction = 1, 1, 1
+
+# General settings
+use_twist_boundary = false

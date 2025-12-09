@@ -1,0 +1,51 @@
+# Kitaev Honeycomb 2D Coherent Spectroscopy
+# Corresponds to: nonlinearspectroscopy_kitaev_honeycomb function
+# Usage: ./spin_solver 2dcs_kitaev.param
+
+# Simulation Type
+system = honeycomb_kitaev
+simulation_mode = 2dcs
+
+# Lattice Size
+lattice_size = 6,6,1       # Smaller for 2DCS
+
+# Kitaev Model Parameters
+K = -1.0
+Gamma = 0.25
+Gammap = -0.02
+J = 0.0
+
+# Magnetic Field
+field_strength = 0.7
+field_direction = 0.577,0.577,0.577
+
+# Equilibration
+T_start = 5.0               # Annealing start
+T_end = 0.001                # Annealing end
+annealing_steps = 1000
+use_twist_boundary = false
+T_zero = true
+
+# Pump-Probe Setup
+pump_direction = 0,0,1      # Pump along z
+pump_amplitude = 0.1
+pump_width = 0.4
+pump_frequency = 0.1
+pump_time = 0.0             # Not used in 2DCS scan
+
+# 2DCS Scan Parameters
+tau_start = -300          # Delay time start
+tau_end = 300               # Delay time end
+tau_step = 0.25              # Delay time step
+parallel_tau = true         # Enable MPI parallelization over tau when num_trials=1
+
+# Time evolution after pump
+md_time_start = -300.0
+md_time_end = 300.0
+md_timestep = 0.25
+md_integrator = rk5
+
+# Output
+output_dir = KITAEV_2DCS
+save_observables = false
+parallel_tau = true

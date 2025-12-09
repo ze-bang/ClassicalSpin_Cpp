@@ -1,0 +1,72 @@
+# TmFeO3 2D Coherent Spectroscopy
+# Corresponds to: TmFeO3_2DCS.cpp
+# Usage: mpirun -np N ./spin_solver 2dcs_tmfeo3.param
+
+# Simulation Type
+system = tmfeo3
+simulation_mode = 2dcs
+
+# Lattice Size
+lattice_size = 4,4,4
+
+# Fe Exchange Parameters (normalized to J1ab)
+J1ab = 4.92
+J1c = 4.92
+J2ab = 0.29
+J2c = 0.29
+Ka = 0.0
+Kc = -0.09
+D1 = 0.0
+D2 = 0.0
+
+# Tm Parameters
+e1 = 0.97
+e2 = 3.97
+tm_alpha_scale = 1.0
+tm_beta_scale = 1.0
+chii = 0.0
+
+# Field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# Equilibration
+T_start = 10.0
+T_end = 0.01
+annealing_steps = 1000
+use_twist_boundary = false
+gaussian_move = false
+
+T_zero = true
+
+
+# Pump-Probe Setup
+# For SU(2) spins (Fe)
+pump_direction = 0,0,0
+pump_amplitude = 0
+pump_width = 0.4
+pump_frequency = 0.3
+
+# For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
+# Single direction broadcasts to all Tm sublattices, or provide one per sublattice
+pump_amplitude = 0.3
+pump_width = 0.5
+pump_frequency = 0.2
+pump_direction_su3 = 0,1,0,0,0,0,0,0  # λ3 component (default)
+
+# 2DCS Scan
+tau_start = -100.0
+tau_end = 100.0
+tau_step = 0.1
+parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
+
+# Time evolution
+md_time_start = -100.0
+md_time_end = 100.0
+md_timestep = 0.01
+md_integrator = rk4
+use_gpu = true              # Recommended for TmFeO3 2DCS
+
+# Output
+output_dir = TmFeO3_2DCS
+save_observables = false

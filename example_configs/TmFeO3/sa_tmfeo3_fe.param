@@ -1,0 +1,46 @@
+# TmFeO3 Tm-only Lattice (SU3 spins)
+# Simulated Annealing Configuration
+# Usage: ./spin_solver example_configs/TmFeO3/sa_tmfeo3_tm.param
+
+# System Type - Fe sublattice only
+system = tmfeo3_fe
+simulation_mode = simulated_annealing
+
+# Lattice Size (for mixed Fe)
+lattice_size = 4,4,4
+
+# Fe Exchange Interaction Parameters (in meV)
+J1ab = 4.92     # In-plane nearest neighbor
+J1c = 4.92      # Out-of-plane nearest neighbor
+J2ab = 0.29     # In-plane next nearest neighbor
+J2c = 0.29      # Out-of-plane next nearest neighbor
+
+# Fe Single-Ion Anisotropy (in meV)
+Ka = 0.0
+Kc = -0.09
+
+# DM Interaction (in meV)
+D1 = 0.0
+D2 = 0.0
+
+# Tm Energy Splitting (in meV)
+e1 = 0.97
+e2 = 3.97
+
+
+# Simulated Annealing Parameters
+T_start = 20.0
+T_end = 0.01
+annealing_steps = 10000
+overrelaxation_rate = 1
+use_twist_boundary = false
+gaussian_move = false
+cooling_rate = 0.9
+
+T_zero = true
+n_deterministics = 10000
+
+# Output
+output_dir = TmFeO3_Fe_sa
+num_trials = 1
+save_observables = false

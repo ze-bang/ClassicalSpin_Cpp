@@ -1,0 +1,43 @@
+# Example: Sweep probe time delay in pump-probe
+# Useful for mapping out temporal response
+
+system = honeycomb_bcao
+lattice_size = 12, 12, 1
+
+simulation_mode = parameter_sweep
+sweep_parameter = probe_time
+sweep_start = 10.0
+sweep_end = 100.0
+sweep_step = 5.0
+sweep_base_simulation = pump_probe
+
+# Pump-probe parameters
+pump_amplitude = 1.0
+pump_width = 5.0
+pump_time = 0.0
+pump_direction = 0, 1, 0
+
+probe_amplitude = 0.1
+probe_width = 5.0
+probe_time = 50.0                    # Will be overridden by sweep
+probe_direction = 0, 1, 0
+
+# MD settings
+md_time_start = -20.0
+md_time_end = 120.0
+md_timestep = 0.01
+md_save_interval = 5
+use_gpu = false
+
+output_dir = output_sweep_probe_delay
+num_trials = 1
+
+# BCAO parameters
+J1xy = -7.6
+J1z = -1.2
+D = 0.1
+E = -0.1
+J3xy = 2.5
+J3z = -0.85
+
+field_strength = 0.0

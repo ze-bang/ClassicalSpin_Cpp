@@ -1,0 +1,40 @@
+# TmFeO3 Tm-only Lattice (SU3 spins)
+# Simulated Annealing Configuration
+# Usage: ./spin_solver example_configs/TmFeO3/sa_tmfeo3_tm.param
+
+# System Type - Tm sublattice only (SU3 spins, 8-dimensional Gell-Mann basis)
+system = tmfeo3_tm
+simulation_mode = simulated_annealing
+
+# Lattice Size
+lattice_size = 1,1,1
+
+# Tm Energy Splitting (in meV)
+# These define the crystal field splitting for the Tm ions
+e1 = 0.97
+e2 = 3.97
+
+# Tm field scaling factors
+tm_alpha_scale = 1.0
+tm_beta_scale = 1.0
+
+# Tm-Tm Interactions (optional)
+J_tm = 0.0      # Tm-Tm exchange coupling
+K_tm = 0.0      # Tm onsite anisotropy
+
+# Simulated Annealing Parameters
+T_start = 10.0
+T_end = 0.01
+annealing_steps = 100000
+overrelaxation_rate = 0
+use_twist_boundary = false
+gaussian_move = false
+cooling_rate = 0.9
+
+T_zero = true
+n_deterministics = 10000
+
+# Output
+output_dir = TmFeO3_Tm_sa
+num_trials = 1
+save_observables = true

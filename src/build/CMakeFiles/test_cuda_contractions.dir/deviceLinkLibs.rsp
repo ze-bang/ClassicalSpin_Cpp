@@ -1,1 +1,0 @@
- "/usr/lib/x86_64-linux-gnu/libcudart_static.a" -ldl "/usr/lib/x86_64-linux-gnu/librt.a"  "/usr/lib/x86_64-linux-gnu/libculibos.a" -lcudadevrt -lcudart 

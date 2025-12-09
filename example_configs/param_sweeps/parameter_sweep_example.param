@@ -1,0 +1,48 @@
+# Example configuration for parameter sweep
+# This sweeps over the J1xy parameter in BCAO honeycomb system
+
+# System specification
+system = honeycomb_bcao
+lattice_size = 12, 12, 1
+spin_length = 1.0
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# Parameter sweep settings
+sweep_parameter = J1xy           # Name of parameter to sweep (can be any Hamiltonian parameter)
+sweep_start = -10.0              # Starting value
+sweep_end = -5.0                 # Ending value  
+sweep_step = 0.5                 # Step size
+sweep_base_simulation = simulated_annealing  # Simulation to run at each point
+
+# Base simulation parameters (applied at each sweep point)
+num_trials = 1
+T_start = 10.0
+T_end = 0.001
+annealing_steps = 50000
+cooling_rate = 0.9
+save_observables = true
+
+# Output
+output_dir = output_sweep_J1xy
+
+# Hamiltonian parameters (defaults - sweep_parameter will override)
+J1xy = -7.6
+J1z = -1.2
+D = 0.1
+E = -0.1
+F = 0.0
+G = 0.0
+J3xy = 2.5
+J3z = -0.85
+
+# Field
+field_strength = 0.0
+field_direction = 0, 1, 0
+g_factor = 1.0, 1.0, 1.0
+
+# General settings
+use_twist_boundary = false
+gaussian_move = false
+deterministic = false
