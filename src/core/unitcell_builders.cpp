@@ -219,7 +219,15 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double Kc = config.get_param("Kc", -0.09);
     const double D1 = config.get_param("D1", 0.0);
     const double D2 = config.get_param("D2", 0.0);
-    const double chii = config.get_param("chii", 0.05);
+    const double chi2x = config.get_param("chi2x", 0.0);
+    const double chi2y = config.get_param("chi2y", 0.0);
+    const double chi2z = config.get_param("chi2z", 0.0);
+    const double chi5x = config.get_param("chi5x", 0.0);
+    const double chi5y = config.get_param("chi5y", 0.0);
+    const double chi5z = config.get_param("chi5z", 0.0);
+    const double chi7x = config.get_param("chi7x", 0.0);
+    const double chi7y = config.get_param("chi7y", 0.0);
+    const double chi7z = config.get_param("chi7z", 0.0);
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
     const double h = config.field_strength;
@@ -353,16 +361,16 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     MixedUnitCell mixed_uc(Fe_atoms, Tm_atoms);
     
     // Set Fe-Tm bilinear coupling (following exact pattern from legacy code)
-    if (chii != 0.0) {
+    if (chi2x != 0.0 || chi2y != 0.0 || chi2z != 0.0 || chi5x != 0.0 || chi5y != 0.0 || chi5z != 0.0 || chi7x != 0.0 || chi7y != 0.0 || chi7z != 0.0) {
         Eigen::MatrixXd chi = Eigen::MatrixXd::Zero(8, 3);
-        chi(1, 0) = chii; chi(1, 1) = chii; chi(1, 2) = chii;
-        chi(4, 0) = chii; chi(4, 1) = chii; chi(4, 2) = chii;
-        chi(6, 0) = chii; chi(6, 1) = chii; chi(6, 2) = chii;
+        chi(1, 0) = chi2x; chi(1, 1) = chi2y; chi(1, 2) = chi2z;
+        chi(4, 0) = chi5x; chi(4, 1) = chi5y; chi(4, 2) = chi5z;
+        chi(6, 0) = chi7x; chi(6, 1) = chi7y; chi(6, 2) = chi7z;
         
         Eigen::MatrixXd chi_inv = Eigen::MatrixXd::Zero(8, 3);
-        chi_inv(1, 0) = chii; chi_inv(1, 1) = chii; chi_inv(1, 2) = chii;
-        chi_inv(4, 0) = -chii; chi_inv(4, 1) = -chii; chi_inv(4, 2) = -chii;
-        chi_inv(6, 0) = -chii; chi_inv(6, 1) = -chii; chi_inv(6, 2) = -chii;
+        chi_inv(1, 0) = chi2x; chi_inv(1, 1) = chi2y; chi_inv(1, 2) = chi2z;
+        chi_inv(4, 0) = -chi5x; chi_inv(4, 1) = -chi5y; chi_inv(4, 2) = -chi5z;
+        chi_inv(6, 0) = -chi7x; chi_inv(6, 1) = -chi7y; chi_inv(6, 2) = -chi7z;
         
         // Fe site 0 - 8 nearest Tm neighbors
         mixed_uc.set_mixed_bilinear(chi, 3, 0, Eigen::Vector3i(-1, 0, 0));

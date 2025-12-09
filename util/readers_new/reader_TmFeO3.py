@@ -41,8 +41,11 @@ import matplotlib.pyplot as plt
 import os
 from math import gcd
 from functools import reduce
-from matplotlib.colors import PowerNorm
-from typing import Dict, Tuple, Optional, List, Any
+from matplotlib.colors import PowerNorm, LogNorm, SymLogNorm, Normalize
+from typing import Dict, Tuple, Optional, List, Any, Literal
+
+# Type for norm selection
+NormType = Literal['log', 'power', 'symlog', 'linear']
 
 
 # =============================================================================
@@ -716,8 +719,89 @@ def _validate_window(window, name):
     return tuple(window)
 
 
+def _get_norm(data: np.ndarray, norm_type: NormType = 'log', gamma: float = 0.5, 
+              linthresh: float = 1e-3) -> Optional[Normalize]:
+    """Get normalization for imshow based on the specified type.
+    
+    Args:
+        data: The data array to normalize
+        norm_type: Type of normalization:
+            - 'log': LogNorm (logarithmic scaling, good for data with large dynamic range)
+            - 'power': PowerNorm (power-law scaling with gamma parameter)
+            - 'symlog': SymLogNorm (symmetric log, good for data with positive and negative values)
+            - 'linear': Linear normalization (no scaling)
+        gamma: Exponent for PowerNorm (default: 0.5, i.e., square root scaling)
+        linthresh: Linear threshold for SymLogNorm (default: 1e-3)
+    
+    Returns:
+        Matplotlib Normalize object or None for default linear normalization
+    """
+    # Get data range
+    finite_data = data[np.isfinite(data)]
+    if len(finite_data) == 0:
+        return None
+    
+    data_min = finite_data.min()
+    data_max = finite_data.max()
+    
+    if data_min >= data_max:
+        # All values are the same, use linear norm
+        return None
+    
+    if norm_type == 'log':
+        # Get positive values only for log norm
+        positive_data = data[data > 0]
+        if len(positive_data) == 0:
+            return None
+        vmin = positive_data.min()
+        vmax = positive_data.max()
+        if vmin >= vmax:
+            return None
+        return LogNorm(vmin=vmin, vmax=vmax)
+    
+    elif norm_type == 'power':
+        # PowerNorm with specified gamma
+        # For data that includes zero or negative, shift to positive
+        if data_min <= 0:
+            vmin = 0
+            vmax = data_max - data_min
+        else:
+            vmin = data_min
+            vmax = data_max
+        return PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
+    
+    elif norm_type == 'symlog':
+        # SymLogNorm for data with both positive and negative values
+        # Automatically determine linthresh if data is very small
+        abs_max = max(abs(data_min), abs(data_max))
+        if abs_max > 0:
+            auto_linthresh = min(linthresh, abs_max * 0.01)
+        else:
+            auto_linthresh = linthresh
+        return SymLogNorm(linthresh=auto_linthresh, vmin=data_min, vmax=data_max)
+    
+    elif norm_type == 'linear':
+        return Normalize(vmin=data_min, vmax=data_max)
+    
+    else:
+        # Unknown norm type, return None (linear)
+        print(f"Warning: Unknown norm_type '{norm_type}', using linear normalization")
+        return None
+
+
+def _get_safe_log_norm(data: np.ndarray):
+    """Get a safe log normalization for imshow, handling zeros and edge cases.
+    
+    DEPRECATED: Use _get_norm(data, 'log') instead.
+    
+    Returns None for linear normalization if log is not appropriate.
+    """
+    return _get_norm(data, 'log')
+
+
 def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None,
-                      omega_tau_window: Optional[Tuple[float, float]] = None) -> Dict[str, np.ndarray]:
+                      omega_tau_window: Optional[Tuple[float, float]] = None,
+                      norm_type: NormType = 'power') -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for mixed SU(2)+SU(3) systems.
     
     Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
@@ -729,6 +813,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         dir: Directory containing pump_probe_spectroscopy.h5
         omega_t_window: Optional (min, max) tuple for ω_t axis limits
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
+        norm_type: Normalization type for plots ('log', 'power', 'symlog', 'linear')
         
     Returns:
         Dictionary with 2DCS results for both sublattices
@@ -853,7 +938,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     sig_comp_FF = compute_2d_fft(sig_comp)
                     ax_freq = axes_sig[comp, 2]
                     im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                              norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
                     ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
                     ax_freq.set_title(f'{label}-component (freq domain)')
@@ -878,7 +963,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 plt.imshow(sig_z_FF, origin='lower',
                            extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-                           aspect='auto', cmap='gnuplot2', norm='linear')
+                           aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_z_FF, norm_type))
                 plt.xlabel('$\\omega_t$ (rad/time)')
                 plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
                 plt.colorbar(label='Intensity')
@@ -924,7 +1009,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 M_NL_comp_FF = compute_2d_fft(M_NL_comp)
                 ax_freq = axes_debug[comp, 2]
                 im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                          norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                 ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
                 ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
                 ax_freq.set_title(f'{label}-component (freq domain)')
@@ -949,7 +1034,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             plt.imshow(M_NL_z_FF, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-                       aspect='auto', cmap='gnuplot2', norm='linear')
+                       aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_z_FF, norm_type))
             plt.xlabel('$\\omega_t$ (rad/time)')
             plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
             plt.colorbar(label='Intensity')
@@ -1029,7 +1114,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     sig_comp_FF = compute_2d_fft(sig_comp)
                     ax_freq = axes_sig[comp, 2]
                     im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                              norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
                     ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
                     ax_freq.set_title(f'{label}-component (freq domain)')
@@ -1055,7 +1140,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 plt.imshow(sig_total_FF, origin='lower',
                            extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-                           aspect='auto', cmap='gnuplot2', norm='linear')
+                           aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_total_FF, norm_type))
                 plt.xlabel('$\\omega_t$ (rad/time)')
                 plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
                 plt.colorbar(label='Intensity')
@@ -1101,7 +1186,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 M_NL_comp_FF = compute_2d_fft(M_NL_comp)
                 ax_freq = axes_debug[comp, 2]
                 im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                          norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                 ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
                 ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
                 ax_freq.set_title(f'{label}-component (freq domain)')
@@ -1127,7 +1212,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             plt.imshow(M_NL_total_FF, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-                       aspect='auto', cmap='gnuplot2', norm='linear')
+                       aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_total_FF, norm_type))
             plt.xlabel('$\\omega_t$ (rad/time)')
             plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
             plt.colorbar(label='Intensity')
@@ -1150,7 +1235,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             plt.imshow(M_NL_combined, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-                       aspect='auto', cmap='gnuplot2', norm='linear')
+                       aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_combined, norm_type))
             plt.xlabel('$\\omega_t$ (rad/time)')
             plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
             plt.colorbar(label='Intensity')
@@ -1169,7 +1254,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
 
 
 def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float, float]] = None,
-                            omega_tau_window: Optional[Tuple[float, float]] = None) -> Dict[str, np.ndarray]:
+                            omega_tau_window: Optional[Tuple[float, float]] = None,
+                            norm_type: NormType = 'power') -> Dict[str, np.ndarray]:
     """
     Read 2D coherent spectroscopy data and compute nonlinear spectra for both sublattices.
     
@@ -1179,6 +1265,7 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
         filepath: Path to pump_probe_spectroscopy.h5 file
         omega_t_window: Optional (min, max) tuple for ω_t axis limits  
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
+        norm_type: Normalization type for plots ('log', 'power', 'symlog', 'linear')
         
     Returns:
         Dictionary with 2DCS results for SU(2), SU(3), and combined
@@ -1187,7 +1274,7 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
     if output_dir == '':
         output_dir = '.'
     
-    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window)
+    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window, norm_type)
 
 
 # =============================================================================
@@ -1289,15 +1376,36 @@ def find_hdf5_file(path: str, analysis_type: str) -> str:
 
 if __name__ == "__main__":
     import sys
+    import argparse
     
-    if len(sys.argv) < 2:
-        print("Usage: python reader_TmFeO3_hdf5.py <hdf5_file_or_directory> [analysis_type]")
-        print("  analysis_type: 'md' for molecular dynamics, '2dcs' for 2D spectroscopy")
-        print("  If a directory is provided, the script will search for the appropriate HDF5 file.")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='HDF5 Reader for TmFeO3 Molecular Dynamics and 2D Coherent Spectroscopy Results',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python reader_TmFeO3.py /path/to/data md
+  python reader_TmFeO3.py /path/to/data 2dcs --norm power
+  python reader_TmFeO3.py /path/to/data 2dcs --norm log --omega-t -10 10 --omega-tau -5 5
+        """
+    )
+    parser.add_argument('path', help='Path to HDF5 file or directory containing it')
+    parser.add_argument('analysis_type', nargs='?', default='md', choices=['md', '2dcs'],
+                        help="Analysis type: 'md' for molecular dynamics, '2dcs' for 2D spectroscopy (default: md)")
+    parser.add_argument('--norm', '-n', type=str, default='power', choices=['log', 'power', 'symlog', 'linear'],
+                        help="Normalization type for 2D plots (default: power)")
+    parser.add_argument('--omega-t', type=float, nargs=2, metavar=('MIN', 'MAX'), default=None,
+                        help='ω_t axis limits for 2DCS plots (e.g., --omega-t -10 10)')
+    parser.add_argument('--omega-tau', type=float, nargs=2, metavar=('MIN', 'MAX'), default=None,
+                        help='ω_τ axis limits for 2DCS plots (e.g., --omega-tau -5 5)')
+    parser.add_argument('--w0', type=float, default=0,
+                        help='Minimum frequency for MD analysis (default: 0)')
+    parser.add_argument('--wmax', type=float, default=70,
+                        help='Maximum frequency for MD analysis (default: 70)')
     
-    input_path = sys.argv[1]
-    analysis_type = sys.argv[2] if len(sys.argv) > 2 else 'md'
+    args = parser.parse_args()
+    
+    input_path = args.path
+    analysis_type = args.analysis_type
     
     if not os.path.exists(input_path):
         print(f"Error: Path not found: {input_path}")
@@ -1311,18 +1419,21 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print(f"Analyzing {filepath} (type: {analysis_type})")
-    print("\nHDF5 Structure:")
-    print("-" * 50)
-    print_hdf5_structure(filepath)
-    print("-" * 50)
+    print(f"  Normalization: {args.norm}")
+    if args.omega_t:
+        print(f"  ω_t window: {args.omega_t}")
+    if args.omega_tau:
+        print(f"  ω_τ window: {args.omega_tau}")
     
     if analysis_type == 'md':
-        print("\nRunning MD analysis...")
-        results = read_MD_hdf5(filepath)
+        print(f"\nRunning MD analysis (w0={args.w0}, wmax={args.wmax})...")
+        results = read_MD_hdf5(filepath, w0=args.w0, wmax=args.wmax)
         print(f"Results keys: {list(results.keys())}")
     elif analysis_type == '2dcs':
         print("\nRunning 2DCS analysis...")
-        results = read_2DCS_combined_hdf5(filepath)
+        omega_t_window = tuple(args.omega_t) if args.omega_t else None
+        omega_tau_window = tuple(args.omega_tau) if args.omega_tau else None
+        results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm)
         print(f"Results keys: {list(results.keys())}")
     else:
         print(f"Unknown analysis type: {analysis_type}")
