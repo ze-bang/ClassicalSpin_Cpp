@@ -5,10 +5,13 @@
  * This implements a honeycomb lattice with:
  * - Generic NN, 2nd NN, and 3rd NN spin-spin interactions (bilinear matrix form)
  * - Sublattice-dependent 2nd NN coupling (J2_A for sublattice A, J2_B for sublattice B)
- * - Two phonon modes: E1 (Qx, Qy) and A1 (Q_R)
- * - Three-phonon coupling: g3 * (Qx² + Qy²) * Q_R
- * - Spin-phonon coupling: Qx*(SxSz + SzSx) + Qy*(SySz + SzSy) + Q_R*(SxSx + SySy + SzSz)
- * - THz drive coupling to E1 mode
+ * - Three phonon modes: E1 (Qx_E1, Qy_E1), E2 (Qx_E2, Qy_E2), and A1 (Q_A1)
+ * - Three-phonon coupling: g3_E1A1 * (Qx_E1² + Qy_E1²) * Q_A1 + g3_E2A1 * (Qx_E2² + Qy_E2²) * Q_A1
+ * - E1-E2 bilinear coupling: g3_E1E2 * (Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
+ * - Spin-phonon E1 coupling: λ_E1 * [Qx_E1*(SxSz + SzSx) + Qy_E1*(SySz + SzSy)]
+ * - Spin-phonon E2 coupling: λ_E2 * [Qx_E2*(SxSx - SySy) + Qy_E2*(SxSy - SySx)]
+ * - Spin-phonon A1 coupling: λ_A1 * Q_A1 * (Si·Sj)
+ * - THz drive coupling to E1 mode (only E1 is IR active)
  * 
  * Hamiltonian:
  * H = H_spin + H_phonon + H_sp-ph + H_drive
@@ -17,15 +20,19 @@
  *        + Σ_<<<ij>>> Si · J3 · Sj - Σ_i B · Si
  *   (NN J1 is bond-dependent Kitaev-Heisenberg-Γ-Γ', 2nd and 3rd NN are isotropic Heisenberg)
  * 
- * H_phonon = (1/2)(Vx² + Vy²) + (1/2)ω_E²(Qx² + Qy²) + (λ_E/4)(Qx² + Qy²)²
- *          + (1/2)V_R² + (1/2)ω_A²*Q_R² + (λ_A/4)*Q_R⁴
- *          + g3*(Qx² + Qy²)*Q_R
+ * H_phonon = (1/2)(Vx_E1² + Vy_E1²) + (1/2)ω_E1²(Qx_E1² + Qy_E1²) + (λ_E1/4)(Qx_E1² + Qy_E1²)²
+ *          + (1/2)(Vx_E2² + Vy_E2²) + (1/2)ω_E2²(Qx_E2² + Qy_E2²) + (λ_E2/4)(Qx_E2² + Qy_E2²)²
+ *          + (1/2)V_A1² + (1/2)ω_A1²*Q_A1² + (λ_A1/4)*Q_A1⁴
+ *          + g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
+ *          + g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
  * 
- * H_sp-ph = Σ_<ij> [λ_xy * Qx * (Si_x*Sj_z + Si_z*Sj_x)
- *                 + λ_xy * Qy * (Si_y*Sj_z + Si_z*Sj_y)
- *                 + λ_R  * Q_R * (Si_x*Sj_x + Si_y*Sj_y + Si_z*Sj_z)]
+ * H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)    // E1 coupling
+ *                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
+ *                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)    // E2 coupling
+ *                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+ *                 + λ_A1 * Q_A1  * (Si · Sj)]                  // A1 coupling
  * 
- * H_drive = -E_x(t) * Qx - E_y(t) * Qy
+ * H_drive = -E_x(t) * Qx_E1 - E_y(t) * Qy_E1   (only E1 is IR active)
  * 
  * Equations of motion (Euler-Lagrange):
  * - Spins: dS/dt = S × H_eff (LLG with optional Gilbert damping)
@@ -79,40 +86,67 @@ using std::array;
 /**
  * Phonon state for the spin-phonon model
  * 
- * E1 mode: 2-component (Qx, Qy) with velocities (Vx, Vy)
- * A1 mode: 1-component (Q_R) with velocity (V_R)
+ * E1 mode: 2-component (Qx_E1, Qy_E1) - IR active, couples to SxSz+SzSx, SySz+SzSy
+ * E2 mode: 2-component (Qx_E2, Qy_E2) - Raman active, couples to SxSx-SySy, SxSy-SySx
+ * A1 mode: 1-component (Q_A1) - Raman active, couples to Si·Sj
  */
 struct PhononState {
     // E1 mode (infrared active, 2-component)
-    double Q_x = 0.0;   // x-component of E1 normal coordinate
-    double Q_y = 0.0;   // y-component of E1 normal coordinate
+    double Q_x_E1 = 0.0;   // x-component of E1 normal coordinate
+    double Q_y_E1 = 0.0;   // y-component of E1 normal coordinate
+    
+    // E2 mode (Raman active, 2-component)
+    double Q_x_E2 = 0.0;   // x-component of E2 normal coordinate
+    double Q_y_E2 = 0.0;   // y-component of E2 normal coordinate
     
     // A1 mode (Raman active, 1-component)
-    double Q_R = 0.0;   // A1 normal coordinate
+    double Q_A1 = 0.0;     // A1 normal coordinate
     
     // Velocities (dQ/dt)
-    double V_x = 0.0;   // dQx/dt
-    double V_y = 0.0;   // dQy/dt
-    double V_R = 0.0;   // dQ_R/dt
+    double V_x_E1 = 0.0;   // dQx_E1/dt
+    double V_y_E1 = 0.0;   // dQy_E1/dt
+    double V_x_E2 = 0.0;   // dQx_E2/dt
+    double V_y_E2 = 0.0;   // dQy_E2/dt
+    double V_A1 = 0.0;     // dQ_A1/dt
     
-    // Total DOF: 3 coordinates + 3 velocities = 6
-    static constexpr size_t N_DOF = 6;
+    // Total DOF: 5 coordinates + 5 velocities = 10
+    static constexpr size_t N_DOF = 10;
     
-    // Pack to flat array: [Qx, Qy, Q_R, Vx, Vy, V_R]
+    // Pack to flat array: [Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1]
     void to_array(double* arr) const {
-        arr[0] = Q_x; arr[1] = Q_y; arr[2] = Q_R;
-        arr[3] = V_x; arr[4] = V_y; arr[5] = V_R;
+        arr[0] = Q_x_E1; arr[1] = Q_y_E1; 
+        arr[2] = Q_x_E2; arr[3] = Q_y_E2;
+        arr[4] = Q_A1;
+        arr[5] = V_x_E1; arr[6] = V_y_E1;
+        arr[7] = V_x_E2; arr[8] = V_y_E2;
+        arr[9] = V_A1;
     }
     
     // Unpack from flat array
     void from_array(const double* arr) {
-        Q_x = arr[0]; Q_y = arr[1]; Q_R = arr[2];
-        V_x = arr[3]; V_y = arr[4]; V_R = arr[5];
+        Q_x_E1 = arr[0]; Q_y_E1 = arr[1];
+        Q_x_E2 = arr[2]; Q_y_E2 = arr[3];
+        Q_A1 = arr[4];
+        V_x_E1 = arr[5]; V_y_E1 = arr[6];
+        V_x_E2 = arr[7]; V_y_E2 = arr[8];
+        V_A1 = arr[9];
     }
     
     // Kinetic energy (unit mass)
     double kinetic_energy() const {
-        return 0.5 * (V_x*V_x + V_y*V_y + V_R*V_R);
+        return 0.5 * (V_x_E1*V_x_E1 + V_y_E1*V_y_E1 + 
+                      V_x_E2*V_x_E2 + V_y_E2*V_y_E2 + 
+                      V_A1*V_A1);
+    }
+    
+    // E1 amplitude
+    double E1_amplitude() const {
+        return std::sqrt(Q_x_E1*Q_x_E1 + Q_y_E1*Q_y_E1);
+    }
+    
+    // E2 amplitude
+    double E2_amplitude() const {
+        return std::sqrt(Q_x_E2*Q_x_E2 + Q_y_E2*Q_y_E2);
     }
 };
 
@@ -120,25 +154,31 @@ struct PhononState {
  * Phonon parameters
  */
 struct PhononParams {
-    // E1 mode (IR active)
-    double omega_E = 1.0;   // E1 mode frequency
-    double gamma_E = 0.1;   // E1 mode damping
-    double mass_E = 1.0;    // E1 mode effective mass (set to 1, absorb in other params)
+    // E1 mode (IR active, 2-component)
+    double omega_E1 = 1.0;   // E1 mode frequency
+    double gamma_E1 = 0.1;   // E1 mode damping
+    double lambda_E1 = 0.0;  // E1 mode quartic coefficient
     
-    // A1 mode (Raman active)
-    double omega_A = 0.5;   // A1 mode frequency
-    double gamma_A = 0.05;  // A1 mode damping
-    double mass_A = 1.0;    // A1 mode effective mass
+    // E2 mode (Raman active, 2-component)
+    double omega_E2 = 0.8;   // E2 mode frequency
+    double gamma_E2 = 0.1;   // E2 mode damping
+    double lambda_E2 = 0.0;  // E2 mode quartic coefficient
     
-    // Three-phonon coupling: g3 * (Qx² + Qy²) * Q_R
-    double g3 = 0.0;        // Cubic phonon-phonon coupling
+    // A1 mode (Raman active, 1-component)
+    double omega_A1 = 0.5;   // A1 mode frequency
+    double gamma_A1 = 0.05;  // A1 mode damping
+    double lambda_A1 = 0.0;  // A1 mode quartic coefficient
     
-    // Quartic stabilization terms: (λ_E/4)(Qx² + Qy²)² + (λ_A/4)*Q_R⁴
-    double lambda_E = 0.0;  // E1 mode quartic coefficient (restores stability)
-    double lambda_A = 0.0;  // A1 mode quartic coefficient (restores stability)
+    // Three-phonon coupling: g3_E1A1 * (Qx_E1² + Qy_E1²) * Q_A1
+    //                      + g3_E2A1 * (Qx_E2² + Qy_E2²) * Q_A1
+    double g3_E1A1 = 0.0;   // E1-A1 cubic coupling
+    double g3_E2A1 = 0.0;   // E2-A1 cubic coupling
     
-    // THz coupling strength
-    double Z_star = 1.0;    // Effective charge for E(t) coupling
+    // E1-E2 bilinear coupling: g3_E1E2 * (Qx_E1 * Qx_E2 + Qy_E1 * Qy_E2)
+    double g3_E1E2 = 0.0;   // E1-E2 bilinear coupling
+    
+    // THz coupling strength (only E1 is IR active)
+    double Z_star = 1.0;    // Effective charge for E(t) coupling to E1
 };
 
 /**
@@ -153,9 +193,9 @@ struct PhononParams {
  *   Jz (z-bond): K on zz, Γ on xy/yx, Γ' on xz/yz
  * 
  * Spin-phonon coupling form on each bond <ij>:
- *   λ_xy * Qx * (Si_x*Sj_z + Si_z*Sj_x)
- * + λ_xy * Qy * (Si_y*Sj_z + Si_z*Sj_y)  
- * + λ_R  * Q_R * (Si_x*Sj_x + Si_y*Sj_y + Si_z*Sj_z)
+ *   λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x) + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)  [E1 coupling]
+ * + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y) + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)  [E2 coupling]
+ * + λ_A1 * Q_A1  * (Si · Sj)                                                          [A1 coupling]
  */
 struct SpinPhononCouplingParams {
     // Kitaev-Heisenberg-Γ-Γ' parameters (Songvilay defaults)
@@ -172,8 +212,9 @@ struct SpinPhononCouplingParams {
     double J3 = 0.9;
     
     // Spin-phonon coupling strengths
-    double lambda_xy = 0.0;  // Coupling for E1 mode (Qx, Qy)
-    double lambda_R = 0.0;   // Coupling for A1 mode (Q_R)
+    double lambda_E1 = 0.0;  // E1 coupling: Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
+    double lambda_E2 = 0.0;  // E2 coupling: Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)
+    double lambda_A1 = 0.0;  // A1 coupling: Q_A1*(Si·Sj)
     
     // Build bond-dependent exchange matrices
     SpinMatrix get_Jx() const {
@@ -256,9 +297,9 @@ struct DriveParams {
  * 
  * Degrees of freedom:
  * - N_spin = 2 * dim1 * dim2 * dim3 classical spins (honeycomb, spin_dim = 3)
- * - 6 global phonon DOF: (Qx, Qy, Q_R, Vx, Vy, V_R)
+ * - 10 global phonon DOF: (Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1)
  * 
- * Total ODE state size: 3 * N_spin + 6
+ * Total ODE state size: 3 * N_spin + 10
  */
 class PhononLattice {
 public:
@@ -446,11 +487,14 @@ public:
         double E = -spin_here.dot(field[site]);
         
         // Phonon coordinates (for spin-phonon coupling)
-        double Qx = phonons.Q_x;
-        double Qy = phonons.Q_y;
-        double QR = phonons.Q_R;
-        double lxy = spin_phonon_params.lambda_xy;
-        double lR = spin_phonon_params.lambda_R;
+        double Qx_E1 = phonons.Q_x_E1;
+        double Qy_E1 = phonons.Q_y_E1;
+        double Qx_E2 = phonons.Q_x_E2;
+        double Qy_E2 = phonons.Q_y_E2;
+        double Q_A1 = phonons.Q_A1;
+        double l_E1 = spin_phonon_params.lambda_E1;
+        double l_E2 = spin_phonon_params.lambda_E2;
+        double l_A1 = spin_phonon_params.lambda_A1;
         
         // NN interactions (includes spin-phonon coupling)
         for (size_t n = 0; n < nn_partners[site].size(); ++n) {
@@ -460,13 +504,21 @@ public:
             // Pure spin-spin interaction
             E += spin_here.dot(nn_interaction[site][n] * Sj);
             
-            // Spin-phonon coupling
-            // λ_xy * Qx * (Si_x * Sj_z + Si_z * Sj_x)
-            E += lxy * Qx * (spin_here(0) * Sj(2) + spin_here(2) * Sj(0));
-            // λ_xy * Qy * (Si_y * Sj_z + Si_z * Sj_y)
-            E += lxy * Qy * (spin_here(1) * Sj(2) + spin_here(2) * Sj(1));
-            // λ_R * Q_R * (Si · Sj)
-            E += lR * QR * spin_here.dot(Sj);
+            // Spin-phonon coupling: E1 terms
+            // λ_E1 * Qx_E1 * (Si_x * Sj_z + Si_z * Sj_x)
+            E += l_E1 * Qx_E1 * (spin_here(0) * Sj(2) + spin_here(2) * Sj(0));
+            // λ_E1 * Qy_E1 * (Si_y * Sj_z + Si_z * Sj_y)
+            E += l_E1 * Qy_E1 * (spin_here(1) * Sj(2) + spin_here(2) * Sj(1));
+            
+            // Spin-phonon coupling: E2 terms
+            // λ_E2 * Qx_E2 * (Si_x * Sj_x - Si_y * Sj_y)
+            E += l_E2 * Qx_E2 * (spin_here(0) * Sj(0) - spin_here(1) * Sj(1));
+            // λ_E2 * Qy_E2 * (Si_x * Sj_y - Si_y * Sj_x)
+            E += l_E2 * Qy_E2 * (spin_here(0) * Sj(1) - spin_here(1) * Sj(0));
+            
+            // Spin-phonon coupling: A1 term
+            // λ_A1 * Q_A1 * (Si · Sj)
+            E += l_A1 * Q_A1 * spin_here.dot(Sj);
         }
         // 2nd NN interactions
         for (size_t n = 0; n < j2_partners[site].size(); ++n) {
@@ -497,11 +549,14 @@ public:
         double dE = -delta.dot(field[site]);
         
         // Phonon coordinates (for spin-phonon coupling)
-        double Qx = phonons.Q_x;
-        double Qy = phonons.Q_y;
-        double QR = phonons.Q_R;
-        double lxy = spin_phonon_params.lambda_xy;
-        double lR = spin_phonon_params.lambda_R;
+        double Qx_E1 = phonons.Q_x_E1;
+        double Qy_E1 = phonons.Q_y_E1;
+        double Qx_E2 = phonons.Q_x_E2;
+        double Qy_E2 = phonons.Q_y_E2;
+        double Q_A1 = phonons.Q_A1;
+        double l_E1 = spin_phonon_params.lambda_E1;
+        double l_E2 = spin_phonon_params.lambda_E2;
+        double l_A1 = spin_phonon_params.lambda_A1;
         
         // NN interactions (includes spin-phonon coupling)
         for (size_t n = 0; n < nn_partners[site].size(); ++n) {
@@ -511,12 +566,21 @@ public:
             // Pure spin-spin interaction
             dE += delta.dot(nn_interaction[site][n] * Sj);
             
-            // Spin-phonon coupling: λ_xy * Qx * (ΔSi_x * Sj_z + ΔSi_z * Sj_x)
-            dE += lxy * Qx * (delta(0) * Sj(2) + delta(2) * Sj(0));
-            // Spin-phonon coupling: λ_xy * Qy * (ΔSi_y * Sj_z + ΔSi_z * Sj_y)
-            dE += lxy * Qy * (delta(1) * Sj(2) + delta(2) * Sj(1));
-            // Spin-phonon coupling: λ_R * Q_R * (ΔSi · Sj)
-            dE += lR * QR * delta.dot(Sj);
+            // Spin-phonon coupling: E1 terms
+            // λ_E1 * Qx_E1 * (ΔSi_x * Sj_z + ΔSi_z * Sj_x)
+            dE += l_E1 * Qx_E1 * (delta(0) * Sj(2) + delta(2) * Sj(0));
+            // λ_E1 * Qy_E1 * (ΔSi_y * Sj_z + ΔSi_z * Sj_y)
+            dE += l_E1 * Qy_E1 * (delta(1) * Sj(2) + delta(2) * Sj(1));
+            
+            // Spin-phonon coupling: E2 terms
+            // λ_E2 * Qx_E2 * (ΔSi_x * Sj_x - ΔSi_y * Sj_y)
+            dE += l_E2 * Qx_E2 * (delta(0) * Sj(0) - delta(1) * Sj(1));
+            // λ_E2 * Qy_E2 * (ΔSi_x * Sj_y - ΔSi_y * Sj_x)
+            dE += l_E2 * Qy_E2 * (delta(0) * Sj(1) - delta(1) * Sj(0));
+            
+            // Spin-phonon coupling: A1 term
+            // λ_A1 * Q_A1 * (ΔSi · Sj)
+            dE += l_A1 * Q_A1 * delta.dot(Sj);
         }
         // 2nd NN interactions (no spin-phonon coupling on 2nd NN)
         for (size_t n = 0; n < j2_partners[site].size(); ++n) {
@@ -539,18 +603,22 @@ public:
     /**
      * Phonon energy (kinetic + potential + cubic coupling)
      * 
-     * E_ph = (1/2)(Vx² + Vy²) + (1/2)ω_E²(Qx² + Qy²)
-     *      + (1/2)V_R² + (1/2)ω_A²*Q_R²
-     *      + g3*(Qx² + Qy²)*Q_R
+     * E_ph = (1/2)(Vx_E1² + Vy_E1²) + (1/2)ω_E1²(Qx_E1² + Qy_E1²) + (λ_E1/4)(Qx_E1² + Qy_E1²)²
+     *      + (1/2)(Vx_E2² + Vy_E2²) + (1/2)ω_E2²(Qx_E2² + Qy_E2²) + (λ_E2/4)(Qx_E2² + Qy_E2²)²
+     *      + (1/2)V_A1² + (1/2)ω_A1²*Q_A1² + (λ_A1/4)*Q_A1⁴
+     *      + g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
+     *      + g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
      */
     double phonon_energy() const;
     
     /**
      * Spin-phonon coupling energy
      * 
-     * H_sp-ph = Σ_<ij> [λ_xy * Qx * (Si_x*Sj_z + Si_z*Sj_x)
-     *                 + λ_xy * Qy * (Si_y*Sj_z + Si_z*Sj_y)
-     *                 + λ_R  * Q_R * (Si · Sj)]
+     * H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)   // E1 coupling
+     *                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
+     *                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)   // E2 coupling
+     *                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+     *                 + λ_A1 * Q_A1  * (Si · Sj)]                 // A1 coupling
      */
     double spin_phonon_energy() const;
     
@@ -573,19 +641,29 @@ public:
     // ============================================================
     
     /**
-     * Compute ∂H_sp-ph/∂Qx = Σ_<ij> λ_xy * (Si_x*Sj_z + Si_z*Sj_x)
+     * Compute ∂H_sp-ph/∂Qx_E1 = Σ_<ij> λ_E1 * (Si_x*Sj_z + Si_z*Sj_x)
      */
-    double dH_dQx() const;
+    double dH_dQx_E1() const;
     
     /**
-     * Compute ∂H_sp-ph/∂Qy = Σ_<ij> λ_xy * (Si_y*Sj_z + Si_z*Sj_y)
+     * Compute ∂H_sp-ph/∂Qy_E1 = Σ_<ij> λ_E1 * (Si_y*Sj_z + Si_z*Sj_y)
      */
-    double dH_dQy() const;
+    double dH_dQy_E1() const;
     
     /**
-     * Compute ∂H_sp-ph/∂Q_R = Σ_<ij> λ_R * (Si · Sj)
+     * Compute ∂H_sp-ph/∂Qx_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_x - Si_y*Sj_y)
      */
-    double dH_dQR() const;
+    double dH_dQx_E2() const;
+    
+    /**
+     * Compute ∂H_sp-ph/∂Qy_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+     */
+    double dH_dQy_E2() const;
+    
+    /**
+     * Compute ∂H_sp-ph/∂Q_A1 = Σ_<ij> λ_A1 * (Si · Sj)
+     */
+    double dH_dQ_A1() const;
     
     /**
      * Compute effective field on spin i (for spin EOM)
@@ -601,19 +679,33 @@ public:
     /**
      * Phonon EOM derivatives
      * 
-     * dQx/dt = Vx
-     * dVx/dt = -ω_E² Qx - 2*g3*Qx*Q_R - γ_E*Vx - ∂H_sp-ph/∂Qx + Z*Ex(t)
+     * E1 mode (IR active, THz driven):
+     *   dQx_E1/dt = Vx_E1
+     *   dVx_E1/dt = -ω_E1² Qx_E1 - λ_E1 (Qx_E1²+Qy_E1²) Qx_E1 
+     *              - 2*g3_E1A1*Qx_E1*Q_A1 - γ_E1*Vx_E1 - ∂H_sp-ph/∂Qx_E1 + Z*Ex(t)
+     *   dQy_E1/dt = Vy_E1
+     *   dVy_E1/dt = -ω_E1² Qy_E1 - λ_E1 (Qx_E1²+Qy_E1²) Qy_E1 
+     *              - 2*g3_E1A1*Qy_E1*Q_A1 - γ_E1*Vy_E1 - ∂H_sp-ph/∂Qy_E1 + Z*Ey(t)
      * 
-     * dQy/dt = Vy  
-     * dVy/dt = -ω_E² Qy - 2*g3*Qy*Q_R - γ_E*Vy - ∂H_sp-ph/∂Qy + Z*Ey(t)
+     * E2 mode (Raman active, not directly driven by THz):
+     *   dQx_E2/dt = Vx_E2
+     *   dVx_E2/dt = -ω_E2² Qx_E2 - λ_E2 (Qx_E2²+Qy_E2²) Qx_E2 
+     *              - 2*g3_E2A1*Qx_E2*Q_A1 - γ_E2*Vx_E2 - ∂H_sp-ph/∂Qx_E2
+     *   dQy_E2/dt = Vy_E2
+     *   dVy_E2/dt = -ω_E2² Qy_E2 - λ_E2 (Qx_E2²+Qy_E2²) Qy_E2 
+     *              - 2*g3_E2A1*Qy_E2*Q_A1 - γ_E2*Vy_E2 - ∂H_sp-ph/∂Qy_E2
      * 
-     * dQ_R/dt = V_R
-     * dV_R/dt = -ω_A² Q_R - g3*(Qx² + Qy²) - γ_A*V_R - ∂H_sp-ph/∂Q_R
+     * A1 mode (Raman active, not directly driven by THz):
+     *   dQ_A1/dt = V_A1
+     *   dV_A1/dt = -ω_A1² Q_A1 - λ_A1 Q_A1³ 
+     *             - g3_E1A1 (Qx_E1²+Qy_E1²) - g3_E2A1 (Qx_E2²+Qy_E2²) 
+     *             - γ_A1*V_A1 - ∂H_sp-ph/∂Q_A1
      */
     void phonon_derivatives(const PhononState& ph, double t,
-                           double dH_dQx_val, double dH_dQy_val, double dH_dQR_val,
-                           double& dQx, double& dQy, double& dQR,
-                           double& dVx, double& dVy, double& dVR) const;
+                           double dH_dQx_E1_val, double dH_dQy_E1_val,
+                           double dH_dQx_E2_val, double dH_dQy_E2_val,
+                           double dH_dQ_A1_val,
+                           PhononState& dph_dt) const;
     
     /**
      * Full ODE system for coupled spin-phonon dynamics
@@ -785,7 +877,14 @@ public:
      * E1 phonon amplitude
      */
     double E1_amplitude() const {
-        return std::sqrt(phonons.Q_x * phonons.Q_x + phonons.Q_y * phonons.Q_y);
+        return phonons.E1_amplitude();
+    }
+    
+    /**
+     * E2 phonon amplitude
+     */
+    double E2_amplitude() const {
+        return phonons.E2_amplitude();
     }
     
     // ============================================================
@@ -895,10 +994,13 @@ public:
      * for fixed spins. This should be called after simulated annealing and
      * before molecular dynamics to ensure a proper steady state.
      * 
-     * The equilibrium satisfies:
-     *   ω_E² Qx + λ_E (Qx²+Qy²) Qx + 2 g3 Qx Q_R + ∂H_sp/∂Qx = 0
-     *   ω_E² Qy + λ_E (Qx²+Qy²) Qy + 2 g3 Qy Q_R + ∂H_sp/∂Qy = 0  
-     *   ω_A² Q_R + λ_A Q_R³ + g3 (Qx²+Qy²) + ∂H_sp/∂Q_R = 0
+     * The equilibrium satisfies (for each mode):
+     * E1: ω_E1² Qx_E1 + λ_E1 (Qx_E1²+Qy_E1²) Qx_E1 + 2 g3_E1A1 Qx_E1 Q_A1 + ∂H_sp/∂Qx_E1 = 0
+     *     ω_E1² Qy_E1 + λ_E1 (Qx_E1²+Qy_E1²) Qy_E1 + 2 g3_E1A1 Qy_E1 Q_A1 + ∂H_sp/∂Qy_E1 = 0
+     * E2: ω_E2² Qx_E2 + λ_E2 (Qx_E2²+Qy_E2²) Qx_E2 + 2 g3_E2A1 Qx_E2 Q_A1 + ∂H_sp/∂Qx_E2 = 0
+     *     ω_E2² Qy_E2 + λ_E2 (Qx_E2²+Qy_E2²) Qy_E2 + 2 g3_E2A1 Qy_E2 Q_A1 + ∂H_sp/∂Qy_E2 = 0
+     * A1: ω_A1² Q_A1 + λ_A1 Q_A1³ + g3_E1A1 (Qx_E1²+Qy_E1²) 
+     *     + g3_E2A1 (Qx_E2²+Qy_E2²) + ∂H_sp/∂Q_A1 = 0
      * 
      * Uses damped dynamics to find equilibrium (overdamped relaxation).
      * 
@@ -922,9 +1024,10 @@ public:
      * @param tol                   Convergence tolerance for energy and Q changes
      * @param max_iter              Maximum joint relaxation iterations
      * @param spin_sweeps_per_iter  Number of deterministic spin sweeps per iteration
+     * @param phonon_only           If true, only relax phonons (keep spins fixed)
      * @return true if converged, false if max_iter reached
      */
-    bool relax_joint(double tol = 1e-6, size_t max_iter = 100, size_t spin_sweeps_per_iter = 10);
+    bool relax_joint(double tol = 1e-6, size_t max_iter = 100, size_t spin_sweeps_per_iter = 10, bool phonon_only = false);
     
     // ============================================================
     // SINGLE/DOUBLE PULSE DRIVE (for 2DCS)
@@ -1042,11 +1145,12 @@ public:
     
     void print_state() const {
         cout << "=== PhononLattice State ===" << endl;
-        cout << "Phonon Q: Qx=" << phonons.Q_x << ", Qy=" << phonons.Q_y 
-             << ", Q_R=" << phonons.Q_R << endl;
-        cout << "Phonon V: Vx=" << phonons.V_x << ", Vy=" << phonons.V_y 
-             << ", V_R=" << phonons.V_R << endl;
-        cout << "E1 amplitude: " << E1_amplitude() << endl;
+        cout << "E1: Qx=" << phonons.Q_x_E1 << ", Qy=" << phonons.Q_y_E1 
+             << ", Vx=" << phonons.V_x_E1 << ", Vy=" << phonons.V_y_E1 << endl;
+        cout << "E2: Qx=" << phonons.Q_x_E2 << ", Qy=" << phonons.Q_y_E2 
+             << ", Vx=" << phonons.V_x_E2 << ", Vy=" << phonons.V_y_E2 << endl;
+        cout << "A1: Q=" << phonons.Q_A1 << ", V=" << phonons.V_A1 << endl;
+        cout << "E1 amplitude: " << E1_amplitude() << ", E2 amplitude: " << E2_amplitude() << endl;
         cout << "Magnetization: " << magnetization().transpose() << endl;
         cout << "Staggered M: " << staggered_magnetization().transpose() << endl;
         cout << "Energy: " << energy_density() << " per site" << endl;

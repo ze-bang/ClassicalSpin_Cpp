@@ -771,30 +771,42 @@ void build_phonon_params(const SpinConfig& config,
     sp_params.J3 = config.get_param("J3", 0.9);
     
     // Spin-phonon coupling strengths
-    sp_params.lambda_xy = config.get_param("lambda_xy", 0.0);
-    sp_params.lambda_R = config.get_param("lambda_R", 0.0);
+    sp_params.lambda_E1 = config.get_param("lambda_E1", config.get_param("lambda_xy", 0.0));
+    sp_params.lambda_E2 = config.get_param("lambda_E2", 0.0);
+    sp_params.lambda_A1 = config.get_param("lambda_A1", config.get_param("lambda_R", 0.0));
     
-    // Phonon parameters
-    ph_params.omega_E = config.get_param("omega_E", 1.0);
-    ph_params.omega_A = config.get_param("omega_A", 0.5);
-    ph_params.gamma_E = config.get_param("gamma_E", 0.1);
-    ph_params.gamma_A = config.get_param("gamma_A", 0.05);
-    ph_params.g3 = config.get_param("g3", 0.0);  // Three-phonon coupling
-    ph_params.lambda_E = config.get_param("lambda_E", 0.0);  // E1 quartic stabilization
-    ph_params.lambda_A = config.get_param("lambda_A", 0.0);  // A1 quartic stabilization
-    ph_params.Z_star = config.get_param("Z_star", 1.0);  // Effective charge
+    // E1 Phonon parameters
+    ph_params.omega_E1 = config.get_param("omega_E1", config.get_param("omega_E", 1.0));
+    ph_params.gamma_E1 = config.get_param("gamma_E1", config.get_param("gamma_E", 0.1));
+    ph_params.lambda_E1 = config.get_param("lambda_E1_quartic", config.get_param("lambda_E", 0.0));
     
-    // Drive parameters (pulse 1 - pump)
+    // E2 Phonon parameters (Raman active, not directly THz driven)
+    ph_params.omega_E2 = config.get_param("omega_E2", 0.8);
+    ph_params.gamma_E2 = config.get_param("gamma_E2", 0.1);
+    ph_params.lambda_E2 = config.get_param("lambda_E2_quartic", 0.0);
+    
+    // A1 Phonon parameters
+    ph_params.omega_A1 = config.get_param("omega_A1", config.get_param("omega_A", 0.5));
+    ph_params.gamma_A1 = config.get_param("gamma_A1", config.get_param("gamma_A", 0.05));
+    ph_params.lambda_A1 = config.get_param("lambda_A1_quartic", config.get_param("lambda_A", 0.0));
+    
+    // Three-phonon coupling
+    ph_params.g3_E1A1 = config.get_param("g3_E1A1", config.get_param("g3", 0.0));
+    ph_params.g3_E2A1 = config.get_param("g3_E2A1", 0.0);
+    ph_params.g3_E1E2 = config.get_param("g3_E1E2", 0.0);  // E1-E2 bilinear coupling
+    ph_params.Z_star = config.get_param("Z_star", 1.0);  // Effective charge (E1 is IR active)
+    
+    // Drive parameters (pulse 1 - pump) - only drives E1 mode
     dr_params.E0_1 = config.pump_amplitude;
-    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : ph_params.omega_E;
+    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : ph_params.omega_E1;
     dr_params.t_1 = config.pump_time;
     dr_params.sigma_1 = config.pump_width;
     dr_params.phi_1 = config.get_param("pump_phase", 0.0);
     dr_params.theta_1 = config.get_param("pump_polarization", 0.0);
     
-    // Drive parameters (pulse 2 - probe)
+    // Drive parameters (pulse 2 - probe) - only drives E1 mode
     dr_params.E0_2 = config.probe_amplitude;
-    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : ph_params.omega_E;
+    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : ph_params.omega_E1;
     dr_params.t_2 = config.probe_time;
     dr_params.sigma_2 = config.probe_width;
     dr_params.phi_2 = config.get_param("probe_phase", 0.0);
@@ -903,9 +915,13 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
         // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
         if (config.relax_phonons || config.adiabatic_phonons) {
             if (rank == 0) {
-                cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+                if (config.phonon_only_relax) {
+                    cout << "Relaxing phonons only (spins fixed)..." << endl;
+                } else {
+                    cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+                }
             }
-            lattice.relax_joint();
+            lattice.relax_joint(1e-6, 100, 10, config.phonon_only_relax);
         } else {
             if (rank == 0) {
                 cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;
@@ -997,9 +1013,13 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
         if (config.relax_phonons || config.adiabatic_phonons) {
             if (rank == 0) {
-                cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+                if (config.phonon_only_relax) {
+                    cout << "Relaxing phonons only (spins fixed)..." << endl;
+                } else {
+                    cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+                }
             }
-            lattice.relax_joint();
+            lattice.relax_joint(1e-6, 100, 10, config.phonon_only_relax);
         } else {
             if (rank == 0) {
                 cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;
@@ -1104,9 +1124,13 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
         // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
         if (config.relax_phonons || config.adiabatic_phonons) {
             if (rank == 0) {
-                cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+                if (config.phonon_only_relax) {
+                    cout << "Relaxing phonons only (spins fixed)..." << endl;
+                } else {
+                    cout << "Relaxing spins and phonons to joint equilibrium..." << endl;
+                }
             }
-            lattice.relax_joint();
+            lattice.relax_joint(1e-6, 100, 10, config.phonon_only_relax);
         } else {
             if (rank == 0) {
                 cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;

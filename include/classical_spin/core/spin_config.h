@@ -68,6 +68,7 @@ struct SpinConfig {
     size_t n_deterministics = 1000;
     bool adiabatic_phonons = false;  // If true, relax phonons at each temperature step (Born-Oppenheimer)
     bool relax_phonons = true;       // If true, relax phonons to equilibrium before dynamics (ignored if adiabatic_phonons is true)
+    bool phonon_only_relax = false;  // If true, only relax phonons without updating spins in relax_joint
     
     // Molecular dynamics parameters
     double md_time_start = 0.0;

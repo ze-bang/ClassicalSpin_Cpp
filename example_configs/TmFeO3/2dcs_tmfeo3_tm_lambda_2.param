@@ -47,7 +47,7 @@ use_twist_boundary = false
 gaussian_move = false
 
 pump_amplitude = 0.3
-pump_width = 0.5
+pump_width = 0.3
 pump_frequency = 0.2
 pump_direction = 0,1,0,0,0,0,0,0  # λ2 component (default)
 

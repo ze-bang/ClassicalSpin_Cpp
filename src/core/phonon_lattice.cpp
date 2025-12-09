@@ -3,10 +3,13 @@
  * @brief Implementation of spin-phonon coupled honeycomb lattice
  * 
  * Implements honeycomb lattice with:
- * - Generic NN and 3rd NN spin interactions
- * - E1 (Qx, Qy) and A1 (Q_R) phonon modes
- * - Three-phonon coupling: g3*(Qx² + Qy²)*Q_R
- * - Spin-phonon: Qx*(SxSz+SzSx) + Qy*(SySz+SzSy) + Q_R*(SxSx+SySy+SzSz)
+ * - Generic NN, 2nd NN, and 3rd NN spin interactions
+ * - Three phonon modes: E1 (Qx_E1, Qy_E1), E2 (Qx_E2, Qy_E2), A1 (Q_A1)
+ * - Three-phonon coupling: g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
+ * - E1-E2 bilinear coupling: g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
+ * - Spin-phonon E1:  λ_E1 * [Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)]
+ * - Spin-phonon E2:  λ_E2 * [Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)]
+ * - Spin-phonon A1:  λ_A1 * Q_A1*(Si·Sj)
  */
 
 #include "classical_spin/lattice/phonon_lattice.h"
@@ -270,10 +273,16 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
          << ", Γ=" << sp_params.Gamma << ", Γ'=" << sp_params.Gammap << endl;
     cout << "  J2_A=" << sp_params.J2_A << ", J2_B=" << sp_params.J2_B << endl;
     cout << "  J3=" << sp_params.J3 << endl;
-    cout << "  λ_xy=" << sp_params.lambda_xy << ", λ_R=" << sp_params.lambda_R << endl;
-    cout << "  Phonon: ω_E=" << ph_params.omega_E << ", ω_A=" << ph_params.omega_A
-         << ", g3=" << ph_params.g3 << endl;
-    cout << "  Quartic: λ_E=" << ph_params.lambda_E << ", λ_A=" << ph_params.lambda_A << endl;
+    cout << "  Spin-phonon: λ_E1=" << sp_params.lambda_E1 
+         << ", λ_E2=" << sp_params.lambda_E2 
+         << ", λ_A1=" << sp_params.lambda_A1 << endl;
+    cout << "  E1 mode: ω_E1=" << ph_params.omega_E1 << ", γ_E1=" << ph_params.gamma_E1
+         << ", λ_E1(quartic)=" << ph_params.lambda_E1 << endl;
+    cout << "  E2 mode: ω_E2=" << ph_params.omega_E2 << ", γ_E2=" << ph_params.gamma_E2
+         << ", λ_E2(quartic)=" << ph_params.lambda_E2 << endl;
+    cout << "  A1 mode: ω_A1=" << ph_params.omega_A1 << ", γ_A1=" << ph_params.gamma_A1
+         << ", λ_A1(quartic)=" << ph_params.lambda_A1 << endl;
+    cout << "  3-phonon: g3_E1A1=" << ph_params.g3_E1A1 << ", g3_E2A1=" << ph_params.g3_E2A1 << endl;
     cout << "  Drive: E0_1=" << dr_params.E0_1 << ", ω_1=" << dr_params.omega_1 << endl;
 }
 
@@ -322,38 +331,51 @@ double PhononLattice::spin_energy() const {
 }
 
 double PhononLattice::phonon_energy() const {
-    // Kinetic: (1/2)(Vx² + Vy² + V_R²)
+    // Kinetic energy for all modes
     double T = phonons.kinetic_energy();
     
-    // E1 potential: (1/2)ω_E²(Qx² + Qy²)
-    double Q_E_sq = phonons.Q_x * phonons.Q_x + phonons.Q_y * phonons.Q_y;
-    double V_E = 0.5 * phonon_params.omega_E * phonon_params.omega_E * Q_E_sq;
+    // E1 mode: (1/2)ω_E1²(Qx_E1² + Qy_E1²) + (λ_E1/4)(Qx_E1² + Qy_E1²)²
+    double Q_E1_sq = phonons.Q_x_E1 * phonons.Q_x_E1 + phonons.Q_y_E1 * phonons.Q_y_E1;
+    double V_E1 = 0.5 * phonon_params.omega_E1 * phonon_params.omega_E1 * Q_E1_sq;
+    double V_4E1 = 0.25 * phonon_params.lambda_E1 * Q_E1_sq * Q_E1_sq;
     
-    // A1 potential: (1/2)ω_A² Q_R²
-    double Q_R_sq = phonons.Q_R * phonons.Q_R;
-    double V_A = 0.5 * phonon_params.omega_A * phonon_params.omega_A * Q_R_sq;
+    // E2 mode: (1/2)ω_E2²(Qx_E2² + Qy_E2²) + (λ_E2/4)(Qx_E2² + Qy_E2²)²
+    double Q_E2_sq = phonons.Q_x_E2 * phonons.Q_x_E2 + phonons.Q_y_E2 * phonons.Q_y_E2;
+    double V_E2 = 0.5 * phonon_params.omega_E2 * phonon_params.omega_E2 * Q_E2_sq;
+    double V_4E2 = 0.25 * phonon_params.lambda_E2 * Q_E2_sq * Q_E2_sq;
     
-    // Three-phonon coupling: g3*(Qx² + Qy²)*Q_R
-    double V_3ph = phonon_params.g3 * Q_E_sq * phonons.Q_R;
+    // A1 mode: (1/2)ω_A1² Q_A1² + (λ_A1/4)*Q_A1⁴
+    double Q_A1_sq = phonons.Q_A1 * phonons.Q_A1;
+    double V_A1 = 0.5 * phonon_params.omega_A1 * phonon_params.omega_A1 * Q_A1_sq;
+    double V_4A1 = 0.25 * phonon_params.lambda_A1 * Q_A1_sq * Q_A1_sq;
     
-    // Quartic stabilization: (λ_E/4)(Qx² + Qy²)² + (λ_A/4)*Q_R⁴
-    double V_4E = 0.25 * phonon_params.lambda_E * Q_E_sq * Q_E_sq;
-    double V_4A = 0.25 * phonon_params.lambda_A * Q_R_sq * Q_R_sq;
+    // Three-phonon coupling: g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
+    double V_3ph = phonon_params.g3_E1A1 * Q_E1_sq * phonons.Q_A1
+                 + phonon_params.g3_E2A1 * Q_E2_sq * phonons.Q_A1;
     
-    return T + V_E + V_A + V_3ph + V_4E + V_4A;
+    // E1-E2 bilinear coupling: g3_E1E2 * (Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
+    double V_E1E2 = phonon_params.g3_E1E2 * (phonons.Q_x_E1 * phonons.Q_x_E2 
+                                            + phonons.Q_y_E1 * phonons.Q_y_E2);
+    
+    return T + V_E1 + V_4E1 + V_E2 + V_4E2 + V_A1 + V_4A1 + V_3ph + V_E1E2;
 }
 
 double PhononLattice::spin_phonon_energy() const {
-    // H_sp-ph = Σ_<ij> [λ_xy * Qx * (Si_x*Sj_z + Si_z*Sj_x)
-    //                 + λ_xy * Qy * (Si_y*Sj_z + Si_z*Sj_y)
-    //                 + λ_R  * Q_R * (Si · Sj)]
+    // H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)   // E1 coupling
+    //                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
+    //                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)   // E2 coupling
+    //                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+    //                 + λ_A1 * Q_A1  * (Si · Sj)]                 // A1 coupling
     
     double E = 0.0;
-    double Qx = phonons.Q_x;
-    double Qy = phonons.Q_y;
-    double QR = phonons.Q_R;
-    double lxy = spin_phonon_params.lambda_xy;
-    double lR = spin_phonon_params.lambda_R;
+    double Qx_E1 = phonons.Q_x_E1;
+    double Qy_E1 = phonons.Q_y_E1;
+    double Qx_E2 = phonons.Q_x_E2;
+    double Qy_E2 = phonons.Q_y_E2;
+    double Q_A1 = phonons.Q_A1;
+    double l_E1 = spin_phonon_params.lambda_E1;
+    double l_E2 = spin_phonon_params.lambda_E2;
+    double l_A1 = spin_phonon_params.lambda_A1;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -363,16 +385,24 @@ double PhononLattice::spin_phonon_energy() const {
             if (j > i) {  // Avoid double counting
                 const Eigen::Vector3d& Sj = spins[j];
                 
-                // Qx * (Si_x*Sj_z + Si_z*Sj_x)
+                // E1: Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)
                 double xz_term = Si(0)*Sj(2) + Si(2)*Sj(0);
-                E += lxy * Qx * xz_term;
+                E += l_E1 * Qx_E1 * xz_term;
                 
-                // Qy * (Si_y*Sj_z + Si_z*Sj_y)
+                // E1: Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
                 double yz_term = Si(1)*Sj(2) + Si(2)*Sj(1);
-                E += lxy * Qy * yz_term;
+                E += l_E1 * Qy_E1 * yz_term;
                 
-                // Q_R * (Si · Sj)
-                E += lR * QR * Si.dot(Sj);
+                // E2: Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)
+                double xx_yy_term = Si(0)*Sj(0) - Si(1)*Sj(1);
+                E += l_E2 * Qx_E2 * xx_yy_term;
+                
+                // E2: Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+                double xy_yx_term = Si(0)*Sj(1) - Si(1)*Sj(0);
+                E += l_E2 * Qy_E2 * xy_yx_term;
+                
+                // A1: Q_A1 * (Si · Sj)
+                E += l_A1 * Q_A1 * Si.dot(Sj);
             }
         }
     }
@@ -384,10 +414,10 @@ double PhononLattice::spin_phonon_energy() const {
 // DERIVATIVES
 // ============================================================
 
-double PhononLattice::dH_dQx() const {
-    // ∂H_sp-ph/∂Qx = Σ_<ij> λ_xy * (Si_x*Sj_z + Si_z*Sj_x)
+double PhononLattice::dH_dQx_E1() const {
+    // ∂H_sp-ph/∂Qx_E1 = Σ_<ij> λ_E1 * (Si_x*Sj_z + Si_z*Sj_x)
     double deriv = 0.0;
-    double lxy = spin_phonon_params.lambda_xy;
+    double l_E1 = spin_phonon_params.lambda_E1;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -396,7 +426,7 @@ double PhononLattice::dH_dQx() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += lxy * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                deriv += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
             }
         }
     }
@@ -404,10 +434,10 @@ double PhononLattice::dH_dQx() const {
     return deriv;
 }
 
-double PhononLattice::dH_dQy() const {
-    // ∂H_sp-ph/∂Qy = Σ_<ij> λ_xy * (Si_y*Sj_z + Si_z*Sj_y)
+double PhononLattice::dH_dQy_E1() const {
+    // ∂H_sp-ph/∂Qy_E1 = Σ_<ij> λ_E1 * (Si_y*Sj_z + Si_z*Sj_y)
     double deriv = 0.0;
-    double lxy = spin_phonon_params.lambda_xy;
+    double l_E1 = spin_phonon_params.lambda_E1;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -416,7 +446,7 @@ double PhononLattice::dH_dQy() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += lxy * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                deriv += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
             }
         }
     }
@@ -424,10 +454,10 @@ double PhononLattice::dH_dQy() const {
     return deriv;
 }
 
-double PhononLattice::dH_dQR() const {
-    // ∂H_sp-ph/∂Q_R = Σ_<ij> λ_R * (Si · Sj)
+double PhononLattice::dH_dQx_E2() const {
+    // ∂H_sp-ph/∂Qx_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_x - Si_y*Sj_y)
     double deriv = 0.0;
-    double lR = spin_phonon_params.lambda_R;
+    double l_E2 = spin_phonon_params.lambda_E2;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -436,7 +466,47 @@ double PhononLattice::dH_dQR() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += lR * Si.dot(Sj);
+                deriv += l_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));
+            }
+        }
+    }
+    
+    return deriv;
+}
+
+double PhononLattice::dH_dQy_E2() const {
+    // ∂H_sp-ph/∂Qy_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+    double deriv = 0.0;
+    double l_E2 = spin_phonon_params.lambda_E2;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const Eigen::Vector3d& Si = spins[i];
+        
+        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+            size_t j = nn_partners[i][n];
+            if (j > i) {
+                const Eigen::Vector3d& Sj = spins[j];
+                deriv += l_E2 * (Si(0)*Sj(1) - Si(1)*Sj(0));
+            }
+        }
+    }
+    
+    return deriv;
+}
+
+double PhononLattice::dH_dQ_A1() const {
+    // ∂H_sp-ph/∂Q_A1 = Σ_<ij> λ_A1 * (Si · Sj)
+    double deriv = 0.0;
+    double l_A1 = spin_phonon_params.lambda_A1;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const Eigen::Vector3d& Si = spins[i];
+        
+        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+            size_t j = nn_partners[i][n];
+            if (j > i) {
+                const Eigen::Vector3d& Sj = spins[j];
+                deriv += l_A1 * Si.dot(Sj);
             }
         }
     }
@@ -449,11 +519,14 @@ SpinVector PhononLattice::get_local_field(size_t site) const {
     
     Eigen::Vector3d H = field[site];  // External field
     
-    double Qx = phonons.Q_x;
-    double Qy = phonons.Q_y;
-    double QR = phonons.Q_R;
-    double lxy = spin_phonon_params.lambda_xy;
-    double lR = spin_phonon_params.lambda_R;
+    double Qx_E1 = phonons.Q_x_E1;
+    double Qy_E1 = phonons.Q_y_E1;
+    double Qx_E2 = phonons.Q_x_E2;
+    double Qy_E2 = phonons.Q_y_E2;
+    double Q_A1 = phonons.Q_A1;
+    double l_E1 = spin_phonon_params.lambda_E1;
+    double l_E2 = spin_phonon_params.lambda_E2;
+    double l_A1 = spin_phonon_params.lambda_A1;
     
     // NN contributions
     for (size_t n = 0; n < nn_partners[site].size(); ++n) {
@@ -463,19 +536,33 @@ SpinVector PhononLattice::get_local_field(size_t site) const {
         // Pure spin contribution: -J · Sj
         H -= nn_interaction[site][n] * Sj;
         
-        // Spin-phonon contribution from Qx*(Si_x*Sj_z + Si_z*Sj_x)
-        // ∂/∂Si_x: λ_xy * Qx * Sj_z
-        // ∂/∂Si_z: λ_xy * Qx * Sj_x
-        H(0) -= lxy * Qx * Sj(2);
-        H(2) -= lxy * Qx * Sj(0);
+        // E1 coupling: Qx_E1*(Si_x*Sj_z + Si_z*Sj_x)
+        // ∂/∂Si_x: λ_E1 * Qx_E1 * Sj_z
+        // ∂/∂Si_z: λ_E1 * Qx_E1 * Sj_x
+        H(0) -= l_E1 * Qx_E1 * Sj(2);
+        H(2) -= l_E1 * Qx_E1 * Sj(0);
         
-        // Spin-phonon contribution from Qy*(Si_y*Sj_z + Si_z*Sj_y)
-        H(1) -= lxy * Qy * Sj(2);
-        H(2) -= lxy * Qy * Sj(1);
+        // E1 coupling: Qy_E1*(Si_y*Sj_z + Si_z*Sj_y)
+        // ∂/∂Si_y: λ_E1 * Qy_E1 * Sj_z
+        // ∂/∂Si_z: λ_E1 * Qy_E1 * Sj_y
+        H(1) -= l_E1 * Qy_E1 * Sj(2);
+        H(2) -= l_E1 * Qy_E1 * Sj(1);
         
-        // Spin-phonon contribution from Q_R*(Si · Sj)
-        // ∂/∂Si: λ_R * Q_R * Sj
-        H -= lR * QR * Sj;
+        // E2 coupling: Qx_E2*(Si_x*Sj_x - Si_y*Sj_y)
+        // ∂/∂Si_x: λ_E2 * Qx_E2 * Sj_x
+        // ∂/∂Si_y: -λ_E2 * Qx_E2 * Sj_y
+        H(0) -= l_E2 * Qx_E2 * Sj(0);
+        H(1) -= -l_E2 * Qx_E2 * Sj(1);
+        
+        // E2 coupling: Qy_E2*(Si_x*Sj_y - Si_y*Sj_x)
+        // ∂/∂Si_x: λ_E2 * Qy_E2 * Sj_y
+        // ∂/∂Si_y: -λ_E2 * Qy_E2 * Sj_x
+        H(0) -= l_E2 * Qy_E2 * Sj(1);
+        H(1) -= -l_E2 * Qy_E2 * Sj(0);
+        
+        // A1 coupling: Q_A1*(Si · Sj)
+        // ∂/∂Si: λ_A1 * Q_A1 * Sj
+        H -= l_A1 * Q_A1 * Sj;
     }
     
     // 2nd NN contributions
@@ -501,47 +588,77 @@ SpinVector PhononLattice::get_local_field(size_t site) const {
 
 void PhononLattice::phonon_derivatives(
     const PhononState& ph, double t,
-    double dH_dQx_val, double dH_dQy_val, double dH_dQR_val,
-    double& dQx, double& dQy, double& dQR,
-    double& dVx, double& dVy, double& dVR) const 
+    double dH_dQx_E1_val, double dH_dQy_E1_val,
+    double dH_dQx_E2_val, double dH_dQy_E2_val,
+    double dH_dQ_A1_val,
+    PhononState& dph_dt) const 
 {
-    // Get THz drive field
+    // Get THz drive field (only E1 is IR active)
     double Ex, Ey;
     drive_params.E_field(t, Ex, Ey);
     
     // Precompute common terms
-    double Q_E_sq = ph.Q_x * ph.Q_x + ph.Q_y * ph.Q_y;
-    double Q_R_sq = ph.Q_R * ph.Q_R;
+    double Q_E1_sq = ph.Q_x_E1 * ph.Q_x_E1 + ph.Q_y_E1 * ph.Q_y_E1;
+    double Q_E2_sq = ph.Q_x_E2 * ph.Q_x_E2 + ph.Q_y_E2 * ph.Q_y_E2;
+    double Q_A1 = ph.Q_A1;
+    double Q_A1_sq = Q_A1 * Q_A1;
     
-    // E1 mode (Qx): d²Qx/dt² = -ω_E²Qx - 2g3*Qx*Q_R - λ_E*(Qx²+Qy²)*Qx - γ_E*Vx - ∂H_sp-ph/∂Qx + Z*Ex
-    dQx = ph.V_x;
-    dVx = -phonon_params.omega_E * phonon_params.omega_E * ph.Q_x
-          - 2.0 * phonon_params.g3 * ph.Q_x * ph.Q_R
-          - phonon_params.lambda_E * Q_E_sq * ph.Q_x  // Quartic: ∂/∂Qx[(λ_E/4)(Qx²+Qy²)²] = λ_E*(Qx²+Qy²)*Qx
-          - phonon_params.gamma_E * ph.V_x
-          - dH_dQx_val
+    // E1 mode (Qx_E1): THz driven
+    // d²Qx_E1/dt² = -ω_E1²Qx_E1 - λ_E1*(Qx_E1²+Qy_E1²)*Qx_E1 - 2g3_E1A1*Qx_E1*Q_A1 
+    //              - g3_E1E2*Qx_E2 - γ_E1*Vx_E1 - ∂H_sp-ph/∂Qx_E1 + Z*Ex
+    dph_dt.Q_x_E1 = ph.V_x_E1;
+    dph_dt.V_x_E1 = -phonon_params.omega_E1 * phonon_params.omega_E1 * ph.Q_x_E1
+          - phonon_params.lambda_E1 * Q_E1_sq * ph.Q_x_E1
+          - 2.0 * phonon_params.g3_E1A1 * ph.Q_x_E1 * Q_A1
+          - phonon_params.g3_E1E2 * ph.Q_x_E2
+          - phonon_params.gamma_E1 * ph.V_x_E1
+          - dH_dQx_E1_val
           + phonon_params.Z_star * Ex;
     
-    // E1 mode (Qy): d²Qy/dt² = -ω_E²Qy - 2g3*Qy*Q_R - λ_E*(Qx²+Qy²)*Qy - γ_E*Vy - ∂H_sp-ph/∂Qy + Z*Ey
-    dQy = ph.V_y;
-    dVy = -phonon_params.omega_E * phonon_params.omega_E * ph.Q_y
-          - 2.0 * phonon_params.g3 * ph.Q_y * ph.Q_R
-          - phonon_params.lambda_E * Q_E_sq * ph.Q_y  // Quartic: ∂/∂Qy[(λ_E/4)(Qx²+Qy²)²] = λ_E*(Qx²+Qy²)*Qy
-          - phonon_params.gamma_E * ph.V_y
-          - dH_dQy_val
+    // E1 mode (Qy_E1): THz driven
+    dph_dt.Q_y_E1 = ph.V_y_E1;
+    dph_dt.V_y_E1 = -phonon_params.omega_E1 * phonon_params.omega_E1 * ph.Q_y_E1
+          - phonon_params.lambda_E1 * Q_E1_sq * ph.Q_y_E1
+          - 2.0 * phonon_params.g3_E1A1 * ph.Q_y_E1 * Q_A1
+          - phonon_params.g3_E1E2 * ph.Q_y_E2
+          - phonon_params.gamma_E1 * ph.V_y_E1
+          - dH_dQy_E1_val
           + phonon_params.Z_star * Ey;
     
-    // A1 mode (Q_R): d²Q_R/dt² = -ω_A²Q_R - g3*(Qx²+Qy²) - λ_A*Q_R³ - γ_A*V_R - ∂H_sp-ph/∂Q_R
-    dQR = ph.V_R;
-    dVR = -phonon_params.omega_A * phonon_params.omega_A * ph.Q_R
-          - phonon_params.g3 * Q_E_sq
-          - phonon_params.lambda_A * Q_R_sq * ph.Q_R  // Quartic: ∂/∂Q_R[(λ_A/4)*Q_R⁴] = λ_A*Q_R³
-          - phonon_params.gamma_A * ph.V_R
-          - dH_dQR_val;
+    // E2 mode (Qx_E2): Raman active, not THz driven
+    // d²Qx_E2/dt² = -ω_E2²Qx_E2 - λ_E2*(Qx_E2²+Qy_E2²)*Qx_E2 - 2g3_E2A1*Qx_E2*Q_A1 
+    //              - g3_E1E2*Qx_E1 - γ_E2*Vx_E2 - ∂H_sp-ph/∂Qx_E2
+    dph_dt.Q_x_E2 = ph.V_x_E2;
+    dph_dt.V_x_E2 = -phonon_params.omega_E2 * phonon_params.omega_E2 * ph.Q_x_E2
+          - phonon_params.lambda_E2 * Q_E2_sq * ph.Q_x_E2
+          - 2.0 * phonon_params.g3_E2A1 * ph.Q_x_E2 * Q_A1
+          - phonon_params.g3_E1E2 * ph.Q_x_E1
+          - phonon_params.gamma_E2 * ph.V_x_E2
+          - dH_dQx_E2_val;
+    
+    // E2 mode (Qy_E2): Raman active, not THz driven
+    dph_dt.Q_y_E2 = ph.V_y_E2;
+    dph_dt.V_y_E2 = -phonon_params.omega_E2 * phonon_params.omega_E2 * ph.Q_y_E2
+          - phonon_params.lambda_E2 * Q_E2_sq * ph.Q_y_E2
+          - 2.0 * phonon_params.g3_E2A1 * ph.Q_y_E2 * Q_A1
+          - phonon_params.g3_E1E2 * ph.Q_y_E1
+          - phonon_params.gamma_E2 * ph.V_y_E2
+          - dH_dQy_E2_val;
+    
+    // A1 mode: Raman active, not THz driven
+    // d²Q_A1/dt² = -ω_A1²Q_A1 - λ_A1*Q_A1³ - g3_E1A1*(Qx_E1²+Qy_E1²) - g3_E2A1*(Qx_E2²+Qy_E2²)
+    //             - γ_A1*V_A1 - ∂H_sp-ph/∂Q_A1
+    dph_dt.Q_A1 = ph.V_A1;
+    dph_dt.V_A1 = -phonon_params.omega_A1 * phonon_params.omega_A1 * Q_A1
+          - phonon_params.lambda_A1 * Q_A1_sq * Q_A1
+          - phonon_params.g3_E1A1 * Q_E1_sq
+          - phonon_params.g3_E2A1 * Q_E2_sq
+          - phonon_params.gamma_A1 * ph.V_A1
+          - dH_dQ_A1_val;
 }
 
 void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
-    // State: [S0_x, S0_y, S0_z, ..., SN_z, Qx, Qy, Q_R, Vx, Vy, V_R]
+    // State: [S0_x, S0_y, S0_z, ..., SN_z, Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1]
     
     const size_t spin_offset = spin_dim * lattice_size;
     
@@ -549,17 +666,22 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     PhononState ph;
     ph.from_array(&x[spin_offset]);
     
-    double Qx = ph.Q_x;
-    double Qy = ph.Q_y;
-    double QR = ph.Q_R;
-    double lxy = spin_phonon_params.lambda_xy;
-    double lR = spin_phonon_params.lambda_R;
+    double Qx_E1 = ph.Q_x_E1;
+    double Qy_E1 = ph.Q_y_E1;
+    double Qx_E2 = ph.Q_x_E2;
+    double Qy_E2 = ph.Q_y_E2;
+    double Q_A1 = ph.Q_A1;
+    double l_E1 = spin_phonon_params.lambda_E1;
+    double l_E2 = spin_phonon_params.lambda_E2;
+    double l_A1 = spin_phonon_params.lambda_A1;
     
     // Compute spin-phonon derivatives for phonon EOM
     // Note: These are ONLY the spin-dependent parts
-    double dHsp_dQx = 0.0;
-    double dHsp_dQy = 0.0;
-    double dHsp_dQR = 0.0;
+    double dHsp_dQx_E1 = 0.0;
+    double dHsp_dQy_E1 = 0.0;
+    double dHsp_dQx_E2 = 0.0;
+    double dHsp_dQy_E2 = 0.0;
+    double dHsp_dQ_A1 = 0.0;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const size_t idx = i * spin_dim;
@@ -571,9 +693,14 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
                 const size_t jdx = j * spin_dim;
                 Eigen::Vector3d Sj(x[jdx], x[jdx+1], x[jdx+2]);
                 
-                dHsp_dQx += lxy * (Si(0)*Sj(2) + Si(2)*Sj(0));
-                dHsp_dQy += lxy * (Si(1)*Sj(2) + Si(2)*Sj(1));
-                dHsp_dQR += lR * Si.dot(Sj);
+                // E1 terms
+                dHsp_dQx_E1 += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                dHsp_dQy_E1 += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                // E2 terms
+                dHsp_dQx_E2 += l_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));
+                dHsp_dQy_E2 += l_E2 * (Si(0)*Sj(1) - Si(1)*Sj(0));
+                // A1 term
+                dHsp_dQ_A1 += l_A1 * Si.dot(Sj);
             }
         }
     }
@@ -597,12 +724,20 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             // Pure spin: -J · Sj
             H -= nn_interaction[i][n] * Sj;
             
-            // Spin-phonon coupling
-            H(0) -= lxy * Qx * Sj(2);
-            H(2) -= lxy * Qx * Sj(0);
-            H(1) -= lxy * Qy * Sj(2);
-            H(2) -= lxy * Qy * Sj(1);
-            H -= lR * QR * Sj;
+            // Spin-phonon coupling: E1 terms
+            H(0) -= l_E1 * Qx_E1 * Sj(2);
+            H(2) -= l_E1 * Qx_E1 * Sj(0);
+            H(1) -= l_E1 * Qy_E1 * Sj(2);
+            H(2) -= l_E1 * Qy_E1 * Sj(1);
+            
+            // Spin-phonon coupling: E2 terms
+            H(0) -= l_E2 * Qx_E2 * Sj(0);
+            H(1) -= -l_E2 * Qx_E2 * Sj(1);
+            H(0) -= l_E2 * Qy_E2 * Sj(1);
+            H(1) -= -l_E2 * Qy_E2 * Sj(0);
+            
+            // Spin-phonon coupling: A1 term
+            H -= l_A1 * Q_A1 * Sj;
         }
         
         // 2nd NN interactions
@@ -621,8 +756,8 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             H -= j3_interaction[i][n] * Sj;
         }
         
-        // LLG equation
-        Eigen::Vector3d dSdt = Si.cross(H);
+        // LLG equation: dS/dt = S × H_eff + α S × (S × H_eff)
+        Eigen::Vector3d dSdt = spin_derivative(Si, H);
         dxdt[idx] = dSdt(0);
         dxdt[idx+1] = dSdt(1);
         dxdt[idx+2] = dSdt(2);
@@ -631,16 +766,11 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     // =============================================
     // Phonon equations
     // =============================================
-    double dQx, dQy, dQR, dVx, dVy, dVR;
-    phonon_derivatives(ph, t, dHsp_dQx, dHsp_dQy, dHsp_dQR,
-                       dQx, dQy, dQR, dVx, dVy, dVR);
+    PhononState dph_dt;
+    phonon_derivatives(ph, t, dHsp_dQx_E1, dHsp_dQy_E1, dHsp_dQx_E2, dHsp_dQy_E2, dHsp_dQ_A1,
+                       dph_dt);
     
-    dxdt[spin_offset]   = dQx;
-    dxdt[spin_offset+1] = dQy;
-    dxdt[spin_offset+2] = dQR;
-    dxdt[spin_offset+3] = dVx;
-    dxdt[spin_offset+4] = dVy;
-    dxdt[spin_offset+5] = dVR;
+    dph_dt.to_array(&dxdt[spin_offset]);
 }
 
 // ============================================================
@@ -967,9 +1097,14 @@ void PhononLattice::molecular_dynamics(
     std::unique_ptr<HDF5MDWriter> hdf5_writer;
     
     // Storage for phonon trajectory (appended separately since HDF5MDWriter doesn't handle phonons)
+    // E1 mode (2-component), E2 mode (2-component), A1 mode (1-component)
     vector<double> times_phonon;
-    vector<double> Qx_traj, Qy_traj, QR_traj;
-    vector<double> Vx_traj, Vy_traj, VR_traj;
+    vector<double> Qx_E1_traj, Qy_E1_traj;
+    vector<double> Qx_E2_traj, Qy_E2_traj;
+    vector<double> Q_A1_traj;
+    vector<double> Vx_E1_traj, Vy_E1_traj;
+    vector<double> Vx_E2_traj, Vy_E2_traj;
+    vector<double> V_A1_traj;
     vector<double> energy_traj;
     
     if (!out_dir.empty()) {
@@ -1009,12 +1144,17 @@ void PhononLattice::molecular_dynamics(
             Eigen::Vector3d M_global = M_local;
             
             // Extract phonon state from end of ODE state vector
-            double Qx = x[spin_state_size];
-            double Qy = x[spin_state_size + 1];
-            double QR = x[spin_state_size + 2];
-            double Vx = x[spin_state_size + 3];
-            double Vy = x[spin_state_size + 4];
-            double VR = x[spin_state_size + 5];
+            // Layout: [Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1]
+            double Qx_E1 = x[spin_state_size + 0];
+            double Qy_E1 = x[spin_state_size + 1];
+            double Qx_E2 = x[spin_state_size + 2];
+            double Qy_E2 = x[spin_state_size + 3];
+            double Q_A1 = x[spin_state_size + 4];
+            double Vx_E1 = x[spin_state_size + 5];
+            double Vy_E1 = x[spin_state_size + 6];
+            double Vx_E2 = x[spin_state_size + 7];
+            double Vy_E2 = x[spin_state_size + 8];
+            double V_A1 = x[spin_state_size + 9];
             
 #ifdef HDF5_ENABLED
             // Write full spin configuration to HDF5 (like Lattice class)
@@ -1023,12 +1163,16 @@ void PhononLattice::molecular_dynamics(
                 
                 // Store phonon data for later writing
                 times_phonon.push_back(t);
-                Qx_traj.push_back(Qx);
-                Qy_traj.push_back(Qy);
-                QR_traj.push_back(QR);
-                Vx_traj.push_back(Vx);
-                Vy_traj.push_back(Vy);
-                VR_traj.push_back(VR);
+                Qx_E1_traj.push_back(Qx_E1);
+                Qy_E1_traj.push_back(Qy_E1);
+                Qx_E2_traj.push_back(Qx_E2);
+                Qy_E2_traj.push_back(Qy_E2);
+                Q_A1_traj.push_back(Q_A1);
+                Vx_E1_traj.push_back(Vx_E1);
+                Vy_E1_traj.push_back(Vy_E1);
+                Vx_E2_traj.push_back(Vx_E2);
+                Vy_E2_traj.push_back(Vy_E2);
+                V_A1_traj.push_back(V_A1);
                 
                 // Compute energy for monitoring
                 const_cast<PhononLattice*>(this)->from_state(x);
@@ -1038,11 +1182,13 @@ void PhononLattice::molecular_dynamics(
             
             // Progress output
             if (step_count % (save_interval * 10) == 0) {
-                double E1_amp = std::sqrt(Qx*Qx + Qy*Qy);
+                double E1_amp = std::sqrt(Qx_E1*Qx_E1 + Qy_E1*Qy_E1);
+                double E2_amp = std::sqrt(Qx_E2*Qx_E2 + Qy_E2*Qy_E2);
                 cout << "t=" << t << ", |M|=" << M_local.norm()
                      << ", |M_stag|=" << M_staggered.norm()
-                     << ", |Q_E|=" << E1_amp
-                     << ", Q_R=" << QR << endl;
+                     << ", |Q_E1|=" << E1_amp
+                     << ", |Q_E2|=" << E2_amp
+                     << ", Q_A1=" << Q_A1 << endl;
             }
             
             save_count++;
@@ -1084,12 +1230,23 @@ void PhononLattice::molecular_dynamics(
             ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
         };
         
-        write_dataset("Qx", Qx_traj);
-        write_dataset("Qy", Qy_traj);
-        write_dataset("QR", QR_traj);
-        write_dataset("Vx", Vx_traj);
-        write_dataset("Vy", Vy_traj);
-        write_dataset("VR", VR_traj);
+        // E1 mode (IR active, 2-component)
+        write_dataset("Qx_E1", Qx_E1_traj);
+        write_dataset("Qy_E1", Qy_E1_traj);
+        write_dataset("Vx_E1", Vx_E1_traj);
+        write_dataset("Vy_E1", Vy_E1_traj);
+        
+        // E2 mode (Raman active, 2-component)
+        write_dataset("Qx_E2", Qx_E2_traj);
+        write_dataset("Qy_E2", Qy_E2_traj);
+        write_dataset("Vx_E2", Vx_E2_traj);
+        write_dataset("Vy_E2", Vy_E2_traj);
+        
+        // A1 mode (Raman active, 1-component)
+        write_dataset("Q_A1", Q_A1_traj);
+        write_dataset("V_A1", V_A1_traj);
+        
+        // Energy
         write_dataset("energy", energy_traj);
         
         // Write phonon parameters as metadata
@@ -1101,15 +1258,21 @@ void PhononLattice::molecular_dynamics(
             attr.write(H5::PredType::NATIVE_DOUBLE, &val);
         };
         
-        write_scalar("omega_E", phonon_params.omega_E);
-        write_scalar("omega_A", phonon_params.omega_A);
-        write_scalar("g3", phonon_params.g3);
-        write_scalar("gamma_E", phonon_params.gamma_E);
-        write_scalar("gamma_A", phonon_params.gamma_A);
-        write_scalar("lambda_E", phonon_params.lambda_E);
-        write_scalar("lambda_A", phonon_params.lambda_A);
-        write_scalar("lambda_xy", spin_phonon_params.lambda_xy);
-        write_scalar("lambda_R", spin_phonon_params.lambda_R);
+        write_scalar("omega_E1", phonon_params.omega_E1);
+        write_scalar("omega_E2", phonon_params.omega_E2);
+        write_scalar("omega_A1", phonon_params.omega_A1);
+        write_scalar("g3_E1A1", phonon_params.g3_E1A1);
+        write_scalar("g3_E2A1", phonon_params.g3_E2A1);
+        write_scalar("g3_E1E2", phonon_params.g3_E1E2);
+        write_scalar("gamma_E1", phonon_params.gamma_E1);
+        write_scalar("gamma_E2", phonon_params.gamma_E2);
+        write_scalar("gamma_A1", phonon_params.gamma_A1);
+        write_scalar("lambda_E1_quartic", phonon_params.lambda_E1);
+        write_scalar("lambda_E2_quartic", phonon_params.lambda_E2);
+        write_scalar("lambda_A1_quartic", phonon_params.lambda_A1);
+        write_scalar("lambda_E1", spin_phonon_params.lambda_E1);
+        write_scalar("lambda_E2", spin_phonon_params.lambda_E2);
+        write_scalar("lambda_A1", spin_phonon_params.lambda_A1);
         
         phonon_group.close();
         meta_group.close();
@@ -1227,8 +1390,9 @@ void PhononLattice::simulated_annealing(
                  << ", |M|=" << std::fixed << std::setprecision(4) << M.norm()
                  << ", |M_stag|=" << std::fixed << std::setprecision(4) << M_stag.norm();
             if (adiabatic_phonons) {
-                cout << ", |Q_E|=" << std::fixed << std::setprecision(4) << E1_amplitude()
-                     << ", Q_R=" << std::fixed << std::setprecision(4) << phonons.Q_R;
+                cout << ", |Q_E1|=" << std::fixed << std::setprecision(4) << E1_amplitude()
+                     << ", |Q_E2|=" << std::fixed << std::setprecision(4) << E2_amplitude()
+                     << ", Q_A1=" << std::fixed << std::setprecision(4) << phonons.Q_A1;
             }
             cout << endl;
         }
@@ -1240,9 +1404,9 @@ void PhononLattice::simulated_annealing(
             energies_data.push_back(energy_density());
             acc_rates_data.push_back(acceptance);
             if (adiabatic_phonons) {
-                Qx_data.push_back(phonons.Q_x);
-                Qy_data.push_back(phonons.Q_y);
-                QR_data.push_back(phonons.Q_R);
+                Qx_data.push_back(phonons.Q_x_E1);
+                Qy_data.push_back(phonons.Q_y_E1);
+                QR_data.push_back(phonons.Q_A1);
             }
         }
 #endif
@@ -1262,8 +1426,9 @@ void PhononLattice::simulated_annealing(
     cout << "Final magnetization: [" << M_final.transpose() << "], |M|=" << M_final.norm() << endl;
     cout << "Final staggered M: [" << M_stag_final.transpose() << "], |M_stag|=" << M_stag_final.norm() << endl;
     if (adiabatic_phonons) {
-        cout << "Phonons: Qx=" << phonons.Q_x << ", Qy=" << phonons.Q_y << ", Q_R=" << phonons.Q_R << endl;
-        cout << "|Q_E|=" << E1_amplitude() << endl;
+        cout << "E1: Qx=" << phonons.Q_x_E1 << ", Qy=" << phonons.Q_y_E1 << ", |Q_E1|=" << E1_amplitude() << endl;
+        cout << "E2: Qx=" << phonons.Q_x_E2 << ", Qy=" << phonons.Q_y_E2 << ", |Q_E2|=" << E2_amplitude() << endl;
+        cout << "A1: Q=" << phonons.Q_A1 << endl;
     }
     cout << "====================================" << endl;
     
@@ -1309,7 +1474,7 @@ void PhononLattice::simulated_annealing(
         cout << "  Phonon energy:     " << phonon_energy() << endl;
         cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
         cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
-        cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
+        cout << "  |Q_E1| = " << E1_amplitude() << ", |Q_E2| = " << E2_amplitude() << ", Q_A1 = " << phonons.Q_A1 << endl;
         
         cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
         deterministic_sweep(n_deterministics);
@@ -1325,7 +1490,7 @@ void PhononLattice::simulated_annealing(
         cout << "  Phonon energy:     " << phonon_energy() << endl;
         cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
         cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
-        cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
+        cout << "  |Q_E1| = " << E1_amplitude() << ", |Q_E2| = " << E2_amplitude() << ", Q_A1 = " << phonons.Q_A1 << endl;
         
         // Save final configuration after T=0 sweeps
         if (!out_dir.empty()) {
@@ -1347,96 +1512,127 @@ bool PhononLattice::relax_phonons(double tol, size_t max_iter, double damping) {
     cout << "Relaxing phonons to equilibrium for current spin configuration..." << endl;
     
     // Compute spin-phonon coupling derivatives (fixed for current spin config)
-    double dH_dQx_spin = dH_dQx();
-    double dH_dQy_spin = dH_dQy();
-    double dH_dQR_spin = dH_dQR();
+    double dH_dQx_E1_spin = dH_dQx_E1();
+    double dH_dQy_E1_spin = dH_dQy_E1();
+    double dH_dQx_E2_spin = dH_dQx_E2();
+    double dH_dQy_E2_spin = dH_dQy_E2();
+    double dH_dQ_A1_spin = dH_dQ_A1();
     
-    cout << "  Spin-phonon forces: dH/dQx=" << dH_dQx_spin 
-         << ", dH/dQy=" << dH_dQy_spin 
-         << ", dH/dQR=" << dH_dQR_spin << endl;
+    cout << "  Spin-phonon forces:" << endl;
+    cout << "    E1: dH/dQx_E1=" << dH_dQx_E1_spin << ", dH/dQy_E1=" << dH_dQy_E1_spin << endl;
+    cout << "    E2: dH/dQx_E2=" << dH_dQx_E2_spin << ", dH/dQy_E2=" << dH_dQy_E2_spin << endl;
+    cout << "    A1: dH/dQ_A1=" << dH_dQ_A1_spin << endl;
     
-    double omega_E_sq = phonon_params.omega_E * phonon_params.omega_E;
-    double omega_A_sq = phonon_params.omega_A * phonon_params.omega_A;
-    double lambda_E = phonon_params.lambda_E;
-    double lambda_A = phonon_params.lambda_A;
-    double g3 = phonon_params.g3;
-    
-    // For the case without quartic terms and small g3, we can solve analytically:
-    // At equilibrium: omega_E^2 * Qx + dH_sp/dQx = 0
-    //                 omega_E^2 * Qy + dH_sp/dQy = 0
-    //                 omega_A^2 * QR + g3*(Qx^2+Qy^2) + dH_sp/dQR = 0
+    double omega_E1_sq = phonon_params.omega_E1 * phonon_params.omega_E1;
+    double omega_E2_sq = phonon_params.omega_E2 * phonon_params.omega_E2;
+    double omega_A1_sq = phonon_params.omega_A1 * phonon_params.omega_A1;
+    double lambda_E1 = phonon_params.lambda_E1;
+    double lambda_E2 = phonon_params.lambda_E2;
+    double lambda_A1 = phonon_params.lambda_A1;
+    double g3_E1A1 = phonon_params.g3_E1A1;
+    double g3_E2A1 = phonon_params.g3_E2A1;
+    double g3_E1E2 = phonon_params.g3_E1E2;
     
     // Start with the linear approximation (ignoring quartic and g3 coupling)
-    double Qx = -dH_dQx_spin / omega_E_sq;
-    double Qy = -dH_dQy_spin / omega_E_sq;
-    double QR = -dH_dQR_spin / omega_A_sq;
+    double Qx_E1 = -dH_dQx_E1_spin / omega_E1_sq;
+    double Qy_E1 = -dH_dQy_E1_spin / omega_E1_sq;
+    double Qx_E2 = -dH_dQx_E2_spin / omega_E2_sq;
+    double Qy_E2 = -dH_dQy_E2_spin / omega_E2_sq;
+    double Q_A1 = -dH_dQ_A1_spin / omega_A1_sq;
     
-    // If g3 is non-zero, iterate to include coupling
-    // QR_eq = -(g3 * (Qx^2 + Qy^2) + dH_dQR_spin) / omega_A^2
-    double Q_E_sq = Qx*Qx + Qy*Qy;
-    QR = -(g3 * Q_E_sq + dH_dQR_spin) / omega_A_sq;
+    // Use Newton-Raphson iteration for nonlinear terms
+    bool has_nonlinear = lambda_E1 > 1e-10 || lambda_E2 > 1e-10 || lambda_A1 > 1e-10 
+                       || std::abs(g3_E1A1) > 1e-10 || std::abs(g3_E2A1) > 1e-10
+                       || std::abs(g3_E1E2) > 1e-10;
     
-    // For quartic terms, use Newton-Raphson iteration
-    if (lambda_E > 1e-10 || lambda_A > 1e-10 || std::abs(g3) > 1e-10) {
+    if (has_nonlinear) {
         cout << "  Using iterative solver for nonlinear terms..." << endl;
         
         for (size_t iter = 0; iter < max_iter; ++iter) {
-            Q_E_sq = Qx*Qx + Qy*Qy;
+            double Q_E1_sq = Qx_E1*Qx_E1 + Qy_E1*Qy_E1;
+            double Q_E2_sq = Qx_E2*Qx_E2 + Qy_E2*Qy_E2;
             
             // Gradient (residual): should be zero at equilibrium
-            // F_x = omega_E^2 * Qx + lambda_E * Q_E^2 * Qx + 2*g3*Qx*QR + dH_dQx_spin
-            double F_x = omega_E_sq * Qx + lambda_E * Q_E_sq * Qx 
-                       + 2.0 * g3 * Qx * QR + dH_dQx_spin;
-            double F_y = omega_E_sq * Qy + lambda_E * Q_E_sq * Qy 
-                       + 2.0 * g3 * Qy * QR + dH_dQy_spin;
-            double F_R = omega_A_sq * QR + lambda_A * QR * QR * QR 
-                       + g3 * Q_E_sq + dH_dQR_spin;
+            // E1: F_x = ω_E1² Qx_E1 + λ_E1 Q_E1² Qx_E1 + 2 g3_E1A1 Qx_E1 Q_A1 + g3_E1E2 Qx_E2 + dH_dQx_E1
+            double F_x_E1 = omega_E1_sq * Qx_E1 + lambda_E1 * Q_E1_sq * Qx_E1 
+                          + 2.0 * g3_E1A1 * Qx_E1 * Q_A1 + g3_E1E2 * Qx_E2 + dH_dQx_E1_spin;
+            double F_y_E1 = omega_E1_sq * Qy_E1 + lambda_E1 * Q_E1_sq * Qy_E1 
+                          + 2.0 * g3_E1A1 * Qy_E1 * Q_A1 + g3_E1E2 * Qy_E2 + dH_dQy_E1_spin;
             
-            double residual = std::sqrt(F_x*F_x + F_y*F_y + F_R*F_R);
+            // E2: F_x = ω_E2² Qx_E2 + λ_E2 Q_E2² Qx_E2 + 2 g3_E2A1 Qx_E2 Q_A1 + g3_E1E2 Qx_E1 + dH_dQx_E2
+            double F_x_E2 = omega_E2_sq * Qx_E2 + lambda_E2 * Q_E2_sq * Qx_E2 
+                          + 2.0 * g3_E2A1 * Qx_E2 * Q_A1 + g3_E1E2 * Qx_E1 + dH_dQx_E2_spin;
+            double F_y_E2 = omega_E2_sq * Qy_E2 + lambda_E2 * Q_E2_sq * Qy_E2 
+                          + 2.0 * g3_E2A1 * Qy_E2 * Q_A1 + g3_E1E2 * Qy_E1 + dH_dQy_E2_spin;
+            
+            // A1: F = ω_A1² Q_A1 + λ_A1 Q_A1³ + g3_E1A1 Q_E1² + g3_E2A1 Q_E2² + dH_dQ_A1
+            double F_A1 = omega_A1_sq * Q_A1 + lambda_A1 * Q_A1 * Q_A1 * Q_A1 
+                        + g3_E1A1 * Q_E1_sq + g3_E2A1 * Q_E2_sq + dH_dQ_A1_spin;
+            
+            double residual = std::sqrt(F_x_E1*F_x_E1 + F_y_E1*F_y_E1 
+                                      + F_x_E2*F_x_E2 + F_y_E2*F_y_E2 
+                                      + F_A1*F_A1);
             
             if (residual < tol) {
-                phonons.Q_x = Qx;
-                phonons.Q_y = Qy;
-                phonons.Q_R = QR;
-                phonons.V_x = 0.0;
-                phonons.V_y = 0.0;
-                phonons.V_R = 0.0;
+                phonons.Q_x_E1 = Qx_E1;
+                phonons.Q_y_E1 = Qy_E1;
+                phonons.Q_x_E2 = Qx_E2;
+                phonons.Q_y_E2 = Qy_E2;
+                phonons.Q_A1 = Q_A1;
+                phonons.V_x_E1 = 0.0;
+                phonons.V_y_E1 = 0.0;
+                phonons.V_x_E2 = 0.0;
+                phonons.V_y_E2 = 0.0;
+                phonons.V_A1 = 0.0;
                 
                 cout << "  Phonon relaxation converged in " << iter << " iterations!" << endl;
-                cout << "  Equilibrium: Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
-                cout << "  |Q_E| = " << std::sqrt(Qx*Qx + Qy*Qy) << endl;
+                cout << "  Equilibrium E1: Qx=" << Qx_E1 << ", Qy=" << Qy_E1 
+                     << ", |Q_E1|=" << std::sqrt(Q_E1_sq) << endl;
+                cout << "  Equilibrium E2: Qx=" << Qx_E2 << ", Qy=" << Qy_E2 
+                     << ", |Q_E2|=" << std::sqrt(Q_E2_sq) << endl;
+                cout << "  Equilibrium A1: Q=" << Q_A1 << endl;
                 return true;
             }
             
             // Jacobian diagonal elements (approximate, ignoring off-diagonal)
-            double J_xx = omega_E_sq + lambda_E * (3.0*Qx*Qx + Qy*Qy) + 2.0*g3*QR;
-            double J_yy = omega_E_sq + lambda_E * (Qx*Qx + 3.0*Qy*Qy) + 2.0*g3*QR;
-            double J_RR = omega_A_sq + 3.0*lambda_A*QR*QR;
+            double J_xx_E1 = omega_E1_sq + lambda_E1 * (3.0*Qx_E1*Qx_E1 + Qy_E1*Qy_E1) + 2.0*g3_E1A1*Q_A1;
+            double J_yy_E1 = omega_E1_sq + lambda_E1 * (Qx_E1*Qx_E1 + 3.0*Qy_E1*Qy_E1) + 2.0*g3_E1A1*Q_A1;
+            double J_xx_E2 = omega_E2_sq + lambda_E2 * (3.0*Qx_E2*Qx_E2 + Qy_E2*Qy_E2) + 2.0*g3_E2A1*Q_A1;
+            double J_yy_E2 = omega_E2_sq + lambda_E2 * (Qx_E2*Qx_E2 + 3.0*Qy_E2*Qy_E2) + 2.0*g3_E2A1*Q_A1;
+            double J_A1 = omega_A1_sq + 3.0*lambda_A1*Q_A1*Q_A1;
             
             // Damped Newton step (diagonal approximation)
             double step_size = damping;
-            if (J_xx > 1e-10) Qx -= step_size * F_x / J_xx;
-            if (J_yy > 1e-10) Qy -= step_size * F_y / J_yy;
-            if (J_RR > 1e-10) QR -= step_size * F_R / J_RR;
+            if (J_xx_E1 > 1e-10) Qx_E1 -= step_size * F_x_E1 / J_xx_E1;
+            if (J_yy_E1 > 1e-10) Qy_E1 -= step_size * F_y_E1 / J_yy_E1;
+            if (J_xx_E2 > 1e-10) Qx_E2 -= step_size * F_x_E2 / J_xx_E2;
+            if (J_yy_E2 > 1e-10) Qy_E2 -= step_size * F_y_E2 / J_yy_E2;
+            if (J_A1 > 1e-10) Q_A1 -= step_size * F_A1 / J_A1;
             
             if (iter % 100 == 0 && iter > 0) {
-                cout << "  iter=" << iter << ", |F|=" << residual 
-                     << ", Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
+                cout << "  iter=" << iter << ", |F|=" << residual << endl;
             }
         }
         
         cout << "  WARNING: Phonon relaxation did not fully converge after " << max_iter << " iterations!" << endl;
     }
     
-    phonons.Q_x = Qx;
-    phonons.Q_y = Qy;
-    phonons.Q_R = QR;
-    phonons.V_x = 0.0;
-    phonons.V_y = 0.0;
-    phonons.V_R = 0.0;
+    phonons.Q_x_E1 = Qx_E1;
+    phonons.Q_y_E1 = Qy_E1;
+    phonons.Q_x_E2 = Qx_E2;
+    phonons.Q_y_E2 = Qy_E2;
+    phonons.Q_A1 = Q_A1;
+    phonons.V_x_E1 = 0.0;
+    phonons.V_y_E1 = 0.0;
+    phonons.V_x_E2 = 0.0;
+    phonons.V_y_E2 = 0.0;
+    phonons.V_A1 = 0.0;
     
-    cout << "  Equilibrium phonons: Qx=" << Qx << ", Qy=" << Qy << ", QR=" << QR << endl;
-    cout << "  |Q_E| = " << std::sqrt(Qx*Qx + Qy*Qy) << endl;
+    cout << "  Equilibrium E1: Qx=" << Qx_E1 << ", Qy=" << Qy_E1 
+         << ", |Q_E1|=" << std::sqrt(Qx_E1*Qx_E1 + Qy_E1*Qy_E1) << endl;
+    cout << "  Equilibrium E2: Qx=" << Qx_E2 << ", Qy=" << Qy_E2 
+         << ", |Q_E2|=" << std::sqrt(Qx_E2*Qx_E2 + Qy_E2*Qy_E2) << endl;
+    cout << "  Equilibrium A1: Q=" << Q_A1 << endl;
     
     // Energy breakdown AFTER phonon relaxation
     cout << "  --- Energy after phonon relaxation ---" << endl;
@@ -1448,8 +1644,12 @@ bool PhononLattice::relax_phonons(double tol, size_t max_iter, double damping) {
     return true;
 }
 
-bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_per_iter) {
-    cout << "Joint spin-phonon relaxation to find true steady state..." << endl;
+bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_per_iter, bool phonon_only) {
+    if (phonon_only) {
+        cout << "Phonon-only relaxation (spins fixed)..." << endl;
+    } else {
+        cout << "Joint spin-phonon relaxation to find true steady state..." << endl;
+    }
     
     double prev_energy = total_energy();
     double prev_Q_E = E1_amplitude();
@@ -1458,8 +1658,10 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         // Step 1: Relax phonons for current spin configuration
         relax_phonons(1e-10, 1000, 1.0);
         
-        // Step 2: Relax spins for current phonon configuration
-        deterministic_sweep(spin_sweeps_per_iter);
+        // Step 2: Relax spins for current phonon configuration (skip if phonon_only)
+        if (!phonon_only) {
+            deterministic_sweep(spin_sweeps_per_iter);
+        }
         
         // Check convergence
         double curr_energy = total_energy();
@@ -1469,7 +1671,7 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         double dQ = std::abs(curr_Q_E - prev_Q_E);
         
         if (iter % 10 == 0 || (dE < tol && dQ < tol)) {
-            cout << "  Joint relax iter " << iter 
+            cout << "  " << (phonon_only ? "Phonon" : "Joint") << " relax iter " << iter 
                  << ": E=" << curr_energy 
                  << ", |Q_E|=" << curr_Q_E
                  << ", dE=" << dE 
@@ -1477,13 +1679,13 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         }
         
         if (dE < tol && dQ < tol) {
-            cout << "  Joint relaxation converged in " << iter << " iterations!" << endl;
-            cout << "\n=== Energy AFTER joint relaxation (equilibrium state) ===" << endl;
+            cout << "  " << (phonon_only ? "Phonon-only" : "Joint") << " relaxation converged in " << iter << " iterations!" << endl;
+            cout << "\n=== Energy AFTER " << (phonon_only ? "phonon-only" : "joint") << " relaxation (equilibrium state) ===" << endl;
             cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
             cout << "  Phonon energy:     " << phonon_energy() << endl;
             cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
             cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
-            cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
+            cout << "  |Q_E1| = " << E1_amplitude() << ", |Q_E2| = " << E2_amplitude() << ", Q_A1 = " << phonons.Q_A1 << endl;
             return true;
         }
         
@@ -1491,13 +1693,13 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         prev_Q_E = curr_Q_E;
     }
     
-    cout << "  WARNING: Joint relaxation did not fully converge after " << max_iter << " iterations" << endl;
+    cout << "  WARNING: " << (phonon_only ? "Phonon-only" : "Joint") << " relaxation did not fully converge after " << max_iter << " iterations" << endl;
     cout << "\n=== Energy after " << max_iter << " iterations ===" << endl;
     cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
     cout << "  Phonon energy:     " << phonon_energy() << endl;
     cout << "  Spin-phonon energy: " << spin_phonon_energy() << endl;
     cout << "  Total energy:      " << total_energy() << " (" << energy_density() << " per site)" << endl;
-    cout << "  |Q_E| = " << E1_amplitude() << ", Q_R = " << phonons.Q_R << endl;
+    cout << "  |Q_E1| = " << E1_amplitude() << ", |Q_E2| = " << E2_amplitude() << ", Q_A1 = " << phonons.Q_A1 << endl;
     return false;
 }
 
