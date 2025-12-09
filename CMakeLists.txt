@@ -8,6 +8,12 @@ option(CLASSICAL_SPIN_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 # PROJECT CONFIGURATION
 # ============================================================================
 
+# Enable using *_ROOT environment variables for find_package
+cmake_policy(SET CMP0144 NEW)
+
+# Use Config mode for Boost (avoids deprecated FindBoost module)
+cmake_policy(SET CMP0167 NEW)
+
 # C++ and CUDA standards
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,7 +52,12 @@ find_package(Thrust REQUIRED CONFIG)
 find_package(OpenMP REQUIRED)
 find_package(MPI REQUIRED)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
-find_package(Boost 1.65 REQUIRED)
+find_package(Boost 1.65 REQUIRED CONFIG)
+
+# Use HDF5_DIR environment variable if available (set by module system)
+if(DEFINED ENV{HDF5_DIR} AND NOT HDF5_ROOT)
+    set(HDF5_ROOT "$ENV{HDF5_DIR}")
+endif()
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 # ============================================================================
