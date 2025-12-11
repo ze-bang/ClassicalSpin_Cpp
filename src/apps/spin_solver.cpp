@@ -756,7 +756,8 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
 void build_phonon_params(const SpinConfig& config, 
                          SpinPhononCouplingParams& sp_params,
                          PhononParams& ph_params,
-                         DriveParams& dr_params) {
+                         DriveParams& dr_params,
+                         TimeDependentSpinPhononParams& td_sp_params) {
     // Kitaev-Heisenberg-Γ-Γ' spin interaction parameters (Songvilay defaults)
     sp_params.J = config.get_param("J", -0.1);
     sp_params.K = config.get_param("K", -9.0);
@@ -774,6 +775,26 @@ void build_phonon_params(const SpinConfig& config,
     sp_params.lambda_E1 = config.get_param("lambda_E1", config.get_param("lambda_xy", 0.0));
     sp_params.lambda_E2 = config.get_param("lambda_E2", 0.0);
     sp_params.lambda_A1 = config.get_param("lambda_A1", config.get_param("lambda_R", 0.0));
+    
+    // Time-dependent spin-phonon coupling parameters
+    // Mode: 0 = constant (default), 1 = window
+    double time_mode = config.get_param("lambda_time_mode", 0.0);
+    td_sp_params.mode = (time_mode > 0.5) ? "window" : "constant";
+    
+    // Window function parameters for E1 mode
+    td_sp_params.t_start_E1 = config.get_param("lambda_E1_t_start", 0.0);
+    td_sp_params.t_end_E1 = config.get_param("lambda_E1_t_end", 1e30);
+    td_sp_params.lambda_E1_target = config.get_param("lambda_E1_target", sp_params.lambda_E1);
+    
+    // Window function parameters for E2 mode
+    td_sp_params.t_start_E2 = config.get_param("lambda_E2_t_start", 0.0);
+    td_sp_params.t_end_E2 = config.get_param("lambda_E2_t_end", 1e30);
+    td_sp_params.lambda_E2_target = config.get_param("lambda_E2_target", sp_params.lambda_E2);
+    
+    // Window function parameters for A1 mode
+    td_sp_params.t_start_A1 = config.get_param("lambda_A1_t_start", 0.0);
+    td_sp_params.t_end_A1 = config.get_param("lambda_A1_t_end", 1e30);
+    td_sp_params.lambda_A1_target = config.get_param("lambda_A1_target", sp_params.lambda_A1);
     
     // E1 Phonon parameters
     ph_params.omega_E1 = config.get_param("omega_E1", config.get_param("omega_E", 1.0));
@@ -2405,10 +2426,14 @@ int main(int argc, char** argv) {
             SpinPhononCouplingParams sp_params;
             PhononParams ph_params;
             DriveParams dr_params;
-            build_phonon_params(config, sp_params, ph_params, dr_params);
+            TimeDependentSpinPhononParams td_sp_params;
+            build_phonon_params(config, sp_params, ph_params, dr_params, td_sp_params);
             
             // Set parameters (this builds the interaction matrices)
             phonon_lattice.set_parameters(sp_params, ph_params, dr_params);
+            
+            // Set time-dependent spin-phonon coupling parameters
+            phonon_lattice.set_time_dependent_spin_phonon(td_sp_params);
             
             // Set Gilbert damping if specified
             phonon_lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);

@@ -10,6 +10,16 @@
  * - Spin-phonon E1:  λ_E1 * [Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)]
  * - Spin-phonon E2:  λ_E2 * [Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)]
  * - Spin-phonon A1:  λ_A1 * Q_A1*(Si·Sj)
+ * 
+ * COORDINATE FRAME:
+ * The spin Hamiltonian (Kitaev-Heisenberg-Γ-Γ') exchange matrices are defined in
+ * the local Kitaev frame and then transformed to the global Cartesian frame using:
+ *   J_global = R * J_local * R^T
+ * 
+ * where R is the Kitaev local-to-global rotation matrix with columns:
+ *   x' = (1, 1, -2)/√6,  y' = (-1, 1, 0)/√2,  z' = (1, 1, 1)/√3
+ * 
+ * Spins are stored and evolved in the GLOBAL Cartesian frame.
  */
 
 #include "classical_spin/lattice/phonon_lattice.h"
@@ -268,7 +278,9 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         }
     }
     
-    cout << "Set PhononLattice parameters (Kitaev-Heisenberg-Γ-Γ'):" << endl;
+    cout << "Set PhononLattice parameters (Kitaev-Heisenberg-Γ-Γ' in GLOBAL Cartesian frame):" << endl;
+    cout << "  Exchange matrices transformed: J_global = R * J_local * R^T" << endl;
+    cout << "  Local frame basis: x'=(1,1,-2)/√6, y'=(-1,1,0)/√2, z'=(1,1,1)/√3" << endl;
     cout << "  J=" << sp_params.J << ", K=" << sp_params.K 
          << ", Γ=" << sp_params.Gamma << ", Γ'=" << sp_params.Gammap << endl;
     cout << "  J2_A=" << sp_params.J2_A << ", J2_B=" << sp_params.J2_B << endl;
@@ -671,9 +683,11 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     double Qx_E2 = ph.Q_x_E2;
     double Qy_E2 = ph.Q_y_E2;
     double Q_A1 = ph.Q_A1;
-    double l_E1 = spin_phonon_params.lambda_E1;
-    double l_E2 = spin_phonon_params.lambda_E2;
-    double l_A1 = spin_phonon_params.lambda_A1;
+    
+    // Get time-dependent spin-phonon coupling strengths
+    double l_E1 = get_lambda_E1(t);
+    double l_E2 = get_lambda_E2(t);
+    double l_A1 = get_lambda_A1(t);
     
     // Compute spin-phonon derivatives for phonon EOM
     // Note: These are ONLY the spin-dependent parts

@@ -2002,22 +2002,23 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
         
         anim = FuncAnimation(fig_anim, update_global, frames=n_frames, 
                              interval=1000/animation_fps, blit=False)
-        
-        # Save global frame animation
-        anim_path = os.path.join(dir, "spin_animation.mp4")
+
+        # Save global frame animation as both mp4 and gif
+        mp4_path = os.path.join(dir, "spin_animation.mp4")
         try:
-            writer = FFMpegWriter(fps=animation_fps, bitrate=2000)
-            anim.save(anim_path, writer=writer)
-            print(f"  Saved: spin_animation.mp4")
+            writer_mp4 = FFMpegWriter(fps=animation_fps, bitrate=2000)
+            anim.save(mp4_path, writer=writer_mp4)
+            print("  Saved: spin_animation.mp4")
         except Exception as e:
-            print(f"  Warning: Could not save mp4 ({e}), trying gif...")
-            try:
-                anim_path = os.path.join(dir, "spin_animation.gif")
-                writer = PillowWriter(fps=animation_fps)
-                anim.save(anim_path, writer=writer)
-                print(f"  Saved: spin_animation.gif")
-            except Exception as e2:
-                print(f"  Warning: Could not save animation: {e2}")
+            print(f"  Warning: Could not save spin_animation.mp4 ({e})")
+
+        gif_path = os.path.join(dir, "spin_animation.gif")
+        try:
+            writer_gif = PillowWriter(fps=animation_fps)
+            anim.save(gif_path, writer=writer_gif)
+            print("  Saved: spin_animation.gif")
+        except Exception as e:
+            print(f"  Warning: Could not save spin_animation.gif ({e})")
         
         plt.close(fig_anim)
         
@@ -2103,22 +2104,23 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
         
         anim_local = FuncAnimation(fig_anim_local, update_local, frames=n_frames, 
                                    interval=1000/animation_fps, blit=False)
-        
-        # Save local frame animation
-        anim_path_local = os.path.join(dir, "spin_animation_local.mp4")
+
+        # Save local frame animation as both mp4 and gif
+        mp4_path_local = os.path.join(dir, "spin_animation_local.mp4")
         try:
-            writer = FFMpegWriter(fps=animation_fps, bitrate=2000)
-            anim_local.save(anim_path_local, writer=writer)
-            print(f"  Saved: spin_animation_local.mp4")
+            writer_mp4_local = FFMpegWriter(fps=animation_fps, bitrate=2000)
+            anim_local.save(mp4_path_local, writer=writer_mp4_local)
+            print("  Saved: spin_animation_local.mp4")
         except Exception as e:
-            print(f"  Warning: Could not save mp4 ({e}), trying gif...")
-            try:
-                anim_path_local = os.path.join(dir, "spin_animation_local.gif")
-                writer = PillowWriter(fps=animation_fps)
-                anim_local.save(anim_path_local, writer=writer)
-                print(f"  Saved: spin_animation_local.gif")
-            except Exception as e2:
-                print(f"  Warning: Could not save local frame animation: {e2}")
+            print(f"  Warning: Could not save spin_animation_local.mp4 ({e})")
+
+        gif_path_local = os.path.join(dir, "spin_animation_local.gif")
+        try:
+            writer_gif_local = PillowWriter(fps=animation_fps)
+            anim_local.save(gif_path_local, writer=writer_gif_local)
+            print("  Saved: spin_animation_local.gif")
+        except Exception as e:
+            print(f"  Warning: Could not save spin_animation_local.gif ({e})")
         
         plt.close(fig_anim_local)
     

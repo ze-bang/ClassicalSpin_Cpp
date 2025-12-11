@@ -13,12 +13,28 @@
  * - Spin-phonon A1 coupling: λ_A1 * Q_A1 * (Si·Sj)
  * - THz drive coupling to E1 mode (only E1 is IR active)
  * 
+ * COORDINATE FRAMES:
+ * -----------------
+ * The spin Hamiltonian (Kitaev-Heisenberg-Γ-Γ') is defined in a LOCAL Kitaev frame
+ * where the Kitaev exchange has a simple diagonal form on each bond type. The exchange
+ * matrices are then TRANSFORMED to the GLOBAL Cartesian frame using:
+ *   J_global = R * J_local * R^T
+ * 
+ * where R is the Kitaev local-to-global rotation matrix with columns:
+ *   x' = (1, 1, -2)/√6
+ *   y' = (-1, 1, 0)/√2  
+ *   z' = (1, 1, 1)/√3
+ * 
+ * This means spins are stored and evolved in the GLOBAL Cartesian frame, while the
+ * physical Kitaev model parameters (J, K, Γ, Γ') are specified in the standard form.
+ * 
  * Hamiltonian:
  * H = H_spin + H_phonon + H_sp-ph + H_drive
  * 
- * H_spin = Σ_<ij> Si · J1 · Sj + Σ_<<ij>>_A J2_A Si·Sj + Σ_<<ij>>_B J2_B Si·Sj
+ * H_spin = Σ_<ij> Si · J1_global · Sj + Σ_<<ij>>_A J2_A Si·Sj + Σ_<<ij>>_B J2_B Si·Sj
  *        + Σ_<<<ij>>> Si · J3 · Sj - Σ_i B · Si
- *   (NN J1 is bond-dependent Kitaev-Heisenberg-Γ-Γ', 2nd and 3rd NN are isotropic Heisenberg)
+ *   (NN J1_global = R * J1_local * R^T, where J1_local is bond-dependent Kitaev-Heisenberg-Γ-Γ')
+ *   (2nd and 3rd NN are isotropic Heisenberg, invariant under rotation)
  * 
  * H_phonon = (1/2)(Vx_E1² + Vy_E1²) + (1/2)ω_E1²(Qx_E1² + Qy_E1²) + (λ_E1/4)(Qx_E1² + Qy_E1²)²
  *          + (1/2)(Vx_E2² + Vy_E2²) + (1/2)ω_E2²(Qx_E2² + Qy_E2²) + (λ_E2/4)(Qx_E2² + Qy_E2²)²
@@ -26,11 +42,11 @@
  *          + g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
  *          + g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
  * 
- * H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)    // E1 coupling
+ * H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)    // E1 coupling (global frame)
  *                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
- *                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)    // E2 coupling
+ *                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)    // E2 coupling (global frame)
  *                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
- *                 + λ_A1 * Q_A1  * (Si · Sj)]                  // A1 coupling
+ *                 + λ_A1 * Q_A1  * (Si · Sj)]                  // A1 coupling (invariant)
  * 
  * H_drive = -E_x(t) * Qx_E1 - E_y(t) * Qy_E1   (only E1 is IR active)
  * 
@@ -187,15 +203,24 @@ struct PhononParams {
  * Uses Kitaev-Heisenberg-Γ-Γ' model with bond-dependent exchange:
  * H_spin = Σ_<ij>_γ Si · J_γ · Sj  where γ ∈ {x, y, z} is the bond type
  * 
- * For honeycomb lattice:
- *   Jx (x-bond): K on xx, Γ on yz/zy, Γ' on xy/xz  
- *   Jy (y-bond): K on yy, Γ on xz/zx, Γ' on xy/yz
- *   Jz (z-bond): K on zz, Γ on xy/yx, Γ' on xz/yz
+ * The exchange matrices are defined in the LOCAL Kitaev frame and then
+ * transformed to the GLOBAL Cartesian frame using:
+ *   J_global = R * J_local * R^T
  * 
- * Spin-phonon coupling form on each bond <ij>:
- *   λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x) + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)  [E1 coupling]
- * + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y) + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)  [E2 coupling]
- * + λ_A1 * Q_A1  * (Si · Sj)                                                          [A1 coupling]
+ * where R is the Kitaev local-to-global rotation matrix:
+ *   R = [[1/√6, -1/√2, 1/√3],      (columns are local x', y', z' in global coords)
+ *        [1/√6,  1/√2, 1/√3],
+ *        [-2/√6,  0,   1/√3]]
+ * 
+ * Local frame Kitaev model:
+ *   Jx (x-bond): K on x'x', Γ on y'z'/z'y', Γ' on x'y'/x'z'  
+ *   Jy (y-bond): K on y'y', Γ on x'z'/z'x', Γ' on x'y'/y'z'
+ *   Jz (z-bond): K on z'z', Γ on x'y'/y'x', Γ' on x'z'/y'z'
+ * 
+ * Spin-phonon coupling form on each bond <ij> (in LOCAL frame):
+ *   λ_E1 * Qx_E1 * (Si_x'*Sj_z' + Si_z'*Sj_x') + λ_E1 * Qy_E1 * (Si_y'*Sj_z' + Si_z'*Sj_y')  [E1 coupling]
+ * + λ_E2 * Qx_E2 * (Si_x'*Sj_x' - Si_y'*Sj_y') + λ_E2 * Qy_E2 * (Si_x'*Sj_y' - Si_y'*Sj_x')  [E2 coupling]
+ * + λ_A1 * Q_A1  * (Si · Sj)                                                                  [A1 coupling]
  */
 struct SpinPhononCouplingParams {
     // Kitaev-Heisenberg-Γ-Γ' parameters (Songvilay defaults)
@@ -211,13 +236,41 @@ struct SpinPhononCouplingParams {
     // 3rd NN exchange (isotropic Heisenberg)
     double J3 = 0.9;
     
-    // Spin-phonon coupling strengths
-    double lambda_E1 = 0.0;  // E1 coupling: Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
-    double lambda_E2 = 0.0;  // E2 coupling: Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)
+    // Spin-phonon coupling strengths (in LOCAL Kitaev frame)
+    double lambda_E1 = 0.0;  // E1 coupling: Qx_E1*(Sx'Sz'+Sz'Sx') + Qy_E1*(Sy'Sz'+Sz'Sy')
+    double lambda_E2 = 0.0;  // E2 coupling: Qx_E2*(Sx'Sx'-Sy'Sy') + Qy_E2*(Sx'Sy'-Sy'Sx')
     double lambda_A1 = 0.0;  // A1 coupling: Q_A1*(Si·Sj)
     
-    // Build bond-dependent exchange matrices
-    SpinMatrix get_Jx() const {
+    /**
+     * Get the Kitaev local-to-global rotation matrix R.
+     * 
+     * The columns of R are the local frame basis vectors (x', y', z') expressed
+     * in global Cartesian coordinates:
+     *   x' = (1, 1, -2)/√6
+     *   y' = (-1, 1, 0)/√2
+     *   z' = (1, 1, 1)/√3
+     * 
+     * This transforms spins from local to global: S_global = R * S_local
+     */
+    static SpinMatrix get_kitaev_rotation() {
+        SpinMatrix R(3, 3);
+        R << 1.0/std::sqrt(6.0), -1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
+             1.0/std::sqrt(6.0),  1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
+            -2.0/std::sqrt(6.0),  0.0,                1.0/std::sqrt(3.0);
+        return R;
+    }
+    
+    /**
+     * Transform exchange matrix from local Kitaev frame to global Cartesian frame.
+     * J_global = R * J_local * R^T
+     */
+    static SpinMatrix to_global_frame(const SpinMatrix& J_local) {
+        SpinMatrix R = get_kitaev_rotation();
+        return R * J_local * R.transpose();
+    }
+    
+    // Build bond-dependent exchange matrices in LOCAL Kitaev frame
+    SpinMatrix get_Jx_local() const {
         SpinMatrix Jx = SpinMatrix::Zero(3, 3);
         Jx << J + K, Gammap, Gammap,
               Gammap, J, Gamma,
@@ -225,7 +278,7 @@ struct SpinPhononCouplingParams {
         return Jx;
     }
     
-    SpinMatrix get_Jy() const {
+    SpinMatrix get_Jy_local() const {
         SpinMatrix Jy = SpinMatrix::Zero(3, 3);
         Jy << J, Gammap, Gamma,
               Gammap, J + K, Gammap,
@@ -233,7 +286,7 @@ struct SpinPhononCouplingParams {
         return Jy;
     }
     
-    SpinMatrix get_Jz() const {
+    SpinMatrix get_Jz_local() const {
         SpinMatrix Jz = SpinMatrix::Zero(3, 3);
         Jz << J, Gamma, Gammap,
               Gamma, J, Gammap,
@@ -241,6 +294,21 @@ struct SpinPhononCouplingParams {
         return Jz;
     }
     
+    // Build bond-dependent exchange matrices in GLOBAL Cartesian frame
+    // These are used for spin dynamics with spins stored in global coordinates
+    SpinMatrix get_Jx() const {
+        return to_global_frame(get_Jx_local());
+    }
+    
+    SpinMatrix get_Jy() const {
+        return to_global_frame(get_Jy_local());
+    }
+    
+    SpinMatrix get_Jz() const {
+        return to_global_frame(get_Jz_local());
+    }
+    
+    // J2 and J3 are isotropic Heisenberg, so they are invariant under rotation
     SpinMatrix get_J3_matrix() const {
         return J3 * SpinMatrix::Identity(3, 3);
     }
@@ -251,6 +319,74 @@ struct SpinPhononCouplingParams {
     
     SpinMatrix get_J2_B_matrix() const {
         return J2_B * SpinMatrix::Identity(3, 3);
+    }
+};
+
+/**
+ * Time-dependent spin-phonon coupling parameters
+ * 
+ * Allows the spin-phonon coupling strengths (λ_E1, λ_E2, λ_A1) to be time-dependent.
+ * Default mode is "constant" which uses the values from SpinPhononCouplingParams.
+ * 
+ * Available modes:
+ * - "constant": λ(t) = λ (from SpinPhononCouplingParams, default)
+ * - "window": λ(t) = λ_target for t_start <= t <= t_end, λ_static otherwise
+ * 
+ * Each mode (E1, E2, A1) can have independent window parameters.
+ */
+struct TimeDependentSpinPhononParams {
+    // Mode selection: "constant" or "window"
+    std::string mode = "constant";
+    
+    // Window function parameters for E1 mode
+    double t_start_E1 = 0.0;       // Time at which E1 coupling changes to target
+    double t_end_E1 = 1e30;        // Time at which E1 coupling reverts to static
+    double lambda_E1_target = 0.0; // Value of λ_E1 inside the window
+    
+    // Window function parameters for E2 mode
+    double t_start_E2 = 0.0;       // Time at which E2 coupling changes to target
+    double t_end_E2 = 1e30;        // Time at which E2 coupling reverts to static
+    double lambda_E2_target = 0.0; // Value of λ_E2 inside the window
+    
+    // Window function parameters for A1 mode
+    double t_start_A1 = 0.0;       // Time at which A1 coupling changes to target
+    double t_end_A1 = 1e30;        // Time at which A1 coupling reverts to static
+    double lambda_A1_target = 0.0; // Value of λ_A1 inside the window
+    
+    /**
+     * Get effective λ_E1 at time t
+     */
+    double get_lambda_E1(double t, double lambda_E1_static) const {
+        if (mode == "constant") {
+            return lambda_E1_static;
+        } else if (mode == "window") {
+            return (t >= t_start_E1 && t <= t_end_E1) ? lambda_E1_target : lambda_E1_static;
+        }
+        return lambda_E1_static;  // fallback
+    }
+    
+    /**
+     * Get effective λ_E2 at time t
+     */
+    double get_lambda_E2(double t, double lambda_E2_static) const {
+        if (mode == "constant") {
+            return lambda_E2_static;
+        } else if (mode == "window") {
+            return (t >= t_start_E2 && t <= t_end_E2) ? lambda_E2_target : lambda_E2_static;
+        }
+        return lambda_E2_static;  // fallback
+    }
+    
+    /**
+     * Get effective λ_A1 at time t
+     */
+    double get_lambda_A1(double t, double lambda_A1_static) const {
+        if (mode == "constant") {
+            return lambda_A1_static;
+        } else if (mode == "window") {
+            return (t >= t_start_A1 && t <= t_end_A1) ? lambda_A1_target : lambda_A1_static;
+        }
+        return lambda_A1_static;  // fallback
     }
 };
 
@@ -339,6 +475,7 @@ public:
     // Parameters
     PhononParams phonon_params;
     SpinPhononCouplingParams spin_phonon_params;
+    TimeDependentSpinPhononParams time_dep_spin_phonon_params;
     DriveParams drive_params;
     
     // LLG damping
@@ -409,6 +546,46 @@ public:
     void set_parameters(const SpinPhononCouplingParams& sp_params,
                        const PhononParams& ph_params,
                        const DriveParams& dr_params);
+    
+    /**
+     * Set time-dependent spin-phonon coupling parameters
+     */
+    void set_time_dependent_spin_phonon(const TimeDependentSpinPhononParams& td_params) {
+        time_dep_spin_phonon_params = td_params;
+        if (td_params.mode != "constant") {
+            std::cout << "Time-dependent spin-phonon coupling enabled (mode: " 
+                      << td_params.mode << ")" << std::endl;
+            if (td_params.mode == "window") {
+                std::cout << "  E1: λ=" << td_params.lambda_E1_target 
+                          << " for t∈[" << td_params.t_start_E1 << ", " << td_params.t_end_E1 << "]" << std::endl;
+                std::cout << "  E2: λ=" << td_params.lambda_E2_target 
+                          << " for t∈[" << td_params.t_start_E2 << ", " << td_params.t_end_E2 << "]" << std::endl;
+                std::cout << "  A1: λ=" << td_params.lambda_A1_target 
+                          << " for t∈[" << td_params.t_start_A1 << ", " << td_params.t_end_A1 << "]" << std::endl;
+            }
+        }
+    }
+    
+    /**
+     * Get effective λ_E1 at time t
+     */
+    double get_lambda_E1(double t) const {
+        return time_dep_spin_phonon_params.get_lambda_E1(t, spin_phonon_params.lambda_E1);
+    }
+    
+    /**
+     * Get effective λ_E2 at time t
+     */
+    double get_lambda_E2(double t) const {
+        return time_dep_spin_phonon_params.get_lambda_E2(t, spin_phonon_params.lambda_E2);
+    }
+    
+    /**
+     * Get effective λ_A1 at time t
+     */
+    double get_lambda_A1(double t) const {
+        return time_dep_spin_phonon_params.get_lambda_A1(t, spin_phonon_params.lambda_A1);
+    }
     
     /**
      * Set external magnetic field (uniform)
