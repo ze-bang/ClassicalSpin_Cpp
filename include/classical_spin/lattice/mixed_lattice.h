@@ -68,6 +68,55 @@ using std::ifstream;
 using std::function;
 using std::array;
 
+// ============================================================
+// BINNING ANALYSIS STRUCTURES FOR MIXED LATTICE
+// ============================================================
+
+// Binning analysis result for error estimation
+struct MixedBinningResult {
+    double mean;
+    double error;
+    double tau_int;  // Integrated autocorrelation time estimate from binning
+    size_t optimal_bin_level;
+    vector<double> errors_by_level;  // Errors at each binning level
+};
+
+// Observable with uncertainty (mean ± error)
+struct MixedObservable {
+    double value;
+    double error;
+    
+    MixedObservable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
+};
+
+// Vector observable with uncertainty for each component
+struct MixedVectorObservable {
+    vector<double> values;
+    vector<double> errors;
+    
+    MixedVectorObservable() = default;
+    MixedVectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
+};
+
+// Complete set of thermodynamic observables for mixed lattice with uncertainties
+struct MixedThermodynamicObservables {
+    double temperature;
+    
+    // Energy observables
+    MixedObservable energy_total;         // <E>/N_total
+    MixedObservable energy_SU2;           // <E_SU2>/N_SU2
+    MixedObservable energy_SU3;           // <E_SU3>/N_SU3
+    MixedObservable specific_heat;        // C_V = (<E²> - <E>²) / (T² N)
+    
+    // SU(2) sublattice observables
+    vector<MixedVectorObservable> sublattice_magnetization_SU2;  // <S_α> for each SU(2) sublattice
+    vector<MixedVectorObservable> energy_sublattice_cross_SU2;   // <E * S_α> - <E><S_α>
+    
+    // SU(3) sublattice observables
+    vector<MixedVectorObservable> sublattice_magnetization_SU3;  // <S_α> for each SU(3) sublattice
+    vector<MixedVectorObservable> energy_sublattice_cross_SU3;   // <E * S_α> - <E><S_α>
+};
+
 /**
  * MixedLattice class: Template-free implementation for coupled SU(2) and SU(3) systems
  * 
@@ -1729,6 +1778,8 @@ public:
 
     /**
      * Perform detailed measurements at final temperature
+     * Computes: energy, specific heat, sublattice magnetizations (SU2 and SU3), 
+     * and cross-correlations. All with binning analysis for error estimation.
      */
     void perform_final_measurements(double T_final, double sigma, bool gaussian_move,
                                    const string& out_dir) {
@@ -1757,15 +1808,17 @@ public:
         cout << "Equilibrating for " << equilibration << " sweeps..." << endl;
         perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma);
         
-        // Step 3: Collect samples
+        // Step 3: Collect samples with comprehensive observables
         size_t n_samples = 1000;
         size_t n_measure = n_samples * acf.sampling_interval;
         cout << "Collecting " << n_samples << " independent samples..." << endl;
         
         vector<double> energies;
         vector<pair<SpinVector, SpinVector>> magnetizations;
+        vector<MixedMeasurement> measurements;  // NEW: comprehensive measurements
         energies.reserve(n_samples);
         magnetizations.reserve(n_samples);
+        measurements.reserve(n_samples);
         
         for (size_t i = 0; i < n_measure; ++i) {
             metropolis(T_final, gaussian_move, sigma);
@@ -1773,13 +1826,24 @@ public:
             if (i % acf.sampling_interval == 0) {
                 energies.push_back(total_energy());
                 magnetizations.push_back({magnetization_SU2(), magnetization_SU3()});
+                measurements.push_back(measure_all_observables());  // NEW
             }
         }
         
         cout << "Collected " << energies.size() << " samples" << endl;
         
-        // Step 4: Compute observables
-        compute_and_save_observables(energies, magnetizations, T_final, out_dir);
+        // Step 4: Compute comprehensive observables with binning analysis
+        MixedThermodynamicObservables obs = compute_thermodynamic_observables(measurements, T_final);
+        
+        // Print and save results
+        print_thermodynamic_observables(obs);
+        save_thermodynamic_observables(out_dir, obs);
+        
+        // Also save raw time series for further analysis
+        save_observables(out_dir, energies, magnetizations);
+        
+        // Save sublattice magnetization time series
+        save_sublattice_magnetization_timeseries(out_dir, measurements);
         
         // Save autocorrelation function
         save_autocorrelation_results(out_dir, acf);
@@ -1832,6 +1896,658 @@ public:
         result.sampling_interval = static_cast<size_t>(std::max(1.0, 2.0 * result.tau_int)) * base_interval;
         
         return result;
+    }
+
+    // ============================================================
+    // BINNING ANALYSIS FOR ERROR ESTIMATION
+    // ============================================================
+
+    /**
+     * Binning analysis for error estimation of a scalar observable
+     * 
+     * Performs recursive blocking to estimate statistical error with autocorrelation.
+     * The error plateaus when bin size exceeds the correlation length.
+     * 
+     * @param data Vector of observable measurements
+     * @return MixedBinningResult containing mean, error, and binning information
+     */
+    static MixedBinningResult binning_analysis(const vector<double>& data) {
+        MixedBinningResult result;
+        
+        if (data.empty()) {
+            result.mean = 0.0;
+            result.error = 0.0;
+            result.tau_int = 1.0;
+            result.optimal_bin_level = 0;
+            return result;
+        }
+        
+        size_t n = data.size();
+        
+        // Compute mean
+        result.mean = std::accumulate(data.begin(), data.end(), 0.0) / double(n);
+        
+        if (n < 4) {
+            // Too few samples for meaningful analysis
+            double var = 0.0;
+            for (double x : data) var += (x - result.mean) * (x - result.mean);
+            result.error = std::sqrt(var / (n * (n - 1)));
+            result.tau_int = 1.0;
+            result.optimal_bin_level = 0;
+            return result;
+        }
+        
+        // Recursive blocking: progressively halve the data by averaging pairs
+        vector<double> binned_data = data;
+        size_t level = 0;
+        size_t max_levels = static_cast<size_t>(std::log2(n)) - 1;
+        
+        result.errors_by_level.reserve(max_levels);
+        
+        while (binned_data.size() >= 4) {
+            size_t m = binned_data.size();
+            
+            // Compute variance at this level
+            double sum = 0.0, sum2 = 0.0;
+            for (double x : binned_data) {
+                sum += x;
+                sum2 += x * x;
+            }
+            double mean_level = sum / m;
+            double var_level = (sum2 / m - mean_level * mean_level);
+            double error_level = std::sqrt(var_level / (m - 1));
+            
+            result.errors_by_level.push_back(error_level);
+            
+            // Block the data: average consecutive pairs
+            vector<double> new_binned;
+            new_binned.reserve(m / 2);
+            for (size_t i = 0; i + 1 < m; i += 2) {
+                new_binned.push_back(0.5 * (binned_data[i] + binned_data[i + 1]));
+            }
+            binned_data = std::move(new_binned);
+            ++level;
+        }
+        
+        // Find optimal level where error has plateaued
+        result.optimal_bin_level = 0;
+        if (result.errors_by_level.size() > 2) {
+            double max_error = 0.0;
+            for (size_t l = 0; l < result.errors_by_level.size(); ++l) {
+                if (result.errors_by_level[l] > max_error) {
+                    max_error = result.errors_by_level[l];
+                    result.optimal_bin_level = l;
+                }
+            }
+        }
+        
+        // Use error from optimal level
+        if (!result.errors_by_level.empty()) {
+            size_t use_level = std::min(result.optimal_bin_level + 1, result.errors_by_level.size() - 1);
+            result.error = result.errors_by_level[use_level];
+            
+            // Estimate tau_int from ratio of blocked variance to naive variance
+            if (result.errors_by_level[0] > 1e-20) {
+                double ratio = result.error / result.errors_by_level[0];
+                result.tau_int = 0.5 * ratio * ratio;
+            } else {
+                result.tau_int = 1.0;
+            }
+        } else {
+            result.error = 0.0;
+            result.tau_int = 1.0;
+        }
+        
+        return result;
+    }
+
+    /**
+     * Binning analysis for vector observable (component-wise)
+     * 
+     * @param data Vector of SpinVector measurements
+     * @return Vector of MixedBinningResult, one per component
+     */
+    static vector<MixedBinningResult> binning_analysis_vector(const vector<SpinVector>& data) {
+        if (data.empty()) return {};
+        
+        size_t dim = data[0].size();
+        vector<MixedBinningResult> results(dim);
+        
+        for (size_t d = 0; d < dim; ++d) {
+            vector<double> component(data.size());
+            for (size_t i = 0; i < data.size(); ++i) {
+                component[i] = data[i](d);
+            }
+            results[d] = binning_analysis(component);
+        }
+        
+        return results;
+    }
+
+    // ============================================================
+    // SUBLATTICE MAGNETIZATION
+    // ============================================================
+
+    /**
+     * Compute magnetization for each SU(2) sublattice separately
+     * 
+     * @return Vector of SpinVectors, one per SU(2) sublattice (N_atoms_SU2 sublattices)
+     */
+    vector<SpinVector> magnetization_sublattice_SU2() const {
+        vector<SpinVector> M_sub(N_atoms_SU2);
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
+            M_sub[atom] = SpinVector::Zero(spin_dim_SU2);
+        }
+        
+        // Sum over all unit cells for each sublattice
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
+                        size_t site_idx = flatten_index(i, j, k, atom, N_atoms_SU2);
+                        
+                        // Transform to global frame using sublattice frame
+                        SpinVector spin_global = SpinVector::Zero(spin_dim_SU2);
+                        for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                            for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                                spin_global(mu) += sublattice_frames_SU2[atom](nu, mu) * spins_SU2[site_idx](nu);
+                            }
+                        }
+                        M_sub[atom] += spin_global;
+                    }
+                }
+            }
+        }
+        
+        // Normalize by number of unit cells
+        for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
+            M_sub[atom] /= double(n_cells);
+        }
+        
+        return M_sub;
+    }
+
+    /**
+     * Compute magnetization for each SU(3) sublattice separately
+     * 
+     * @return Vector of SpinVectors, one per SU(3) sublattice (N_atoms_SU3 sublattices)
+     */
+    vector<SpinVector> magnetization_sublattice_SU3() const {
+        vector<SpinVector> M_sub(N_atoms_SU3);
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
+            M_sub[atom] = SpinVector::Zero(spin_dim_SU3);
+        }
+        
+        // Sum over all unit cells for each sublattice
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
+                        size_t site_idx = flatten_index(i, j, k, atom, N_atoms_SU3);
+                        
+                        // Transform to global frame using sublattice frame
+                        SpinVector spin_global = SpinVector::Zero(spin_dim_SU3);
+                        for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
+                            for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
+                                spin_global(mu) += sublattice_frames_SU3[atom](nu, mu) * spins_SU3[site_idx](nu);
+                            }
+                        }
+                        M_sub[atom] += spin_global;
+                    }
+                }
+            }
+        }
+        
+        // Normalize by number of unit cells
+        for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
+            M_sub[atom] /= double(n_cells);
+        }
+        
+        return M_sub;
+    }
+
+    // ============================================================
+    // COMPREHENSIVE OBSERVABLE COLLECTION
+    // ============================================================
+
+    /**
+     * Collect a single measurement of all thermodynamic observables
+     * Returns: (energy, energy_SU2, energy_SU3, sublattice_mags_SU2, sublattice_mags_SU3)
+     */
+    struct MixedMeasurement {
+        double energy;
+        double energy_SU2;
+        double energy_SU3;
+        vector<SpinVector> sublattice_mags_SU2;
+        vector<SpinVector> sublattice_mags_SU3;
+    };
+
+    MixedMeasurement measure_all_observables() const {
+        MixedMeasurement m;
+        m.energy = total_energy();
+        m.energy_SU2 = total_energy_SU2();
+        m.energy_SU3 = total_energy_SU3();
+        m.sublattice_mags_SU2 = magnetization_sublattice_SU2();
+        m.sublattice_mags_SU3 = magnetization_sublattice_SU3();
+        return m;
+    }
+
+    /**
+     * Compute comprehensive thermodynamic observables with binning error analysis
+     * 
+     * @param measurements Vector of MixedMeasurement from MC sampling
+     * @param T Temperature
+     * @return MixedThermodynamicObservables struct with all observables and uncertainties
+     */
+    MixedThermodynamicObservables compute_thermodynamic_observables(
+        const vector<MixedMeasurement>& measurements,
+        double T) const {
+        
+        MixedThermodynamicObservables obs;
+        obs.temperature = T;
+        size_t n_samples = measurements.size();
+        
+        if (n_samples == 0) return obs;
+        
+        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+        
+        // 1. Energy observables with binning analysis
+        vector<double> energy_per_site(n_samples);
+        vector<double> energy_SU2_per_site(n_samples);
+        vector<double> energy_SU3_per_site(n_samples);
+        
+        for (size_t i = 0; i < n_samples; ++i) {
+            energy_per_site[i] = measurements[i].energy / double(total_sites);
+            energy_SU2_per_site[i] = measurements[i].energy_SU2 / double(lattice_size_SU2);
+            energy_SU3_per_site[i] = measurements[i].energy_SU3 / double(lattice_size_SU3);
+        }
+        
+        MixedBinningResult E_result = binning_analysis(energy_per_site);
+        MixedBinningResult E_SU2_result = binning_analysis(energy_SU2_per_site);
+        MixedBinningResult E_SU3_result = binning_analysis(energy_SU3_per_site);
+        
+        obs.energy_total.value = E_result.mean;
+        obs.energy_total.error = E_result.error;
+        obs.energy_SU2.value = E_SU2_result.mean;
+        obs.energy_SU2.error = E_SU2_result.error;
+        obs.energy_SU3.value = E_SU3_result.mean;
+        obs.energy_SU3.error = E_SU3_result.error;
+        
+        // 2. Specific heat with jackknife error estimation
+        {
+            vector<double> E_total(n_samples);
+            vector<double> E2(n_samples);
+            for (size_t i = 0; i < n_samples; ++i) {
+                E_total[i] = measurements[i].energy;
+                E2[i] = measurements[i].energy * measurements[i].energy;
+            }
+            
+            double E_mean = 0.0, E2_mean = 0.0;
+            for (size_t i = 0; i < n_samples; ++i) {
+                E_mean += E_total[i];
+                E2_mean += E2[i];
+            }
+            E_mean /= n_samples;
+            E2_mean /= n_samples;
+            
+            double var_E = E2_mean - E_mean * E_mean;
+            obs.specific_heat.value = var_E / (T * T * double(total_sites));
+            
+            // Jackknife error estimation
+            size_t n_jack = std::min(n_samples, size_t(100));
+            size_t block_size = n_samples / n_jack;
+            vector<double> C_jack(n_jack);
+            
+            for (size_t j = 0; j < n_jack; ++j) {
+                double E_sum = 0.0, E2_sum = 0.0;
+                size_t count = 0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    if (i / block_size != j) {
+                        E_sum += E_total[i];
+                        E2_sum += E2[i];
+                        ++count;
+                    }
+                }
+                double E_j = E_sum / count;
+                double E2_j = E2_sum / count;
+                double var_j = E2_j - E_j * E_j;
+                C_jack[j] = var_j / (T * T * double(total_sites));
+            }
+            
+            double C_mean = 0.0;
+            for (double c : C_jack) C_mean += c;
+            C_mean /= n_jack;
+            
+            double C_var = 0.0;
+            for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
+            C_var *= double(n_jack - 1) / n_jack;
+            obs.specific_heat.error = std::sqrt(C_var);
+        }
+        
+        // 3. SU(2) sublattice magnetizations with binning analysis
+        if (!measurements[0].sublattice_mags_SU2.empty()) {
+            size_t n_sublattices_SU2 = measurements[0].sublattice_mags_SU2.size();
+            
+            obs.sublattice_magnetization_SU2.resize(n_sublattices_SU2);
+            obs.energy_sublattice_cross_SU2.resize(n_sublattices_SU2);
+            
+            for (size_t alpha = 0; alpha < n_sublattices_SU2; ++alpha) {
+                obs.sublattice_magnetization_SU2[alpha] = MixedVectorObservable(spin_dim_SU2);
+                obs.energy_sublattice_cross_SU2[alpha] = MixedVectorObservable(spin_dim_SU2);
+                
+                for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                    // Extract time series for magnetization component
+                    vector<double> M_alpha_d(n_samples);
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        M_alpha_d[i] = measurements[i].sublattice_mags_SU2[alpha](d);
+                    }
+                    MixedBinningResult M_result = binning_analysis(M_alpha_d);
+                    obs.sublattice_magnetization_SU2[alpha].values[d] = M_result.mean;
+                    obs.sublattice_magnetization_SU2[alpha].errors[d] = M_result.error;
+                    
+                    // Cross term <E * S_α,d> - <E><S_α,d>
+                    vector<double> ES_alpha_d(n_samples);
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        ES_alpha_d[i] = measurements[i].energy * measurements[i].sublattice_mags_SU2[alpha](d);
+                    }
+                    
+                    MixedBinningResult ES_result = binning_analysis(ES_alpha_d);
+                    double E_mean = obs.energy_total.value * double(total_sites);
+                    double S_mean = M_result.mean;
+                    double cross_val = ES_result.mean - E_mean * S_mean;
+                    
+                    // Jackknife for cross-correlation error
+                    size_t n_jack = std::min(n_samples, size_t(100));
+                    size_t block_size = n_samples / n_jack;
+                    vector<double> cross_jack(n_jack);
+                    
+                    for (size_t j = 0; j < n_jack; ++j) {
+                        double E_sum = 0.0, S_sum = 0.0, ES_sum = 0.0;
+                        size_t count = 0;
+                        for (size_t i = 0; i < n_samples; ++i) {
+                            if (i / block_size != j) {
+                                E_sum += measurements[i].energy;
+                                S_sum += measurements[i].sublattice_mags_SU2[alpha](d);
+                                ES_sum += measurements[i].energy * measurements[i].sublattice_mags_SU2[alpha](d);
+                                ++count;
+                            }
+                        }
+                        double E_j = E_sum / count;
+                        double S_j = S_sum / count;
+                        double ES_j = ES_sum / count;
+                        cross_jack[j] = ES_j - E_j * S_j;
+                    }
+                    
+                    double cross_mean = 0.0;
+                    for (double c : cross_jack) cross_mean += c;
+                    cross_mean /= n_jack;
+                    
+                    double cross_var = 0.0;
+                    for (double c : cross_jack) cross_var += (c - cross_mean) * (c - cross_mean);
+                    cross_var *= double(n_jack - 1) / n_jack;
+                    
+                    obs.energy_sublattice_cross_SU2[alpha].values[d] = cross_val;
+                    obs.energy_sublattice_cross_SU2[alpha].errors[d] = std::sqrt(cross_var);
+                }
+            }
+        }
+        
+        // 4. SU(3) sublattice magnetizations with binning analysis
+        if (!measurements[0].sublattice_mags_SU3.empty()) {
+            size_t n_sublattices_SU3 = measurements[0].sublattice_mags_SU3.size();
+            
+            obs.sublattice_magnetization_SU3.resize(n_sublattices_SU3);
+            obs.energy_sublattice_cross_SU3.resize(n_sublattices_SU3);
+            
+            for (size_t alpha = 0; alpha < n_sublattices_SU3; ++alpha) {
+                obs.sublattice_magnetization_SU3[alpha] = MixedVectorObservable(spin_dim_SU3);
+                obs.energy_sublattice_cross_SU3[alpha] = MixedVectorObservable(spin_dim_SU3);
+                
+                for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                    // Extract time series for magnetization component
+                    vector<double> M_alpha_d(n_samples);
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        M_alpha_d[i] = measurements[i].sublattice_mags_SU3[alpha](d);
+                    }
+                    MixedBinningResult M_result = binning_analysis(M_alpha_d);
+                    obs.sublattice_magnetization_SU3[alpha].values[d] = M_result.mean;
+                    obs.sublattice_magnetization_SU3[alpha].errors[d] = M_result.error;
+                    
+                    // Cross term <E * S_α,d> - <E><S_α,d>
+                    vector<double> ES_alpha_d(n_samples);
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        ES_alpha_d[i] = measurements[i].energy * measurements[i].sublattice_mags_SU3[alpha](d);
+                    }
+                    
+                    MixedBinningResult ES_result = binning_analysis(ES_alpha_d);
+                    double E_mean = obs.energy_total.value * double(total_sites);
+                    double S_mean = M_result.mean;
+                    double cross_val = ES_result.mean - E_mean * S_mean;
+                    
+                    // Jackknife for cross-correlation error
+                    size_t n_jack = std::min(n_samples, size_t(100));
+                    size_t block_size = n_samples / n_jack;
+                    vector<double> cross_jack(n_jack);
+                    
+                    for (size_t j = 0; j < n_jack; ++j) {
+                        double E_sum = 0.0, S_sum = 0.0, ES_sum = 0.0;
+                        size_t count = 0;
+                        for (size_t i = 0; i < n_samples; ++i) {
+                            if (i / block_size != j) {
+                                E_sum += measurements[i].energy;
+                                S_sum += measurements[i].sublattice_mags_SU3[alpha](d);
+                                ES_sum += measurements[i].energy * measurements[i].sublattice_mags_SU3[alpha](d);
+                                ++count;
+                            }
+                        }
+                        double E_j = E_sum / count;
+                        double S_j = S_sum / count;
+                        double ES_j = ES_sum / count;
+                        cross_jack[j] = ES_j - E_j * S_j;
+                    }
+                    
+                    double cross_mean = 0.0;
+                    for (double c : cross_jack) cross_mean += c;
+                    cross_mean /= n_jack;
+                    
+                    double cross_var = 0.0;
+                    for (double c : cross_jack) cross_var += (c - cross_mean) * (c - cross_mean);
+                    cross_var *= double(n_jack - 1) / n_jack;
+                    
+                    obs.energy_sublattice_cross_SU3[alpha].values[d] = cross_val;
+                    obs.energy_sublattice_cross_SU3[alpha].errors[d] = std::sqrt(cross_var);
+                }
+            }
+        }
+        
+        return obs;
+    }
+
+    /**
+     * Save comprehensive thermodynamic observables to files
+     */
+    void save_thermodynamic_observables(const string& out_dir,
+                                         const MixedThermodynamicObservables& obs) const {
+        ensure_directory_exists(out_dir);
+        
+        // Save main observables summary
+        ofstream summary_file(out_dir + "/observables_summary.txt");
+        summary_file << "# Mixed Lattice Thermodynamic Observables at T = " << obs.temperature << endl;
+        summary_file << "# Format: observable mean error" << endl;
+        summary_file << std::scientific << std::setprecision(12);
+        
+        summary_file << "energy_per_site_total " << obs.energy_total.value << " " << obs.energy_total.error << endl;
+        summary_file << "energy_per_site_SU2 " << obs.energy_SU2.value << " " << obs.energy_SU2.error << endl;
+        summary_file << "energy_per_site_SU3 " << obs.energy_SU3.value << " " << obs.energy_SU3.error << endl;
+        summary_file << "specific_heat " << obs.specific_heat.value << " " << obs.specific_heat.error << endl;
+        summary_file.close();
+        
+        // Save SU(2) sublattice magnetizations
+        ofstream sub_mag_SU2_file(out_dir + "/sublattice_magnetization_SU2.txt");
+        sub_mag_SU2_file << "# SU(2) sublattice magnetizations <S_α>" << endl;
+        sub_mag_SU2_file << "# Format: sublattice component mean error" << endl;
+        sub_mag_SU2_file << std::scientific << std::setprecision(12);
+        
+        for (size_t alpha = 0; alpha < obs.sublattice_magnetization_SU2.size(); ++alpha) {
+            const auto& M = obs.sublattice_magnetization_SU2[alpha];
+            for (size_t d = 0; d < M.values.size(); ++d) {
+                sub_mag_SU2_file << alpha << " " << d << " " 
+                                << M.values[d] << " " << M.errors[d] << endl;
+            }
+        }
+        sub_mag_SU2_file.close();
+        
+        // Save SU(3) sublattice magnetizations
+        ofstream sub_mag_SU3_file(out_dir + "/sublattice_magnetization_SU3.txt");
+        sub_mag_SU3_file << "# SU(3) sublattice magnetizations <S_α>" << endl;
+        sub_mag_SU3_file << "# Format: sublattice component mean error" << endl;
+        sub_mag_SU3_file << std::scientific << std::setprecision(12);
+        
+        for (size_t alpha = 0; alpha < obs.sublattice_magnetization_SU3.size(); ++alpha) {
+            const auto& M = obs.sublattice_magnetization_SU3[alpha];
+            for (size_t d = 0; d < M.values.size(); ++d) {
+                sub_mag_SU3_file << alpha << " " << d << " " 
+                                << M.values[d] << " " << M.errors[d] << endl;
+            }
+        }
+        sub_mag_SU3_file.close();
+        
+        // Save SU(2) energy-sublattice cross terms
+        ofstream cross_SU2_file(out_dir + "/energy_sublattice_cross_SU2.txt");
+        cross_SU2_file << "# SU(2) energy-sublattice cross correlations <E*S_α> - <E><S_α>" << endl;
+        cross_SU2_file << "# Format: sublattice component mean error" << endl;
+        cross_SU2_file << std::scientific << std::setprecision(12);
+        
+        for (size_t alpha = 0; alpha < obs.energy_sublattice_cross_SU2.size(); ++alpha) {
+            const auto& cross = obs.energy_sublattice_cross_SU2[alpha];
+            for (size_t d = 0; d < cross.values.size(); ++d) {
+                cross_SU2_file << alpha << " " << d << " " 
+                              << cross.values[d] << " " << cross.errors[d] << endl;
+            }
+        }
+        cross_SU2_file.close();
+        
+        // Save SU(3) energy-sublattice cross terms
+        ofstream cross_SU3_file(out_dir + "/energy_sublattice_cross_SU3.txt");
+        cross_SU3_file << "# SU(3) energy-sublattice cross correlations <E*S_α> - <E><S_α>" << endl;
+        cross_SU3_file << "# Format: sublattice component mean error" << endl;
+        cross_SU3_file << std::scientific << std::setprecision(12);
+        
+        for (size_t alpha = 0; alpha < obs.energy_sublattice_cross_SU3.size(); ++alpha) {
+            const auto& cross = obs.energy_sublattice_cross_SU3[alpha];
+            for (size_t d = 0; d < cross.values.size(); ++d) {
+                cross_SU3_file << alpha << " " << d << " " 
+                              << cross.values[d] << " " << cross.errors[d] << endl;
+            }
+        }
+        cross_SU3_file.close();
+    }
+
+    /**
+     * Print thermodynamic observables summary to stdout
+     */
+    void print_thermodynamic_observables(const MixedThermodynamicObservables& obs) const {
+        cout << "\n=== Mixed Lattice Thermodynamic Observables at T = " << obs.temperature << " ===" << endl;
+        cout << std::scientific << std::setprecision(6);
+        
+        cout << "<E>/N_total = " << obs.energy_total.value << " ± " << obs.energy_total.error << endl;
+        cout << "<E>/N_SU2   = " << obs.energy_SU2.value << " ± " << obs.energy_SU2.error << endl;
+        cout << "<E>/N_SU3   = " << obs.energy_SU3.value << " ± " << obs.energy_SU3.error << endl;
+        cout << "C_V         = " << obs.specific_heat.value << " ± " << obs.specific_heat.error << endl;
+        
+        cout << "\nSU(2) Sublattice magnetizations:" << endl;
+        for (size_t alpha = 0; alpha < obs.sublattice_magnetization_SU2.size(); ++alpha) {
+            cout << "  Sublattice " << alpha << ": (";
+            const auto& M = obs.sublattice_magnetization_SU2[alpha];
+            for (size_t d = 0; d < M.values.size(); ++d) {
+                if (d > 0) cout << ", ";
+                cout << M.values[d] << "±" << M.errors[d];
+            }
+            cout << ")" << endl;
+        }
+        
+        cout << "\nSU(3) Sublattice magnetizations:" << endl;
+        for (size_t alpha = 0; alpha < obs.sublattice_magnetization_SU3.size(); ++alpha) {
+            cout << "  Sublattice " << alpha << ": (";
+            const auto& M = obs.sublattice_magnetization_SU3[alpha];
+            for (size_t d = 0; d < M.values.size(); ++d) {
+                if (d > 0) cout << ", ";
+                cout << M.values[d] << "±" << M.errors[d];
+            }
+            cout << ")" << endl;
+        }
+        
+        cout << "\nSU(2) Energy-sublattice cross correlations:" << endl;
+        for (size_t alpha = 0; alpha < obs.energy_sublattice_cross_SU2.size(); ++alpha) {
+            cout << "  Sublattice " << alpha << ": (";
+            const auto& cross = obs.energy_sublattice_cross_SU2[alpha];
+            for (size_t d = 0; d < cross.values.size(); ++d) {
+                if (d > 0) cout << ", ";
+                cout << cross.values[d] << "±" << cross.errors[d];
+            }
+            cout << ")" << endl;
+        }
+        
+        cout << "\nSU(3) Energy-sublattice cross correlations:" << endl;
+        for (size_t alpha = 0; alpha < obs.energy_sublattice_cross_SU3.size(); ++alpha) {
+            cout << "  Sublattice " << alpha << ": (";
+            const auto& cross = obs.energy_sublattice_cross_SU3[alpha];
+            for (size_t d = 0; d < cross.values.size(); ++d) {
+                if (d > 0) cout << ", ";
+                cout << cross.values[d] << "±" << cross.errors[d];
+            }
+            cout << ")" << endl;
+        }
+    }
+
+    /**
+     * Save sublattice magnetization time series to files
+     */
+    void save_sublattice_magnetization_timeseries(const string& out_dir,
+                                                   const vector<MixedMeasurement>& measurements) const {
+        ensure_directory_exists(out_dir);
+        
+        if (measurements.empty()) return;
+        
+        // SU(2) sublattice time series
+        size_t n_sublattices_SU2 = measurements[0].sublattice_mags_SU2.size();
+        for (size_t alpha = 0; alpha < n_sublattices_SU2; ++alpha) {
+            ofstream file(out_dir + "/sublattice_SU2_" + std::to_string(alpha) + "_timeseries.txt");
+            file << std::scientific << std::setprecision(12);
+            file << "# SU(2) Sublattice " << alpha << " magnetization time series" << endl;
+            
+            for (const auto& m : measurements) {
+                const auto& M = m.sublattice_mags_SU2[alpha];
+                for (size_t d = 0; d < static_cast<size_t>(M.size()); ++d) {
+                    if (d > 0) file << " ";
+                    file << M(d);
+                }
+                file << "\n";
+            }
+            file.close();
+        }
+        
+        // SU(3) sublattice time series
+        size_t n_sublattices_SU3 = measurements[0].sublattice_mags_SU3.size();
+        for (size_t alpha = 0; alpha < n_sublattices_SU3; ++alpha) {
+            ofstream file(out_dir + "/sublattice_SU3_" + std::to_string(alpha) + "_timeseries.txt");
+            file << std::scientific << std::setprecision(12);
+            file << "# SU(3) Sublattice " << alpha << " magnetization time series" << endl;
+            
+            for (const auto& m : measurements) {
+                const auto& M = m.sublattice_mags_SU3[alpha];
+                for (size_t d = 0; d < static_cast<size_t>(M.size()); ++d) {
+                    if (d > 0) file << " ";
+                    file << M(d);
+                }
+                file << "\n";
+            }
+            file.close();
+        }
     }
 
     /**
@@ -1943,7 +2659,8 @@ public:
 
     /**
      * Parallel tempering with MPI for mixed lattice
-     * Matches structure and features from Lattice::parallel_tempering
+     * Collects: energy, specific heat, sublattice magnetizations (SU2 and SU3), 
+     * and cross-correlations. All with binning analysis for error estimation.
      * 
      * Automatically uses interleaved sweeps when mixed interactions are present.
      */
@@ -1985,9 +2702,11 @@ public:
         
         vector<double> energies;
         vector<pair<SpinVector, SpinVector>> magnetizations; // (SU2, SU3)
+        vector<MixedMeasurement> measurements;  // NEW: comprehensive measurements
         size_t expected_samples = n_measure / probe_rate + 100;
         energies.reserve(expected_samples);
         magnetizations.reserve(expected_samples);
+        measurements.reserve(expected_samples);
         
         cout << "Rank " << rank << ": T=" << curr_Temp << endl;
         
@@ -2052,23 +2771,17 @@ public:
             if (i % probe_rate == 0) {
                 energies.push_back(total_energy());
                 magnetizations.push_back({magnetization_SU2(), magnetization_SU3()});
+                measurements.push_back(measure_all_observables());  // NEW
             }
         }
         
         cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
         
-        // Compute local heat capacity using energy variance
-        double E_mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
-        double E2_mean = 0.0;
-        for (double E : energies) {
-            E2_mean += E * E;
-        }
-        E2_mean /= energies.size();
-        double var_E = E2_mean - E_mean * E_mean;
+        // Compute comprehensive thermodynamic observables with binning analysis
+        MixedThermodynamicObservables obs = compute_thermodynamic_observables(measurements, curr_Temp);
         
-        size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
-        double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * total_sites);
-        double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * total_sites);
+        double curr_heat_capacity = obs.specific_heat.value;
+        double curr_dHeat = obs.specific_heat.error;
         
         // Gather heat capacity to root
         vector<double> heat_capacity, dHeat;
@@ -2089,7 +2802,10 @@ public:
         
         cout << "Rank " << rank << ": T=" << curr_Temp 
              << ", acc=" << acc_rate 
-             << ", swap_acc=" << swap_rate_actual << endl;
+             << ", swap_acc=" << swap_rate_actual 
+             << ", <E>/N=" << obs.energy_total.value << "±" << obs.energy_total.error
+             << ", C_V=" << obs.specific_heat.value << "±" << obs.specific_heat.error
+             << endl;
         
         // Save results
         if (!dir_name.empty()) {
@@ -2101,42 +2817,22 @@ public:
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
                 ensure_directory_exists(rank_dir);
                 
+                // Save comprehensive observables
+                save_thermodynamic_observables(rank_dir, obs);
+                
+                // Save raw time series
+                save_observables(rank_dir, energies, magnetizations);
+                save_sublattice_magnetization_timeseries(rank_dir, measurements);
+                
+                // Save spin configuration
                 save_spin_config_to_dir(rank_dir, "spins_T=" + std::to_string(curr_Temp));
-                
-                // Save energy time series
-                ofstream energy_file(rank_dir + "/energy.txt");
-                for (double E : energies) {
-                    energy_file << E / (lattice_size_SU2 + lattice_size_SU3) << "\n";
-                }
-                energy_file.close();
-                
-                // Save magnetization time series
-                ofstream mag_su2_file(rank_dir + "/magnetization_SU2.txt");
-                ofstream mag_su3_file(rank_dir + "/magnetization_SU3.txt");
-                for (const auto& mag_pair : magnetizations) {
-                    const auto& M_SU2 = mag_pair.first;
-                    const auto& M_SU3 = mag_pair.second;
-                    
-                    for (int i = 0; i < M_SU2.size(); ++i) {
-                        mag_su2_file << M_SU2(i);
-                        if (i < M_SU2.size() - 1) mag_su2_file << " ";
-                    }
-                    mag_su2_file << "\n";
-                    
-                    for (int i = 0; i < M_SU3.size(); ++i) {
-                        mag_su3_file << M_SU3(i);
-                        if (i < M_SU3.size() - 1) mag_su3_file << " ";
-                    }
-                    mag_su3_file << "\n";
-                }
-                mag_su2_file.close();
-                mag_su3_file.close();
             }
             
-            // Root process saves heat capacity
+            // Root process saves aggregated heat capacity
             if (rank == 0) {
                 ofstream heat_file(dir_name + "/heat_capacity.txt");
-                heat_file << "# T C_V dC_V\n";
+                heat_file << "# T C_V dC_V" << endl;
+                heat_file << std::scientific << std::setprecision(12);
                 for (int r = 0; r < size; ++r) {
                     heat_file << temp[r] << " " << heat_capacity[r] << " " << dHeat[r] << "\n";
                 }

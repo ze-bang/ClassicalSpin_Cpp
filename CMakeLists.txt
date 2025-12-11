@@ -12,7 +12,10 @@ option(CLASSICAL_SPIN_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 cmake_policy(SET CMP0144 NEW)
 
 # Use Config mode for Boost (avoids deprecated FindBoost module)
-cmake_policy(SET CMP0167 NEW)
+# CMP0167 is only available in CMake 3.30+
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
 
 # C++ and CUDA standards
 set(CMAKE_CXX_STANDARD 20)
