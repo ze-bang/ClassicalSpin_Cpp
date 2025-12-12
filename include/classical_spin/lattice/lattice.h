@@ -762,19 +762,29 @@ public:
                     const double* S_j = &state_flat[partner * spin_dim];
                     
                     // Apply twist if needed
-                    if (spin_dim == 3 && (bilinear_wrap_dir[i][n][0] != 0 || 
-                                          bilinear_wrap_dir[i][n][1] != 0 || 
-                                          bilinear_wrap_dir[i][n][2] != 0)) {
+                    const auto& wrap = bilinear_wrap_dir[i][n];
+                    if (spin_dim == 3 && (wrap[0] != 0 || wrap[1] != 0 || wrap[2] != 0)) {
                         double S_j_twisted[3];
                         std::copy(S_j, S_j + 3, S_j_twisted);
                         
                         for (size_t d = 0; d < 3; ++d) {
-                            if (bilinear_wrap_dir[i][n][d] != 0) {
+                            if (wrap[d] != 0) {
                                 double twisted[3] = {0, 0, 0};
-                                for (size_t d2 = 0; d2 < 3; ++d2) {
-                                    twisted[d2] += twist_matrices[d](d2, 0) * S_j_twisted[0];
-                                    twisted[d2] += twist_matrices[d](d2, 1) * S_j_twisted[1];
-                                    twisted[d2] += twist_matrices[d](d2, 2) * S_j_twisted[2];
+                                // For positive wrap, apply twist_matrices[d]
+                                // For negative wrap, apply transpose (inverse for rotations)
+                                if (wrap[d] > 0) {
+                                    for (size_t d2 = 0; d2 < 3; ++d2) {
+                                        twisted[d2] += twist_matrices[d](d2, 0) * S_j_twisted[0];
+                                        twisted[d2] += twist_matrices[d](d2, 1) * S_j_twisted[1];
+                                        twisted[d2] += twist_matrices[d](d2, 2) * S_j_twisted[2];
+                                    }
+                                } else {
+                                    // Apply transpose: R^T[d2, d3] = R[d3, d2]
+                                    for (size_t d2 = 0; d2 < 3; ++d2) {
+                                        twisted[d2] += twist_matrices[d](0, d2) * S_j_twisted[0];
+                                        twisted[d2] += twist_matrices[d](1, d2) * S_j_twisted[1];
+                                        twisted[d2] += twist_matrices[d](2, d2) * S_j_twisted[2];
+                                    }
                                 }
                                 std::copy(twisted, twisted + 3, S_j_twisted);
                             }
@@ -924,10 +934,22 @@ public:
                 for (size_t dim = 0; dim < 3; ++dim) {
                     if (wrap[dim] != 0) {
                         double temp[3];
-                        for (size_t d = 0; d < 3; ++d) {
-                            temp[d] = 0.0;
-                            for (size_t d2 = 0; d2 < 3; ++d2) {
-                                temp[d] += twist_matrices[dim](d, d2) * S_twisted[d2];
+                        // For positive wrap, apply twist_matrices[dim]
+                        // For negative wrap, apply transpose (inverse for rotations)
+                        if (wrap[dim] > 0) {
+                            for (size_t d = 0; d < 3; ++d) {
+                                temp[d] = 0.0;
+                                for (size_t d2 = 0; d2 < 3; ++d2) {
+                                    temp[d] += twist_matrices[dim](d, d2) * S_twisted[d2];
+                                }
+                            }
+                        } else {
+                            // Apply transpose: R^T[d, d2] = R[d2, d]
+                            for (size_t d = 0; d < 3; ++d) {
+                                temp[d] = 0.0;
+                                for (size_t d2 = 0; d2 < 3; ++d2) {
+                                    temp[d] += twist_matrices[dim](d2, d) * S_twisted[d2];
+                                }
                             }
                         }
                         for (size_t d = 0; d < 3; ++d) S_twisted[d] = temp[d];
@@ -1683,14 +1705,16 @@ public:
                 size_t j = bilinear_partners[i][n];
                 if (in_cluster[j]) continue;
                 
-                // Compute projected coupling
+                // Compute projected coupling and twisted partner spin projection
                 SpinVector partner_spin = apply_twist_to_partner_spin(
                     spins[j], bilinear_wrap_dir[i][n]);
+                double proj_j_twisted = partner_spin.dot(r);
                 double K_r = r.dot(bilinear_interaction[i][n] * r);
                 
                 // Add bond with probability 1 - exp(-2 beta K_r s_i s_j)
-                if (K_r > 0 && proj[i] * proj[j] > 0) {
-                    double P_add = 1.0 - std::exp(-2.0 * beta * K_r * proj[i] * proj[j]);
+                // Note: use twisted projection for partner
+                if (K_r > 0 && proj[i] * proj_j_twisted > 0) {
+                    double P_add = 1.0 - std::exp(-2.0 * beta * K_r * proj[i] * proj_j_twisted);
                     if (random_double_lehman(0.0, 1.0) < P_add) {
                         in_cluster[j] = 1;
                         stack.push_back(j);
@@ -1782,10 +1806,12 @@ public:
                 
                 SpinVector partner_spin = apply_twist_to_partner_spin(
                     spins[j], bilinear_wrap_dir[i][n]);
+                double proj_j_twisted = partner_spin.dot(r);
                 double K_r = r.dot(bilinear_interaction[i][n] * r);
                 
-                if (K_r > 0 && proj[i] * proj[j] > 0) {
-                    double P_bond = 1.0 - std::exp(-2.0 * beta * K_r * proj[i] * proj[j]);
+                // Use twisted projection for partner
+                if (K_r > 0 && proj[i] * proj_j_twisted > 0) {
+                    double P_bond = 1.0 - std::exp(-2.0 * beta * K_r * proj[i] * proj_j_twisted);
                     if (random_double_lehman(0.0, 1.0) < P_bond) {
                         unite(i, j);
                     }
@@ -1883,45 +1909,47 @@ public:
 
     /**
      * Metropolis update for twist boundary matrices
+     * Returns acceptance count (number of accepted moves)
      */
-    void metropolis_twist_sweep(double T) {
-        if (T <= 0) return;
+    size_t metropolis_twist_sweep(double T) {
+        if (T <= 0) return 0;
         
-        const double beta = 1.0 / T;
-        const double angle_step = 0.1; // radians
+        size_t accepted = 0;
         
+        // For each dimension that has length > 1, attempt one global angle move
         for (size_t d = 0; d < 3; ++d) {
-            // Skip dimensions with size 1
-            size_t dim_size = (d == 0) ? dim1 : (d == 1) ? dim2 : dim3;
-            if (dim_size <= 1) continue;
+            size_t Ld = (d == 0) ? dim1 : (d == 1) ? dim2 : dim3;
+            if (Ld <= 1) continue; // not relevant
             
-            // Compute energy of boundary sites
-            double E_old = 0.0;
-            for (size_t site : boundary_sites_per_dim[d]) {
-                E_old += site_energy(spins[site], site);
+            // Energy on boundary sites before the move
+            double E_before = 0.0;
+            for (size_t idx : boundary_sites_per_dim[d]) {
+                E_before += site_energy(spins[idx], idx);
             }
             
-            // Propose new twist angle
-            double delta_angle = random_double_lehman(-angle_step, angle_step);
-            SpinMatrix twist_old = twist_matrices[d];
+            // Propose a small rotation update (full replacement)
+            double delta = random_double_lehman(0, 2 * M_PI);
+            SpinMatrix R_new = rotation_from_axis_angle(rotation_axis[d], delta);
             
-            // Get current angle from matrix (simplified for small angles)
-            // Full implementation would extract angle from rotation matrix
-            twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], delta_angle) * twist_old;
+            // Temporarily apply
+            auto saved_R = twist_matrices[d];
+            twist_matrices[d] = R_new;
             
-            // Compute new energy
-            double E_new = 0.0;
-            for (size_t site : boundary_sites_per_dim[d]) {
-                E_new += site_energy(spins[site], site);
+            double E_after = 0.0;
+            for (size_t idx : boundary_sites_per_dim[d]) {
+                E_after += site_energy(spins[idx], idx);
             }
             
-            // Metropolis acceptance
-            double dE = E_new - E_old;
-            if (dE > 0 && random_double_lehman(0.0, 1.0) >= std::exp(-beta * dE)) {
-                // Reject: restore old twist matrix
-                twist_matrices[d] = twist_old;
+            double dE = E_after - E_before;
+            bool accept = (dE < 0) || (random_double_lehman(0, 1) < std::exp(-dE / T));
+            if (!accept) {
+                twist_matrices[d] = saved_R;
+            } else {
+                accepted++;
             }
         }
+        
+        return accepted;
     }
 
     
@@ -2063,6 +2091,19 @@ public:
 
     /**
      * Main simulated annealing routine
+     * 
+     * @param T_start              Starting temperature
+     * @param T_end                Final temperature (cooling stops here)
+     * @param n_anneal             Number of MC sweeps per temperature step
+     * @param overrelaxation_rate  Overrelaxation frequency (0 = disabled)
+     * @param boundary_update      Enable twist boundary condition updates
+     * @param gaussian_move        Use Gaussian moves instead of uniform
+     * @param cooling_rate         Temperature reduction factor (default: 0.9)
+     * @param out_dir              Output directory for configurations
+     * @param save_observables     Save energy/magnetization trajectories
+     * @param T_zero               Perform zero-temperature deterministic sweeps
+     * @param n_deterministics     Number of T=0 sweeps (if T_zero=true)
+     * @param twist_sweep_count    Twist BC sweeps per MC sweep (default: 100)
      */
     void simulated_annealing(double T_start, double T_end, size_t n_anneal,
                             size_t overrelaxation_rate = 0,
@@ -2072,7 +2113,8 @@ public:
                             string out_dir = "",
                             bool save_observables = false,
                             bool T_zero = false,
-                            size_t n_deterministics = 1000) {
+                            size_t n_deterministics = 1000,
+                            size_t twist_sweep_count = 100) {
         
         // Setup output directory
         if (!out_dir.empty()) {
@@ -2089,12 +2131,15 @@ public:
         if (T_zero) {
             cout << "T=0 mode enabled: will perform " << n_deterministics << " deterministic sweeps at T=0" << endl;
         }
+        if (boundary_update) {
+            cout << "Twist boundary updates enabled: " << twist_sweep_count << " twist sweeps per MC sweep" << endl;
+        }
         
         size_t temp_step = 0;
         while (T > T_end) {
             // Perform sweeps at this temperature
             double acc_sum = perform_mc_sweeps(n_anneal, T, gaussian_move, sigma, 
-                                              overrelaxation_rate, boundary_update);
+                                              overrelaxation_rate, boundary_update, twist_sweep_count);
             
             // Calculate acceptance rate (normalize differently if overrelaxation is used)
             double acceptance = (overrelaxation_rate > 0) ? 
@@ -2128,6 +2173,10 @@ public:
         // Save spin config after annealing (before deterministic sweeps)
         if (!out_dir.empty()) {
             save_spin_config(out_dir + "/spins_T=" + std::to_string(T) + ".txt");
+            save_positions(out_dir + "/positions.txt");
+            if (boundary_update) {
+                save_twist_angles(out_dir + "/twist_angles_T=" + std::to_string(T) + ".txt");
+            }
         }
         
         // Final measurements if requested (before deterministic sweeps)
@@ -2152,6 +2201,9 @@ public:
             // Save final configuration
             if (!out_dir.empty()) {
                 save_spin_config(out_dir + "/spins_T=0.txt");
+                if (boundary_update) {
+                    save_twist_angles(out_dir + "/twist_angles_T=0.txt");
+                }
             }
         }
     }
@@ -2189,7 +2241,8 @@ public:
         // Step 2: Equilibrate
         size_t equilibration = 10 * acf.sampling_interval;
         cout << "Equilibrating for " << equilibration << " sweeps..." << endl;
-        perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma, overrelaxation_rate);
+        perform_mc_sweeps(equilibration, T_final, gaussian_move, sigma, overrelaxation_rate, 
+                         false, 100);  // boundary_update=false for measurements
         
         // Step 3: Collect samples - now including sublattice magnetizations
         size_t n_samples = 1000;
@@ -3671,6 +3724,41 @@ public:
     }
 
     /**
+     * Save twist angles to file
+     */
+    void save_twist_angles(const string& filename) const {
+        ofstream file(filename);
+        if (!file) {
+            std::cerr << "Error: Cannot open file " << filename << endl;
+            return;
+        }
+        
+        file << std::scientific << std::setprecision(16);
+        file << "# Twist boundary condition angles (radians) for each dimension\n";
+        file << "# Format: dimension axis_x axis_y axis_z angle\n";
+        
+        for (size_t d = 0; d < 3; ++d) {
+            // Extract angle from rotation matrix
+            // For 3D rotations, we can use the trace formula: angle = arccos((trace(R) - 1) / 2)
+            double angle = 0.0;
+            if (spin_dim == 3) {
+                double trace = twist_matrices[d](0, 0) + twist_matrices[d](1, 1) + twist_matrices[d](2, 2);
+                double cos_angle = (trace - 1.0) / 2.0;
+                cos_angle = std::clamp(cos_angle, -1.0, 1.0); // Handle numerical errors
+                angle = std::acos(cos_angle);
+            }
+            
+            file << d << " ";
+            for (size_t i = 0; i < rotation_axis[d].size(); ++i) {
+                file << rotation_axis[d](i) << " ";
+            }
+            file << angle << "\n";
+        }
+        
+        file.close();
+    }
+
+    /**
      * Save site positions to file
      */
     void save_positions(const string& filename) const {
@@ -3799,11 +3887,26 @@ private:
     /**
      * Helper: Perform MC sweeps with optional overrelaxation
      * Returns sum of acceptance rates from metropolis calls
+     * 
+     * @param n_sweeps             Number of MC sweeps
+     * @param T                    Temperature
+     * @param gaussian_move        Use Gaussian moves
+     * @param sigma                Gaussian width (modified in-place)
+     * @param overrelaxation_rate  Overrelaxation frequency (0 = disabled)
+     * @param boundary_update      Enable twist boundary updates
+     * @param twist_sweep_count    Number of twist sweeps per MC sweep (default: 100)
+     * @param twist_acc_ptr        Optional pointer to store cumulative twist acceptance count
      */
     double perform_mc_sweeps(size_t n_sweeps, double T, bool gaussian_move, 
                             double& sigma, size_t overrelaxation_rate = 0,
-                            bool boundary_update = false) {
+                            bool boundary_update = false,
+                            size_t twist_sweep_count = 100,
+                            size_t* twist_acc_ptr = nullptr) {
         double acc_sum = 0.0;
+        size_t total_twist_accepted = 0;
+        size_t total_twist_attempted = 0;
+        
+        // Perform MC sweeps
         for (size_t i = 0; i < n_sweeps; ++i) {
             if (overrelaxation_rate > 0) {
                 overrelaxation();
@@ -3813,10 +3916,29 @@ private:
             } else {
                 acc_sum += metropolis(T, gaussian_move, sigma);
             }
-            
-            if (boundary_update && i % 10 == 0) {
-                metropolis_twist_sweep(T);
+        }
+        
+        // Perform twist boundary updates after MC sweeps are complete
+        if (boundary_update) {
+            for (size_t j = 0; j < twist_sweep_count; ++j) {
+                size_t accepted = metropolis_twist_sweep(T);
+                total_twist_accepted += accepted;
+                // Count number of dimensions with Ld > 1 as attempts
+                size_t n_dims = ((dim1 > 1) ? 1 : 0) + ((dim2 > 1) ? 1 : 0) + ((dim3 > 1) ? 1 : 0);
+                total_twist_attempted += n_dims;
             }
+            
+            // Report twist boundary diagnostics
+            if (total_twist_attempted > 0) {
+                double twist_acc_rate = double(total_twist_accepted) / double(total_twist_attempted);
+                cout << "  [Twist BC: " << total_twist_accepted << "/" << total_twist_attempted 
+                     << " accepted (" << std::fixed << std::setprecision(3) << twist_acc_rate * 100.0 
+                     << "%)]" << endl;
+            }
+        }
+        
+        if (twist_acc_ptr) {
+            *twist_acc_ptr = total_twist_accepted;
         }
         
         return acc_sum;

@@ -54,6 +54,7 @@ struct SpinConfig {
     string output_dir = "output";
     double initial_step_size = 0.5;
     bool use_twist_boundary = false;
+    size_t twist_sweep_count = 100;  // Number of twist boundary sweeps per MC sweep
     
     // Temperature parameters
     double T_start = 10.0;

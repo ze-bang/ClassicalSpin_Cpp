@@ -89,6 +89,9 @@ if(CLASSICAL_SPIN_ENABLE_WARNINGS)
             -Wno-unused-parameter      # unused parameters in callbacks/interfaces
             -Wno-pedantic              # strict ISO compliance (e.g., __int128)
             -Wno-reorder               # member initialization order
+            -Wno-unused-variable       # unused variables (reserved for future use)
+            -Wno-stringop-overread     # false positive in AVX intrinsics (GCC bug)
+            -Wno-stringop-overflow     # false positive in AVX intrinsics (GCC bug)
         )
     elseif(MSVC)
         list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS /W3 /permissive-)
@@ -108,6 +111,9 @@ if(CLASSICAL_SPIN_ENABLE_WARNINGS)
             -Xcompiler=-Wno-unused-parameter
             -Xcompiler=-Wno-pedantic
             -Xcompiler=-Wno-reorder
+            -Xcompiler=-Wno-unused-variable
+            -Xcompiler=-Wno-stringop-overread
+            -Xcompiler=-Wno-stringop-overflow
         )
     endif()
 
@@ -135,8 +141,11 @@ endfunction()
 
 # CUDA compiler flags
 # --extended-lambda allows __device__ annotation on lambdas (required for Thrust)
-set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK --extended-lambda --expt-relaxed-constexpr")
+set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK --extended-lambda --expt-relaxed-constexpr -Wno-deprecated-gpu-targets")
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
+
+# Suppress nvlink warnings about incompatible libraries (32-bit libs on 64-bit system)
+set(CMAKE_CUDA_LINK_FLAGS "${CMAKE_CUDA_LINK_FLAGS} -Xnvlink=-w")
 
 # Optimization flags for Release builds
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -144,6 +153,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         -O3 -DNDEBUG -march=native -mtune=native -flto
         -funroll-loops -fomit-frame-pointer -fno-stack-protector
         -ffp-contract=fast -fno-math-errno -fno-trapping-math -fno-rounding-math
+        -Wno-stringop-overread -Wno-stringop-overflow  # suppress false positives in AVX intrinsics during LTO
     )
     
     set(CUDA_OPTIMIZATION_FLAGS
@@ -320,6 +330,10 @@ function(add_optimized_executable exec_name source_file)
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_HOST_OPTIMIZATION_FLAGS}>
         $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    )
+    # Suppress LTO warnings from AVX intrinsics (GCC bug with -flto and avx512)
+    target_link_options(${exec_name} PRIVATE
+        -Wno-stringop-overread -Wno-stringop-overflow
     )
     classical_spin_apply_warnings(${exec_name})
     

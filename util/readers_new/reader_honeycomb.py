@@ -16,6 +16,7 @@ import h5py
 import numpy as np
 from opt_einsum import contract
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as patheffects
 from mpl_toolkits.mplot3d import Axes3D
 import os
 from matplotlib.colors import PowerNorm, LogNorm
@@ -153,7 +154,7 @@ def SSSF_q(k, S, P, gb=False):
     # S(q) * S(-q)^* should be real, take real part to avoid casting issues
     return np.real(result)
 
-def SSSF2D(S, P, nK, dir, gb=False):
+def SSSF2D(S, P, nK, dir, gb=False, h_range=(-1.5, 1.5), k_range=(-1.5, 1.5)):
     """Compute 2D Static Spin Structure Factor.
     
     Args:
@@ -162,17 +163,21 @@ def SSSF2D(S, P, nK, dir, gb=False):
         nK: Grid size (nK x nK)
         dir: Output directory
         gb: Use global frame
+        h_range: Range of H in reciprocal lattice units (default: -1.5 to 1.5)
+        k_range: Range of K in reciprocal lattice units (default: -1.5 to 1.5)
     
     Returns:
         SSSF: (nK, nK, 3, 3)
+        H_grid: H values in RLU
+        K_grid: K values in RLU
     """
-    H = np.linspace(0, 1, nK)
-    L = np.linspace(0, 1, nK)
-    A, B = np.meshgrid(H, L)
-    K = hhknk(A, B).reshape((nK * nK, 3))
-    SSSF = SSSF_q(K, S, P, gb)
+    H = np.linspace(h_range[0], h_range[1], nK)
+    L = np.linspace(k_range[0], k_range[1], nK)
+    H_grid, K_grid = np.meshgrid(H, L)
+    K_momenta = hhknk(H_grid.flatten(), K_grid.flatten()).reshape((nK * nK, 3))
+    SSSF = SSSF_q(K_momenta, S, P, gb)
     SSSF = SSSF.reshape((nK, nK, 3, 3))
-    return SSSF
+    return SSSF, H_grid, K_grid
 
 # ============================================================================
 # HELPER FUNCTIONS - Reciprocal Space Coordinates
@@ -207,44 +212,139 @@ def hhknk(H, K):
 # HELPER FUNCTIONS - Plotting
 # ============================================================================
 
-def SSSFGraph2D(A, B, d1, filename):
-    """Plot 2D Static Structure Factor with Brillouin zone."""
+def get_honeycomb_brillouin_zone(coord_type='cartesian'):
+    """Get first Brillouin zone vertices and high-symmetry points for honeycomb lattice.
+    
+    The honeycomb lattice has a triangular Bravais lattice, so its reciprocal lattice
+    is also triangular (rotated 30 degrees). The first BZ is a hexagon.
+    
+    High-symmetry points (in reciprocal lattice units u*b1 + v*b2):
+    - Gamma: (0, 0)
+    - K: (2/3, 1/3) and K': (1/3, 2/3)
+    - M: (1/2, 0), (0, 1/2), (1/2, 1/2)
+    
+    Args:
+        coord_type: 'cartesian' for k-space (1/Angstrom or 2pi/a units)
+                    'rlu' for reciprocal lattice units (H, K)
+    
+    Returns:
+        bz_vertices: (7, 2) array of BZ boundary vertices (closed loop)
+        high_sym_points: dict with Gamma, K, K', M coordinates
+    """
+    if coord_type == 'rlu':
+        # In RLU, the BZ is the Wigner-Seitz cell of the reciprocal lattice
+        # For triangular lattice, this is a hexagon centered at origin
+        bz_vertices = np.array([
+            [2/3, 1/3],
+            [1/3, 2/3],
+            [-1/3, 1/3],
+            [-2/3, -1/3],
+            [-1/3, -2/3],
+            [1/3, -1/3],
+            [2/3, 1/3],  # Close the loop
+        ])
+        high_sym_points = {
+            'Gamma': np.array([0.0, 0.0]),
+            'K': np.array([2/3, 1/3]),
+            'Kp': np.array([1/3, 2/3]),
+            'M': np.array([1/2, 0.0]),
+            'Mp': np.array([0.0, 1/2]),
+        }
+    else:  # cartesian
+        reciprocal_basis = honeycomb_reciprocal_basis()
+        b1 = reciprocal_basis[0, :2]
+        b2 = reciprocal_basis[1, :2]
+        
+        # BZ vertices in Cartesian coordinates
+        bz_vertices = np.array([
+            (2/3) * b1 + (1/3) * b2,
+            (1/3) * b1 + (2/3) * b2,
+            (-1/3) * b1 + (1/3) * b2,
+            (-2/3) * b1 + (-1/3) * b2,
+            (-1/3) * b1 + (-2/3) * b2,
+            (1/3) * b1 + (-1/3) * b2,
+            (2/3) * b1 + (1/3) * b2,  # Close the loop
+        ])
+        high_sym_points = {
+            'Gamma': np.array([0.0, 0.0]),
+            'K': (2/3) * b1 + (1/3) * b2,
+            'Kp': (1/3) * b1 + (2/3) * b2,
+            'M': (1/2) * b1,
+            'Mp': (1/2) * b2,
+        }
+    
+    return bz_vertices, high_sym_points
+
+
+def SSSFGraph2D(H_grid, K_grid, d1, filename, coord_type='cartesian', cmap='viridis'):
+    """Plot 2D Static Structure Factor with Brillouin zone overlay.
+    
+    Args:
+        H_grid: H values in reciprocal lattice units (2D meshgrid)
+        K_grid: K values in reciprocal lattice units (2D meshgrid)
+        d1: SSSF intensity data (2D array)
+        filename: Output filename (without extension)
+        coord_type: 'cartesian' for Cartesian k-space plot (k_x, k_y in units of 2pi/a)
+                    'rlu' for reciprocal lattice units plot (H, K)
+        cmap: Colormap to use (default: 'viridis')
+    """
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
     reciprocal_basis = honeycomb_reciprocal_basis()
-    b1 = reciprocal_basis[0]
-    b2 = reciprocal_basis[1]
+    b1 = reciprocal_basis[0, :2]
+    b2 = reciprocal_basis[1, :2]
     
-    bz_vertices = np.array([
-        b1 * (-1/3) + b2 * (1/3),
-        b1 * (1/3) + b2 * (2/3),
-        b1 * (2/3) + b2 * (1/3),
-        b1 * (1/3) + b2 * (-1/3),
-        b1 * (-1/3) + b2 * (-2/3),
-        b1 * (-2/3) + b2 * (-1/3),
-        b1 * (-1/3) + b2 * (1/3),
-    ])
+    if coord_type == 'rlu':
+        # Plot in RLU coordinates directly (H, K axes are orthogonal in the plot)
+        X_plot = H_grid
+        Y_plot = K_grid
+        xlabel = r'$H$ (r.l.u.)'
+        ylabel = r'$K$ (r.l.u.)'
+    else:
+        # Convert RLU grid to Cartesian k-space
+        X_plot = H_grid * b1[0] + K_grid * b2[0]
+        Y_plot = H_grid * b1[1] + K_grid * b2[1]
+        xlabel = r'$k_x$ $(2\pi/a)$'
+        ylabel = r'$k_y$ $(2\pi/a)$'
     
-    gamma_point = np.array([0, 0, 0])
-    k_point = b1 * (-1/3) + b2 * (1/3)
-    m_point = b1 * 0 + b2 * (1/2)
+    # Plot the SSSF data
+    mesh = ax.pcolormesh(X_plot, Y_plot, d1, shading='auto', cmap=cmap)
+    plt.colorbar(mesh, ax=ax, label=r'$\log S(\mathbf{q})$')
     
-    bz_vertices_plot = bz_vertices[:, :2]
-    gamma_plot = gamma_point[:2]
-    k_plot = k_point[:2]
-    m_plot = m_point[:2]
+    # Get and plot Brillouin zone
+    bz_vertices, high_sym_points = get_honeycomb_brillouin_zone(coord_type=coord_type)
     
-    plt.plot(bz_vertices_plot[:, 0], bz_vertices_plot[:, 1], 'w--', lw=1.5)
-    plt.scatter([gamma_plot[0], k_plot[0], m_plot[0]], 
-                [gamma_plot[1], k_plot[1], m_plot[1]], c='white', s=50, zorder=5)
-    plt.text(gamma_plot[0] + 0.02, gamma_plot[1] + 0.02, r'$\Gamma$', color='white', fontsize=14)
-    plt.text(k_plot[0] + 0.02, k_plot[1] + 0.02, 'K', color='white', fontsize=14)
-    plt.text(m_plot[0] + 0.02, m_plot[1] + 0.02, 'M', color='white', fontsize=14)
+    # Plot first BZ boundary
+    ax.plot(bz_vertices[:, 0], bz_vertices[:, 1], 'w-', lw=2.0, label='1st BZ')
     
-    plt.pcolormesh(A, B, d1)
-    plt.colorbar()
-    plt.ylabel(r'$K_y$')
-    plt.xlabel(r'$K_x$')
-    plt.savefig(filename + ".pdf")
-    plt.clf()
+    # Also plot second BZ (shifted by reciprocal lattice vectors) if in range
+    if coord_type == 'rlu':
+        shifts = [(1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, -1)]
+    else:
+        shifts = [b1, b2, -b1, -b2, b1+b2, -b1-b2]
+    
+    for shift in shifts:
+        shifted_bz = bz_vertices + np.array(shift)
+        ax.plot(shifted_bz[:, 0], shifted_bz[:, 1], 'w--', lw=1.0, alpha=0.5)
+    
+    # Mark high-symmetry points
+    for name, pos in high_sym_points.items():
+        ax.scatter(pos[0], pos[1], c='white', s=60, zorder=5, edgecolors='black', linewidths=1)
+        # Add label with offset
+        offset = 0.05 if coord_type == 'rlu' else 0.3
+        label_name = r'$\Gamma$' if name == 'Gamma' else (r"$K'$" if name == 'Kp' else (r"$M'$" if name == 'Mp' else f'${name}$'))
+        ax.text(pos[0] + offset, pos[1] + offset, label_name, color='white', fontsize=12, fontweight='bold',
+                path_effects=[patheffects.withStroke(linewidth=2, foreground='black')])
+    
+    ax.set_xlabel(xlabel, fontsize=14)
+    ax.set_ylabel(ylabel, fontsize=14)
+    ax.set_aspect('equal')
+    ax.set_title(f'Static Spin Structure Factor ({coord_type.upper()})', fontsize=14)
+    
+    plt.tight_layout()
+    plt.savefig(filename + f"_{coord_type}.pdf", dpi=150)
+    plt.close()
+    print(f"    Saved: {filename}_{coord_type}.pdf")
 
 # ============================================================================
 # HELPER FUNCTIONS - I/O
@@ -837,19 +937,105 @@ def read_2D_nonlinear_tot(dir, omega_t_window=None, omega_tau_window=None):
 # MAIN FUNCTION 3: Parse and Visualize Spin Configurations
 # ============================================================================
 
+def _visualize_single_spin_config(S, P, output_dir, file_prefix, title_suffix):
+    """Helper function to visualize a single spin configuration.
+    
+    Args:
+        S: Spin configuration (n_atoms, 3)
+        P: Atomic positions (n_atoms, 3)
+        output_dir: Directory to save output files
+        file_prefix: Prefix for output files
+        title_suffix: Suffix for plot title
+    """
+    # Compute statistics
+    n_atoms = len(S)
+    spin_mag = np.linalg.norm(S, axis=1)
+    avg_mag = np.mean(spin_mag)
+    total_mag = np.sum(S, axis=0)
+    sz_min = np.min(S[:, 2])
+    sz_max = np.max(S[:, 2])
+    
+    print(f"    Number of atoms: {n_atoms}")
+    print(f"    Average spin magnitude: {avg_mag:.6f}")
+    print(f"    Total magnetization: [{total_mag[0]:.6f}, {total_mag[1]:.6f}, {total_mag[2]:.6f}]")
+    print(f"    |M_total|: {np.linalg.norm(total_mag):.6f}")
+    print(f"    S_z range: [{sz_min:.6f}, {sz_max:.6f}]")
+    
+    # Compute static spin structure factor (SSSF) on 2D grid
+    # Sample centered on Gamma to see full Brillouin zones
+    print(f"    Computing static spin correlations...")
+    nK = 128  # Grid resolution
+    h_range = (-1.5, 1.5)  # Cover multiple Brillouin zones
+    k_range = (-1.5, 1.5)
+    SSSF, H_grid, K_grid = SSSF2D(S, P, nK, output_dir, gb=True, h_range=h_range, k_range=k_range)
+    
+    # Sum over spin components for total intensity
+    SSSF_total = np.sum(np.abs(SSSF), axis=(2, 3))
+    
+    # Save SSSF data
+    sssf_file = os.path.join(output_dir, f"{file_prefix}_SSSF.txt")
+    np.savetxt(sssf_file, SSSF_total)
+    
+    # Save statistics
+    info_file = os.path.join(output_dir, f"{file_prefix}_info.txt")
+    with open(info_file, 'w') as f:
+        f.write(f"Number of atoms: {n_atoms}\n")
+        f.write(f"Average spin magnitude: {avg_mag:.6f}\n")
+        f.write(f"Total magnetization: [{total_mag[0]:.6f}, {total_mag[1]:.6f}, {total_mag[2]:.6f}]\n")
+        f.write(f"|M_total|: {np.linalg.norm(total_mag):.6f}\n")
+        f.write(f"S_z range: [{sz_min:.6f}, {sz_max:.6f}]\n")
+    
+    # Create XY plane projection with z-component colormap
+    fig, ax = plt.subplots(figsize=(12, 10))
+    
+    # Normalize colormap based on actual S_z range
+    sz_values = S[:, 2]
+    
+    # Color the arrows by z-component (using viridis to keep all spins visible)
+    quiver = ax.quiver(P[:, 0], P[:, 1], S[:, 0], S[:, 1], sz_values,
+                       cmap='viridis', clim=(sz_min, sz_max),
+                       scale=5, scale_units='inches', width=0.004, 
+                       headwidth=3, headlength=4, alpha=0.9)
+    
+    # Add colorbar for z-component
+    cbar = plt.colorbar(quiver, ax=ax, label='Spin $S_z$ component')
+    
+    ax.set_xlabel('X', fontsize=12)
+    ax.set_ylabel('Y', fontsize=12)
+    ax.set_title(f'Spin Configuration (XY Projection) - {title_suffix} ({n_atoms} atoms)', fontsize=14)
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3)
+    
+    pdf_file = os.path.join(output_dir, f"{file_prefix}.pdf")
+    plt.savefig(pdf_file)
+    plt.close()
+    print(f"    Saved: {pdf_file}")
+    
+    # Plot static spin structure factor in BOTH coordinate systems
+    log_SSSF = np.log(SSSF_total + 1e-10)
+    sssf_basename = os.path.join(output_dir, f"{file_prefix}_SSSF")
+    
+    # Plot in Cartesian coordinates (k_x, k_y in units of 2π/a)
+    SSSFGraph2D(H_grid, K_grid, log_SSSF, sssf_basename, coord_type='cartesian', cmap='viridis')
+    
+    # Plot in reciprocal lattice units (H, K)
+    SSSFGraph2D(H_grid, K_grid, log_SSSF, sssf_basename, coord_type='rlu', cmap='viridis')
+    
+    print(f"    Saved: {info_file}\n")
+
 def parse_spin_config(dir):
     """Parse and visualize spin configurations from simulation outputs.
     
     Processes all subdirectories containing spin configuration data,
-    reads from either HDF5 or text files, and generates 3D visualization
-    plots for each run.
+    reads from either HDF5 or text files (including simulated annealing outputs),
+    and generates 3D visualization plots for each run.
     
     Args:
         dir: Parent directory containing subdirectories with spin configuration data
     
     Outputs (per subdirectory):
-        - spin_config.pdf: 3D plot of spin configuration
-        - spin_info.txt: Statistics about spin configuration
+        - spin_config_T=*.pdf: 3D plot of spin configuration for each temperature
+        - spin_info_T=*.txt: Statistics about spin configuration for each temperature
     """
     directory = os.fsencode(dir)
     
@@ -878,73 +1064,48 @@ def parse_spin_config(dir):
                         if '/trajectory/times' in f:
                             times = f['/trajectory/times'][:]
                             print(f"  Time steps: {len(times)}, last time: {times[-1]:.4f}")
-                else:
-                    # Try text files
-                    spin_file = os.path.join(subdir, "spin.txt")
-                    pos_file = os.path.join(subdir, "pos.txt")
                     
-                    if os.path.exists(spin_file) and os.path.exists(pos_file):
-                        print(f"  Reading from text files: {spin_file}, {pos_file}")
-                        S = np.loadtxt(spin_file)
+                    # Process single configuration from HDF5
+                    _visualize_single_spin_config(S, P, subdir, "spin_config", filename)
+                    
+                else:
+                    # Look for simulated annealing output files (spins_T=*.txt)
+                    spin_files = sorted([f for f in os.listdir(subdir) if f.startswith('spins_T=') and f.endswith('.txt')])
+                    pos_file = os.path.join(subdir, "positions.txt")
+                    
+                    if spin_files and os.path.exists(pos_file):
+                        print(f"  Found {len(spin_files)} simulated annealing temperature files")
                         P = np.loadtxt(pos_file)
+                        
+                        # Process each temperature file
+                        for spin_file in spin_files:
+                            spin_path = os.path.join(subdir, spin_file)
+                            S = np.loadtxt(spin_path)
+                            
+                            # Extract temperature from filename (e.g., "spins_T=0.001000.txt" -> "0.001000")
+                            T_str = spin_file.replace('spins_T=', '').replace('.txt', '')
+                            output_prefix = f"spin_config_T={T_str}"
+                            
+                            print(f"  Processing T={T_str}")
+                            _visualize_single_spin_config(S, P, subdir, output_prefix, f"{filename} (T={T_str})")
                     else:
-                        print(f"  Error: No valid spin configuration found in {subdir}")
-                        continue
-                
-                # Compute statistics
-                n_atoms = len(S)
-                spin_mag = np.linalg.norm(S, axis=1)
-                avg_mag = np.mean(spin_mag)
-                total_mag = np.sum(S, axis=0)
-                
-                print(f"  Spin Configuration Summary:")
-                print(f"    Number of atoms: {n_atoms}")
-                print(f"    Average spin magnitude: {avg_mag:.6f}")
-                print(f"    Total magnetization: [{total_mag[0]:.6f}, {total_mag[1]:.6f}, {total_mag[2]:.6f}]")
-                print(f"    |M_total|: {np.linalg.norm(total_mag):.6f}")
-                
-                # Save statistics
-                with open(os.path.join(subdir, "spin_info.txt"), 'w') as f:
-                    f.write(f"Number of atoms: {n_atoms}\n")
-                    f.write(f"Average spin magnitude: {avg_mag:.6f}\n")
-                    f.write(f"Total magnetization: [{total_mag[0]:.6f}, {total_mag[1]:.6f}, {total_mag[2]:.6f}]\n")
-                    f.write(f"|M_total|: {np.linalg.norm(total_mag):.6f}\n")
-                
-                # Create 3D visualization
-                fig = plt.figure(figsize=(10, 10))
-                ax = fig.add_subplot(111, projection='3d')
-                
-                # Plot atoms
-                ax.scatter(P[:, 0], P[:, 1], P[:, 2], c='lightblue', s=100, alpha=0.6, edgecolors='k')
-                
-                # Plot spins as arrows
-                ax.quiver(P[:, 0], P[:, 1], P[:, 2],
-                          S[:, 0], S[:, 1], S[:, 2],
-                          color='red', arrow_length_ratio=0.3, linewidth=2, alpha=0.8)
-                
-                ax.set_xlabel('X')
-                ax.set_ylabel('Y')
-                ax.set_zlabel('Z')
-                ax.set_title(f'Spin Configuration - {filename} ({n_atoms} atoms)')
-                
-                # Equal aspect ratio
-                max_range = np.array([P[:, 0].max() - P[:, 0].min(),
-                                     P[:, 1].max() - P[:, 1].min(),
-                                     P[:, 2].max() - P[:, 2].min()]).max() / 2.0
-                mid_x = (P[:, 0].max() + P[:, 0].min()) * 0.5
-                mid_y = (P[:, 1].max() + P[:, 1].min()) * 0.5
-                mid_z = (P[:, 2].max() + P[:, 2].min()) * 0.5
-                ax.set_xlim(mid_x - max_range, mid_x + max_range)
-                ax.set_ylim(mid_y - max_range, mid_y + max_range)
-                ax.set_zlim(mid_z - max_range, mid_z + max_range)
-                
-                plt.savefig(os.path.join(subdir, "spin_config.pdf"))
-                plt.close()
-                print(f"  Saved: {os.path.join(subdir, 'spin_config.pdf')}")
-                print(f"  Saved: {os.path.join(subdir, 'spin_info.txt')}\n")
+                        # Fallback to old naming convention
+                        spin_file = os.path.join(subdir, "spin.txt")
+                        pos_file = os.path.join(subdir, "pos.txt")
+                        
+                        if os.path.exists(spin_file) and os.path.exists(pos_file):
+                            print(f"  Reading from text files: {spin_file}, {pos_file}")
+                            S = np.loadtxt(spin_file)
+                            P = np.loadtxt(pos_file)
+                            _visualize_single_spin_config(S, P, subdir, "spin_config", filename)
+                        else:
+                            print(f"  Error: No valid spin configuration found in {subdir}")
+                            continue
                 
             except Exception as e:
                 print(f"  Error processing {filename}: {e}\n")
+                import traceback
+                traceback.print_exc()
                 continue
 
 # ============================================================================

@@ -77,6 +77,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "use_twist_boundary" || key == "tbc") {
                 config.use_twist_boundary = parse_bool(value);
             }
+            else if (key == "twist_sweep_count" || key == "tbc_sweeps") {
+                config.twist_sweep_count = stoull(value);
+            }
             else if (key == "T_start" || key == "temperature_start") {
                 config.T_start = stod(value);
             }

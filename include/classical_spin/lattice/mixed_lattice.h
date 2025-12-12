@@ -1677,7 +1677,8 @@ public:
                             string out_dir = "",
                             bool save_observables = false,
                             bool T_zero = false,
-                            size_t n_deterministics = 1000) {
+                            size_t n_deterministics = 1000,
+                            size_t twist_sweep_count = 100) {
         
         // Setup output directory
         ensure_directory_exists(out_dir);
@@ -1737,6 +1738,7 @@ public:
         if (!out_dir.empty()) {
             save_spin_config_to_dir(out_dir, "spins_T=" + std::to_string(T_end));
             save_energy_to_dir(out_dir, "energy_T=" + std::to_string(T_end));
+            save_positions_to_dir(out_dir);
         }
         
         // Final measurements if requested (before deterministic sweeps)
@@ -1771,7 +1773,6 @@ public:
             if (!out_dir.empty()) {
                 save_spin_config_to_dir(out_dir, "spins_T=0");
                 save_energy_to_dir(out_dir, "energy_T=0");
-                save_positions_to_dir(out_dir);
             }
         }
     }

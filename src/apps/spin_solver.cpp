@@ -56,12 +56,13 @@ void run_simulated_annealing(Lattice& lattice, const SpinConfig& config, int ran
             trial_dir,
             config.save_observables,
             config.T_zero,
-            config.n_deterministics
+            config.n_deterministics,
+            config.twist_sweep_count
         );
         
         // Save final configuration
         lattice.save_positions(trial_dir + "/positions.txt");
-        lattice.save_spin_config(trial_dir + "/spins.txt");
+        // lattice.save_spin_config(trial_dir + "/spins.txt");
         
         if (rank == 0) {
             ofstream energy_file(trial_dir + "/final_energy.txt");
@@ -206,7 +207,8 @@ void run_molecular_dynamics(Lattice& lattice, const SpinConfig& config, int rank
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+            config.twist_sweep_count
             );
         } else if (rank == 0) {
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
@@ -358,7 +360,8 @@ void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int si
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+            config.twist_sweep_count
             );
         } else if (rank == 0) {
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
@@ -574,7 +577,8 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
                     "",
                     false,  // Don't save observables during equilibration
                     config.T_zero,
-                    config.n_deterministics
+                    config.n_deterministics,
+                config.twist_sweep_count
                 );
             }
         } else if (rank == 0) {
@@ -678,7 +682,8 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
                     "",
                     config.save_observables,
                     config.T_zero,
-                    config.n_deterministics
+                    config.n_deterministics,
+                config.twist_sweep_count
                 );
             } else if (rank == 0) {
                 cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
@@ -873,7 +878,7 @@ void run_simulated_annealing_phonon(PhononLattice& lattice, const SpinConfig& co
         
         // Save final configuration
         lattice.save_positions(trial_dir + "/positions.txt");
-        lattice.save_spin_config(trial_dir + "/spins.txt");
+        // lattice.save_spin_config(trial_dir + "/spins.txt");
         lattice.print_state();
         
         cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
@@ -926,7 +931,7 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
                 config.T_zero,
                 config.n_deterministics,
                 config.adiabatic_phonons
-            );
+        );
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
@@ -1025,7 +1030,7 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
                 config.T_zero,
                 config.n_deterministics,
                 config.adiabatic_phonons
-            );
+        );
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
@@ -1136,7 +1141,7 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
                 config.T_zero,
                 config.n_deterministics,
                 config.adiabatic_phonons
-            );
+        );
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
@@ -1224,13 +1229,11 @@ void run_simulated_annealing_mixed(MixedLattice& lattice, const SpinConfig& conf
             trial_dir,
             config.save_observables,
             config.T_zero,
-            config.n_deterministics
+            config.n_deterministics,
+        config.twist_sweep_count
         );
         
-        // Save final configuration
-        lattice.save_positions(trial_dir + "/positions.txt");
-        lattice.save_spin_config(trial_dir + "/spins.txt");
-        
+
         if (rank == 0) {
             ofstream energy_file(trial_dir + "/final_energy.txt");
             energy_file << "Energy Density: " << lattice.energy_density() << "\n";
@@ -1372,7 +1375,8 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const SpinConfig& confi
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+            config.twist_sweep_count
             );
         } else if (rank == 0) {
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
@@ -1561,7 +1565,8 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
                 "",
                 false,
                 config.T_zero,
-                config.n_deterministics
+                config.n_deterministics,
+            config.twist_sweep_count
             );
         } else if (rank == 0) {
             cout << "Skipping equilibration (using loaded spin configuration)" << endl;
@@ -1814,7 +1819,8 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                     "",
                     false,
                     config.T_zero,
-                    config.n_deterministics
+                    config.n_deterministics,
+                config.twist_sweep_count
                 );
             }
         } else if (rank == 0) {
@@ -1958,7 +1964,8 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                     trial_dir,
                     config.save_observables,
                     config.T_zero,
-                    config.n_deterministics
+                    config.n_deterministics,
+                config.twist_sweep_count
                 );
             } else if (rank == 0) {
                 cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
