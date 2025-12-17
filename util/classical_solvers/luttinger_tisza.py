@@ -142,6 +142,30 @@ def calculate_total_energy(spins, NN, NN_bonds, NNN, NNNN, J, B_field=None):
     
     return total_energy, exchange_energy, zeeman_energy
 
+
+def calculate_energy_from_matrices(spins, NN, NN_bonds, NNN, NNNN, J1_mats, J2_mat, J3_mat):
+    """Compute classical energy per site using explicit interaction matrices.
+
+    This helper keeps the bond-type mapping consistent with the C++ honeycomb
+    builder (X -> NN_bonds==0, Y -> 1, Z -> 2) and avoids constructing model
+    parameters twice when the matrices are already available.
+    """
+    total_energy = 0.0
+    N = len(spins)
+
+    for i in range(N):
+        for j in NN[i]:
+            if i < j:
+                total_energy += spins[i] @ J1_mats[NN_bonds[i, j]] @ spins[j]
+        for j in NNN[i]:
+            if i < j:
+                total_energy += spins[i] @ J2_mat @ spins[j]
+        for j in NNNN[i]:
+            if i < j:
+                total_energy += spins[i] @ J3_mat @ spins[j]
+
+    return total_energy / N
+
 def calculate_magnetization(spins):
     """
     Calculate the magnetization vector (average spin) of the configuration.
@@ -414,13 +438,14 @@ def create_honeycomb_lattice(L):
                 neigh_b = 2 * (ni * L + nj) + 1
                 NN[site_a].append(neigh_b)
                 NN[neigh_b].append(site_a)
+                # Bond ordering matches C++ builder: X -> (0, -1), Y -> (1, -1), Z -> (0, 0)
                 bondtype = 0
-                if (delta==delta1).all():
-                    bondtype = 2
-                elif (delta==delta2).all(): 
-                    bondtype = 1
-                elif (delta==delta3).all():
-                    bondtype = 0
+                if (delta == delta1).all():
+                    bondtype = 2  # Z bond
+                elif (delta == delta2).all():
+                    bondtype = 0  # X bond
+                elif (delta == delta3).all():
+                    bondtype = 1  # Y bond
 
                 NN_bonds[site_a, neigh_b] = bondtype
                 NN_bonds[neigh_b, site_a] = bondtype
@@ -491,19 +516,26 @@ def construct_interaction_matrices(J=[-6.54, 0.15, -3.76, 0.36, -0.21, 1.70, 0.0
     return J1, J2_mat, J3_mat
 
 def get_bond_vectors(a1, a2):
-    """Get bond vectors for different neighbor types."""
+    """Get bond vectors for different neighbor types.
+
+    Ordering follows the C++ BCAO builder:
+    - X bond: translation (0, -1)  -> vector -a2 + delta_B
+    - Y bond: translation (1, -1)  -> vector  a1 - a2 + delta_B
+    - Z bond: translation (0, 0)   -> vector  delta_B
+    """
+    delta_B = np.array([0, 1/np.sqrt(3)])
+
     # A to B site vectors (nearest neighbors)
-    delta3 = np.array([0, 1/np.sqrt(3)])           # Z bond
-    delta2 = -a2 + delta3                          # Y bond
-    delta1 = a1 - a2 + delta3                      # X bond
-    nn_vectors = [delta1, delta2, delta3]
-    # print("Nearest neighbor vectors:", nn_vectors)
+    delta_x = -a2 + delta_B
+    delta_y = a1 - a2 + delta_B
+    delta_z = delta_B
+    nn_vectors = [delta_x, delta_y, delta_z]
     
     # Second nearest neighbor vectors (A to A or B to B)
-    nnn_vectors = [a1, a2, a1-a2, -a1, -a2, a2-a1]
+    nnn_vectors = [a1, a2, a1 - a2, -a1, -a2, a2 - a1]
     
     # Third nearest neighbor vectors (A to B)
-    nnnn_vectors = [a1 + delta3, -a1 + delta3, a1-2*a2 + delta3]
+    nnnn_vectors = [a1 + delta_B, -a1 + delta_B, a1 - 2 * a2 + delta_B]
     
     return nn_vectors, nnn_vectors, nnnn_vectors
 

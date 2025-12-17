@@ -1,6 +1,12 @@
 import numpy as np
 from scipy.optimize import minimize
-from luttinger_tisza import create_honeycomb_lattice, construct_interaction_matrices, get_bond_vectors, visualize_spins
+from luttinger_tisza import (
+    create_honeycomb_lattice,
+    construct_interaction_matrices,
+    get_bond_vectors,
+    visualize_spins,
+    calculate_energy_from_matrices,
+)
 
 # filepath: /home/pc_linux/ClassicalSpin_Cpp/util/single_q.py
 
@@ -339,6 +345,14 @@ class SingleQ:
             'staggered': staggered,
             'staggered_magnitude': staggered_magnitude
         }
+
+    def real_space_energy(self, spins=None):
+        """Energy per site computed directly from the BCAO Hamiltonian."""
+        if spins is None:
+            spins = self.generate_spin_configuration()
+        return calculate_energy_from_matrices(
+            spins, self.NN, self.NN_bonds, self.NNN, self.NNNN, self.J1, self.J2_mat, self.J3_mat
+        )
 
 
 if __name__ == "__main__":

@@ -162,6 +162,7 @@ public:
     // Twist boundary conditions
     array<SpinMatrix, 3> twist_matrices;                 // Rotation matrices per dimension
     array<SpinVector, 3> rotation_axis;                  // Rotation axes
+    array<double, 3> twist_angles;                       // Current twist angles (radians)
     vector<vector<array<int8_t, 3>>> bilinear_wrap_dir;  // Wrap direction per neighbor
     array<vector<size_t>, 3> boundary_sites_per_dim;     // Sites near boundaries
     array<size_t, 3> boundary_thickness;                 // Layers affected by twist
@@ -577,8 +578,9 @@ public:
      */
     void set_twist_axes(const array<SpinVector, 3>& axes) {
         rotation_axis = axes;
-        // Recompute twist matrices from axes (will be updated during simulation)
+        // Initialize twist matrices and angles to zero rotation
         for (size_t d = 0; d < 3; ++d) {
+            twist_angles[d] = 0.0;
             twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], 0.0);
         }
     }
@@ -1910,16 +1912,26 @@ public:
     /**
      * Metropolis update for twist boundary matrices
      * Returns acceptance count (number of accepted moves)
+     * 
+     * Optimizes the rotation angle around a fixed z-axis.
+     * Uses hybrid strategy:
+     *   - At high T: larger steps + occasional global moves for exploration
+     *   - At low T: small incremental steps for fine-tuning
+     *   - Occasional random global moves (10% probability) to escape local minima
      */
     size_t metropolis_twist_sweep(double T) {
         if (T <= 0) return 0;
+        if (spin_dim != 3) return 0;  // Only defined for 3D spins
         
         size_t accepted = 0;
         
-        // For each dimension that has length > 1, attempt one global angle move
+        // Probability of attempting a global (random) move vs incremental
+        const double global_move_prob = 0.1;
+        
+        // For each dimension that has length > 1, attempt one rotation update
         for (size_t d = 0; d < 3; ++d) {
             size_t Ld = (d == 0) ? dim1 : (d == 1) ? dim2 : dim3;
-            if (Ld <= 1) continue; // not relevant
+            if (Ld <= 1) continue;
             
             // Energy on boundary sites before the move
             double E_before = 0.0;
@@ -1927,14 +1939,30 @@ public:
                 E_before += site_energy(spins[idx], idx);
             }
             
-            // Propose a small rotation update (full replacement)
-            double delta = random_double_lehman(0, 2 * M_PI);
-            SpinMatrix R_new = rotation_from_axis_angle(rotation_axis[d], delta);
+            double angle_new;
+            bool is_global_move = (random_double_lehman(0, 1) < global_move_prob);
             
-            // Temporarily apply
-            auto saved_R = twist_matrices[d];
+            if (is_global_move) {
+                // Global move: propose completely random angle
+                angle_new = random_double_lehman(0, 2 * M_PI);
+            } else {
+                // Incremental move: small perturbation to current angle
+                // Step size scales with temperature (larger at high T)
+                double max_step = std::min(0.3, std::max(0.02, T * 0.5));
+                double delta = random_double_lehman(-max_step, max_step);
+                angle_new = twist_angles[d] + delta;
+            }
+            
+            // Generate rotation matrix around z-axis
+            SpinMatrix R_new = rotation_from_axis_angle(rotation_axis[d], angle_new);
+            
+            // Save old state and apply proposed move
+            SpinMatrix saved_R = twist_matrices[d];
+            double saved_angle = twist_angles[d];
             twist_matrices[d] = R_new;
+            twist_angles[d] = angle_new;
             
+            // Energy after the move
             double E_after = 0.0;
             for (size_t idx : boundary_sites_per_dim[d]) {
                 E_after += site_energy(spins[idx], idx);
@@ -1944,12 +1972,68 @@ public:
             bool accept = (dE < 0) || (random_double_lehman(0, 1) < std::exp(-dE / T));
             if (!accept) {
                 twist_matrices[d] = saved_R;
+                twist_angles[d] = saved_angle;
             } else {
                 accepted++;
             }
         }
         
         return accepted;
+    }
+    
+    /**
+     * Extract axis-angle representation from rotation matrix
+     * Uses the formula: angle = arccos((trace(R) - 1) / 2)
+     * Axis is extracted from the antisymmetric part of R
+     */
+    static void extract_axis_angle_from_rotation(const SpinMatrix& R, SpinVector& axis, double& angle) {
+        if (R.rows() != 3 || R.cols() != 3) {
+            axis = SpinVector::Zero(R.rows());
+            if (axis.size() >= 3) axis(2) = 1.0;
+            angle = 0.0;
+            return;
+        }
+        
+        double trace = R(0, 0) + R(1, 1) + R(2, 2);
+        double cos_angle = (trace - 1.0) / 2.0;
+        cos_angle = std::clamp(cos_angle, -1.0, 1.0);
+        angle = std::acos(cos_angle);
+        
+        // Handle special cases
+        if (std::abs(angle) < 1e-10) {
+            // Identity rotation
+            axis = SpinVector::Zero(3);
+            axis(2) = 1.0;
+            angle = 0.0;
+            return;
+        }
+        
+        if (std::abs(angle - M_PI) < 1e-10) {
+            // 180 degree rotation - extract axis from diagonal
+            axis = SpinVector::Zero(3);
+            axis(0) = std::sqrt(std::max(0.0, (R(0, 0) + 1.0) / 2.0));
+            axis(1) = std::sqrt(std::max(0.0, (R(1, 1) + 1.0) / 2.0));
+            axis(2) = std::sqrt(std::max(0.0, (R(2, 2) + 1.0) / 2.0));
+            // Determine signs from off-diagonal elements
+            if (R(0, 1) < 0) axis(1) = -axis(1);
+            if (R(0, 2) < 0) axis(2) = -axis(2);
+            return;
+        }
+        
+        // General case: extract axis from antisymmetric part
+        double sin_angle = std::sin(angle);
+        axis = SpinVector::Zero(3);
+        axis(0) = (R(2, 1) - R(1, 2)) / (2.0 * sin_angle);
+        axis(1) = (R(0, 2) - R(2, 0)) / (2.0 * sin_angle);
+        axis(2) = (R(1, 0) - R(0, 1)) / (2.0 * sin_angle);
+        
+        // Normalize (should already be unit, but ensure numerical stability)
+        double norm = axis.norm();
+        if (norm > 1e-10) {
+            axis /= norm;
+        } else {
+            axis(2) = 1.0;
+        }
     }
 
     
@@ -3724,7 +3808,8 @@ public:
     }
 
     /**
-     * Save twist angles to file
+     * Save twist boundary condition data to file
+     * Includes both axis-angle representation and full SO(3) matrices
      */
     void save_twist_angles(const string& filename) const {
         ofstream file(filename);
@@ -3734,25 +3819,31 @@ public:
         }
         
         file << std::scientific << std::setprecision(16);
-        file << "# Twist boundary condition angles (radians) for each dimension\n";
-        file << "# Format: dimension axis_x axis_y axis_z angle\n";
+        file << "# Twist boundary condition data for each dimension\n";
+        file << "# Section 1: Axis-angle representation\n";
+        file << "# Format: dimension axis_x axis_y axis_z angle(rad)\n";
         
         for (size_t d = 0; d < 3; ++d) {
-            // Extract angle from rotation matrix
-            // For 3D rotations, we can use the trace formula: angle = arccos((trace(R) - 1) / 2)
-            double angle = 0.0;
-            if (spin_dim == 3) {
-                double trace = twist_matrices[d](0, 0) + twist_matrices[d](1, 1) + twist_matrices[d](2, 2);
-                double cos_angle = (trace - 1.0) / 2.0;
-                cos_angle = std::clamp(cos_angle, -1.0, 1.0); // Handle numerical errors
-                angle = std::acos(cos_angle);
-            }
-            
             file << d << " ";
             for (size_t i = 0; i < rotation_axis[d].size(); ++i) {
                 file << rotation_axis[d](i) << " ";
             }
-            file << angle << "\n";
+            file << twist_angles[d] << "\n";
+        }
+        
+        file << "\n# Section 2: Full SO(3) rotation matrices\n";
+        file << "# Format: dimension followed by 3x3 matrix (row-major)\n";
+        
+        for (size_t d = 0; d < 3; ++d) {
+            file << "# Dimension " << d << " twist matrix:\n";
+            file << d << "\n";
+            for (size_t row = 0; row < twist_matrices[d].rows(); ++row) {
+                for (size_t col = 0; col < twist_matrices[d].cols(); ++col) {
+                    file << twist_matrices[d](row, col);
+                    if (col < twist_matrices[d].cols() - 1) file << " ";
+                }
+                file << "\n";
+            }
         }
         
         file.close();

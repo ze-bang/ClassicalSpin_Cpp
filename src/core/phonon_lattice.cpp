@@ -7,8 +7,14 @@
  * - Three phonon modes: E1 (Qx_E1, Qy_E1), E2 (Qx_E2, Qy_E2), A1 (Q_A1)
  * - Three-phonon coupling: g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
  * - E1-E2 bilinear coupling: g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
- * - Spin-phonon E1:  λ_E1 * [Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)]
- * - Spin-phonon E2:  λ_E2 * [Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)]
+ * - Spin-phonon E1 (bond-dependent, like Γ'):
+ *     x-bond: λ_E1 * [Qx_E1*(SxSy+SySx) + Qy_E1*(SxSz+SzSx)]
+ *     y-bond: λ_E1 * [Qx_E1*(SySz+SzSy) + Qy_E1*(SxSy+SySx)]
+ *     z-bond: λ_E1 * [Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)]
+ * - Spin-phonon E2 (bond-dependent, like Γ+η):
+ *     x-bond: λ_E2 * [Qx_E2*(SySy-SzSz) + Qy_E2*(SySz+SzSy)]
+ *     y-bond: λ_E2 * [Qx_E2*(SzSz-SxSx) + Qy_E2*(SxSz+SzSx)]
+ *     z-bond: λ_E2 * [Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy+SySx)]
  * - Spin-phonon A1:  λ_A1 * Q_A1*(Si·Sj)
  * 
  * COORDINATE FRAME:
@@ -373,11 +379,16 @@ double PhononLattice::phonon_energy() const {
 }
 
 double PhononLattice::spin_phonon_energy() const {
-    // H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)   // E1 coupling
-    //                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
-    //                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)   // E2 coupling
-    //                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
-    //                 + λ_A1 * Q_A1  * (Si · Sj)]                 // A1 coupling
+    // H_sp-ph = Σ_<ij> bond-dependent coupling:
+    // E1 (like Γ'):
+    //   x-bond: λ_E1 * [Qx_E1*(SxSy+SySx) + Qy_E1*(SxSz+SzSx)]
+    //   y-bond: λ_E1 * [Qx_E1*(SySz+SzSy) + Qy_E1*(SxSy+SySx)]
+    //   z-bond: λ_E1 * [Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)]
+    // E2 (like K+Γ):
+    //   x-bond: λ_E2 * [Qx_E2*(SySy-SzSz) + Qy_E2*(SySz+SzSy)]
+    //   y-bond: λ_E2 * [Qx_E2*(SzSz-SxSx) + Qy_E2*(SxSz+SzSx)]
+    //   z-bond: λ_E2 * [Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy+SySx)]
+    // A1: λ_A1 * Q_A1 * (Si · Sj)
     
     double E = 0.0;
     double Qx_E1 = phonons.Q_x_E1;
@@ -396,22 +407,31 @@ double PhononLattice::spin_phonon_energy() const {
             size_t j = nn_partners[i][n];
             if (j > i) {  // Avoid double counting
                 const Eigen::Vector3d& Sj = spins[j];
+                int bond_type = nn_bond_types[i][n];  // 0=x, 1=y, 2=z
                 
-                // E1: Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)
-                double xz_term = Si(0)*Sj(2) + Si(2)*Sj(0);
-                E += l_E1 * Qx_E1 * xz_term;
+                // E1 coupling (bond-dependent, like Γ')
+                if (bond_type == 0) {  // x-bond: Qx_E1*(SxSy+SySx) + Qy_E1*(SxSz+SzSx)
+                    E += l_E1 * Qx_E1 * (Si(0)*Sj(1) + Si(1)*Sj(0));
+                    E += l_E1 * Qy_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                } else if (bond_type == 1) {  // y-bond: Qx_E1*(SySz+SzSy) + Qy_E1*(SxSy+SySx)
+                    E += l_E1 * Qx_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                    E += l_E1 * Qy_E1 * (Si(0)*Sj(1) + Si(1)*Sj(0));
+                } else {  // z-bond: Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
+                    E += l_E1 * Qx_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                    E += l_E1 * Qy_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                }
                 
-                // E1: Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
-                double yz_term = Si(1)*Sj(2) + Si(2)*Sj(1);
-                E += l_E1 * Qy_E1 * yz_term;
-                
-                // E2: Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)
-                double xx_yy_term = Si(0)*Sj(0) - Si(1)*Sj(1);
-                E += l_E2 * Qx_E2 * xx_yy_term;
-                
-                // E2: Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
-                double xy_yx_term = Si(0)*Sj(1) - Si(1)*Sj(0);
-                E += l_E2 * Qy_E2 * xy_yx_term;
+                // E2 coupling (bond-dependent, like Γ+η)
+                if (bond_type == 0) {  // x-bond: Qx_E2*(SySy-SzSz) + Qy_E2*(SySz+SzSy)
+                    E += l_E2 * Qx_E2 * (Si(1)*Sj(1) - Si(2)*Sj(2));
+                    E += l_E2 * Qy_E2 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                } else if (bond_type == 1) {  // y-bond: Qx_E2*(SzSz-SxSx) + Qy_E2*(SxSz+SzSx)
+                    E += l_E2 * Qx_E2 * (Si(2)*Sj(2) - Si(0)*Sj(0));
+                    E += l_E2 * Qy_E2 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                } else {  // z-bond: Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy+SySx)
+                    E += l_E2 * Qx_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));
+                    E += l_E2 * Qy_E2 * (Si(0)*Sj(1) + Si(1)*Sj(0));
+                }
                 
                 // A1: Q_A1 * (Si · Sj)
                 E += l_A1 * Q_A1 * Si.dot(Sj);
@@ -427,7 +447,10 @@ double PhononLattice::spin_phonon_energy() const {
 // ============================================================
 
 double PhononLattice::dH_dQx_E1() const {
-    // ∂H_sp-ph/∂Qx_E1 = Σ_<ij> λ_E1 * (Si_x*Sj_z + Si_z*Sj_x)
+    // ∂H_sp-ph/∂Qx_E1 with bond-dependent coupling:
+    //   x-bond: λ_E1 * (SxSy+SySx)
+    //   y-bond: λ_E1 * (SySz+SzSy)
+    //   z-bond: λ_E1 * (SxSz+SzSx)
     double deriv = 0.0;
     double l_E1 = spin_phonon_params.lambda_E1;
     
@@ -438,7 +461,15 @@ double PhononLattice::dH_dQx_E1() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                int bond_type = nn_bond_types[i][n];
+                
+                if (bond_type == 0) {  // x-bond: (SxSy+SySx)
+                    deriv += l_E1 * (Si(0)*Sj(1) + Si(1)*Sj(0));
+                } else if (bond_type == 1) {  // y-bond: (SySz+SzSy)
+                    deriv += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                } else {  // z-bond: (SxSz+SzSx)
+                    deriv += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                }
             }
         }
     }
@@ -447,7 +478,10 @@ double PhononLattice::dH_dQx_E1() const {
 }
 
 double PhononLattice::dH_dQy_E1() const {
-    // ∂H_sp-ph/∂Qy_E1 = Σ_<ij> λ_E1 * (Si_y*Sj_z + Si_z*Sj_y)
+    // ∂H_sp-ph/∂Qy_E1 with bond-dependent coupling (orthogonal to Qx_E1):
+    //   x-bond: λ_E1 * (SxSz+SzSx)
+    //   y-bond: λ_E1 * (SxSy+SySx)
+    //   z-bond: λ_E1 * (SySz+SzSy)
     double deriv = 0.0;
     double l_E1 = spin_phonon_params.lambda_E1;
     
@@ -458,7 +492,15 @@ double PhononLattice::dH_dQy_E1() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                int bond_type = nn_bond_types[i][n];
+                
+                if (bond_type == 0) {  // x-bond: (SxSz+SzSx)
+                    deriv += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                } else if (bond_type == 1) {  // y-bond: (SxSy+SySx)
+                    deriv += l_E1 * (Si(0)*Sj(1) + Si(1)*Sj(0));
+                } else {  // z-bond: (SySz+SzSy)
+                    deriv += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                }
             }
         }
     }
@@ -467,7 +509,10 @@ double PhononLattice::dH_dQy_E1() const {
 }
 
 double PhononLattice::dH_dQx_E2() const {
-    // ∂H_sp-ph/∂Qx_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_x - Si_y*Sj_y)
+    // ∂H_sp-ph/∂Qx_E2 with bond-dependent η-like coupling:
+    //   x-bond: λ_E2 * (SySy-SzSz)
+    //   y-bond: λ_E2 * (SzSz-SxSx)
+    //   z-bond: λ_E2 * (SxSx-SySy)
     double deriv = 0.0;
     double l_E2 = spin_phonon_params.lambda_E2;
     
@@ -478,7 +523,15 @@ double PhononLattice::dH_dQx_E2() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += l_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));
+                int bond_type = nn_bond_types[i][n];
+                
+                if (bond_type == 0) {  // x-bond: (SySy-SzSz)
+                    deriv += l_E2 * (Si(1)*Sj(1) - Si(2)*Sj(2));
+                } else if (bond_type == 1) {  // y-bond: (SzSz-SxSx)
+                    deriv += l_E2 * (Si(2)*Sj(2) - Si(0)*Sj(0));
+                } else {  // z-bond: (SxSx-SySy)
+                    deriv += l_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));
+                }
             }
         }
     }
@@ -487,7 +540,10 @@ double PhononLattice::dH_dQx_E2() const {
 }
 
 double PhononLattice::dH_dQy_E2() const {
-    // ∂H_sp-ph/∂Qy_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+    // ∂H_sp-ph/∂Qy_E2 with bond-dependent coupling:
+    //   x-bond: λ_E2 * (SySz+SzSy)
+    //   y-bond: λ_E2 * (SxSz+SzSx)
+    //   z-bond: λ_E2 * (SxSy+SySx)
     double deriv = 0.0;
     double l_E2 = spin_phonon_params.lambda_E2;
     
@@ -498,7 +554,15 @@ double PhononLattice::dH_dQy_E2() const {
             size_t j = nn_partners[i][n];
             if (j > i) {
                 const Eigen::Vector3d& Sj = spins[j];
-                deriv += l_E2 * (Si(0)*Sj(1) - Si(1)*Sj(0));
+                int bond_type = nn_bond_types[i][n];
+                
+                if (bond_type == 0) {  // x-bond: (SySz+SzSy)
+                    deriv += l_E2 * (Si(1)*Sj(2) + Si(2)*Sj(1));
+                } else if (bond_type == 1) {  // y-bond: (SxSz+SzSx)
+                    deriv += l_E2 * (Si(0)*Sj(2) + Si(2)*Sj(0));
+                } else {  // z-bond: (SxSy+SySx)
+                    deriv += l_E2 * (Si(0)*Sj(1) + Si(1)*Sj(0));
+                }
             }
         }
     }
@@ -544,33 +608,46 @@ SpinVector PhononLattice::get_local_field(size_t site) const {
     for (size_t n = 0; n < nn_partners[site].size(); ++n) {
         size_t j = nn_partners[site][n];
         const Eigen::Vector3d& Sj = spins[j];
+        int bond_type = nn_bond_types[site][n];
         
         // Pure spin contribution: -J · Sj
         H -= nn_interaction[site][n] * Sj;
         
-        // E1 coupling: Qx_E1*(Si_x*Sj_z + Si_z*Sj_x)
-        // ∂/∂Si_x: λ_E1 * Qx_E1 * Sj_z
-        // ∂/∂Si_z: λ_E1 * Qx_E1 * Sj_x
-        H(0) -= l_E1 * Qx_E1 * Sj(2);
-        H(2) -= l_E1 * Qx_E1 * Sj(0);
+        // E1 spin-phonon coupling (bond-dependent, like Γ')
+        if (bond_type == 0) {  // x-bond: Qx_E1*(SxSy+SySx) + Qy_E1*(SxSz+SzSx)
+            H(0) -= l_E1 * Qx_E1 * Sj(1);  // ∂/∂Si_x of Si_x*Sj_y
+            H(1) -= l_E1 * Qx_E1 * Sj(0);  // ∂/∂Si_y of Si_y*Sj_x
+            H(0) -= l_E1 * Qy_E1 * Sj(2);  // ∂/∂Si_x of Si_x*Sj_z
+            H(2) -= l_E1 * Qy_E1 * Sj(0);  // ∂/∂Si_z of Si_z*Sj_x
+        } else if (bond_type == 1) {  // y-bond: Qx_E1*(SySz+SzSy) + Qy_E1*(SxSy+SySx)
+            H(1) -= l_E1 * Qx_E1 * Sj(2);  // ∂/∂Si_y of Si_y*Sj_z
+            H(2) -= l_E1 * Qx_E1 * Sj(1);  // ∂/∂Si_z of Si_z*Sj_y
+            H(0) -= l_E1 * Qy_E1 * Sj(1);  // ∂/∂Si_x of Si_x*Sj_y
+            H(1) -= l_E1 * Qy_E1 * Sj(0);  // ∂/∂Si_y of Si_y*Sj_x
+        } else {  // z-bond: Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
+            H(0) -= l_E1 * Qx_E1 * Sj(2);  // ∂/∂Si_x of Si_x*Sj_z
+            H(2) -= l_E1 * Qx_E1 * Sj(0);  // ∂/∂Si_z of Si_z*Sj_x
+            H(1) -= l_E1 * Qy_E1 * Sj(2);  // ∂/∂Si_y of Si_y*Sj_z
+            H(2) -= l_E1 * Qy_E1 * Sj(1);  // ∂/∂Si_z of Si_z*Sj_y
+        }
         
-        // E1 coupling: Qy_E1*(Si_y*Sj_z + Si_z*Sj_y)
-        // ∂/∂Si_y: λ_E1 * Qy_E1 * Sj_z
-        // ∂/∂Si_z: λ_E1 * Qy_E1 * Sj_y
-        H(1) -= l_E1 * Qy_E1 * Sj(2);
-        H(2) -= l_E1 * Qy_E1 * Sj(1);
-        
-        // E2 coupling: Qx_E2*(Si_x*Sj_x - Si_y*Sj_y)
-        // ∂/∂Si_x: λ_E2 * Qx_E2 * Sj_x
-        // ∂/∂Si_y: -λ_E2 * Qx_E2 * Sj_y
-        H(0) -= l_E2 * Qx_E2 * Sj(0);
-        H(1) -= -l_E2 * Qx_E2 * Sj(1);
-        
-        // E2 coupling: Qy_E2*(Si_x*Sj_y - Si_y*Sj_x)
-        // ∂/∂Si_x: λ_E2 * Qy_E2 * Sj_y
-        // ∂/∂Si_y: -λ_E2 * Qy_E2 * Sj_x
-        H(0) -= l_E2 * Qy_E2 * Sj(1);
-        H(1) -= -l_E2 * Qy_E2 * Sj(0);
+        // E2 spin-phonon coupling (bond-dependent, like Γ+η)
+        if (bond_type == 0) {  // x-bond: Qx_E2*(SySy-SzSz) + Qy_E2*(SySz+SzSy)
+            H(1) -= l_E2 * Qx_E2 * Sj(1);   // ∂/∂Si_y of Si_y*Sj_y
+            H(2) -= -l_E2 * Qx_E2 * Sj(2);  // ∂/∂Si_z of -Si_z*Sj_z
+            H(1) -= l_E2 * Qy_E2 * Sj(2);   // ∂/∂Si_y of Si_y*Sj_z
+            H(2) -= l_E2 * Qy_E2 * Sj(1);   // ∂/∂Si_z of Si_z*Sj_y
+        } else if (bond_type == 1) {  // y-bond: Qx_E2*(SzSz-SxSx) + Qy_E2*(SxSz+SzSx)
+            H(2) -= l_E2 * Qx_E2 * Sj(2);   // ∂/∂Si_z of Si_z*Sj_z
+            H(0) -= -l_E2 * Qx_E2 * Sj(0);  // ∂/∂Si_x of -Si_x*Sj_x
+            H(0) -= l_E2 * Qy_E2 * Sj(2);   // ∂/∂Si_x of Si_x*Sj_z
+            H(2) -= l_E2 * Qy_E2 * Sj(0);   // ∂/∂Si_z of Si_z*Sj_x
+        } else {  // z-bond: Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy+SySx)
+            H(0) -= l_E2 * Qx_E2 * Sj(0);   // ∂/∂Si_x of Si_x*Sj_x
+            H(1) -= -l_E2 * Qx_E2 * Sj(1);  // ∂/∂Si_y of -Si_y*Sj_y
+            H(0) -= l_E2 * Qy_E2 * Sj(1);   // ∂/∂Si_x of Si_x*Sj_y
+            H(1) -= l_E2 * Qy_E2 * Sj(0);   // ∂/∂Si_y of Si_y*Sj_x
+        }
         
         // A1 coupling: Q_A1*(Si · Sj)
         // ∂/∂Si: λ_A1 * Q_A1 * Sj
@@ -706,13 +783,32 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             if (j > i) {
                 const size_t jdx = j * spin_dim;
                 Eigen::Vector3d Sj(x[jdx], x[jdx+1], x[jdx+2]);
+                int bond_type = nn_bond_types[i][n];
                 
-                // E1 terms
-                dHsp_dQx_E1 += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));
-                dHsp_dQy_E1 += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));
-                // E2 terms
-                dHsp_dQx_E2 += l_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));
-                dHsp_dQy_E2 += l_E2 * (Si(0)*Sj(1) - Si(1)*Sj(0));
+                // E1 terms (bond-dependent)
+                if (bond_type == 0) {  // x-bond
+                    dHsp_dQx_E1 += l_E1 * (Si(0)*Sj(1) + Si(1)*Sj(0));  // (SxSy+SySx)
+                    dHsp_dQy_E1 += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));  // (SxSz+SzSx)
+                } else if (bond_type == 1) {  // y-bond
+                    dHsp_dQx_E1 += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));  // (SySz+SzSy)
+                    dHsp_dQy_E1 += l_E1 * (Si(0)*Sj(1) + Si(1)*Sj(0));  // (SxSy+SySx)
+                } else {  // z-bond
+                    dHsp_dQx_E1 += l_E1 * (Si(0)*Sj(2) + Si(2)*Sj(0));  // (SxSz+SzSx)
+                    dHsp_dQy_E1 += l_E1 * (Si(1)*Sj(2) + Si(2)*Sj(1));  // (SySz+SzSy)
+                }
+                
+                // E2 terms (bond-dependent)
+                if (bond_type == 0) {  // x-bond
+                    dHsp_dQx_E2 += l_E2 * (Si(1)*Sj(1) - Si(2)*Sj(2));  // (SySy-SzSz)
+                    dHsp_dQy_E2 += l_E2 * (Si(1)*Sj(2) + Si(2)*Sj(1));  // (SySz+SzSy)
+                } else if (bond_type == 1) {  // y-bond
+                    dHsp_dQx_E2 += l_E2 * (Si(2)*Sj(2) - Si(0)*Sj(0));  // (SzSz-SxSx)
+                    dHsp_dQy_E2 += l_E2 * (Si(0)*Sj(2) + Si(2)*Sj(0));  // (SxSz+SzSx)
+                } else {  // z-bond
+                    dHsp_dQx_E2 += l_E2 * (Si(0)*Sj(0) - Si(1)*Sj(1));  // (SxSx-SySy)
+                    dHsp_dQy_E2 += l_E2 * (Si(0)*Sj(1) + Si(1)*Sj(0));  // (SxSy+SySx)
+                }
+                
                 // A1 term
                 dHsp_dQ_A1 += l_A1 * Si.dot(Sj);
             }
@@ -734,21 +830,46 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             size_t j = nn_partners[i][n];
             const size_t jdx = j * spin_dim;
             Eigen::Vector3d Sj(x[jdx], x[jdx+1], x[jdx+2]);
+            int bond_type = nn_bond_types[i][n];
             
             // Pure spin: -J · Sj
             H -= nn_interaction[i][n] * Sj;
             
-            // Spin-phonon coupling: E1 terms
-            H(0) -= l_E1 * Qx_E1 * Sj(2);
-            H(2) -= l_E1 * Qx_E1 * Sj(0);
-            H(1) -= l_E1 * Qy_E1 * Sj(2);
-            H(2) -= l_E1 * Qy_E1 * Sj(1);
+            // E1 spin-phonon coupling (bond-dependent, like Γ')
+            if (bond_type == 0) {  // x-bond: Qx_E1*(SxSy+SySx) + Qy_E1*(SxSz+SzSx)
+                H(0) -= l_E1 * Qx_E1 * Sj(1);
+                H(1) -= l_E1 * Qx_E1 * Sj(0);
+                H(0) -= l_E1 * Qy_E1 * Sj(2);
+                H(2) -= l_E1 * Qy_E1 * Sj(0);
+            } else if (bond_type == 1) {  // y-bond: Qx_E1*(SySz+SzSy) + Qy_E1*(SxSy+SySx)
+                H(1) -= l_E1 * Qx_E1 * Sj(2);
+                H(2) -= l_E1 * Qx_E1 * Sj(1);
+                H(0) -= l_E1 * Qy_E1 * Sj(1);
+                H(1) -= l_E1 * Qy_E1 * Sj(0);
+            } else {  // z-bond: Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
+                H(0) -= l_E1 * Qx_E1 * Sj(2);
+                H(2) -= l_E1 * Qx_E1 * Sj(0);
+                H(1) -= l_E1 * Qy_E1 * Sj(2);
+                H(2) -= l_E1 * Qy_E1 * Sj(1);
+            }
             
-            // Spin-phonon coupling: E2 terms
-            H(0) -= l_E2 * Qx_E2 * Sj(0);
-            H(1) -= -l_E2 * Qx_E2 * Sj(1);
-            H(0) -= l_E2 * Qy_E2 * Sj(1);
-            H(1) -= -l_E2 * Qy_E2 * Sj(0);
+            // E2 spin-phonon coupling (bond-dependent, like Γ+η)
+            if (bond_type == 0) {  // x-bond: Qx_E2*(SySy-SzSz) + Qy_E2*(SySz+SzSy)
+                H(1) -= l_E2 * Qx_E2 * Sj(1);
+                H(2) -= -l_E2 * Qx_E2 * Sj(2);
+                H(1) -= l_E2 * Qy_E2 * Sj(2);
+                H(2) -= l_E2 * Qy_E2 * Sj(1);
+            } else if (bond_type == 1) {  // y-bond: Qx_E2*(SzSz-SxSx) + Qy_E2*(SxSz+SzSx)
+                H(2) -= l_E2 * Qx_E2 * Sj(2);
+                H(0) -= -l_E2 * Qx_E2 * Sj(0);
+                H(0) -= l_E2 * Qy_E2 * Sj(2);
+                H(2) -= l_E2 * Qy_E2 * Sj(0);
+            } else {  // z-bond: Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy+SySx)
+                H(0) -= l_E2 * Qx_E2 * Sj(0);
+                H(1) -= -l_E2 * Qx_E2 * Sj(1);
+                H(0) -= l_E2 * Qy_E2 * Sj(1);
+                H(1) -= l_E2 * Qy_E2 * Sj(0);
+            }
             
             // Spin-phonon coupling: A1 term
             H -= l_A1 * Q_A1 * Sj;

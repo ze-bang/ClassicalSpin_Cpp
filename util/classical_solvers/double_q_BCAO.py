@@ -1,6 +1,12 @@
 import numpy as np
 from scipy.optimize import minimize
-from luttinger_tisza import create_honeycomb_lattice, construct_interaction_matrices, get_bond_vectors, visualize_spins
+from luttinger_tisza import (
+    create_honeycomb_lattice,
+    construct_interaction_matrices,
+    get_bond_vectors,
+    visualize_spins,
+    calculate_energy_from_matrices,
+)
 
 """
 Double-Q ansatz for BCAO honeycomb lattice spin systems.
@@ -576,6 +582,14 @@ class DoubleQ:
             'staggered': staggered,
             'staggered_magnitude': np.linalg.norm(staggered)
         }
+
+    def real_space_energy(self, spins=None):
+        """Energy per site from the real-space Hamiltonian (pair-counted once)."""
+        if spins is None:
+            spins = self.generate_spin_configuration()
+        return calculate_energy_from_matrices(
+            spins, self.NN, self.NN_bonds, self.NNN, self.NNNN, self.J1, self.J2_mat, self.J3_mat
+        )
     
     def print_optimal_parameters(self):
         """Print the optimal parameters in a readable format"""
