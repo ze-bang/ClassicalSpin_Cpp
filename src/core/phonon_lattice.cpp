@@ -1617,6 +1617,10 @@ void PhononLattice::simulated_annealing(
         // If using adiabatic phonons, relax phonons again after deterministic sweeps
         if (adiabatic_phonons) {
             relax_phonons(1e-10, 1000, 1.0);
+
+            // Enforce a joint spin-phonon equilibrium so subsequent dynamics start from a stationary state
+            cout << "Running joint spin-phonon relaxation to enforce equilibrium before dynamics..." << endl;
+            relax_joint(1e-10, 100, 1, false);
         }
         
         // Energy breakdown AFTER deterministic sweeps
