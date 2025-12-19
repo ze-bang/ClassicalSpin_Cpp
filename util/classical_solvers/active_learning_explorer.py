@@ -108,25 +108,43 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     Returns:
         (spins, positions, energy) or None if failed
     """
+    import sys
+    import traceback
+    
     try:
         # Run simulation
         result = simulation_func(params)
         
         if result is None or result[0] is None:
             # Simulation returned None (timeout or failure)
+            sys.stderr.write(f"[Worker PID {os.getpid()}] Simulation returned None for params: {params}\n")
+            sys.stderr.flush()
             return None
         
         spins, positions, energy = result
         
         # Validate result
         if spins is None or len(spins) == 0:
+            sys.stderr.write(f"[Worker PID {os.getpid()}] Invalid spins result\n")
+            sys.stderr.flush()
             return None
         
         return (spins, positions, energy)
     
+    except TimeoutError as e:
+        # Explicit timeout
+        sys.stderr.write(f"[Worker PID {os.getpid()}] TIMEOUT: {e}\n")
+        sys.stderr.flush()
+        return None
+    
     except Exception as e:
         # Catch any exception and return None
-        print(f"[Worker] Simulation failed: {e}")
+        error_msg = f"[Worker PID {os.getpid()}] ERROR: {type(e).__name__}: {e}\n"
+        error_msg += f"  Params: {params}\n"
+        error_msg += f"  Traceback:\n"
+        error_msg += traceback.format_exc()
+        sys.stderr.write(error_msg)
+        sys.stderr.flush()
         return None
 
 

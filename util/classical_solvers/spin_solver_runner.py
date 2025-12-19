@@ -58,6 +58,9 @@ class SimulationConfig:
     use_twist_boundary: bool = False
     gaussian_move: bool = False
     
+    # Diagnostics
+    save_diagnostics: bool = False  # Save T, E, acceptance rate vs step
+    
     # Field (default zero)
     field_strength: float = 0.0
     field_direction: Tuple[float, float, float] = (1.0, 0.0, 0.0)
@@ -96,6 +99,9 @@ class SpinSolverRunner:
         
         if not self.solver_path.exists():
             raise FileNotFoundError(f"Spin solver not found at {self.solver_path}")
+        
+        if not os.access(self.solver_path, os.X_OK):
+            raise PermissionError(f"Spin solver is not executable: {self.solver_path}")
         
         # Work directory (unique per instance for parallel safety)
         if work_dir is None:
@@ -267,6 +273,7 @@ class SpinSolverRunner:
         self._log(f"  Parameter file: {param_file}")
         
         # Run solver
+        start_time = time.time()
         try:
             result = subprocess.run(
                 [str(self.solver_path), param_file],
@@ -275,22 +282,53 @@ class SpinSolverRunner:
                 timeout=timeout,
                 cwd=str(self.work_dir)
             )
+            elapsed = time.time() - start_time
             
             if result.returncode != 0:
-                self._log(f"  Solver returned error code {result.returncode}")
-                self._log(f"  stdout: {result.stdout[:500]}")
-                self._log(f"  stderr: {result.stderr[:500]}")
-                raise RuntimeError(f"Spin solver failed: {result.stderr[:200]}")
+                error_msg = (
+                    f"Spin solver failed after {elapsed:.2f}s\n"
+                    f"  Return code: {result.returncode}\n"
+                    f"  Command: {self.solver_path} {param_file}\n"
+                    f"  Working dir: {self.work_dir}\n"
+                    f"  stdout: {result.stdout[:1000]}\n"
+                    f"  stderr: {result.stderr[:1000]}"
+                )
+                print(error_msg)  # Always print errors, not just when verbose
+                raise RuntimeError(f"Spin solver failed (exit {result.returncode}): {result.stderr[:200]}")
+            
+            # Parse diagnostics from stdout
+            diagnostics = self._parse_diagnostics(result.stdout)
+            self._log(f"  Solver completed in {elapsed:.2f}s")
+            
+            # Check if run was suspiciously fast
+            if elapsed < 1.0:
+                print(f"WARNING: Simulation completed very fast ({elapsed:.2f}s). Output may be invalid.")
+                print(f"  stdout: {result.stdout[:500]}")
             
         except subprocess.TimeoutExpired:
-            self._log(f"  Simulation timed out after {timeout}s")
-            # Return None to indicate timeout instead of crashing
-            return None, None, None
+            elapsed = time.time() - start_time
+            error_msg = (
+                f"Simulation timed out after {elapsed:.2f}s (limit: {timeout}s)\n"
+                f"  Command: {self.solver_path} {param_file}\n"
+                f"  Working dir: {self.work_dir}\n"
+                f"  This may indicate the solver is stuck or the timeout is too short."
+            )
+            print(error_msg)  # Always print timeouts
+            raise TimeoutError(f"Spin solver timed out after {timeout}s")
         
         # Parse output
-        spins, positions, energy = self._parse_output(output_dir)
+        try:
+            spins, positions, energy = self._parse_output(output_dir)
+        except Exception as e:
+            print(f"ERROR parsing output from {output_dir}: {e}")
+            print(f"  Available files: {list(output_dir.glob('**/*'))}")
+            raise
         
-        self._log(f"  Completed: E={energy:.6f}, N_sites={len(spins)}")
+        self._log(f"  Completed: E={energy:.6f}, N_sites={len(spins)}, time={elapsed:.2f}s")
+        
+        # Log diagnostics if verbose
+        if self.verbose and diagnostics:
+            self._log_diagnostics(diagnostics)
         
         # Cleanup if requested
         if self.cleanup:
@@ -301,6 +339,106 @@ class SpinSolverRunner:
                 pass
         
         return spins, positions, energy
+    
+    def _parse_diagnostics(self, stdout: str) -> Dict[str, Any]:
+        """
+        Parse diagnostic information from solver stdout.
+        
+        Looks for:
+        - Temperature vs energy
+        - Acceptance rates
+        - Convergence information
+        
+        Args:
+            stdout: Standard output from spin_solver
+            
+        Returns:
+            Dictionary with diagnostic data
+        """
+        diagnostics = {
+            'temperatures': [],
+            'energies': [],
+            'acceptance_rates': [],
+            'num_steps': [],
+        }
+        
+        lines = stdout.split('\n')
+        
+        for line in lines:
+            # Parse temperature and energy lines
+            # Example: "T = 2.500, E/N = -0.7234, acceptance = 0.45"
+            if 'T =' in line and 'E/N' in line:
+                try:
+                    parts = line.split(',')
+                    temp = float(parts[0].split('=')[1].strip())
+                    energy = float(parts[1].split('=')[1].strip())
+                    
+                    diagnostics['temperatures'].append(temp)
+                    diagnostics['energies'].append(energy)
+                    
+                    # Look for acceptance rate if present
+                    if 'acceptance' in line:
+                        acc = float(parts[2].split('=')[1].strip())
+                        diagnostics['acceptance_rates'].append(acc)
+                    
+                except (IndexError, ValueError):
+                    continue
+            
+            # Parse step counts
+            elif 'Step' in line or 'sweep' in line:
+                try:
+                    # Extract step number
+                    import re
+                    match = re.search(r'(\d+)', line)
+                    if match:
+                        diagnostics['num_steps'].append(int(match.group(1)))
+                except:
+                    continue
+        
+        # Convert to numpy arrays for easier analysis
+        for key in ['temperatures', 'energies', 'acceptance_rates']:
+            if diagnostics[key]:
+                diagnostics[key] = np.array(diagnostics[key])
+        
+        return diagnostics
+    
+    def _log_diagnostics(self, diagnostics: Dict[str, Any]):
+        """
+        Log diagnostic information in a readable format.
+        
+        Args:
+            diagnostics: Dictionary from _parse_diagnostics
+        """
+        self._log("\n  === Simulation Diagnostics ===")
+        
+        temps = diagnostics.get('temperatures', [])
+        energies = diagnostics.get('energies', [])
+        acc_rates = diagnostics.get('acceptance_rates', [])
+        
+        if len(temps) > 0:
+            self._log(f"  Temperature range: {temps.min():.4f} → {temps.max():.4f}")
+            self._log(f"  Energy range: {energies.min():.6f} → {energies.max():.6f}")
+            self._log(f"  Energy change: Δ = {abs(energies[-1] - energies[0]):.6f}")
+            
+            if len(acc_rates) > 0:
+                self._log(f"  Acceptance rate: {acc_rates.mean():.3f} ± {acc_rates.std():.3f}")
+                self._log(f"  Acceptance range: [{acc_rates.min():.3f}, {acc_rates.max():.3f}]")
+                
+                # Check for common issues
+                if acc_rates.mean() < 0.1:
+                    self._log("  ⚠ WARNING: Very low acceptance rate - system may not be equilibrating")
+                elif acc_rates.mean() > 0.9:
+                    self._log("  ⚠ WARNING: Very high acceptance rate - moves may be too small")
+                
+                # Check if energy is still changing significantly at low T
+                if len(energies) > 5:
+                    final_energies = energies[-5:]
+                    energy_std = final_energies.std()
+                    if energy_std > 0.01:
+                        self._log(f"  ⚠ WARNING: Energy still fluctuating at low T (σ={energy_std:.4f})")
+                        self._log("     → Consider more annealing steps or slower cooling")
+        
+        self._log("  ==============================\n")
     
     def _parse_output(self, output_dir: Path) -> Tuple[np.ndarray, np.ndarray, float]:
         """
@@ -333,10 +471,13 @@ class SpinSolverRunner:
                 break
         
         if spins_file is None:
-            available = list(output_dir.glob("*.txt"))
+            available = list(output_dir.glob("**/*.txt"))
+            all_files = list(output_dir.glob("**/*"))
             raise FileNotFoundError(
-                f"Spins file not found in {output_dir}. "
-                f"Available files: {[f.name for f in available]}"
+                f"Spins file not found in {output_dir}\n"
+                f"  Checked: {[str(c.relative_to(output_dir.parent)) for c in candidates if c.exists()]}\n"
+                f"  Available .txt files: {[str(f.relative_to(output_dir.parent)) for f in available]}\n"
+                f"  All files: {[str(f.relative_to(output_dir.parent)) for f in all_files[:20]]}"
             )
         
         self._log(f"  Reading spins from: {spins_file.name}")
@@ -412,10 +553,68 @@ class SpinSolverRunner:
                 pass
 
 
+class _PicklableSimulation:
+    """
+    A picklable simulation callable for multiprocessing.
+    
+    This wraps the SpinSolverRunner configuration so it can be passed
+    to worker processes in parallel execution.
+    """
+    def __init__(self, config_dict: Dict[str, Any], solver_path: str = None, 
+                 cleanup: bool = True, verbose: bool = False):
+        """
+        Initialize with configuration dictionary.
+        
+        Args:
+            config_dict: Dictionary of SimulationConfig parameters
+            solver_path: Path to solver executable
+            cleanup: Whether to cleanup temp files
+            verbose: Verbose output
+        """
+        self.config_dict = config_dict
+        self.solver_path = solver_path
+        self.cleanup = cleanup
+        self.verbose = verbose
+        self.timeout = config_dict.get('timeout', 300)
+        self._runner = None
+    
+    def _get_runner(self):
+        """Lazy initialization of runner in worker process."""
+        if self._runner is None:
+            # Create config from dict
+            config = SimulationConfig(**{k: v for k, v in self.config_dict.items() 
+                                        if k != 'timeout'})
+            
+            # Create runner in this process
+            self._runner = SpinSolverRunner(
+                solver_path=self.solver_path,
+                config=config,
+                cleanup=self.cleanup,
+                verbose=self.verbose
+            )
+        return self._runner
+    
+    def __call__(self, params: NormalizedParameters) -> Tuple[np.ndarray, np.ndarray, float]:
+        """Run simulation."""
+        runner = self._get_runner()
+        return runner.run_simulation(params, timeout=self.timeout)
+    
+    def __getstate__(self):
+        """Control pickling - don't pickle the runner."""
+        state = self.__dict__.copy()
+        state['_runner'] = None
+        return state
+    
+    def __setstate__(self, state):
+        """Control unpickling."""
+        self.__dict__.update(state)
+        self._runner = None
+
+
 def create_spin_solver_simulation_func(
     L: int = 24,
     simulation_mode: str = "simulated_annealing",
-    annealing_steps: int = 30000,
+    annealing_steps: int = 50000,
     n_deterministics: int = 5000,
     T_start: float = 5.0,
     T_end: float = 0.001,
@@ -443,41 +642,37 @@ def create_spin_solver_simulation_func(
         cleanup: Clean up temporary files
         
     Returns:
-        Function(NormalizedParameters) -> (spins, positions, energy)
+        Picklable function(NormalizedParameters) -> (spins, positions, energy)
     """
-    config = SimulationConfig(
-        lattice_size=(L, L, 1),
-        simulation_mode=simulation_mode,
-        annealing_steps=annealing_steps,
-        n_deterministics=n_deterministics,
-        T_start=T_start,
-        T_end=T_end,
-        cooling_rate=0.9,
-        T_zero=True,
-        overrelaxation_rate=10,
-    )
+    # Convert config to dictionary for pickling
+    config_dict = {
+        'lattice_size': (L, L, 1),
+        'simulation_mode': simulation_mode,
+        'annealing_steps': annealing_steps,
+        'n_deterministics': n_deterministics,
+        'T_start': T_start,
+        'T_end': T_end,
+        'cooling_rate': 0.9,
+        'T_zero': True,
+        'overrelaxation_rate': 10,
+        'timeout': timeout,
+    }
     
-    runner = SpinSolverRunner(
+    # Create picklable simulation function
+    simulate = _PicklableSimulation(
+        config_dict=config_dict,
         solver_path=solver_path,
-        config=config,
         cleanup=cleanup,
-        verbose=verbose,
+        verbose=verbose
     )
-    
-    def simulate(params: NormalizedParameters) -> Tuple[np.ndarray, np.ndarray, float]:
-        """Run spin solver simulation."""
-        return runner.run_simulation(params, timeout=timeout)
-    
-    # Attach runner to function for cleanup access
-    simulate._runner = runner
     
     return simulate
 
 
 def create_fast_simulation_func(
     L: int = 12,
-    annealing_steps: int = 2000,
-    n_deterministics: int = 500,
+    annealing_steps: int = 10000,
+    n_deterministics: int = 1000,
     **kwargs
 ):
     """
@@ -490,14 +685,14 @@ def create_fast_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=30,
+        timeout=300,
         **kwargs
     )
 
 
 def create_accurate_simulation_func(
     L: int = 24,
-    annealing_steps: int = 20000,
+    annealing_steps: int = 50000,
     n_deterministics: int = 5000,
     **kwargs
 ):
@@ -533,7 +728,7 @@ def create_screening_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=15,
+        timeout=300,
         **kwargs
     )
 
@@ -562,9 +757,6 @@ if __name__ == "__main__":
         print(f"  Energy per site: {energy:.6f}")
         print(f"  Spin shape: {spins.shape}")
         print(f"  Total magnetization: {np.mean(spins, axis=0)}")
-        
-        # Cleanup
-        sim_func._runner.cleanup_all()
         
         print("\n✓ Spin solver test passed!")
         
