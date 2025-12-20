@@ -41,6 +41,7 @@ field_direction = 0,1,0
 # Simulated Annealing (equilibration)
 T_start = 15.0
 T_end = 0.01
+T_zero = true
 annealing_steps = 10000
 overrelaxation_rate = 1
 use_twist_boundary = false
@@ -67,4 +68,4 @@ md_integrator = rk4
 output_dir = TmFeO3_tm_2dcs_lambda_7
 save_observables = true
 
-initial_spin_config = TmFeO3_Tm_sa/sample_0/spins.txt
+#initial_spin_config = TmFeO3_Tm_sa/sample_0/spins.txt

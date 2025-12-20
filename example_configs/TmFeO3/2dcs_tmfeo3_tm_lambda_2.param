@@ -41,6 +41,7 @@ field_direction = 0,1,0
 # Simulated Annealing (equilibration)
 T_start = 15.0
 T_end = 0.01
+T_zero = true
 annealing_steps = 10000
 overrelaxation_rate = 1
 use_twist_boundary = false

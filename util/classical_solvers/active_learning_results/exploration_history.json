@@ -1,0 +1,1819 @@
+{
+  "metadata": {
+    "L": 12,
+    "J1xy_abs": 6.0,
+    "J1xy_sign": -1.0,
+    "target_phase": "Meron-Antimeron",
+    "surrogate_type": "random_forest",
+    "total_points": 24,
+    "timestamp": "2025-12-19T15:01:26.142350"
+  },
+  "phase_counts": {
+    "Meron-Antimeron": 6,
+    "Ferromagnetic": 9,
+    "Disordered": 7,
+    "Zigzag": 2
+  },
+  "points": [
+    {
+      "point_id": 0,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.2786473715298287,
+        "D_norm": 0.12034849379799172,
+        "E_norm": 0.19078558771411694,
+        "F_norm": -0.013437684583579444,
+        "G_norm": 0.09258712344949793,
+        "J3xy_norm": 0.26919669226225634,
+        "J3z_norm": -0.023183697578263437,
+        "J1xy_abs": 6.772
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_2"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2025-12-19T15:00:52.891087",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 1,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.31357207342762566,
+        "D_norm": 0.10156485103821848,
+        "E_norm": 0.20012037315678605,
+        "F_norm": -0.2281071321095396,
+        "G_norm": 0.03159795365633464,
+        "J3xy_norm": 0.2553415588323804,
+        "J3z_norm": 0.0058681913933192895,
+        "J1xy_abs": 6.646
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_4"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2025-12-19T15:00:52.891106",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 2,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.31357207342762566,
+        "D_norm": 0.10156485103821848,
+        "E_norm": 0.18808305747818238,
+        "F_norm": -0.2281071321095396,
+        "G_norm": -0.03159795365633464,
+        "J3xy_norm": 0.2553415588323804,
+        "J3z_norm": 0.0058681913933192895,
+        "J1xy_abs": 6.646
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_8"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2025-12-19T15:00:52.891112",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 3,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.3316372072271109,
+        "D_norm": -0.21226669503448664,
+        "E_norm": 0.7028229771633525,
+        "F_norm": -0.14939759026432864,
+        "G_norm": 0.6339715484678399,
+        "J3xy_norm": -0.47881409472582553,
+        "J3z_norm": 0.1190349133946223,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.99999999999993,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.99999999999993
+          ]
+        ],
+        "magnetization": {
+          "total": 0.9999999999999998,
+          "staggered": 1.756054389863676e-13,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.21822
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.3316372072271109,
+          "D_norm": -0.2122666950344866,
+          "E_norm": 0.7028229771633526,
+          "F_norm": -0.14939759026432864,
+          "G_norm": 0.6339715484678399,
+          "J3xy_norm": -0.47881409472582553,
+          "J3z_norm": 0.1190349133946223,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.21822,
+        "total_mag": 0.9999999999999998,
+        "total_mag_x": 0.26931896094959407,
+        "total_mag_y": 0.9630510356533711,
+        "total_mag_z": -2.3946394699064355e-15,
+        "staggered_mag": 1.756054389863676e-13,
+        "sublattice_A_mag": 0.9999999999999999,
+        "sublattice_B_mag": 1.0,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.21822,
+      "timestamp": "2025-12-19T15:00:52.891305",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 4,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.5054534161190167,
+        "D_norm": -0.541097951954411,
+        "E_norm": -0.6181685213785095,
+        "F_norm": 0.28947387006515907,
+        "G_norm": -0.46040525605388233,
+        "J3xy_norm": 0.48134756067987455,
+        "J3z_norm": -0.9320929355530583,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.9999999999085,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.9999999999085
+          ]
+        ],
+        "magnetization": {
+          "total": 0.9999999999996426,
+          "staggered": 3.865091474956436e-09,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.15632
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.5054534161190167,
+          "D_norm": -0.541097951954411,
+          "E_norm": -0.6181685213785095,
+          "F_norm": 0.28947387006515907,
+          "G_norm": -0.46040525605388233,
+          "J3xy_norm": 0.48134756067987455,
+          "J3z_norm": -0.9320929355530584,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.15632,
+        "total_mag": 0.9999999999996426,
+        "total_mag_x": 1.8843932168845936e-10,
+        "total_mag_y": -7.580220230999099e-10,
+        "total_mag_z": 0.9999999999996426,
+        "staggered_mag": 3.865091474956436e-09,
+        "sublattice_A_mag": 0.9999999999996366,
+        "sublattice_B_mag": 0.9999999999996492,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.15632,
+      "timestamp": "2025-12-19T15:00:52.891308",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 5,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.022917060454787586,
+        "D_norm": 0.7682764602048695,
+        "E_norm": -0.13653313043311116,
+        "F_norm": -0.7886769128199886,
+        "G_norm": -0.974716021206441,
+        "J3xy_norm": 0.8042297705601869,
+        "J3z_norm": -0.30920828194104627,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.022917060454787586,
+          "D_norm": 0.7682764602048695,
+          "E_norm": -0.13653313043311116,
+          "F_norm": -0.7886769128199886,
+          "G_norm": -0.974716021206441,
+          "J3xy_norm": 0.804229770560187,
+          "J3z_norm": -0.30920828194104627,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.67974,
+        "total_mag": 2.7790825171116956e-12,
+        "total_mag_x": -9.16697273645184e-14,
+        "total_mag_y": -2.5764167275316163e-12,
+        "total_mag_z": -1.0377731660127232e-12,
+        "staggered_mag": 4.648467512146952e-11,
+        "sublattice_A_mag": 2.6017108276043873e-11,
+        "sublattice_B_mag": 2.0468736814975293e-11,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.67974,
+      "timestamp": "2025-12-19T15:00:52.891311",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 6,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.5517350107448356,
+        "D_norm": 0.4146894286084636,
+        "E_norm": 0.18929923845252944,
+        "F_norm": 0.5304284199415551,
+        "G_norm": 0.3087213625870431,
+        "J3xy_norm": -0.7300536935564336,
+        "J3z_norm": 0.8639414862049327,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 128.00000000000003,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            128.00000000000003
+          ]
+        ],
+        "magnetization": {
+          "total": 1.0000000000000002,
+          "staggered": 2.4435238587382247e-13,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.59508
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.5517350107448356,
+          "D_norm": 0.41468942860846364,
+          "E_norm": 0.18929923845252947,
+          "F_norm": 0.5304284199415551,
+          "G_norm": 0.3087213625870431,
+          "J3xy_norm": -0.7300536935564336,
+          "J3z_norm": 0.8639414862049327,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.59508,
+        "total_mag": 1.0000000000000002,
+        "total_mag_x": -0.9953760733840442,
+        "total_mag_y": -0.09605452896434566,
+        "total_mag_z": 3.04600508277214e-14,
+        "staggered_mag": 2.4435238587382247e-13,
+        "sublattice_A_mag": 1.0000000000000002,
+        "sublattice_B_mag": 1.0000000000000002,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.59508,
+      "timestamp": "2025-12-19T15:00:52.891312",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 7,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.7953883745049808,
+        "D_norm": 0.12287016074074408,
+        "E_norm": 0.505656475188669,
+        "F_norm": 0.4732685978558764,
+        "G_norm": -0.9653164397515985,
+        "J3xy_norm": -0.4675727749612615,
+        "J3z_norm": -0.9523793837178369,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.7953883745049808,
+          "D_norm": 0.12287016074074408,
+          "E_norm": 0.505656475188669,
+          "F_norm": 0.4732685978558764,
+          "G_norm": -0.9653164397515986,
+          "J3xy_norm": -0.4675727749612615,
+          "J3z_norm": -0.952379383717837,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.47485,
+        "total_mag": 3.381291687028901e-12,
+        "total_mag_x": -2.939680183305926e-12,
+        "total_mag_y": 1.6707438384166995e-12,
+        "total_mag_z": 5.377642775528102e-15,
+        "staggered_mag": 5.252270167408987e-14,
+        "sublattice_A_mag": 3.3552821506284758e-12,
+        "sublattice_B_mag": 3.407321375443839e-12,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.47485,
+      "timestamp": "2025-12-19T15:01:03.484603",
+      "selection_method": "balanced",
+      "acquisition_value": 0.5
+    },
+    {
+      "point_id": 8,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.9438880788932644,
+        "D_norm": -0.2608940168999645,
+        "E_norm": 0.5364491914325373,
+        "F_norm": -0.6917570704239029,
+        "G_norm": -0.8940409278759118,
+        "J3xy_norm": 0.3216320284803609,
+        "J3z_norm": -0.4429610996840252,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Zigzag",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.494949494949495,
+            0.005050505050505051
+          ],
+          "intensity": 96.71383679491147,
+          "type": "m"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.494949494949495,
+            0.005050505050505051,
+            96.71383679491147
+          ]
+        ],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.12632
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.9438880788932643,
+          "D_norm": -0.2608940168999645,
+          "E_norm": 0.5364491914325373,
+          "F_norm": -0.6917570704239028,
+          "G_norm": -0.8940409278759119,
+          "J3xy_norm": 0.3216320284803609,
+          "J3z_norm": -0.4429610996840252,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.12632,
+        "total_mag": 5.976810856618342e-09,
+        "total_mag_x": 2.302721520408557e-09,
+        "total_mag_y": -2.2545015500199765e-09,
+        "total_mag_z": -5.033583651455065e-09,
+        "staggered_mag": 4.583709444190242e-09,
+        "sublattice_A_mag": 3.9105143286779135e-09,
+        "sublattice_B_mag": 8.164411152038493e-09,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.12632,
+      "timestamp": "2025-12-19T15:01:03.490756",
+      "selection_method": "balanced",
+      "acquisition_value": 0.5
+    },
+    {
+      "point_id": 9,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.2786473715298287,
+        "D_norm": 0.12034849379799172,
+        "E_norm": 0.19078558771411694,
+        "F_norm": -0.013437684583579444,
+        "G_norm": 0.09258712344949793,
+        "J3xy_norm": 0.26919669226225634,
+        "J3z_norm": -0.023183697578263437,
+        "J1xy_abs": 6.772
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_2"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2025-12-19T15:01:13.558728",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 10,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.31357207342762566,
+        "D_norm": 0.10156485103821848,
+        "E_norm": 0.20012037315678605,
+        "F_norm": -0.2281071321095396,
+        "G_norm": 0.03159795365633464,
+        "J3xy_norm": 0.2553415588323804,
+        "J3z_norm": 0.0058681913933192895,
+        "J1xy_abs": 6.646
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_4"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2025-12-19T15:01:13.558741",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 11,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.31357207342762566,
+        "D_norm": 0.10156485103821848,
+        "E_norm": 0.18808305747818238,
+        "F_norm": -0.2281071321095396,
+        "G_norm": -0.03159795365633464,
+        "J3xy_norm": 0.2553415588323804,
+        "J3z_norm": 0.0058681913933192895,
+        "J1xy_abs": 6.646
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_8"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2025-12-19T15:01:13.558746",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 12,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.5206387971296262,
+        "D_norm": 0.29184735101234305,
+        "E_norm": 0.23232997764430158,
+        "F_norm": -0.3532169225583146,
+        "G_norm": 0.5563261214925936,
+        "J3xy_norm": 0.8472294088373591,
+        "J3z_norm": -0.5894802097729186,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.5206387971296262,
+          "D_norm": 0.29184735101234305,
+          "E_norm": 0.2323299776443016,
+          "F_norm": -0.3532169225583146,
+          "G_norm": 0.5563261214925936,
+          "J3xy_norm": 0.8472294088373591,
+          "J3z_norm": -0.5894802097729186,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.15205,
+        "total_mag": 8.921496569395833e-11,
+        "total_mag_x": -2.5399460312769406e-11,
+        "total_mag_y": 8.550477340052431e-11,
+        "total_mag_z": 1.7638722513840799e-12,
+        "staggered_mag": 1.7113215588576976e-10,
+        "sublattice_A_mag": 1.7322297749677038e-10,
+        "sublattice_B_mag": 2.3569634357736707e-11,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.15205,
+      "timestamp": "2025-12-19T15:01:13.558949",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 13,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.245901743136043,
+        "D_norm": -0.29304844207912617,
+        "E_norm": 0.5013574382393333,
+        "F_norm": -0.5558983432771232,
+        "G_norm": -0.8087740435281636,
+        "J3xy_norm": -0.8715346821612218,
+        "J3z_norm": -0.9242658089894311,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 128.00000000000003,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            128.00000000000003
+          ]
+        ],
+        "magnetization": {
+          "total": 1.0000000000000002,
+          "staggered": 1.4387711438340465e-15,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.8073
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.245901743136043,
+          "D_norm": -0.29304844207912617,
+          "E_norm": 0.5013574382393333,
+          "F_norm": -0.5558983432771232,
+          "G_norm": -0.8087740435281635,
+          "J3xy_norm": -0.8715346821612218,
+          "J3z_norm": -0.9242658089894311,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.8073,
+        "total_mag": 1.0000000000000002,
+        "total_mag_x": -0.9409612311966541,
+        "total_mag_y": -0.3385143444300071,
+        "total_mag_z": 2.449143105285285e-16,
+        "staggered_mag": 1.4387711438340465e-15,
+        "sublattice_A_mag": 0.9999999999999997,
+        "sublattice_B_mag": 1.0000000000000002,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.8073,
+      "timestamp": "2025-12-19T15:01:13.558952",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 14,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.4334946393354697,
+        "D_norm": -0.12321375029461454,
+        "E_norm": 0.38222513668075353,
+        "F_norm": -0.09687638909285859,
+        "G_norm": 0.4731446819725078,
+        "J3xy_norm": 0.07210894994702158,
+        "J3z_norm": -0.12915183005499625,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.99988997813627,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.99988997813627
+          ]
+        ],
+        "magnetization": {
+          "total": 0.9999995702270026,
+          "staggered": 2.3668556488720774e-06,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -1.39184
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.4334946393354697,
+          "D_norm": -0.12321375029461452,
+          "E_norm": 0.3822251366807536,
+          "F_norm": -0.0968763890928586,
+          "G_norm": 0.4731446819725078,
+          "J3xy_norm": 0.07210894994702158,
+          "J3z_norm": -0.12915183005499625,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -1.39184,
+        "total_mag": 0.9999995702270026,
+        "total_mag_x": -0.10057784686340374,
+        "total_mag_y": 0.9949287598488962,
+        "total_mag_z": 2.2156006242395438e-07,
+        "staggered_mag": 2.3668556488720774e-06,
+        "sublattice_A_mag": 0.9999995713322006,
+        "sublattice_B_mag": 0.9999995691232052,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -1.39184,
+      "timestamp": "2025-12-19T15:01:13.558954",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 15,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.6469847102784737,
+        "D_norm": 0.07483365789186563,
+        "E_norm": 0.8946962355763597,
+        "F_norm": 0.5574131134601471,
+        "G_norm": -0.5486059910001103,
+        "J3xy_norm": -0.41739159719777236,
+        "J3z_norm": 0.5071857771519497,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.99999999999994,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.99999999999994
+          ]
+        ],
+        "magnetization": {
+          "total": 0.9999999999999999,
+          "staggered": 1.2837029580564413e-12,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.12609
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.6469847102784737,
+          "D_norm": 0.07483365789186563,
+          "E_norm": 0.8946962355763596,
+          "F_norm": 0.5574131134601471,
+          "G_norm": -0.5486059910001103,
+          "J3xy_norm": -0.41739159719777236,
+          "J3z_norm": 0.5071857771519497,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.12609,
+        "total_mag": 0.9999999999999999,
+        "total_mag_x": -0.9083774688241945,
+        "total_mag_y": -0.41815113790655817,
+        "total_mag_z": -7.278553237345436e-15,
+        "staggered_mag": 1.2837029580564413e-12,
+        "sublattice_A_mag": 0.9999999999999999,
+        "sublattice_B_mag": 0.9999999999999999,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.12609,
+      "timestamp": "2025-12-19T15:01:13.558956",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 16,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.19231577881310133,
+        "D_norm": -0.7989119561537469,
+        "E_norm": -0.43625256633439713,
+        "F_norm": -0.9864728391258777,
+        "G_norm": 0.021911238736197852,
+        "J3xy_norm": 0.4579200458587078,
+        "J3z_norm": 0.14581338145613057,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.19231577881310133,
+          "D_norm": -0.7989119561537469,
+          "E_norm": -0.4362525663343971,
+          "F_norm": -0.9864728391258777,
+          "G_norm": 0.021911238736197852,
+          "J3xy_norm": 0.4579200458587078,
+          "J3z_norm": 0.14581338145613057,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.14916,
+        "total_mag": 1.3526555177842877e-13,
+        "total_mag_x": 3.252172836587519e-14,
+        "total_mag_y": 1.1664952857814992e-13,
+        "total_mag_z": -6.026602827891026e-14,
+        "staggered_mag": 1.8717014682309687e-13,
+        "sublattice_A_mag": 4.190786471011905e-14,
+        "sublattice_B_mag": 2.2880893462303297e-13,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.14916,
+      "timestamp": "2025-12-19T15:01:13.558957",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 17,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": 0.9410312123327531,
+        "D_norm": 0.7406009671529848,
+        "E_norm": -0.5512781391783204,
+        "F_norm": 0.11092202235336943,
+        "G_norm": -0.24482884066551708,
+        "J3xy_norm": 0.5932119638295146,
+        "J3z_norm": 0.9532995350393593,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": 0.9410312123327532,
+          "D_norm": 0.7406009671529848,
+          "E_norm": -0.5512781391783204,
+          "F_norm": 0.11092202235336941,
+          "G_norm": -0.2448288406655171,
+          "J3xy_norm": 0.5932119638295146,
+          "J3z_norm": 0.9532995350393593,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.8415,
+        "total_mag": 1.2990696529239099e-18,
+        "total_mag_x": -9.399277744224796e-19,
+        "total_mag_y": -8.967261243083375e-19,
+        "total_mag_z": 0.0,
+        "staggered_mag": 2.0,
+        "sublattice_A_mag": 1.0,
+        "sublattice_B_mag": 1.0,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.8415,
+      "timestamp": "2025-12-19T15:01:13.558958",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 18,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.964016510451177,
+        "D_norm": 0.9347294333951108,
+        "E_norm": -0.13531351012833362,
+        "F_norm": 0.8132007991458607,
+        "G_norm": -0.2879386421453967,
+        "J3xy_norm": -0.06430368956743229,
+        "J3z_norm": -0.30522496336086335,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.99999999999997,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.99999999999997
+          ]
+        ],
+        "magnetization": {
+          "total": 1.0,
+          "staggered": 1.8482732399913675e-17,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -1.90386
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.964016510451177,
+          "D_norm": 0.9347294333951108,
+          "E_norm": -0.13531351012833362,
+          "F_norm": 0.8132007991458607,
+          "G_norm": -0.2879386421453967,
+          "J3xy_norm": -0.06430368956743229,
+          "J3z_norm": -0.30522496336086335,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -1.90386,
+        "total_mag": 1.0,
+        "total_mag_x": 6.048078111933269e-16,
+        "total_mag_y": -1.3513827248394092e-16,
+        "total_mag_z": -1.0,
+        "staggered_mag": 1.8482732399913675e-17,
+        "sublattice_A_mag": 1.0,
+        "sublattice_B_mag": 1.0,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -1.90386,
+      "timestamp": "2025-12-19T15:01:13.558960",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 19,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.39273526703934986,
+        "D_norm": -0.7295807025979044,
+        "E_norm": -0.8826258312055427,
+        "F_norm": 0.41854753419338786,
+        "G_norm": 0.9307229640865236,
+        "J3xy_norm": -0.7411176823998611,
+        "J3z_norm": 0.29598936130043974,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.99999999999986,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.99999999999986
+          ]
+        ],
+        "magnetization": {
+          "total": 0.9999999999999996,
+          "staggered": 4.863050249457743e-14,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.61168
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.39273526703934986,
+          "D_norm": -0.7295807025979043,
+          "E_norm": -0.8826258312055427,
+          "F_norm": 0.4185475341933878,
+          "G_norm": 0.9307229640865234,
+          "J3xy_norm": -0.7411176823998611,
+          "J3z_norm": 0.29598936130043974,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.61168,
+        "total_mag": 0.9999999999999996,
+        "total_mag_x": -0.5554532428382051,
+        "total_mag_y": -0.8315477707387118,
+        "total_mag_z": -1.0217165226095052e-14,
+        "staggered_mag": 4.863050249457743e-14,
+        "sublattice_A_mag": 1.0,
+        "sublattice_B_mag": 1.0,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.61168,
+      "timestamp": "2025-12-19T15:01:13.558961",
+      "selection_method": "lhs",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 20,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.952118672617897,
+        "D_norm": 0.1703486147752682,
+        "E_norm": 0.7648832454907575,
+        "F_norm": -0.08366745329136238,
+        "G_norm": -0.7560739492050517,
+        "J3xy_norm": 0.16831846292889807,
+        "J3z_norm": 0.6553389585407832,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.952118672617897,
+          "D_norm": 0.1703486147752682,
+          "E_norm": 0.7648832454907574,
+          "F_norm": -0.08366745329136238,
+          "G_norm": -0.7560739492050517,
+          "J3xy_norm": 0.16831846292889807,
+          "J3z_norm": 0.6553389585407832,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.10426,
+        "total_mag": 2.0127796591244953e-08,
+        "total_mag_x": -3.3399752854927633e-09,
+        "total_mag_y": 1.6481213793023697e-08,
+        "total_mag_z": 1.1060847735118451e-08,
+        "staggered_mag": 1.6062335058655817e-08,
+        "sublattice_A_mag": 2.8013404649277238e-08,
+        "sublattice_B_mag": 1.2429998188301483e-08,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.10426,
+      "timestamp": "2025-12-19T15:01:21.601761",
+      "selection_method": "balanced",
+      "acquisition_value": 0.5
+    },
+    {
+      "point_id": 21,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.36814321811181316,
+        "D_norm": 0.12099328891329209,
+        "E_norm": 0.13337170566862633,
+        "F_norm": -0.11264249438664753,
+        "G_norm": -0.22464306060290662,
+        "J3xy_norm": 0.5693737068341775,
+        "J3z_norm": -0.862730503867357,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Ferromagnetic",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 127.99999999999997,
+          "type": "gamma"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.0,
+            0.0,
+            127.99999999999997
+          ]
+        ],
+        "magnetization": {
+          "total": 1.0,
+          "staggered": 5.136811503132393e-18,
+          "sublattice_parallel": true,
+          "sublattice_antiparallel": false
+        },
+        "energy": -1.84631
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.36814321811181316,
+          "D_norm": 0.12099328891329209,
+          "E_norm": 0.13337170566862633,
+          "F_norm": -0.11264249438664753,
+          "G_norm": -0.22464306060290662,
+          "J3xy_norm": 0.5693737068341775,
+          "J3z_norm": -0.8627305038673571,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -1.84631,
+        "total_mag": 1.0,
+        "total_mag_x": 2.4083340977547027e-17,
+        "total_mag_y": 4.149523695949628e-17,
+        "total_mag_z": 1.0,
+        "staggered_mag": 5.136811503132393e-18,
+        "sublattice_A_mag": 1.0,
+        "sublattice_B_mag": 1.0,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 1,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 1.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -1.84631,
+      "timestamp": "2025-12-19T15:01:21.607765",
+      "selection_method": "balanced",
+      "acquisition_value": 0.5
+    },
+    {
+      "point_id": 22,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.4797633460667585,
+        "D_norm": -0.0742582704150705,
+        "E_norm": 0.10156896742786237,
+        "F_norm": -0.4876200137914617,
+        "G_norm": 0.9779022513732822,
+        "J3xy_norm": 0.2922028068983713,
+        "J3z_norm": 0.1540295516360497,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Disordered",
+      "confidence": 0.7,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.0,
+            0.0
+          ],
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 0,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": 0.0
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.4797633460667585,
+          "D_norm": -0.0742582704150705,
+          "E_norm": 0.10156896742786237,
+          "F_norm": -0.4876200137914617,
+          "G_norm": 0.9779022513732821,
+          "J3xy_norm": 0.2922028068983713,
+          "J3z_norm": 0.1540295516360497,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -1.81055,
+        "total_mag": 3.915698849856004e-06,
+        "total_mag_x": -8.870015643855367e-07,
+        "total_mag_y": -3.80664138376844e-06,
+        "total_mag_z": 2.3538709166548433e-07,
+        "staggered_mag": 4.318110595098132e-05,
+        "sublattice_A_mag": 2.297021787291474e-05,
+        "sublattice_B_mag": 2.0864765548917504e-05,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -1.81055,
+      "timestamp": "2025-12-19T15:01:21.612905",
+      "selection_method": "balanced",
+      "acquisition_value": 0.5
+    },
+    {
+      "point_id": 23,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.3795157978326542,
+        "D_norm": 0.11274780325136646,
+        "E_norm": 0.1350109529890411,
+        "F_norm": 0.21541850931062134,
+        "G_norm": -0.9199486455416468,
+        "J3xy_norm": 0.9049719744122395,
+        "J3z_norm": -0.13839698099606146,
+        "J1xy_abs": 6.0
+      },
+      "phase": "Zigzag",
+      "confidence": 0.9,
+      "decision_flags": {
+        "q1": {
+          "position": [
+            0.494949494949495,
+            0.005050505050505051
+          ],
+          "intensity": 96.71285875209716,
+          "type": "m"
+        },
+        "q2": {
+          "position": null,
+          "intensity": 0.0,
+          "type": "none"
+        },
+        "multi_q": {
+          "num_peaks": 1,
+          "is_double_q": false,
+          "parallel": false,
+          "intensity_ratio": 0.0
+        },
+        "all_peaks": [
+          [
+            0.494949494949495,
+            0.005050505050505051,
+            96.71285875209716
+          ]
+        ],
+        "magnetization": {
+          "total": 0.0,
+          "staggered": 0.0,
+          "sublattice_parallel": false,
+          "sublattice_antiparallel": false
+        },
+        "energy": -2.14765
+      },
+      "features": {
+        "params": {
+          "J1xy_sign": -1.0,
+          "J1z_norm": -0.3795157978326542,
+          "D_norm": 0.11274780325136646,
+          "E_norm": 0.1350109529890411,
+          "F_norm": 0.21541850931062134,
+          "G_norm": -0.9199486455416469,
+          "J3xy_norm": 0.9049719744122395,
+          "J3z_norm": -0.13839698099606146,
+          "J1xy_abs": 6.0
+        },
+        "energy_per_site": -2.14765,
+        "total_mag": 1.4736899824418044e-06,
+        "total_mag_x": -5.997356019183525e-08,
+        "total_mag_y": 1.2956388500866625e-06,
+        "total_mag_z": -6.996322652460737e-07,
+        "staggered_mag": 5.0964135168333546e-06,
+        "sublattice_A_mag": 3.859191330297508e-06,
+        "sublattice_B_mag": 1.5610515597316219e-06,
+        "dominant_Q1": 0.0,
+        "dominant_Q2": 0.0,
+        "Q_magnitude": 0.0,
+        "num_peaks": 0,
+        "peak_ratio_1": 0.0,
+        "peak_ratio_2": 0.0,
+        "Q_at_gamma": 0.0,
+        "Q_at_M": 0.0,
+        "Q_at_K": 0.0,
+        "Q_incommensurate": 0.0,
+        "is_multi_Q": 0.0,
+        "Q_perpendicular": 0.0,
+        "second_Q_mag": 0.0,
+        "skyrmion_number": 0.0,
+        "winding_variance": 0.0,
+        "vortex_density": 0.0,
+        "is_coplanar": 1.0,
+        "is_collinear": 1.0
+      },
+      "energy": -2.14765,
+      "timestamp": "2025-12-19T15:01:21.618974",
+      "selection_method": "balanced",
+      "acquisition_value": 0.5
+    }
+  ]
+}

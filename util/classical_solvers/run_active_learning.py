@@ -20,6 +20,8 @@ Options:
     --lattice-size L      Lattice size for simulations (default: 24)
     --strategy STR        Acquisition strategy: uncertainty, target, balanced (default: balanced)
     --n-jobs N            Number of parallel workers (1=sequential, -1=all CPUs, default: 1)
+    --timeout T           Maximum time per simulation in seconds (default: 300)
+    --fresh-start         Start fresh, ignore any existing exploration history
     --skip-simulation     Skip actual simulations (for testing with mock data)
     --use-ansatz          Use Python single-Q/double-Q ansatz instead of C++ solver
     --fast-mode           Use fast screening mode with fewer MC steps (default)
@@ -153,6 +155,13 @@ def run_exploration(args):
     if args.verbose:
         print_phase_legend()
     
+    # Handle fresh start - delete old history if requested
+    if args.fresh_start:
+        history_file = Path(args.output_dir) / "exploration_history.json"
+        if history_file.exists():
+            print(f"\n[Fresh Start] Removing existing history: {history_file}")
+            history_file.unlink()
+    
     # Create explorer
     explorer = ActiveLearningExplorer(
         output_dir=args.output_dir,
@@ -214,7 +223,7 @@ def run_exploration(args):
     
     # Step 4: Classify initial samples
     print("\n[Step 4] Classifying initial samples...")
-    explorer.classify_pending_points(simulation_func, n_jobs=args.n_jobs)
+    explorer.classify_pending_points(simulation_func, n_jobs=args.n_jobs, timeout=args.timeout)
     
     # Step 5: Fit initial surrogate model
     print("\n[Step 5] Fitting surrogate model...")
@@ -235,7 +244,7 @@ def run_exploration(args):
         
         # Classify new points
         print(f"  Classifying {len(new_points)} new points...")
-        explorer.classify_pending_points(simulation_func, n_jobs=args.n_jobs)
+        explorer.classify_pending_points(simulation_func, n_jobs=args.n_jobs, timeout=args.timeout)
         
         # Update surrogate
         print("  Updating surrogate model...")
@@ -372,6 +381,10 @@ def main():
                         help='Print verbose output')
     parser.add_argument('--n-jobs', type=int, default=1,
                         help='Number of parallel workers for simulations (1=sequential, -1=all CPUs)')
+    parser.add_argument('--timeout', type=float, default=300,
+                        help='Maximum time per simulation in seconds (default: 300)')
+    parser.add_argument('--fresh-start', action='store_true',
+                        help='Start fresh, ignore any existing exploration history')
     
     args = parser.parse_args()
     

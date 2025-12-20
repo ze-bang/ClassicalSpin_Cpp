@@ -93,6 +93,10 @@ from phase_classifier import (
 # ============================================================================
 # This needs to be at module level for proper pickling in multiprocessing
 
+def _timeout_handler(signum, frame):
+    """Signal handler for timeout."""
+    raise TimeoutError("Simulation exceeded time limit")
+
 def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     """
     Worker function for parallel simulation execution.
@@ -109,11 +113,19 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
         (spins, positions, energy) or None if failed
     """
     import sys
+    import signal
     import traceback
     
     try:
+        # Set up timeout for this specific simulation
+        signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(int(timeout))  # Convert to integer seconds
+        
         # Run simulation
         result = simulation_func(params)
+        
+        # Cancel the alarm if simulation completes
+        signal.alarm(0)
         
         if result is None or result[0] is None:
             # Simulation returned None (timeout or failure)
@@ -132,13 +144,15 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
         return (spins, positions, energy)
     
     except TimeoutError as e:
-        # Explicit timeout
-        sys.stderr.write(f"[Worker PID {os.getpid()}] TIMEOUT: {e}\n")
+        # Explicit timeout - cancel alarm and report
+        signal.alarm(0)
+        sys.stderr.write(f"[Worker PID {os.getpid()}] TIMEOUT after {timeout}s: {e}\n")
         sys.stderr.flush()
         return None
     
     except Exception as e:
-        # Catch any exception and return None
+        # Catch any exception - cancel alarm and return None
+        signal.alarm(0)
         error_msg = f"[Worker PID {os.getpid()}] ERROR: {type(e).__name__}: {e}\n"
         error_msg += f"  Params: {params}\n"
         error_msg += f"  Traceback:\n"
@@ -408,7 +422,7 @@ class ActiveLearningExplorer:
         return point
     
     def classify_pending_points(self, simulation_func: Callable, n_jobs: int = 1,
-                                checkpoint_interval: int = 10):
+                                checkpoint_interval: int = 10, timeout: float = 300):
         """
         Classify all pending (unclassified) points using a simulation function.
         
@@ -418,6 +432,7 @@ class ActiveLearningExplorer:
             simulation_func: Function(NormalizedParameters) -> (spins, positions, energy)
             n_jobs: Number of parallel workers (1=sequential, -1=all CPUs)
             checkpoint_interval: Save progress every N completed simulations
+            timeout: Maximum time per simulation in seconds
         """
         pending = [p for p in self.history if p.phase == PhaseType.UNKNOWN.value]
         
@@ -442,20 +457,22 @@ class ActiveLearningExplorer:
         else:
             # Parallel execution
             self._log(f"\nClassifying {len(pending)} points using {n_jobs} parallel workers...")
-            self._classify_parallel(pending, simulation_func, n_jobs, checkpoint_interval)
+            self._classify_parallel(pending, simulation_func, n_jobs, checkpoint_interval, timeout)
     
     def _classify_parallel(self, points: List['ExplorationPoint'], 
                           simulation_func: Callable,
                           n_jobs: int,
-                          checkpoint_interval: int):
+                          checkpoint_interval: int,
+                          timeout: float = 300):
         """
-        Internal method for parallel classification with error handling.
+        Internal method for parallel classification with per-simulation timeout.
         
         Args:
             points: List of ExplorationPoint objects to classify
             simulation_func: Simulation function
             n_jobs: Number of parallel workers
             checkpoint_interval: Save interval
+            timeout: Maximum time per simulation in seconds (enforced per worker)
         """
         completed = 0
         failed = 0
@@ -466,9 +483,9 @@ class ActiveLearningExplorer:
         
         try:
             with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                # Submit all tasks
+                # Submit all tasks with timeout
                 future_to_point = {
-                    executor.submit(_run_simulation_safe, point.params, simulation_func): point
+                    executor.submit(_run_simulation_safe, point.params, simulation_func, timeout): point
                     for point in points
                 }
                 
