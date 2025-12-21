@@ -133,6 +133,45 @@ def generate_k_path(reciprocal_lattice: np.ndarray, graphres: int = 4) -> Tuple[
     return DSSF_K, [g1, g2, g3, g4]
 
 
+def generate_k_path_near_gamma(reciprocal_lattice: np.ndarray, graphres: int = 4) -> Tuple[np.ndarray, List[int]]:
+    """
+    Generate alternative k-path near Gamma point for TmFeO3.
+    Path: Gamma → X → M → Gamma
+    
+    Returns:
+        DSSF_K: k-point array
+        tick_positions: positions for tick labels
+    """
+    # Define high-symmetry points (in fractional coordinates of reciprocal lattice)
+    Gamma_frac = np.array([0, 0, 0])  # Gamma point
+    X_frac = np.array([0.5, 0, 0])     # X point
+    M_frac = np.array([0.5, 0.5, 0])   # M point
+    Z_frac = np.array([0, 0, 0.5])     # Z point
+    
+    # Convert to Cartesian coordinates
+    Gamma = contract('i,ij->j', Gamma_frac, reciprocal_lattice)
+    X = contract('i,ij->j', X_frac, reciprocal_lattice)
+    M = contract('i,ij->j', M_frac, reciprocal_lattice)
+    Z = contract('i,ij->j', Z_frac, reciprocal_lattice)
+    
+    # Create path segments
+    Gamma_X = np.linspace(Gamma, X, calcNumSites(Gamma, X, graphres))
+    X_M = np.linspace(X, M, calcNumSites(X, M, graphres))[1:]
+    M_Z = np.linspace(M, Z, calcNumSites(M, Z, graphres))[1:]
+    Z_Gamma = np.linspace(Z, Gamma, calcNumSites(Z, Gamma, graphres))[1:]
+    
+    # Tick positions
+    g1 = 0
+    g2 = g1 + len(Gamma_X) - 1
+    g3 = g2 + len(X_M) - 1
+    g4 = g3 + len(M_Z) - 1
+    g5 = g4 + len(Z_Gamma) - 1
+    
+    DSSF_K = np.concatenate((Gamma_X, X_M, M_Z, Z_Gamma))
+    
+    return DSSF_K, [g1, g2, g3, g4, g5]
+
+
 # =============================================================================
 # SPIN STRUCTURE FACTOR COMPUTATIONS
 # =============================================================================
@@ -451,6 +490,40 @@ def read_MD_hdf5(filepath: str, w0: float = 0, wmax: float = 70,
                             'local', w0, wmax)
         _plot_DSSF_combined(DSSF_sum_global, w, tick_positions, output_dir, 
                             'global', w0, wmax)
+        
+        # === Alternative K-path near Gamma ===
+        DSSF_K_gamma, tick_positions_gamma = generate_k_path_near_gamma(reciprocal_lattice)
+        
+        # Compute DSSF in local frame for alternative path
+        A_local_gamma = DSSF(w, DSSF_K_gamma, S, P, T, global_frame=False)
+        results['DSSF_local_gamma'] = A_local_gamma
+        
+        # Compute DSSF in global frame for alternative path
+        A_global_gamma = DSSF(w, DSSF_K_gamma, S, P, T, global_frame=True)
+        results['DSSF_global_gamma'] = A_global_gamma
+        
+        # Plot individual components - local frame (alternative path)
+        _plot_DSSF_components_gamma(A_local_gamma, w, tick_positions_gamma, output_dir, 'local', 
+                                    min(3, spin_dim), w0, wmax)
+        
+        # Plot individual components - global frame (alternative path)
+        _plot_DSSF_components_gamma(A_global_gamma, w, tick_positions_gamma, output_dir, 'global', 
+                                    3, w0, wmax)
+        
+        # Save summed DSSF for alternative path
+        DSSF_sum_local_gamma = contract('wiab->wi', A_local_gamma)
+        DSSF_sum_global_gamma = contract('wiab->wi', A_global_gamma)
+        results['DSSF_sum_local_gamma'] = DSSF_sum_local_gamma
+        results['DSSF_sum_global_gamma'] = DSSF_sum_global_gamma
+        
+        np.savetxt(os.path.join(output_dir, "DSSF_local_gamma_path.txt"), DSSF_sum_local_gamma)
+        np.savetxt(os.path.join(output_dir, "DSSF_global_gamma_path.txt"), DSSF_sum_global_gamma)
+        
+        # Plot combined DSSF for alternative path
+        _plot_DSSF_combined_gamma(DSSF_sum_local_gamma, w, tick_positions_gamma, output_dir, 
+                                  'local', w0, wmax)
+        _plot_DSSF_combined_gamma(DSSF_sum_global_gamma, w, tick_positions_gamma, output_dir, 
+                                  'global', w0, wmax)
     
     return results
 
@@ -460,7 +533,7 @@ def _plot_DSSF_components(A: np.ndarray, w: np.ndarray, tick_positions: List[int
                           w0: float, wmax: float):
     """Plot individual DSSF components."""
     g1, g2, g3, g4 = tick_positions
-    labels = [r'$(0,0,0)$', r'$(0,0,1)$', r'$(0,1,1)$', r'$(1,1,1)$']
+    labels = [r'$(1,0,3)$', r'$(3,0,3)$', r'$(3,0,1)$', r'$(3,2,1)$']
     
     for i in range(n_components):
         fig, ax = plt.subplots(figsize=(10, 4))
@@ -527,6 +600,61 @@ def _plot_DSSF_combined(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
     ax.set_xlim([0, g4])
     fig.colorbar(C)
     plt.savefig(os.path.join(output_dir, f"DSSF_{frame_type}.pdf"))
+    plt.close()
+
+
+def _plot_DSSF_components_gamma(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
+                                output_dir: str, frame_type: str, n_components: int,
+                                w0: float, wmax: float):
+    """Plot individual DSSF components for alternative Gamma path."""
+    labels = [r'$\Gamma$', r'$X$', r'$M$', r'$Z$', r'$\Gamma$']
+    g_max = tick_positions[-1]
+    
+    for i in range(n_components):
+        fig, ax = plt.subplots(figsize=(10, 4))
+        C = ax.imshow(A[:, :, i, i], origin='lower', 
+                     extent=[0, g_max, w0, wmax],
+                     aspect='auto', interpolation='lanczos', cmap='gnuplot2', norm=LogNorm())
+        for pos in tick_positions:
+            ax.axvline(x=pos, color='b', linestyle='dashed')
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(labels)
+        ax.set_xlim([0, g_max])
+        fig.colorbar(C)
+        plt.savefig(os.path.join(output_dir, f"DSSF_{frame_type}_gamma_path_{i}_{i}.pdf"))
+        plt.close()
+    
+    # Sum of all components
+    DSSF_sum = contract('wiab->wi', A)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    C = ax.imshow(DSSF_sum, origin='lower', extent=[0, g_max, w0, wmax],
+                 aspect='auto', interpolation='gaussian', cmap='gnuplot2')
+    for pos in tick_positions:
+        ax.axvline(x=pos, color='b', linestyle='dashed')
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(labels)
+    ax.set_xlim([0, g_max])
+    fig.colorbar(C)
+    plt.savefig(os.path.join(output_dir, f"DSSF_{frame_type}_gamma_path_sum.pdf"))
+    plt.close()
+
+
+def _plot_DSSF_combined_gamma(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
+                              output_dir: str, frame_type: str, w0: float, wmax: float):
+    """Plot combined DSSF for alternative Gamma path."""
+    labels = [r'$\Gamma$', r'$X$', r'$M$', r'$Z$', r'$\Gamma$']
+    g_max = tick_positions[-1]
+    
+    fig, ax = plt.subplots(figsize=(10, 4))
+    C = ax.imshow(A, origin='lower', extent=[0, g_max, w0, wmax],
+                 aspect='auto', interpolation='gaussian', cmap='gnuplot2', norm=LogNorm())
+    for pos in tick_positions:
+        ax.axvline(x=pos, color='b', linestyle='dashed')
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(labels)
+    ax.set_xlim([0, g_max])
+    fig.colorbar(C)
+    plt.savefig(os.path.join(output_dir, f"DSSF_{frame_type}_gamma_path.pdf"))
     plt.close()
 
 

@@ -375,6 +375,21 @@ class FeatureExtractor:
         if S_q[0, 0] > 0.5 * np.max(S_q):
             peaks.append((0.0, 0.0, S_q[0, 0]))
         
+        # Check M points explicitly (boundary points that may be missed)
+        # M1 = (0.5, 0), M2 = (0, 0.5), M3 = (0.5, 0.5)
+        threshold = 0.1 * np.max(S_q)
+        m_indices = [
+            (n_q - 1, 0),      # M1: q=(0.5, 0)
+            (0, n_q - 1),      # M2: q=(0, 0.5)
+            (n_q - 1, n_q - 1) # M3: q=(0.5, 0.5)
+        ]
+        for i, j in m_indices:
+            if S_q[i, j] > threshold:
+                q_pt = (q1_vals[i], q2_vals[j], S_q[i, j])
+                # Check if not already in peaks
+                if not any(abs(p[0] - q_pt[0]) < 1e-6 and abs(p[1] - q_pt[1]) < 1e-6 for p in peaks):
+                    peaks.append(q_pt)
+        
         # Sort by intensity
         peaks = sorted(peaks, key=lambda x: -x[2])
         

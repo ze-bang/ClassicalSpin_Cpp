@@ -234,7 +234,7 @@ class SpinSolverRunner:
             "",
             "# Output",
             f"output_dir = {output_dir}",
-            f"save_observables = {'true' if config.save_observables else 'false'}",
+            f"save_observables = 'false'",
         ])
         
         # Write parameter file
@@ -617,8 +617,8 @@ def create_spin_solver_simulation_func(
     annealing_steps: int = 50000,
     n_deterministics: int = 5000,
     T_start: float = 5.0,
-    T_end: float = 0.001,
-    timeout: float = 240,
+    T_end: float = 0.01,
+    timeout: float = 300,
     solver_path: str = None,
     verbose: bool = False,
     cleanup: bool = True
@@ -671,8 +671,8 @@ def create_spin_solver_simulation_func(
 
 def create_fast_simulation_func(
     L: int = 12,
-    annealing_steps: int = 10000,
-    n_deterministics: int = 1000,
+    annealing_steps: int = 20000,
+    n_deterministics: int = 10000,
     **kwargs
 ):
     """
@@ -713,8 +713,8 @@ def create_accurate_simulation_func(
 
 def create_screening_simulation_func(
     L: int = 8,
-    annealing_steps: int = 1000,
-    n_deterministics: int = 200,
+    annealing_steps: int = 5000,
+    n_deterministics: int = 5000,
     **kwargs
 ):
     """
