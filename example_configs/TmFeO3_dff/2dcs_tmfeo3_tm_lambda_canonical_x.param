@@ -1,0 +1,71 @@
+# TmFeO3 Mixed Lattice Molecular Dynamics
+# Corresponds to: molecular_dynamic_TmFeO3.cpp
+# Usage: ./spin_solver md_tmfeo3.param
+
+# Simulation Type
+system = tmfeo3_tm
+simulation_mode = 2dcs
+
+# Lattice Size (for mixed Fe + Tm lattice)
+lattice_size = 1,1,1
+
+# Fe Exchange Interaction Parameters (in meV)
+J1ab = 4.74     # In-plane nearest neighbor
+J1c = 5.15      # Out-of-plane nearest neighbor
+J2ab = 0.15     # In-plane next nearest neighbor
+J2c = 0.30      # Out-of-plane next nearest neighbor
+
+# Fe Single-Ion Anisotropy (in meV)
+Ka = 0.0
+Kc = -0.025230794650949503 #To get the AFM band gap at zero to be 0.91 THz
+
+# DM Interaction (in meV)
+D1 = 0.0 #0 for now just for the AFM mode
+D2 = 0.0
+
+# Tm Energy Splitting (in meV)
+e1 = 2.19190387888 #0.53*4.135667696 = 2.19190387888
+e2 = 5.33501132784 #1.29*4.135667696 = 5.33501132784
+
+# Tm-O (Fe-Tm coupling) scaling factors
+tm_alpha_scale = 1.0
+tm_beta_scale = 1.0
+
+# Fe-Tm Bilinear Coupling
+chii = 0.0     # χ parameter
+
+# Magnetic Field
+field_strength = 0.0
+field_direction = 0,1,0
+
+# Simulated Annealing (equilibration)
+T_start = 20.0
+T_end = 0.01
+T_zero = true
+annealing_steps = 10000
+overrelaxation_rate = 1
+use_twist_boundary = false
+gaussian_move = false
+
+pump_amplitude = 0.3
+pump_width = 0.5
+pump_frequency = 0.2
+pump_direction = 0,0,0,0,2.3915,0,0.9128,0  # λ7 component (default)
+
+# 2DCS Scan
+tau_start = -100.0
+tau_end = 100.0
+tau_step = 0.1
+parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
+
+# Time evolution
+md_time_start = -100.0
+md_time_end = 100.0
+md_timestep = 0.01
+md_integrator = rk4
+
+# Output
+output_dir = TmFeO3_tm_2dcs_canonical_x
+save_observables = true
+
+#initial_spin_config = TmFeO3_Tm_sa/sample_0/spins.txt

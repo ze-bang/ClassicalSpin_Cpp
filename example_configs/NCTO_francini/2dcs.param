@@ -1,0 +1,130 @@
+# NCTO Spin-Phonon 2D Coherent Spectroscopy Configuration (Francini Parameters)
+# ===============================================================================
+# 
+# This configuration performs 2D coherent spectroscopy (2DCS) on the 
+# NCTO spin-phonon coupled honeycomb lattice.
+#
+# The experiment consists of:
+# 1. Equilibrate spin configuration via simulated annealing (or load from file)
+# 2. Apply pump pulse at t=0 and record magnetization M0(t)
+# 3. For each delay time τ:
+#    a) Apply probe pulse at t=τ only → M1(t,τ)
+#    b) Apply pump at t=0 + probe at t=τ → M01(t,τ)
+# 4. Extract nonlinear response: M_NL(t,τ) = M01 - M0 - M1
+#
+# The 2D Fourier transform gives the 2D spectrum ω_pump × ω_probe
+#
+# Uses Francini parameters for exchange interactions.
+
+# System type
+system = NCTO
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 24,24,1
+
+# Simulation type
+simulation_mode = 2dcs
+
+# Output directory  
+output_dir = NCTO_francini_2dcs
+
+# Number of trials (usually 1 for 2DCS)
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN: Kitaev-Heisenberg-Γ-Γ' (Francini)
+# ============================================
+J = -0.2                 # Heisenberg
+K = -0.667               # Kitaev (FM)
+Gamma = 3.0              # Γ
+Gammap = -0.5            # Γ'
+J2_A = -0.25             # 2nd NN Heisenberg (sublattice A, AFM)
+J2_B = 0.25              # 2nd NN Heisenberg (sublattice B, FM)
+J3 = 0.0                 # 3rd NN Heisenberg
+
+# External field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PHONON MODE PARAMETERS
+# ============================================
+# E1 mode (IR-active doublet)
+omega_E = 8            # E1 frequency (meV or THz)
+gamma_E = 0.5            # E1 damping
+lambda_E = 0.01          # Quartic stabilization
+
+# A1 mode (Raman singlet)
+omega_A = 16            # A1 frequency
+gamma_A = 0.1            # A1 damping
+lambda_A = 0.01          # Quartic stabilization
+
+# Three-phonon coupling: g3 * Q_R * (Qx² + Qy²)
+g3 = 0.2                 # Ionic Raman mechanism strength
+
+# Effective charge for THz drive
+Z_star = 1.0
+
+# ============================================
+# SPIN-PHONON COUPLING
+# ============================================
+# H_sp-ph = Σ_<ij> λ_xy [Qx(Si_x Sj_z + Si_z Sj_x) + Qy(Si_y Sj_z + Si_z Sj_y)]
+#         + Σ_<ij> λ_R Q_R (Si · Sj)
+
+lambda_xy = 0.1          # E1 mode coupling (exchange modulation)
+lambda_R = 0.05          # A1 mode coupling (bond length modulation)
+
+# ============================================
+# THz PULSE PARAMETERS
+# ============================================
+# Both pump and probe use the same pulse shape
+# The code handles the timing (pump at t=0, probe at t=τ)
+
+pump_amplitude = 1.0     # Electric field amplitude
+pump_frequency = 8.0     # Should match omega_E for resonant driving
+pump_time = 0.0         # Pulse center time
+pump_width = 1.0        # Gaussian width (FWHM ~ 2.35 * width)
+pump_phase = 0.0         # Carrier-envelope phase
+pump_polarization = 0.0  # 0 = x-polarized, π/2 = y-polarized
+
+# Probe uses same parameters as pump
+probe_amplitude = 1.0
+probe_frequency = 8.0
+probe_width = 1.0
+
+# ============================================
+# DELAY TIME SCAN (τ)
+# ============================================
+tau_start = -100.0          # Starting delay
+tau_end = 100.0           # Final delay
+tau_step = 0.1           # Delay increment
+
+# ============================================
+# TIME EVOLUTION (for each pulse sequence)
+# ============================================
+md_time_start = -100.0    # Start before pump (to capture equilibrium)
+md_time_end = 100.0      # End time (should be > tau_end + pulse_width)
+md_timestep = 0.01       # Integration timestep
+md_save_interval = 1     # Save every N steps
+md_integrator = dopri5   # ODE integrator (dopri5, rk4, etc.)
+
+# Gilbert damping for spin dynamics
+alpha_gilbert = 0.0
+
+# ============================================
+# EQUILIBRATION (before pulse sequences)
+# ============================================
+T_start = 5.0
+T_end = 1e-4
+annealing_steps = 50000
+cooling_rate = 0.95
+overrelaxation_rate = 5
+
+# ============================================
+# INITIALIZATION
+# ============================================
+# Random initial spins (will be annealed before dynamics)
+# use_ferromagnetic_init = false
+
+# Or load pre-equilibrated configuration:
+initial_spin_config = NCTO_francini_sa/sample_0/spins.txt

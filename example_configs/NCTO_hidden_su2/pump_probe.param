@@ -1,0 +1,160 @@
+# NCTO Spin-Phonon Pump-Probe Configuration
+# ============================================
+# 
+# This configuration file sets up a THz pump-probe experiment on the 
+# NCTO (Na2Co2TeO6-like) spin-phonon coupled honeycomb lattice.
+#
+# The model includes:
+# - Classical spins on honeycomb lattice with Kitaev-Heisenberg-Γ interactions
+# - Global IR (E1) phonon mode driven by THz field
+# - Global Raman (E2) phonon mode coupled to spins
+# - Global Raman (A1) phonon mode coupled to spins
+# - Three-phonon coupling: g3_E1A1 * (Qx_E1² + Qy_E1²) * Q_A1
+#                        + g3_E2A1 * (Qx_E2² + Qy_E2²) * Q_A1
+# - E1-E2 bilinear coupling: g3_E1E2 * (Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
+# - Spin-phonon coupling: E1, E2, A1 modes couple to different spin bilinears
+
+# System type
+system = NCTO
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 8,8,1
+
+# Simulation type
+simulation_mode = pump_probe
+
+# Output directory
+output_dir = NCTO_pump_probe_hidden_su2
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+
+# Kitaev-Heisenberg-Gamma model (at Q_R = 0)
+# H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α)]
+J = -1                 # Heisenberg coupling (meV)
+K = -6                 # Kitaev coupling (meV, ferromagnetic)
+Gamma = 8              # Gamma coupling (meV)
+Gammap = 6             # Gamma' coupling (meV)
+J2_A = 0               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0               # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0                 # Third-neighbor Heisenberg (meV)
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# SPIN-PHONON COUPLING PARAMETERS
+# ============================================
+
+# Spin-phonon coupling forms on each bond <ij>:
+# lambda_E1 (E1): Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
+# lambda_E2 (E2): Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)
+# lambda_A1 (A1): Q_A1*(Si·Sj)
+lambda_E1 = 2         # E1 coupling (off-diagonal xz, yz)
+lambda_E2 = 0.0          # E2 coupling (in-plane anisotropic xx-yy, xy-yx)
+lambda_A1 = 0.0          # A1 coupling (isotropic Heisenberg)
+
+# Time-dependent spin-phonon coupling (optional)
+# lambda_time_mode: 0 = constant (default, uses lambda_E1/E2/A1 from above)
+#                   1 = window function (λ=λ_target for t_start<=t<=t_end, λ=λ_static otherwise)
+#lambda_time_mode = 1             # Uncomment to enable window function mode
+#lambda_E1_t_start = 0.0          # Time at which E1 coupling changes to target
+#lambda_E1_t_end = 10          # Time at which E1 coupling reverts to static
+#lambda_E1_target = 0.3           # Value of λ_E1 inside the window
+# lambda_E2_t_start = 0.0          # Time at which E2 coupling changes to target
+# lambda_E2_t_end = 100.0          # Time at which E2 coupling reverts to static
+# lambda_E2_target = 0.0           # Value of λ_E2 inside the window
+# lambda_A1_t_start = 0.0          # Time at which A1 coupling changes to target
+# lambda_A1_t_end = 100.0          # Time at which A1 coupling reverts to static
+# lambda_A1_target = 0.0           # Value of λ_A1 inside the window
+
+# ============================================
+# PHONON PARAMETERS
+# ============================================
+# Note: Effective masses are set to 1 (absorbed into frequency/coupling definitions)
+
+# E1 mode (IR-active doublet, THz driven)
+omega_E1 = 8.0           # E1 frequency (meV or THz)
+gamma_E1 = 2.0           # E1 damping
+lambda_E1_quartic = 0.0  # E1 quartic stabilization
+
+# E2 mode (Raman-active doublet, not THz driven)
+omega_E2 = 12.0           # E2 frequency
+gamma_E2 = 0.0           # E2 damping
+lambda_E2_quartic = 0.0  # E2 quartic stabilization
+
+# A1 mode (Raman-active singlet, not THz driven)
+omega_A1 = 16.0          # A1 frequency
+gamma_A1 = 0.0           # A1 damping
+lambda_A1_quartic = 0.0  # A1 quartic stabilization
+
+# Three-phonon coupling (ionic Raman mechanism)
+# H = g3_E1A1 * (Qx_E1² + Qy_E1²) * Q_A1 + g3_E2A1 * (Qx_E2² + Qy_E2²) * Q_A1
+g3_E1A1 = 0.0            # E1-A1 cubic coupling
+g3_E2A1 = 0.0            # E2-A1 cubic coupling
+
+# E1-E2 bilinear coupling
+# H = g3_E1E2 * (Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
+g3_E1E2 = 0.0            # E1-E2 bilinear coupling
+
+# Effective charge for THz coupling: H_drive = -Z* [Ex Qx_E1 + Ey Qy_E1]
+Z_star = 1.0
+
+# ============================================
+# THz DRIVE PARAMETERS
+# ============================================
+
+# Pump pulse (THz driving IR mode)
+pump_amplitude = 5.0     # Electric field amplitude
+pump_frequency = 8.0     # Should match omega_E1 for resonant driving
+pump_time = 0.0         # Pulse center time
+pump_width = 0.2        # Gaussian width (FWHM ~ 2.35 * width)
+pump_phase = 0.0         # Carrier-envelope phase
+pump_polarization = 0.0  # 0 = x-polarized, π/2 = y-polarized
+
+# Probe pulse (optional second pulse)
+probe_amplitude = 0.0    # Set to 0 for single-pulse experiment
+probe_frequency = 5.0
+probe_time = 0.0
+probe_width = 10.0
+
+# ============================================
+# MOLECULAR DYNAMICS PARAMETERS
+# ============================================
+
+# Time integration
+md_time_start = -10.0
+md_time_end = 100.0
+md_timestep = 0.1
+md_save_interval = 1
+md_integrator = rkf54
+
+
+# ============================================
+# THERMAL EQUILIBRATION (before dynamics)
+# ============================================
+
+# Temperature sweep (simulated annealing)
+adiabatic_phonons = true
+relax_phonons = true
+phonon_only_relax = true    # Only relax phonons, don't update spins
+T_start = 20.0
+T_end = 0.01
+T_zero = true
+annealing_steps = 50000
+cooling_rate = 0.9
+overrelaxation_rate = 5
+use_twist_boundary = false
+
+# ============================================
+# INITIALIZATION
+# ============================================
+
+# Start from random configuration (default)
+# use_ferromagnetic_init = false
+# ferromagnetic_direction = 0,0,1

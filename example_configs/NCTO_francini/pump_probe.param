@@ -1,0 +1,133 @@
+# NCTO Spin-Phonon Pump-Probe Configuration (Francini Parameters)
+# ==================================================================
+# 
+# This configuration file sets up a THz pump-probe experiment on the 
+# NCTO (Na2Co2TeO6-like) spin-phonon coupled honeycomb lattice.
+#
+# The model includes:
+# - Classical spins on honeycomb lattice with Kitaev-Heisenberg-Γ interactions
+# - Global IR (E1) phonon mode driven by THz field
+# - Global Raman (A1) phonon mode coupled to spins
+# - Nonlinear phononics: g * Q_R * (Qx^2 + Qy^2)
+# - Spin-phonon coupling: exchange parameters depend linearly on Q_R
+#
+# Uses Francini parameters for exchange interactions.
+
+# System type
+system = NCTO
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 4,4,1
+
+# Simulation type
+simulation_mode = pump_probe
+
+# Output directory
+output_dir = NCTO_francini_pump_probe
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS (Francini)
+# ============================================
+
+# Kitaev-Heisenberg-Gamma model (at Q_R = 0)
+# H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α)]
+J = 1.23                 # Heisenberg coupling (meV)
+K = -8.29               # Kitaev coupling (meV, ferromagnetic)
+Gamma = 1.86              # Gamma coupling (meV)
+Gammap = -2.27            # Gamma' coupling (meV)
+J2_A = 0.32             # 2nd NN Heisenberg (sublattice A, AFM, meV)
+J2_B = -0.24              # 2nd NN Heisenberg (sublattice B, FM, meV)
+J3 = 0.47                 # Third-neighbor Heisenberg (meV)
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# SPIN-PHONON COUPLING PARAMETERS
+# ============================================
+
+# Linear coupling: J_eff(Q_R) = J_0 + λ * Q_R
+# Use standard spin-phonon coupling names:
+# lambda_xy couples E1 mode to anisotropic exchange
+# lambda_R couples A1 mode to isotropic exchange
+lambda_xy = 1          # E1 mode coupling
+lambda_R = 1           # A1 mode coupling
+
+# ============================================
+# PHONON PARAMETERS
+# ============================================
+# Note: Effective masses are set to 1 (absorbed into frequency/coupling definitions)
+
+# E1 mode (IR-active doublet)
+omega_E = 8             # E1 frequency (meV or THz)
+gamma_E = 0.1           # E1 damping
+lambda_E = 0.0          # Quartic stabilization
+
+# A1 mode (Raman singlet)
+omega_A = 16            # A1 frequency
+gamma_A = 0.0            # A1 damping
+lambda_A = 0.0          # Quartic stabilization
+
+# Three-phonon coupling (ionic Raman mechanism)
+g3 = 2                 # Cubic coupling: g3 * Q_R * (Qx² + Qy²)
+
+# Effective charge for THz coupling: H_drive = -Z* [Ex Qx + Ey Qy]
+Z_star = 1.0
+
+# ============================================
+# THz DRIVE PARAMETERS
+# ============================================
+
+# Pump pulse (THz driving IR mode)
+pump_amplitude = 0.2     # Electric field amplitude
+pump_frequency = 1.0     # Should match omega_E for resonant driving
+pump_time = 0.0         # Pulse center time
+pump_width = 0.2        # Gaussian width (FWHM ~ 2.35 * width)
+pump_phase = 0.0         # Carrier-envelope phase
+pump_polarization = 0.0  # 0 = x-polarized, π/2 = y-polarized
+
+# Probe pulse (optional second pulse)
+probe_amplitude = 0.0    # Set to 0 for single-pulse experiment
+probe_frequency = 5.0
+probe_time = 0.0
+probe_width = 10.0
+
+# ============================================
+# MOLECULAR DYNAMICS PARAMETERS
+# ============================================
+
+# Time integration
+md_time_start = -5.0
+md_time_end = 300.0
+md_timestep = 0.1
+md_save_interval = 1
+md_integrator = rk4
+
+
+# ============================================
+# THERMAL EQUILIBRATION (before dynamics)
+# ============================================
+
+# Temperature sweep (simulated annealing)
+adiabatic_phonons = false
+relax_phonons = true
+T_start = 10.0
+T_end = 0.01
+T_zero = true
+annealing_steps = 50000
+cooling_rate = 0.9
+overrelaxation_rate = 5
+
+# ============================================
+# INITIALIZATION
+# ============================================
+
+# Start from random configuration (default)
+# use_ferromagnetic_init = false
+# ferromagnetic_direction = 0,0,1
+adiabatic_phonons = false
+relax_phonons = true
