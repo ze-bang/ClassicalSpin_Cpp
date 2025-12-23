@@ -245,7 +245,7 @@ class SpinSolverRunner:
         return str(param_file)
     
     def run_simulation(self, params: NormalizedParameters,
-                       timeout: float = 300) -> Tuple[np.ndarray, np.ndarray, float]:
+                       timeout: float = 600) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Run a simulation with the given parameters.
         
@@ -575,7 +575,7 @@ class _PicklableSimulation:
         self.solver_path = solver_path
         self.cleanup = cleanup
         self.verbose = verbose
-        self.timeout = config_dict.get('timeout', 300)
+        self.timeout = config_dict.get('timeout', 600)
         self._runner = None
     
     def _get_runner(self):
@@ -618,7 +618,7 @@ def create_spin_solver_simulation_func(
     n_deterministics: int = 5000,
     T_start: float = 5.0,
     T_end: float = 0.01,
-    timeout: float = 300,
+    timeout: float = 600,
     solver_path: str = None,
     verbose: bool = False,
     cleanup: bool = True
@@ -685,7 +685,7 @@ def create_fast_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=300,
+        timeout=600,
         **kwargs
     )
 
@@ -706,7 +706,7 @@ def create_accurate_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=300,
+        timeout=600,
         **kwargs
     )
 
@@ -728,7 +728,7 @@ def create_screening_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=300,
+        timeout=600,
         **kwargs
     )
 
