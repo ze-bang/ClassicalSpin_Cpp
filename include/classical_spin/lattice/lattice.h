@@ -3061,11 +3061,11 @@ public:
         
         const double factor1 = field_drive_amp * 
                         std::exp(-std::pow(dt1 / (2.0 * field_drive_width), 2)) *
-                        std::cos(2.0 * M_PI * field_drive_freq * dt1);
+                        std::cos( field_drive_freq * dt1);
         
         const double factor2 = field_drive_amp * 
                         std::exp(-std::pow(dt2 / (2.0 * field_drive_width), 2)) *
-                        std::cos(2.0 * M_PI * field_drive_freq * dt2);
+                        std::cos( field_drive_freq * dt2);
         
         for (size_t d = 0; d < spin_dim; ++d) {
             H[d] -= field_drive[0](atom * spin_dim + d) * factor1 +
@@ -3081,11 +3081,11 @@ public:
         
         double factor1 = field_drive_amp * 
                         std::exp(-std::pow((t - t_pulse[0]) / (2.0 * field_drive_width), 2)) *
-                        std::cos(2.0 * M_PI * field_drive_freq * (t - t_pulse[0]));
+                        std::cos( field_drive_freq * (t - t_pulse[0]));
         
         double factor2 = field_drive_amp * 
                         std::exp(-std::pow((t - t_pulse[1]) / (2.0 * field_drive_width), 2)) *
-                        std::cos(2.0 * M_PI * field_drive_freq * (t - t_pulse[1]));
+                        std::cos( field_drive_freq * (t - t_pulse[1]));
         
         return field_drive[0].segment(atom * spin_dim, spin_dim) * factor1 +
                field_drive[1].segment(atom * spin_dim, spin_dim) * factor2;
@@ -4357,7 +4357,7 @@ public:
         
         // Save initial configuration
         save_positions(dir_name + "/positions.txt");
-        save_spin_config(dir_name + "/spins_initial.txt");
+        save_spin_config(dir_name + "/initial_spins.txt");
         
         // Backup ground state
         SpinConfig ground_state = spins;
@@ -4540,7 +4540,7 @@ public:
         // Save initial configuration (rank 0 only)
         if (rank == 0) {
             save_positions(dir_name + "/positions.txt");
-            save_spin_config(dir_name + "/spins_initial.txt");
+            save_spin_config(dir_name + "/initial_spins.txt");
         }
         
         // Backup ground state
@@ -4617,77 +4617,213 @@ public:
             cout << "\n[4/4] Gathering results from all ranks..." << endl;
         }
         
-        // Prepare full arrays for gathering (rank 0 only needs full storage)
-        vector<vector<pair<double, array<SpinVector, 3>>>> M1_trajectories(tau_steps);
-        vector<vector<pair<double, array<SpinVector, 3>>>> M01_trajectories(tau_steps);
-        vector<double> tau_values(tau_steps);
-        
-        // Fill in tau values
-        for (int i = 0; i < tau_steps; ++i) {
-            tau_values[i] = tau_start + i * tau_step;
-        }
-        
-        // Place local results in correct positions
-        for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
-            int global_idx = my_tau_indices[idx];
-            M1_trajectories[global_idx] = local_M1_trajectories[idx];
-            M01_trajectories[global_idx] = local_M01_trajectories[idx];
-        }
-        
-        // Now gather trajectories from all ranks to rank 0
-        // We need to serialize trajectories for MPI communication
-        // Each trajectory point: (time, [M_total, M_staggered, M_local]) with spin_dim components each
-        
+        // Compute sizes for serialization
         size_t time_points = M0_trajectory.size();
         size_t data_per_point = 1 + 3 * spin_dim;  // time + 3 SpinVectors
         size_t traj_size = time_points * data_per_point;
         
-        // For each tau index not owned by rank 0, receive from owner
+        // Compute tau values (needed for HDF5)
+        vector<double> tau_values(tau_steps);
+        for (int i = 0; i < tau_steps; ++i) {
+            tau_values[i] = tau_start + i * tau_step;
+        }
+
+#ifdef HDF5_ENABLED
+        // ===== STREAMING APPROACH: Write to HDF5 as we receive data =====
+        // This avoids storing all trajectories in memory at once
+        
+        // Type alias for trajectory
+        typedef vector<pair<double, array<SpinVector, 3>>> TrajectoryType;
+        
+        // Rank 0 opens HDF5 file and prepares for streaming writes
+        H5::H5File* file_ptr = nullptr;
+        H5::Group metadata_group, reference_group, tau_scan_group;
+        
+        if (rank == 0) {
+            string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
+            cout << "\nWriting data to HDF5 file (streaming): " << hdf5_file << endl;
+            
+            try {
+                file_ptr = new H5::H5File(hdf5_file, H5F_ACC_TRUNC);
+                
+                // Create groups
+                metadata_group = file_ptr->createGroup("/metadata");
+                reference_group = file_ptr->createGroup("/reference");
+                tau_scan_group = file_ptr->createGroup("/tau_scan");
+                
+                // Write metadata (simplified - essential params only)
+                H5::DataSpace attr_space(H5S_SCALAR);
+                {
+                    auto write_attr = [&](const char* name, double val) {
+                        H5::Attribute attr = metadata_group.createAttribute(name, H5::PredType::NATIVE_DOUBLE, attr_space);
+                        attr.write(H5::PredType::NATIVE_DOUBLE, &val);
+                    };
+                    auto write_attr_int = [&](const char* name, size_t val) {
+                        H5::Attribute attr = metadata_group.createAttribute(name, H5::PredType::NATIVE_HSIZE, attr_space);
+                        attr.write(H5::PredType::NATIVE_HSIZE, &val);
+                    };
+                    
+                    write_attr_int("lattice_size", lattice_size);
+                    write_attr_int("spin_dim", spin_dim);
+                    write_attr_int("N_atoms", N_atoms);
+                    write_attr("pulse_amp", pulse_amp);
+                    write_attr("pulse_width", pulse_width);
+                    write_attr("pulse_freq", pulse_freq);
+                    write_attr("T_start", T_start);
+                    write_attr("T_end", T_end);
+                    write_attr("T_step", T_step);
+                    write_attr("tau_start", tau_start);
+                    write_attr("tau_end", tau_end);
+                    write_attr("tau_step", tau_step);
+                    write_attr_int("tau_steps", static_cast<size_t>(tau_steps));
+                    write_attr("ground_state_energy", E_ground);
+                }
+                
+                // Write tau values array
+                hsize_t tau_dims[1] = {static_cast<hsize_t>(tau_steps)};
+                H5::DataSpace tau_space(1, tau_dims);
+                H5::DataSet tau_dataset = tau_scan_group.createDataSet("tau_values", H5::PredType::NATIVE_DOUBLE, tau_space);
+                tau_dataset.write(tau_values.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                // Write reference trajectory M0
+                hsize_t time_dims[1] = {time_points};
+                H5::DataSpace time_space(1, time_dims);
+                
+                vector<double> times(time_points);
+                for (size_t i = 0; i < time_points; ++i) times[i] = M0_trajectory[i].first;
+                H5::DataSet time_ds = reference_group.createDataSet("times", H5::PredType::NATIVE_DOUBLE, time_space);
+                time_ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+                
+                // Write M0 magnetization data
+                auto write_mag_dataset = [&](H5::Group& grp, const char* name, int mag_idx) {
+                    hsize_t dims[2] = {time_points, spin_dim};
+                    H5::DataSpace dspace(2, dims);
+                    vector<double> data(time_points * spin_dim);
+                    for (size_t t = 0; t < time_points; ++t) {
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            data[t * spin_dim + d] = M0_trajectory[t].second[mag_idx](d);
+                        }
+                    }
+                    H5::DataSet ds = grp.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dspace);
+                    ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
+                };
+                
+                write_mag_dataset(reference_group, "M_total", 0);
+                write_mag_dataset(reference_group, "M_staggered", 1);
+                write_mag_dataset(reference_group, "M_local", 2);
+                
+                cout << "  Reference trajectory (M0) written." << endl;
+                
+            } catch (H5::Exception& e) {
+                std::cerr << "HDF5 Error opening file: " << e.getDetailMsg() << endl;
+                if (file_ptr) delete file_ptr;
+                file_ptr = nullptr;
+            }
+        }
+        
+        // Helper lambda to write a trajectory to HDF5 (rank 0 only)
+        auto write_tau_to_hdf5 = [&](int tau_idx, const TrajectoryType& M1_traj, const TrajectoryType& M01_traj) {
+            if (!file_ptr) return;
+            
+            std::string grp_name = "/tau_scan/tau_" + std::to_string(tau_idx);
+            H5::Group tau_grp = file_ptr->createGroup(grp_name);
+            
+            // Write tau value as attribute
+            H5::DataSpace attr_space(H5S_SCALAR);
+            double tau_val = tau_values[tau_idx];
+            H5::Attribute tau_attr = tau_grp.createAttribute("tau_value", H5::PredType::NATIVE_DOUBLE, attr_space);
+            tau_attr.write(H5::PredType::NATIVE_DOUBLE, &tau_val);
+            
+            size_t n_times = M1_traj.size();
+            
+            auto write_mag = [&](const char* name, const TrajectoryType& traj, int mag_idx) {
+                hsize_t dims[2] = {n_times, spin_dim};
+                H5::DataSpace dspace(2, dims);
+                vector<double> data(n_times * spin_dim);
+                for (size_t t = 0; t < n_times; ++t) {
+                    for (size_t d = 0; d < spin_dim; ++d) {
+                        data[t * spin_dim + d] = traj[t].second[mag_idx](d);
+                    }
+                }
+                H5::DataSet ds = tau_grp.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dspace);
+                ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
+            };
+            
+            write_mag("M1_total", M1_traj, 0);
+            write_mag("M1_staggered", M1_traj, 1);
+            write_mag("M1_local", M1_traj, 2);
+            
+            write_mag("M01_total", M01_traj, 0);
+            write_mag("M01_staggered", M01_traj, 1);
+            write_mag("M01_local", M01_traj, 2);
+            
+            tau_grp.close();
+        };
+        
+        // Helper lambda to deserialize buffer to trajectory
+        auto deserialize_trajectory = [&](const vector<double>& buffer) -> TrajectoryType {
+            TrajectoryType traj(time_points);
+            for (size_t t = 0; t < time_points; ++t) {
+                size_t offset = t * data_per_point;
+                traj[t].first = buffer[offset];
+                for (int m = 0; m < 3; ++m) {
+                    traj[t].second[m] = SpinVector::Zero(spin_dim);
+                    for (size_t d = 0; d < spin_dim; ++d) {
+                        traj[t].second[m](d) = buffer[offset + 1 + m * spin_dim + d];
+                    }
+                }
+            }
+            return traj;
+        };
+        
+        // First: rank 0 writes its own local results immediately
+        if (rank == 0) {
+            for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
+                int tau_idx = my_tau_indices[idx];
+                write_tau_to_hdf5(tau_idx, local_M1_trajectories[idx], local_M01_trajectories[idx]);
+            }
+            cout << "  Rank 0 local trajectories written (" << my_tau_indices.size() << " tau points)." << endl;
+            
+            // Free local memory on rank 0 after writing
+            local_M1_trajectories.clear();
+            local_M1_trajectories.shrink_to_fit();
+            local_M01_trajectories.clear();
+            local_M01_trajectories.shrink_to_fit();
+        }
+        
+        // Now receive from other ranks and write immediately (streaming)
+        vector<double> M1_buffer(traj_size);
+        vector<double> M01_buffer(traj_size);
+        
+        int progress_interval = std::max(1, tau_steps / 20);  // Report every 5%
+        int received_count = 0;
+        
         for (int tau_idx = 0; tau_idx < tau_steps; ++tau_idx) {
             int owner_rank = tau_idx % mpi_size;
             
-            if (owner_rank == 0) {
-                // Rank 0 already has this data
-                continue;
-            }
+            if (owner_rank == 0) continue;  // Already written above
             
             if (rank == 0) {
-                // Rank 0 receives data from owner
-                vector<double> M1_buffer(traj_size);
-                vector<double> M01_buffer(traj_size);
-                
+                // Receive from owner and write immediately
                 MPI_Recv(M1_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
                         2 * tau_idx, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(M01_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
                         2 * tau_idx + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 
-                // Deserialize M1 trajectory
-                M1_trajectories[tau_idx].resize(time_points);
-                for (size_t t = 0; t < time_points; ++t) {
-                    size_t offset = t * data_per_point;
-                    M1_trajectories[tau_idx][t].first = M1_buffer[offset];
-                    for (int m = 0; m < 3; ++m) {
-                        M1_trajectories[tau_idx][t].second[m] = SpinVector::Zero(spin_dim);
-                        for (size_t d = 0; d < spin_dim; ++d) {
-                            M1_trajectories[tau_idx][t].second[m](d) = M1_buffer[offset + 1 + m * spin_dim + d];
-                        }
-                    }
+                // Deserialize and write to HDF5 immediately (no storage)
+                TrajectoryType M1_traj = deserialize_trajectory(M1_buffer);
+                TrajectoryType M01_traj = deserialize_trajectory(M01_buffer);
+                
+                write_tau_to_hdf5(tau_idx, M1_traj, M01_traj);
+                
+                received_count++;
+                if (received_count % progress_interval == 0) {
+                    int local_tau_count = static_cast<int>(my_tau_indices.size());
+                    cout << "  Progress: " << received_count << "/" << (tau_steps - local_tau_count) 
+                         << " remote tau points received and written." << endl;
                 }
                 
-                // Deserialize M01 trajectory
-                M01_trajectories[tau_idx].resize(time_points);
-                for (size_t t = 0; t < time_points; ++t) {
-                    size_t offset = t * data_per_point;
-                    M01_trajectories[tau_idx][t].first = M01_buffer[offset];
-                    for (int m = 0; m < 3; ++m) {
-                        M01_trajectories[tau_idx][t].second[m] = SpinVector::Zero(spin_dim);
-                        for (size_t d = 0; d < spin_dim; ++d) {
-                            M01_trajectories[tau_idx][t].second[m](d) = M01_buffer[offset + 1 + m * spin_dim + d];
-                        }
-                    }
-                }
             } else if (rank == owner_rank) {
-                // This rank sends data to rank 0
                 // Find local index for this tau
                 size_t local_idx = 0;
                 for (size_t i = 0; i < my_tau_indices.size(); ++i) {
@@ -4697,8 +4833,7 @@ public:
                     }
                 }
                 
-                // Serialize M1 trajectory
-                vector<double> M1_buffer(traj_size);
+                // Serialize M1
                 for (size_t t = 0; t < time_points; ++t) {
                     size_t offset = t * data_per_point;
                     M1_buffer[offset] = local_M1_trajectories[local_idx][t].first;
@@ -4709,8 +4844,7 @@ public:
                     }
                 }
                 
-                // Serialize M01 trajectory
-                vector<double> M01_buffer(traj_size);
+                // Serialize M01
                 for (size_t t = 0; t < time_points; ++t) {
                     size_t offset = t * data_per_point;
                     M01_buffer[offset] = local_M01_trajectories[local_idx][t].first;
@@ -4726,40 +4860,24 @@ public:
             }
         }
         
-        // Only rank 0 writes output
-        if (rank == 0) {
-            string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
-            cout << "\nWriting all data to single HDF5 file: " << hdf5_file << endl;
-            
-#ifdef HDF5_ENABLED
-            try {
-                HDF5PumpProbeWriter writer(
-                    hdf5_file,
-                    lattice_size, spin_dim, N_atoms, dim1, dim2, dim3, spin_length,
-                    pulse_amp, pulse_width, pulse_freq,
-                    T_start, T_end, T_step, method,
-                    tau_start, tau_end, tau_step,
-                    E_ground, M_ground, Temp_start, Temp_end, n_anneal,
-                    T_zero_quench, quench_sweeps,
-                    &field_in, &site_positions
-                );
-                
-                writer.write_reference_trajectory(M0_trajectory);
-                
-                for (int i = 0; i < tau_steps; ++i) {
-                    writer.write_tau_trajectory(i, tau_values[i], M1_trajectories[i], M01_trajectories[i]);
-                }
-                
-                writer.close();
-                cout << "Successfully wrote all data to single HDF5 file" << endl;
-                
-            } catch (H5::Exception& e) {
-                std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
-            }
+        // Close HDF5 file
+        if (rank == 0 && file_ptr) {
+            metadata_group.close();
+            reference_group.close();
+            tau_scan_group.close();
+            file_ptr->close();
+            delete file_ptr;
+            cout << "Successfully wrote all data to HDF5 file (streaming mode)" << endl;
+        }
+        
 #else
+        // No HDF5 - skip the communication and output
+        if (rank == 0) {
             cout << "Warning: HDF5 support not enabled. Data not saved to HDF5 file." << endl;
+        }
 #endif
-            
+        
+        if (rank == 0) {
             cout << "\n==========================================" << endl;
             cout << "Pump-Probe Spectroscopy (MPI) Complete!" << endl;
             cout << "Output directory: " << dir_name << endl;

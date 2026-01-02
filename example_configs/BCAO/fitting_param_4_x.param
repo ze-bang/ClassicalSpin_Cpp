@@ -1,0 +1,43 @@
+
+# BCAO Honeycomb Field Scan - Fitting Parameter Set 4 (X-direction)
+# Corresponds to: fitting_param_4_x field scan simulation
+# Usage: ./spin_solver fitting_param_4_x.param
+
+# Simulation Type
+system = honeycomb_bcao
+simulation_mode = simulated_annealing
+
+# Lattice Size
+lattice_size = 12,12,1
+
+# Exchange Interaction Parameters (Fitting Set 4)
+J1xy = -6.646
+J1z = -2.084
+D = 0.675
+E = 1.33
+F = -1.516
+G = 0.21
+J3xy = 1.697
+J3z = 0.039
+
+# Magnetic Field
+field_strength = 0.0
+field_direction = 1,0,0
+field_scan_start = 0.0
+field_scan_end = 1.0
+field_scan_steps = 50
+
+# Simulated Annealing
+T_start = 20.0
+T_end = 0.01
+annealing_steps = 50000
+overrelaxation_rate = 10
+use_twist_boundary = false
+gaussian_move = false
+cooling_rate = 0.9
+T_zero = true
+n_deterministics = 10000
+
+# Output
+output_dir = Potential_Param_Scan/fitting_param_4_x_3
+save_observables = false

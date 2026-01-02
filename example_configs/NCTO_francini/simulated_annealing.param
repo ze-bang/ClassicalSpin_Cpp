@@ -1,0 +1,102 @@
+# NCTO Spin-Phonon Simulated Annealing Configuration (Francini Parameters)
+# ==========================================================================
+# 
+# This configuration performs simulated annealing on the spin subsystem
+# of the NCTO honeycomb lattice to find the ground state spin configuration.
+# 
+# The phonon modes are not evolved during annealing - only the spin 
+# configuration is optimized at fixed Q_R = 0.
+#
+# After annealing, the resulting spin configuration can be used as
+# input for molecular dynamics or 2DCS simulations.
+#
+# Uses Francini parameters for exchange interactions.
+
+# System type
+system = NCTO
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 24,24,1
+
+# Simulation type
+simulation_mode = SA
+
+# Output directory
+output_dir = NCTO_francini_sa
+
+# Number of trials (independent runs with different random seeds)
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS (Francini)
+# ============================================
+# Kitaev-Heisenberg-Γ-Γ' model on honeycomb lattice
+# 
+# H_spin = Σ_<ij>^γ-bond [J S_i·S_j + K S_i^γ S_j^γ 
+#                        + Γ(S_i^α S_j^β + S_i^β S_j^α)
+#                        + Γ'(S_i^γ S_j^α + S_i^γ S_j^β + S_i^α S_j^γ + S_i^β S_j^γ)]
+#        + J2 Σ_<<ij>> S_i·S_j
+
+# NN exchange (Francini parameters, meV units)
+J = -0.2                 # Heisenberg (isotropic)
+K = -0.667               # Kitaev (ferromagnetic K < 0)
+Gamma = 3.0              # Γ coupling
+Gammap = -0.5            # Γ' coupling
+
+# 2nd NN Heisenberg (sublattice-dependent)
+J2_A = -0.25             # 2nd NN coupling on sublattice A (AFM)
+J2_B = 0.25              # 2nd NN coupling on sublattice B (FM)
+
+# 3rd NN Heisenberg (not specified in Francini)
+J3 = 0.0
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PHONON PARAMETERS (at equilibrium)
+# ============================================
+# These determine the equilibrium phonon frequencies for computing
+# the ground state energy; phonons are not dynamically evolved during SA.
+
+# E1 mode (IR-active, doublet)
+omega_E = 5.0            # Frequency (meV or dimensionless)
+gamma_E = 0.1            # Damping (not used in SA)
+lambda_E = 0.1           # Quartic stabilization (λ_E/4)(Qx²+Qy²)²
+
+# A1 mode (Raman-active, singlet)
+omega_A = 2.5            # Frequency
+gamma_A = 0.05           # Damping (not used in SA)
+lambda_A = 0.1           # Quartic stabilization (λ_A/4)Q_R⁴
+
+# Three-phonon coupling g*(Qx²+Qy²)*Q_R (not active during SA)
+g3 = 0.0
+
+# ============================================
+# SPIN-PHONON COUPLING (at equilibrium Q=0)
+# ============================================
+# H_sp-ph = Σ_<ij> [λ_xy Qx (Si_x Sj_z + Si_z Sj_x)
+#                 + λ_xy Qy (Si_y Sj_z + Si_z Sj_y)
+#                 + λ_R Q_R (Si·Sj)]
+
+lambda_xy = 0.0          # E1 mode spin-phonon coupling
+lambda_R = 0.0           # A1 mode spin-phonon coupling (Raman)
+
+# ============================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================
+
+# Temperature schedule: T(n) = T_start * cooling_rate^n until T < T_end
+T_start = 10.0           # Initial temperature (meV)
+T_end = 1e-4             # Final temperature (essentially T=0)
+annealing_steps = 10000 # Total MC sweeps
+cooling_rate = 0.95      # Geometric cooling factor
+
+# Overrelaxation: perform spin reflection every N sweeps (speeds up)
+overrelaxation_rate = 5
+T_zero = true
+
+# ============================================
+# INITIALIZATION
+# ============================================
