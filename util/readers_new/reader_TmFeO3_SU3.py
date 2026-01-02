@@ -24,13 +24,17 @@ Molecular Dynamics trajectory.h5:
 import h5py
 import numpy as np
 from opt_einsum import contract
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for faster plotting
 import matplotlib.pyplot as plt
 import os
 import sys
 from math import gcd
-from functools import reduce
+from functools import reduce, lru_cache
 from matplotlib.colors import PowerNorm, LogNorm, SymLogNorm, Normalize
 from typing import Dict, Tuple, Optional, List, Any, Literal
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 
 # Type for norm selection
 NormType = Literal['log', 'power', 'symlog', 'linear']
@@ -163,11 +167,13 @@ def Spin_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     N = S.shape[1]
     n_times = S.shape[0]
     spin_dim = S.shape[2]
-    results = np.zeros((n_times, len(k), spin_dim), dtype=np.complex128)
-    ffact = np.exp(1j * contract('ik,jk->ij', k, P))
     
-    for i in range(n_times):
-        results[i] = contract('js, ij->is', S[i], ffact) / np.sqrt(N)
+    # Compute phase factors once (k @ P.T)
+    ffact = np.exp(1j * np.dot(k, P.T))  # [n_k, n_sites]
+    
+    # Vectorized computation: (n_times, n_sites, spin_dim) @ (n_sites, n_k) -> (n_times, spin_dim, n_k)
+    # Then transpose to (n_times, n_k, spin_dim)
+    results = np.einsum('tjs,kj->tks', S, ffact, optimize=True) / np.sqrt(N)
     
     return results
 
@@ -193,14 +199,19 @@ def Spin_global_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     tS = np.zeros((n_times, n_sublattices, len(k), spin_dim), dtype=np.complex128)
     
     for i in range(n_sublattices):
-        ffact = np.exp(1j * contract('ik,jk->ij', k, P[i*size:(i+1)*size]))
+        # Compute phase factors once (faster than einsum for matrix multiply)
+        ffact = np.exp(1j * np.dot(k, P[i*size:(i+1)*size].T))  # [n_k, size]
+        
         # Transform first 3 components (dipole moments) to global frame
-        tS[:, i, :, :3] = contract('tjs, ij, sp->tip', S[:, i*size:(i+1)*size, :3], 
-                                   ffact, localframe[:, i, :]) / np.sqrt(size)
-        # Keep remaining components (quadrupole moments) unchanged
+        # Use optimized einsum for 3-tensor contraction
+        S_sub_dipole = S[:, i*size:(i+1)*size, :3]
+        tS[:, i, :, :3] = np.einsum('tjs,kj,sp->tkp', S_sub_dipole, ffact, 
+                                     localframe[:, i, :], optimize=True) / np.sqrt(size)
+        
+        # Keep remaining components (quadrupole moments) unchanged - use vectorized matmul
         if spin_dim > 3:
-            tS[:, i, :, 3:] = contract('tjs, ij->tis', S[:, i*size:(i+1)*size, 3:], 
-                                        ffact) / np.sqrt(size)
+            S_sub_quad = S[:, i*size:(i+1)*size, 3:]
+            tS[:, i, :, 3:] = np.einsum('tjs,kj->tks', S_sub_quad, ffact, optimize=True) / np.sqrt(size)
     
     return tS
 
@@ -225,43 +236,37 @@ def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray,
     Returns:
         DSSF: [n_w, n_k, spin_dim, spin_dim] array (spin_dim=8 for SU(3))
     """
+    dt = T[1] - T[0] if len(T) > 1 else 1.0
+    fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+    
+    # Vectorized frequency index selection
+    indices = np.argmin(np.abs(fft_freqs[:, None] - w[None, :]), axis=0)
+    
     if global_frame:
         # Use global frame transformation for all 8 SU(3) components
         A = Spin_global_t(k, S, P)
         # A shape: (n_times, n_sublattices, n_k, 8)
-        # Subtract mean configuration before FFT
-        A_mean = np.mean(A, axis=0, keepdims=True)
-        A = A - A_mean
-        # FFT over time dimension
-        dt = T[1] - T[0] if len(T) > 1 else 1.0
-        A_fft = np.fft.fft(A, axis=0)
-        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
+        # Subtract mean and FFT in one step (more cache-friendly)
+        A -= A.mean(axis=0, keepdims=True)
+        A_fft = np.fft.fft(A, axis=0) / np.sqrt(len(T))
         
-        # Select closest frequencies to w
-        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
-        Somega = A_fft[indices] / np.sqrt(len(T))
-        
-        read = np.real(contract('wnia, wnib->wiab', Somega, np.conj(Somega)))
-        return read
+        # Select frequencies and compute outer product
+        Somega = A_fft[indices]  # [n_w, n_sublattices, n_k, spin_dim]
+        # Optimized outer product: S * S^H
+        result = np.einsum('wnia,wnib->wiab', Somega, np.conj(Somega), optimize=True)
+        return np.real(result)
     else:
-        # Use local frame (original implementation) - full 8 components for SU(3)
+        # Use local frame - full 8 components for SU(3)
         A = Spin_t(k, S, P)
+        # Subtract mean and FFT
+        A -= A.mean(axis=0, keepdims=True)
+        A_fft = np.fft.fft(A, axis=0) / np.sqrt(len(T))
         
-        # Subtract mean configuration before FFT
-        A_mean = np.mean(A, axis=0, keepdims=True)
-        A = A - A_mean
-        
-        # FFT over time dimension
-        dt = T[1] - T[0] if len(T) > 1 else 1.0
-        A_fft = np.fft.fft(A, axis=0)
-        fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
-        
-        # Select closest frequencies to w
-        indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
-        Somega = A_fft[indices] / np.sqrt(len(T))
-        
-        read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
-        return read
+        # Select frequencies and compute outer product
+        Somega = A_fft[indices]  # [n_w, n_k, spin_dim]
+        # Optimized outer product
+        result = np.einsum('wia,wib->wiab', Somega, np.conj(Somega), optimize=True)
+        return np.real(result)
 
 
 # =============================================================================
@@ -752,13 +757,100 @@ def _plot_DSSF_combined(A: np.ndarray, w: np.ndarray, tick_positions: List[int],
     plt.close()
 
 
+def _plot_first_timesteps(M0_components: np.ndarray, M1_components: np.ndarray, 
+                          M01_components: np.ndarray, M_NL_components: np.ndarray,
+                          tau_values: np.ndarray, times: np.ndarray, output_dir: str,
+                          n_tau_steps: int = 10):
+    """Plot the first few time steps for all signal components.
+    
+    Args:
+        M0_components: Reference signal [spin_dim, n_tau, n_times]
+        M1_components: First pump signal [spin_dim, n_tau, n_times]
+        M01_components: Double pump signal [spin_dim, n_tau, n_times]
+        M_NL_components: Nonlinear signal [spin_dim, n_tau, n_times]
+        tau_values: Array of tau values
+        times: Array of time points
+        output_dir: Directory to save plots
+        n_tau_steps: Number of tau steps to plot (default: 10)
+    """
+    spin_dim = M0_components.shape[0]
+    component_labels = ['λ1', 'λ2', 'λ3', 'λ4', 'λ5', 'λ6', 'λ7', 'λ8']
+    
+    # Determine which tau indices to plot (evenly spaced)
+    n_tau = len(tau_values)
+    tau_indices = np.linspace(0, n_tau - 1, min(n_tau_steps, n_tau), dtype=int)
+    
+    print(f"  Plotting first {len(tau_indices)} tau steps...")
+    
+    # Create a figure for each component showing all signals
+    for comp in range(spin_dim):
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(f'{component_labels[comp]}-component: First {len(tau_indices)} tau steps', 
+                     fontsize=14, fontweight='bold')
+        
+        signal_data = [
+            (M0_components[comp], 'M0', axes[0, 0]),
+            (M1_components[comp], 'M1', axes[0, 1]),
+            (M01_components[comp], 'M01', axes[1, 0]),
+            (M_NL_components[comp], 'M_NL', axes[1, 1])
+        ]
+        
+        for data, label, ax in signal_data:
+            for tau_idx in tau_indices:
+                tau_val = tau_values[tau_idx]
+                ax.plot(times, data[tau_idx, :], 
+                       label=f'τ={tau_val:.3f}', alpha=0.7, linewidth=1.5)
+            
+            ax.set_xlabel('Time', fontsize=11)
+            ax.set_ylabel(f'${label}_{{{component_labels[comp]}}}$', fontsize=11)
+            ax.set_title(f'{label} signal', fontsize=12)
+            ax.legend(fontsize=8, ncol=2, loc='best')
+            ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f"first_timesteps_{component_labels[comp]}.pdf"), 
+                   dpi=100)
+        plt.close(fig)
+    
+    # Create summary plot with all components for M_NL only
+    n_rows = min(spin_dim, 4)  # Limit to 4 rows for readability
+    n_cols = 2
+    fig_summary, axes_summary = plt.subplots(n_rows, n_cols, 
+                                            figsize=(14, 3*n_rows))
+    fig_summary.suptitle(f'M_NL: First {len(tau_indices)} tau steps (all components)', 
+                        fontsize=14, fontweight='bold')
+    
+    for comp in range(min(spin_dim, n_rows * n_cols)):
+        row = comp // n_cols
+        col = comp % n_cols
+        ax = axes_summary[row, col] if n_rows > 1 else axes_summary[col]
+        
+        for tau_idx in tau_indices:
+            tau_val = tau_values[tau_idx]
+            ax.plot(times, M_NL_components[comp][tau_idx, :], 
+                   label=f'τ={tau_val:.3f}', alpha=0.7, linewidth=1.5)
+        
+        ax.set_xlabel('Time', fontsize=10)
+        ax.set_ylabel(f'$M_{{NL,{component_labels[comp]}}}$', fontsize=10)
+        ax.set_title(f'{component_labels[comp]}-component', fontsize=11)
+        ax.legend(fontsize=7, ncol=2, loc='best')
+        ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "first_timesteps_M_NL_summary.pdf"), dpi=100)
+    plt.close(fig_summary)
+    
+    print(f"  Saved first timestep plots to {output_dir}")
+
+
 # =============================================================================
 # 2D COHERENT SPECTROSCOPY ANALYSIS
 # =============================================================================
 
 def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None, 
                       omega_tau_window: Optional[Tuple[float, float]] = None,
-                      norm_type: NormType = 'log', gamma: float = 0.5) -> Dict[str, np.ndarray]:
+                      norm_type: NormType = 'log', gamma: float = 0.5,
+                      demod_omega_t: Optional[float] = None) -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for SU(3) systems.
     
     Computes the nonlinear response M_NL = M01 - M0 - M1 and performs 2D FFT
@@ -772,6 +864,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         norm_type: Normalization type for colormap ('log', 'power', 'symlog', 'linear')
         gamma: Exponent for PowerNorm (default: 0.5)
+        demod_omega_t: If provided, demodulate (rotate) along detection time t by
+            multiplying data by exp(+i * demod_omega_t * t) before FFT.
         
     Returns:
         Dictionary with 2DCS results including M_NL_FF and frequency arrays
@@ -785,6 +879,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     
     results = {}
     
+    pulse_freq: Optional[float] = None
+
     # Read from HDF5 file
     with h5py.File(hdf5_path, 'r') as f:
         times = f['/reference/times'][:]
@@ -809,7 +905,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             if 'pulse_width' in metadata_grp.attrs:
                 print(f"    Width: {metadata_grp.attrs['pulse_width']}")
             if 'pulse_freq' in metadata_grp.attrs:
-                print(f"    Frequency: {metadata_grp.attrs['pulse_freq']}")
+                pulse_freq = float(metadata_grp.attrs['pulse_freq'])
+                print(f"    Frequency: {pulse_freq}")
             print(f"  Lattice parameters:")
             if 'n_atoms' in metadata_grp.attrs:
                 print(f"    n_atoms: {metadata_grp.attrs['n_atoms']}")
@@ -853,17 +950,44 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     results['omega_tau'] = omega_tau
     results['omega_t'] = omega_t
     results['tau_values'] = tau_values
+    if pulse_freq is not None:
+        results['pulse_freq'] = pulse_freq
     
-    # Helper function for 2D FFT analysis
+    # Pre-compute FFT for all components (cache for reuse)
+    print("  Pre-computing FFTs for all components...")
+    M_NL_FF_cache = np.zeros((spin_dim, len(omega_tau), len(omega_t)), dtype=np.float64)
+    M0_FF_cache = np.zeros_like(M_NL_FF_cache)
+    M1_FF_cache = np.zeros_like(M_NL_FF_cache)
+    M01_FF_cache = np.zeros_like(M_NL_FF_cache)
+    
+    # Helper function for 2D FFT analysis (optimized)
+    t_phase: Optional[np.ndarray] = None
+    if demod_omega_t is not None:
+        t_phase = np.exp(1j * demod_omega_t * times)
+
     def compute_2d_fft(data):
         """Compute 2D FFT with proper shifting and flipping."""
-        data_static = np.mean(data)
-        data_dynamic = data - data_static
+        data_dynamic = data - data.mean()  # In-place mean subtraction equivalent
+        if t_phase is not None:
+            data_dynamic = data_dynamic * t_phase[None, :]
         data_FF = np.fft.fft2(data_dynamic)
         data_FF = np.fft.fftshift(data_FF)
         data_FF = np.abs(data_FF)
-        data_FF = np.flip(data_FF, axis=1)  # Flip omega_t axis
-        return data_FF
+        return np.flip(data_FF, axis=1)  # Flip omega_t axis
+    
+    # Compute all FFTs once
+    for comp in range(spin_dim):
+        M_NL_FF_cache[comp] = compute_2d_fft(M_NL_components[comp])
+        M0_FF_cache[comp] = compute_2d_fft(M0_components[comp])
+        M1_FF_cache[comp] = compute_2d_fft(M1_components[comp])
+        M01_FF_cache[comp] = compute_2d_fft(M01_components[comp])
+    
+    # =========================================================================
+    # Plot first few time steps
+    # =========================================================================
+    print("  Plotting first time steps...")
+    _plot_first_timesteps(M0_components, M1_components, M01_components, M_NL_components,
+                         tau_values, times, dir, n_tau_steps=10)
     
     # =========================================================================
     # Analysis for M0, M1, M01 (individual signals)
@@ -871,8 +995,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     signal_names = ['M0', 'M1', 'M01']
     signal_data = [M0_components, M1_components, M01_components]
     
+    # Map signal names to cached FFTs
+    fft_cache_map = {'M0': M0_FF_cache, 'M1': M1_FF_cache, 'M01': M01_FF_cache}
+    
     for sig_name, sig_components in zip(signal_names, signal_data):
         print(f"  Processing {sig_name}...")
+        sig_fft_cache = fft_cache_map[sig_name]
         
         # Create debug plot for this signal (spin_dim components x 3 plot types)
         n_rows = min(spin_dim, 8)  # Limit rows for readability
@@ -883,7 +1011,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             # Time domain plot
             ax_time = axes_sig[comp, 0]
-            for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+            tau_stride = max(1, len(tau) // 5)
+            for tau_idx in range(0, len(tau), tau_stride):
                 ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
             ax_time.set_xlabel('Time index')
             ax_time.set_ylabel(f'${sig_name}_{{{component_labels[comp]}}}$')
@@ -900,12 +1029,13 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             ax_2d.set_title(f'{component_labels[comp]}-component (τ, t)')
             plt.colorbar(im, ax=ax_2d)
             
-            # Frequency domain plot (2D FFT)
-            sig_comp_FF = compute_2d_fft(sig_comp)
+            # Frequency domain plot (use cached FFT)
+            sig_comp_FF = sig_fft_cache[comp]
             
             ax_freq = axes_sig[comp, 2]
             im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                      norm=_get_norm(sig_comp_FF, norm_type, gamma), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                      norm=_get_norm(sig_comp_FF, norm_type, gamma), 
+                                      extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
             ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
             ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
             ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
@@ -919,18 +1049,16 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             np.savetxt(dir + f"/{sig_name}_FF_{component_labels[comp]}.txt", sig_comp_FF)
         
         plt.tight_layout()
-        plt.savefig(dir + f"/{sig_name}_components_debug.pdf")
-        plt.clf()
-        plt.close()
+        plt.savefig(dir + f"/{sig_name}_components_debug.pdf", dpi=100)
+        plt.close(fig_sig)  # Explicitly close figure
         
-        # Save total FFT (sum over components)
-        sig_total_FF = np.zeros_like(compute_2d_fft(sig_components[0]))
-        for comp in range(spin_dim):
-            sig_total_FF += compute_2d_fft(sig_components[comp])
+        # Save total FFT (use cached values - just sum)
+        sig_total_FF = sig_fft_cache.sum(axis=0)
         np.savetxt(dir + f"/{sig_name}_FF.txt", sig_total_FF)
         results[f'{sig_name}_FF'] = sig_total_FF
         
         # Main spectrum plot (sum of components)
+        fig_spec = plt.figure(figsize=(10, 8))
         plt.imshow(sig_total_FF, origin='lower',
                    extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                    aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_total_FF, norm_type, gamma))
@@ -942,22 +1070,25 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             plt.xlim(omega_t_window)
         if omega_tau_window is not None:
             plt.ylim(omega_tau_window)
-        plt.savefig(dir + f"/{sig_name}_SPEC.pdf")
-        plt.clf()
+        plt.savefig(dir + f"/{sig_name}_SPEC.pdf", dpi=100)
+        plt.close(fig_spec)
     
     # =========================================================================
     # M_NL analysis (M01 - M0 - M1)
     # =========================================================================
     
     # Debug plots: Plot M_NL for each component in time domain and frequency domain
+    print("  Generating M_NL debug plots...")
     n_rows = min(spin_dim, 8)
     fig_debug, axes_debug = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
+    tau_stride = max(1, len(tau) // 5)
+    
     for comp in range(n_rows):
         M_NL_comp = M_NL_components[comp]
         
         # Time domain plot (M_NL vs t for different tau)
         ax_time = axes_debug[comp, 0]
-        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+        for tau_idx in range(0, len(tau), tau_stride):
             ax_time.plot(M_NL_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
         ax_time.set_xlabel('Time index')
         ax_time.set_ylabel(f'$M_{{NL,{component_labels[comp]}}}$')
@@ -974,12 +1105,13 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         ax_2d.set_title(f'{component_labels[comp]}-component (τ, t)')
         plt.colorbar(im, ax=ax_2d)
         
-        # Frequency domain plot (2D FFT)
-        M_NL_comp_FF = compute_2d_fft(M_NL_comp)
+        # Frequency domain plot (use cached FFT)
+        M_NL_comp_FF = M_NL_FF_cache[comp]
         
         ax_freq = axes_debug[comp, 2]
         im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                  norm=_get_norm(M_NL_comp_FF, norm_type, gamma), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                  norm=_get_norm(M_NL_comp_FF, norm_type, gamma), 
+                                  extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
         ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
         ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
         ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
@@ -993,19 +1125,17 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         np.savetxt(dir + f"/M_NL_FF_{component_labels[comp]}.txt", M_NL_comp_FF)
     
     plt.tight_layout()
-    plt.savefig(dir + "/M_NL_components_debug.pdf")
-    plt.clf()
-    plt.close()
+    plt.savefig(dir + "/M_NL_components_debug.pdf", dpi=100)
+    plt.close(fig_debug)
     
-    # Compute total M_NL (sum over all components)
-    M_NL_total_FF = np.zeros_like(compute_2d_fft(M_NL_components[0]))
-    for comp in range(spin_dim):
-        M_NL_total_FF += compute_2d_fft(M_NL_components[comp])
+    # Compute total M_NL (use cached FFTs - just sum)
+    M_NL_total_FF = M_NL_FF_cache.sum(axis=0)
     
     np.savetxt(dir + "/M_NL_FF.txt", M_NL_total_FF)
     results['M_NL_FF'] = M_NL_total_FF
     
     # Full spectrum plot (total)
+    fig_nl = plt.figure(figsize=(10, 8))
     plt.imshow(M_NL_total_FF, origin='lower',
                extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_total_FF, norm_type, gamma))
@@ -1017,18 +1147,36 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         plt.xlim(omega_t_window)
     if omega_tau_window is not None:
         plt.ylim(omega_tau_window)
-    plt.savefig(dir + "/M_NLSPEC.pdf")
-    plt.clf()
+    plt.savefig(dir + "/M_NLSPEC.pdf", dpi=100)
+    plt.close(fig_nl)
     
     return results
 
 
+def _process_subdir_parallel(args):
+    """Helper function for parallel processing of subdirectories."""
+    subdir, filename, omega_t_window, omega_tau_window, norm_type, gamma = args
+    try:
+        print(f"Processing: {filename}")
+        sub_results = read_2D_nonlinear(subdir,
+                                         omega_t_window=omega_t_window,
+                                         omega_tau_window=omega_tau_window,
+                                         norm_type=norm_type,
+                                         gamma=gamma)
+        M_NL_data = np.loadtxt(os.path.join(subdir, "M_NL_FF.txt"))
+        return (M_NL_data, sub_results.get('omega_tau'), sub_results.get('omega_t'), filename)
+    except Exception as e:
+        print(f"Error processing {filename}: {e}")
+        return None
+
+
 def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]] = None, 
                           omega_tau_window: Optional[Tuple[float, float]] = None,
-                          norm_type: NormType = 'log', gamma: float = 0.5) -> Dict[str, np.ndarray]:
+                          norm_type: NormType = 'log', gamma: float = 0.5,
+                          n_jobs: Optional[int] = None) -> Dict[str, np.ndarray]:
     """Aggregate 2D nonlinear spectroscopy from multiple pump-probe runs.
     
-    Processes all subdirectories containing pump-probe data, aggregates
+    Processes all subdirectories containing pump-probe data in parallel, aggregates
     results, and generates combined 2D FFT spectrum.
     
     Args:
@@ -1037,6 +1185,7 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         norm_type: Normalization type for colormap ('log', 'power', 'symlog', 'linear')
         gamma: Exponent for PowerNorm (default: 0.5)
+        n_jobs: Number of parallel jobs (default: use all cores)
     
     Returns:
         Dictionary with aggregated 2DCS results
@@ -1047,42 +1196,49 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
     """
     omega_t_window = _validate_window(omega_t_window, "omega_t_window")
     omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
-    directory = os.fsencode(dir)
+    
+    if n_jobs is None:
+        n_jobs = max(1, multiprocessing.cpu_count() - 1)
+    
+    # Collect all subdirectories
+    subdirs_to_process = []
+    for filename in sorted(os.listdir(dir)):
+        subdir = os.path.join(dir, filename)
+        if os.path.isdir(subdir):
+            hdf5_path = os.path.join(subdir, "pump_probe_spectroscopy.h5")
+            if os.path.exists(hdf5_path):
+                subdirs_to_process.append((subdir, filename, omega_t_window, 
+                                          omega_tau_window, norm_type, gamma))
+    
+    if not subdirs_to_process:
+        print("No valid subdirectories found")
+        return {}
+    
+    print(f"Processing {len(subdirs_to_process)} subdirectories using {n_jobs} workers...")
+    
     A = None
     count = 0
     results = {}
     
-    for file in sorted(os.listdir(directory)):
-        filename = os.fsdecode(file)
-        subdir = os.path.join(dir, filename)
-        if os.path.isdir(subdir):
-            hdf5_path = os.path.join(subdir, "pump_probe_spectroscopy.h5")
-            if not os.path.exists(hdf5_path):
-                print(f"  Skipping {filename}: no pump_probe_spectroscopy.h5 found")
-                continue
-            try:
-                print(f"Processing: {filename}")
-                sub_results = read_2D_nonlinear(subdir,
-                                                 omega_t_window=omega_t_window,
-                                                 omega_tau_window=omega_tau_window,
-                                                 norm_type=norm_type,
-                                                 gamma=gamma)
-                M_NL_data = np.loadtxt(os.path.join(subdir, "M_NL_FF.txt"))
+    # Process in parallel
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        future_to_subdir = {executor.submit(_process_subdir_parallel, args): args[1] 
+                           for args in subdirs_to_process}
+        
+        for future in as_completed(future_to_subdir):
+            result = future.result()
+            if result is not None:
+                M_NL_data, omega_tau, omega_t, filename = result
                 
                 if A is None:
                     A = M_NL_data.copy()
-                    results['omega_tau'] = sub_results.get('omega_tau')
-                    results['omega_t'] = sub_results.get('omega_t')
+                    results['omega_tau'] = omega_tau
+                    results['omega_t'] = omega_t
                 else:
                     min_shape = (min(A.shape[0], M_NL_data.shape[0]),
                                 min(A.shape[1], M_NL_data.shape[1]))
                     A[:min_shape[0], :min_shape[1]] += M_NL_data[:min_shape[0], :min_shape[1]]
                 count += 1
-            except Exception as e:
-                print(f"Error processing {filename}: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
     
     if A is not None and count > 0:
         A = A / count  # Average over all runs
@@ -1327,6 +1483,27 @@ def parse_norm_arg(arg: str) -> Tuple[NormType, float]:
     return norm_type, gamma
 
 
+def _parse_kv_args(args: List[str]) -> Dict[str, str]:
+    """Parse extra CLI args in key=value form."""
+    kv: Dict[str, str] = {}
+    for a in args:
+        if '=' not in a:
+            continue
+        k, v = a.split('=', 1)
+        k = k.strip().lower()
+        v = v.strip()
+        if k:
+            kv[k] = v
+    return kv
+
+
+def _parse_demod_arg(val: str) -> Optional[float]:
+    """Parse demod arg. Accepts float string or 'none'."""
+    if val.lower() == 'none':
+        return None
+    return float(val)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python reader_TmFeO3_SU3.py <hdf5_file_or_directory> [analysis_type] [omega_t_window] [omega_tau_window] [norm_type]")
@@ -1337,6 +1514,9 @@ if __name__ == "__main__":
         print("  omega_tau_window: 'min,max' or 'None' for no windowing (default: None)")
         print("  norm_type: 'log', 'power', 'power:gamma', 'symlog', or 'linear' (default: 'log')")
         print("             For power norm, optionally specify gamma as 'power:0.3' (default: 0.5)")
+        print("  Optional extra args (key=value, after norm_type):")
+        print("    demod=<omega>: demodulate along t by exp(+i*omega*t) before FFT (e.g. demod=0.5)")
+        print("                 Use demod=none to disable (default)")
         print("\nExamples:")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_tm_md/sample_0/trajectory.h5 md")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_tm_md/ md")
@@ -1344,6 +1524,7 @@ if __name__ == "__main__":
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -0.5,0.5 -0.5,0.5")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power:0.3")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power demod=0.5")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp None None symlog")
         sys.exit(1)
     
@@ -1362,6 +1543,12 @@ if __name__ == "__main__":
         omega_tau_window = parse_omega_window(sys.argv[4])
     if len(sys.argv) > 5:
         norm_type, gamma = parse_norm_arg(sys.argv[5])
+
+    extra_kv = _parse_kv_args(sys.argv[6:]) if len(sys.argv) > 6 else {}
+    demod_omega_t: Optional[float] = None
+    if 'demod' in extra_kv:
+        # demod=<float> or demod=none
+        demod_omega_t = _parse_demod_arg(extra_kv['demod'])
     
     if not os.path.exists(input_path):
         print(f"Error: Path not found: {input_path}")
@@ -1373,6 +1560,8 @@ if __name__ == "__main__":
         print(f"  omega_t_window: {omega_t_window}")
         print(f"  omega_tau_window: {omega_tau_window}")
         print(f"  norm_type: {norm_type}" + (f" (gamma={gamma})" if norm_type == 'power' else ""))
+        if demod_omega_t is not None:
+            print(f"  demod_omega_t: {demod_omega_t}")
         print("=" * 50)
         
         if os.path.isdir(input_path):
@@ -1400,7 +1589,8 @@ if __name__ == "__main__":
                                             omega_t_window=omega_t_window,
                                             omega_tau_window=omega_tau_window,
                                             norm_type=norm_type,
-                                            gamma=gamma)
+                                            gamma=gamma,
+                                            demod_omega_t=demod_omega_t)
             else:
                 print(f"Error: No pump_probe_spectroscopy.h5 found in {input_path}")
                 sys.exit(1)

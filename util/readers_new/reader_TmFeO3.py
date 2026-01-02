@@ -37,10 +37,12 @@ HDF5 File Structures:
 import h5py
 import numpy as np
 from opt_einsum import contract
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for faster plotting
 import matplotlib.pyplot as plt
 import os
 from math import gcd
-from functools import reduce
+from functools import reduce, lru_cache
 from matplotlib.colors import PowerNorm, LogNorm, SymLogNorm, Normalize
 from typing import Dict, Tuple, Optional, List, Any, Literal
 
@@ -172,13 +174,13 @@ def Spin_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
         results: [n_times, n_k, spin_dim] complex array
     """
     N = S.shape[1]
-    n_times = S.shape[0]
-    spin_dim = S.shape[2]
-    results = np.zeros((n_times, len(k), spin_dim), dtype=np.complex128)
-    ffact = np.exp(1j * contract('ik,jk->ij', k, P))
     
-    for i in range(n_times):
-        results[i] = contract('js, ij->is', S[i], ffact) / np.sqrt(N)
+    # Compute phase factors once (k @ P.T)
+    ffact = np.exp(1j * np.dot(k, P.T))  # [n_k, n_sites]
+    
+    # Vectorized computation: (n_times, n_sites, spin_dim) @ (n_sites, n_k) -> (n_times, spin_dim, n_k)
+    # Then transpose to (n_times, n_k, spin_dim)
+    results = np.einsum('tjs,kj->tks', S, ffact, optimize=True) / np.sqrt(N)
     
     return results
 
@@ -198,7 +200,6 @@ def Spin_global_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     """
     n_sublattices = 4
     N = S.shape[1]
-    n_times = S.shape[0]
     
     # eta[sublattice, component] gives the sign for each spin component
     eta = np.array([[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]])
@@ -208,12 +209,11 @@ def Spin_global_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     for i in range(n_sublattices):
         S_global[:, i::n_sublattices, :] *= eta[i]
     
-    # Now compute structure factor same as Spin_t
-    results = np.zeros((n_times, len(k), 3), dtype=np.complex128)
-    ffact = np.exp(1j * contract('ik,jk->ij', k, P))
+    # Compute phase factors once (faster than einsum for matrix multiply)
+    ffact = np.exp(1j * np.dot(k, P.T))  # [n_k, n_sites]
     
-    for t in range(n_times):
-        results[t] = contract('js, ij->is', S_global[t], ffact) / np.sqrt(N)
+    # Vectorized computation
+    results = np.einsum('tjs,kj->tks', S_global, ffact, optimize=True) / np.sqrt(N)
     
     return results
 
@@ -242,21 +242,21 @@ def DSSF(w: np.ndarray, k: np.ndarray, S: np.ndarray, P: np.ndarray,
         # Use local frame (original implementation)
         A = Spin_t(k, S, P)
     
-    # Subtract mean configuration before FFT
-    A_mean = np.mean(A, axis=0, keepdims=True)
-    A = A - A_mean
+    # Subtract mean and FFT in one step (more cache-friendly)
+    A -= A.mean(axis=0, keepdims=True)
     
     # FFT over time dimension
     dt = T[1] - T[0] if len(T) > 1 else 1.0
-    A_fft = np.fft.fft(A, axis=0)
+    A_fft = np.fft.fft(A, axis=0) / np.sqrt(len(T))
     fft_freqs = np.fft.fftfreq(len(T), d=dt) * 2 * np.pi
     
-    # Select closest frequencies to w
-    indices = [np.argmin(np.abs(fft_freqs - w_val)) for w_val in w]
-    Somega = A_fft[indices] / np.sqrt(len(T))
+    # Vectorized frequency index selection
+    indices = np.argmin(np.abs(fft_freqs[:, None] - w[None, :]), axis=0)
+    Somega = A_fft[indices]
     
-    read = np.real(contract('wia, wib->wiab', Somega, np.conj(Somega)))
-    return read
+    # Optimized outer product
+    result = np.einsum('wia,wib->wiab', Somega, np.conj(Somega), optimize=True)
+    return np.real(result)
 
 
 # =============================================================================
@@ -859,16 +859,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         results['omega_t'] = omega_t
         results['tau_values'] = tau_values
         
-        # Helper function for 2D FFT analysis
+        # Helper function for 2D FFT analysis (optimized)
         def compute_2d_fft(data):
             """Compute 2D FFT with proper shifting and flipping."""
-            data_static = np.mean(data)
-            data_dynamic = data - data_static
+            data_dynamic = data - data.mean()  # In-place equivalent
             data_FF = np.fft.fft2(data_dynamic)
             data_FF = np.fft.fftshift(data_FF)
             data_FF = np.abs(data_FF)
-            data_FF = np.flip(data_FF, axis=1)  # Flip omega_t axis
-            return data_FF
+            return np.flip(data_FF, axis=1)  # Flip omega_t axis
         
         # =====================================================================
         # Process SU(2) sublattice
@@ -961,6 +959,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_z_FF)
                 results[f'{sig_name}_FF'] = sig_z_FF
                 
+                fig_spec = plt.figure(figsize=(10, 8))
                 plt.imshow(sig_z_FF, origin='lower',
                            extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                            aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_z_FF, norm_type))
@@ -972,8 +971,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     plt.xlim(omega_t_window)
                 if omega_tau_window is not None:
                     plt.ylim(omega_tau_window)
-                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"))
-                plt.clf()
+                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
+                plt.close(fig_spec)
             
             # M_NL analysis for SU2
             print("    Processing M_NL_SU2...")
@@ -1022,9 +1021,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 np.savetxt(os.path.join(dir, f"M_NL_SU2_FF_{label}.txt"), M_NL_comp_FF)
             
             plt.tight_layout()
-            plt.savefig(os.path.join(dir, "M_NL_SU2_components_debug.pdf"))
-            plt.clf()
-            plt.close()
+            plt.savefig(os.path.join(dir, "M_NL_SU2_components_debug.pdf"), dpi=100)
+            plt.close(fig_debug)
             
             # Main M_NL spectrum for SU2 (z-component)
             M_NL_z = M_NL_SU2[2] if spin_dim_SU2 > 2 else M_NL_SU2[0]
@@ -1032,6 +1030,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             np.savetxt(os.path.join(dir, "M_NL_SU2_FF.txt"), M_NL_z_FF)
             results['M_NL_SU2_FF'] = M_NL_z_FF
             
+            fig_nl = plt.figure(figsize=(10, 8))
             plt.imshow(M_NL_z_FF, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_z_FF, norm_type))
@@ -1043,8 +1042,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.xlim(omega_t_window)
             if omega_tau_window is not None:
                 plt.ylim(omega_tau_window)
-            plt.savefig(os.path.join(dir, "M_NL_SU2_SPEC.pdf"))
-            plt.clf()
+            plt.savefig(os.path.join(dir, "M_NL_SU2_SPEC.pdf"), dpi=100)
+            plt.close(fig_nl)
         
         # =====================================================================
         # Process SU(3) sublattice
@@ -1127,17 +1126,17 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
                 
                 plt.tight_layout()
-                plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
-                plt.clf()
-                plt.close()
+                plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"), dpi=100)
+                plt.close(fig_sig)  # Explicitly close figure
                 
-                # Total spectrum (sum over components)
+                # Total spectrum (sum over components - cache FFTs)
                 sig_total_FF = np.zeros_like(compute_2d_fft(sig_components[0]))
                 for comp in range(spin_dim_SU3):
                     sig_total_FF += compute_2d_fft(sig_components[comp])
                 np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_total_FF)
                 results[f'{sig_name}_FF'] = sig_total_FF
                 
+                fig_spec = plt.figure(figsize=(10, 8))
                 plt.imshow(sig_total_FF, origin='lower',
                            extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                            aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_total_FF, norm_type))
@@ -1149,8 +1148,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     plt.xlim(omega_t_window)
                 if omega_tau_window is not None:
                     plt.ylim(omega_tau_window)
-                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"))
-                plt.clf()
+                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
+                plt.close(fig_spec)
             
             # M_NL analysis for SU3
             print("    Processing M_NL_SU3...")
@@ -1199,9 +1198,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 np.savetxt(os.path.join(dir, f"M_NL_SU3_FF_{label}.txt"), M_NL_comp_FF)
             
             plt.tight_layout()
-            plt.savefig(os.path.join(dir, "M_NL_SU3_components_debug.pdf"))
-            plt.clf()
-            plt.close()
+            plt.savefig(os.path.join(dir, "M_NL_SU3_components_debug.pdf"), dpi=100)
+            plt.close(fig_debug)
             
             # Total M_NL spectrum for SU3 (sum over components)
             M_NL_total_FF = np.zeros_like(compute_2d_fft(M_NL_SU3[0]))
@@ -1210,6 +1208,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             np.savetxt(os.path.join(dir, "M_NL_SU3_FF.txt"), M_NL_total_FF)
             results['M_NL_SU3_FF'] = M_NL_total_FF
             
+            fig_nl = plt.figure(figsize=(10, 8))
             plt.imshow(M_NL_total_FF, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_total_FF, norm_type))
@@ -1221,8 +1220,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.xlim(omega_t_window)
             if omega_tau_window is not None:
                 plt.ylim(omega_tau_window)
-            plt.savefig(os.path.join(dir, "M_NL_SU3_SPEC.pdf"))
-            plt.clf()
+            plt.savefig(os.path.join(dir, "M_NL_SU3_SPEC.pdf"), dpi=100)
+            plt.close(fig_nl)
         
         # =====================================================================
         # Combined SU(2) + SU(3) spectrum
@@ -1233,6 +1232,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             np.savetxt(os.path.join(dir, "M_NL_combined_FF.txt"), M_NL_combined)
             results['M_NL_combined_FF'] = M_NL_combined
             
+            fig_comb = plt.figure(figsize=(10, 8))
             plt.imshow(M_NL_combined, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_combined, norm_type))
@@ -1244,8 +1244,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.xlim(omega_t_window)
             if omega_tau_window is not None:
                 plt.ylim(omega_tau_window)
-            plt.savefig(os.path.join(dir, "M_NL_combined_SPEC.pdf"))
-            plt.clf()
+            plt.savefig(os.path.join(dir, "M_NL_combined_SPEC.pdf"), dpi=100)
+            plt.close(fig_comb)
     
     print(f"\n  2D nonlinear spectroscopy analysis complete.")
     print(f"  Output files saved to: {dir}")
