@@ -47,14 +47,14 @@ overrelaxation_rate = 1
 use_twist_boundary = false
 gaussian_move = false
 
-pump_amplitude = 0.2
-pump_width = 4
+pump_amplitude = 0.05
+pump_width = 0.5
 pump_frequency = 2.1
 pump_direction = 0,1,0,0,0,0,0.0,0
 
 # 2DCS Scan
 tau_start = -100.0
-tau_end = 100.0
+tau_end = 0.0
 tau_step = 0.1
 parallel_tau = true     # Enable MPI parallelization over tau when num_trials=1
 

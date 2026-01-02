@@ -941,7 +941,21 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         dt = times[1] - times[0] if len(times) > 1 else 1.0
         tau = tau_values
 
-    # Compute omega arrays
+    # Filter to only include t >= 0 for Fourier transform
+    t0_idx = np.searchsorted(times, 0.0)  # Find index where t >= 0
+    times_positive = times[t0_idx:]
+    print(f"  Filtering to t >= 0: using {len(times_positive)}/{len(times)} time points (t0_idx={t0_idx})")
+    
+    # Slice the data arrays to only include t >= 0
+    M_NL_components = M_NL_components[:, :, t0_idx:]
+    M0_components = M0_components[:, :, t0_idx:]
+    M1_components = M1_components[:, :, t0_idx:]
+    M01_components = M01_components[:, :, t0_idx:]
+    
+    # Update times for downstream use
+    times = times_positive
+    
+    # Compute omega arrays (using filtered time array)
     omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
     omega_tau = np.fft.fftshift(omega_tau)
     omega_t = np.fft.fftfreq(M_NL_components.shape[2], dt) * 2 * np.pi
@@ -966,7 +980,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         t_phase = np.exp(1j * demod_omega_t * times)
 
     def compute_2d_fft(data):
-        """Compute 2D FFT with proper shifting and flipping."""
+        """Compute 2D FFT with proper shifting and flipping (only t >= 0 data)."""
         data_dynamic = data - data.mean()  # In-place mean subtraction equivalent
         if t_phase is not None:
             data_dynamic = data_dynamic * t_phase[None, :]
