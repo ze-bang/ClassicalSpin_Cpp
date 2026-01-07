@@ -3059,18 +3059,18 @@ public:
     }
 
     /**
-     * Set pulse parameters for SU(2)
+     * Set pulse parameters for SU(2) (drive field is transformed to local frame)
      */
     void set_pulse_SU2(const vector<SpinVector>& field_in1, double t_B1,
                       const vector<SpinVector>& field_in2, double t_B2,
                       double amp, double width, double freq) {
-        // Pack field vectors
+        // Pack field vectors, transforming to local frame: B_local = R * B_global
         field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
         field_drive_SU2[1] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
         
         for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
-            field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2) = field_in1[atom];
-            field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2) = field_in2[atom];
+            field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2) = sublattice_frames_SU2[atom] * field_in1[atom];
+            field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2) = sublattice_frames_SU2[atom] * field_in2[atom];
         }
         
         t_pulse_SU2[0] = t_B1;
@@ -3081,18 +3081,18 @@ public:
     }
 
     /**
-     * Set pulse parameters for SU(3)
+     * Set pulse parameters for SU(3) (drive field is transformed to local frame)
      */
     void set_pulse_SU3(const vector<SpinVector>& field_in1, double t_B1,
                       const vector<SpinVector>& field_in2, double t_B2,
                       double amp, double width, double freq) {
-        // Pack field vectors
+        // Pack field vectors, transforming to local frame: B_local = R * B_global
         field_drive_SU3[0] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
         field_drive_SU3[1] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
         
         for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
-            field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3) = field_in1[atom];
-            field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3) = field_in2[atom];
+            field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3) = sublattice_frames_SU3[atom] * field_in1[atom];
+            field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3) = sublattice_frames_SU3[atom] * field_in2[atom];
         }
         
         t_pulse_SU3[0] = t_B1;
@@ -3117,7 +3117,7 @@ public:
     }
 
     /**
-     * Compute time-dependent drive field for SU(2) site
+     * Compute time-dependent drive field for SU(2) site (pre-transformed to local frame)
      */
     SpinVector drive_field_SU2_at_time(double t, size_t site_index) const {
         const size_t atom = site_index % N_atoms_SU2;
@@ -3137,7 +3137,7 @@ public:
     }
 
     /**
-     * Compute time-dependent drive field for SU(3) site
+     * Compute time-dependent drive field for SU(3) site (pre-transformed to local frame)
      */
     SpinVector drive_field_SU3_at_time(double t, size_t site_index) const {
         const size_t atom = site_index % N_atoms_SU3;

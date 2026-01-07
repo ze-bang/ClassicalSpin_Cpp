@@ -29,8 +29,11 @@ import os
 import sys
 from math import gcd
 from functools import reduce
-from matplotlib.colors import LogNorm, PowerNorm
-from typing import Dict, Tuple, Optional, List, Any
+from matplotlib.colors import LogNorm, PowerNorm, SymLogNorm, Normalize
+from typing import Dict, Tuple, Optional, List, Any, Literal
+
+# Type alias for normalization types
+NormType = Literal['log', 'power', 'symlog', 'linear']
 
 
 # =============================================================================
@@ -672,8 +675,79 @@ def _validate_window(window, name):
     return tuple(window)
 
 
+def _get_norm(data: np.ndarray, norm_type: NormType = 'log', gamma: float = 0.5, 
+              linthresh: float = 1e-3) -> Optional[Normalize]:
+    """Get normalization for imshow based on the specified type.
+    
+    Args:
+        data: The data array to normalize
+        norm_type: Type of normalization:
+            - 'log': LogNorm (logarithmic scaling, good for data with large dynamic range)
+            - 'power': PowerNorm (power-law scaling with gamma parameter)
+            - 'symlog': SymLogNorm (symmetric log, good for data with positive and negative values)
+            - 'linear': Linear normalization (no scaling)
+        gamma: Exponent for PowerNorm (default: 0.5, i.e., square root scaling)
+        linthresh: Linear threshold for SymLogNorm (default: 1e-3)
+    
+    Returns:
+        Matplotlib Normalize object or None for default linear normalization
+    """
+    # Get data range
+    finite_data = data[np.isfinite(data)]
+    if len(finite_data) == 0:
+        return None
+    
+    data_min = finite_data.min()
+    data_max = finite_data.max()
+    
+    if data_min >= data_max:
+        # All values are the same, use linear norm
+        return None
+    
+    if norm_type == 'log':
+        # Get positive values only for log norm
+        positive_data = data[data > 0]
+        if len(positive_data) == 0:
+            return None
+        vmin = positive_data.min()
+        vmax = positive_data.max()
+        if vmin >= vmax:
+            return None
+        return LogNorm(vmin=vmin, vmax=vmax)
+    
+    elif norm_type == 'power':
+        # PowerNorm with specified gamma
+        # For data that includes zero or negative, shift to positive
+        if data_min <= 0:
+            vmin = 0
+            vmax = data_max - data_min
+        else:
+            vmin = data_min
+            vmax = data_max
+        return PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
+    
+    elif norm_type == 'symlog':
+        # SymLogNorm for data with both positive and negative values
+        # Automatically determine linthresh if data is very small
+        abs_max = max(abs(data_min), abs(data_max))
+        if abs_max > 0:
+            auto_linthresh = min(linthresh, abs_max * 0.01)
+        else:
+            auto_linthresh = linthresh
+        return SymLogNorm(linthresh=auto_linthresh, vmin=data_min, vmax=data_max)
+    
+    elif norm_type == 'linear':
+        return Normalize(vmin=data_min, vmax=data_max)
+    
+    else:
+        # Unknown norm type, return None (linear)
+        print(f"Warning: Unknown norm_type '{norm_type}', using linear normalization")
+        return None
+
+
 def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None,
-                      omega_tau_window: Optional[Tuple[float, float]] = None):
+                      omega_tau_window: Optional[Tuple[float, float]] = None,
+                      norm_type: NormType = 'log', gamma: float = 0.5):
     """Read and compute 2D nonlinear spectroscopy using FFT.
     
     Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
@@ -683,6 +757,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         dir: Directory containing pump_probe_spectroscopy.h5
         omega_t_window: Optional (min, max) tuple for ω_t axis limits
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
+        norm_type: Normalization type for colormap ('log', 'power', 'symlog', 'linear')
+        gamma: Exponent for PowerNorm (default: 0.5)
     """
     omega_t_window = _validate_window(omega_t_window, "omega_t_window")
     omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
@@ -692,7 +768,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     # Read from HDF5 file
     with h5py.File(hdf5_path, 'r') as f:
         times = f['/reference/times'][:]
-        M0_antiferro = f['/reference/M_local'][:]
+        M0_antiferro = f['/reference/M_global'][:]
         tau_values = f['/tau_scan/tau_values'][:]
         tau_step = len(tau_values)
         
@@ -700,7 +776,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         print(f"  Loaded HDF5: {hdf5_path}")
         print(f"    Time steps: {len(times)}, t_range: [{times[0]:.4f}, {times[-1]:.4f}]")
         print(f"    Tau values: {tau_step}, tau_range: [{tau_values[0]:.4f}, {tau_values[-1]:.4f}]")
-        print(f"    M_local shape: {M0_antiferro.shape}")
+        print(f"    M_global shape: {M0_antiferro.shape}")
         
         # Print pulse and lattice metadata if available
         if '/metadata' in f:
@@ -741,8 +817,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         
         for i, tau_val in enumerate(tau_values):
             tau_group = f[f'/tau_scan/tau_{i}']
-            M1_antiferro = tau_group['M1_local'][:]
-            M01_antiferro = tau_group['M01_local'][:]
+            M1_antiferro = tau_group['M1_global'][:]
+            M01_antiferro = tau_group['M01_global'][:]
             
             for comp in range(3):
                 M0 = M0_antiferro[:, comp]
@@ -760,6 +836,21 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
 
     # Use z-component for main analysis (backwards compatible)
     M_NL = M_NL_components[2]
+    
+    # Filter to only use t > 0 for FFT (important for 2D coherent spectroscopy)
+    t_positive_idx = np.where(times > 0)[0]
+    if len(t_positive_idx) > 0:
+        t_start_idx = t_positive_idx[0]
+        print(f"  Filtering to t > 0: using time indices [{t_start_idx}:{len(times)}] (t >= {times[t_start_idx]:.4f})")
+        # Slice all component arrays to only include t > 0
+        M_NL_components = M_NL_components[:, :, t_start_idx:]
+        M0_components = M0_components[:, :, t_start_idx:]
+        M1_components = M1_components[:, :, t_start_idx:]
+        M01_components = M01_components[:, :, t_start_idx:]
+        M_NL = M_NL[:, t_start_idx:]
+        times = times[t_start_idx:]
+    else:
+        print("  Warning: No t > 0 found, using all time points")
     
     # Compute omega arrays (needed for all plots)
     omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
@@ -817,7 +908,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             ax_freq = axes_sig[comp, 2]
             im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                      norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                      norm=_get_norm(sig_comp_FF, norm_type, gamma), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
             ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
             ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
             ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
@@ -842,7 +933,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         
         plt.imshow(sig_z_FF, origin='lower',
                    extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-                   aspect='auto', cmap='gnuplot2', norm='linear')
+                   aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_z_FF, norm_type, gamma))
         plt.xlabel('$\\omega_t$ (rad/time)')
         plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
         plt.colorbar(label='Intensity')
@@ -894,7 +985,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         
         ax_freq = axes_debug[comp, 2]
         im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                  norm='linear', extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                                  norm=_get_norm(M_NL_comp_FF, norm_type, gamma), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
         ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
         ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
         ax_freq.set_title(f'{component_labels[comp]}-component (freq domain)')
@@ -929,7 +1020,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     # Full spectrum plot
     plt.imshow(M_NL_FF, origin='lower',
                extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
-               aspect='auto', cmap='gnuplot2', norm='linear')
+               aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_FF, norm_type, gamma))
     plt.xlabel('$\\omega_t$ (rad/time)')
     plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
     plt.colorbar(label='Intensity')
@@ -1095,20 +1186,89 @@ def find_trajectory_file(path: str) -> str:
     raise FileNotFoundError(f"Path does not exist or is not a valid HDF5 file: {path}")
 
 
+def parse_omega_window(arg: str) -> Optional[Tuple[float, float]]:
+    """Parse omega window argument in format 'min,max' or 'None'.
+    
+    Examples:
+        '-0.5,0.5' -> (-0.5, 0.5)
+        'None' -> None
+        '-2,2' -> (-2.0, 2.0)
+    """
+    if arg.lower() == 'none':
+        return None
+    try:
+        parts = arg.split(',')
+        if len(parts) != 2:
+            raise ValueError(f"Expected 'min,max' format, got: {arg}")
+        return (float(parts[0]), float(parts[1]))
+    except ValueError as e:
+        raise ValueError(f"Invalid omega window: {arg}. Expected 'min,max' or 'None'. Error: {e}")
+
+
+def parse_norm_arg(arg: str) -> Tuple[NormType, float]:
+    """Parse norm argument in format 'type' or 'type:gamma'.
+    
+    Examples:
+        'log' -> ('log', 0.5)
+        'power' -> ('power', 0.5)
+        'power:0.3' -> ('power', 0.3)
+        'symlog' -> ('symlog', 0.5)
+        'linear' -> ('linear', 0.5)
+    """
+    valid_norms = ['log', 'power', 'symlog', 'linear']
+    
+    if ':' in arg:
+        parts = arg.split(':')
+        norm_type = parts[0].lower()
+        try:
+            gamma = float(parts[1])
+        except ValueError:
+            raise ValueError(f"Invalid gamma value: {parts[1]}. Expected a number.")
+    else:
+        norm_type = arg.lower()
+        gamma = 0.5  # default gamma
+    
+    if norm_type not in valid_norms:
+        raise ValueError(f"Invalid norm type: {norm_type}. Valid options: {valid_norms}")
+    
+    return norm_type, gamma
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python reader_TmFeO3_SU2.py <hdf5_file_or_directory> [analysis_type]")
+        print("Usage: python reader_TmFeO3_SU2.py <hdf5_file_or_directory> [analysis_type] [omega_t_window] [omega_tau_window] [norm_type]")
         print("  analysis_type: 'md' for molecular dynamics (default)")
         print("                 'mag' for magnetization plots")
         print("                 '2dcs' for 2D coherent spectroscopy")
+        print("  omega_t_window: 'min,max' or 'None' for no windowing (default: None)")
+        print("  omega_tau_window: 'min,max' or 'None' for no windowing (default: None)")
+        print("  norm_type: 'log', 'power', 'power:gamma', 'symlog', or 'linear' (default: 'log')")
+        print("             For power norm, optionally specify gamma as 'power:0.3' (default: 0.5)")
         print("\nExamples:")
         print("  python reader_TmFeO3_SU2.py ./TmFeO3_Fe_md/sample_0/trajectory.h5 md")
         print("  python reader_TmFeO3_SU2.py ./TmFeO3_Fe_md/ md")
         print("  python reader_TmFeO3_SU2.py ./TmFeO3_2DCS/sample_0/ 2dcs")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_2DCS/ 2dcs -0.5,0.5 -0.5,0.5")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_2DCS/ 2dcs -2,2 -2,2 power")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_2DCS/ 2dcs -2,2 -2,2 power:0.3")
+        print("  python reader_TmFeO3_SU2.py ./TmFeO3_2DCS/ 2dcs None None symlog")
         sys.exit(1)
     
     input_path = sys.argv[1]
     analysis_type = sys.argv[2] if len(sys.argv) > 2 else 'md'
+    
+    # Parse omega windows from command line arguments (default to None for no windowing)
+    omega_t_window = None
+    omega_tau_window = None
+    norm_type = 'log'
+    gamma = 0.5
+    
+    if len(sys.argv) > 3:
+        omega_t_window = parse_omega_window(sys.argv[3])
+    if len(sys.argv) > 4:
+        omega_tau_window = parse_omega_window(sys.argv[4])
+    if len(sys.argv) > 5:
+        norm_type, gamma = parse_norm_arg(sys.argv[5])
     
     if not os.path.exists(input_path):
         print(f"Error: Path not found: {input_path}")
@@ -1134,13 +1294,18 @@ if __name__ == "__main__":
                 sys.exit(1)
         
         print(f"Analyzing 2D coherent spectroscopy data in: {dir_path}")
+        print(f"  omega_t_window: {omega_t_window}")
+        print(f"  omega_tau_window: {omega_tau_window}")
+        print(f"  norm_type: {norm_type}" + (f" (gamma={gamma})" if norm_type == 'power' else ""))
         print("\nHDF5 Structure:")
         print("-" * 50)
         print_hdf5_structure(hdf5_path)
         print("-" * 50)
         
         print("\nRunning 2D nonlinear spectroscopy analysis...")
-        read_2D_nonlinear(dir_path)
+        read_2D_nonlinear(dir_path, omega_t_window=omega_t_window, 
+                          omega_tau_window=omega_tau_window,
+                          norm_type=norm_type, gamma=gamma)
     else:
         try:
             filepath = find_trajectory_file(input_path)

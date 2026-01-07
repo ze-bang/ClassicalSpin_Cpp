@@ -3052,6 +3052,7 @@ public:
     
     /**
      * Subtract time-dependent drive field from H array (in-place, flat version)
+     * Drive field is pre-transformed to local frame during set_pulse()
      */
     void drive_field_at_time_flat(double t, size_t site_index, double* H) const {
         const size_t atom = site_index % N_atoms;
@@ -3074,7 +3075,7 @@ public:
     }
 
     /**
-     * Compute time-dependent drive field
+     * Compute time-dependent drive field (pre-transformed to local frame during set_pulse)
      */
     SpinVector drive_field_at_time(double t, size_t site_index) const {
         size_t atom = site_index % N_atoms;
@@ -3092,15 +3093,15 @@ public:
     }
 
     /**
-     * Set time-dependent pulse
+     * Set time-dependent pulse (drive field is transformed to local frame)
      */
     void set_pulse(const vector<SpinVector>& field_in1, double t_B1,
                   const vector<SpinVector>& field_in2, double t_B2,
                   double pulse_amp, double pulse_width, double pulse_freq) {
-        // Pack field components
+        // Pack field components, transforming to local frame: B_local = R * B_global
         for (size_t atom = 0; atom < N_atoms; ++atom) {
-            field_drive[0].segment(atom * spin_dim, spin_dim) = field_in1[atom];
-            field_drive[1].segment(atom * spin_dim, spin_dim) = field_in2[atom];
+            field_drive[0].segment(atom * spin_dim, spin_dim) = sublattice_frames[atom] * field_in1[atom];
+            field_drive[1].segment(atom * spin_dim, spin_dim) = sublattice_frames[atom] * field_in2[atom];
         }
         
         t_pulse[0] = t_B1;
@@ -4708,9 +4709,9 @@ public:
                     ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
                 };
                 
-                write_mag_dataset(reference_group, "M_total", 0);
-                write_mag_dataset(reference_group, "M_staggered", 1);
-                write_mag_dataset(reference_group, "M_local", 2);
+                write_mag_dataset(reference_group, "M_antiferro", 0);
+                write_mag_dataset(reference_group, "M_local", 1);
+                write_mag_dataset(reference_group, "M_global", 2);
                 
                 cout << "  Reference trajectory (M0) written." << endl;
                 
@@ -4749,13 +4750,13 @@ public:
                 ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
             };
             
-            write_mag("M1_total", M1_traj, 0);
-            write_mag("M1_staggered", M1_traj, 1);
-            write_mag("M1_local", M1_traj, 2);
+            write_mag("M1_antiferro", M1_traj, 0);
+            write_mag("M1_local", M1_traj, 1);
+            write_mag("M1_global", M1_traj, 2);
             
-            write_mag("M01_total", M01_traj, 0);
-            write_mag("M01_staggered", M01_traj, 1);
-            write_mag("M01_local", M01_traj, 2);
+            write_mag("M01_antiferro", M01_traj, 0);
+            write_mag("M01_local", M01_traj, 1);
+            write_mag("M01_global", M01_traj, 2);
             
             tau_grp.close();
         };

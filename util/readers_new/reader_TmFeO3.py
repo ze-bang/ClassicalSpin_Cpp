@@ -879,9 +879,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         # =====================================================================
         # Process SU(2) sublattice
         # =====================================================================
-        if '/reference/M_local_SU2' in f:
+        if '/reference/M_global_SU2' in f:
             print("\n  Processing SU(2) sublattice...")
-            M0_SU2 = f['/reference/M_local_SU2'][:]
+            M0_SU2 = f['/reference/M_global_SU2'][:]
             spin_dim_SU2 = M0_SU2.shape[1]
             length = len(M0_SU2[:, 0])
             
@@ -893,8 +893,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             for i, tau_val in enumerate(tau_values):
                 tau_group = f[f'/tau_scan/tau_{i}']
-                M1_SU2 = tau_group['M1_local_SU2'][:]
-                M01_SU2 = tau_group['M01_local_SU2'][:]
+                M1_SU2 = tau_group['M1_global_SU2'][:]
+                M01_SU2 = tau_group['M01_global_SU2'][:]
                 
                 for comp in range(spin_dim_SU2):
                     M0 = M0_SU2[:, comp]
@@ -1056,9 +1056,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         # =====================================================================
         # Process SU(3) sublattice
         # =====================================================================
-        if '/reference/M_local_SU3' in f:
+        if '/reference/M_global_SU3' in f:
             print("\n  Processing SU(3) sublattice...")
-            M0_SU3 = f['/reference/M_local_SU3'][:]
+            M0_SU3 = f['/reference/M_global_SU3'][:]
             spin_dim_SU3 = M0_SU3.shape[1]
             length = len(M0_SU3[:, 0])
             
@@ -1070,8 +1070,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             
             for i, tau_val in enumerate(tau_values):
                 tau_group = f[f'/tau_scan/tau_{i}']
-                M1_SU3 = tau_group['M1_local_SU3'][:]
-                M01_SU3 = tau_group['M01_local_SU3'][:]
+                M1_SU3 = tau_group['M1_global_SU3'][:]
+                M01_SU3 = tau_group['M01_global_SU3'][:]
                 
                 for comp in range(spin_dim_SU3):
                     M0 = M0_SU3[:, comp]
