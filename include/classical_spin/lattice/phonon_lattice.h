@@ -236,6 +236,9 @@ struct SpinPhononCouplingParams {
     // 3rd NN exchange (isotropic Heisenberg)
     double J3 = 0.9;
     
+    // Six-spin ring exchange on hexagonal plaquettes
+    double J7 = 0.0;
+    
     // Spin-phonon coupling strengths (in LOCAL Kitaev frame)
     double lambda_E1 = 0.0;  // E1 coupling: Qx_E1*(Sx'Sz'+Sz'Sx') + Qy_E1*(Sy'Sz'+Sz'Sy')
     double lambda_E2 = 0.0;  // E2 coupling: Qx_E2*(Sx'Sx'-Sy'Sy') + Qy_E2*(Sx'Sy'-Sy'Sx')
@@ -468,6 +471,12 @@ public:
     // 3rd NN interactions
     vector<vector<SpinMatrix>> j3_interaction;      // J3 matrices  
     vector<vector<size_t>> j3_partners;             // 3rd NN partner indices
+    
+    // Hexagonal plaquettes for ring exchange
+    // Each hexagon stores 6 site indices in order (i,j,k,l,m,n) going around the ring
+    vector<std::array<size_t, 6>> hexagons;
+    // For each site, list of hexagons it belongs to and its position (0-5) within each hexagon
+    vector<vector<std::pair<size_t, size_t>>> site_hexagons;
     
     // External field
     vector<SpinVector> field;
@@ -718,64 +727,28 @@ public:
      * - Zeeman energy change
      * - NN, 2nd NN, 3rd NN spin-spin interaction changes
      * - Spin-phonon coupling energy change (if phonons are non-zero)
+     * - Ring exchange energy change
      */
     double site_energy_diff(const Eigen::Vector3d& new_spin, 
                            const Eigen::Vector3d& old_spin, 
-                           size_t site) const {
-        Eigen::Vector3d delta = new_spin - old_spin;
-        double dE = -delta.dot(field[site]);
-        
-        // Phonon coordinates (for spin-phonon coupling)
-        double Qx_E1 = phonons.Q_x_E1;
-        double Qy_E1 = phonons.Q_y_E1;
-        double Qx_E2 = phonons.Q_x_E2;
-        double Qy_E2 = phonons.Q_y_E2;
-        double Q_A1 = phonons.Q_A1;
-        double l_E1 = spin_phonon_params.lambda_E1;
-        double l_E2 = spin_phonon_params.lambda_E2;
-        double l_A1 = spin_phonon_params.lambda_A1;
-        
-        // NN interactions (includes spin-phonon coupling)
-        for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-            size_t j = nn_partners[site][n];
-            const Eigen::Vector3d& Sj = spins[j];
-            
-            // Pure spin-spin interaction
-            dE += delta.dot(nn_interaction[site][n] * Sj);
-            
-            // Spin-phonon coupling: E1 terms
-            // λ_E1 * Qx_E1 * (ΔSi_x * Sj_z + ΔSi_z * Sj_x)
-            dE += l_E1 * Qx_E1 * (delta(0) * Sj(2) + delta(2) * Sj(0));
-            // λ_E1 * Qy_E1 * (ΔSi_y * Sj_z + ΔSi_z * Sj_y)
-            dE += l_E1 * Qy_E1 * (delta(1) * Sj(2) + delta(2) * Sj(1));
-            
-            // Spin-phonon coupling: E2 terms
-            // λ_E2 * Qx_E2 * (ΔSi_x * Sj_x - ΔSi_y * Sj_y)
-            dE += l_E2 * Qx_E2 * (delta(0) * Sj(0) - delta(1) * Sj(1));
-            // λ_E2 * Qy_E2 * (ΔSi_x * Sj_y - ΔSi_y * Sj_x)
-            dE += l_E2 * Qy_E2 * (delta(0) * Sj(1) - delta(1) * Sj(0));
-            
-            // Spin-phonon coupling: A1 term
-            // λ_A1 * Q_A1 * (ΔSi · Sj)
-            dE += l_A1 * Q_A1 * delta.dot(Sj);
-        }
-        // 2nd NN interactions (no spin-phonon coupling on 2nd NN)
-        for (size_t n = 0; n < j2_partners[site].size(); ++n) {
-            size_t j = j2_partners[site][n];
-            dE += delta.dot(j2_interaction[site][n] * spins[j]);
-        }
-        // 3rd NN interactions (no spin-phonon coupling on 3rd NN)
-        for (size_t n = 0; n < j3_partners[site].size(); ++n) {
-            size_t j = j3_partners[site][n];
-            dE += delta.dot(j3_interaction[site][n] * spins[j]);
-        }
-        return dE;
-    }
+                           size_t site) const;
     
     /**
-     * Pure spin energy (NN + 2nd NN + 3rd NN + Zeeman)
+     * Pure spin energy (NN + 2nd NN + 3rd NN + Zeeman + ring exchange)
      */
     double spin_energy() const;
+    
+    /**
+     * Six-spin ring exchange energy on hexagonal plaquettes
+     * 
+     * H_7 = (J_7/6) Σ_{hex} [2(S_i·S_j)(S_k·S_l)(S_m·S_n)
+     *                       -6(S_i·S_k)(S_j·S_l)(S_m·S_n)
+     *                       +3(S_i·S_l)(S_j·S_k)(S_m·S_n)
+     *                       +3(S_i·S_k)(S_j·S_m)(S_l·S_n)
+     *                       -(S_i·S_l)(S_j·S_m)(S_k·S_n)
+     *                       + cyclic permutations of (i,j,k,l,m,n)]
+     */
+    double ring_exchange_energy() const;
     
     /**
      * Phonon energy (kinetic + potential + cubic coupling)
@@ -843,9 +816,19 @@ public:
     double dH_dQ_A1() const;
     
     /**
+     * Compute ring exchange contribution to effective field on spin at given site
+     * 
+     * H_eff_ring = -∂H_7/∂S_site
+     * 
+     * For each hexagon containing the site, computes the derivative of the
+     * ring exchange term with respect to that spin.
+     */
+    SpinVector get_ring_exchange_field(size_t site) const;
+    
+    /**
      * Compute effective field on spin i (for spin EOM)
      * 
-     * H_eff = -∂H/∂Si = B + Σ_j [NN contributions] + [spin-phonon contributions]
+     * H_eff = -∂H/∂Si = B + Σ_j [NN contributions] + [spin-phonon contributions] + [ring exchange]
      */
     SpinVector get_local_field(size_t site) const;
     

@@ -776,6 +776,9 @@ void build_phonon_params(const SpinConfig& config,
     // 3rd neighbor (J3) - isotropic Heisenberg
     sp_params.J3 = config.get_param("J3", 0.9);
     
+    // Six-spin ring exchange on hexagonal plaquettes
+    sp_params.J7 = config.get_param("J7", 0.0);
+    
     // Spin-phonon coupling strengths
     sp_params.lambda_E1 = config.get_param("lambda_E1", config.get_param("lambda_xy", 0.0));
     sp_params.lambda_E2 = config.get_param("lambda_E2", 0.0);
@@ -1034,7 +1037,7 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
-        lattice.set_ordering_pattern();
+        
         // Relax spins and phonons to joint equilibrium
         // Skip if adiabatic_phonons was used (phonons already relaxed during SA) and relax_phonons is false
         if (config.relax_phonons || config.adiabatic_phonons) {
@@ -1051,6 +1054,10 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
                 cout << "Skipping phonon relaxation (relax_phonons = false)" << endl;
             }
         }
+        
+        // Set ordering pattern AFTER all equilibration is complete
+        // This ensures O_custom = 1 at t=0 (spins match the ordering pattern)
+        lattice.set_ordering_pattern();
         
         // Save initial configuration
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
