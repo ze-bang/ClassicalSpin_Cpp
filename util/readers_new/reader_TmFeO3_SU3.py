@@ -884,17 +884,17 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     # Read from HDF5 file
     with h5py.File(hdf5_path, 'r') as f:
         times = f['/reference/times'][:]
-        M0_local = f['/reference/M_local'][:]
+        M0_global = f['/reference/M_global'][:]
         tau_values = f['/tau_scan/tau_values'][:]
         tau_step = len(tau_values)
         
-        spin_dim = M0_local.shape[1]  # Should be 8 for SU(3)
+        spin_dim = M0_global.shape[1]  # Should be 8 for SU(3)
         
         # Print metadata
         print(f"  Loaded HDF5: {hdf5_path}")
         print(f"    Time steps: {len(times)}, t_range: [{times[0]:.4f}, {times[-1]:.4f}]")
         print(f"    Tau values: {tau_step}, tau_range: [{tau_values[0]:.4f}, {tau_values[-1]:.4f}]")
-        print(f"    M_local shape: {M0_local.shape}, spin_dim: {spin_dim}")
+        print(f"    M_global shape: {M0_global.shape}, spin_dim: {spin_dim}")
         
         # Print pulse and lattice metadata if available
         if '/metadata' in f:
@@ -916,7 +916,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 print(f"    lattice_size: {metadata_grp.attrs['lattice_size']}")
         
         # Process all spin_dim components for M_NL, M0, M1, M01
-        length = len(M0_local[:, 0])
+        length = len(M0_global[:, 0])
         M_NL_components = np.zeros((spin_dim, tau_step, length))
         M0_components = np.zeros((spin_dim, tau_step, length))
         M1_components = np.zeros((spin_dim, tau_step, length))
@@ -924,13 +924,13 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         
         for i, tau_val in enumerate(tau_values):
             tau_group = f[f'/tau_scan/tau_{i}']
-            M1_local = tau_group['M1_local'][:]
-            M01_local = tau_group['M01_local'][:]
+            M1_global = tau_group['M1_global'][:]
+            M01_global = tau_group['M01_global'][:]
             
             for comp in range(spin_dim):
-                M0 = M0_local[:, comp]
-                M1 = M1_local[:, comp]
-                M01 = M01_local[:, comp]
+                M0 = M0_global[:, comp]
+                M1 = M1_global[:, comp]
+                M01 = M01_global[:, comp]
                 
                 min_len = min(len(M0), len(M1), len(M01), length)
                 M_NL_components[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]

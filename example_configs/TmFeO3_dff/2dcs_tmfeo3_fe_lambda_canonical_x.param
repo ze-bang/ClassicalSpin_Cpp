@@ -7,17 +7,18 @@ system = tmfeo3_fe
 simulation_mode = 2dcs
 
 # Lattice Size (for mixed Fe + Tm lattice)
-lattice_size = 3,3,3
+lattice_size = 4,4,4
 
 # Fe Exchange Interaction Parameters (in meV)
-J1ab = 4.74     # In-plane nearest neighbor
-J1c = 5.15      # Out-of-plane nearest neighbor
-J2ab = 0.15     # In-plane next nearest neighbor
-J2c = 0.30      # Out-of-plane next nearest neighbor
+J1ab = 4.92
+J1c = 4.92
+J2ab = 0.29
+J2c = 0.29
 
 # Fe Single-Ion Anisotropy (in meV)
 Ka = 0.0
-Kc = -0.025230794650949503 #To get the AFM band gap at zero to be 0.91 THz
+#Kc = -0.025230794650949503 #To get the AFM band gap at zero to be 0.91 THz
+Kc = -0.09
 
 # DM Interaction (in meV)
 D1 = 0.0 #0 for now just for the AFM mode
@@ -47,8 +48,8 @@ overrelaxation_rate = 1
 use_twist_boundary = false
 gaussian_move = false
 
-pump_amplitude = 0.05
-pump_width = 0.5
+pump_amplitude = 0.5
+pump_width = 1
 pump_frequency = 4
 pump_direction = 1,0,0
 
@@ -66,6 +67,6 @@ md_integrator = rk4
 
 # Output
 output_dir = TmFeO3_fe_2dcs_y
-save_observables = true
+save_observables = false
 
 #initial_spin_config = TmFeO3_Tm_sa/sample_0/spins.txt
