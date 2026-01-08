@@ -1154,6 +1154,17 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     
     const size_t spin_offset = spin_dim * lattice_size;
     
+    // Update internal spins from ODE state for ring exchange calculation
+    // (Only needed if J7 != 0)
+    if (std::abs(spin_phonon_params.J7) > 1e-12) {
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t idx = i * spin_dim;
+            spins[i](0) = x[idx];
+            spins[i](1) = x[idx+1];
+            spins[i](2) = x[idx+2];
+        }
+    }
+    
     // Extract phonon state
     PhononState ph;
     ph.from_array(&x[spin_offset]);
@@ -1293,6 +1304,10 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             Eigen::Vector3d Sj(x[jdx], x[jdx+1], x[jdx+2]);
             H -= j3_interaction[i][n] * Sj;
         }
+        
+        // Ring exchange (6-spin) contribution
+        // Uses internal spins array which was updated from x at the start of ode_system
+        H += get_ring_exchange_field(i);
         
         // LLG equation: dS/dt = S × H_eff + α S × (S × H_eff)
         Eigen::Vector3d dSdt = spin_derivative(Si, H);

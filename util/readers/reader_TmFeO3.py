@@ -627,12 +627,18 @@ def read_2D_nonlinear(dir):
     plt.clf()
 
 
-def read_2D_nonlinear_adaptive_time_step(dir, fm):
+def read_2D_nonlinear_adaptive_time_step(dir, fm, apodization_gamma=0.03, t_cutoff=5.0):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps.
     
     Args:
         dir: Directory containing the spectroscopy data
+        fm: Whether to use local (True) or global (False) magnetization
+        apodization_gamma: Exponential decay rate for apodization to reduce spectral
+            leakage from truncated oscillations. Applied as exp(-apodization_gamma * |t|).
+            Set to 0.0 to disable. Default: 0.03
+        t_cutoff: Time cutoff to skip probe pulse region. Only t > t_cutoff is used
+            for the FFT. For Gaussian pulses, set to ~5*pulse_width. Default: 5.0
     """
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
@@ -649,10 +655,26 @@ def read_2D_nonlinear_adaptive_time_step(dir, fm):
 
     try:
         M0 = np.loadtxt(m0_file)[-time_steps:]
-        M0_T = np.loadtxt(m0_time_file)
+        M0_T = np.loadtxt(m0_time_file)[-time_steps:]
     except (IOError, IndexError) as e:
         print(f"Error loading M0 data: {e}")
         return
+    
+    # Filter to only use t > t_cutoff (skip probe pulse region)
+    t_valid_mask = M0_T > t_cutoff
+    if np.any(t_valid_mask):
+        M0 = M0[t_valid_mask]
+        M0_T = M0_T[t_valid_mask]
+        print(f"  Filtering to t > {t_cutoff}: using {np.sum(t_valid_mask)}/{time_steps} time points")
+    else:
+        print(f"  Warning: No t > {t_cutoff} found, using all time points")
+    
+    # Apply exponential decay apodization to reduce spectral leakage (use relative time so decay starts at 1.0)
+    if apodization_gamma > 0:
+        M0_T_relative = M0_T - M0_T[0]
+        decay_M0 = np.exp(-apodization_gamma * M0_T_relative)[:, np.newaxis]
+        M0 = M0 * decay_M0
+        print(f"  Applying apodization with γ = {apodization_gamma}")
     
     # Setup frequency range
     omega_range = 3
@@ -700,10 +722,29 @@ def read_2D_nonlinear_adaptive_time_step(dir, fm):
             
             # Load M1 data
             M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:]
-            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
+            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))[-time_steps:]
             # Load M01 data
             M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:]
-            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
+            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))[-time_steps:]
+            
+            # Filter to only use t > t_cutoff (skip probe pulse region)
+            t_valid_mask_M1 = M1_T > t_cutoff
+            t_valid_mask_M01 = M01_T > t_cutoff
+            if np.any(t_valid_mask_M1):
+                M1 = M1[t_valid_mask_M1]
+                M1_T = M1_T[t_valid_mask_M1]
+            if np.any(t_valid_mask_M01):
+                M01 = M01[t_valid_mask_M01]
+                M01_T = M01_T[t_valid_mask_M01]
+            
+            # Apply exponential decay apodization (use relative time so decay starts at 1.0)
+            if apodization_gamma > 0:
+                t_rel_M1 = M1_T - M1_T[0]
+                t_rel_M01 = M01_T - M01_T[0]
+                decay_M1 = np.exp(-apodization_gamma * t_rel_M1)[:, np.newaxis]
+                decay_M01 = np.exp(-apodization_gamma * t_rel_M01)[:, np.newaxis]
+                M1 = M1 * decay_M1
+                M01 = M01 * decay_M01
             
             # Transform to frequency domain
             M1_phase = np.exp(1j * np.outer(wp, M1_T))
@@ -763,12 +804,18 @@ def read_2D_nonlinear_adaptive_time_step(dir, fm):
     
     return M_NL_FF_abs
 
-def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
+def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm, apodization_gamma=0.03, t_cutoff=5.0):
     """
-    Process 2D nonlinear spectroscopy data with adaptive time steps.
+    Process 2D nonlinear spectroscopy data with adaptive time steps for SU3.
     
     Args:
         dir: Directory containing the spectroscopy data
+        fm: Whether to use local (True) or global (False) magnetization
+        apodization_gamma: Exponential decay rate for apodization to reduce spectral
+            leakage from truncated oscillations. Applied as exp(-apodization_gamma * |t|).
+            Set to 0.0 to disable. Default: 0.03
+        t_cutoff: Time cutoff to skip probe pulse region. Only t > t_cutoff is used
+            for the FFT. For Gaussian pulses, set to ~5*pulse_width. Default: 5.0
     """
     directory = os.path.abspath(dir)  # Use absolute path for reliability
     
@@ -784,10 +831,28 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
 
     try:
         M0 = np.loadtxt(m0_file)[-time_steps:]
-        M0_T = np.loadtxt(m0_time_file)
+        M0_T = np.loadtxt(m0_time_file)[-time_steps:]
     except (IOError, IndexError) as e:
         print(f"Error loading M0 data: {e}")
         return
+    
+    # Filter to only use t > t_cutoff (skip probe pulse region)
+    t_valid_mask = M0_T > t_cutoff
+    if np.any(t_valid_mask):
+        M0 = M0[t_valid_mask]
+        M0_T = M0_T[t_valid_mask]
+        print(f"  Filtering to t > {t_cutoff}: using {np.sum(t_valid_mask)}/{time_steps} time points")
+    else:
+        print(f"  Warning: No t > {t_cutoff} found, using all time points")
+    
+    # Apply exponential decay apodization to reduce spectral leakage
+    # Use relative time so decay starts at 1.0 at beginning of filtered window
+    if apodization_gamma > 0:
+        t_relative = M0_T - M0_T[0]  # Relative time from start
+        decay_M0 = np.exp(-apodization_gamma * t_relative)[:, np.newaxis]
+        M0 = M0 * decay_M0
+        print(f"  Applying apodization with γ = {apodization_gamma}")
+        print(f"    t decay: 1.0 at t={M0_T[0]:.1f} → {decay_M0[-1,0]:.4f} at t={M0_T[-1]:.1f}")
     
     # Setup frequency range
     omega_range = 3
@@ -835,10 +900,29 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
             
             # Load M1 data
             M1 = np.loadtxt(os.path.join(base_path, "M1/" + readfile))[-time_steps:]
-            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))
+            M1_T = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))[-time_steps:]
             # Load M01 data
             M01 = np.loadtxt(os.path.join(base_path, "M01/" + readfile))[-time_steps:]
-            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))
+            M01_T = np.loadtxt(os.path.join(base_path, "M01/Time_steps.txt"))[-time_steps:]
+            
+            # Filter to only use t > t_cutoff (skip probe pulse region)
+            t_valid_mask_M1 = M1_T > t_cutoff
+            t_valid_mask_M01 = M01_T > t_cutoff
+            if np.any(t_valid_mask_M1):
+                M1 = M1[t_valid_mask_M1]
+                M1_T = M1_T[t_valid_mask_M1]
+            if np.any(t_valid_mask_M01):
+                M01 = M01[t_valid_mask_M01]
+                M01_T = M01_T[t_valid_mask_M01]
+            
+            # Apply exponential decay apodization (use relative time so decay starts at 1.0)
+            if apodization_gamma > 0:
+                M1_T_relative = M1_T - M1_T[0]
+                M01_T_relative = M01_T - M01_T[0]
+                decay_M1 = np.exp(-apodization_gamma * M1_T_relative)[:, np.newaxis]
+                decay_M01 = np.exp(-apodization_gamma * M01_T_relative)[:, np.newaxis]
+                M1 = M1 * decay_M1
+                M01 = M01 * decay_M01
             
             # Transform to frequency domain
             M1_phase = np.exp(1j * np.outer(wp, M1_T))
@@ -893,7 +977,7 @@ def read_2D_nonlinear_adaptive_time_step_SU3(dir, fm):
     return M_NL_FF_abs
 
 
-def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
+def read_2D_nonlinear_adaptive_time_step_combined(dir, fm, apodization_gamma=0.03, t_cutoff=5.0):
     """
     Process 2D nonlinear spectroscopy data with adaptive time steps for both SU(2) and SU(3) data.
     This version uses FFT for improved efficiency and accuracy with natural FFT grid.
@@ -902,6 +986,11 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
     Args:
         dir (str): Directory containing the spectroscopy data.
         fm (bool): Flag to use filtered data files (e.g., 'M_t_f.txt').
+        apodization_gamma: Exponential decay rate for apodization to reduce spectral
+            leakage from truncated oscillations. Applied as exp(-apodization_gamma * |t|).
+            Set to 0.0 to disable. Default: 0.03
+        t_cutoff: Time cutoff to skip probe pulse region. Only t > t_cutoff is used
+            for the FFT. For Gaussian pulses, set to ~5*pulse_width. Default: 5.0
     
     Returns:
         dict: Results containing SU2 and SU3 data with frequency arrays
@@ -944,11 +1033,30 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
             M0 = m0_data[-time_steps:]
             M0_T = m0_time[-time_steps:]
             
+            # Filter to only use t > t_cutoff (skip probe pulse region)
+            t_valid_mask = M0_T > t_cutoff
+            if np.any(t_valid_mask):
+                M0 = M0[t_valid_mask]
+                M0_T = M0_T[t_valid_mask]
+                if group == 'SU2':
+                    print(f"  Filtering to t > {t_cutoff}: using {np.sum(t_valid_mask)}/{time_steps} time points")
+            else:
+                if group == 'SU2':
+                    print(f"  Warning: No t > {t_cutoff} found, using all time points")
+            
             # Subtract background if available
             if background_data[group] is not None:
                 bg_length = min(len(background_data[group]), len(M0))
                 M0[:bg_length] -= background_data[group][-bg_length:]
                 print(f"Background subtracted for {group} M0 data")
+            
+            # Apply exponential decay apodization to reduce spectral leakage (use relative time so decay starts at 1.0)
+            if apodization_gamma > 0:
+                M0_T_relative = M0_T - M0_T[0]
+                decay = np.exp(-apodization_gamma * M0_T_relative)[:, np.newaxis]
+                M0 = M0 * decay
+                if group == 'SU2':
+                    print(f"  Applying apodization with γ = {apodization_gamma}")
             
             # Subtract mean configuration before FFT
             M0_mean = np.mean(M0, axis=0, keepdims=True)
@@ -964,7 +1072,8 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
                 'M_NL_FF_tau': {},  # Store by tau value
                 'time_steps': time_steps,
                 'dt': dt,
-                'wp_freqs': wp_freqs
+                'wp_freqs': wp_freqs,
+                'M0_T': M0_T  # Store for apodization of M1/M01
             }
             print(f"Successfully loaded M0 data for {group}.")
         except (IOError, IndexError, FileNotFoundError) as e:
@@ -995,15 +1104,34 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
                 if results[group] is None: continue
                 readfile = config['readfile']
                 time_steps = results[group]['time_steps']
+                M0_T = results[group]['M0_T']  # Already filtered to t > t_cutoff
                 try:
-                    M1 = np.loadtxt(os.path.join(base_path, "M1/", readfile))[-time_steps:]
-                    M01 = np.loadtxt(os.path.join(base_path, "M01/", readfile))[-time_steps:]
+                    # Load and filter M1/M01 to match the filtered M0_T length
+                    M1_raw = np.loadtxt(os.path.join(base_path, "M1/", readfile))[-time_steps:]
+                    M01_raw = np.loadtxt(os.path.join(base_path, "M01/", readfile))[-time_steps:]
+                    M1_T_raw = np.loadtxt(os.path.join(base_path, "M1/Time_steps.txt"))[-time_steps:]
+                    
+                    # Filter M1/M01 to match t > t_cutoff filtering applied to M0
+                    t_valid_mask = M1_T_raw > t_cutoff
+                    if np.any(t_valid_mask):
+                        M1 = M1_raw[t_valid_mask]
+                        M01 = M01_raw[t_valid_mask]
+                    else:
+                        M1 = M1_raw
+                        M01 = M01_raw
                     
                     # Subtract background if available
                     if background_data[group] is not None:
                         bg_length = min(len(background_data[group]), len(M1))
                         M1[:bg_length] -= background_data[group][-bg_length:]
                         M01[:bg_length] -= background_data[group][-bg_length:]
+                    
+                    # Apply exponential decay apodization to reduce spectral leakage (use relative time so decay starts at 1.0)
+                    if apodization_gamma > 0:
+                        M0_T_relative = M0_T - M0_T[0]
+                        decay = np.exp(-apodization_gamma * M0_T_relative)[:, np.newaxis]
+                        M1 = M1 * decay
+                        M01 = M01 * decay
                     
                     # Subtract mean configuration before FFT
                     M1_mean = np.mean(M1, axis=0, keepdims=True)
@@ -1037,6 +1165,12 @@ def read_2D_nonlinear_adaptive_time_step_combined(dir, fm):
             
         # Stack all tau data
         M_NL_tau_stack = np.stack([results[group]['M_NL_FF_tau'][t] for t in tau_sorted], axis=0)
+        
+        # Apply exponential decay apodization in tau dimension
+        if apodization_gamma > 0:
+            tau_arr = np.array(tau_sorted)
+            decay_tau = np.exp(-apodization_gamma * np.abs(tau_arr))[:, np.newaxis, np.newaxis]
+            M_NL_tau_stack = M_NL_tau_stack * decay_tau
         
         # Subtract mean configuration before FFT over tau
         M_NL_tau_mean = np.mean(M_NL_tau_stack, axis=0, keepdims=True)

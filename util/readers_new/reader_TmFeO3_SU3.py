@@ -850,7 +850,10 @@ def _plot_first_timesteps(M0_components: np.ndarray, M1_components: np.ndarray,
 def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None, 
                       omega_tau_window: Optional[Tuple[float, float]] = None,
                       norm_type: NormType = 'log', gamma: float = 0.5,
-                      demod_omega_t: Optional[float] = None) -> Dict[str, np.ndarray]:
+                      demod_omega_t: Optional[float] = None,
+                      apodization_gamma: float = 0.03,
+                      pulse_window_sigma: float = 5.0,
+                      window_type: str = 'gaussian') -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for SU(3) systems.
     
     Computes the nonlinear response M_NL = M01 - M0 - M1 and performs 2D FFT
@@ -866,6 +869,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         gamma: Exponent for PowerNorm (default: 0.5)
         demod_omega_t: If provided, demodulate (rotate) along detection time t by
             multiplying data by exp(+i * demod_omega_t * t) before FFT.
+        apodization_gamma: Decay parameter for apodization window. For Gaussian: sets
+            boundary decay level. For exponential: decay rate. For Tukey: taper fraction.
+            Default: 0.03
+        pulse_window_sigma: Number of pulse widths (sigma) after probe center (t=0) 
+            to skip before FFT. Default: 5.0
+        window_type: Type of apodization window to reduce spectral leakage:
+            'gaussian', 'hann', 'hamming', 'blackman', 'tukey', 'cosine', 'exponential', 'none'
+            Default: 'gaussian'
         
     Returns:
         Dictionary with 2DCS results including M_NL_FF and frequency arrays
@@ -897,13 +908,15 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         print(f"    M_global shape: {M0_global.shape}, spin_dim: {spin_dim}")
         
         # Print pulse and lattice metadata if available
+        pulse_width = 1.0  # Default fallback
         if '/metadata' in f:
             metadata_grp = f['/metadata']
             print(f"  Pulse parameters:")
             if 'pulse_amp' in metadata_grp.attrs:
                 print(f"    Amplitude: {metadata_grp.attrs['pulse_amp']}")
             if 'pulse_width' in metadata_grp.attrs:
-                print(f"    Width: {metadata_grp.attrs['pulse_width']}")
+                pulse_width = float(metadata_grp.attrs['pulse_width'])
+                print(f"    Width: {pulse_width}")
             if 'pulse_freq' in metadata_grp.attrs:
                 pulse_freq = float(metadata_grp.attrs['pulse_freq'])
                 print(f"    Frequency: {pulse_freq}")
@@ -941,12 +954,21 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         dt = times[1] - times[0] if len(times) > 1 else 1.0
         tau = tau_values
 
-    # Filter to only include t >= 0 for Fourier transform
-    t0_idx = np.searchsorted(times, 0.0)  # Find index where t >= 0
-    times_positive = times[t0_idx:]
-    print(f"  Filtering to t >= 0: using {len(times_positive)}/{len(times)} time points (t0_idx={t0_idx})")
+    # Compute time cutoff: skip the probe pulse region (probe is centered at t=0)
+    # We wait pulse_window_sigma * pulse_width after probe center before FFT
+    t_cutoff = pulse_window_sigma * pulse_width
+    t_valid_idx = np.where(times > t_cutoff)[0]
+    if len(t_valid_idx) > 0:
+        t0_idx = t_valid_idx[0]
+        times_positive = times[t0_idx:]
+        print(f"  Filtering to t > {t_cutoff:.2f} (={pulse_window_sigma}σ × pulse_width={pulse_width}): "
+              f"using {len(times_positive)}/{len(times)} time points (t0_idx={t0_idx})")
+    else:
+        t0_idx = 0
+        times_positive = times
+        print(f"  Warning: No t > {t_cutoff:.2f} found, using all time points")
     
-    # Slice the data arrays to only include t >= 0
+    # Slice the data arrays to exclude probe pulse region
     M_NL_components = M_NL_components[:, :, t0_idx:]
     M0_components = M0_components[:, :, t0_idx:]
     M1_components = M1_components[:, :, t0_idx:]
@@ -979,9 +1001,96 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     if demod_omega_t is not None:
         t_phase = np.exp(1j * demod_omega_t * times)
 
+    # Build apodization window based on window_type
+    # For t: use relative time from start of window so decay starts at 1.0
+    # For tau: use distance from tau=0 (probe time) so max weight is at tau closest to 0
+    n_t = len(times)
+    n_tau = len(tau)
+    
+    if window_type.lower() == 'none' or apodization_gamma <= 0:
+        apod_window = None
+        print(f"  No apodization applied (window_type='{window_type}')")
+    elif window_type.lower() == 'gaussian':
+        # Gaussian window: exp(-0.5 * (t/sigma)^2)
+        t_relative = times - times[0]
+        t_range = t_relative[-1] if len(t_relative) > 1 else 1.0
+        tau_range = max(np.abs(tau[0]), np.abs(tau[-1])) if len(tau) > 1 else 1.0
+        
+        decay_factor = np.sqrt(-2.0 * np.log(apodization_gamma))
+        sigma_t = t_range / decay_factor
+        sigma_tau = tau_range / decay_factor
+        
+        decay_t = np.exp(-0.5 * (t_relative / sigma_t) ** 2)
+        decay_tau = np.exp(-0.5 * (np.abs(tau) / sigma_tau) ** 2)
+        apod_window = np.outer(decay_tau, decay_t)
+        print(f"  Applying Gaussian apodization (σ_t={sigma_t:.2f}, σ_τ={sigma_tau:.2f})")
+        print(f"    t window: 1.0 at t={times[0]:.1f} → {decay_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ window: {decay_tau[0]:.4f} at τ={tau[0]:.1f} → {decay_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    elif window_type.lower() == 'exponential':
+        t_relative = times - times[0]
+        decay_t = np.exp(-apodization_gamma * t_relative)
+        decay_tau = np.exp(-apodization_gamma * np.abs(tau))
+        apod_window = np.outer(decay_tau, decay_t)
+        print(f"  Applying exponential apodization (γ={apodization_gamma})")
+        print(f"    t decay: 1.0 at t={times[0]:.1f} → {decay_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ decay: {decay_tau[0]:.4f} at τ={tau[0]:.1f} → {decay_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    elif window_type.lower() == 'hann':
+        window_t = 0.5 * (1 + np.cos(np.pi * np.arange(n_t) / (n_t - 1)))
+        window_tau = 0.5 * (1 + np.cos(np.pi * np.abs(tau) / np.max(np.abs(tau))))
+        apod_window = np.outer(window_tau, window_t)
+        print(f"  Applying Hann apodization")
+        print(f"    t window: {window_t[0]:.4f} at t={times[0]:.1f} → {window_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    elif window_type.lower() == 'hamming':
+        window_t = 0.54 + 0.46 * np.cos(np.pi * np.arange(n_t) / (n_t - 1))
+        window_tau = 0.54 + 0.46 * np.cos(np.pi * np.abs(tau) / np.max(np.abs(tau)))
+        apod_window = np.outer(window_tau, window_t)
+        print(f"  Applying Hamming apodization")
+        print(f"    t window: {window_t[0]:.4f} at t={times[0]:.1f} → {window_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    elif window_type.lower() == 'blackman':
+        n_norm_t = np.arange(n_t) / (n_t - 1)
+        n_norm_tau = np.abs(tau) / np.max(np.abs(tau))
+        window_t = 0.42 + 0.5 * np.cos(np.pi * n_norm_t) + 0.08 * np.cos(2 * np.pi * n_norm_t)
+        window_tau = 0.42 + 0.5 * np.cos(np.pi * n_norm_tau) + 0.08 * np.cos(2 * np.pi * n_norm_tau)
+        apod_window = np.outer(window_tau, window_t)
+        print(f"  Applying Blackman apodization")
+        print(f"    t window: {window_t[0]:.4f} at t={times[0]:.1f} → {window_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    elif window_type.lower() == 'tukey':
+        alpha = min(1.0, max(0.0, apodization_gamma * 10))
+        window_t = np.ones(n_t)
+        window_tau = np.ones(n_tau)
+        taper_len_t = int(alpha * n_t / 2)
+        if taper_len_t > 0:
+            taper = 0.5 * (1 + np.cos(np.pi * np.arange(taper_len_t) / taper_len_t))
+            window_t[-taper_len_t:] = taper
+        taper_len_tau = int(alpha * n_tau / 2)
+        if taper_len_tau > 0:
+            taper = 0.5 * (1 + np.cos(np.pi * np.arange(taper_len_tau) / taper_len_tau))
+            window_tau[:taper_len_tau] = taper[::-1]
+        apod_window = np.outer(window_tau, window_t)
+        print(f"  Applying Tukey apodization (α={alpha:.2f}, taper={100*alpha/2:.0f}%)")
+        print(f"    t window: {window_t[0]:.4f} at t={times[0]:.1f} → {window_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    elif window_type.lower() == 'cosine':
+        window_t = np.cos(0.5 * np.pi * np.arange(n_t) / (n_t - 1))
+        window_tau = np.cos(0.5 * np.pi * np.abs(tau) / np.max(np.abs(tau)))
+        apod_window = np.outer(window_tau, window_t)
+        print(f"  Applying Cosine apodization")
+        print(f"    t window: {window_t[0]:.4f} at t={times[0]:.1f} → {window_t[-1]:.4f} at t={times[-1]:.1f}")
+        print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+    else:
+        print(f"  Warning: Unknown window_type '{window_type}', using no apodization")
+        print(f"    Available: gaussian, exponential, hann, hamming, blackman, tukey, cosine, none")
+        apod_window = None
+
     def compute_2d_fft(data):
-        """Compute 2D FFT with proper shifting and flipping (only t >= 0 data)."""
+        """Compute 2D FFT with proper shifting, flipping, and apodization (only t >= 0 data)."""
         data_dynamic = data - data.mean()  # In-place mean subtraction equivalent
+        # Apply apodization window to reduce spectral leakage
+        if apod_window is not None:
+            data_dynamic = data_dynamic * apod_window
         if t_phase is not None:
             data_dynamic = data_dynamic * t_phase[None, :]
         data_FF = np.fft.fft2(data_dynamic)
@@ -1169,14 +1278,16 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
 
 def _process_subdir_parallel(args):
     """Helper function for parallel processing of subdirectories."""
-    subdir, filename, omega_t_window, omega_tau_window, norm_type, gamma = args
+    subdir, filename, omega_t_window, omega_tau_window, norm_type, gamma, apodization_gamma, pulse_window_sigma = args
     try:
         print(f"Processing: {filename}")
         sub_results = read_2D_nonlinear(subdir,
                                          omega_t_window=omega_t_window,
                                          omega_tau_window=omega_tau_window,
                                          norm_type=norm_type,
-                                         gamma=gamma)
+                                         gamma=gamma,
+                                         apodization_gamma=apodization_gamma,
+                                         pulse_window_sigma=pulse_window_sigma)
         M_NL_data = np.loadtxt(os.path.join(subdir, "M_NL_FF.txt"))
         return (M_NL_data, sub_results.get('omega_tau'), sub_results.get('omega_t'), filename)
     except Exception as e:
@@ -1187,7 +1298,9 @@ def _process_subdir_parallel(args):
 def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]] = None, 
                           omega_tau_window: Optional[Tuple[float, float]] = None,
                           norm_type: NormType = 'log', gamma: float = 0.5,
-                          n_jobs: Optional[int] = None) -> Dict[str, np.ndarray]:
+                          n_jobs: Optional[int] = None,
+                          apodization_gamma: float = 0.03,
+                          pulse_window_sigma: float = 5.0) -> Dict[str, np.ndarray]:
     """Aggregate 2D nonlinear spectroscopy from multiple pump-probe runs.
     
     Processes all subdirectories containing pump-probe data in parallel, aggregates
@@ -1200,6 +1313,11 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
         norm_type: Normalization type for colormap ('log', 'power', 'symlog', 'linear')
         gamma: Exponent for PowerNorm (default: 0.5)
         n_jobs: Number of parallel jobs (default: use all cores)
+        apodization_gamma: Exponential decay rate for apodization to reduce spectral
+            leakage from truncated oscillations. Applied as exp(-apodization_gamma * |t|).
+            Set to 0.0 to disable. Default: 0.03
+        pulse_window_sigma: Number of pulse widths (sigma) after probe center (t=0) 
+            to skip before FFT. Default: 5.0 (captures >99.99% of Gaussian pulse)
     
     Returns:
         Dictionary with aggregated 2DCS results
@@ -1222,7 +1340,8 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
             hdf5_path = os.path.join(subdir, "pump_probe_spectroscopy.h5")
             if os.path.exists(hdf5_path):
                 subdirs_to_process.append((subdir, filename, omega_t_window, 
-                                          omega_tau_window, norm_type, gamma))
+                                          omega_tau_window, norm_type, gamma, 
+                                          apodization_gamma, pulse_window_sigma))
     
     if not subdirs_to_process:
         print("No valid subdirectories found")
@@ -1520,7 +1639,7 @@ def _parse_demod_arg(val: str) -> Optional[float]:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python reader_TmFeO3_SU3.py <hdf5_file_or_directory> [analysis_type] [omega_t_window] [omega_tau_window] [norm_type]")
+        print("Usage: python reader_TmFeO3_SU3.py <hdf5_file_or_directory> [analysis_type] [omega_t_window] [omega_tau_window] [norm_type] [window_type]")
         print("  analysis_type: 'md' for molecular dynamics (default)")
         print("                 'mag' for magnetization plots")
         print("                 'pp' for 2D nonlinear spectroscopy (pump-probe)")
@@ -1528,7 +1647,9 @@ if __name__ == "__main__":
         print("  omega_tau_window: 'min,max' or 'None' for no windowing (default: None)")
         print("  norm_type: 'log', 'power', 'power:gamma', 'symlog', or 'linear' (default: 'log')")
         print("             For power norm, optionally specify gamma as 'power:0.3' (default: 0.5)")
-        print("  Optional extra args (key=value, after norm_type):")
+        print("  window_type: Apodization window to reduce spectral leakage (default: 'gaussian')")
+        print("               'gaussian', 'hann', 'hamming', 'blackman', 'tukey', 'cosine', 'exponential', 'none'")
+        print("  Optional extra args (key=value, after window_type):")
         print("    demod=<omega>: demodulate along t by exp(+i*omega*t) before FFT (e.g. demod=0.5)")
         print("                 Use demod=none to disable (default)")
         print("\nExamples:")
@@ -1536,10 +1657,10 @@ if __name__ == "__main__":
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_tm_md/ md")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp")
         print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -0.5,0.5 -0.5,0.5")
-        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power")
-        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power:0.3")
-        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power demod=0.5")
-        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp None None symlog")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power blackman")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power:0.3 hann")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp -2,2 -2,2 power gaussian demod=0.5")
+        print("  python reader_TmFeO3_SU3.py ./TmFeO3_2DCS/ pp None None symlog tukey")
         sys.exit(1)
     
     input_path = sys.argv[1]
@@ -1550,6 +1671,7 @@ if __name__ == "__main__":
     omega_tau_window = None
     norm_type = 'log'
     gamma = 0.5
+    window_type = 'gaussian'
     
     if len(sys.argv) > 3:
         omega_t_window = parse_omega_window(sys.argv[3])
@@ -1557,8 +1679,10 @@ if __name__ == "__main__":
         omega_tau_window = parse_omega_window(sys.argv[4])
     if len(sys.argv) > 5:
         norm_type, gamma = parse_norm_arg(sys.argv[5])
+    if len(sys.argv) > 6 and '=' not in sys.argv[6]:
+        window_type = sys.argv[6]
 
-    extra_kv = _parse_kv_args(sys.argv[6:]) if len(sys.argv) > 6 else {}
+    extra_kv = _parse_kv_args([arg for arg in sys.argv[6:] if '=' in arg]) if len(sys.argv) > 6 else {}
     demod_omega_t: Optional[float] = None
     if 'demod' in extra_kv:
         # demod=<float> or demod=none
@@ -1604,7 +1728,8 @@ if __name__ == "__main__":
                                             omega_tau_window=omega_tau_window,
                                             norm_type=norm_type,
                                             gamma=gamma,
-                                            demod_omega_t=demod_omega_t)
+                                            demod_omega_t=demod_omega_t,
+                                            window_type=window_type)
             else:
                 print(f"Error: No pump_probe_spectroscopy.h5 found in {input_path}")
                 sys.exit(1)

@@ -42,7 +42,7 @@ Gammap = -4             # Gamma' coupling (meV)
 J2_A = 0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0                 # Third-neighbor Heisenberg (meV)
-J7 = -0.5
+J7 = -0.8
 
 # External magnetic field
 field_strength = 0.0
@@ -56,7 +56,7 @@ field_direction = 0,0,1
 # lambda_E1 (E1): Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
 # lambda_E2 (E2): Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)
 # lambda_A1 (A1): Q_A1*(Si·Sj)
-lambda_E1 = -0.2         # E1 coupling (off-diagonal xz, yz)
+lambda_E1 = -2         # E1 coupling (off-diagonal xz, yz)
 lambda_E2 = 0.0          # E2 coupling (in-plane anisotropic xx-yy, xy-yx)
 lambda_A1 = 0.0          # A1 coupling (isotropic Heisenberg)
 
@@ -114,7 +114,7 @@ Z_star = 1.0
 pump_amplitude = 5.0     # Electric field amplitude
 pump_frequency = 8.0     # Should match omega_E1 for resonant driving
 pump_time = 0.0         # Pulse center time
-pump_width = 0.2        # Gaussian width (FWHM ~ 2.35 * width)
+pump_width = 0.5        # Gaussian width (FWHM ~ 2.35 * width)
 pump_phase = 0.0         # Carrier-envelope phase
 pump_polarization = 0.0  # 0 = x-polarized, π/2 = y-polarized
 
