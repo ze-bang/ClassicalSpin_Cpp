@@ -42,7 +42,7 @@ Gammap = -4             # Gamma' coupling (meV)
 J2_A = 0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0                 # Third-neighbor Heisenberg (meV)
-J7 = -0.8
+J7 = -0.2
 
 # External magnetic field
 field_strength = 0.0
@@ -56,7 +56,7 @@ field_direction = 0,0,1
 # lambda_E1 (E1): Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
 # lambda_E2 (E2): Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)
 # lambda_A1 (A1): Q_A1*(Si·Sj)
-lambda_E1 = -2         # E1 coupling (off-diagonal xz, yz)
+lambda_E1 = 1         # E1 coupling (off-diagonal xz, yz)
 lambda_E2 = 0.0          # E2 coupling (in-plane anisotropic xx-yy, xy-yx)
 lambda_A1 = 0.0          # A1 coupling (isotropic Heisenberg)
 
@@ -141,8 +141,8 @@ md_integrator = rkf54
 # ============================================
 
 # Temperature sweep (simulated annealing)
-adiabatic_phonons = true
-relax_phonons = true
+adiabatic_phonons = false
+relax_phonons = false
 phonon_only_relax = false    # Only relax phonons, don't update spins
 T_start = 20.0
 T_end = 0.01
