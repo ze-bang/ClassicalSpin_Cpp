@@ -801,7 +801,10 @@ def _get_safe_log_norm(data: np.ndarray):
 
 def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = None,
                       omega_tau_window: Optional[Tuple[float, float]] = None,
-                      norm_type: NormType = 'power') -> Dict[str, np.ndarray]:
+                      norm_type: NormType = 'power',
+                      apodization_gamma: float = 0.03,
+                      pulse_window_sigma: float = 5.0,
+                      window_type: str = 'gaussian') -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for mixed SU(2)+SU(3) systems.
     
     Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
@@ -814,6 +817,13 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         omega_t_window: Optional (min, max) tuple for ω_t axis limits
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         norm_type: Normalization type for plots ('log', 'power', 'symlog', 'linear')
+        apodization_gamma: Decay parameter for apodization window. For Gaussian: sets
+            boundary decay level. For exponential: decay rate. Default: 0.03
+        pulse_window_sigma: Number of pulse widths (sigma) after probe center (t=0) 
+            to skip before FFT. Default: 5.0
+        window_type: Type of apodization window to reduce spectral leakage:
+            'gaussian', 'hann', 'hamming', 'blackman', 'tukey', 'cosine', 'exponential', 'none'
+            Default: 'gaussian'
         
     Returns:
         Dictionary with 2DCS results for both sublattices
@@ -849,10 +859,24 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         dt = times[1] - times[0] if len(times) > 1 else 1.0
         tau = tau_values
         
-        # Filter to only include t >= 0 for Fourier transform
-        t0_idx = np.searchsorted(times, 0.0)  # Find index where t >= 0
-        times_positive = times[t0_idx:]
-        print(f"  Filtering to t >= 0: using {len(times_positive)}/{len(times)} time points (t0_idx={t0_idx})")
+        # Extract pulse width for time cutoff calculation
+        pulse_width = 1.0  # Default fallback
+        if '/metadata' in f and 'pulse_width' in f['/metadata'].attrs:
+            pulse_width = float(f['/metadata'].attrs['pulse_width'])
+        
+        # Compute time cutoff: skip the probe pulse region (probe is centered at t=0)
+        # We wait pulse_window_sigma * pulse_width after probe center before FFT
+        t_cutoff = pulse_window_sigma * pulse_width
+        t_valid_idx = np.where(times > t_cutoff)[0]
+        if len(t_valid_idx) > 0:
+            t0_idx = t_valid_idx[0]
+            times_positive = times[t0_idx:]
+            print(f"  Filtering to t > {t_cutoff:.2f} (={pulse_window_sigma}σ × pulse_width={pulse_width}): "
+                  f"using {len(times_positive)}/{len(times)} time points (t0_idx={t0_idx})")
+        else:
+            t0_idx = 0
+            times_positive = times
+            print(f"  Warning: No t > {t_cutoff:.2f} found, using all time points")
         
         # Compute omega arrays (using filtered time array length)
         omega_tau = np.fft.fftfreq(int(len(tau)), tau[1] - tau[0] if len(tau) > 1 else 1.0) * 2 * np.pi
@@ -865,12 +889,98 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         results['omega_t'] = omega_t
         results['tau_values'] = tau_values
         
+        # Build apodization window based on window_type
+        # For t: use relative time from start of window so decay starts at 1.0
+        # For tau: use distance from tau=0 (probe time) so max weight is at tau closest to 0
+        n_t = len(times_positive)
+        n_tau = len(tau)
+        
+        if window_type.lower() == 'none' or apodization_gamma <= 0:
+            apod_window = None
+            print(f"  No apodization applied (window_type='{window_type}')")
+        elif window_type.lower() == 'gaussian':
+            t_relative = times_positive - times_positive[0]
+            t_range = t_relative[-1] if len(t_relative) > 1 else 1.0
+            tau_range = max(np.abs(tau[0]), np.abs(tau[-1])) if len(tau) > 1 else 1.0
+            
+            decay_factor = np.sqrt(-2.0 * np.log(apodization_gamma))
+            sigma_t = t_range / decay_factor
+            sigma_tau = tau_range / decay_factor
+            
+            decay_t = np.exp(-0.5 * (t_relative / sigma_t) ** 2)
+            decay_tau = np.exp(-0.5 * (np.abs(tau) / sigma_tau) ** 2)
+            apod_window = np.outer(decay_tau, decay_t)
+            print(f"  Applying Gaussian apodization (σ_t={sigma_t:.2f}, σ_τ={sigma_tau:.2f})")
+            print(f"    t window: 1.0 at t={times_positive[0]:.1f} → {decay_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ window: {decay_tau[0]:.4f} at τ={tau[0]:.1f} → {decay_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        elif window_type.lower() == 'exponential':
+            t_relative = times_positive - times_positive[0]
+            decay_t = np.exp(-apodization_gamma * t_relative)
+            decay_tau = np.exp(-apodization_gamma * np.abs(tau))
+            apod_window = np.outer(decay_tau, decay_t)
+            print(f"  Applying exponential apodization (γ={apodization_gamma})")
+            print(f"    t decay: 1.0 at t={times_positive[0]:.1f} → {decay_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ decay: {decay_tau[0]:.4f} at τ={tau[0]:.1f} → {decay_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        elif window_type.lower() == 'hann':
+            window_t = 0.5 * (1 + np.cos(np.pi * np.arange(n_t) / (n_t - 1)))
+            window_tau = 0.5 * (1 + np.cos(np.pi * np.abs(tau) / np.max(np.abs(tau))))
+            apod_window = np.outer(window_tau, window_t)
+            print(f"  Applying Hann apodization")
+            print(f"    t window: {window_t[0]:.4f} at t={times_positive[0]:.1f} → {window_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        elif window_type.lower() == 'hamming':
+            window_t = 0.54 + 0.46 * np.cos(np.pi * np.arange(n_t) / (n_t - 1))
+            window_tau = 0.54 + 0.46 * np.cos(np.pi * np.abs(tau) / np.max(np.abs(tau)))
+            apod_window = np.outer(window_tau, window_t)
+            print(f"  Applying Hamming apodization")
+            print(f"    t window: {window_t[0]:.4f} at t={times_positive[0]:.1f} → {window_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        elif window_type.lower() == 'blackman':
+            n_norm_t = np.arange(n_t) / (n_t - 1)
+            n_norm_tau = np.abs(tau) / np.max(np.abs(tau))
+            window_t = 0.42 + 0.5 * np.cos(np.pi * n_norm_t) + 0.08 * np.cos(2 * np.pi * n_norm_t)
+            window_tau = 0.42 + 0.5 * np.cos(np.pi * n_norm_tau) + 0.08 * np.cos(2 * np.pi * n_norm_tau)
+            apod_window = np.outer(window_tau, window_t)
+            print(f"  Applying Blackman apodization")
+            print(f"    t window: {window_t[0]:.4f} at t={times_positive[0]:.1f} → {window_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        elif window_type.lower() == 'tukey':
+            alpha = min(1.0, max(0.0, apodization_gamma * 10))
+            window_t = np.ones(n_t)
+            window_tau = np.ones(n_tau)
+            taper_len_t = int(alpha * n_t / 2)
+            if taper_len_t > 0:
+                taper = 0.5 * (1 + np.cos(np.pi * np.arange(taper_len_t) / taper_len_t))
+                window_t[-taper_len_t:] = taper
+            taper_len_tau = int(alpha * n_tau / 2)
+            if taper_len_tau > 0:
+                taper = 0.5 * (1 + np.cos(np.pi * np.arange(taper_len_tau) / taper_len_tau))
+                window_tau[:taper_len_tau] = taper[::-1]
+            apod_window = np.outer(window_tau, window_t)
+            print(f"  Applying Tukey apodization (α={alpha:.2f}, taper={100*alpha/2:.0f}%)")
+            print(f"    t window: {window_t[0]:.4f} at t={times_positive[0]:.1f} → {window_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        elif window_type.lower() == 'cosine':
+            window_t = np.cos(0.5 * np.pi * np.arange(n_t) / (n_t - 1))
+            window_tau = np.cos(0.5 * np.pi * np.abs(tau) / np.max(np.abs(tau)))
+            apod_window = np.outer(window_tau, window_t)
+            print(f"  Applying Cosine apodization")
+            print(f"    t window: {window_t[0]:.4f} at t={times_positive[0]:.1f} → {window_t[-1]:.4f} at t={times_positive[-1]:.1f}")
+            print(f"    τ window: {window_tau[0]:.4f} at τ={tau[0]:.1f} → {window_tau[-1]:.4f} at τ={tau[-1]:.1f}")
+        else:
+            print(f"  Warning: Unknown window_type '{window_type}', using no apodization")
+            print(f"    Available: gaussian, exponential, hann, hamming, blackman, tukey, cosine, none")
+            apod_window = None
+        
         # Helper function for 2D FFT analysis (optimized)
         def compute_2d_fft(data):
-            """Compute 2D FFT with proper shifting and flipping (only t >= 0 data)."""
+            """Compute 2D FFT with proper shifting, flipping, and apodization (only t >= 0 data)."""
             # Filter to t >= 0
             data_filtered = data[:, t0_idx:]
             data_dynamic = data_filtered - data_filtered.mean()  # In-place equivalent
+            # Apply apodization window to reduce spectral leakage
+            if apod_window is not None:
+                data_dynamic = data_dynamic * apod_window
             data_FF = np.fft.fft2(data_dynamic)
             data_FF = np.fft.fftshift(data_FF)
             data_FF = np.abs(data_FF)
@@ -1263,7 +1373,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
 
 def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float, float]] = None,
                             omega_tau_window: Optional[Tuple[float, float]] = None,
-                            norm_type: NormType = 'power') -> Dict[str, np.ndarray]:
+                            norm_type: NormType = 'power',
+                            window_type: str = 'gaussian') -> Dict[str, np.ndarray]:
     """
     Read 2D coherent spectroscopy data and compute nonlinear spectra for both sublattices.
     
@@ -1274,6 +1385,7 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
         omega_t_window: Optional (min, max) tuple for ω_t axis limits  
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         norm_type: Normalization type for plots ('log', 'power', 'symlog', 'linear')
+        window_type: Type of apodization window ('gaussian', 'hann', 'blackman', etc.)
         
     Returns:
         Dictionary with 2DCS results for SU(2), SU(3), and combined
@@ -1282,7 +1394,7 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
     if output_dir == '':
         output_dir = '.'
     
-    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window, norm_type)
+    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window, norm_type, window_type=window_type)
 
 
 # =============================================================================
@@ -1394,6 +1506,7 @@ Examples:
   python reader_TmFeO3.py /path/to/data md
   python reader_TmFeO3.py /path/to/data 2dcs --norm power
   python reader_TmFeO3.py /path/to/data 2dcs --norm log --omega-t -10 10 --omega-tau -5 5
+  python reader_TmFeO3.py /path/to/data 2dcs --norm power --window blackman
         """
     )
     parser.add_argument('path', help='Path to HDF5 file or directory containing it')
@@ -1405,6 +1518,9 @@ Examples:
                         help='ω_t axis limits for 2DCS plots (e.g., --omega-t -10 10)')
     parser.add_argument('--omega-tau', type=float, nargs=2, metavar=('MIN', 'MAX'), default=None,
                         help='ω_τ axis limits for 2DCS plots (e.g., --omega-tau -5 5)')
+    parser.add_argument('--window', '-w', type=str, default='gaussian',
+                        choices=['gaussian', 'hann', 'hamming', 'blackman', 'tukey', 'cosine', 'exponential', 'none'],
+                        help="Apodization window type (default: gaussian)")
     parser.add_argument('--w0', type=float, default=0,
                         help='Minimum frequency for MD analysis (default: 0)')
     parser.add_argument('--wmax', type=float, default=70,
@@ -1428,6 +1544,7 @@ Examples:
     
     print(f"Analyzing {filepath} (type: {analysis_type})")
     print(f"  Normalization: {args.norm}")
+    print(f"  Window type: {args.window}")
     if args.omega_t:
         print(f"  ω_t window: {args.omega_t}")
     if args.omega_tau:
@@ -1441,7 +1558,7 @@ Examples:
         print("\nRunning 2DCS analysis...")
         omega_t_window = tuple(args.omega_t) if args.omega_t else None
         omega_tau_window = tuple(args.omega_tau) if args.omega_tau else None
-        results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm)
+        results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm, window_type=args.window)
         print(f"Results keys: {list(results.keys())}")
     else:
         print(f"Unknown analysis type: {analysis_type}")

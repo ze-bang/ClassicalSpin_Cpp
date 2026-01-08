@@ -10,15 +10,14 @@ simulation_mode = 2dcs
 lattice_size = 4,4,4
 
 # Fe Exchange Interaction Parameters (in meV)
-J1ab = 4.92
-J1c = 4.92
-J2ab = 0.29
-J2c = 0.29
+J1ab = 4.74     # In-plane nearest neighbor (consistent with MD)
+J1c = 5.15      # Out-of-plane nearest neighbor (consistent with MD)
+J2ab = 0.15     # In-plane next nearest neighbor (consistent with MD)
+J2c = 0.30      # Out-of-plane next nearest neighbor (consistent with MD)
 
 # Fe Single-Ion Anisotropy (in meV)
 Ka = 0.0
-#Kc = -0.025230794650949503 #To get the AFM band gap at zero to be 0.91 THz
-Kc = -0.09
+Kc = -0.120794758807550 #To get the AFM band gap at zero to be 0.91 THz
 
 # DM Interaction (in meV)
 D1 = 0.0 #0 for now just for the AFM mode

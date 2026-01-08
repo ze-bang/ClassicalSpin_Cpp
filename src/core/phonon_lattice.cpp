@@ -63,6 +63,7 @@ PhononLattice::PhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
     j2_partners.resize(lattice_size);
     j3_interaction.resize(lattice_size);
     j3_partners.resize(lattice_size);
+    site_hexagons.resize(lattice_size);
     
     // Initialize Kitaev local frame for honeycomb lattice
     // The Kitaev local frame transforms from local coordinates to the global cubic frame
@@ -152,7 +153,9 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         j2_partners[i].clear();
         j3_interaction[i].clear();
         j3_partners[i].clear();
+        site_hexagons[i].clear();
     }
+    hexagons.clear();
     
     // Build bond-dependent Kitaev-Heisenberg-Γ-Γ' exchange matrices
     SpinMatrix Jx = sp_params.get_Jx();
@@ -284,13 +287,47 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         }
     }
     
+    // Build hexagonal plaquettes for ring exchange
+    // On honeycomb, each hexagon consists of alternating A and B sites
+    // For each unit cell at (i,j,k), we define one hexagon with sites going counterclockwise:
+    //   0: A(i,j,k)     - central A site
+    //   1: B(i,j,k)     - z-bond neighbor (same unit cell)
+    //   2: A(i,j+1,k)   - from B via y-bond to next A
+    //   3: B(i-1,j+1,k) - z-bond from A(i,j+1,k)
+    //   4: A(i-1,j,k)   - from B(i-1,j+1,k) via x-bond
+    //   5: B(i-1,j,k)   - z-bond from A(i-1,j,k)
+    if (std::abs(sp_params.J7) > 1e-12) {
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    std::array<size_t, 6> hex;
+                    hex[0] = flatten_index(i, j, k, 0);                          // A(i,j,k)
+                    hex[1] = flatten_index(i, j, k, 1);                          // B(i,j,k)
+                    hex[2] = flatten_index_periodic(i, j+1, k, 0);               // A(i,j+1,k)
+                    hex[3] = flatten_index_periodic(i+1, j, k, 1);             // B(i-1,j+1,k)
+                    hex[4] = flatten_index_periodic(i+1, j, k, 0);               // A(i-1,j,k)
+                    hex[5] = flatten_index_periodic(i+1, j-1, k, 1);               // B(i-1,j,k)
+                    
+                    size_t hex_idx = hexagons.size();
+                    hexagons.push_back(hex);
+                    
+                    // Register this hexagon for each site
+                    for (size_t pos = 0; pos < 6; ++pos) {
+                        site_hexagons[hex[pos]].push_back({hex_idx, pos});
+                    }
+                }
+            }
+        }
+        cout << "  Built " << hexagons.size() << " hexagonal plaquettes for ring exchange" << endl;
+    }
+    
     cout << "Set PhononLattice parameters (Kitaev-Heisenberg-Γ-Γ' in GLOBAL Cartesian frame):" << endl;
     cout << "  Exchange matrices transformed: J_global = R * J_local * R^T" << endl;
     cout << "  Local frame basis: x'=(1,1,-2)/√6, y'=(-1,1,0)/√2, z'=(1,1,1)/√3" << endl;
     cout << "  J=" << sp_params.J << ", K=" << sp_params.K 
          << ", Γ=" << sp_params.Gamma << ", Γ'=" << sp_params.Gammap << endl;
     cout << "  J2_A=" << sp_params.J2_A << ", J2_B=" << sp_params.J2_B << endl;
-    cout << "  J3=" << sp_params.J3 << endl;
+    cout << "  J3=" << sp_params.J3 << ", J7=" << sp_params.J7 << endl;
     cout << "  Spin-phonon: λ_E1=" << sp_params.lambda_E1 
          << ", λ_E2=" << sp_params.lambda_E2 
          << ", λ_A1=" << sp_params.lambda_A1 << endl;
@@ -343,6 +380,81 @@ double PhononLattice::spin_energy() const {
                 E += Si.dot(j3_interaction[i][n] * Sj);
             }
         }
+    }
+    
+    // Add ring exchange contribution
+    E += ring_exchange_energy();
+    
+    return E;
+}
+
+double PhononLattice::ring_exchange_energy() const {
+    // Six-spin ring exchange on hexagonal plaquettes
+    // H_7 = (J_7/6) Σ_{hex} [2(S_i·S_j)(S_k·S_l)(S_m·S_n)
+    //                       -6(S_i·S_k)(S_j·S_l)(S_m·S_n)
+    //                       +3(S_i·S_l)(S_j·S_k)(S_m·S_n)
+    //                       +3(S_i·S_k)(S_j·S_m)(S_l·S_n)
+    //                       -(S_i·S_l)(S_j·S_m)(S_k·S_n)
+    //                       + cyclic permutations of (i,j,k,l,m,n)]
+    //
+    // The cyclic permutations are: (0,1,2,3,4,5), (1,2,3,4,5,0), (2,3,4,5,0,1),
+    //                              (3,4,5,0,1,2), (4,5,0,1,2,3), (5,0,1,2,3,4)
+    
+    double J7 = spin_phonon_params.J7;
+    if (std::abs(J7) < 1e-12 || hexagons.empty()) {
+        return 0.0;
+    }
+    
+    double E = 0.0;
+    double prefactor = J7 / 6.0;
+    
+    for (const auto& hex : hexagons) {
+        // Get the 6 spins around the hexagon
+        const Eigen::Vector3d& S0 = spins[hex[0]];
+        const Eigen::Vector3d& S1 = spins[hex[1]];
+        const Eigen::Vector3d& S2 = spins[hex[2]];
+        const Eigen::Vector3d& S3 = spins[hex[3]];
+        const Eigen::Vector3d& S4 = spins[hex[4]];
+        const Eigen::Vector3d& S5 = spins[hex[5]];
+        
+        // Precompute all pairwise dot products (15 unique pairs)
+        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
+        double d04 = S0.dot(S4), d05 = S0.dot(S5);
+        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
+        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
+        double d34 = S3.dot(S4), d35 = S3.dot(S5);
+        double d45 = S4.dot(S5);
+        
+        // Sum over 6 cyclic permutations
+        // For each permutation (i,j,k,l,m,n), compute:
+        //   2*(i·j)*(k·l)*(m·n) - 6*(i·k)*(j·l)*(m·n) + 3*(i·l)*(j·k)*(m·n)
+        //   + 3*(i·k)*(j·m)*(l·n) - (i·l)*(j·m)*(k·n)
+        
+        // Permutation 0: (0,1,2,3,4,5)
+        double term0 = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
+                     + 3.0*d02*d14*d35 - d03*d14*d25;
+        
+        // Permutation 1: (1,2,3,4,5,0)
+        double term1 = 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
+                     + 3.0*d13*d25*d04 - d14*d25*d03;
+        
+        // Permutation 2: (2,3,4,5,0,1)
+        double term2 = 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
+                     + 3.0*d24*d03*d15 - d25*d03*d14;
+        
+        // Permutation 3: (3,4,5,0,1,2)
+        double term3 = 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
+                     + 3.0*d35*d14*d02 - d03*d14*d25;
+        
+        // Permutation 4: (4,5,0,1,2,3)
+        double term4 = 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
+                     + 3.0*d04*d25*d13 - d14*d25*d03;
+        
+        // Permutation 5: (5,0,1,2,3,4)
+        double term5 = 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
+                     + 3.0*d15*d03*d24 - d25*d03*d14;
+        
+        E += prefactor * (term0 + term1 + term2 + term3 + term4 + term5);
     }
     
     return E;
@@ -440,6 +552,113 @@ double PhononLattice::spin_phonon_energy() const {
     }
     
     return E;
+}
+
+double PhononLattice::site_energy_diff(const Eigen::Vector3d& new_spin, 
+                                       const Eigen::Vector3d& old_spin, 
+                                       size_t site) const {
+    // Compute energy difference for a proposed spin flip
+    // dE = E(new_spin) - E(old_spin)
+    
+    Eigen::Vector3d delta = new_spin - old_spin;
+    double dE = -delta.dot(field[site]);
+    
+    // Phonon coordinates (for spin-phonon coupling)
+    double Qx_E1 = phonons.Q_x_E1;
+    double Qy_E1 = phonons.Q_y_E1;
+    double Qx_E2 = phonons.Q_x_E2;
+    double Qy_E2 = phonons.Q_y_E2;
+    double Q_A1 = phonons.Q_A1;
+    double l_E1 = spin_phonon_params.lambda_E1;
+    double l_E2 = spin_phonon_params.lambda_E2;
+    double l_A1 = spin_phonon_params.lambda_A1;
+    
+    // NN interactions (includes spin-phonon coupling)
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        const Eigen::Vector3d& Sj = spins[j];
+        
+        // Pure spin-spin interaction
+        dE += delta.dot(nn_interaction[site][n] * Sj);
+        
+        // Spin-phonon coupling: E1 terms
+        // λ_E1 * Qx_E1 * (ΔSi_x * Sj_z + ΔSi_z * Sj_x)
+        dE += l_E1 * Qx_E1 * (delta(0) * Sj(2) + delta(2) * Sj(0));
+        // λ_E1 * Qy_E1 * (ΔSi_y * Sj_z + ΔSi_z * Sj_y)
+        dE += l_E1 * Qy_E1 * (delta(1) * Sj(2) + delta(2) * Sj(1));
+        
+        // Spin-phonon coupling: E2 terms
+        // λ_E2 * Qx_E2 * (ΔSi_x * Sj_x - ΔSi_y * Sj_y)
+        dE += l_E2 * Qx_E2 * (delta(0) * Sj(0) - delta(1) * Sj(1));
+        // λ_E2 * Qy_E2 * (ΔSi_x * Sj_y - ΔSi_y * Sj_x)
+        dE += l_E2 * Qy_E2 * (delta(0) * Sj(1) - delta(1) * Sj(0));
+        
+        // Spin-phonon coupling: A1 term
+        // λ_A1 * Q_A1 * (ΔSi · Sj)
+        dE += l_A1 * Q_A1 * delta.dot(Sj);
+    }
+    // 2nd NN interactions (no spin-phonon coupling on 2nd NN)
+    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+        size_t j = j2_partners[site][n];
+        dE += delta.dot(j2_interaction[site][n] * spins[j]);
+    }
+    // 3rd NN interactions (no spin-phonon coupling on 3rd NN)
+    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+        size_t j = j3_partners[site][n];
+        dE += delta.dot(j3_interaction[site][n] * spins[j]);
+    }
+    
+    // Ring exchange contribution
+    // For ring exchange, we compute the energy difference by calculating
+    // the energy change for each hexagon containing this site
+    double J7 = spin_phonon_params.J7;
+    if (std::abs(J7) > 1e-12 && !site_hexagons[site].empty()) {
+        double prefactor = J7 / 6.0;
+        
+        for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+            const auto& hex = hexagons[hex_idx];
+            
+            // Temporarily modify spin for energy calculation
+            // Get spins with old value for site
+            std::array<Eigen::Vector3d, 6> S_old, S_new;
+            for (size_t p = 0; p < 6; ++p) {
+                S_old[p] = spins[hex[p]];
+                S_new[p] = spins[hex[p]];
+            }
+            S_new[pos] = new_spin;
+            
+            // Compute energy for old and new configurations
+            auto compute_hex_energy = [&](const std::array<Eigen::Vector3d, 6>& S) {
+                // Precompute dot products
+                double d01 = S[0].dot(S[1]), d02 = S[0].dot(S[2]), d03 = S[0].dot(S[3]);
+                double d04 = S[0].dot(S[4]), d05 = S[0].dot(S[5]);
+                double d12 = S[1].dot(S[2]), d13 = S[1].dot(S[3]), d14 = S[1].dot(S[4]), d15 = S[1].dot(S[5]);
+                double d23 = S[2].dot(S[3]), d24 = S[2].dot(S[4]), d25 = S[2].dot(S[5]);
+                double d34 = S[3].dot(S[4]), d35 = S[3].dot(S[5]);
+                double d45 = S[4].dot(S[5]);
+                
+                // Sum over 6 cyclic permutations
+                double term0 = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
+                             + 3.0*d02*d14*d35 - d03*d14*d25;
+                double term1 = 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
+                             + 3.0*d13*d25*d04 - d14*d25*d03;
+                double term2 = 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
+                             + 3.0*d24*d03*d15 - d25*d03*d14;
+                double term3 = 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
+                             + 3.0*d35*d14*d02 - d03*d14*d25;
+                double term4 = 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
+                             + 3.0*d04*d25*d13 - d14*d25*d03;
+                double term5 = 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
+                             + 3.0*d15*d03*d24 - d25*d03*d14;
+                
+                return prefactor * (term0 + term1 + term2 + term3 + term4 + term5);
+            };
+            
+            dE += compute_hex_energy(S_new) - compute_hex_energy(S_old);
+        }
+    }
+    
+    return dE;
 }
 
 // ============================================================
@@ -668,6 +887,190 @@ SpinVector PhononLattice::get_local_field(size_t site) const {
         H -= j3_interaction[site][n] * Sj;
     }
     
+    // Ring exchange contribution
+    H += get_ring_exchange_field(site);
+    
+    return H;
+}
+
+SpinVector PhononLattice::get_ring_exchange_field(size_t site) const {
+    // Compute H_eff_ring = -∂H_7/∂S_site
+    //
+    // H_7 = (J_7/6) Σ_{hex} Σ_{cyclic perms} [
+    //   2*(S_i·S_j)*(S_k·S_l)*(S_m·S_n) - 6*(S_i·S_k)*(S_j·S_l)*(S_m·S_n)
+    //   + 3*(S_i·S_l)*(S_j·S_k)*(S_m·S_n) + 3*(S_i·S_k)*(S_j·S_m)*(S_l·S_n)
+    //   - (S_i·S_l)*(S_j·S_m)*(S_k·S_n)
+    // ]
+    //
+    // Taking ∂/∂S_α for site α within hexagon, we get contributions whenever α appears
+    // in one of the dot products. Using ∂(S_α·S_β)/∂S_α = S_β
+    
+    Eigen::Vector3d H = Eigen::Vector3d::Zero();
+    double J7 = spin_phonon_params.J7;
+    
+    if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
+        return H;
+    }
+    
+    double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
+    
+    // Loop over all hexagons containing this site
+    for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+        const auto& hex = hexagons[hex_idx];
+        
+        // Get all 6 spins
+        const Eigen::Vector3d& S0 = spins[hex[0]];
+        const Eigen::Vector3d& S1 = spins[hex[1]];
+        const Eigen::Vector3d& S2 = spins[hex[2]];
+        const Eigen::Vector3d& S3 = spins[hex[3]];
+        const Eigen::Vector3d& S4 = spins[hex[4]];
+        const Eigen::Vector3d& S5 = spins[hex[5]];
+        
+        // Precompute all pairwise dot products
+        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
+        double d04 = S0.dot(S4), d05 = S0.dot(S5);
+        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
+        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
+        double d34 = S3.dot(S4), d35 = S3.dot(S5);
+        double d45 = S4.dot(S5);
+        
+        // We need to compute the derivative of the sum over 6 cyclic permutations
+        // with respect to S_{pos}
+        // For each permutation (i,j,k,l,m,n), we have 5 terms:
+        //   T1 = 2*(i·j)*(k·l)*(m·n)
+        //   T2 = -6*(i·k)*(j·l)*(m·n)
+        //   T3 = 3*(i·l)*(j·k)*(m·n)
+        //   T4 = 3*(i·k)*(j·m)*(l·n)
+        //   T5 = -(i·l)*(j·m)*(k·n)
+        
+        Eigen::Vector3d dH = Eigen::Vector3d::Zero();
+        
+        // We'll compute contributions from all 6 cyclic permutations
+        // The permutations map position p to index (p+shift) mod 6
+        for (int shift = 0; shift < 6; ++shift) {
+            // Map: i=shift, j=shift+1, k=shift+2, l=shift+3, m=shift+4, n=shift+5 (mod 6)
+            size_t pi = shift % 6;
+            size_t pj = (shift + 1) % 6;
+            size_t pk = (shift + 2) % 6;
+            size_t pl = (shift + 3) % 6;
+            size_t pm = (shift + 4) % 6;
+            size_t pn = (shift + 5) % 6;
+            
+            // Get the spins for this permutation
+            const Eigen::Vector3d& Si = spins[hex[pi]];
+            const Eigen::Vector3d& Sj_perm = spins[hex[pj]];
+            const Eigen::Vector3d& Sk = spins[hex[pk]];
+            const Eigen::Vector3d& Sl = spins[hex[pl]];
+            const Eigen::Vector3d& Sm = spins[hex[pm]];
+            const Eigen::Vector3d& Sn = spins[hex[pn]];
+            
+            // Compute dot products for this permutation
+            double dij = Si.dot(Sj_perm);
+            double dik = Si.dot(Sk);
+            double dil = Si.dot(Sl);
+            double djk = Sj_perm.dot(Sk);
+            double djl = Sj_perm.dot(Sl);
+            double djm = Sj_perm.dot(Sm);
+            double dkl = Sk.dot(Sl);
+            double dkn = Sk.dot(Sn);
+            double dln = Sl.dot(Sn);
+            double dmn = Sm.dot(Sn);
+            
+            // Determine which role our site plays in this permutation
+            // pos is the position in the hexagon (0-5)
+            // We need to find which of i,j,k,l,m,n corresponds to pos
+            int role = -1;
+            if (pos == pi) role = 0;       // site is i
+            else if (pos == pj) role = 1;  // site is j
+            else if (pos == pk) role = 2;  // site is k
+            else if (pos == pl) role = 3;  // site is l
+            else if (pos == pm) role = 4;  // site is m
+            else if (pos == pn) role = 5;  // site is n
+            
+            // Compute derivative based on which role our site plays
+            // T1 = 2*(i·j)*(k·l)*(m·n)
+            // T2 = -6*(i·k)*(j·l)*(m·n)
+            // T3 = 3*(i·l)*(j·k)*(m·n)
+            // T4 = 3*(i·k)*(j·m)*(l·n)
+            // T5 = -(i·l)*(j·m)*(k·n)
+            
+            if (role == 0) {  // site is i
+                // ∂T1/∂Si = 2 * Sj * (k·l) * (m·n)
+                dH += 2.0 * Sj_perm * dkl * dmn;
+                // ∂T2/∂Si = -6 * Sk * (j·l) * (m·n)
+                dH += -6.0 * Sk * djl * dmn;
+                // ∂T3/∂Si = 3 * Sl * (j·k) * (m·n)
+                dH += 3.0 * Sl * djk * dmn;
+                // ∂T4/∂Si = 3 * Sk * (j·m) * (l·n)
+                dH += 3.0 * Sk * djm * dln;
+                // ∂T5/∂Si = -Sl * (j·m) * (k·n)
+                dH += -Sl * djm * dkn;
+            }
+            else if (role == 1) {  // site is j
+                // ∂T1/∂Sj = 2 * Si * (k·l) * (m·n)
+                dH += 2.0 * Si * dkl * dmn;
+                // ∂T2/∂Sj = -6 * Sl * (i·k) * (m·n)
+                dH += -6.0 * Sl * dik * dmn;
+                // ∂T3/∂Sj = 3 * Sk * (i·l) * (m·n)
+                dH += 3.0 * Sk * dil * dmn;
+                // ∂T4/∂Sj = 3 * Sm * (i·k) * (l·n)
+                dH += 3.0 * Sm * dik * dln;
+                // ∂T5/∂Sj = -Sm * (i·l) * (k·n)
+                dH += -Sm * dil * dkn;
+            }
+            else if (role == 2) {  // site is k
+                // ∂T1/∂Sk = 2 * Sl * (i·j) * (m·n)
+                dH += 2.0 * Sl * dij * dmn;
+                // ∂T2/∂Sk = -6 * Si * (j·l) * (m·n)
+                dH += -6.0 * Si * djl * dmn;
+                // ∂T3/∂Sk = 3 * Sj_perm * (i·l) * (m·n)
+                dH += 3.0 * Sj_perm * dil * dmn;
+                // ∂T4/∂Sk = 3 * Si * (j·m) * (l·n)
+                dH += 3.0 * Si * djm * dln;
+                // ∂T5/∂Sk = -Sn * (i·l) * (j·m)
+                dH += -Sn * dil * djm;
+            }
+            else if (role == 3) {  // site is l
+                // ∂T1/∂Sl = 2 * Sk * (i·j) * (m·n)
+                dH += 2.0 * Sk * dij * dmn;
+                // ∂T2/∂Sl = -6 * Sj_perm * (i·k) * (m·n)
+                dH += -6.0 * Sj_perm * dik * dmn;
+                // ∂T3/∂Sl = 3 * Si * (j·k) * (m·n)
+                dH += 3.0 * Si * djk * dmn;
+                // ∂T4/∂Sl = 3 * Sn * (i·k) * (j·m)
+                dH += 3.0 * Sn * dik * djm;
+                // ∂T5/∂Sl = -Si * (j·m) * (k·n)
+                dH += -Si * djm * dkn;
+            }
+            else if (role == 4) {  // site is m
+                // ∂T1/∂Sm = 2 * Sn * (i·j) * (k·l)
+                dH += 2.0 * Sn * dij * dkl;
+                // ∂T2/∂Sm = -6 * Sn * (i·k) * (j·l)
+                dH += -6.0 * Sn * dik * djl;
+                // ∂T3/∂Sm = 3 * Sn * (i·l) * (j·k)
+                dH += 3.0 * Sn * dil * djk;
+                // ∂T4/∂Sm = 3 * Sj_perm * (i·k) * (l·n)
+                dH += 3.0 * Sj_perm * dik * dln;
+                // ∂T5/∂Sm = -Sj_perm * (i·l) * (k·n)
+                dH += -Sj_perm * dil * dkn;
+            }
+            else if (role == 5) {  // site is n
+                // ∂T1/∂Sn = 2 * Sm * (i·j) * (k·l)
+                dH += 2.0 * Sm * dij * dkl;
+                // ∂T2/∂Sn = -6 * Sm * (i·k) * (j·l)
+                dH += -6.0 * Sm * dik * djl;
+                // ∂T3/∂Sn = 3 * Sm * (i·l) * (j·k)
+                dH += 3.0 * Sm * dil * djk;
+                // ∂T4/∂Sn = 3 * Sl * (i·k) * (j·m)
+                dH += 3.0 * Sl * dik * djm;
+                // ∂T5/∂Sn = -Sk * (i·l) * (j·m)
+                dH += -Sk * dil * djm;
+            }
+        }
+        
+        H += prefactor * dH;
+    }
+    
     return H;
 }
 
@@ -750,6 +1153,17 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     // State: [S0_x, S0_y, S0_z, ..., SN_z, Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1]
     
     const size_t spin_offset = spin_dim * lattice_size;
+    
+    // Update internal spins from ODE state for ring exchange calculation
+    // (Only needed if J7 != 0)
+    if (std::abs(spin_phonon_params.J7) > 1e-12) {
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t idx = i * spin_dim;
+            spins[i](0) = x[idx];
+            spins[i](1) = x[idx+1];
+            spins[i](2) = x[idx+2];
+        }
+    }
     
     // Extract phonon state
     PhononState ph;
@@ -890,6 +1304,10 @@ void PhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
             Eigen::Vector3d Sj(x[jdx], x[jdx+1], x[jdx+2]);
             H -= j3_interaction[i][n] * Sj;
         }
+        
+        // Ring exchange (6-spin) contribution
+        // Uses internal spins array which was updated from x at the start of ode_system
+        H += get_ring_exchange_field(i);
         
         // LLG equation: dS/dt = S × H_eff + α S × (S × H_eff)
         Eigen::Vector3d dSdt = spin_derivative(Si, H);
@@ -1818,6 +2236,12 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         }
         
         if (dE < tol && dQ < tol) {
+            // Final phonon relaxation to ensure phonons are at equilibrium for final spin config
+            // This is needed because deterministic_sweep() moved spins after the last relax_phonons()
+            if (!phonon_only) {
+                relax_phonons(1e-10, 1000, 1.0);
+            }
+            
             cout << "  " << (phonon_only ? "Phonon-only" : "Joint") << " relaxation converged in " << iter << " iterations!" << endl;
             cout << "\n=== Energy AFTER " << (phonon_only ? "phonon-only" : "joint") << " relaxation (equilibrium state) ===" << endl;
             cout << "  Spin energy:       " << spin_energy() << " (" << spin_energy()/lattice_size << " per site)" << endl;
@@ -1830,6 +2254,11 @@ bool PhononLattice::relax_joint(double tol, size_t max_iter, size_t spin_sweeps_
         
         prev_energy = curr_energy;
         prev_Q_E = curr_Q_E;
+    }
+    
+    // Final phonon relaxation even if not converged, to ensure V=0 and phonons at equilibrium
+    if (!phonon_only) {
+        relax_phonons(1e-10, 1000, 1.0);
     }
     
     cout << "  WARNING: " << (phonon_only ? "Phonon-only" : "Joint") << " relaxation did not fully converge after " << max_iter << " iterations" << endl;

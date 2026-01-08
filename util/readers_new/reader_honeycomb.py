@@ -779,7 +779,7 @@ def read_MD_tot(dir):
                 else:
                     raise KeyError("positions dataset not found in HDF5 file")
         
-            sssf_result = SSSF2D(S, P, nK, dir + "/" + filename)
+            sssf_result, _, _ = SSSF2D(S, P, nK, dir + "/" + filename)
             SSSF += sssf_result
         except Exception as e:
             print(f"Error reading file {filename}: {e}")
