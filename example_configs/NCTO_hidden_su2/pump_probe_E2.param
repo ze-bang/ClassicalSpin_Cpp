@@ -24,7 +24,7 @@ lattice_size = 8,8,1
 simulation_mode = pump_probe
 
 # Output directory
-output_dir = NCTO_pump_probe_hidden_su2
+output_dir = NCTO_pump_probe_hidden_su2_E2_phonon
 
 # Number of trials
 num_trials = 1
@@ -56,8 +56,8 @@ field_direction = 0,0,1
 # lambda_E1 (E1): Qx_E1*(SxSz+SzSx) + Qy_E1*(SySz+SzSy)
 # lambda_E2 (E2): Qx_E2*(SxSx-SySy) + Qy_E2*(SxSy-SySx)
 # lambda_A1 (A1): Q_A1*(Si·Sj)
-lambda_E1 = 0.5         # E1 coupling (off-diagonal xz, yz)
-lambda_E2 = 0.0          # E2 coupling (in-plane anisotropic xx-yy, xy-yx)
+lambda_E1 = 0.0         # E1 coupling (off-diagonal xz, yz)
+lambda_E2 = 0.5          # E2 coupling (in-plane anisotropic xx-yy, xy-yx)
 lambda_A1 = 0.0          # A1 coupling (isotropic Heisenberg)
 
 # Time-dependent spin-phonon coupling (optional)
@@ -85,7 +85,7 @@ gamma_E1 = 0.0           # E1 damping
 lambda_E1_quartic = 0.0  # E1 quartic stabilization
 
 # E2 mode (Raman-active doublet, not THz driven)
-omega_E2 = 12.0           # E2 frequency
+omega_E2 = 8.0           # E2 frequency
 gamma_E2 = 0.0           # E2 damping
 lambda_E2_quartic = 0.0  # E2 quartic stabilization
 
@@ -110,17 +110,24 @@ Z_star = 1.0
 # THz DRIVE PARAMETERS
 # ============================================
 
-# Drive strength per bond type: relative scaling of the THz field for each bond type.
+# Drive strength per bond type for E1 (IR active): relative scaling of the THz field.
 # The phonon Q_E1 is now per-bond-type, so these control how strongly the THz field
 # couples to each bond type's phonon mode.
 # Default: 1.0 (full strength). Set to 0 to disable drive on a bond type.
-drive_strength_0 = 1.0   # x-bond drive strength
-drive_strength_1 = 1.0   # y-bond drive strength
-drive_strength_2 = 1.0   # z-bond drive strength
+drive_strength_0 = 0.0   # x-bond E1 drive strength
+drive_strength_1 = 0.0   # y-bond E1 drive strength
+drive_strength_2 = 0.0   # z-bond E1 drive strength
 
-# Pump pulse (THz driving IR mode)
+# Drive strength per bond type for E2 (Raman active): artificial drive for E2 phonon.
+# E2 is normally Raman-active (not IR), but this allows direct driving for modeling.
+# Default: 0.0 (E2 is not driven). Set to non-zero to drive E2 phonon.
+drive_strength_E2_0 = 1.0   # x-bond E2 drive strength
+drive_strength_E2_1 = 1.0   # y-bond E2 drive strength
+drive_strength_E2_2 = 1.0   # z-bond E2 drive strength
+
+# Pump pulse (driving phonon modes based on drive_strength settings)
 pump_amplitude = 5.0     # Electric field amplitude
-pump_frequency = 8.0     # Should match omega_E1 for resonant driving
+pump_frequency = 8.0     # Should match omega_E2 for resonant E2 driving
 pump_time = 0.0         # Pulse center time
 pump_width = 2.0        # Gaussian width (FWHM ~ 2.35 * width)
 pump_phase = 0.0         # Carrier-envelope phase

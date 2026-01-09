@@ -7,7 +7,7 @@ system = tmfeo3
 simulation_mode = 2dcs
 
 # Lattice Size (for mixed Fe + Tm lattice)
-lattice_size = 3,3,3
+lattice_size = 4,4,4
 
 # Fe Exchange Interaction Parameters (in meV)
 J1ab = 4.74     # In-plane nearest neighbor
@@ -17,7 +17,7 @@ J2c = 0.30      # Out-of-plane next nearest neighbor
 
 # Fe Single-Ion Anisotropy (in meV)
 Ka = 0.0
-Kc = -0.025230794650949503 #To get the AFM band gap at zero to be 0.91 THz
+Kc = -0.120794758807550 #To get the AFM band gap at zero to be 0.91 THz
 
 # DM Interaction (in meV)
 D1 = 0.0 #0 for now just for the AFM mode
@@ -32,7 +32,7 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
-chii = 0.0     # χ parameter
+chi5x = 0.5     # χ parameter
 
 # Magnetic Field
 field_strength = 0.0
@@ -58,10 +58,10 @@ pump_frequency = 0.3
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
-pump_amplitude = 0.3
-pump_width = 0.5
-pump_frequency = 0.2
-pump_direction_su3 = 0,1,0,0,0,0,0,0  # λ3 component (default)
+pump_amplitude_su3 = 0.05
+pump_width_su3 = 0.5
+pump_frequency_su3 = 2.1
+pump_direction_su3 = 0,0,0,0,2.3915,0,0.9128,0 
 
 # 2DCS Scan
 tau_start = -100.0
@@ -74,7 +74,7 @@ md_time_start = -100.0
 md_time_end = 100.0
 md_timestep = 0.01
 md_integrator = rk4
-use_gpu = true              # Recommended for TmFeO3 2DCS
+use_gpu = false              # Recommended for TmFeO3 2DCS
 
 # Output
 output_dir = TmFeO3_2DCS
