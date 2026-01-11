@@ -32,7 +32,7 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
-chi5x = 0.5     # χ parameter
+chi5x = 0.8     # χ parameter
 
 # Magnetic Field
 field_strength = 0.0
@@ -58,7 +58,7 @@ pump_frequency = 0.3
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
-pump_amplitude_su3 = 0.05
+pump_amplitude_su3 = 0.5
 pump_width_su3 = 0.5
 pump_frequency_su3 = 2.1
 pump_direction_su3 = 0,0,0,0,2.3915,0,0.9128,0 

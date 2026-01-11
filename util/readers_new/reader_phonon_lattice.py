@@ -465,12 +465,22 @@ def compute_phonon_energy_breakdown(result):
 def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
     """Read PhononLattice MD trajectory with full spin configuration.
     
-    The PhononLattice trajectory.h5 format now matches the Lattice format:
+    The PhononLattice trajectory.h5 format supports two modes:
+    
+    Per-bond-type format (new):
+    - /phonon_trajectory/Qx_E1_0, Qx_E1_1, Qx_E1_2: E1 x-component per bond type
+    - /phonon_trajectory/Qy_E1_0, Qy_E1_1, Qy_E1_2: E1 y-component per bond type
+    - /phonon_trajectory/Qx_E2_0, ..., Q_A1_0, Q_A1_1, Q_A1_2: Similar for E2 and A1
+    - /metadata/@drive_strength_0, @drive_strength_1, @drive_strength_2: Drive per bond
+    
+    Scalar format (legacy):
+    - /phonon_trajectory/Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1: Phonon coordinates
+    - /phonon_trajectory/Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1: Phonon velocities
+    
+    Common:
     - /trajectory/times: Time array
     - /trajectory/spins: Full spin configuration [n_steps, n_sites, spin_dim]
     - /trajectory/magnetization_local, magnetization_antiferro, magnetization_global
-    - /phonon_trajectory/Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1: Phonon coordinates
-    - /phonon_trajectory/Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1: Phonon velocities
     - /phonon_trajectory/energy: Energy density at each timestep
     - /metadata/positions: Site positions [n_sites, 3]
     - /metadata/@omega_E1, @omega_E2, @omega_A1, @g3_E1A1, etc.: Phonon parameters
@@ -484,7 +494,13 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
             spin deviation from initial configuration as default order parameter.
     
     Returns:
-        dict with full trajectory data and computed observables
+        dict with full trajectory data and computed observables, including:
+        - 'has_per_bond_type': bool, whether per-bond-type data is available
+        - 'Qx_E1', 'Qy_E1', etc.: Total phonon coordinates (sum over bond types)
+        - 'Qx_E1_0', 'Qx_E1_1', 'Qx_E1_2', etc.: Per-bond-type phonon coordinates
+        - 'Q_per_bond': (n_time, 5, 3) array of all per-bond-type coordinates
+        - 'E1_amp_0', 'E1_amp_1', 'E1_amp_2': Per-bond-type E1 amplitudes
+        - 'E1_spectrum_0', etc.: Per-bond-type spectra
     """
     hdf5_path = os.path.join(dir, "trajectory.h5")
     
@@ -509,53 +525,145 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
         else:
             raise KeyError("positions dataset not found in HDF5 file")
         
-        # Read phonon trajectory - try new naming first, fallback to legacy
-        # E1 mode (IR active, 2-component)
-        if '/phonon_trajectory/Qx_E1' in f:
+        # Read phonon trajectory - try per-bond-type first, then scalar, then legacy
+        # Per-bond-type format: Qx_E1_0, Qx_E1_1, Qx_E1_2, etc.
+        # Scalar format: Qx_E1, Qy_E1, etc.
+        # Legacy format: Qx, Qy, QR, etc.
+        
+        N_BONDS = 3  # x-bond, y-bond, z-bond
+        
+        # E1 mode (IR active, 2-component) - per bond type
+        if '/phonon_trajectory/Qx_E1_0' in f:
+            # Per-bond-type format
+            Qx_E1_0 = f['/phonon_trajectory/Qx_E1_0'][:]
+            Qx_E1_1 = f['/phonon_trajectory/Qx_E1_1'][:]
+            Qx_E1_2 = f['/phonon_trajectory/Qx_E1_2'][:]
+            Qy_E1_0 = f['/phonon_trajectory/Qy_E1_0'][:]
+            Qy_E1_1 = f['/phonon_trajectory/Qy_E1_1'][:]
+            Qy_E1_2 = f['/phonon_trajectory/Qy_E1_2'][:]
+            # Compute total E1 as sum over bond types for backward compat
+            Qx_E1 = Qx_E1_0 + Qx_E1_1 + Qx_E1_2
+            Qy_E1 = Qy_E1_0 + Qy_E1_1 + Qy_E1_2
+            has_per_bond_type = True
+        elif '/phonon_trajectory/Qx_E1' in f:
             Qx_E1 = f['/phonon_trajectory/Qx_E1'][:]
             Qy_E1 = f['/phonon_trajectory/Qy_E1'][:]
+            # Create dummy per-bond-type arrays (uniform distribution)
+            Qx_E1_0 = Qx_E1_1 = Qx_E1_2 = Qx_E1 / 3.0
+            Qy_E1_0 = Qy_E1_1 = Qy_E1_2 = Qy_E1 / 3.0
+            has_per_bond_type = False
         else:
             # Legacy naming
             Qx_E1 = f['/phonon_trajectory/Qx'][:]
             Qy_E1 = f['/phonon_trajectory/Qy'][:]
+            Qx_E1_0 = Qx_E1_1 = Qx_E1_2 = Qx_E1 / 3.0
+            Qy_E1_0 = Qy_E1_1 = Qy_E1_2 = Qy_E1 / 3.0
+            has_per_bond_type = False
         
-        # E2 mode (Raman active, 2-component)
-        if '/phonon_trajectory/Qx_E2' in f:
+        # E2 mode (Raman active, 2-component) - per bond type
+        if '/phonon_trajectory/Qx_E2_0' in f:
+            Qx_E2_0 = f['/phonon_trajectory/Qx_E2_0'][:]
+            Qx_E2_1 = f['/phonon_trajectory/Qx_E2_1'][:]
+            Qx_E2_2 = f['/phonon_trajectory/Qx_E2_2'][:]
+            Qy_E2_0 = f['/phonon_trajectory/Qy_E2_0'][:]
+            Qy_E2_1 = f['/phonon_trajectory/Qy_E2_1'][:]
+            Qy_E2_2 = f['/phonon_trajectory/Qy_E2_2'][:]
+            Qx_E2 = Qx_E2_0 + Qx_E2_1 + Qx_E2_2
+            Qy_E2 = Qy_E2_0 + Qy_E2_1 + Qy_E2_2
+        elif '/phonon_trajectory/Qx_E2' in f:
             Qx_E2 = f['/phonon_trajectory/Qx_E2'][:]
             Qy_E2 = f['/phonon_trajectory/Qy_E2'][:]
+            Qx_E2_0 = Qx_E2_1 = Qx_E2_2 = Qx_E2 / 3.0
+            Qy_E2_0 = Qy_E2_1 = Qy_E2_2 = Qy_E2 / 3.0
         else:
             # Legacy: E2 mode not present, initialize to zeros
             Qx_E2 = np.zeros_like(Qx_E1)
             Qy_E2 = np.zeros_like(Qy_E1)
+            Qx_E2_0 = Qx_E2_1 = Qx_E2_2 = np.zeros_like(Qx_E1)
+            Qy_E2_0 = Qy_E2_1 = Qy_E2_2 = np.zeros_like(Qy_E1)
         
-        # A1 mode (Raman active, 1-component)
-        if '/phonon_trajectory/Q_A1' in f:
+        # A1 mode (Raman active, 1-component) - per bond type
+        if '/phonon_trajectory/Q_A1_0' in f:
+            Q_A1_0 = f['/phonon_trajectory/Q_A1_0'][:]
+            Q_A1_1 = f['/phonon_trajectory/Q_A1_1'][:]
+            Q_A1_2 = f['/phonon_trajectory/Q_A1_2'][:]
+            Q_A1 = Q_A1_0 + Q_A1_1 + Q_A1_2
+        elif '/phonon_trajectory/Q_A1' in f:
             Q_A1 = f['/phonon_trajectory/Q_A1'][:]
+            Q_A1_0 = Q_A1_1 = Q_A1_2 = Q_A1 / 3.0
         else:
             # Legacy naming
             Q_A1 = f['/phonon_trajectory/QR'][:]
+            Q_A1_0 = Q_A1_1 = Q_A1_2 = Q_A1 / 3.0
         
         energy = f['/phonon_trajectory/energy'][:]
         
-        # Read velocities - try new naming first, fallback to legacy
-        if '/phonon_trajectory/Vx_E1' in f:
+        # Read velocities - try per-bond-type first, then scalar, then legacy
+        # E1 velocities
+        if '/phonon_trajectory/Vx_E1_0' in f:
+            Vx_E1_0 = f['/phonon_trajectory/Vx_E1_0'][:]
+            Vx_E1_1 = f['/phonon_trajectory/Vx_E1_1'][:]
+            Vx_E1_2 = f['/phonon_trajectory/Vx_E1_2'][:]
+            Vy_E1_0 = f['/phonon_trajectory/Vy_E1_0'][:]
+            Vy_E1_1 = f['/phonon_trajectory/Vy_E1_1'][:]
+            Vy_E1_2 = f['/phonon_trajectory/Vy_E1_2'][:]
+            Vx_E1 = Vx_E1_0 + Vx_E1_1 + Vx_E1_2
+            Vy_E1 = Vy_E1_0 + Vy_E1_1 + Vy_E1_2
+        elif '/phonon_trajectory/Vx_E1' in f:
             Vx_E1 = f['/phonon_trajectory/Vx_E1'][:]
             Vy_E1 = f['/phonon_trajectory/Vy_E1'][:]
+            Vx_E1_0 = Vx_E1_1 = Vx_E1_2 = Vx_E1 / 3.0
+            Vy_E1_0 = Vy_E1_1 = Vy_E1_2 = Vy_E1 / 3.0
         else:
             Vx_E1 = f['/phonon_trajectory/Vx'][:] if '/phonon_trajectory/Vx' in f else None
             Vy_E1 = f['/phonon_trajectory/Vy'][:] if '/phonon_trajectory/Vy' in f else None
+            if Vx_E1 is not None:
+                Vx_E1_0 = Vx_E1_1 = Vx_E1_2 = Vx_E1 / 3.0
+                Vy_E1_0 = Vy_E1_1 = Vy_E1_2 = Vy_E1 / 3.0
+            else:
+                Vx_E1_0 = Vx_E1_1 = Vx_E1_2 = None
+                Vy_E1_0 = Vy_E1_1 = Vy_E1_2 = None
         
-        if '/phonon_trajectory/Vx_E2' in f:
+        # E2 velocities
+        if '/phonon_trajectory/Vx_E2_0' in f:
+            Vx_E2_0 = f['/phonon_trajectory/Vx_E2_0'][:]
+            Vx_E2_1 = f['/phonon_trajectory/Vx_E2_1'][:]
+            Vx_E2_2 = f['/phonon_trajectory/Vx_E2_2'][:]
+            Vy_E2_0 = f['/phonon_trajectory/Vy_E2_0'][:]
+            Vy_E2_1 = f['/phonon_trajectory/Vy_E2_1'][:]
+            Vy_E2_2 = f['/phonon_trajectory/Vy_E2_2'][:]
+            Vx_E2 = Vx_E2_0 + Vx_E2_1 + Vx_E2_2
+            Vy_E2 = Vy_E2_0 + Vy_E2_1 + Vy_E2_2
+        elif '/phonon_trajectory/Vx_E2' in f:
             Vx_E2 = f['/phonon_trajectory/Vx_E2'][:]
             Vy_E2 = f['/phonon_trajectory/Vy_E2'][:]
+            Vx_E2_0 = Vx_E2_1 = Vx_E2_2 = Vx_E2 / 3.0
+            Vy_E2_0 = Vy_E2_1 = Vy_E2_2 = Vy_E2 / 3.0
         else:
             Vx_E2 = np.zeros_like(Qx_E1) if Vx_E1 is not None else None
             Vy_E2 = np.zeros_like(Qy_E1) if Vy_E1 is not None else None
+            if Vx_E2 is not None:
+                Vx_E2_0 = Vx_E2_1 = Vx_E2_2 = Vx_E2 / 3.0
+                Vy_E2_0 = Vy_E2_1 = Vy_E2_2 = Vy_E2 / 3.0
+            else:
+                Vx_E2_0 = Vx_E2_1 = Vx_E2_2 = None
+                Vy_E2_0 = Vy_E2_1 = Vy_E2_2 = None
         
-        if '/phonon_trajectory/V_A1' in f:
+        # A1 velocities
+        if '/phonon_trajectory/V_A1_0' in f:
+            V_A1_0 = f['/phonon_trajectory/V_A1_0'][:]
+            V_A1_1 = f['/phonon_trajectory/V_A1_1'][:]
+            V_A1_2 = f['/phonon_trajectory/V_A1_2'][:]
+            V_A1 = V_A1_0 + V_A1_1 + V_A1_2
+        elif '/phonon_trajectory/V_A1' in f:
             V_A1 = f['/phonon_trajectory/V_A1'][:]
+            V_A1_0 = V_A1_1 = V_A1_2 = V_A1 / 3.0
         else:
             V_A1 = f['/phonon_trajectory/VR'][:] if '/phonon_trajectory/VR' in f else None
+            if V_A1 is not None:
+                V_A1_0 = V_A1_1 = V_A1_2 = V_A1 / 3.0
+            else:
+                V_A1_0 = V_A1_1 = V_A1_2 = None
         
         # Read metadata
         metadata = {}
@@ -577,6 +685,10 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
         print(f"  Phonon params: omega_E1={metadata.get('omega_E1', 'N/A')}, "
               f"omega_E2={metadata.get('omega_E2', 'N/A')}, "
               f"omega_A1={metadata.get('omega_A1', 'N/A')}")
+        if has_per_bond_type:
+            print(f"  Per-bond-type phonons: drive_strength_0={metadata.get('drive_strength_0', 'N/A')}, "
+                  f"drive_strength_1={metadata.get('drive_strength_1', 'N/A')}, "
+                  f"drive_strength_2={metadata.get('drive_strength_2', 'N/A')}")
     
     print(f"  Computing spin deviation from initial configuration...")
     S0 = S[0]  # Initial spin configuration
@@ -584,31 +696,57 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
     O_custom = np.array([np.sqrt(np.mean(np.sum((S[t] - S0)**2, axis=1))) 
                             for t in range(len(T))])
     
-    # Stack phonon coordinates (all 5 modes)
+    # Stack phonon coordinates (all 5 modes - sum over bond types)
     Q = np.stack([Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1], axis=1)  # (n_time, 5)
     
-    # Compute mode amplitudes
+    # Stack per-bond-type phonon coordinates
+    # Shape: (n_time, 5 modes, 3 bond types)
+    Q_per_bond = np.stack([
+        np.stack([Qx_E1_0, Qx_E1_1, Qx_E1_2], axis=1),  # Qx_E1 per bond
+        np.stack([Qy_E1_0, Qy_E1_1, Qy_E1_2], axis=1),  # Qy_E1 per bond
+        np.stack([Qx_E2_0, Qx_E2_1, Qx_E2_2], axis=1),  # Qx_E2 per bond
+        np.stack([Qy_E2_0, Qy_E2_1, Qy_E2_2], axis=1),  # Qy_E2 per bond
+        np.stack([Q_A1_0, Q_A1_1, Q_A1_2], axis=1),     # Q_A1 per bond
+    ], axis=1)  # (n_time, 5, 3)
+    
+    # Compute mode amplitudes (total across bond types)
     E1_amp = np.sqrt(Qx_E1**2 + Qy_E1**2)
     E2_amp = np.sqrt(Qx_E2**2 + Qy_E2**2)
+    
+    # Per-bond-type mode amplitudes
+    E1_amp_0 = np.sqrt(Qx_E1_0**2 + Qy_E1_0**2)
+    E1_amp_1 = np.sqrt(Qx_E1_1**2 + Qy_E1_1**2)
+    E1_amp_2 = np.sqrt(Qx_E1_2**2 + Qy_E1_2**2)
+    E2_amp_0 = np.sqrt(Qx_E2_0**2 + Qy_E2_0**2)
+    E2_amp_1 = np.sqrt(Qx_E2_1**2 + Qy_E2_1**2)
+    E2_amp_2 = np.sqrt(Qx_E2_2**2 + Qy_E2_2**2)
     
     # Compute spectra
     dt = T[1] - T[0] if len(T) > 1 else 1.0
     omega = np.fft.fftfreq(len(T), dt) * 2 * np.pi
     omega = np.fft.fftshift(omega)
     
-    # E1 mode spectrum (Qx_E1, Qy_E1)
+    # E1 mode spectrum (Qx_E1, Qy_E1) - total
     Qx_E1_fft = np.fft.fftshift(np.fft.fft(Qx_E1 - np.mean(Qx_E1)))
     Qy_E1_fft = np.fft.fftshift(np.fft.fft(Qy_E1 - np.mean(Qy_E1)))
     E1_spectrum = np.abs(Qx_E1_fft)**2 + np.abs(Qy_E1_fft)**2
     
-    # E2 mode spectrum (Qx_E2, Qy_E2)
+    # E2 mode spectrum (Qx_E2, Qy_E2) - total
     Qx_E2_fft = np.fft.fftshift(np.fft.fft(Qx_E2 - np.mean(Qx_E2)))
     Qy_E2_fft = np.fft.fftshift(np.fft.fft(Qy_E2 - np.mean(Qy_E2)))
     E2_spectrum = np.abs(Qx_E2_fft)**2 + np.abs(Qy_E2_fft)**2
     
-    # A1 mode spectrum (Q_A1)
+    # A1 mode spectrum (Q_A1) - total
     Q_A1_fft = np.fft.fftshift(np.fft.fft(Q_A1 - np.mean(Q_A1)))
     A1_spectrum = np.abs(Q_A1_fft)**2
+    
+    # Per-bond-type spectra for E1 mode
+    E1_spectrum_0 = np.abs(np.fft.fftshift(np.fft.fft(Qx_E1_0 - np.mean(Qx_E1_0))))**2 + \
+                    np.abs(np.fft.fftshift(np.fft.fft(Qy_E1_0 - np.mean(Qy_E1_0))))**2
+    E1_spectrum_1 = np.abs(np.fft.fftshift(np.fft.fft(Qx_E1_1 - np.mean(Qx_E1_1))))**2 + \
+                    np.abs(np.fft.fftshift(np.fft.fft(Qy_E1_1 - np.mean(Qy_E1_1))))**2
+    E1_spectrum_2 = np.abs(np.fft.fftshift(np.fft.fft(Qx_E1_2 - np.mean(Qx_E1_2))))**2 + \
+                    np.abs(np.fft.fftshift(np.fft.fft(Qy_E1_2 - np.mean(Qy_E1_2))))**2
     
     # Custom order parameter spectrum
     O_custom_spectrum = None
@@ -625,19 +763,37 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
         'M_local': M_local,
         'M_global': M_global,
         'Q': Q,
-        # E1 mode
+        'Q_per_bond': Q_per_bond,  # (n_time, 5, 3) per-bond-type coordinates
+        'has_per_bond_type': has_per_bond_type,
+        # E1 mode - total (sum over bond types)
         'Qx_E1': Qx_E1, 'Qy_E1': Qy_E1,
         'Vx_E1': Vx_E1, 'Vy_E1': Vy_E1,
         'E1_amp': E1_amp,
         'E1_spectrum': E1_spectrum,
-        # E2 mode
+        # E1 mode - per bond type
+        'Qx_E1_0': Qx_E1_0, 'Qx_E1_1': Qx_E1_1, 'Qx_E1_2': Qx_E1_2,
+        'Qy_E1_0': Qy_E1_0, 'Qy_E1_1': Qy_E1_1, 'Qy_E1_2': Qy_E1_2,
+        'Vx_E1_0': Vx_E1_0, 'Vx_E1_1': Vx_E1_1, 'Vx_E1_2': Vx_E1_2,
+        'Vy_E1_0': Vy_E1_0, 'Vy_E1_1': Vy_E1_1, 'Vy_E1_2': Vy_E1_2,
+        'E1_amp_0': E1_amp_0, 'E1_amp_1': E1_amp_1, 'E1_amp_2': E1_amp_2,
+        'E1_spectrum_0': E1_spectrum_0, 'E1_spectrum_1': E1_spectrum_1, 'E1_spectrum_2': E1_spectrum_2,
+        # E2 mode - total
         'Qx_E2': Qx_E2, 'Qy_E2': Qy_E2,
         'Vx_E2': Vx_E2, 'Vy_E2': Vy_E2,
         'E2_amp': E2_amp,
         'E2_spectrum': E2_spectrum,
-        # A1 mode
+        # E2 mode - per bond type
+        'Qx_E2_0': Qx_E2_0, 'Qx_E2_1': Qx_E2_1, 'Qx_E2_2': Qx_E2_2,
+        'Qy_E2_0': Qy_E2_0, 'Qy_E2_1': Qy_E2_1, 'Qy_E2_2': Qy_E2_2,
+        'Vx_E2_0': Vx_E2_0, 'Vx_E2_1': Vx_E2_1, 'Vx_E2_2': Vx_E2_2,
+        'Vy_E2_0': Vy_E2_0, 'Vy_E2_1': Vy_E2_1, 'Vy_E2_2': Vy_E2_2,
+        'E2_amp_0': E2_amp_0, 'E2_amp_1': E2_amp_1, 'E2_amp_2': E2_amp_2,
+        # A1 mode - total
         'Q_A1': Q_A1, 'V_A1': V_A1,
         'A1_spectrum': A1_spectrum,
+        # A1 mode - per bond type
+        'Q_A1_0': Q_A1_0, 'Q_A1_1': Q_A1_1, 'Q_A1_2': Q_A1_2,
+        'V_A1_0': V_A1_0, 'V_A1_1': V_A1_1, 'V_A1_2': V_A1_2,
         # Legacy aliases for backward compatibility
         'Qx': Qx_E1, 'Qy': Qy_E1, 'QR': Q_A1,
         'Vx': Vx_E1, 'Vy': Vy_E1, 'VR': V_A1,
@@ -878,7 +1034,7 @@ def read_pump_probe_phonon(dir, order_parameter_func=None):
 
 def animate_spin_trajectory(result, output_file='spin_animation.mp4', 
                             fps=10, interval=1, 
-                            show_phonon=True, figsize=(12, 10)):
+                            show_phonon=True, show_pulse=True, figsize=(12, 10)):
     """Create animation of spin configuration evolution from MD trajectory.
     
     Spins are transformed from local Kitaev frame to global Cartesian frame.
@@ -890,6 +1046,7 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
         fps: Frames per second
         interval: Use every Nth frame (for long trajectories)
         show_phonon: If True, show phonon amplitude panel
+        show_pulse: If True, show THz pulse form panel
         figsize: Figure size
     
     Returns:
@@ -940,15 +1097,50 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
     
     print(f"Creating animation: {n_frames} frames from {n_steps} timesteps")
     
+    # Extract pump parameters from metadata
+    metadata = result.get('metadata', {})
+    pump_amplitude = metadata.get('pump_amplitude', 0.0)
+    pump_frequency = metadata.get('pump_frequency', 1.0)
+    pump_time = metadata.get('pump_time', 0.0)
+    pump_width = metadata.get('pump_width', 1.0)
+    pump_phase = metadata.get('pump_phase', 0.0)
+    pump_polarization = metadata.get('pump_polarization', 0.0)
+    
+    # Compute pulse envelope and E-field
+    if show_pulse and pump_amplitude > 0:
+        envelope = pump_amplitude * np.exp(-(T - pump_time)**2 / (2 * pump_width**2))
+        Ex = envelope * np.cos(pump_frequency * (T - pump_time) + pump_phase) * np.cos(pump_polarization)
+        Ey = envelope * np.cos(pump_frequency * (T - pump_time) + pump_phase) * np.sin(pump_polarization)
+        has_pulse = True
+        print(f"  Pulse params: A={pump_amplitude:.2f}, ω={pump_frequency:.2f}, t0={pump_time:.2f}, σ={pump_width:.2f}")
+    else:
+        has_pulse = False
+        Ex = Ey = envelope = None
+    
+    # Count number of bottom panels
+    n_bottom_panels = sum([show_phonon, show_pulse and has_pulse])
+    
     # Create figure - only 2D plot, no 3D
-    if show_phonon:
+    if n_bottom_panels > 0:
         fig = plt.figure(figsize=figsize)
-        gs = fig.add_gridspec(2, 1, height_ratios=[3, 1])
+        gs = fig.add_gridspec(1 + n_bottom_panels, 1, height_ratios=[3] + [1]*n_bottom_panels)
         ax_2d = fig.add_subplot(gs[0])
-        ax_phonon = fig.add_subplot(gs[1])
+        
+        panel_idx = 1
+        if show_phonon:
+            ax_phonon = fig.add_subplot(gs[panel_idx])
+            panel_idx += 1
+        else:
+            ax_phonon = None
+        
+        if show_pulse and has_pulse:
+            ax_pulse = fig.add_subplot(gs[panel_idx])
+        else:
+            ax_pulse = None
     else:
         fig, ax_2d = plt.subplots(figsize=(10, 8))
         ax_phonon = None
+        ax_pulse = None
     
     # Get Sz (global) for color mapping
     sz_init = S_global[0, :, 2]
@@ -993,11 +1185,37 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
         line_E1, = ax_phonon.plot([], [], 'r-', lw=2)
         line_E2, = ax_phonon.plot([], [], 'g-', lw=2)
         line_A1, = ax_phonon.plot([], [], 'b-', lw=2)
-        vline = ax_phonon.axvline(T[0], color='k', linestyle='--', lw=1)
+        vline_phonon = ax_phonon.axvline(T[0], color='k', linestyle='--', lw=1)
         ax_phonon.set_xlabel('Time')
         ax_phonon.set_ylabel('Phonon Amplitude')
         ax_phonon.legend(loc='upper left', fontsize=8)
         ax_phonon.set_xlim(T[0], T[-1])
+    else:
+        line_E1 = line_E2 = line_A1 = vline_phonon = None
+        line_O = None
+        ax_phonon_twin = None
+    
+    # Initialize pulse plot
+    if ax_pulse is not None and has_pulse:
+        # Plot full pulse in background (transparent)
+        ax_pulse.plot(T, envelope, 'k--', alpha=0.3, linewidth=1, label='Envelope')
+        ax_pulse.plot(T, -envelope, 'k--', alpha=0.3, linewidth=1)
+        ax_pulse.plot(T, Ex, 'b-', alpha=0.3, linewidth=0.5)
+        if np.any(np.abs(Ey) > 1e-10):
+            ax_pulse.plot(T, Ey, 'r-', alpha=0.3, linewidth=0.5, label='Ey')
+        
+        # Progressive pulse trace
+        line_Ex, = ax_pulse.plot([], [], 'b-', lw=1.2, label='Ex(t)')
+        line_Ey, = ax_pulse.plot([], [], 'r-', lw=1.2, label='Ey(t)') if np.any(np.abs(Ey) > 1e-10) else (None,)
+        vline_pulse = ax_pulse.axvline(T[0], color='k', linestyle='--', lw=1)
+        ax_pulse.axhline(0, color='gray', linewidth=0.5)
+        ax_pulse.set_xlabel('Time')
+        ax_pulse.set_ylabel('E-field')
+        ax_pulse.set_title(f'THz Pulse (A={pump_amplitude:.1f}, ω={pump_frequency:.1f}, σ={pump_width:.1f})')
+        ax_pulse.legend(loc='upper right', fontsize=8)
+        ax_pulse.set_xlim(T[0], T[-1])
+    else:
+        line_Ex = line_Ey = vline_pulse = None
     
     plt.tight_layout()
     
@@ -1026,13 +1244,20 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
         title_2d.set_text(f'Global Frame Spin Config, t = {T[i]:.3f}')
         
         # Update phonon lines
-        if ax_phonon is not None:
+        if ax_phonon is not None and line_E1 is not None:
             line_E1.set_data(T[:i+1], E1_amp[:i+1])
             line_E2.set_data(T[:i+1], E2_amp[:i+1])
             line_A1.set_data(T[:i+1], Q_A1[:i+1])
-            vline.set_xdata([T[i], T[i]])
+            vline_phonon.set_xdata([T[i], T[i]])
             if line_O is not None and O_custom is not None:
                 line_O.set_data(T[:i+1], O_custom[:i+1])
+        
+        # Update pulse lines
+        if ax_pulse is not None and line_Ex is not None:
+            line_Ex.set_data(T[:i+1], Ex[:i+1])
+            if line_Ey is not None:
+                line_Ey.set_data(T[:i+1], Ey[:i+1])
+            vline_pulse.set_xdata([T[i], T[i]])
         
         return [quiver, scatter, title_2d]
     
@@ -1902,6 +2127,7 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
         from matplotlib.colors import Normalize
         
         n_steps, n_sites, spin_dim = S.shape
+        metadata = result.get('metadata', {})
         
         # Kitaev local to global frame transformation
         KITAEV_LOCAL_TO_GLOBAL = np.array([
@@ -1919,17 +2145,36 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
         
         norm = Normalize(vmin=-1, vmax=1)
         
+        # Extract pump parameters for pulse panel
+        pump_amplitude = metadata.get('pump_amplitude', 0.0)
+        pump_frequency = metadata.get('pump_frequency', 1.0)
+        pump_time = metadata.get('pump_time', 0.0)
+        pump_width = metadata.get('pump_width', 1.0)
+        pump_phase = metadata.get('pump_phase', 0.0)
+        pump_polarization = metadata.get('pump_polarization', 0.0)
+        
+        # Compute pulse envelope and E-field
+        if pump_amplitude > 0:
+            envelope = pump_amplitude * np.exp(-(T - pump_time)**2 / (2 * pump_width**2))
+            Ex = envelope * np.cos(pump_frequency * (T - pump_time) + pump_phase) * np.cos(pump_polarization)
+            Ey = envelope * np.cos(pump_frequency * (T - pump_time) + pump_phase) * np.sin(pump_polarization)
+            has_pulse = True
+        else:
+            has_pulse = False
+            envelope = Ex = Ey = np.zeros_like(T)
+        
         # =====================================================================
-        # Global frame animation
+        # Animation with pulse panel (spin + phonon + pulse)
         # =====================================================================
-        print(f"  Creating spin configuration animation (global frame)...")
+        print(f"  Creating spin animation with pulse...")
         print(f"    {n_frames} frames from {n_steps} timesteps (interval={animation_interval})")
         
-        # Create animation figure (2D only, no 3D)
-        fig_anim = plt.figure(figsize=(12, 10))
-        gs_anim = fig_anim.add_gridspec(2, 1, height_ratios=[3, 1])
+        # Create animation figure with 3 panels
+        fig_anim = plt.figure(figsize=(12, 12))
+        gs_anim = fig_anim.add_gridspec(3, 1, height_ratios=[3, 1, 1])
         ax_2d = fig_anim.add_subplot(gs_anim[0])
         ax_phonon = fig_anim.add_subplot(gs_anim[1])
+        ax_pulse = fig_anim.add_subplot(gs_anim[2])
         
         # Get initial global spins
         sx, sy, sz = S_global[0, :, 0], S_global[0, :, 1], S_global[0, :, 2]
@@ -1962,7 +2207,7 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
         line_E2, = ax_phonon.plot([], [], 'g-', lw=2)
         line_A1, = ax_phonon.plot([], [], 'b-', lw=2)
         line_O, = ax_phonon_twin.plot([], [], 'purple', lw=2, label='O_custom')
-        vline = ax_phonon.axvline(T_ps[0], color='k', linestyle='--', lw=1)
+        vline_phonon = ax_phonon.axvline(T_ps[0], color='k', linestyle='--', lw=1)
         ax_phonon.set_xlabel('Time (ps)')
         ax_phonon.set_ylabel('Phonon Amplitude')
         ax_phonon_twin.set_ylabel('Order Parameter', color='purple')
@@ -1970,9 +2215,26 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
         ax_phonon_twin.legend(loc='upper right', fontsize=8)
         ax_phonon.set_xlim(T_ps[0], T_ps[-1])
         
+        # Initialize pulse panel
+        ax_pulse.plot(T_ps, envelope * HBAR_OVER_MEV_PS, 'k--', alpha=0.3, linewidth=1, label='Envelope')
+        ax_pulse.plot(T_ps, -envelope * HBAR_OVER_MEV_PS, 'k--', alpha=0.3, linewidth=1)
+        ax_pulse.plot(T_ps, Ex * HBAR_OVER_MEV_PS, 'b-', alpha=0.3, linewidth=0.5)
+        if np.any(np.abs(Ey) > 1e-10):
+            ax_pulse.plot(T_ps, Ey * HBAR_OVER_MEV_PS, 'r-', alpha=0.3, linewidth=0.5)
+        line_Ex, = ax_pulse.plot([], [], 'b-', lw=1.2, label='Ex(t)')
+        line_Ey, = ax_pulse.plot([], [], 'r-', lw=1.2, label='Ey(t)') if np.any(np.abs(Ey) > 1e-10) else (None,)
+        vline_pulse = ax_pulse.axvline(T_ps[0], color='k', linestyle='--', lw=1)
+        ax_pulse.axhline(0, color='gray', linewidth=0.5)
+        ax_pulse.set_xlabel('Time (ps)')
+        ax_pulse.set_ylabel('E-field')
+        omega_THz_pump = pump_frequency / (2 * np.pi * HBAR_OVER_MEV_PS)
+        ax_pulse.set_title(f'THz Pulse (A={pump_amplitude:.1f}, ω={omega_THz_pump:.1f} THz, σ={pump_width:.1f})')
+        ax_pulse.legend(loc='upper right', fontsize=8)
+        ax_pulse.set_xlim(T_ps[0], T_ps[-1])
+        
         plt.tight_layout()
         
-        def update_global(frame_idx):
+        def update_with_pulse(frame_idx):
             i = frame_indices[frame_idx]
             
             # Get global spins at this timestep
@@ -1996,133 +2258,29 @@ def analyze_pump_probe(dir, omega_max=25.0, order_parameter_func=None,
             line_E2.set_data(T_ps[:i+1], E2_amp[:i+1])
             line_A1.set_data(T_ps[:i+1], Q_A1[:i+1])
             line_O.set_data(T_ps[:i+1], O_custom[:i+1])
-            vline.set_xdata([T_ps[i], T_ps[i]])
+            vline_phonon.set_xdata([T_ps[i], T_ps[i]])
+            
+            # Update pulse lines
+            line_Ex.set_data(T_ps[:i+1], Ex[:i+1] * HBAR_OVER_MEV_PS)
+            if line_Ey is not None:
+                line_Ey.set_data(T_ps[:i+1], Ey[:i+1] * HBAR_OVER_MEV_PS)
+            vline_pulse.set_xdata([T_ps[i], T_ps[i]])
             
             return [quiver_2d, scatter_2d, title_2d]
         
-        anim = FuncAnimation(fig_anim, update_global, frames=n_frames, 
+        anim = FuncAnimation(fig_anim, update_with_pulse, frames=n_frames, 
                              interval=1000/animation_fps, blit=False)
 
-        # Save global frame animation as both mp4 and gif
-        mp4_path = os.path.join(dir, "spin_animation.mp4")
+        # Save animation as mp4 only
+        mp4_path = os.path.join(dir, "spin_anim_with_pulse.mp4")
         try:
             writer_mp4 = FFMpegWriter(fps=animation_fps, bitrate=2000)
             anim.save(mp4_path, writer=writer_mp4)
-            print("  Saved: spin_animation.mp4")
+            print("  Saved: spin_anim_with_pulse.mp4")
         except Exception as e:
-            print(f"  Warning: Could not save spin_animation.mp4 ({e})")
-
-        gif_path = os.path.join(dir, "spin_animation.gif")
-        try:
-            writer_gif = PillowWriter(fps=animation_fps)
-            anim.save(gif_path, writer=writer_gif)
-            print("  Saved: spin_animation.gif")
-        except Exception as e:
-            print(f"  Warning: Could not save spin_animation.gif ({e})")
+            print(f"  Warning: Could not save spin_anim_with_pulse.mp4 ({e})")
         
         plt.close(fig_anim)
-        
-        # =====================================================================
-        # Local frame animation
-        # =====================================================================
-        print(f"  Creating spin configuration animation (local frame)...")
-        
-        # Create animation figure for local frame
-        fig_anim_local = plt.figure(figsize=(12, 10))
-        gs_anim_local = fig_anim_local.add_gridspec(2, 1, height_ratios=[3, 1])
-        ax_2d_local = fig_anim_local.add_subplot(gs_anim_local[0])
-        ax_phonon_local = fig_anim_local.add_subplot(gs_anim_local[1])
-        
-        # Get initial local spins (directly from S, which is in local Kitaev frame)
-        sx_local, sy_local, sz_local = S[0, :, 0], S[0, :, 1], S[0, :, 2]
-        in_plane_mag_local = np.sqrt(sx_local**2 + sy_local**2)
-        in_plane_mag_local = np.where(in_plane_mag_local > 1e-10, in_plane_mag_local, 1.0)
-        sx_norm_local, sy_norm_local = sx_local / in_plane_mag_local, sy_local / in_plane_mag_local
-        
-        # Initialize 2D plot (local frame)
-        scatter_2d_local = ax_2d_local.scatter(P[:, 0], P[:, 1], c=sz_local, cmap='coolwarm', norm=norm,
-                                               s=50, alpha=0.7, edgecolors='k', linewidth=0.5)
-        quiver_2d_local = ax_2d_local.quiver(P[:, 0], P[:, 1], sx_norm_local, sy_norm_local, sz_local,
-                                              cmap='coolwarm', norm=norm,
-                                              scale=1.2, scale_units='xy', angles='xy',
-                                              pivot='middle', width=0.008)
-        cbar_local = plt.colorbar(quiver_2d_local, ax=ax_2d_local, shrink=0.8)
-        cbar_local.set_label(r'$S_z^{local}$', fontsize=12)
-        ax_2d_local.set_xlabel('x', fontsize=12)
-        ax_2d_local.set_ylabel('y', fontsize=12)
-        title_2d_local = ax_2d_local.set_title(f'Local (Kitaev) Frame, t = {T_ps[0]:.3f} ps', fontsize=12)
-        ax_2d_local.set_aspect('equal')
-        ax_2d_local.grid(True, alpha=0.3)
-        
-        # Initialize phonon + order parameter plot for local animation
-        ax_phonon_local.plot(T_ps, E1_amp, 'r-', alpha=0.3, label='|E1|')
-        ax_phonon_local.plot(T_ps, E2_amp, 'g-', alpha=0.3, label='|E2|')
-        ax_phonon_local.plot(T_ps, Q_A1, 'b-', alpha=0.3, label='Q_A1')
-        ax_phonon_twin_local = ax_phonon_local.twinx()
-        ax_phonon_twin_local.plot(T_ps, O_custom, 'purple', alpha=0.3)
-        line_E1_local, = ax_phonon_local.plot([], [], 'r-', lw=2)
-        line_E2_local, = ax_phonon_local.plot([], [], 'g-', lw=2)
-        line_A1_local, = ax_phonon_local.plot([], [], 'b-', lw=2)
-        line_O_local, = ax_phonon_twin_local.plot([], [], 'purple', lw=2, label='O_custom')
-        vline_local = ax_phonon_local.axvline(T_ps[0], color='k', linestyle='--', lw=1)
-        ax_phonon_local.set_xlabel('Time (ps)')
-        ax_phonon_local.set_ylabel('Phonon Amplitude')
-        ax_phonon_twin_local.set_ylabel('Order Parameter', color='purple')
-        ax_phonon_local.legend(loc='upper left', fontsize=8)
-        ax_phonon_twin_local.legend(loc='upper right', fontsize=8)
-        ax_phonon_local.set_xlim(T_ps[0], T_ps[-1])
-        
-        plt.tight_layout()
-        
-        def update_local(frame_idx):
-            i = frame_indices[frame_idx]
-            
-            # Get local spins at this timestep (directly from S)
-            sx_local, sy_local, sz_local = S[i, :, 0], S[i, :, 1], S[i, :, 2]
-            in_plane_mag_local = np.sqrt(sx_local**2 + sy_local**2)
-            in_plane_mag_local = np.where(in_plane_mag_local > 1e-10, in_plane_mag_local, 1.0)
-            sx_norm_local, sy_norm_local = sx_local / in_plane_mag_local, sy_local / in_plane_mag_local
-            
-            # Update 2D quiver
-            nonlocal quiver_2d_local
-            quiver_2d_local.remove()
-            quiver_2d_local = ax_2d_local.quiver(P[:, 0], P[:, 1], sx_norm_local, sy_norm_local, sz_local,
-                                                  cmap='coolwarm', norm=norm,
-                                                  scale=1.2, scale_units='xy', angles='xy',
-                                                  pivot='middle', width=0.008)
-            scatter_2d_local.set_array(sz_local)
-            title_2d_local.set_text(f'Local (Kitaev) Frame, t = {T_ps[i]:.3f} ps')
-            
-            # Update phonon/order parameter lines
-            line_E1_local.set_data(T_ps[:i+1], E1_amp[:i+1])
-            line_E2_local.set_data(T_ps[:i+1], E2_amp[:i+1])
-            line_A1_local.set_data(T_ps[:i+1], Q_A1[:i+1])
-            line_O_local.set_data(T_ps[:i+1], O_custom[:i+1])
-            vline_local.set_xdata([T_ps[i], T_ps[i]])
-            
-            return [quiver_2d_local, scatter_2d_local, title_2d_local]
-        
-        anim_local = FuncAnimation(fig_anim_local, update_local, frames=n_frames, 
-                                   interval=1000/animation_fps, blit=False)
-
-        # Save local frame animation as both mp4 and gif
-        mp4_path_local = os.path.join(dir, "spin_animation_local.mp4")
-        try:
-            writer_mp4_local = FFMpegWriter(fps=animation_fps, bitrate=2000)
-            anim_local.save(mp4_path_local, writer=writer_mp4_local)
-            print("  Saved: spin_animation_local.mp4")
-        except Exception as e:
-            print(f"  Warning: Could not save spin_animation_local.mp4 ({e})")
-
-        gif_path_local = os.path.join(dir, "spin_animation_local.gif")
-        try:
-            writer_gif_local = PillowWriter(fps=animation_fps)
-            anim_local.save(gif_path_local, writer=writer_gif_local)
-            print("  Saved: spin_animation_local.gif")
-        except Exception as e:
-            print(f"  Warning: Could not save spin_animation_local.gif ({e})")
-        
-        plt.close(fig_anim_local)
     
     # =========================================================================
     # Save spectra to text files

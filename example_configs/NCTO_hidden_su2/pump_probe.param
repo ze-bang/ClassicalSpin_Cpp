@@ -81,7 +81,7 @@ lambda_A1 = 0.0          # A1 coupling (isotropic Heisenberg)
 
 # E1 mode (IR-active doublet, THz driven)
 omega_E1 = 8.0           # E1 frequency (meV or THz)
-gamma_E1 = 0.0           # E1 damping
+gamma_E1 = 0.02           # E1 damping
 lambda_E1_quartic = 0.0  # E1 quartic stabilization
 
 # E2 mode (Raman-active doublet, not THz driven)
