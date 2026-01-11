@@ -11,7 +11,8 @@
  * - Spin-phonon E1 coupling: λ_E1 * [Qx_E1*(SxSz + SzSx) + Qy_E1*(SySz + SzSy)]
  * - Spin-phonon E2 coupling: λ_E2 * [Qx_E2*(SxSx - SySy) + Qy_E2*(SxSy - SySx)]
  * - Spin-phonon A1 coupling: λ_A1 * Q_A1 * (Si·Sj)
- * - THz drive coupling to E1 mode (only E1 is IR active)
+ * - THz drive coupling to E1 mode (E1 is IR active, driven by default)
+ * - Optional drive coupling to E2 mode (E2 is Raman active, driven when drive_strength_E2 > 0)
  * 
  * COORDINATE FRAMES:
  * -----------------
@@ -48,7 +49,8 @@
  *                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
  *                 + λ_A1 * Q_A1  * (Si · Sj)]                  // A1 coupling (invariant)
  * 
- * H_drive = -E_x(t) * Qx_E1 - E_y(t) * Qy_E1   (only E1 is IR active)
+ * H_drive = -E_x(t)*strength_E1*Qx_E1 - E_y(t)*strength_E1*Qy_E1   (E1: IR active)
+ *         - E_x(t)*strength_E2*Qx_E2 - E_y(t)*strength_E2*Qy_E2   (E2: optional drive)
  * 
  * Equations of motion (Euler-Lagrange):
  * - Spins: dS/dt = S × H_eff (LLG with optional Gilbert damping)
@@ -470,14 +472,21 @@ struct DriveParams {
     double phi_2 = 0.0;
     double theta_2 = 0.0;
     
-    // Drive strength per bond type (relative scaling, default 1.0 for all)
-    // drive_strength[b] scales the E-field for bond type b
-    double drive_strength[PhononState::N_BONDS] = {1.0, 1.0, 1.0};
+    // Drive strength per bond type for E1 mode (IR active, default 1.0 for all)
+    // drive_strength_E1[b] scales the E-field driving E1 for bond type b
+    double drive_strength_E1[PhononState::N_BONDS] = {1.0, 1.0, 1.0};
     
-    // Compute E-field components at time t for a specific bond type
-    // Scales by drive_strength[bond_type]
+    // Drive strength per bond type for E2 mode (default 0.0 - E2 is Raman active, not IR active)
+    // Set to non-zero to artificially drive E2 phonon (e.g., for Raman excitation modeling)
+    double drive_strength_E2[PhononState::N_BONDS] = {0.0, 0.0, 0.0};
+    
+    // Backward compatible alias for E1 drive strength
+    double* drive_strength = drive_strength_E1;
+    
+    // Compute E-field components at time t for E1 drive (IR active)
+    // Scales by drive_strength_E1[bond_type]
     void E_field(double t, double& Ex, double& Ey, size_t bond_type) const {
-        double strength = drive_strength[bond_type];
+        double strength = drive_strength_E1[bond_type];
         
         double dt1 = t - t_1;
         double dt2 = t - t_2;
@@ -509,6 +518,27 @@ struct DriveParams {
         
         Ex = E1 * std::cos(theta_1) + E2 * std::cos(theta_2);
         Ey = E1 * std::sin(theta_1) + E2 * std::sin(theta_2);
+    }
+    
+    // Compute E-field components at time t for E2 drive
+    // Scales by drive_strength_E2[bond_type]
+    // E2 is normally Raman active (not IR), but this allows artificial driving
+    void E_field_E2(double t, double& Ex, double& Ey, size_t bond_type) const {
+        double strength = drive_strength_E2[bond_type];
+        
+        double dt1 = t - t_1;
+        double dt2 = t - t_2;
+        
+        double env1 = std::exp(-0.5 * dt1*dt1 / (sigma_1*sigma_1));
+        double osc1 = std::cos(omega_1 * dt1 + phi_1);
+        double E1 = E0_1 * env1 * osc1;
+        
+        double env2 = std::exp(-0.5 * dt2*dt2 / (sigma_2*sigma_2));
+        double osc2 = std::cos(omega_2 * dt2 + phi_2);
+        double E2 = E0_2 * env2 * osc2;
+        
+        Ex = strength * (E1 * std::cos(theta_1) + E2 * std::cos(theta_2));
+        Ey = strength * (E1 * std::sin(theta_1) + E2 * std::sin(theta_2));
     }
 };
 

@@ -42,7 +42,7 @@ Gammap = -4             # Gamma' coupling (meV)
 J2_A = 0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0                 # Third-neighbor Heisenberg (meV)
-J7 = -0.1739475
+J7 = -0.1
 
 # External magnetic field
 field_strength = 0.0

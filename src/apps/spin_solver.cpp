@@ -841,11 +841,17 @@ void build_phonon_params(const SpinConfig& config,
     dr_params.phi_2 = config.get_param("probe_phase", 0.0);
     dr_params.theta_2 = config.get_param("probe_polarization", 0.0);
     
-    // Drive strength per bond type: relative scaling of the THz field for each bond type
+    // Drive strength per bond type for E1 (IR active): relative scaling of the THz field
     // Default: 1.0 (full strength). Set to 0 to disable, or any value to scale.
-    dr_params.drive_strength[0] = config.get_param("drive_strength_0", 1.0);  // x-bond
-    dr_params.drive_strength[1] = config.get_param("drive_strength_1", 1.0);  // y-bond
-    dr_params.drive_strength[2] = config.get_param("drive_strength_2", 1.0);  // z-bond
+    dr_params.drive_strength_E1[0] = config.get_param("drive_strength_0", 1.0);  // x-bond
+    dr_params.drive_strength_E1[1] = config.get_param("drive_strength_1", 1.0);  // y-bond
+    dr_params.drive_strength_E1[2] = config.get_param("drive_strength_2", 1.0);  // z-bond
+    
+    // Drive strength per bond type for E2 (Raman active): allows artificial E2 driving
+    // Default: 0.0 (E2 is not IR active). Set to non-zero to drive E2 phonon.
+    dr_params.drive_strength_E2[0] = config.get_param("drive_strength_E2_0", 0.0);  // x-bond
+    dr_params.drive_strength_E2[1] = config.get_param("drive_strength_E2_1", 0.0);  // y-bond
+    dr_params.drive_strength_E2[2] = config.get_param("drive_strength_E2_2", 0.0);  // z-bond
 }
 
 /**
@@ -908,6 +914,12 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
         cout << "Running spin-phonon molecular dynamics on PhononLattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
+        cout << "E1 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E1[0]
+             << ", y=" << lattice.drive_params.drive_strength_E1[1]
+             << ", z=" << lattice.drive_params.drive_strength_E1[2] << endl;
+        cout << "E2 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E2[0]
+             << ", y=" << lattice.drive_params.drive_strength_E2[1]
+             << ", z=" << lattice.drive_params.drive_strength_E2[2] << endl;
     }
     
     // Distribute trials across MPI ranks
@@ -1007,9 +1019,12 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         cout << "  Pump frequency: " << config.pump_frequency << endl;
         cout << "  Pump time: " << config.pump_time << endl;
         cout << "  Pump width: " << config.pump_width << endl;
-        cout << "  Drive strength per bond type: x=" << lattice.drive_params.drive_strength[0]
-             << ", y=" << lattice.drive_params.drive_strength[1]
-             << ", z=" << lattice.drive_params.drive_strength[2] << endl;
+        cout << "  E1 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E1[0]
+             << ", y=" << lattice.drive_params.drive_strength_E1[1]
+             << ", z=" << lattice.drive_params.drive_strength_E1[2] << endl;
+        cout << "  E2 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E2[0]
+             << ", y=" << lattice.drive_params.drive_strength_E2[1]
+             << ", z=" << lattice.drive_params.drive_strength_E2[2] << endl;
     }
     
     // Distribute trials across MPI ranks

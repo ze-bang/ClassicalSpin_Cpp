@@ -1273,6 +1273,62 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     plt.savefig(dir + "/M_NLSPEC.pdf", dpi=100)
     plt.close(fig_nl)
     
+    # =====================================================
+    # Lambda5 + Lambda7 mode (magnetic dipole observable)
+    # λ5 = index 4, λ7 = index 6 in Gell-Mann basis
+    # Weighted sum: 2.3915*λ5 + 0.9128*λ7
+    # =====================================================
+    # Combine λ5 and λ7 components in TIME domain before FFT (weighted)
+    LAMBDA5_WEIGHT = 2.3915
+    LAMBDA7_WEIGHT = 0.9128
+    M_NL_lambda57 = LAMBDA5_WEIGHT * M_NL_components[4] + LAMBDA7_WEIGHT * M_NL_components[6]
+    
+    # Debug plot for λ5 + λ7 time domain
+    fig_lambda57_debug = plt.figure(figsize=(14, 5))
+    ax1 = fig_lambda57_debug.add_subplot(131)
+    ax1.imshow(M_NL_components[4].T, origin='lower', aspect='auto', cmap='RdBu_r')
+    ax1.set_title(f'$\\lambda_5$ (×{LAMBDA5_WEIGHT})')
+    ax1.set_xlabel('$\\tau$ index')
+    ax1.set_ylabel('$t$ index')
+    
+    ax2 = fig_lambda57_debug.add_subplot(132)
+    ax2.imshow(M_NL_components[6].T, origin='lower', aspect='auto', cmap='RdBu_r')
+    ax2.set_title(f'$\\lambda_7$ (×{LAMBDA7_WEIGHT})')
+    ax2.set_xlabel('$\\tau$ index')
+    ax2.set_ylabel('$t$ index')
+    
+    ax3 = fig_lambda57_debug.add_subplot(133)
+    ax3.imshow(M_NL_lambda57.T, origin='lower', aspect='auto', cmap='RdBu_r')
+    ax3.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$')
+    ax3.set_xlabel('$\\tau$ index')
+    ax3.set_ylabel('$t$ index')
+    
+    plt.tight_layout()
+    plt.savefig(dir + "/M_NL_lambda57_debug.pdf", dpi=100)
+    plt.close(fig_lambda57_debug)
+    
+    # Apply apodization and FFT to λ5 + λ7 (use the same compute_2d_fft function)
+    M_NL_lambda57_FF = compute_2d_fft(M_NL_lambda57)
+    
+    np.savetxt(dir + "/M_NL_lambda57_FF.txt", M_NL_lambda57_FF)
+    results['M_NL_lambda57_FF'] = M_NL_lambda57_FF
+    
+    # Spectrum plot for λ5 + λ7
+    fig_lambda57 = plt.figure(figsize=(10, 8))
+    plt.imshow(M_NL_lambda57_FF, origin='lower',
+               extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+               aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_lambda57_FF, norm_type, gamma))
+    plt.xlabel('$\\omega_t$ (rad/time)')
+    plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+    plt.colorbar(label='Intensity')
+    plt.title(f'$M_{{NL}}$ Spectrum ({LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$)')
+    if omega_t_window is not None:
+        plt.xlim(omega_t_window)
+    if omega_tau_window is not None:
+        plt.ylim(omega_tau_window)
+    plt.savefig(dir + "/M_NL_lambda57_SPEC.pdf", dpi=100)
+    plt.close(fig_lambda57)
+    
     return results
 
 
@@ -1289,7 +1345,10 @@ def _process_subdir_parallel(args):
                                          apodization_gamma=apodization_gamma,
                                          pulse_window_sigma=pulse_window_sigma)
         M_NL_data = np.loadtxt(os.path.join(subdir, "M_NL_FF.txt"))
-        return (M_NL_data, sub_results.get('omega_tau'), sub_results.get('omega_t'), filename)
+        # Also load λ5 + λ7 data
+        M_NL_lambda57_path = os.path.join(subdir, "M_NL_lambda57_FF.txt")
+        M_NL_lambda57_data = np.loadtxt(M_NL_lambda57_path) if os.path.exists(M_NL_lambda57_path) else None
+        return (M_NL_data, M_NL_lambda57_data, sub_results.get('omega_tau'), sub_results.get('omega_t'), filename)
     except Exception as e:
         print(f"Error processing {filename}: {e}")
         return None
@@ -1350,6 +1409,7 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
     print(f"Processing {len(subdirs_to_process)} subdirectories using {n_jobs} workers...")
     
     A = None
+    A_lambda57 = None
     count = 0
     results = {}
     
@@ -1361,22 +1421,34 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
         for future in as_completed(future_to_subdir):
             result = future.result()
             if result is not None:
-                M_NL_data, omega_tau, omega_t, filename = result
+                M_NL_data, M_NL_lambda57_data, omega_tau, omega_t, filename = result
                 
                 if A is None:
                     A = M_NL_data.copy()
+                    if M_NL_lambda57_data is not None:
+                        A_lambda57 = M_NL_lambda57_data.copy()
                     results['omega_tau'] = omega_tau
                     results['omega_t'] = omega_t
                 else:
                     min_shape = (min(A.shape[0], M_NL_data.shape[0]),
                                 min(A.shape[1], M_NL_data.shape[1]))
                     A[:min_shape[0], :min_shape[1]] += M_NL_data[:min_shape[0], :min_shape[1]]
+                    if M_NL_lambda57_data is not None and A_lambda57 is not None:
+                        min_shape_57 = (min(A_lambda57.shape[0], M_NL_lambda57_data.shape[0]),
+                                       min(A_lambda57.shape[1], M_NL_lambda57_data.shape[1]))
+                        A_lambda57[:min_shape_57[0], :min_shape_57[1]] += M_NL_lambda57_data[:min_shape_57[0], :min_shape_57[1]]
                 count += 1
     
     if A is not None and count > 0:
         A = A / count  # Average over all runs
         np.savetxt(os.path.join(dir, "M_NL_tot.txt"), A)
         results['M_NL_FF_tot'] = A
+        
+        # Average λ5 + λ7 if available
+        if A_lambda57 is not None:
+            A_lambda57 = A_lambda57 / count
+            np.savetxt(os.path.join(dir, "M_NL_lambda57_tot.txt"), A_lambda57)
+            results['M_NL_lambda57_FF_tot'] = A_lambda57
         
         # Get frequency arrays for plotting
         omega_tau = results.get('omega_tau')
@@ -1403,6 +1475,24 @@ def read_2D_nonlinear_tot(dir: str, omega_t_window: Optional[Tuple[float, float]
         plt.clf()
         plt.close()
         print(f"Aggregated {count} runs, saved to {dir}/NLSPEC_tot.pdf")
+        
+        # Plot aggregated λ5 + λ7 if available
+        if A_lambda57 is not None:
+            plt.figure(figsize=(10, 8))
+            plt.imshow(A_lambda57, origin='lower', aspect='auto', cmap='gnuplot2', 
+                       norm=_get_norm(A_lambda57, norm_type, gamma), extent=extent)
+            plt.xlabel('$\\omega_t$ (rad/time)')
+            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(label='Intensity')
+            plt.title(f'Aggregated $\\lambda_5 + \\lambda_7$ Spectrum ({count} runs)')
+            if omega_t_window is not None:
+                plt.xlim(omega_t_window)
+            if omega_tau_window is not None:
+                plt.ylim(omega_tau_window)
+            plt.savefig(os.path.join(dir, "NLSPEC_lambda57_tot.pdf"))
+            plt.clf()
+            plt.close()
+            print(f"Aggregated λ5+λ7 {count} runs, saved to {dir}/NLSPEC_lambda57_tot.pdf")
     else:
         print("No valid data found")
     

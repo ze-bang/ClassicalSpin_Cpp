@@ -680,14 +680,12 @@ double PhononLattice::site_energy_diff(const Eigen::Vector3d& new_spin,
 // ============================================================
 
 double PhononLattice::dH_dQx_E1(size_t bond_type) const {
-    // ∂H_sp-ph/∂Qx_E1_b for bond type b with bond-dependent coupling (using |Qx_E1|):
-    // ∂|Q|/∂Q = sign(Q), so ∂H/∂Q = sign(Q) * f(S)
-    //   x-bond (b=0): sign(Qx_E1_0) * λ_E1 * (SxSy+SySx)
-    //   y-bond (b=1): sign(Qx_E1_1) * λ_E1 * (SySz+SzSy)
-    //   z-bond (b=2): sign(Qx_E1_2) * λ_E1 * (SxSz+SzSx)
+    // ∂H_sp-ph/∂Qx_E1_b for bond type b with bond-dependent coupling:
+    //   x-bond (b=0): λ_E1 * (SxSy+SySx)
+    //   y-bond (b=1): λ_E1 * (SySz+SzSy)
+    //   z-bond (b=2): λ_E1 * (SxSz+SzSx)
     double deriv = 0.0;
     double l_E1 = spin_phonon_params.lambda_E1;
-    double sign_Qx = (phonons.Q_x_E1[bond_type] >= 0.0) ? 1.0 : -1.0;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -708,18 +706,16 @@ double PhononLattice::dH_dQx_E1(size_t bond_type) const {
         }
     }
     
-    return sign_Qx * deriv;
+    return deriv;
 }
 
 double PhononLattice::dH_dQy_E1(size_t bond_type) const {
-    // ∂H_sp-ph/∂Qy_E1_b for bond type b with bond-dependent coupling (using |Qy_E1|):
-    // ∂|Q|/∂Q = sign(Q), so ∂H/∂Q = sign(Q) * f(S)
-    //   x-bond (b=0): sign(Qy_E1_0) * λ_E1 * (SxSz+SzSx)
-    //   y-bond (b=1): sign(Qy_E1_1) * λ_E1 * (SxSy+SySx)
-    //   z-bond (b=2): sign(Qy_E1_2) * λ_E1 * (SySz+SzSy)
+    // ∂H_sp-ph/∂Qy_E1_b for bond type b with bond-dependent coupling:
+    //   x-bond (b=0): λ_E1 * (SxSz+SzSx)
+    //   y-bond (b=1): λ_E1 * (SxSy+SySx)
+    //   z-bond (b=2): λ_E1 * (SySz+SzSy)
     double deriv = 0.0;
     double l_E1 = spin_phonon_params.lambda_E1;
-    double sign_Qy = (phonons.Q_y_E1[bond_type] >= 0.0) ? 1.0 : -1.0;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -740,18 +736,16 @@ double PhononLattice::dH_dQy_E1(size_t bond_type) const {
         }
     }
     
-    return sign_Qy * deriv;
+    return deriv;
 }
 
 double PhononLattice::dH_dQx_E2(size_t bond_type) const {
-    // ∂H_sp-ph/∂Qx_E2_b for bond type b with bond-dependent η-like coupling (using |Qx_E2|):
-    // ∂|Q|/∂Q = sign(Q), so ∂H/∂Q = sign(Q) * f(S)
-    //   x-bond (b=0): sign(Qx_E2_0) * λ_E2 * (SySy-SzSz)
-    //   y-bond (b=1): sign(Qx_E2_1) * λ_E2 * (SzSz-SxSx)
-    //   z-bond (b=2): sign(Qx_E2_2) * λ_E2 * (SxSx-SySy)
+    // ∂H_sp-ph/∂Qx_E2_b for bond type b with bond-dependent η-like coupling:
+    //   x-bond (b=0): λ_E2 * (SySy-SzSz)
+    //   y-bond (b=1): λ_E2 * (SzSz-SxSx)
+    //   z-bond (b=2): λ_E2 * (SxSx-SySy)
     double deriv = 0.0;
     double l_E2 = spin_phonon_params.lambda_E2;
-    double sign_Qx = (phonons.Q_x_E2[bond_type] >= 0.0) ? 1.0 : -1.0;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -772,18 +766,16 @@ double PhononLattice::dH_dQx_E2(size_t bond_type) const {
         }
     }
     
-    return sign_Qx * deriv;
+    return deriv;
 }
 
 double PhononLattice::dH_dQy_E2(size_t bond_type) const {
-    // ∂H_sp-ph/∂Qy_E2_b for bond type b with bond-dependent coupling (using |Qy_E2|):
-    // ∂|Q|/∂Q = sign(Q), so ∂H/∂Q = sign(Q) * f(S)
-    //   x-bond (b=0): sign(Qy_E2_0) * λ_E2 * (SySz+SzSy)
-    //   y-bond (b=1): sign(Qy_E2_1) * λ_E2 * (SxSz+SzSx)
-    //   z-bond (b=2): sign(Qy_E2_2) * λ_E2 * (SxSy+SySx)
+    // ∂H_sp-ph/∂Qy_E2_b for bond type b with bond-dependent coupling:
+    //   x-bond (b=0): λ_E2 * (SySz+SzSy)
+    //   y-bond (b=1): λ_E2 * (SxSz+SzSx)
+    //   z-bond (b=2): λ_E2 * (SxSy+SySx)
     double deriv = 0.0;
     double l_E2 = spin_phonon_params.lambda_E2;
-    double sign_Qy = (phonons.Q_y_E2[bond_type] >= 0.0) ? 1.0 : -1.0;
     
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
@@ -804,7 +796,7 @@ double PhononLattice::dH_dQy_E2(size_t bond_type) const {
         }
     }
     
-    return sign_Qy * deriv;
+    return deriv;
 }
 
 double PhononLattice::dH_dQ_A1(size_t bond_type) const {
@@ -1107,9 +1099,13 @@ void PhononLattice::phonon_derivatives(
 {
     // Loop over bond types
     for (size_t b = 0; b < PhononState::N_BONDS; ++b) {
-        // Get THz drive field for this bond type (only E1 is IR active)
-        double Ex, Ey;
-        drive_params.E_field(t, Ex, Ey, b);
+        // Get THz drive field for E1 mode (IR active)
+        double Ex_E1, Ey_E1;
+        drive_params.E_field(t, Ex_E1, Ey_E1, b);
+        
+        // Get drive field for E2 mode (controlled by drive_strength_E2)
+        double Ex_E2, Ey_E2;
+        drive_params.E_field_E2(t, Ex_E2, Ey_E2, b);
         
         // Precompute common terms for this bond type
         double Q_E1_sq = ph.Q_x_E1[b] * ph.Q_x_E1[b] + ph.Q_y_E1[b] * ph.Q_y_E1[b];
@@ -1117,7 +1113,7 @@ void PhononLattice::phonon_derivatives(
         double Q_A1_b = ph.Q_A1[b];
         double Q_A1_sq = Q_A1_b * Q_A1_b;
         
-        // E1 mode (Qx_E1_b): THz driven
+        // E1 mode (Qx_E1_b): THz driven (IR active)
         // d²Qx_E1_b/dt² = -ω_E1²Qx_E1_b - λ_E1*(Qx_E1_b²+Qy_E1_b²)*Qx_E1_b - 2g3_E1A1*Qx_E1_b*Q_A1_b 
         //              - g3_E1E2*Qx_E2_b - γ_E1*Vx_E1_b - ∂H_sp-ph/∂Qx_E1_b + Z*Ex
         dph_dt.Q_x_E1[b] = ph.V_x_E1[b];
@@ -1127,9 +1123,9 @@ void PhononLattice::phonon_derivatives(
               - phonon_params.g3_E1E2 * ph.Q_x_E2[b]
               - phonon_params.gamma_E1 * ph.V_x_E1[b]
               - dH_dQx_E1[b]
-              + phonon_params.Z_star * Ex;
+              + phonon_params.Z_star * Ex_E1;
         
-        // E1 mode (Qy_E1_b): THz driven
+        // E1 mode (Qy_E1_b): THz driven (IR active)
         dph_dt.Q_y_E1[b] = ph.V_y_E1[b];
         dph_dt.V_y_E1[b] = -phonon_params.omega_E1 * phonon_params.omega_E1 * ph.Q_y_E1[b]
               - phonon_params.lambda_E1 * Q_E1_sq * ph.Q_y_E1[b]
@@ -1137,25 +1133,27 @@ void PhononLattice::phonon_derivatives(
               - phonon_params.g3_E1E2 * ph.Q_y_E2[b]
               - phonon_params.gamma_E1 * ph.V_y_E1[b]
               - dH_dQy_E1[b]
-              + phonon_params.Z_star * Ey;
+              + phonon_params.Z_star * Ey_E1;
         
-        // E2 mode (Qx_E2_b): Raman active, not THz driven
+        // E2 mode (Qx_E2_b): Raman active, can be driven via drive_strength_E2
         dph_dt.Q_x_E2[b] = ph.V_x_E2[b];
         dph_dt.V_x_E2[b] = -phonon_params.omega_E2 * phonon_params.omega_E2 * ph.Q_x_E2[b]
               - phonon_params.lambda_E2 * Q_E2_sq * ph.Q_x_E2[b]
               - 2.0 * phonon_params.g3_E2A1 * ph.Q_x_E2[b] * Q_A1_b
               - phonon_params.g3_E1E2 * ph.Q_x_E1[b]
               - phonon_params.gamma_E2 * ph.V_x_E2[b]
-              - dH_dQx_E2[b];
+              - dH_dQx_E2[b]
+              + phonon_params.Z_star * Ex_E2;
         
-        // E2 mode (Qy_E2_b): Raman active, not THz driven
+        // E2 mode (Qy_E2_b): Raman active, can be driven via drive_strength_E2
         dph_dt.Q_y_E2[b] = ph.V_y_E2[b];
         dph_dt.V_y_E2[b] = -phonon_params.omega_E2 * phonon_params.omega_E2 * ph.Q_y_E2[b]
               - phonon_params.lambda_E2 * Q_E2_sq * ph.Q_y_E2[b]
               - 2.0 * phonon_params.g3_E2A1 * ph.Q_y_E2[b] * Q_A1_b
               - phonon_params.g3_E1E2 * ph.Q_y_E1[b]
               - phonon_params.gamma_E2 * ph.V_y_E2[b]
-              - dH_dQy_E2[b];
+              - dH_dQy_E2[b]
+              + phonon_params.Z_star * Ey_E2;
         
         // A1 mode: Raman active, not THz driven
         dph_dt.Q_A1[b] = ph.V_A1[b];
@@ -1670,14 +1668,21 @@ void PhononLattice::molecular_dynamics(
     std::unique_ptr<HDF5MDWriter> hdf5_writer;
     
     // Storage for phonon trajectory (appended separately since HDF5MDWriter doesn't handle phonons)
-    // E1 mode (2-component), E2 mode (2-component), A1 mode (1-component)
+    // Per-bond-type: E1 mode (2-component × 3 bonds), E2 mode (2-component × 3 bonds), A1 mode (1-component × 3 bonds)
     vector<double> times_phonon;
-    vector<double> Qx_E1_traj, Qy_E1_traj;
-    vector<double> Qx_E2_traj, Qy_E2_traj;
-    vector<double> Q_A1_traj;
-    vector<double> Vx_E1_traj, Vy_E1_traj;
-    vector<double> Vx_E2_traj, Vy_E2_traj;
-    vector<double> V_A1_traj;
+    // E1 mode per bond type
+    vector<double> Qx_E1_0_traj, Qx_E1_1_traj, Qx_E1_2_traj;
+    vector<double> Qy_E1_0_traj, Qy_E1_1_traj, Qy_E1_2_traj;
+    vector<double> Vx_E1_0_traj, Vx_E1_1_traj, Vx_E1_2_traj;
+    vector<double> Vy_E1_0_traj, Vy_E1_1_traj, Vy_E1_2_traj;
+    // E2 mode per bond type
+    vector<double> Qx_E2_0_traj, Qx_E2_1_traj, Qx_E2_2_traj;
+    vector<double> Qy_E2_0_traj, Qy_E2_1_traj, Qy_E2_2_traj;
+    vector<double> Vx_E2_0_traj, Vx_E2_1_traj, Vx_E2_2_traj;
+    vector<double> Vy_E2_0_traj, Vy_E2_1_traj, Vy_E2_2_traj;
+    // A1 mode per bond type
+    vector<double> Q_A1_0_traj, Q_A1_1_traj, Q_A1_2_traj;
+    vector<double> V_A1_0_traj, V_A1_1_traj, V_A1_2_traj;
     vector<double> energy_traj;
     
     if (!out_dir.empty()) {
@@ -1717,35 +1722,41 @@ void PhononLattice::molecular_dynamics(
             Eigen::Vector3d M_global = M_local;
             
             // Extract phonon state from end of ODE state vector
-            // Layout: [Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1]
-            double Qx_E1 = x[spin_state_size + 0];
-            double Qy_E1 = x[spin_state_size + 1];
-            double Qx_E2 = x[spin_state_size + 2];
-            double Qy_E2 = x[spin_state_size + 3];
-            double Q_A1 = x[spin_state_size + 4];
-            double Vx_E1 = x[spin_state_size + 5];
-            double Vy_E1 = x[spin_state_size + 6];
-            double Vx_E2 = x[spin_state_size + 7];
-            double Vy_E2 = x[spin_state_size + 8];
-            double V_A1 = x[spin_state_size + 9];
+            // Layout: [Qx_E1_0, Qx_E1_1, Qx_E1_2, Qy_E1_0, ..., Qy_E2_2, Q_A1_0, Q_A1_1, Q_A1_2,
+            //          Vx_E1_0, Vx_E1_1, Vx_E1_2, Vy_E1_0, ..., Vy_E2_2, V_A1_0, V_A1_1, V_A1_2]
+            // Positions: 15 DOF, Velocities: 15 DOF
+            size_t p_idx = spin_state_size;
+            double Qx_E1_0 = x[p_idx + 0], Qx_E1_1 = x[p_idx + 1], Qx_E1_2 = x[p_idx + 2];
+            double Qy_E1_0 = x[p_idx + 3], Qy_E1_1 = x[p_idx + 4], Qy_E1_2 = x[p_idx + 5];
+            double Qx_E2_0 = x[p_idx + 6], Qx_E2_1 = x[p_idx + 7], Qx_E2_2 = x[p_idx + 8];
+            double Qy_E2_0 = x[p_idx + 9], Qy_E2_1 = x[p_idx + 10], Qy_E2_2 = x[p_idx + 11];
+            double Q_A1_0 = x[p_idx + 12], Q_A1_1 = x[p_idx + 13], Q_A1_2 = x[p_idx + 14];
+            double Vx_E1_0 = x[p_idx + 15], Vx_E1_1 = x[p_idx + 16], Vx_E1_2 = x[p_idx + 17];
+            double Vy_E1_0 = x[p_idx + 18], Vy_E1_1 = x[p_idx + 19], Vy_E1_2 = x[p_idx + 20];
+            double Vx_E2_0 = x[p_idx + 21], Vx_E2_1 = x[p_idx + 22], Vx_E2_2 = x[p_idx + 23];
+            double Vy_E2_0 = x[p_idx + 24], Vy_E2_1 = x[p_idx + 25], Vy_E2_2 = x[p_idx + 26];
+            double V_A1_0 = x[p_idx + 27], V_A1_1 = x[p_idx + 28], V_A1_2 = x[p_idx + 29];
             
 #ifdef HDF5_ENABLED
             // Write full spin configuration to HDF5 (like Lattice class)
             if (hdf5_writer) {
                 hdf5_writer->write_flat_step(t, M_staggered, M_local, M_global, x.data());
                 
-                // Store phonon data for later writing
+                // Store phonon data for later writing (per bond type)
                 times_phonon.push_back(t);
-                Qx_E1_traj.push_back(Qx_E1);
-                Qy_E1_traj.push_back(Qy_E1);
-                Qx_E2_traj.push_back(Qx_E2);
-                Qy_E2_traj.push_back(Qy_E2);
-                Q_A1_traj.push_back(Q_A1);
-                Vx_E1_traj.push_back(Vx_E1);
-                Vy_E1_traj.push_back(Vy_E1);
-                Vx_E2_traj.push_back(Vx_E2);
-                Vy_E2_traj.push_back(Vy_E2);
-                V_A1_traj.push_back(V_A1);
+                // E1 mode
+                Qx_E1_0_traj.push_back(Qx_E1_0); Qx_E1_1_traj.push_back(Qx_E1_1); Qx_E1_2_traj.push_back(Qx_E1_2);
+                Qy_E1_0_traj.push_back(Qy_E1_0); Qy_E1_1_traj.push_back(Qy_E1_1); Qy_E1_2_traj.push_back(Qy_E1_2);
+                Vx_E1_0_traj.push_back(Vx_E1_0); Vx_E1_1_traj.push_back(Vx_E1_1); Vx_E1_2_traj.push_back(Vx_E1_2);
+                Vy_E1_0_traj.push_back(Vy_E1_0); Vy_E1_1_traj.push_back(Vy_E1_1); Vy_E1_2_traj.push_back(Vy_E1_2);
+                // E2 mode
+                Qx_E2_0_traj.push_back(Qx_E2_0); Qx_E2_1_traj.push_back(Qx_E2_1); Qx_E2_2_traj.push_back(Qx_E2_2);
+                Qy_E2_0_traj.push_back(Qy_E2_0); Qy_E2_1_traj.push_back(Qy_E2_1); Qy_E2_2_traj.push_back(Qy_E2_2);
+                Vx_E2_0_traj.push_back(Vx_E2_0); Vx_E2_1_traj.push_back(Vx_E2_1); Vx_E2_2_traj.push_back(Vx_E2_2);
+                Vy_E2_0_traj.push_back(Vy_E2_0); Vy_E2_1_traj.push_back(Vy_E2_1); Vy_E2_2_traj.push_back(Vy_E2_2);
+                // A1 mode
+                Q_A1_0_traj.push_back(Q_A1_0); Q_A1_1_traj.push_back(Q_A1_1); Q_A1_2_traj.push_back(Q_A1_2);
+                V_A1_0_traj.push_back(V_A1_0); V_A1_1_traj.push_back(V_A1_1); V_A1_2_traj.push_back(V_A1_2);
                 
                 // Compute energy for monitoring
                 const_cast<PhononLattice*>(this)->from_state(x);
@@ -1753,15 +1764,20 @@ void PhononLattice::molecular_dynamics(
             }
 #endif
             
-            // Progress output
+            // Progress output - compute total amplitude across bond types
             if (step_count % (save_interval * 10) == 0) {
-                double E1_amp = std::sqrt(Qx_E1*Qx_E1 + Qy_E1*Qy_E1);
-                double E2_amp = std::sqrt(Qx_E2*Qx_E2 + Qy_E2*Qy_E2);
+                double E1_amp_sq = Qx_E1_0*Qx_E1_0 + Qy_E1_0*Qy_E1_0 + 
+                                   Qx_E1_1*Qx_E1_1 + Qy_E1_1*Qy_E1_1 + 
+                                   Qx_E1_2*Qx_E1_2 + Qy_E1_2*Qy_E1_2;
+                double E2_amp_sq = Qx_E2_0*Qx_E2_0 + Qy_E2_0*Qy_E2_0 + 
+                                   Qx_E2_1*Qx_E2_1 + Qy_E2_1*Qy_E2_1 + 
+                                   Qx_E2_2*Qx_E2_2 + Qy_E2_2*Qy_E2_2;
+                double A1_amp_sq = Q_A1_0*Q_A1_0 + Q_A1_1*Q_A1_1 + Q_A1_2*Q_A1_2;
                 cout << "t=" << t << ", |M|=" << M_local.norm()
                      << ", |M_stag|=" << M_staggered.norm()
-                     << ", |Q_E1|=" << E1_amp
-                     << ", |Q_E2|=" << E2_amp
-                     << ", Q_A1=" << Q_A1 << endl;
+                     << ", |Q_E1|=" << std::sqrt(E1_amp_sq)
+                     << ", |Q_E2|=" << std::sqrt(E2_amp_sq)
+                     << ", |Q_A1|=" << std::sqrt(A1_amp_sq) << endl;
             }
             
             save_count++;
@@ -1803,21 +1819,21 @@ void PhononLattice::molecular_dynamics(
             ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
         };
         
-        // E1 mode (IR active, 2-component)
-        write_dataset("Qx_E1", Qx_E1_traj);
-        write_dataset("Qy_E1", Qy_E1_traj);
-        write_dataset("Vx_E1", Vx_E1_traj);
-        write_dataset("Vy_E1", Vy_E1_traj);
+        // E1 mode (IR active, 2-component) - per bond type
+        write_dataset("Qx_E1_0", Qx_E1_0_traj); write_dataset("Qx_E1_1", Qx_E1_1_traj); write_dataset("Qx_E1_2", Qx_E1_2_traj);
+        write_dataset("Qy_E1_0", Qy_E1_0_traj); write_dataset("Qy_E1_1", Qy_E1_1_traj); write_dataset("Qy_E1_2", Qy_E1_2_traj);
+        write_dataset("Vx_E1_0", Vx_E1_0_traj); write_dataset("Vx_E1_1", Vx_E1_1_traj); write_dataset("Vx_E1_2", Vx_E1_2_traj);
+        write_dataset("Vy_E1_0", Vy_E1_0_traj); write_dataset("Vy_E1_1", Vy_E1_1_traj); write_dataset("Vy_E1_2", Vy_E1_2_traj);
         
-        // E2 mode (Raman active, 2-component)
-        write_dataset("Qx_E2", Qx_E2_traj);
-        write_dataset("Qy_E2", Qy_E2_traj);
-        write_dataset("Vx_E2", Vx_E2_traj);
-        write_dataset("Vy_E2", Vy_E2_traj);
+        // E2 mode (Raman active, 2-component) - per bond type
+        write_dataset("Qx_E2_0", Qx_E2_0_traj); write_dataset("Qx_E2_1", Qx_E2_1_traj); write_dataset("Qx_E2_2", Qx_E2_2_traj);
+        write_dataset("Qy_E2_0", Qy_E2_0_traj); write_dataset("Qy_E2_1", Qy_E2_1_traj); write_dataset("Qy_E2_2", Qy_E2_2_traj);
+        write_dataset("Vx_E2_0", Vx_E2_0_traj); write_dataset("Vx_E2_1", Vx_E2_1_traj); write_dataset("Vx_E2_2", Vx_E2_2_traj);
+        write_dataset("Vy_E2_0", Vy_E2_0_traj); write_dataset("Vy_E2_1", Vy_E2_1_traj); write_dataset("Vy_E2_2", Vy_E2_2_traj);
         
-        // A1 mode (Raman active, 1-component)
-        write_dataset("Q_A1", Q_A1_traj);
-        write_dataset("V_A1", V_A1_traj);
+        // A1 mode (Raman active, 1-component) - per bond type
+        write_dataset("Q_A1_0", Q_A1_0_traj); write_dataset("Q_A1_1", Q_A1_1_traj); write_dataset("Q_A1_2", Q_A1_2_traj);
+        write_dataset("V_A1_0", V_A1_0_traj); write_dataset("V_A1_1", V_A1_1_traj); write_dataset("V_A1_2", V_A1_2_traj);
         
         // Energy
         write_dataset("energy", energy_traj);
@@ -1846,6 +1862,30 @@ void PhononLattice::molecular_dynamics(
         write_scalar("lambda_E1", spin_phonon_params.lambda_E1);
         write_scalar("lambda_E2", spin_phonon_params.lambda_E2);
         write_scalar("lambda_A1", spin_phonon_params.lambda_A1);
+        // Drive parameters - E1 drive strength (IR active)
+        write_scalar("drive_strength_0", drive_params.drive_strength_E1[0]);
+        write_scalar("drive_strength_1", drive_params.drive_strength_E1[1]);
+        write_scalar("drive_strength_2", drive_params.drive_strength_E1[2]);
+        // Drive parameters - E2 drive strength (Raman active, artificial drive)
+        write_scalar("drive_strength_E2_0", drive_params.drive_strength_E2[0]);
+        write_scalar("drive_strength_E2_1", drive_params.drive_strength_E2[1]);
+        write_scalar("drive_strength_E2_2", drive_params.drive_strength_E2[2]);
+        
+        // Pump pulse 1 parameters
+        write_scalar("pump_amplitude", drive_params.E0_1);
+        write_scalar("pump_frequency", drive_params.omega_1);
+        write_scalar("pump_time", drive_params.t_1);
+        write_scalar("pump_width", drive_params.sigma_1);
+        write_scalar("pump_phase", drive_params.phi_1);
+        write_scalar("pump_polarization", drive_params.theta_1);
+        
+        // Pump pulse 2 parameters (probe)
+        write_scalar("probe_amplitude", drive_params.E0_2);
+        write_scalar("probe_frequency", drive_params.omega_2);
+        write_scalar("probe_time", drive_params.t_2);
+        write_scalar("probe_width", drive_params.sigma_2);
+        write_scalar("probe_phase", drive_params.phi_2);
+        write_scalar("probe_polarization", drive_params.theta_2);
         
         phonon_group.close();
         meta_group.close();

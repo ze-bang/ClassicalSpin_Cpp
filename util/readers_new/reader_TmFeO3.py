@@ -49,6 +49,73 @@ from typing import Dict, Tuple, Optional, List, Any, Literal
 # Type for norm selection
 NormType = Literal['log', 'power', 'symlog', 'linear']
 
+# Conversion factor: meV to rad/ps (ω = E/ℏ where ℏ = 0.6582119569 meV·ps)
+MEV_TO_RAD_PS = 1.0 / 0.6582119569  # ≈ 1.5193 rad/ps per meV
+
+# Default energy level line style parameters
+ENERGY_LINE_STYLE = {
+    'linestyle': '--',
+    'linewidth': 0.8,
+    'alpha': 0.7
+}
+
+# Color scheme for different energy levels
+ENERGY_LINE_COLORS = {
+    'e1': 'cyan',
+    'e2': 'magenta', 
+    'e2_e1': 'yellow',
+    'kc': 'lime'
+}
+
+
+def add_energy_level_lines(ax, energy_levels_mev: Dict[str, float], 
+                           omega_window: Optional[Tuple[float, float]] = None,
+                           show_labels: bool = True):
+    """
+    Add horizontal and vertical dashed lines at specified energy levels.
+    
+    Args:
+        ax: matplotlib axes object
+        energy_levels_mev: Dict mapping level names to energy values in meV
+        omega_window: Optional (min, max) tuple for omega axis limits (in rad/time)
+        show_labels: Whether to show labels for the lines
+        
+    Lines are drawn for both positive and negative frequencies.
+    """
+    if not energy_levels_mev:
+        return
+    
+    # Get current axis limits for positioning labels
+    xlim = ax.get_xlim() if omega_window is None else omega_window
+    ylim = ax.get_ylim() if omega_window is None else omega_window
+    
+    for level_name, energy_mev in energy_levels_mev.items():
+        if energy_mev is None or energy_mev == 0:
+            continue
+            
+        # Convert meV to rad/time (same as rad/ps if time unit is ps)
+        omega = energy_mev * MEV_TO_RAD_PS
+        
+        # Get color for this level
+        color = ENERGY_LINE_COLORS.get(level_name, 'white')
+        
+        # Draw lines at +ω and -ω
+        for sign, omega_val in [('+', omega), ('-', -omega)]:
+            # Horizontal lines (constant ω_τ)
+            ax.axhline(y=omega_val, color=color, **ENERGY_LINE_STYLE)
+            # Vertical lines (constant ω_t)
+            ax.axvline(x=omega_val, color=color, **ENERGY_LINE_STYLE)
+        
+        # Add label only once (at positive frequency, on the right side)
+        if show_labels:
+            # Format label
+            label = f'{level_name}: {energy_mev:.2f} meV'
+            # Position label at edge of plot
+            label_x = xlim[1] * 0.95 if xlim[1] > 0 else xlim[0] * 0.95
+            ax.annotate(label, xy=(label_x, omega), fontsize=6, color=color,
+                       ha='right', va='bottom', alpha=0.9,
+                       bbox=dict(boxstyle='round,pad=0.1', facecolor='black', alpha=0.3))
+
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -804,7 +871,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                       norm_type: NormType = 'power',
                       apodization_gamma: float = 0.03,
                       pulse_window_sigma: float = 5.0,
-                      window_type: str = 'gaussian') -> Dict[str, np.ndarray]:
+                      window_type: str = 'gaussian',
+                      energy_levels_mev: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for mixed SU(2)+SU(3) systems.
     
     Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
@@ -824,6 +892,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         window_type: Type of apodization window to reduce spectral leakage:
             'gaussian', 'hann', 'hamming', 'blackman', 'tukey', 'cosine', 'exponential', 'none'
             Default: 'gaussian'
+        energy_levels_mev: Optional dict of energy levels in meV to mark with dashed lines.
+            Keys: 'e1', 'e2', 'e2_e1', 'kc'. Values: energy in meV.
+            Lines are drawn at ±ω for each energy level.
         
     Returns:
         Dictionary with 2DCS results for both sublattices
@@ -831,6 +902,13 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     omega_t_window = _validate_window(omega_t_window, "omega_t_window")
     omega_tau_window = _validate_window(omega_tau_window, "omega_tau_window")
     hdf5_path = os.path.join(dir, "pump_probe_spectroscopy.h5")
+    
+    # Print energy level info if provided
+    if energy_levels_mev:
+        print(f"  Energy level reference lines (meV → rad/ps):")
+        for name, val in energy_levels_mev.items():
+            if val is not None:
+                print(f"    {name}: {val:.4f} meV → ±{val * MEV_TO_RAD_PS:.4f} rad/ps")
     
     # Component labels
     component_labels_SU2 = ['x', 'y', 'z']
@@ -1149,17 +1227,21 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             results['M_NL_SU2_FF'] = M_NL_z_FF
             
             fig_nl = plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_z_FF, origin='lower',
+            ax_nl = fig_nl.add_subplot(111)
+            im_nl = ax_nl.imshow(M_NL_z_FF, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_z_FF, norm_type))
-            plt.xlabel('$\\omega_t$ (rad/time)')
-            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
-            plt.colorbar(label='Intensity')
-            plt.title('$M_{NL}$ Spectrum (SU(2))')
+            ax_nl.set_xlabel('$\\omega_t$ (rad/time)')
+            ax_nl.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(im_nl, ax=ax_nl, label='Intensity')
+            ax_nl.set_title('$M_{NL}$ Spectrum (SU(2))')
             if omega_t_window is not None:
-                plt.xlim(omega_t_window)
+                ax_nl.set_xlim(omega_t_window)
             if omega_tau_window is not None:
-                plt.ylim(omega_tau_window)
+                ax_nl.set_ylim(omega_tau_window)
+            # Add energy level reference lines
+            if energy_levels_mev:
+                add_energy_level_lines(ax_nl, energy_levels_mev, omega_t_window)
             plt.savefig(os.path.join(dir, "M_NL_SU2_SPEC.pdf"), dpi=100)
             plt.close(fig_nl)
         
@@ -1327,19 +1409,132 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             results['M_NL_SU3_FF'] = M_NL_total_FF
             
             fig_nl = plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_total_FF, origin='lower',
+            ax_nl = fig_nl.add_subplot(111)
+            im_nl = ax_nl.imshow(M_NL_total_FF, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_total_FF, norm_type))
-            plt.xlabel('$\\omega_t$ (rad/time)')
-            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
-            plt.colorbar(label='Intensity')
-            plt.title('$M_{NL}$ Spectrum (SU(3) total)')
+            ax_nl.set_xlabel('$\\omega_t$ (rad/time)')
+            ax_nl.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(im_nl, ax=ax_nl, label='Intensity')
+            ax_nl.set_title('$M_{NL}$ Spectrum (SU(3) total)')
             if omega_t_window is not None:
-                plt.xlim(omega_t_window)
+                ax_nl.set_xlim(omega_t_window)
             if omega_tau_window is not None:
-                plt.ylim(omega_tau_window)
+                ax_nl.set_ylim(omega_tau_window)
+            # Add energy level reference lines
+            if energy_levels_mev:
+                add_energy_level_lines(ax_nl, energy_levels_mev, omega_t_window)
             plt.savefig(os.path.join(dir, "M_NL_SU3_SPEC.pdf"), dpi=100)
             plt.close(fig_nl)
+            
+            # =====================================================================
+            # λ5 + λ7 mode analysis (Tm magnetic dipole observable)
+            # λ5 and λ7 are indices 4 and 6 respectively
+            # Weighted sum: 2.3915*λ5 + 0.9128*λ7
+            # =====================================================================
+            if spin_dim_SU3 >= 8:
+                print("    Processing λ5 + λ7 mode (weighted)...")
+                
+                # Weights for λ5 and λ7 combination
+                LAMBDA5_WEIGHT = 2.3915
+                LAMBDA7_WEIGHT = 0.9128
+                
+                # Combine λ5 (index 4) and λ7 (index 6) in time domain before FFT (weighted)
+                M_NL_lambda57 = LAMBDA5_WEIGHT * M_NL_SU3[4] + LAMBDA7_WEIGHT * M_NL_SU3[6]
+                M0_lambda57 = LAMBDA5_WEIGHT * M0_comp_SU3[4] + LAMBDA7_WEIGHT * M0_comp_SU3[6]
+                M1_lambda57 = LAMBDA5_WEIGHT * M1_comp_SU3[4] + LAMBDA7_WEIGHT * M1_comp_SU3[6]
+                M01_lambda57 = LAMBDA5_WEIGHT * M01_comp_SU3[4] + LAMBDA7_WEIGHT * M01_comp_SU3[6]
+                
+                # Create debug plot for λ5 + λ7
+                fig_l57, axes_l57 = plt.subplots(2, 3, figsize=(15, 8))
+                
+                # Row 0: M_NL (λ5 + λ7)
+                # Time domain
+                ax_time = axes_l57[0, 0]
+                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                    ax_time.plot(M_NL_lambda57[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                ax_time.set_xlabel('Time index')
+                ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
+                ax_time.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$ (time domain)')
+                ax_time.legend(fontsize=6)
+                ax_time.grid(True, alpha=0.3)
+                
+                # 2D time-tau plot
+                ax_2d = axes_l57[0, 1]
+                im = ax_2d.imshow(M_NL_lambda57, origin='lower', aspect='auto', cmap='RdBu_r',
+                                  extent=[0, M_NL_lambda57.shape[1], tau[0], tau[-1]])
+                ax_2d.set_xlabel('Time index')
+                ax_2d.set_ylabel('τ')
+                ax_2d.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$ (τ, t)')
+                plt.colorbar(im, ax=ax_2d)
+                
+                # Frequency domain
+                M_NL_lambda57_FF = compute_2d_fft(M_NL_lambda57)
+                ax_freq = axes_l57[0, 2]
+                im_freq = ax_freq.imshow(M_NL_lambda57_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                          norm=_get_norm(M_NL_lambda57_FF, norm_type),
+                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                ax_freq.set_xlabel('$\\omega_t$ (rad/time)')
+                ax_freq.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
+                if omega_t_window is not None:
+                    ax_freq.set_xlim(omega_t_window)
+                if omega_tau_window is not None:
+                    ax_freq.set_ylim(omega_tau_window)
+                plt.colorbar(im_freq, ax=ax_freq)
+                
+                # Row 1: Individual M0, M1, M01 spectra for λ5 + λ7
+                M0_lambda57_FF = compute_2d_fft(M0_lambda57)
+                M1_lambda57_FF = compute_2d_fft(M1_lambda57)
+                M01_lambda57_FF = compute_2d_fft(M01_lambda57)
+                
+                for idx, (name, data_FF) in enumerate([('M0', M0_lambda57_FF), ('M1', M1_lambda57_FF), ('M01', M01_lambda57_FF)]):
+                    ax = axes_l57[1, idx]
+                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                   norm=_get_norm(data_FF, norm_type),
+                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax.set_xlabel('$\\omega_t$ (rad/time)')
+                    ax.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                    ax.set_title(f'${name}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
+                    if omega_t_window is not None:
+                        ax.set_xlim(omega_t_window)
+                    if omega_tau_window is not None:
+                        ax.set_ylim(omega_tau_window)
+                    plt.colorbar(im, ax=ax)
+                
+                plt.tight_layout()
+                plt.savefig(os.path.join(dir, "M_NL_lambda57_debug.pdf"), dpi=100)
+                plt.close(fig_l57)
+                
+                # Save data
+                np.savetxt(os.path.join(dir, "M_NL_lambda57_FF.txt"), M_NL_lambda57_FF)
+                np.savetxt(os.path.join(dir, "M0_lambda57_FF.txt"), M0_lambda57_FF)
+                np.savetxt(os.path.join(dir, "M1_lambda57_FF.txt"), M1_lambda57_FF)
+                np.savetxt(os.path.join(dir, "M01_lambda57_FF.txt"), M01_lambda57_FF)
+                results['M_NL_lambda57_FF'] = M_NL_lambda57_FF
+                results['M0_lambda57_FF'] = M0_lambda57_FF
+                results['M1_lambda57_FF'] = M1_lambda57_FF
+                results['M01_lambda57_FF'] = M01_lambda57_FF
+                
+                # Main λ5 + λ7 spectrum plot
+                fig_l57_main = plt.figure(figsize=(10, 8))
+                ax_l57 = fig_l57_main.add_subplot(111)
+                im_l57 = ax_l57.imshow(M_NL_lambda57_FF, origin='lower',
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
+                           aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_lambda57_FF, norm_type))
+                ax_l57.set_xlabel('$\\omega_t$ (rad/time)')
+                ax_l57.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+                plt.colorbar(im_l57, ax=ax_l57, label='Intensity')
+                ax_l57.set_title(f'$M_{{NL}}$ Spectrum ({LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$)')
+                if omega_t_window is not None:
+                    ax_l57.set_xlim(omega_t_window)
+                if omega_tau_window is not None:
+                    ax_l57.set_ylim(omega_tau_window)
+                # Add energy level reference lines
+                if energy_levels_mev:
+                    add_energy_level_lines(ax_l57, energy_levels_mev, omega_t_window)
+                plt.savefig(os.path.join(dir, "M_NL_lambda57_SPEC.pdf"), dpi=100)
+                plt.close(fig_l57_main)
         
         # =====================================================================
         # Combined SU(2) + SU(3) spectrum
@@ -1351,17 +1546,21 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             results['M_NL_combined_FF'] = M_NL_combined
             
             fig_comb = plt.figure(figsize=(10, 8))
-            plt.imshow(M_NL_combined, origin='lower',
+            ax_comb = fig_comb.add_subplot(111)
+            im_comb = ax_comb.imshow(M_NL_combined, origin='lower',
                        extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_combined, norm_type))
-            plt.xlabel('$\\omega_t$ (rad/time)')
-            plt.ylabel('$\\omega_{\\tau}$ (rad/time)')
-            plt.colorbar(label='Intensity')
-            plt.title('$M_{NL}$ Spectrum (SU(2) + SU(3))')
+            ax_comb.set_xlabel('$\\omega_t$ (rad/time)')
+            ax_comb.set_ylabel('$\\omega_{\\tau}$ (rad/time)')
+            plt.colorbar(im_comb, ax=ax_comb, label='Intensity')
+            ax_comb.set_title('$M_{NL}$ Spectrum (SU(2) + SU(3))')
             if omega_t_window is not None:
-                plt.xlim(omega_t_window)
+                ax_comb.set_xlim(omega_t_window)
             if omega_tau_window is not None:
-                plt.ylim(omega_tau_window)
+                ax_comb.set_ylim(omega_tau_window)
+            # Add energy level reference lines
+            if energy_levels_mev:
+                add_energy_level_lines(ax_comb, energy_levels_mev, omega_t_window)
             plt.savefig(os.path.join(dir, "M_NL_combined_SPEC.pdf"), dpi=100)
             plt.close(fig_comb)
     
@@ -1374,7 +1573,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
 def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float, float]] = None,
                             omega_tau_window: Optional[Tuple[float, float]] = None,
                             norm_type: NormType = 'power',
-                            window_type: str = 'gaussian') -> Dict[str, np.ndarray]:
+                            window_type: str = 'gaussian',
+                            energy_levels_mev: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
     """
     Read 2D coherent spectroscopy data and compute nonlinear spectra for both sublattices.
     
@@ -1386,6 +1586,8 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
         omega_tau_window: Optional (min, max) tuple for ω_τ axis limits
         norm_type: Normalization type for plots ('log', 'power', 'symlog', 'linear')
         window_type: Type of apodization window ('gaussian', 'hann', 'blackman', etc.)
+        energy_levels_mev: Optional dict of energy levels in meV to mark with dashed lines.
+            Keys: 'e1', 'e2', 'e2_e1', 'kc'. Values: energy in meV.
         
     Returns:
         Dictionary with 2DCS results for SU(2), SU(3), and combined
@@ -1394,7 +1596,8 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
     if output_dir == '':
         output_dir = '.'
     
-    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window, norm_type, window_type=window_type)
+    return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window, norm_type, 
+                             window_type=window_type, energy_levels_mev=energy_levels_mev)
 
 
 # =============================================================================
@@ -1507,6 +1710,7 @@ Examples:
   python reader_TmFeO3.py /path/to/data 2dcs --norm power
   python reader_TmFeO3.py /path/to/data 2dcs --norm log --omega-t -10 10 --omega-tau -5 5
   python reader_TmFeO3.py /path/to/data 2dcs --norm power --window blackman
+  python reader_TmFeO3.py /path/to/data 2dcs --e1 2.19 --e2 5.34 --kc 3.76  # Add energy level lines
         """
     )
     parser.add_argument('path', help='Path to HDF5 file or directory containing it')
@@ -1525,6 +1729,14 @@ Examples:
                         help='Minimum frequency for MD analysis (default: 0)')
     parser.add_argument('--wmax', type=float, default=70,
                         help='Maximum frequency for MD analysis (default: 70)')
+    
+    # Energy level arguments for 2DCS reference lines (in meV)
+    parser.add_argument('--e1', type=float, default=None,
+                        help='Tm e1 energy level in meV (e.g., 2.19 meV = 0.53 THz)')
+    parser.add_argument('--e2', type=float, default=None,
+                        help='Tm e2 energy level in meV (e.g., 5.34 meV = 1.29 THz)')
+    parser.add_argument('--kc', type=float, default=None,
+                        help='Fe Kc anisotropy energy in meV (e.g., 3.76 meV = 0.91 THz AFM gap)')
     
     args = parser.parse_args()
     
@@ -1550,6 +1762,21 @@ Examples:
     if args.omega_tau:
         print(f"  ω_τ window: {args.omega_tau}")
     
+    # Build energy levels dictionary if any are specified
+    energy_levels_mev = None
+    if analysis_type == '2dcs' and (args.e1 or args.e2 or args.kc):
+        energy_levels_mev = {}
+        if args.e1 is not None:
+            energy_levels_mev['e1'] = args.e1
+        if args.e2 is not None:
+            energy_levels_mev['e2'] = args.e2
+            # Also add e2-e1 if both are provided
+            if args.e1 is not None:
+                energy_levels_mev['e2_e1'] = args.e2 - args.e1
+        if args.kc is not None:
+            energy_levels_mev['kc'] = args.kc
+        print(f"  Energy levels: {energy_levels_mev}")
+    
     if analysis_type == 'md':
         print(f"\nRunning MD analysis (w0={args.w0}, wmax={args.wmax})...")
         results = read_MD_hdf5(filepath, w0=args.w0, wmax=args.wmax)
@@ -1558,7 +1785,8 @@ Examples:
         print("\nRunning 2DCS analysis...")
         omega_t_window = tuple(args.omega_t) if args.omega_t else None
         omega_tau_window = tuple(args.omega_tau) if args.omega_tau else None
-        results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm, window_type=args.window)
+        results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm, 
+                                          window_type=args.window, energy_levels_mev=energy_levels_mev)
         print(f"Results keys: {list(results.keys())}")
     else:
         print(f"Unknown analysis type: {analysis_type}")
