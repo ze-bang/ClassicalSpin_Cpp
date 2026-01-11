@@ -100,69 +100,126 @@ using std::function;
 using std::array;
 
 /**
- * Phonon state for the spin-phonon model
+ * Phonon state for the spin-phonon model (per-bond-type)
  * 
- * E1 mode: 2-component (Qx_E1, Qy_E1) - IR active, couples to SxSz+SzSx, SySz+SzSy
- * E2 mode: 2-component (Qx_E2, Qy_E2) - Raman active, couples to SxSx-SySy, SxSy-SySx
- * A1 mode: 1-component (Q_A1) - Raman active, couples to Si·Sj
+ * Each phonon mode now has separate coordinates for each bond type (0=x-bond, 1=y-bond, 2=z-bond):
+ * E1 mode: 2-component × 3 bond types (Qx_E1_b, Qy_E1_b for b=0,1,2) - IR active
+ * E2 mode: 2-component × 3 bond types (Qx_E2_b, Qy_E2_b for b=0,1,2) - Raman active
+ * A1 mode: 1-component × 3 bond types (Q_A1_b for b=0,1,2) - Raman active
+ * 
+ * Total: (2+2+1) × 3 = 15 coordinates + 15 velocities = 30 DOF
  */
 struct PhononState {
-    // E1 mode (infrared active, 2-component)
-    double Q_x_E1 = 0.0;   // x-component of E1 normal coordinate
-    double Q_y_E1 = 0.0;   // y-component of E1 normal coordinate
+    static constexpr size_t N_BONDS = 3;  // Number of bond types (x=0, y=1, z=2)
     
-    // E2 mode (Raman active, 2-component)
-    double Q_x_E2 = 0.0;   // x-component of E2 normal coordinate
-    double Q_y_E2 = 0.0;   // y-component of E2 normal coordinate
+    // E1 mode (infrared active, 2-component per bond type)
+    double Q_x_E1[N_BONDS] = {0.0, 0.0, 0.0};   // x-component of E1 for each bond type
+    double Q_y_E1[N_BONDS] = {0.0, 0.0, 0.0};   // y-component of E1 for each bond type
     
-    // A1 mode (Raman active, 1-component)
-    double Q_A1 = 0.0;     // A1 normal coordinate
+    // E2 mode (Raman active, 2-component per bond type)
+    double Q_x_E2[N_BONDS] = {0.0, 0.0, 0.0};   // x-component of E2 for each bond type
+    double Q_y_E2[N_BONDS] = {0.0, 0.0, 0.0};   // y-component of E2 for each bond type
     
-    // Velocities (dQ/dt)
-    double V_x_E1 = 0.0;   // dQx_E1/dt
-    double V_y_E1 = 0.0;   // dQy_E1/dt
-    double V_x_E2 = 0.0;   // dQx_E2/dt
-    double V_y_E2 = 0.0;   // dQy_E2/dt
-    double V_A1 = 0.0;     // dQ_A1/dt
+    // A1 mode (Raman active, 1-component per bond type)
+    double Q_A1[N_BONDS] = {0.0, 0.0, 0.0};     // A1 for each bond type
     
-    // Total DOF: 5 coordinates + 5 velocities = 10
-    static constexpr size_t N_DOF = 10;
+    // Velocities (dQ/dt) for each bond type
+    double V_x_E1[N_BONDS] = {0.0, 0.0, 0.0};   // dQx_E1/dt
+    double V_y_E1[N_BONDS] = {0.0, 0.0, 0.0};   // dQy_E1/dt
+    double V_x_E2[N_BONDS] = {0.0, 0.0, 0.0};   // dQx_E2/dt
+    double V_y_E2[N_BONDS] = {0.0, 0.0, 0.0};   // dQy_E2/dt
+    double V_A1[N_BONDS] = {0.0, 0.0, 0.0};     // dQ_A1/dt
     
-    // Pack to flat array: [Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1]
+    // Total DOF: (2+2+1) coordinates × 3 bond types × 2 (coords + velocities) = 30
+    static constexpr size_t N_DOF = 30;
+    
+    // Pack to flat array: 
+    // [Qx_E1_0, Qx_E1_1, Qx_E1_2, Qy_E1_0, Qy_E1_1, Qy_E1_2, 
+    //  Qx_E2_0, Qx_E2_1, Qx_E2_2, Qy_E2_0, Qy_E2_1, Qy_E2_2,
+    //  Q_A1_0, Q_A1_1, Q_A1_2,
+    //  Vx_E1_0, Vx_E1_1, Vx_E1_2, Vy_E1_0, Vy_E1_1, Vy_E1_2,
+    //  Vx_E2_0, Vx_E2_1, Vx_E2_2, Vy_E2_0, Vy_E2_1, Vy_E2_2,
+    //  V_A1_0, V_A1_1, V_A1_2]
     void to_array(double* arr) const {
-        arr[0] = Q_x_E1; arr[1] = Q_y_E1; 
-        arr[2] = Q_x_E2; arr[3] = Q_y_E2;
-        arr[4] = Q_A1;
-        arr[5] = V_x_E1; arr[6] = V_y_E1;
-        arr[7] = V_x_E2; arr[8] = V_y_E2;
-        arr[9] = V_A1;
+        size_t idx = 0;
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_x_E1[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_y_E1[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_x_E2[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_y_E2[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_A1[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_x_E1[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_y_E1[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_x_E2[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_y_E2[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_A1[b];
     }
     
     // Unpack from flat array
     void from_array(const double* arr) {
-        Q_x_E1 = arr[0]; Q_y_E1 = arr[1];
-        Q_x_E2 = arr[2]; Q_y_E2 = arr[3];
-        Q_A1 = arr[4];
-        V_x_E1 = arr[5]; V_y_E1 = arr[6];
-        V_x_E2 = arr[7]; V_y_E2 = arr[8];
-        V_A1 = arr[9];
+        size_t idx = 0;
+        for (size_t b = 0; b < N_BONDS; ++b) Q_x_E1[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) Q_y_E1[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) Q_x_E2[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) Q_y_E2[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) Q_A1[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_x_E1[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_y_E1[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_x_E2[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_y_E2[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_A1[b] = arr[idx++];
     }
     
-    // Kinetic energy (unit mass)
+    // Kinetic energy (unit mass) - sum over all bond types
     double kinetic_energy() const {
-        return 0.5 * (V_x_E1*V_x_E1 + V_y_E1*V_y_E1 + 
-                      V_x_E2*V_x_E2 + V_y_E2*V_y_E2 + 
-                      V_A1*V_A1);
+        double T = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            T += V_x_E1[b]*V_x_E1[b] + V_y_E1[b]*V_y_E1[b];
+            T += V_x_E2[b]*V_x_E2[b] + V_y_E2[b]*V_y_E2[b];
+            T += V_A1[b]*V_A1[b];
+        }
+        return 0.5 * T;
     }
     
-    // E1 amplitude
+    // E1 amplitude for specific bond type
+    double E1_amplitude(size_t bond_type) const {
+        return std::sqrt(Q_x_E1[bond_type]*Q_x_E1[bond_type] + Q_y_E1[bond_type]*Q_y_E1[bond_type]);
+    }
+    
+    // E1 total amplitude (sum over bond types)
     double E1_amplitude() const {
-        return std::sqrt(Q_x_E1*Q_x_E1 + Q_y_E1*Q_y_E1);
+        double amp_sq = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            amp_sq += Q_x_E1[b]*Q_x_E1[b] + Q_y_E1[b]*Q_y_E1[b];
+        }
+        return std::sqrt(amp_sq);
     }
     
-    // E2 amplitude
+    // E2 amplitude for specific bond type
+    double E2_amplitude(size_t bond_type) const {
+        return std::sqrt(Q_x_E2[bond_type]*Q_x_E2[bond_type] + Q_y_E2[bond_type]*Q_y_E2[bond_type]);
+    }
+    
+    // E2 total amplitude (sum over bond types)
     double E2_amplitude() const {
-        return std::sqrt(Q_x_E2*Q_x_E2 + Q_y_E2*Q_y_E2);
+        double amp_sq = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            amp_sq += Q_x_E2[b]*Q_x_E2[b] + Q_y_E2[b]*Q_y_E2[b];
+        }
+        return std::sqrt(amp_sq);
+    }
+    
+    // A1 amplitude for specific bond type
+    double A1_amplitude(size_t bond_type) const {
+        return std::abs(Q_A1[bond_type]);
+    }
+    
+    // A1 total amplitude
+    double A1_amplitude() const {
+        double amp_sq = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            amp_sq += Q_A1[b]*Q_A1[b];
+        }
+        return std::sqrt(amp_sq);
     }
 };
 
@@ -413,7 +470,31 @@ struct DriveParams {
     double phi_2 = 0.0;
     double theta_2 = 0.0;
     
-    // Compute E-field components at time t
+    // Drive strength per bond type (relative scaling, default 1.0 for all)
+    // drive_strength[b] scales the E-field for bond type b
+    double drive_strength[PhononState::N_BONDS] = {1.0, 1.0, 1.0};
+    
+    // Compute E-field components at time t for a specific bond type
+    // Scales by drive_strength[bond_type]
+    void E_field(double t, double& Ex, double& Ey, size_t bond_type) const {
+        double strength = drive_strength[bond_type];
+        
+        double dt1 = t - t_1;
+        double dt2 = t - t_2;
+        
+        double env1 = std::exp(-0.5 * dt1*dt1 / (sigma_1*sigma_1));
+        double osc1 = std::cos(omega_1 * dt1 + phi_1);
+        double E1 = E0_1 * env1 * osc1;
+        
+        double env2 = std::exp(-0.5 * dt2*dt2 / (sigma_2*sigma_2));
+        double osc2 = std::cos(omega_2 * dt2 + phi_2);
+        double E2 = E0_2 * env2 * osc2;
+        
+        Ex = strength * (E1 * std::cos(theta_1) + E2 * std::cos(theta_2));
+        Ey = strength * (E1 * std::sin(theta_1) + E2 * std::sin(theta_2));
+    }
+    
+    // Backward compatible: compute E-field without bond type (uses strength = 1.0)
     void E_field(double t, double& Ex, double& Ey) const {
         double dt1 = t - t_1;
         double dt2 = t - t_2;
@@ -672,12 +753,7 @@ public:
     double site_energy(const Eigen::Vector3d& spin_here, size_t site) const {
         double E = -spin_here.dot(field[site]);
         
-        // Phonon coordinates (for spin-phonon coupling)
-        double Qx_E1 = phonons.Q_x_E1;
-        double Qy_E1 = phonons.Q_y_E1;
-        double Qx_E2 = phonons.Q_x_E2;
-        double Qy_E2 = phonons.Q_y_E2;
-        double Q_A1 = phonons.Q_A1;
+        // Spin-phonon coupling parameters
         double l_E1 = spin_phonon_params.lambda_E1;
         double l_E2 = spin_phonon_params.lambda_E2;
         double l_A1 = spin_phonon_params.lambda_A1;
@@ -686,6 +762,14 @@ public:
         for (size_t n = 0; n < nn_partners[site].size(); ++n) {
             size_t j = nn_partners[site][n];
             const Eigen::Vector3d& Sj = spins[j];
+            int bond_type = nn_bond_types[site][n];
+            
+            // Get phonon coordinates for this bond type
+            double Qx_E1 = phonons.Q_x_E1[bond_type];
+            double Qy_E1 = phonons.Q_y_E1[bond_type];
+            double Qx_E2 = phonons.Q_x_E2[bond_type];
+            double Qy_E2 = phonons.Q_y_E2[bond_type];
+            double Q_A1 = phonons.Q_A1[bond_type];
             
             // Pure spin-spin interaction
             E += spin_here.dot(nn_interaction[site][n] * Sj);
@@ -791,29 +875,34 @@ public:
     // ============================================================
     
     /**
-     * Compute ∂H_sp-ph/∂Qx_E1 = Σ_<ij> λ_E1 * (Si_x*Sj_z + Si_z*Sj_x)
+     * Compute ∂H_sp-ph/∂Qx_E1 for a specific bond type
+     * @param bond_type Bond type (0=x, 1=y, 2=z)
      */
-    double dH_dQx_E1() const;
+    double dH_dQx_E1(size_t bond_type) const;
     
     /**
-     * Compute ∂H_sp-ph/∂Qy_E1 = Σ_<ij> λ_E1 * (Si_y*Sj_z + Si_z*Sj_y)
+     * Compute ∂H_sp-ph/∂Qy_E1 for a specific bond type
+     * @param bond_type Bond type (0=x, 1=y, 2=z)
      */
-    double dH_dQy_E1() const;
+    double dH_dQy_E1(size_t bond_type) const;
     
     /**
-     * Compute ∂H_sp-ph/∂Qx_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_x - Si_y*Sj_y)
+     * Compute ∂H_sp-ph/∂Qx_E2 for a specific bond type
+     * @param bond_type Bond type (0=x, 1=y, 2=z)
      */
-    double dH_dQx_E2() const;
+    double dH_dQx_E2(size_t bond_type) const;
     
     /**
-     * Compute ∂H_sp-ph/∂Qy_E2 = Σ_<ij> λ_E2 * (Si_x*Sj_y - Si_y*Sj_x)
+     * Compute ∂H_sp-ph/∂Qy_E2 for a specific bond type
+     * @param bond_type Bond type (0=x, 1=y, 2=z)
      */
-    double dH_dQy_E2() const;
+    double dH_dQy_E2(size_t bond_type) const;
     
     /**
-     * Compute ∂H_sp-ph/∂Q_A1 = Σ_<ij> λ_A1 * (Si · Sj)
+     * Compute ∂H_sp-ph/∂Q_A1 for a specific bond type
+     * @param bond_type Bond type (0=x, 1=y, 2=z)
      */
-    double dH_dQ_A1() const;
+    double dH_dQ_A1(size_t bond_type) const;
     
     /**
      * Compute ring exchange contribution to effective field on spin at given site
@@ -837,34 +926,34 @@ public:
     // ============================================================
     
     /**
-     * Phonon EOM derivatives
+     * Phonon EOM derivatives (per-bond-type)
      * 
-     * E1 mode (IR active, THz driven):
-     *   dQx_E1/dt = Vx_E1
-     *   dVx_E1/dt = -ω_E1² Qx_E1 - λ_E1 (Qx_E1²+Qy_E1²) Qx_E1 
-     *              - 2*g3_E1A1*Qx_E1*Q_A1 - γ_E1*Vx_E1 - ∂H_sp-ph/∂Qx_E1 + Z*Ex(t)
-     *   dQy_E1/dt = Vy_E1
-     *   dVy_E1/dt = -ω_E1² Qy_E1 - λ_E1 (Qx_E1²+Qy_E1²) Qy_E1 
-     *              - 2*g3_E1A1*Qy_E1*Q_A1 - γ_E1*Vy_E1 - ∂H_sp-ph/∂Qy_E1 + Z*Ey(t)
+     * Each mode now has separate coordinates for each bond type (b=0,1,2).
      * 
-     * E2 mode (Raman active, not directly driven by THz):
-     *   dQx_E2/dt = Vx_E2
-     *   dVx_E2/dt = -ω_E2² Qx_E2 - λ_E2 (Qx_E2²+Qy_E2²) Qx_E2 
-     *              - 2*g3_E2A1*Qx_E2*Q_A1 - γ_E2*Vx_E2 - ∂H_sp-ph/∂Qx_E2
-     *   dQy_E2/dt = Vy_E2
-     *   dVy_E2/dt = -ω_E2² Qy_E2 - λ_E2 (Qx_E2²+Qy_E2²) Qy_E2 
-     *              - 2*g3_E2A1*Qy_E2*Q_A1 - γ_E2*Vy_E2 - ∂H_sp-ph/∂Qy_E2
+     * E1 mode (IR active, THz driven, per bond type b):
+     *   dQx_E1_b/dt = Vx_E1_b
+     *   dVx_E1_b/dt = -ω_E1² Qx_E1_b - λ_E1 (Qx_E1_b²+Qy_E1_b²) Qx_E1_b 
+     *              - 2*g3_E1A1*Qx_E1_b*Q_A1_b - γ_E1*Vx_E1_b - ∂H_sp-ph/∂Qx_E1_b + Z*Ex(t)
      * 
-     * A1 mode (Raman active, not directly driven by THz):
-     *   dQ_A1/dt = V_A1
-     *   dV_A1/dt = -ω_A1² Q_A1 - λ_A1 Q_A1³ 
-     *             - g3_E1A1 (Qx_E1²+Qy_E1²) - g3_E2A1 (Qx_E2²+Qy_E2²) 
-     *             - γ_A1*V_A1 - ∂H_sp-ph/∂Q_A1
+     * E2 mode (Raman active, per bond type b):
+     *   Similar structure...
+     * 
+     * A1 mode (Raman active, per bond type b):
+     *   Similar structure...
+     * 
+     * @param ph Input phonon state
+     * @param t Current time
+     * @param dH_dQx_E1 Array of ∂H/∂Qx_E1 for each bond type [3]
+     * @param dH_dQy_E1 Array of ∂H/∂Qy_E1 for each bond type [3]
+     * @param dH_dQx_E2 Array of ∂H/∂Qx_E2 for each bond type [3]
+     * @param dH_dQy_E2 Array of ∂H/∂Qy_E2 for each bond type [3]
+     * @param dH_dQ_A1 Array of ∂H/∂Q_A1 for each bond type [3]
+     * @param dph_dt Output phonon derivatives
      */
     void phonon_derivatives(const PhononState& ph, double t,
-                           double dH_dQx_E1_val, double dH_dQy_E1_val,
-                           double dH_dQx_E2_val, double dH_dQy_E2_val,
-                           double dH_dQ_A1_val,
+                           const double* dH_dQx_E1, const double* dH_dQy_E1,
+                           const double* dH_dQx_E2, const double* dH_dQy_E2,
+                           const double* dH_dQ_A1,
                            PhononState& dph_dt) const;
     
     /**
@@ -1047,6 +1136,13 @@ public:
         return phonons.E2_amplitude();
     }
     
+    /**
+     * A1 phonon amplitude
+     */
+    double A1_amplitude() const {
+        return phonons.A1_amplitude();
+    }
+
     // ============================================================
     // SIMULATION
     // ============================================================

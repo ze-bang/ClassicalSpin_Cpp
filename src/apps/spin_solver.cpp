@@ -840,6 +840,12 @@ void build_phonon_params(const SpinConfig& config,
     dr_params.sigma_2 = config.probe_width;
     dr_params.phi_2 = config.get_param("probe_phase", 0.0);
     dr_params.theta_2 = config.get_param("probe_polarization", 0.0);
+    
+    // Drive strength per bond type: relative scaling of the THz field for each bond type
+    // Default: 1.0 (full strength). Set to 0 to disable, or any value to scale.
+    dr_params.drive_strength[0] = config.get_param("drive_strength_0", 1.0);  // x-bond
+    dr_params.drive_strength[1] = config.get_param("drive_strength_1", 1.0);  // y-bond
+    dr_params.drive_strength[2] = config.get_param("drive_strength_2", 1.0);  // z-bond
 }
 
 /**
@@ -1001,6 +1007,9 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         cout << "  Pump frequency: " << config.pump_frequency << endl;
         cout << "  Pump time: " << config.pump_time << endl;
         cout << "  Pump width: " << config.pump_width << endl;
+        cout << "  Drive strength per bond type: x=" << lattice.drive_params.drive_strength[0]
+             << ", y=" << lattice.drive_params.drive_strength[1]
+             << ", z=" << lattice.drive_params.drive_strength[2] << endl;
     }
     
     // Distribute trials across MPI ranks
