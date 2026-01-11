@@ -49,8 +49,9 @@ from typing import Dict, Tuple, Optional, List, Any, Literal
 # Type for norm selection
 NormType = Literal['log', 'power', 'symlog', 'linear']
 
-# Conversion factor: meV to rad/ps (ω = E/ℏ where ℏ = 0.6582119569 meV·ps)
-MEV_TO_RAD_PS = 1.0 / 0.6582119569  # ≈ 1.5193 rad/ps per meV
+# Conversion factor: meV to omega units
+# In natural units with ℏ=1 used by the simulation, omega is directly in meV
+MEV_TO_OMEGA = 1.0  # No conversion needed - axes are in meV
 
 # Default energy level line style parameters
 ENERGY_LINE_STYLE = {
@@ -62,8 +63,8 @@ ENERGY_LINE_STYLE = {
 # Color scheme for different energy levels
 ENERGY_LINE_COLORS = {
     'e1': 'cyan',
-    'e2': 'magenta', 
-    'e2_e1': 'yellow',
+    'e2': 'magenta',
+    'e2-e1': 'yellow',
     'kc': 'lime'
 }
 
@@ -93,8 +94,8 @@ def add_energy_level_lines(ax, energy_levels_mev: Dict[str, float],
         if energy_mev is None or energy_mev == 0:
             continue
             
-        # Convert meV to rad/time (same as rad/ps if time unit is ps)
-        omega = energy_mev * MEV_TO_RAD_PS
+        # Convert meV to omega units (in natural units with ℏ=1, no conversion needed)
+        omega = energy_mev * MEV_TO_OMEGA
         
         # Get color for this level
         color = ENERGY_LINE_COLORS.get(level_name, 'white')
@@ -905,10 +906,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     
     # Print energy level info if provided
     if energy_levels_mev:
-        print(f"  Energy level reference lines (meV → rad/ps):")
+        print(f"  Energy level reference lines (meV):")
         for name, val in energy_levels_mev.items():
             if val is not None:
-                print(f"    {name}: {val:.4f} meV → ±{val * MEV_TO_RAD_PS:.4f} rad/ps")
+                print(f"    {name}: {val:.4f} meV → ±{val * MEV_TO_OMEGA:.4f} omega")
     
     # Component labels
     component_labels_SU2 = ['x', 'y', 'z']
@@ -1140,6 +1141,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                         ax_freq.set_xlim(omega_t_window)
                     if omega_tau_window is not None:
                         ax_freq.set_ylim(omega_tau_window)
+                    # Add energy level reference lines
+                    if energy_levels_mev:
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                     plt.colorbar(im_freq, ax=ax_freq)
                     
                     np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
@@ -1212,6 +1216,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax_freq.set_xlim(omega_t_window)
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
+                # Add energy level reference lines
+                if energy_levels_mev:
+                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                 plt.colorbar(im_freq, ax=ax_freq)
                 
                 np.savetxt(os.path.join(dir, f"M_NL_SU2_FF_{label}.txt"), M_NL_comp_FF)
@@ -1321,6 +1328,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                         ax_freq.set_xlim(omega_t_window)
                     if omega_tau_window is not None:
                         ax_freq.set_ylim(omega_tau_window)
+                    # Add energy level reference lines
+                    if energy_levels_mev:
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                     plt.colorbar(im_freq, ax=ax_freq)
                     
                     np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
@@ -1393,6 +1403,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax_freq.set_xlim(omega_t_window)
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
+                # Add energy level reference lines
+                if energy_levels_mev:
+                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                 plt.colorbar(im_freq, ax=ax_freq)
                 
                 np.savetxt(os.path.join(dir, f"M_NL_SU3_FF_{label}.txt"), M_NL_comp_FF)
@@ -1481,6 +1494,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax_freq.set_xlim(omega_t_window)
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
+                # Add energy level reference lines
+                if energy_levels_mev:
+                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                 plt.colorbar(im_freq, ax=ax_freq)
                 
                 # Row 1: Individual M0, M1, M01 spectra for λ5 + λ7
@@ -1500,6 +1516,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                         ax.set_xlim(omega_t_window)
                     if omega_tau_window is not None:
                         ax.set_ylim(omega_tau_window)
+                    # Add energy level reference lines
+                    if energy_levels_mev:
+                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
                     plt.colorbar(im, ax=ax)
                 
                 plt.tight_layout()
@@ -1772,7 +1791,7 @@ Examples:
             energy_levels_mev['e2'] = args.e2
             # Also add e2-e1 if both are provided
             if args.e1 is not None:
-                energy_levels_mev['e2_e1'] = args.e2 - args.e1
+                energy_levels_mev['e2-e1'] = args.e2 - args.e1
         if args.kc is not None:
             energy_levels_mev['kc'] = args.kc
         print(f"  Energy levels: {energy_levels_mev}")
