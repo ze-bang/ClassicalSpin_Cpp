@@ -36,6 +36,16 @@ chi5x = 0.8     # χ parameter
 chi2x = 0.8
 chi7x = 0.8
 
+# Tm-Tm Diagonal Bilinear Coupling (diagonal in Gell-Mann space)
+# J_a * λ_a ⊗ λ_a for each Gell-Mann generator (no cross terms)
+Jtm_1 = 0.0
+Jtm_2 = 0.0
+Jtm_3 = 0.0
+Jtm_4 = 0.0
+Jtm_5 = 0.0
+Jtm_6 = 0.0
+Jtm_7 = 0.0
+Jtm_8 = 0.0
 
 # Magnetic Field
 field_strength = 0.0
