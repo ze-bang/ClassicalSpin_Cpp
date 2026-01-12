@@ -7,7 +7,7 @@ system = tmfeo3_tm
 simulation_mode = 2dcs
 
 # Lattice Size (for mixed Fe + Tm lattice)
-lattice_size = 1,1,1
+lattice_size = 3,3,3
 
 # Fe Exchange Interaction Parameters (in meV)
 J1ab = 4.74     # In-plane nearest neighbor
@@ -30,6 +30,17 @@ e2 = 5.33501132784 #1.29*4.135667696 = 5.33501132784
 # Tm-O (Fe-Tm coupling) scaling factors
 tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
+
+# Tm-Tm Diagonal Bilinear Coupling (diagonal in Gell-Mann space)
+# J_a * λ_a ⊗ λ_a for each Gell-Mann generator (no cross terms)
+Jtm_1 = 0.0
+Jtm_2 = 0.0
+Jtm_3 = 0.0
+Jtm_4 = 0.0
+Jtm_5 = 0.0
+Jtm_6 = 0.0
+Jtm_7 = 0.0
+Jtm_8 = 0.0
 
 # Fe-Tm Bilinear Coupling
 chii = 0.0     # χ parameter

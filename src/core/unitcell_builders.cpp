@@ -230,6 +230,15 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double chi7z = config.get_param("chi7z", 0.0);
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
+    // Tm-Tm diagonal bilinear coupling (nearest neighbor) - each component couples λ_a ⊗ λ_a only
+    const double Jtm_1 = config.get_param("Jtm_1", 0.0);
+    const double Jtm_2 = config.get_param("Jtm_2", 0.0);
+    const double Jtm_3 = config.get_param("Jtm_3", 0.0);
+    const double Jtm_4 = config.get_param("Jtm_4", 0.0);
+    const double Jtm_5 = config.get_param("Jtm_5", 0.0);
+    const double Jtm_6 = config.get_param("Jtm_6", 0.0);
+    const double Jtm_7 = config.get_param("Jtm_7", 0.0);
+    const double Jtm_8 = config.get_param("Jtm_8", 0.0);
     const double h = config.field_strength;
     
     // Use TmFeO3_Fe and TmFeO3_Tm classes from unitcell.h (already have structure)
@@ -356,6 +365,49 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Tm_atoms.set_field(tm_field, 1);
     Tm_atoms.set_field(tm_field, 2);
     Tm_atoms.set_field(tm_field, 3);
+    
+    // Tm-Tm diagonal bilinear interactions (nearest neighbor)
+    // Diagonal in Gell-Mann space: J_a * λ_a ⊗ λ_a (no cross terms)
+    // Nearest neighbors based on real-space positions:
+    //   Tm0 (0.02111, 0.92839, 0.75) ↔ Tm2 (0.47889, 0.42839, 0.75): d ≈ 0.68
+    //   Tm1 (0.52111, 0.57161, 0.25) ↔ Tm3 (0.97889, 0.07161, 0.25): d ≈ 0.68
+    if (Jtm_1 != 0.0 || Jtm_2 != 0.0 || Jtm_3 != 0.0 || Jtm_4 != 0.0 ||
+        Jtm_5 != 0.0 || Jtm_6 != 0.0 || Jtm_7 != 0.0 || Jtm_8 != 0.0) {
+        Eigen::MatrixXd J_tm_mat = Eigen::MatrixXd::Zero(8, 8);
+        J_tm_mat(0, 0) = Jtm_1;
+        J_tm_mat(1, 1) = Jtm_2;
+        J_tm_mat(2, 2) = Jtm_3;
+        J_tm_mat(3, 3) = Jtm_4;
+        J_tm_mat(4, 4) = Jtm_5;
+        J_tm_mat(5, 5) = Jtm_6;
+        J_tm_mat(6, 6) = Jtm_7;
+        J_tm_mat(7, 7) = Jtm_8;
+        
+        // Tm0 ↔ Tm2 nearest neighbors (z=0.75 plane, d ≈ 0.68)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(0, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 1, 0));
+        
+        // Tm1 ↔ Tm3 nearest neighbors (z=0.25 plane, d ≈ 0.68)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 1, 0));
+        
+        // Out-of-plane nearest neighbors (between z=0.75 and z=0.25 planes)
+        // Tm0 (0.02111, 0.92839, 0.75) ↔ Tm3 (0.97889, 0.07161, 0.25)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 1));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 1));
+        
+        // Tm2 (0.47889, 0.42839, 0.75) ↔ Tm1 (0.52111, 0.57161, 0.25)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 1));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 1));
+    }
     
     // Create mixed unit cell
     MixedUnitCell mixed_uc(Fe_atoms, Tm_atoms);
@@ -551,8 +603,15 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
     
-    // Tm-Tm coupling parameters (if any)
-    const double J_tm = config.get_param("J_tm", 0.0);  // Tm-Tm exchange
+    // Tm-Tm diagonal bilinear coupling (nearest neighbor) - each component couples λ_a ⊗ λ_a only
+    const double Jtm_1 = config.get_param("Jtm_1", 0.0);
+    const double Jtm_2 = config.get_param("Jtm_2", 0.0);
+    const double Jtm_3 = config.get_param("Jtm_3", 0.0);
+    const double Jtm_4 = config.get_param("Jtm_4", 0.0);
+    const double Jtm_5 = config.get_param("Jtm_5", 0.0);
+    const double Jtm_6 = config.get_param("Jtm_6", 0.0);
+    const double Jtm_7 = config.get_param("Jtm_7", 0.0);
+    const double Jtm_8 = config.get_param("Jtm_8", 0.0);
     
     // Use TmFeO3_Tm class from unitcell.h (already has structure)
     // SU(3) has 8-dimensional spin space (Gell-Mann basis)
@@ -576,6 +635,48 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     Tm_atoms.set_field(tm_field, 2);
     Tm_atoms.set_field(tm_field, 3);
     
+    // Tm-Tm diagonal bilinear interactions (nearest neighbor)
+    // Diagonal in Gell-Mann space: J_a * λ_a ⊗ λ_a (no cross terms)
+    // Nearest neighbors based on real-space positions:
+    //   Tm0 (0.02111, 0.92839, 0.75) ↔ Tm2 (0.47889, 0.42839, 0.75): d ≈ 0.68
+    //   Tm1 (0.52111, 0.57161, 0.25) ↔ Tm3 (0.97889, 0.07161, 0.25): d ≈ 0.68
+    if (Jtm_1 != 0.0 || Jtm_2 != 0.0 || Jtm_3 != 0.0 || Jtm_4 != 0.0 ||
+        Jtm_5 != 0.0 || Jtm_6 != 0.0 || Jtm_7 != 0.0 || Jtm_8 != 0.0) {
+        Eigen::MatrixXd J_tm_mat = Eigen::MatrixXd::Zero(8, 8);
+        J_tm_mat(0, 0) = Jtm_1;
+        J_tm_mat(1, 1) = Jtm_2;
+        J_tm_mat(2, 2) = Jtm_3;
+        J_tm_mat(3, 3) = Jtm_4;
+        J_tm_mat(4, 4) = Jtm_5;
+        J_tm_mat(5, 5) = Jtm_6;
+        J_tm_mat(6, 6) = Jtm_7;
+        J_tm_mat(7, 7) = Jtm_8;
+        
+        // Tm0 ↔ Tm2 nearest neighbors (z=0.75 plane, d ≈ 0.68)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(0, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 1, 0));
+        
+        // Tm1 ↔ Tm3 nearest neighbors (z=0.25 plane, d ≈ 0.68)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 1, 0));
+        
+        // Out-of-plane nearest neighbors (between z=0.75 and z=0.25 planes)
+        // Tm0 (0.02111, 0.92839, 0.75) ↔ Tm3 (0.97889, 0.07161, 0.25)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 1));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 1));
+        
+        // Tm2 (0.47889, 0.42839, 0.75) ↔ Tm1 (0.52111, 0.57161, 0.25)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 1));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 1));
+    }
     
     return Tm_atoms;
 }

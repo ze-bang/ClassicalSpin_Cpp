@@ -26,6 +26,17 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 chii = 0.05
 
+# Tm-Tm diagonal bilinear coupling (nearest neighbor)
+# Each Jtm_a couples λ_a ⊗ λ_a only (no cross terms)
+Jtm_1 = 0.0
+Jtm_2 = 0.0
+Jtm_3 = 0.0
+Jtm_4 = 0.0
+Jtm_5 = 0.0
+Jtm_6 = 0.0
+Jtm_7 = 0.0
+Jtm_8 = 0.0
+
 # Field
 field_strength = 0.0
 field_direction = 0,0,1
