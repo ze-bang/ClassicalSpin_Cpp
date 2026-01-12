@@ -65,7 +65,7 @@ ENERGY_LINE_COLORS = {
     'e1': 'cyan',
     'e2': 'magenta',
     'e2-e1': 'yellow',
-    'kc': 'lime'
+    'qAFM': 'lime'
 }
 
 
@@ -1566,6 +1566,118 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     add_energy_level_lines(ax_l57, energy_levels_mev, omega_t_window)
                 plt.savefig(os.path.join(dir, "M_NL_lambda57_SPEC.pdf"), dpi=100)
                 plt.close(fig_l57_main)
+            
+            # λ2 + λ5 + λ7 combined mode
+            if spin_dim_SU3 >= 8:
+                print("    Processing λ2 + λ5 + λ7 mode (equal weight)...")
+                
+                # Equal weights for λ2, λ5 and λ7 combination
+                LAMBDA2_WEIGHT = 1.0
+                LAMBDA5_WEIGHT_257 = 1.0
+                LAMBDA7_WEIGHT_257 = 1.0
+                
+                # Combine λ2 (index 1), λ5 (index 4) and λ7 (index 6) in time domain before FFT (equal weight)
+                M_NL_lambda257 = LAMBDA2_WEIGHT * M_NL_SU3[1] + LAMBDA5_WEIGHT_257 * M_NL_SU3[4] + LAMBDA7_WEIGHT_257 * M_NL_SU3[6]
+                M0_lambda257 = LAMBDA2_WEIGHT * M0_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M0_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M0_comp_SU3[6]
+                M1_lambda257 = LAMBDA2_WEIGHT * M1_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M1_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M1_comp_SU3[6]
+                M01_lambda257 = LAMBDA2_WEIGHT * M01_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M01_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M01_comp_SU3[6]
+                
+                # Create debug plot for λ2 + λ5 + λ7
+                fig_l257, axes_l257 = plt.subplots(2, 3, figsize=(15, 8))
+                
+                # Row 0: M_NL (λ2 + λ5 + λ7)
+                # Time domain
+                ax_time = axes_l257[0, 0]
+                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                    ax_time.plot(M_NL_lambda257[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                ax_time.set_xlabel('Time index')
+                ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+                ax_time.set_title(f'{LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$ (time domain)')
+                ax_time.legend(fontsize=6)
+                ax_time.grid(True, alpha=0.3)
+                
+                # 2D time-tau plot
+                ax_2d = axes_l257[0, 1]
+                im = ax_2d.imshow(M_NL_lambda257, origin='lower', aspect='auto', cmap='RdBu_r',
+                                  extent=[0, M_NL_lambda257.shape[1], tau[0], tau[-1]])
+                ax_2d.set_xlabel('Time index')
+                ax_2d.set_ylabel('τ')
+                ax_2d.set_title(f'{LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$ (τ, t)')
+                plt.colorbar(im, ax=ax_2d)
+                
+                # Frequency domain
+                M_NL_lambda257_FF = compute_2d_fft(M_NL_lambda257)
+                ax_freq = axes_l257[0, 2]
+                im_freq = ax_freq.imshow(M_NL_lambda257_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                          norm=_get_norm(M_NL_lambda257_FF, norm_type),
+                                          extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+                if omega_t_window is not None:
+                    ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                if omega_tau_window is not None:
+                    ax_freq.set_ylim(omega_tau_window)
+                # Add energy level reference lines
+                if energy_levels_mev:
+                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                plt.colorbar(im_freq, ax=ax_freq)
+                
+                # Row 1: Individual M0, M1, M01 spectra for λ2 + λ5 + λ7
+                M0_lambda257_FF = compute_2d_fft(M0_lambda257)
+                M1_lambda257_FF = compute_2d_fft(M1_lambda257)
+                M01_lambda257_FF = compute_2d_fft(M01_lambda257)
+                
+                for idx, (name, data_FF) in enumerate([('M0', M0_lambda257_FF), ('M1', M1_lambda257_FF), ('M01', M01_lambda257_FF)]):
+                    ax = axes_l257[1, idx]
+                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                   norm=_get_norm(data_FF, norm_type),
+                                   extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                    ax.set_xlabel('$\\omega_t$ (THz)')
+                    ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                    ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+                    if omega_t_window is not None:
+                        ax.set_xlim(omega_t_window[1], omega_t_window[0])
+                    if omega_tau_window is not None:
+                        ax.set_ylim(omega_tau_window)
+                    # Add energy level reference lines
+                    if energy_levels_mev:
+                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
+                    plt.colorbar(im, ax=ax)
+                
+                plt.tight_layout()
+                plt.savefig(os.path.join(dir, "M_NL_lambda257_debug.pdf"), dpi=100)
+                plt.close(fig_l257)
+                
+                # Save data
+                np.savetxt(os.path.join(dir, "M_NL_lambda257_FF.txt"), M_NL_lambda257_FF)
+                np.savetxt(os.path.join(dir, "M0_lambda257_FF.txt"), M0_lambda257_FF)
+                np.savetxt(os.path.join(dir, "M1_lambda257_FF.txt"), M1_lambda257_FF)
+                np.savetxt(os.path.join(dir, "M01_lambda257_FF.txt"), M01_lambda257_FF)
+                results['M_NL_lambda257_FF'] = M_NL_lambda257_FF
+                results['M0_lambda257_FF'] = M0_lambda257_FF
+                results['M1_lambda257_FF'] = M1_lambda257_FF
+                results['M01_lambda257_FF'] = M01_lambda257_FF
+                
+                # Main λ2 + λ5 + λ7 spectrum plot
+                fig_l257_main = plt.figure(figsize=(10, 8))
+                ax_l257 = fig_l257_main.add_subplot(111)
+                im_l257 = ax_l257.imshow(M_NL_lambda257_FF, origin='lower',
+                           extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                           aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_lambda257_FF, norm_type))
+                ax_l257.set_xlabel('$\\omega_t$ (THz)')
+                ax_l257.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                plt.colorbar(im_l257, ax=ax_l257, label='Intensity')
+                ax_l257.set_title(f'$M_{{NL}}$ Spectrum ({LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+                if omega_t_window is not None:
+                    ax_l257.set_xlim(omega_t_window[1], omega_t_window[0])
+                if omega_tau_window is not None:
+                    ax_l257.set_ylim(omega_tau_window)
+                # Add energy level reference lines
+                if energy_levels_mev:
+                    add_energy_level_lines(ax_l257, energy_levels_mev, omega_t_window)
+                plt.savefig(os.path.join(dir, "M_NL_lambda257_SPEC.pdf"), dpi=100)
+                plt.close(fig_l257_main)
         
         # =====================================================================
         # Combined SU(2) + SU(3) spectrum
@@ -1805,7 +1917,7 @@ Examples:
             if args.e1 is not None:
                 energy_levels_mev['e2-e1'] = args.e2 - args.e1
         if args.kc is not None:
-            energy_levels_mev['kc'] = args.kc
+            energy_levels_mev['qAFM'] = args.kc
         print(f"  Energy levels: {energy_levels_mev}")
     
     if analysis_type == 'md':
