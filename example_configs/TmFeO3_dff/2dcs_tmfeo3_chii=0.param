@@ -33,6 +33,9 @@ tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
 chi5x = 0.8     # χ parameter
+chi2x = 0.8
+chi7x = 0.8
+
 
 # Magnetic Field
 field_strength = 0.0
@@ -61,7 +64,7 @@ pump_frequency = 0.3
 pump_amplitude_su3 = 0.5
 pump_width_su3 = 0.5
 pump_frequency_su3 = 2.1
-pump_direction_su3 = 0,0,0,0,2.3915,0,0.9128,0 
+pump_direction_su3 = 0,1,0,0,0,0,1,0
 
 # 2DCS Scan
 tau_start = -100.0
