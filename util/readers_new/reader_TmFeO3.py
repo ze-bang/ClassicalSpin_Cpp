@@ -973,7 +973,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         
         omega_t = np.fft.fftfreq(len(times_positive), dt) * 2 * np.pi
         omega_t = np.fft.fftshift(omega_t)
-        omega_t = np.flip(omega_t)  # Flip to match flipped FFT data (axis=1)
+        # omega_t now goes from negative to positive (standard convention)
         omega_t = omega_t * MEV_TO_THZ  # Convert meV (=rad/ps with ℏ=1) to THz
         
         results['omega_tau'] = omega_tau
@@ -1075,7 +1075,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             data_FF = np.fft.fft2(data_dynamic)
             data_FF = np.fft.fftshift(data_FF)
             data_FF = np.abs(data_FF)
-            return np.flip(data_FF, axis=1)  # Flip omega_t axis
+            return data_FF  # Flip omega_t axis
         
         # =====================================================================
         # Process SU(2) sublattice
@@ -1145,12 +1145,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     sig_comp_FF = compute_2d_fft(sig_comp)
                     ax_freq = axes_sig[comp, 2]
                     im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax_freq.set_xlabel('$\\omega_t$ (THz)')
                     ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
                     ax_freq.set_title(f'{label}-component (freq domain)')
                     if omega_t_window is not None:
-                        ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
                         ax_freq.set_ylim(omega_tau_window)
                     # Add energy level reference lines
@@ -1173,14 +1173,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 fig_spec = plt.figure(figsize=(10, 8))
                 plt.imshow(sig_z_FF, origin='lower',
-                           extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                            aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_z_FF, norm_type))
                 plt.xlabel('$\\omega_t$ (THz)')
                 plt.ylabel('$\\omega_{\\tau}$ (THz)')
                 plt.colorbar(label='Intensity')
                 plt.title(f'{sig_name} Spectrum')
                 if omega_t_window is not None:
-                    plt.xlim(omega_t_window[1], omega_t_window[0])
+                    plt.xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     plt.ylim(omega_tau_window)
                 plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
@@ -1220,12 +1220,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 M_NL_comp_FF = compute_2d_fft(M_NL_comp)
                 ax_freq = axes_debug[comp, 2]
                 im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                          norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                 ax_freq.set_xlabel('$\\omega_t$ (THz)')
                 ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
                 ax_freq.set_title(f'{label}-component (freq domain)')
                 if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
                 # Add energy level reference lines
@@ -1248,14 +1248,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             fig_nl = plt.figure(figsize=(10, 8))
             ax_nl = fig_nl.add_subplot(111)
             im_nl = ax_nl.imshow(M_NL_z_FF, origin='lower',
-                       extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_z_FF, norm_type))
             ax_nl.set_xlabel('$\\omega_t$ (THz)')
             ax_nl.set_ylabel('$\\omega_{\\tau}$ (THz)')
             plt.colorbar(im_nl, ax=ax_nl, label='Intensity')
             ax_nl.set_title('$M_{NL}$ Spectrum (SU(2))')
             if omega_t_window is not None:
-                ax_nl.set_xlim(omega_t_window[1], omega_t_window[0])
+                ax_nl.set_xlim(omega_t_window[0], omega_t_window[1])
             if omega_tau_window is not None:
                 ax_nl.set_ylim(omega_tau_window)
             # Add energy level reference lines
@@ -1332,12 +1332,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     sig_comp_FF = compute_2d_fft(sig_comp)
                     ax_freq = axes_sig[comp, 2]
                     im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax_freq.set_xlabel('$\\omega_t$ (THz)')
                     ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
                     ax_freq.set_title(f'{label}-component (freq domain)')
                     if omega_t_window is not None:
-                        ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
                         ax_freq.set_ylim(omega_tau_window)
                     # Add energy level reference lines
@@ -1360,14 +1360,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 fig_spec = plt.figure(figsize=(10, 8))
                 plt.imshow(sig_total_FF, origin='lower',
-                           extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                            aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_total_FF, norm_type))
                 plt.xlabel('$\\omega_t$ (THz)')
                 plt.ylabel('$\\omega_{\\tau}$ (THz)')
                 plt.colorbar(label='Intensity')
                 plt.title(f'{sig_name} Spectrum (total)')
                 if omega_t_window is not None:
-                    plt.xlim(omega_t_window[1], omega_t_window[0])
+                    plt.xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     plt.ylim(omega_tau_window)
                 plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
@@ -1407,12 +1407,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 M_NL_comp_FF = compute_2d_fft(M_NL_comp)
                 ax_freq = axes_debug[comp, 2]
                 im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                          norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                 ax_freq.set_xlabel('$\\omega_t$ (THz)')
                 ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
                 ax_freq.set_title(f'{label}-component (freq domain)')
                 if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
                 # Add energy level reference lines
@@ -1436,14 +1436,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             fig_nl = plt.figure(figsize=(10, 8))
             ax_nl = fig_nl.add_subplot(111)
             im_nl = ax_nl.imshow(M_NL_total_FF, origin='lower',
-                       extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_total_FF, norm_type))
             ax_nl.set_xlabel('$\\omega_t$ (THz)')
             ax_nl.set_ylabel('$\\omega_{\\tau}$ (THz)')
             plt.colorbar(im_nl, ax=ax_nl, label='Intensity')
             ax_nl.set_title('$M_{NL}$ Spectrum (SU(3) total)')
             if omega_t_window is not None:
-                ax_nl.set_xlim(omega_t_window[1], omega_t_window[0])
+                ax_nl.set_xlim(omega_t_window[0], omega_t_window[1])
             if omega_tau_window is not None:
                 ax_nl.set_ylim(omega_tau_window)
             # Add energy level reference lines
@@ -1498,12 +1498,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 ax_freq = axes_l57[0, 2]
                 im_freq = ax_freq.imshow(M_NL_lambda57_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                           norm=_get_norm(M_NL_lambda57_FF, norm_type),
-                                          extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                 ax_freq.set_xlabel('$\\omega_t$ (THz)')
                 ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
                 ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
                 if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
                 # Add energy level reference lines
@@ -1520,12 +1520,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax = axes_l57[1, idx]
                     im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                    norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax.set_xlabel('$\\omega_t$ (THz)')
                     ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
                     ax.set_title(f'${name}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[1], omega_t_window[0])
+                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
                         ax.set_ylim(omega_tau_window)
                     # Add energy level reference lines
@@ -1551,14 +1551,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 fig_l57_main = plt.figure(figsize=(10, 8))
                 ax_l57 = fig_l57_main.add_subplot(111)
                 im_l57 = ax_l57.imshow(M_NL_lambda57_FF, origin='lower',
-                           extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                            aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_lambda57_FF, norm_type))
                 ax_l57.set_xlabel('$\\omega_t$ (THz)')
                 ax_l57.set_ylabel('$\\omega_{\\tau}$ (THz)')
                 plt.colorbar(im_l57, ax=ax_l57, label='Intensity')
                 ax_l57.set_title(f'$M_{{NL}}$ Spectrum ({LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$)')
                 if omega_t_window is not None:
-                    ax_l57.set_xlim(omega_t_window[1], omega_t_window[0])
+                    ax_l57.set_xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     ax_l57.set_ylim(omega_tau_window)
                 # Add energy level reference lines
@@ -1610,12 +1610,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 ax_freq = axes_l257[0, 2]
                 im_freq = ax_freq.imshow(M_NL_lambda257_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                           norm=_get_norm(M_NL_lambda257_FF, norm_type),
-                                          extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                 ax_freq.set_xlabel('$\\omega_t$ (THz)')
                 ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
                 ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
                 if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[1], omega_t_window[0])
+                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     ax_freq.set_ylim(omega_tau_window)
                 # Add energy level reference lines
@@ -1632,12 +1632,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax = axes_l257[1, idx]
                     im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                    norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]])
+                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax.set_xlabel('$\\omega_t$ (THz)')
                     ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
                     ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[1], omega_t_window[0])
+                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
                         ax.set_ylim(omega_tau_window)
                     # Add energy level reference lines
@@ -1663,14 +1663,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 fig_l257_main = plt.figure(figsize=(10, 8))
                 ax_l257 = fig_l257_main.add_subplot(111)
                 im_l257 = ax_l257.imshow(M_NL_lambda257_FF, origin='lower',
-                           extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                           extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                            aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_lambda257_FF, norm_type))
                 ax_l257.set_xlabel('$\\omega_t$ (THz)')
                 ax_l257.set_ylabel('$\\omega_{\\tau}$ (THz)')
                 plt.colorbar(im_l257, ax=ax_l257, label='Intensity')
                 ax_l257.set_title(f'$M_{{NL}}$ Spectrum ({LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$)')
                 if omega_t_window is not None:
-                    ax_l257.set_xlim(omega_t_window[1], omega_t_window[0])
+                    ax_l257.set_xlim(omega_t_window[0], omega_t_window[1])
                 if omega_tau_window is not None:
                     ax_l257.set_ylim(omega_tau_window)
                 # Add energy level reference lines
@@ -1691,14 +1691,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             fig_comb = plt.figure(figsize=(10, 8))
             ax_comb = fig_comb.add_subplot(111)
             im_comb = ax_comb.imshow(M_NL_combined, origin='lower',
-                       extent=[omega_t[-1], omega_t[0], omega_tau[0], omega_tau[-1]],
+                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]],
                        aspect='auto', cmap='gnuplot2', norm=_get_norm(M_NL_combined, norm_type))
             ax_comb.set_xlabel('$\\omega_t$ (THz)')
             ax_comb.set_ylabel('$\\omega_{\\tau}$ (THz)')
             plt.colorbar(im_comb, ax=ax_comb, label='Intensity')
             ax_comb.set_title('$M_{NL}$ Spectrum (SU(2) + SU(3))')
             if omega_t_window is not None:
-                ax_comb.set_xlim(omega_t_window[1], omega_t_window[0])
+                ax_comb.set_xlim(omega_t_window[0], omega_t_window[1])
             if omega_tau_window is not None:
                 ax_comb.set_ylim(omega_tau_window)
             # Add energy level reference lines
