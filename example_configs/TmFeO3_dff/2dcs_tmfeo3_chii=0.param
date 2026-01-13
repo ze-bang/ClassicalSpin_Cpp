@@ -17,7 +17,7 @@ J2c = 0.30      # Out-of-plane next nearest neighbor
 
 # Fe Single-Ion Anisotropy (in meV)
 Ka = 0.0
-Kc = -0.120794758807550 #To get the AFM band gap at zero to be 0.91 THz
+Kc = -0.120794758807550 #To get the AFM band gap at zero to be 0.91 THz = 3.7634575979 meV
 
 # DM Interaction (in meV)
 D1 = 0.0 #0 for now just for the AFM mode
@@ -53,7 +53,7 @@ field_direction = 0,1,0
 
 
 # Equilibration
-T_start = 10.0
+T_start = 15.0
 T_end = 0.01
 annealing_steps = 1000
 use_twist_boundary = false
@@ -64,8 +64,8 @@ T_zero = true
 
 # Pump-Probe Setup
 # For SU(2) spins (Fe)
-pump_direction = 0,0,0
-pump_amplitude = 0
+pump_direction = 1,0,0
+pump_amplitude = 0.2
 pump_width = 0.4
 pump_frequency = 0.3
 
