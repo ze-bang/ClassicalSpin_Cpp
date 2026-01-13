@@ -1127,25 +1127,53 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             plt.close(fig_apod)
             print(f"    Saved: apodization_window_debug.pdf")
         
-        # Helper function for 2D FFT analysis (optimized)
-        def compute_2d_fft(data):
+        # Helper function for 2D FFT analysis (optimized with caching)
+        _fft_cache = {}
+        
+        def compute_2d_fft(data, cache_key=None):
             """Compute 2D FFT with proper shifting, flipping, transposing, and apodization (only t >= 0 data).
+            
+            Uses scipy.fft for better performance and supports caching to avoid redundant computation.
             
             Returns transposed result so that:
             - x-axis (columns) corresponds to ω_τ
             - y-axis (rows) corresponds to ω_t
+            
+            Args:
+                data: 2D array with shape (n_tau, n_t)
+                cache_key: Optional key for caching. If provided and cached, returns cached result.
             """
+            # Check cache first
+            if cache_key is not None and cache_key in _fft_cache:
+                return _fft_cache[cache_key]
+            
             # Filter to t >= 0
             data_filtered = data[:, t0_idx:]
-            data_dynamic = data_filtered - data_filtered.mean()  # In-place equivalent
+            data_dynamic = data_filtered - data_filtered.mean()
             # Apply apodization window to reduce spectral leakage
             if apod_window is not None:
                 data_dynamic = data_dynamic * apod_window
-            data_FF = np.fft.fft2(data_dynamic)
-            data_FF = np.fft.fftshift(data_FF)
+            # Use scipy.fft for better performance (can use multi-threading)
+            try:
+                from scipy import fft as scipy_fft
+                data_FF = scipy_fft.fft2(data_dynamic, workers=-1)  # Use all available cores
+                data_FF = scipy_fft.fftshift(data_FF)
+            except ImportError:
+                data_FF = np.fft.fft2(data_dynamic)
+                data_FF = np.fft.fftshift(data_FF)
             data_FF = np.abs(data_FF)
             data_FF = np.flip(data_FF, axis=1)  # Flip omega_t axis
-            return data_FF.T  # Transpose so omega_tau is x-axis, omega_t is y-axis
+            result = data_FF.T  # Transpose so omega_tau is x-axis, omega_t is y-axis
+            
+            # Cache result
+            if cache_key is not None:
+                _fft_cache[cache_key] = result
+            
+            return result
+        
+        def clear_fft_cache():
+            """Clear the FFT cache to free memory."""
+            _fft_cache.clear()
         
         # =====================================================================
         # Process SU(2) sublattice
@@ -1278,6 +1306,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             for sig_name, sig_components in [('M0_SU2', M0_comp_SU2), ('M1_SU2', M1_comp_SU2), ('M01_SU2', M01_comp_SU2)]:
                 print(f"    Processing {sig_name}...")
                 
+                # Pre-compute all FFTs with caching
+                sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
+                               for comp in range(spin_dim_SU2)]
+                
                 # Create debug plot
                 n_rows = min(spin_dim_SU2, 3)
                 fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
@@ -1307,8 +1339,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax_2d.set_title(f'{label}-component (τ, t)')
                     plt.colorbar(im, ax=ax_2d)
                     
-                    # Frequency domain plot
-                    sig_comp_FF = compute_2d_fft(sig_comp)
+                    # Frequency domain plot (use cached FFT)
+                    sig_comp_FF = sig_comp_FFs[comp]
                     ax_freq = axes_sig[comp, 2]
                     im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                               norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
@@ -1331,9 +1363,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.clf()
                 plt.close()
                 
-                # Main spectrum plot (z-component for SU2)
-                sig_z = sig_components[2] if spin_dim_SU2 > 2 else sig_components[0]
-                sig_z_FF = compute_2d_fft(sig_z)
+                # Main spectrum plot (z-component for SU2) - use cached FFT
+                z_idx = 2 if spin_dim_SU2 > 2 else 0
+                sig_z_FF = sig_comp_FFs[z_idx]  # Reuse cached FFT
                 np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_z_FF)
                 results[f'{sig_name}_FF'] = sig_z_FF
                 
@@ -1359,6 +1391,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             if n_rows == 1:
                 axes_debug = axes_debug.reshape(1, -1)
             
+            # Pre-compute all M_NL FFTs with caching
+            M_NL_SU2_FFs = [compute_2d_fft(M_NL_SU2[comp], cache_key=f'M_NL_SU2_{comp}') 
+                           for comp in range(spin_dim_SU2)]
+            
             for comp in range(n_rows):
                 M_NL_comp = M_NL_SU2[comp]
                 label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
@@ -1382,8 +1418,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 ax_2d.set_title(f'{label}-component (τ, t)')
                 plt.colorbar(im, ax=ax_2d)
                 
-                # Frequency domain plot
-                M_NL_comp_FF = compute_2d_fft(M_NL_comp)
+                # Frequency domain plot (use cached FFT)
+                M_NL_comp_FF = M_NL_SU2_FFs[comp]
                 ax_freq = axes_debug[comp, 2]
                 im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                           norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
@@ -1405,9 +1441,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             plt.savefig(os.path.join(dir, "M_NL_SU2_components_debug.pdf"), dpi=100)
             plt.close(fig_debug)
             
-            # Main M_NL spectrum for SU2 (z-component)
-            M_NL_z = M_NL_SU2[2] if spin_dim_SU2 > 2 else M_NL_SU2[0]
-            M_NL_z_FF = compute_2d_fft(M_NL_z)
+            # Main M_NL spectrum for SU2 (z-component) - use cached FFT
+            z_idx = 2 if spin_dim_SU2 > 2 else 0
+            M_NL_z_FF = M_NL_SU2_FFs[z_idx]
             np.savetxt(os.path.join(dir, "M_NL_SU2_FF.txt"), M_NL_z_FF)
             results['M_NL_SU2_FF'] = M_NL_z_FF
             
@@ -1561,6 +1597,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             for sig_name, sig_components in [('M0_SU3', M0_comp_SU3), ('M1_SU3', M1_comp_SU3), ('M01_SU3', M01_comp_SU3)]:
                 print(f"    Processing {sig_name}...")
                 
+                # Pre-compute all FFTs with caching
+                sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
+                               for comp in range(spin_dim_SU3)]
+                
                 # Create debug plot
                 n_rows = min(spin_dim_SU3, 8)
                 fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
@@ -1590,8 +1630,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     ax_2d.set_title(f'{label}-component (τ, t)')
                     plt.colorbar(im, ax=ax_2d)
                     
-                    # Frequency domain plot
-                    sig_comp_FF = compute_2d_fft(sig_comp)
+                    # Frequency domain plot (use cached FFT)
+                    sig_comp_FF = sig_comp_FFs[comp]
                     ax_freq = axes_sig[comp, 2]
                     im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                               norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
@@ -1613,10 +1653,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"), dpi=100)
                 plt.close(fig_sig)  # Explicitly close figure
                 
-                # Total spectrum (sum over components - cache FFTs)
-                sig_total_FF = np.zeros_like(compute_2d_fft(sig_components[0]))
-                for comp in range(spin_dim_SU3):
-                    sig_total_FF += compute_2d_fft(sig_components[comp])
+                # Total spectrum (sum over cached FFTs - no recomputation needed)
+                sig_total_FF = sum(sig_comp_FFs)
                 np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_total_FF)
                 results[f'{sig_name}_FF'] = sig_total_FF
                 
@@ -1642,6 +1680,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             if n_rows == 1:
                 axes_debug = axes_debug.reshape(1, -1)
             
+            # Pre-compute all M_NL FFTs with caching
+            M_NL_SU3_FFs = [compute_2d_fft(M_NL_SU3[comp], cache_key=f'M_NL_SU3_{comp}') 
+                           for comp in range(spin_dim_SU3)]
+            
             for comp in range(n_rows):
                 M_NL_comp = M_NL_SU3[comp]
                 label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
@@ -1665,8 +1707,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 ax_2d.set_title(f'{label}-component (τ, t)')
                 plt.colorbar(im, ax=ax_2d)
                 
-                # Frequency domain plot
-                M_NL_comp_FF = compute_2d_fft(M_NL_comp)
+                # Frequency domain plot (use cached FFT)
+                M_NL_comp_FF = M_NL_SU3_FFs[comp]
                 ax_freq = axes_debug[comp, 2]
                 im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                           norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
@@ -1688,10 +1730,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             plt.savefig(os.path.join(dir, "M_NL_SU3_components_debug.pdf"), dpi=100)
             plt.close(fig_debug)
             
-            # Total M_NL spectrum for SU3 (sum over components)
-            M_NL_total_FF = np.zeros_like(compute_2d_fft(M_NL_SU3[0]))
-            for comp in range(spin_dim_SU3):
-                M_NL_total_FF += compute_2d_fft(M_NL_SU3[comp])
+            # Total M_NL spectrum for SU3 (sum over cached FFTs)
+            M_NL_total_FF = sum(M_NL_SU3_FFs)
             np.savetxt(os.path.join(dir, "M_NL_SU3_FF.txt"), M_NL_total_FF)
             results['M_NL_SU3_FF'] = M_NL_total_FF
             
@@ -2079,6 +2119,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 add_energy_level_lines(ax_comb, energy_levels_mev, omega_t_window)
             plt.savefig(os.path.join(dir, "M_NL_combined_SPEC.pdf"), dpi=100)
             plt.close(fig_comb)
+    
+    # Clear FFT cache to free memory
+    clear_fft_cache()
     
     print(f"\n  2D nonlinear spectroscopy analysis complete.")
     print(f"  Output files saved to: {dir}")
