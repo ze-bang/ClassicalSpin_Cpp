@@ -575,11 +575,7 @@ class _PicklableSimulation:
         self.solver_path = solver_path
         self.cleanup = cleanup
         self.verbose = verbose
-<<<<<<< HEAD
-        self.timeout = config_dict.get('timeout', 600)
-=======
         self.timeout = config_dict.get('timeout', None)  # None = no timeout
->>>>>>> d213f4f8c9640cab3dca0562352e912e44d2fed3
         self._runner = None
     
     def _get_runner(self):
@@ -622,11 +618,7 @@ def create_spin_solver_simulation_func(
     n_deterministics: int = 5000,
     T_start: float = 5.0,
     T_end: float = 0.01,
-<<<<<<< HEAD
-    timeout: float = 600,
-=======
     timeout: float = None,  # None = no timeout
->>>>>>> d213f4f8c9640cab3dca0562352e912e44d2fed3
     solver_path: str = None,
     verbose: bool = False,
     cleanup: bool = True
@@ -693,11 +685,7 @@ def create_fast_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-<<<<<<< HEAD
-        timeout=600,
-=======
         timeout=None,  # No timeout
->>>>>>> d213f4f8c9640cab3dca0562352e912e44d2fed3
         **kwargs
     )
 
@@ -718,11 +706,7 @@ def create_accurate_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-<<<<<<< HEAD
-        timeout=600,
-=======
         timeout=None,  # No timeout
->>>>>>> d213f4f8c9640cab3dca0562352e912e44d2fed3
         **kwargs
     )
 
@@ -744,11 +728,7 @@ def create_screening_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-<<<<<<< HEAD
-        timeout=600,
-=======
         timeout=None,  # No timeout
->>>>>>> d213f4f8c9640cab3dca0562352e912e44d2fed3
         **kwargs
     )
 
