@@ -1,0 +1,215 @@
+
+======================================================================
+  BCAO HONEYCOMB SPIN PHASE EXPLORER
+  Active Learning for Magnetic Phase Discovery
+======================================================================
+  Started: 2026-01-16 00:53:13
+======================================================================
+
+[Step 1] Adding known seed parameters...
+
+[Step 2] Generating 10 initial Latin Hypercube samples...
+
+[LSWT Screening] Enabled
+         R² threshold (total): 0.7
+         R² threshold (lower band): 0.75
+
+[Step 3] Creating simulation pipeline...
+         Monte Carlo Mode: accurate (~90s/sim), L=12
+         Pipeline: LSWT Screening → Monte Carlo → Phase Classification
+Warning: pandas not available. LSWT screening will be skipped.
+
+[Step 4] Classifying initial samples...
+
+[Step 5] Fitting surrogate model...
+
+[Step 6] Running 6 active learning iterations...
+======================================================================
+
+--- Iteration 1/6 ---
+  Classifying 5 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 57 (57.6%)
+    Meron-Antimeron: 27 (27.3%)
+    Triple-Q: 13 (13.1%)
+    Ferromagnetic: 2 (2.0%)
+  LSWT pass rate: 0/15 (0.0%)
+
+--- Iteration 2/6 ---
+  Classifying 5 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 62 (59.6%)
+    Meron-Antimeron: 27 (26.0%)
+    Triple-Q: 13 (12.5%)
+    Ferromagnetic: 2 (1.9%)
+  LSWT pass rate: 0/20 (0.0%)
+
+--- Iteration 3/6 ---
+  Classifying 5 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 67 (61.5%)
+    Meron-Antimeron: 27 (24.8%)
+    Triple-Q: 13 (11.9%)
+    Ferromagnetic: 2 (1.8%)
+  LSWT pass rate: 0/25 (0.0%)
+
+--- Iteration 4/6 ---
+  Classifying 5 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 72 (63.2%)
+    Meron-Antimeron: 27 (23.7%)
+    Triple-Q: 13 (11.4%)
+    Ferromagnetic: 2 (1.8%)
+  LSWT pass rate: 0/30 (0.0%)
+
+--- Iteration 5/6 ---
+  Classifying 5 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 77 (64.7%)
+    Meron-Antimeron: 27 (22.7%)
+    Triple-Q: 13 (10.9%)
+    Ferromagnetic: 2 (1.7%)
+  LSWT pass rate: 0/35 (0.0%)
+
+--- Iteration 6/6 ---
+  Classifying 5 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 82 (66.1%)
+    Meron-Antimeron: 27 (21.8%)
+    Triple-Q: 13 (10.5%)
+    Ferromagnetic: 2 (1.6%)
+  LSWT pass rate: 0/40 (0.0%)
+
+======================================================================
+[Step 7] FINAL RESULTS
+======================================================================
+
+LSWT Screening Statistics:
+  Total screened: 40
+  Passed: 0 (0.0%)
+  Rejected: 40 (100.0%)
+  R² total: 0.000 ± 0.000
+
+
+======================================================================
+EXPLORATION SUMMARY
+======================================================================
+
+Total points explored: 124
+  Classified: 124
+  Pending: 0
+
+Phase distribution:
+  Timeout: 82 (66.1%)
+  Meron-Antimeron: 27 (21.8%)
+  Triple-Q: 13 (10.5%)
+  Ferromagnetic: 2 (1.6%)
+
+Selection methods:
+  balanced: 71
+  lhs: 38
+  initial: 15
+
+Target phase (Meron-Antimeron): 27 points
+  Example parameters:
+    NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+======================================================================
+
+============================================================
+FEATURE IMPORTANCES (which parameters matter most)
+============================================================
+  J3z_norm    : ██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.161
+  G_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.150
+  J1z_norm    : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.148
+  E_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.144
+  J3xy_norm   : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.143
+  F_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.128
+  D_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.127
+============================================================
+
+======================================================================
+INTERESTING FINDINGS
+======================================================================
+
+Found 27 Double-Q Meron-Antimeron configurations:
+------------------------------------------------------------
+
+  Configuration 1 (Point 0):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 2 (Point 1):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 3 (Point 2):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 4 (Point 3):
+    Parameters: NormalizedParams(J1z=-0.448, D=0.350, E=0.796, F=0.820, G=0.842, J3xy=0.272, J3z=0.008)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 5 (Point 4):
+    Parameters: NormalizedParams(J1z=0.260, D=-0.699, E=0.226, F=0.438, G=0.065, J3xy=-0.963, J3z=-0.223)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 6 (Point 5):
+    Parameters: NormalizedParams(J1z=-0.062, D=0.759, E=0.161, F=0.113, G=0.478, J3xy=-0.535, J3z=0.395)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 7 (Point 6):
+    Parameters: NormalizedParams(J1z=-0.855, D=-0.590, E=-0.363, F=-0.824, G=-0.835, J3xy=0.724, J3z=-0.708)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 8 (Point 8):
+    Parameters: NormalizedParams(J1z=0.426, D=-0.153, E=0.192, F=0.655, G=0.802, J3xy=-0.990, J3z=-0.782)
+    Confidence: 85.00%
+    Selection: balanced
+    Multi-Q: num=0, perp=False
+
+  Configuration 9 (Point 9):
+    Parameters: NormalizedParams(J1z=0.967, D=0.783, E=-0.985, F=0.793, G=0.200, J3xy=-0.699, J3z=0.145)
+    Confidence: 85.00%
+    Selection: balanced
+    Multi-Q: num=0, perp=False
+
+  Configuration 10 (Point 10):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+======================================================================
+PHASE BOUNDARY INSIGHTS
+======================================================================
+
+Most important parameters for phase transitions:
+  1. J3z_norm: 0.161
+  2. G_norm: 0.150
+     → Dzyaloshinskii-Moriya-like yz coupling
+  3. J1z_norm: 0.148
+     → Controls XXZ anisotropy (Ising vs XY character)
+
+======================================================================
+EXPLORATION COMPLETE
+Results saved to: active_learning_results/
+======================================================================

@@ -1,0 +1,179 @@
+/home/pc_linux/ClassicalSpin_Cpp/util/classical_solvers/active_learning_explorer.py:73: UserWarning: scikit-learn not available. Some features will be disabled.
+  warnings.warn("scikit-learn not available. Some features will be disabled.")
+
+======================================================================
+  BCAO HONEYCOMB SPIN PHASE EXPLORER
+  Active Learning for Magnetic Phase Discovery
+======================================================================
+  Started: 2026-01-16 01:15:56
+======================================================================
+
+[Step 1] Adding known seed parameters...
+
+[Step 2] Generating 8 initial Latin Hypercube samples...
+
+[LSWT Screening] Enabled
+         R² threshold (total): 0.7
+         R² threshold (lower band): 0.75
+
+[Step 3] Creating simulation pipeline...
+         Monte Carlo Mode: fast (~15s/sim), L=12
+         Pipeline: LSWT Screening → Monte Carlo → Phase Classification
+Warning: pandas not available. LSWT screening will be skipped.
+
+[Step 4] Classifying initial samples...
+
+[Step 5] Fitting surrogate model...
+
+[Step 6] Running 4 active learning iterations...
+======================================================================
+
+--- Iteration 1/4 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 102 (68.0%)
+    Meron-Antimeron: 33 (22.0%)
+    Triple-Q: 13 (8.7%)
+    Ferromagnetic: 2 (1.3%)
+  LSWT pass rate: 0/11 (0.0%)
+
+--- Iteration 2/4 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 105 (68.6%)
+    Meron-Antimeron: 33 (21.6%)
+    Triple-Q: 13 (8.5%)
+    Ferromagnetic: 2 (1.3%)
+  LSWT pass rate: 0/14 (0.0%)
+
+--- Iteration 3/4 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 108 (69.2%)
+    Meron-Antimeron: 33 (21.2%)
+    Triple-Q: 13 (8.3%)
+    Ferromagnetic: 2 (1.3%)
+  LSWT pass rate: 0/17 (0.0%)
+
+--- Iteration 4/4 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 111 (69.8%)
+    Meron-Antimeron: 33 (20.8%)
+    Triple-Q: 13 (8.2%)
+    Ferromagnetic: 2 (1.3%)
+  LSWT pass rate: 0/20 (0.0%)
+
+======================================================================
+[Step 7] FINAL RESULTS
+======================================================================
+
+LSWT Screening Statistics:
+  Total screened: 20
+  Passed: 0 (0.0%)
+  Rejected: 20 (100.0%)
+  R² total: 0.000 ± 0.000
+
+
+======================================================================
+EXPLORATION SUMMARY
+======================================================================
+
+Total points explored: 159
+  Classified: 159
+  Pending: 0
+
+Phase distribution:
+  Timeout: 111 (69.8%)
+  Meron-Antimeron: 33 (20.8%)
+  Triple-Q: 13 (8.2%)
+  Ferromagnetic: 2 (1.3%)
+
+Selection methods:
+  balanced: 87
+  lhs: 51
+  initial: 21
+
+Target phase (Meron-Antimeron): 33 points
+  Example parameters:
+    NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+======================================================================
+Feature importances not available
+
+======================================================================
+INTERESTING FINDINGS
+======================================================================
+
+Found 33 Double-Q Meron-Antimeron configurations:
+------------------------------------------------------------
+
+  Configuration 1 (Point 0):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 2 (Point 1):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 3 (Point 2):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 4 (Point 3):
+    Parameters: NormalizedParams(J1z=-0.448, D=0.350, E=0.796, F=0.820, G=0.842, J3xy=0.272, J3z=0.008)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 5 (Point 4):
+    Parameters: NormalizedParams(J1z=0.260, D=-0.699, E=0.226, F=0.438, G=0.065, J3xy=-0.963, J3z=-0.223)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 6 (Point 5):
+    Parameters: NormalizedParams(J1z=-0.062, D=0.759, E=0.161, F=0.113, G=0.478, J3xy=-0.535, J3z=0.395)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 7 (Point 6):
+    Parameters: NormalizedParams(J1z=-0.855, D=-0.590, E=-0.363, F=-0.824, G=-0.835, J3xy=0.724, J3z=-0.708)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 8 (Point 8):
+    Parameters: NormalizedParams(J1z=0.426, D=-0.153, E=0.192, F=0.655, G=0.802, J3xy=-0.990, J3z=-0.782)
+    Confidence: 85.00%
+    Selection: balanced
+    Multi-Q: num=0, perp=False
+
+  Configuration 9 (Point 9):
+    Parameters: NormalizedParams(J1z=0.967, D=0.783, E=-0.985, F=0.793, G=0.200, J3xy=-0.699, J3z=0.145)
+    Confidence: 85.00%
+    Selection: balanced
+    Multi-Q: num=0, perp=False
+
+  Configuration 10 (Point 10):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+======================================================================
+PHASE BOUNDARY INSIGHTS
+======================================================================
+
+======================================================================
+EXPLORATION COMPLETE
+Results saved to: active_learning_results/
+======================================================================

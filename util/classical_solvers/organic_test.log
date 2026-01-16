@@ -1,0 +1,185 @@
+
+======================================================================
+  BCAO HONEYCOMB SPIN PHASE EXPLORER
+  Active Learning for Magnetic Phase Discovery
+======================================================================
+  Started: 2026-01-16 00:38:50
+======================================================================
+
+[Step 1] Adding known seed parameters...
+
+[Step 2] Generating 5 initial Latin Hypercube samples...
+
+[LSWT Screening] Enabled
+         R² threshold (total): 0.7
+         R² threshold (lower band): 0.75
+
+[Step 3] Creating simulation pipeline...
+         Monte Carlo Mode: fast (~15s/sim), L=12
+         Pipeline: LSWT Screening → Monte Carlo → Phase Classification
+Warning: pandas not available. LSWT screening will be skipped.
+
+[Step 4] Classifying initial samples...
+
+[Step 5] Fitting surrogate model...
+
+[Step 6] Running 3 active learning iterations...
+======================================================================
+
+--- Iteration 1/3 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Meron-Antimeron: 21 (47.7%)
+    Triple-Q: 13 (29.5%)
+    Timeout: 8 (18.2%)
+    Ferromagnetic: 2 (4.5%)
+  LSWT pass rate: 0/8 (0.0%)
+
+--- Iteration 2/3 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Meron-Antimeron: 21 (44.7%)
+    Triple-Q: 13 (27.7%)
+    Timeout: 11 (23.4%)
+    Ferromagnetic: 2 (4.3%)
+  LSWT pass rate: 0/11 (0.0%)
+
+--- Iteration 3/3 ---
+  Classifying 3 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Meron-Antimeron: 21 (42.0%)
+    Timeout: 14 (28.0%)
+    Triple-Q: 13 (26.0%)
+    Ferromagnetic: 2 (4.0%)
+  LSWT pass rate: 0/14 (0.0%)
+
+======================================================================
+[Step 7] FINAL RESULTS
+======================================================================
+
+LSWT Screening Statistics:
+  Total screened: 14
+  Passed: 0 (0.0%)
+  Rejected: 14 (100.0%)
+  R² total: 0.000 ± 0.000
+
+
+======================================================================
+EXPLORATION SUMMARY
+======================================================================
+
+Total points explored: 50
+  Classified: 50
+  Pending: 0
+
+Phase distribution:
+  Meron-Antimeron: 21 (42.0%)
+  Timeout: 14 (28.0%)
+  Triple-Q: 13 (26.0%)
+  Ferromagnetic: 2 (4.0%)
+
+Selection methods:
+  balanced: 21
+  lhs: 20
+  initial: 9
+
+Target phase (Meron-Antimeron): 21 points
+  Example parameters:
+    NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+======================================================================
+
+============================================================
+FEATURE IMPORTANCES (which parameters matter most)
+============================================================
+  J3z_norm    : ██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.165
+  E_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.150
+  F_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.148
+  D_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.144
+  J1z_norm    : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.142
+  G_norm      : █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.140
+  J3xy_norm   : ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.111
+============================================================
+
+======================================================================
+INTERESTING FINDINGS
+======================================================================
+
+Found 21 Double-Q Meron-Antimeron configurations:
+------------------------------------------------------------
+
+  Configuration 1 (Point 0):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 2 (Point 1):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 3 (Point 2):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 4 (Point 3):
+    Parameters: NormalizedParams(J1z=-0.448, D=0.350, E=0.796, F=0.820, G=0.842, J3xy=0.272, J3z=0.008)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 5 (Point 4):
+    Parameters: NormalizedParams(J1z=0.260, D=-0.699, E=0.226, F=0.438, G=0.065, J3xy=-0.963, J3z=-0.223)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 6 (Point 5):
+    Parameters: NormalizedParams(J1z=-0.062, D=0.759, E=0.161, F=0.113, G=0.478, J3xy=-0.535, J3z=0.395)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 7 (Point 6):
+    Parameters: NormalizedParams(J1z=-0.855, D=-0.590, E=-0.363, F=-0.824, G=-0.835, J3xy=0.724, J3z=-0.708)
+    Confidence: 85.00%
+    Selection: lhs
+    Multi-Q: num=0, perp=False
+
+  Configuration 8 (Point 8):
+    Parameters: NormalizedParams(J1z=0.426, D=-0.153, E=0.192, F=0.655, G=0.802, J3xy=-0.990, J3z=-0.782)
+    Confidence: 85.00%
+    Selection: balanced
+    Multi-Q: num=0, perp=False
+
+  Configuration 9 (Point 9):
+    Parameters: NormalizedParams(J1z=0.967, D=0.783, E=-0.985, F=0.793, G=0.200, J3xy=-0.699, J3z=0.145)
+    Confidence: 85.00%
+    Selection: balanced
+    Multi-Q: num=0, perp=False
+
+  Configuration 10 (Point 10):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+======================================================================
+PHASE BOUNDARY INSIGHTS
+======================================================================
+
+Most important parameters for phase transitions:
+  1. J3z_norm: 0.165
+  2. E_norm: 0.150
+     → Off-diagonal exchange, breaks rotational symmetry
+  3. F_norm: 0.148
+     → Dzyaloshinskii-Moriya-like xz coupling
+
+======================================================================
+EXPLORATION COMPLETE
+Results saved to: active_learning_results/
+======================================================================

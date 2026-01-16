@@ -97,7 +97,7 @@ def _timeout_handler(signum, frame):
     """Signal handler for timeout."""
     raise TimeoutError("Simulation exceeded time limit")
 
-def _run_simulation_safe(params, simulation_func, timeout: float = 300):
+def _run_simulation_safe(params, simulation_func, timeout: float = None):
     """
     Worker function for parallel simulation execution.
     
@@ -107,7 +107,7 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     Args:
         params: Normalized parameters
         simulation_func: Simulation function
-        timeout: Maximum simulation time in seconds
+        timeout: Maximum simulation time in seconds (None = no timeout)
         
     Returns:
         (spins, positions, energy) or None if failed
@@ -117,15 +117,17 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     import traceback
     
     try:
-        # Set up timeout for this specific simulation
-        signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(int(timeout))  # Convert to integer seconds
+        # Set up timeout for this specific simulation (only if timeout is set)
+        if timeout is not None and timeout > 0:
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(int(timeout))  # Convert to integer seconds
         
         # Run simulation
         result = simulation_func(params)
         
         # Cancel the alarm if simulation completes
-        signal.alarm(0)
+        if timeout is not None and timeout > 0:
+            signal.alarm(0)
         
         if result is None or result[0] is None:
             # Simulation returned None (timeout or failure)
@@ -152,7 +154,8 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     
     except Exception as e:
         # Catch any exception - cancel alarm and return None
-        signal.alarm(0)
+        if timeout is not None and timeout > 0:
+            signal.alarm(0)
         error_msg = f"[Worker PID {os.getpid()}] ERROR: {type(e).__name__}: {e}\n"
         error_msg += f"  Params: {params}\n"
         error_msg += f"  Traceback:\n"

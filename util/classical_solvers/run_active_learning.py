@@ -6,6 +6,11 @@ This script runs the active learning exploration to discover the parameter
 space regions that produce different magnetic phases, with particular focus
 on the double-Q meron-antimeron lattice.
 
+Workflow:
+    1. Gaussian random forest proposes parameter sets
+    2. LSWT (Linear Spin Wave Theory) pre-screening validates fit quality
+    3. Only parameters passing LSWT proceed to Monte Carlo phase classification
+
 By default, uses the C++ Monte Carlo spin solver (simulated annealing) to find
 ground states without ansatz constraints.
 
@@ -29,24 +34,33 @@ Options:
     --seed N              Random seed for reproducibility
     --verbose             Print verbose output
     
+    LSWT Pre-Screening Options:
+    --enable-lswt         Enable LSWT pre-screening (default: enabled)
+    --disable-lswt        Disable LSWT pre-screening
+    --lswt-r2-threshold   R² threshold for LSWT screening (default: 0.7)
+    --lswt-r2-lower       R² threshold for lower band (default: 0.75)
+    
 Examples:
     # Quick test run with mock simulation
     python run_active_learning.py --n-initial 20 --n-iterations 3 --skip-simulation
     
-    # Fast exploration with C++ Monte Carlo solver (parallel)
+    # Fast exploration with LSWT screening + C++ Monte Carlo (parallel)
     python run_active_learning.py --n-initial 50 --n-iterations 10 --lattice-size 24 --n-jobs 16
     
-    # Use all available CPUs
+    # Use all available CPUs with LSWT pre-screening
     python run_active_learning.py --n-initial 100 --n-iterations 20 --n-jobs -1
     
     # Accurate exploration (slower but more reliable, with parallel processing)
     python run_active_learning.py --n-initial 30 --n-iterations 15 --accurate --lattice-size 36 --n-jobs 8
     
-    # Focus on finding more meron phases
-    python run_active_learning.py --strategy target --n-iterations 20
+    # Focus on finding more meron phases with strict LSWT threshold
+    python run_active_learning.py --strategy target --n-iterations 20 --lswt-r2-threshold 0.8
     
     # Use Python ansatz optimization (faster but constrained to single-Q/double-Q)
     python run_active_learning.py --use-ansatz --n-initial 100 --n-iterations 10
+    
+    # Disable LSWT screening (use only Monte Carlo)
+    python run_active_learning.py --disable-lswt --n-initial 50 --n-iterations 10
 """
 
 import argparse
@@ -66,6 +80,19 @@ from active_learning_explorer import (
 )
 from phase_classifier import PhaseType
 from feature_extractor import NormalizedParameters, KNOWN_SEEDS
+
+# LSWT screening imports
+try:
+    from lswt_screener import (
+        LSWTScreener,
+        LSWTConfig,
+        LSWTScreeningResult,
+        create_lswt_screened_simulation_simple,
+    )
+    HAS_LSWT = True
+except ImportError:
+    HAS_LSWT = False
+    print("Warning: LSWT screener module not available. LSWT screening disabled.")
 
 
 def print_banner():
@@ -189,6 +216,22 @@ def run_exploration(args):
     screening_mode = getattr(args, 'screening', False)
     fast_mode = args.fast_mode and not args.accurate and not screening_mode
     
+    # Determine LSWT screening settings
+    enable_lswt = args.enable_lswt and not args.disable_lswt and HAS_LSWT
+    lswt_r2_threshold = args.lswt_r2_threshold
+    lswt_r2_lower = args.lswt_r2_lower
+    
+    # Print LSWT screening status
+    if enable_lswt:
+        print(f"\n[LSWT Screening] Enabled")
+        print(f"         R² threshold (total): {lswt_r2_threshold}")
+        print(f"         R² threshold (lower band): {lswt_r2_lower}")
+    else:
+        if not HAS_LSWT:
+            print(f"\n[LSWT Screening] Disabled (module not available)")
+        else:
+            print(f"\n[LSWT Screening] Disabled by user")
+    
     # Step 3: Create simulation function
     if args.skip_simulation:
         print("\n[Step 3] Using mock simulation (--skip-simulation enabled)...")
@@ -211,15 +254,31 @@ def run_exploration(args):
             mode_str = "fast (~15s/sim)"
             L = args.lattice_size
         
-        print(f"\n[Step 3] Using C++ Monte Carlo spin solver...")
-        print(f"         Mode: {mode_str}, L={L}")
-        simulation_func = create_simulation_function(
-            L=L,
-            use_spin_solver=True,
-            fast_mode=fast_mode,
-            screening_mode=screening_mode,
-            verbose=args.verbose
-        )
+        print(f"\n[Step 3] Creating simulation pipeline...")
+        print(f"         Monte Carlo Mode: {mode_str}, L={L}")
+        
+        if enable_lswt:
+            # Use LSWT-screened simulation function
+            print(f"         Pipeline: LSWT Screening → Monte Carlo → Phase Classification")
+            simulation_func = create_lswt_screened_simulation_simple(
+                L=L,
+                use_spin_solver=True,
+                fast_mode=fast_mode,
+                screening_mode=screening_mode,
+                r2_threshold=lswt_r2_threshold,
+                r2_lower_threshold=lswt_r2_lower,
+                verbose=args.verbose
+            )
+        else:
+            # Direct Monte Carlo simulation (no LSWT screening)
+            print(f"         Pipeline: Monte Carlo → Phase Classification (no LSWT)")
+            simulation_func = create_simulation_function(
+                L=L,
+                use_spin_solver=True,
+                fast_mode=fast_mode,
+                screening_mode=screening_mode,
+                verbose=args.verbose
+            )
     
     # Step 4: Classify initial samples
     print("\n[Step 4] Classifying initial samples...")
@@ -259,11 +318,23 @@ def run_exploration(args):
         for phase, count in sorted(explorer.phase_counts.items(), key=lambda x: -x[1]):
             pct = 100 * count / total if total > 0 else 0
             print(f"    {phase}: {count} ({pct:.1f}%)")
+        
+        # Print LSWT pass rate if available
+        if enable_lswt and hasattr(simulation_func, 'lswt_stats'):
+            stats = simulation_func.lswt_stats
+            if stats['total_screened'] > 0:
+                pass_rate = 100 * stats['passed'] / stats['total_screened']
+                print(f"  LSWT pass rate: {stats['passed']}/{stats['total_screened']} ({pass_rate:.1f}%)")
     
     # Step 7: Final summary
     print("\n" + "=" * 70)
     print("[Step 7] FINAL RESULTS")
     print("=" * 70)
+    
+    # Print LSWT screening statistics if available
+    if enable_lswt and hasattr(simulation_func, 'get_stats_summary'):
+        print("\n" + simulation_func.get_stats_summary())
+        print()
     
     explorer.print_summary()
     explorer.print_feature_importances()
@@ -381,10 +452,22 @@ def main():
                         help='Print verbose output')
     parser.add_argument('--n-jobs', type=int, default=1,
                         help='Number of parallel workers for simulations (1=sequential, -1=all CPUs)')
-    parser.add_argument('--timeout', type=float, default=300,
-                        help='Maximum time per simulation in seconds (default: 300)')
+    parser.add_argument('--timeout', type=float, default=None,
+                        help='Maximum time per simulation in seconds (default: None = no timeout)')
     parser.add_argument('--fresh-start', action='store_true',
                         help='Start fresh, ignore any existing exploration history')
+    
+    # LSWT Pre-Screening Options
+    lswt_group = parser.add_argument_group('LSWT Pre-Screening',
+                                           'Options for Linear Spin Wave Theory pre-screening')
+    lswt_group.add_argument('--enable-lswt', action='store_true', default=True,
+                            help='Enable LSWT pre-screening (default: enabled)')
+    lswt_group.add_argument('--disable-lswt', action='store_true',
+                            help='Disable LSWT pre-screening')
+    lswt_group.add_argument('--lswt-r2-threshold', type=float, default=0.7,
+                            help='R² threshold for LSWT total fit (default: 0.7)')
+    lswt_group.add_argument('--lswt-r2-lower', type=float, default=0.75,
+                            help='R² threshold for LSWT lower band fit (default: 0.75)')
     
     args = parser.parse_args()
     

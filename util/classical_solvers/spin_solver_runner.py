@@ -39,18 +39,18 @@ class SimulationConfig:
     
     # Temperature schedule
     T_start: float = 5.0
-    T_end: float = 0.001
+    T_end: float = 0.01
     
     # Simulated annealing specific
-    annealing_steps: int = 50000
-    cooling_rate: float = 0.9
+    annealing_steps: int = 5000  # Fast default for testing
+    cooling_rate: float = 0.95  # Slower cooling for better equilibration
     T_zero: bool = True
-    n_deterministics: int = 10000
+    n_deterministics: int = 2000  # Modest zero-T sweeps
     
     # Parallel tempering specific
     num_replicas: int = 20
-    thermalization_sweeps: int = 100000
-    measurement_sweeps: int = 100000
+    thermalization_sweeps: int = 20000
+    measurement_sweeps: int = 10000
     swap_interval: int = 50
     
     # Common
@@ -575,7 +575,7 @@ class _PicklableSimulation:
         self.solver_path = solver_path
         self.cleanup = cleanup
         self.verbose = verbose
-        self.timeout = config_dict.get('timeout', 300)
+        self.timeout = config_dict.get('timeout', None)  # None = no timeout
         self._runner = None
     
     def _get_runner(self):
@@ -618,7 +618,7 @@ def create_spin_solver_simulation_func(
     n_deterministics: int = 5000,
     T_start: float = 5.0,
     T_end: float = 0.01,
-    timeout: float = 300,
+    timeout: float = None,  # None = no timeout
     solver_path: str = None,
     verbose: bool = False,
     cleanup: bool = True
@@ -636,7 +636,7 @@ def create_spin_solver_simulation_func(
         n_deterministics: Number of zero-temperature optimization steps
         T_start: Starting temperature
         T_end: Ending temperature  
-        timeout: Maximum time per simulation in seconds
+        timeout: Maximum time per simulation in seconds (None = no timeout)
         solver_path: Path to spin_solver executable
         verbose: Print verbose output
         cleanup: Clean up temporary files
@@ -654,7 +654,7 @@ def create_spin_solver_simulation_func(
         'T_end': T_end,
         'cooling_rate': 0.9,
         'T_zero': True,
-        'overrelaxation_rate': 10,
+        'overrelaxation_rate': 2,
         'timeout': timeout,
     }
     
@@ -671,28 +671,28 @@ def create_spin_solver_simulation_func(
 
 def create_fast_simulation_func(
     L: int = 12,
-    annealing_steps: int = 20000,
-    n_deterministics: int = 10000,
+    annealing_steps: int = 5000,
+    n_deterministics: int = 2000,
     **kwargs
 ):
     """
     Create a fast simulation function for initial screening.
     
-    Uses smaller lattice and fewer steps for quick phase identification.
-    Target: ~3-5 seconds per simulation for L=12.
+    Uses smaller lattice with minimal steps for quick phase identification.
+    Target: ~5 seconds per simulation for L=12.
     """
     return create_spin_solver_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=300,
+        timeout=None,  # No timeout
         **kwargs
     )
 
 
 def create_accurate_simulation_func(
-    L: int = 24,
-    annealing_steps: int = 50000,
+    L: int = 16,
+    annealing_steps: int = 20000,
     n_deterministics: int = 5000,
     **kwargs
 ):
@@ -700,35 +700,35 @@ def create_accurate_simulation_func(
     Create an accurate simulation function for confirmation runs.
     
     Uses larger lattice and more steps for reliable classification.
-    Target: ~60-90 seconds per simulation for L=24.
+    Target: ~15-30 seconds per simulation for L=16.
     """
     return create_spin_solver_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=300,
+        timeout=None,  # No timeout
         **kwargs
     )
 
 
 def create_screening_simulation_func(
     L: int = 8,
-    annealing_steps: int = 5000,
-    n_deterministics: int = 5000,
+    annealing_steps: int = 3000,
+    n_deterministics: int = 1000,
     **kwargs
 ):
     """
-    Create an ultra-fast simulation function for initial screening.
+    Create a screening simulation function for initial exploration.
     
-    Uses very small lattice for quick rough phase identification.
-    Target: ~3 seconds per simulation.
-    Good for: Initial exploration to identify promising regions.
+    Uses minimal settings for very fast phase identification.
+    Target: ~1-2 seconds per simulation.
+    Good for: Rapid exploration to identify promising regions.
     """
     return create_spin_solver_simulation_func(
         L=L,
         annealing_steps=annealing_steps,
         n_deterministics=n_deterministics,
-        timeout=300,
+        timeout=None,  # No timeout
         **kwargs
     )
 
