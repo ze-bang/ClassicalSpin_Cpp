@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-project(ClassicalSpin_Cpp LANGUAGES CXX CUDA)
+
+option(ENABLE_CUDA "Enable CUDA support" OFF)
+
+if(ENABLE_CUDA)
+    project(ClassicalSpin_Cpp LANGUAGES CXX CUDA)
+else()
+    project(ClassicalSpin_Cpp LANGUAGES CXX)
+endif()
 
 option(CLASSICAL_SPIN_ENABLE_WARNINGS "Enable recommended warning flags" ON)
 option(CLASSICAL_SPIN_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
@@ -21,12 +28,15 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CUDA_STANDARD 20)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Modern CMake policies
-cmake_policy(SET CMP0104 NEW)
-cmake_policy(SET CMP0105 NEW)
+if(ENABLE_CUDA)
+    set(CMAKE_CUDA_STANDARD 20)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    
+    # Modern CMake policies for CUDA
+    cmake_policy(SET CMP0104 NEW)
+    cmake_policy(SET CMP0105 NEW)
+endif()
 
 # Default to Release build
 if(NOT CMAKE_BUILD_TYPE)
@@ -37,21 +47,25 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # CUDA architectures
-if(NOT CMAKE_CUDA_ARCHITECTURES)
-    set(_classical_spin_default_arch "native")
-    if(DEFINED ENV{CLASSICAL_SPIN_CUDA_ARCHS} AND NOT "$ENV{CLASSICAL_SPIN_CUDA_ARCHS}" STREQUAL "")
-        set(_classical_spin_default_arch "$ENV{CLASSICAL_SPIN_CUDA_ARCHS}")
+if(ENABLE_CUDA)
+    if(NOT CMAKE_CUDA_ARCHITECTURES)
+        set(_classical_spin_default_arch "native")
+        if(DEFINED ENV{CLASSICAL_SPIN_CUDA_ARCHS} AND NOT "$ENV{CLASSICAL_SPIN_CUDA_ARCHS}" STREQUAL "")
+            set(_classical_spin_default_arch "$ENV{CLASSICAL_SPIN_CUDA_ARCHS}")
+        endif()
+        set(CMAKE_CUDA_ARCHITECTURES "${_classical_spin_default_arch}" CACHE STRING "CUDA architectures" FORCE)
     endif()
-    set(CMAKE_CUDA_ARCHITECTURES "${_classical_spin_default_arch}" CACHE STRING "CUDA architectures" FORCE)
+    unset(_classical_spin_default_arch)
 endif()
-unset(_classical_spin_default_arch)
 
 # ============================================================================
 # DEPENDENCIES
 # ============================================================================
 
-find_package(CUDAToolkit REQUIRED)
-find_package(Thrust REQUIRED CONFIG)
+if(ENABLE_CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    find_package(Thrust REQUIRED CONFIG)
+endif()
 find_package(OpenMP REQUIRED)
 find_package(MPI REQUIRED)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -97,7 +111,7 @@ if(CLASSICAL_SPIN_ENABLE_WARNINGS)
         list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS /W3 /permissive-)
     endif()
 
-    if(CMAKE_CUDA_COMPILER)
+    if(ENABLE_CUDA AND CMAKE_CUDA_COMPILER)
         list(APPEND CLASSICAL_SPIN_CUDA_WARNING_FLAGS 
             -Xcompiler=-Wall 
             -Xcompiler=-Wextra
@@ -124,7 +138,7 @@ if(CLASSICAL_SPIN_ENABLE_WARNINGS)
             list(APPEND CLASSICAL_SPIN_CXX_WARNING_FLAGS /WX)
         endif()
 
-        if(CMAKE_CUDA_COMPILER)
+        if(ENABLE_CUDA AND CMAKE_CUDA_COMPILER)
             list(APPEND CLASSICAL_SPIN_CUDA_WARNING_FLAGS -Xcompiler=-Werror)
         endif()
     endif()
@@ -140,12 +154,14 @@ function(classical_spin_apply_warnings target)
 endfunction()
 
 # CUDA compiler flags
-# --extended-lambda allows __device__ annotation on lambdas (required for Thrust)
-set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK --extended-lambda --expt-relaxed-constexpr -Wno-deprecated-gpu-targets")
-set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
-
-# Suppress nvlink warnings about incompatible libraries (32-bit libs on 64-bit system)
-set(CMAKE_CUDA_LINK_FLAGS "${CMAKE_CUDA_LINK_FLAGS} -Xnvlink=-w")
+if(ENABLE_CUDA)
+    # --extended-lambda allows __device__ annotation on lambdas (required for Thrust)
+    set(CMAKE_CUDA_FLAGS "-D__CUDA_NO_HOST_COMPILER_CHECK --extended-lambda --expt-relaxed-constexpr -Wno-deprecated-gpu-targets")
+    set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG --use_fast_math -lineinfo")
+    
+    # Suppress nvlink warnings about incompatible libraries (32-bit libs on 64-bit system)
+    set(CMAKE_CUDA_LINK_FLAGS "${CMAKE_CUDA_LINK_FLAGS} -Xnvlink=-w")
+endif()
 
 # Optimization flags for Release builds
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -192,13 +208,18 @@ set(CLASSICAL_SPIN_HEADERS
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/mixed_lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/phonon_lattice.h
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/gpu_common_helpers.cuh
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/lattice_gpu.cuh
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/lattice_gpu_api.h
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/mixed_lattice_gpu.cuh
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/mixed_lattice_gpu_api.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/io/hdf5_io.h
 )
+
+if(ENABLE_CUDA)
+    list(APPEND CLASSICAL_SPIN_HEADERS
+        ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/gpu_common_helpers.cuh
+        ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/lattice_gpu.cuh
+        ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/lattice_gpu_api.h
+        ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/mixed_lattice_gpu.cuh
+        ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/gpu/mixed_lattice_gpu_api.h
+    )
+endif()
 
 set(CORE_SOURCES
     src/core/simple_linear_alg.cpp
@@ -207,11 +228,13 @@ set(CORE_SOURCES
     src/core/phonon_lattice.cpp
 )
 
-set(GPU_SOURCES
-    src/gpu/gpu_common_helpers.cu
-    src/gpu/lattice_gpu.cu
-    src/gpu/mixed_lattice_gpu.cu
-)
+if(ENABLE_CUDA)
+    set(GPU_SOURCES
+        src/gpu/gpu_common_helpers.cu
+        src/gpu/lattice_gpu.cu
+        src/gpu/mixed_lattice_gpu.cu
+    )
+endif()
 
 # ============================================================================
 # LIBRARIES
@@ -239,12 +262,17 @@ target_link_libraries(classical_spin_headers INTERFACE
     MPI::MPI_CXX 
     Eigen3::Eigen
     ${HDF5_CXX_LIBRARIES}
-    CUDA::cudart
 )
+if(ENABLE_CUDA)
+    target_link_libraries(classical_spin_headers INTERFACE CUDA::cudart)
+endif()
 target_include_directories(classical_spin_headers INTERFACE ${HDF5_INCLUDE_DIRS})
 target_compile_definitions(classical_spin_headers INTERFACE 
-    OPENMP_ENABLED MPI_ENABLED EIGEN3_ENABLED HDF5_ENABLED CUDA_ENABLED
+    OPENMP_ENABLED MPI_ENABLED EIGEN3_ENABLED HDF5_ENABLED
 )
+if(ENABLE_CUDA)
+    target_compile_definitions(classical_spin_headers INTERFACE CUDA_ENABLED)
+endif()
 
 add_library(classical_spin_core STATIC ${CORE_SOURCES})
 target_compile_features(classical_spin_core PUBLIC cxx_std_20)
@@ -264,7 +292,7 @@ target_compile_options(classical_spin_core PRIVATE
 classical_spin_apply_warnings(classical_spin_core)
 
 # CUDA library
-if(GPU_SOURCES)
+if(ENABLE_CUDA AND GPU_SOURCES)
     add_library(classical_spin_gpu STATIC ${GPU_SOURCES})
     
     set_target_properties(classical_spin_gpu PROPERTIES
@@ -286,7 +314,7 @@ if(GPU_SOURCES)
     target_link_libraries(classical_spin_gpu PUBLIC 
         classical_spin_headers
         Eigen3::Eigen
-        CUDA::cudart CUDA::cublas CUDA::curand
+        CUDA::cudart_static CUDA::cuda_driver CUDA::cublas CUDA::curand
         MPI::MPI_CXX
         ${HDF5_CXX_LIBRARIES}
     )
@@ -375,14 +403,20 @@ endif()
 message(STATUS "================ ClassicalSpin_Cpp Build =================")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "CUDA Standard: ${CMAKE_CUDA_STANDARD}")
-message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+if(ENABLE_CUDA)
+    message(STATUS "CUDA Standard: ${CMAKE_CUDA_STANDARD}")
+    message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+else()
+    message(STATUS "CUDA: Disabled")
+endif()
 message(STATUS "Parallel Build Jobs: ${CMAKE_BUILD_PARALLEL_LEVEL}")
 message(STATUS "")
 message(STATUS "Dependencies:")
 message(STATUS "  OpenMP: ${OpenMP_CXX_VERSION}")
 message(STATUS "  MPI: ${MPI_CXX_VERSION}")
-message(STATUS "  CUDA: ${CUDAToolkit_VERSION}")
+if(ENABLE_CUDA)
+    message(STATUS "  CUDA: ${CUDAToolkit_VERSION}")
+endif()
 message(STATUS "  Eigen3: ${Eigen3_VERSION}")
 message(STATUS "  Boost: ${Boost_VERSION}")
 message(STATUS "  HDF5: ${HDF5_VERSION}")

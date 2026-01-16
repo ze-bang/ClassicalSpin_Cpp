@@ -97,7 +97,7 @@ def _timeout_handler(signum, frame):
     """Signal handler for timeout."""
     raise TimeoutError("Simulation exceeded time limit")
 
-def _run_simulation_safe(params, simulation_func, timeout: float = 300):
+def _run_simulation_safe(params, simulation_func, timeout: float = None):
     """
     Worker function for parallel simulation execution.
     
@@ -107,7 +107,7 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     Args:
         params: Normalized parameters
         simulation_func: Simulation function
-        timeout: Maximum simulation time in seconds
+        timeout: Maximum simulation time in seconds (None = no timeout)
         
     Returns:
         (spins, positions, energy) or None if failed
@@ -117,15 +117,17 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     import traceback
     
     try:
-        # Set up timeout for this specific simulation
-        signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(int(timeout))  # Convert to integer seconds
+        # Set up timeout for this specific simulation (only if timeout is set)
+        if timeout is not None and timeout > 0:
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(int(timeout))  # Convert to integer seconds
         
         # Run simulation
         result = simulation_func(params)
         
         # Cancel the alarm if simulation completes
-        signal.alarm(0)
+        if timeout is not None and timeout > 0:
+            signal.alarm(0)
         
         if result is None or result[0] is None:
             # Simulation returned None (timeout or failure)
@@ -152,7 +154,8 @@ def _run_simulation_safe(params, simulation_func, timeout: float = 300):
     
     except Exception as e:
         # Catch any exception - cancel alarm and return None
-        signal.alarm(0)
+        if timeout is not None and timeout > 0:
+            signal.alarm(0)
         error_msg = f"[Worker PID {os.getpid()}] ERROR: {type(e).__name__}: {e}\n"
         error_msg += f"  Params: {params}\n"
         error_msg += f"  Traceback:\n"
@@ -241,7 +244,8 @@ class ActiveLearningExplorer:
     def __init__(self,
                  output_dir: str = "active_learning_results",
                  L: int = 12,
-                 J1xy_abs: float = 6.0,
+                 J1xy_abs: float = None,
+                 J1xy_abs_bounds: Tuple[float, float] = (4.0, 8.0),
                  J1xy_sign: float = -1.0,
                  target_phase: str = "Double-Q Meron-Antimeron",
                  surrogate_type: str = "random_forest",
@@ -252,7 +256,8 @@ class ActiveLearningExplorer:
         Args:
             output_dir: Directory to save results
             L: Lattice size for simulations
-            J1xy_abs: Absolute value of J1xy for unnormalization
+            J1xy_abs: Fixed absolute value of J1xy. If None, sampled from J1xy_abs_bounds.
+            J1xy_abs_bounds: Bounds for J1xy_abs sampling (default: 4.0 to 8.0)
             J1xy_sign: Sign of J1xy (usually -1 for FM tendency)
             target_phase: Phase of primary interest for exploitation
             surrogate_type: 'gaussian_process' or 'random_forest'
@@ -262,7 +267,8 @@ class ActiveLearningExplorer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.L = L
-        self.J1xy_abs = J1xy_abs
+        self.J1xy_abs = J1xy_abs  # None means variable
+        self.J1xy_abs_bounds = J1xy_abs_bounds
         self.J1xy_sign = J1xy_sign
         self.target_phase = target_phase
         self.surrogate_type = surrogate_type
@@ -338,12 +344,17 @@ class ActiveLearningExplorer:
             seed: Random seed for reproducibility
         """
         self._log(f"\nGenerating {n_samples} Latin Hypercube samples...")
+        if self.J1xy_abs is None:
+            self._log(f"  J1xy_abs: sampled from {self.J1xy_abs_bounds}")
+        else:
+            self._log(f"  J1xy_abs: fixed at {self.J1xy_abs}")
         
         samples = generate_latin_hypercube_samples(
             n_samples=n_samples,
             bounds=self.bounds,
             J1xy_sign=self.J1xy_sign,
             J1xy_abs=self.J1xy_abs,
+            J1xy_abs_bounds=self.J1xy_abs_bounds,
             seed=seed,
         )
         
@@ -386,6 +397,15 @@ class ActiveLearningExplorer:
             # Run simulation to get spin configuration
             try:
                 spins, positions, energy = simulation_func(point.params)
+                
+                # Check for LSWT rejection marker
+                if energy == "LSWT_REJECTED":
+                    self._log(f"  Point {point.point_id}: LSWT screening rejected")
+                    point.phase = PhaseType.LSWT_REJECTED.value
+                    point.confidence = 0.0
+                    self._update_phase_counts(point.phase)
+                    return point
+                    
             except (TimeoutError, Exception) as e:
                 self._log(f"  Point {point.point_id}: Simulation failed - {e}")
                 # Mark as timeout and return
@@ -690,6 +710,12 @@ class ActiveLearningExplorer:
         # Generate random candidates
         candidates = []
         for _ in range(n_candidates):
+            # Sample J1xy_abs if variable
+            if self.J1xy_abs is None:
+                j1xy_abs_val = np.random.uniform(*self.J1xy_abs_bounds)
+            else:
+                j1xy_abs_val = self.J1xy_abs
+            
             params = NormalizedParameters(
                 J1xy_sign=self.J1xy_sign,
                 J1z_norm=np.random.uniform(*self.bounds['J1z_norm']),
@@ -699,7 +725,7 @@ class ActiveLearningExplorer:
                 G_norm=np.random.uniform(*self.bounds['G_norm']),
                 J3xy_norm=np.random.uniform(*self.bounds['J3xy_norm']),
                 J3z_norm=np.random.uniform(*self.bounds['J3z_norm']),
-                J1xy_abs=self.J1xy_abs,
+                J1xy_abs=j1xy_abs_val,
             )
             acq = self.compute_acquisition(params, strategy)
             candidates.append((params, acq))
@@ -773,6 +799,12 @@ class ActiveLearningExplorer:
         # Predict on grid
         phases = np.zeros_like(P1, dtype=int)
         
+        # Use midpoint of bounds if J1xy_abs is variable
+        if self.J1xy_abs is None:
+            j1xy_abs_default = 0.5 * (self.J1xy_abs_bounds[0] + self.J1xy_abs_bounds[1])
+        else:
+            j1xy_abs_default = self.J1xy_abs
+        
         for i in range(n_grid):
             for j in range(n_grid):
                 params_dict = defaults.copy()
@@ -781,7 +813,7 @@ class ActiveLearningExplorer:
                 
                 params = NormalizedParameters(
                     J1xy_sign=self.J1xy_sign,
-                    J1xy_abs=self.J1xy_abs,
+                    J1xy_abs=j1xy_abs_default,
                     **{k: v for k, v in params_dict.items()}
                 )
                 

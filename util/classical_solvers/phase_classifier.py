@@ -38,6 +38,7 @@ class PhaseType(Enum):
     INCOMMENSURATE = "Incommensurate"
     DISORDERED = "Disordered"
     TIMEOUT = "Timeout"
+    LSWT_REJECTED = "LSWT Rejected"  # Failed LSWT pre-screening
     UNKNOWN = "Unknown"
 
 
@@ -147,7 +148,7 @@ class ClassificationResult:
         print(f"    Q1: ({self.flags.q1[0]:.4f}, {self.flags.q1[1]:.4f}) [{self.flags.q1_type}], I={self.flags.q1_intensity:.4f}")
         if self.flags.q2 is not None:
             print(f"    Q2: ({self.flags.q2[0]:.4f}, {self.flags.q2[1]:.4f}) [{self.flags.q2_type}], I={self.flags.q2_intensity:.4f}")
-            print(f"    Double-Q: {self.flags.is_double_q}, Perpendicular: {self.flags.q_vectors_perpendicular}")
+            print(f"    Double-Q: {self.flags.is_double_q}, Parallel: {self.flags.q_vectors_parallel}")
         if self.flags.q1_type == "gamma":
             print(f"    Magnetization: |M_tot|={self.flags.total_mag:.4f}, |M_stag|={self.flags.staggered_mag:.4f}")
         print("=" * 70)
@@ -312,9 +313,10 @@ class PhaseClassifier:
         
         # Create momentum grid in reduced coordinates (H, K)
         # Cover first Brillouin zone: H in [0, 1], K in [0, 1]
+        # Include 1.0 to properly capture M and K points
         n_grid = max(100, 2 * L)
-        h_vals = np.linspace(0.0, 0.5, n_grid)
-        k_vals = np.linspace(0.0, 0.5, n_grid)
+        h_vals = np.linspace(0.0, 1.0, n_grid)  # Extended to full BZ
+        k_vals = np.linspace(0.0, 1.0, n_grid)
         
         # Build k-points in Cartesian coordinates
         # k = H * b1 + K * b2
@@ -344,19 +346,31 @@ class PhaseClassifier:
         
         # Find peaks (local maxima above threshold)
         peaks = []
-        threshold = 0.1 * np.max(S_q)
+        threshold = 0.1 * np.max(S_q) if np.max(S_q) > 0 else 0.0
         
-        for i in range(1, n_grid - 1):
-            for j in range(1, n_grid - 1):
+        # Include edge pixels by using modular indexing
+        for i in range(n_grid):
+            for j in range(n_grid):
                 val = S_q[j, i]
                 if val > threshold:
-                    # Check if local maximum
-                    if (val > S_q[j-1, i] and val > S_q[j+1, i] and
-                        val > S_q[j, i-1] and val > S_q[j, i+1] and
-                        val > S_q[j-1, i-1] and val > S_q[j+1, i+1] and
-                        val > S_q[j-1, i+1] and val > S_q[j+1, i-1]):
+                    # Check if local maximum using periodic boundary in BZ
+                    # For interior points
+                    im1 = (i - 1) % n_grid
+                    ip1 = (i + 1) % n_grid
+                    jm1 = (j - 1) % n_grid
+                    jp1 = (j + 1) % n_grid
+                    
+                    is_max = (val > S_q[j, im1] and val > S_q[j, ip1] and
+                              val > S_q[jm1, i] and val > S_q[jp1, i] and
+                              val > S_q[jm1, im1] and val > S_q[jp1, ip1] and
+                              val > S_q[jm1, ip1] and val > S_q[jp1, im1])
+                    
+                    if is_max:
                         h, k = h_vals[i], k_vals[j]
-                        peaks.append((h, k, val))
+                        # Fold back to first BZ quadrant for comparison
+                        h_folded = h if h <= 0.5 else 1.0 - h
+                        k_folded = k if k <= 0.5 else 1.0 - k
+                        peaks.append((h_folded, k_folded, val))
         
         # Also check for peak at Gamma
         if n_grid > 2:
@@ -390,37 +404,50 @@ class PhaseClassifier:
         """
         Classify Q-vector position following single_q_BCAO.py scheme.
         
+        Uses mod 1 to map Q to first Brillouin zone, then checks high-symmetry points.
+        
         Args:
             q: (Q1, Q2) in reduced coordinates
             
         Returns:
             Type string: "gamma", "m", "k", "commensurate", "incomm_gm", "incomm_gk", "incomm"
         """
-        Q1, Q2 = q[0], q[1]
         tol = self.Q_TOL
+        
+        # Map to first BZ using mod 1, keeping in [0, 1)
+        Q1 = q[0] % 1.0
+        Q2 = q[1] % 1.0
+        
+        # Handle numerical edge cases near 1.0
+        if Q1 > 1.0 - tol:
+            Q1 = 0.0
+        if Q2 > 1.0 - tol:
+            Q2 = 0.0
         
         # Gamma point: Q ≈ (0, 0)
         if abs(Q1) < tol and abs(Q2) < tol:
             return "gamma"
         
-        # M point: Q ≈ (0.5, 0) or (0, 0.5) or (0.5, 0.5)
-        m_points = [
-            (0.5, 0.0),
-            (0.0, 0.5),
-            (0.5, 0.5),
-        ]
-        for m in m_points:
-            if abs(Q1 - m[0]) < tol and abs(Q2 - m[1]) < tol:
-                return "m"
+        # M points: (0.5, 0), (0, 0.5), (0.5, 0.5)
+        # Check if either component is 0.5 and other is 0 or 0.5
+        is_half_Q1 = abs(Q1 - 0.5) < tol
+        is_half_Q2 = abs(Q2 - 0.5) < tol
+        is_zero_Q1 = abs(Q1) < tol
+        is_zero_Q2 = abs(Q2) < tol
         
-        # K point: Q ≈ (2/3, 1/3) or (1/3, 2/3)
-        k_points = [
-            (2/3, 1/3),
-            (1/3, 2/3)
-        ]
-        for kp in k_points:
-            if abs(Q1 - kp[0]) < tol and abs(Q2 - kp[1]) < tol:
-                return "k"
+        if (is_half_Q1 and is_zero_Q2) or (is_zero_Q1 and is_half_Q2) or (is_half_Q1 and is_half_Q2):
+            return "m"
+        
+        # K points: (1/3, 1/3), (2/3, 1/3), (1/3, 2/3), (2/3, 2/3)
+        # and boundary equivalents (0, 1/3), (0, 2/3), (1/3, 0), (2/3, 0)
+        # General rule: Q1 or Q2 is n/3 (n=1,2) and the other is 0 or n/3
+        def is_third(x):
+            return abs(x - 1/3) < tol or abs(x - 2/3) < tol
+        
+        if is_third(Q1) and is_third(Q2):
+            return "k"
+        if (is_third(Q1) and is_zero_Q2) or (is_zero_Q1 and is_third(Q2)):
+            return "k"
         
         # Check for commensurate (rational fraction) Q-vectors
         # A Q is commensurate if it can be expressed as p/q where q is small integer
@@ -428,13 +455,15 @@ class PhaseClassifier:
             return "commensurate"
         
         # Incommensurate - check direction
-        # Gamma → M is along (1, 0) or (0, 1) or (1, 1) in reduced coords
+        # Along high-symmetry lines: Γ-M is along (1, 0), (0, 1), or (1, 1)
         if abs(Q2) < tol or abs(Q1) < tol:
             return "incomm_gm"
         if abs(Q1 - Q2) < tol:
             return "incomm_gm"
-        # Gamma → K; K is at (2/3, 1/3) or (1/3, 2/3)
-        if abs(Q1 - 2/3 * Q2) < tol or abs(Q2 - 2/3 * Q1) < tol:
+        
+        # Γ-K direction: ratio Q1:Q2 = 2:1 or 1:2
+        ratio = Q1 / Q2 if abs(Q2) > tol else float('inf')
+        if abs(ratio - 2.0) < 0.2 or abs(ratio - 0.5) < 0.1:
             return "incomm_gk"
         
         return "incomm"
@@ -499,51 +528,13 @@ class PhaseClassifier:
         is_double_q = flags.is_double_q
         q2_type = flags.q2_type if is_double_q else None
         
-        # === Single-Q phases ===
-        if not is_double_q:
-            # Gamma point → FM or AFM
-            if q1_type == "gamma":
-                if flags.sublattice_parallel or flags.total_mag > 0.5:
-                    decision_path.append("DECISION: Q at Γ, sublattices parallel → FM")
-                    return PhaseType.FM, 0.9
-                elif flags.sublattice_antiparallel or flags.staggered_mag > 0.5:
-                    decision_path.append("DECISION: Q at Γ, sublattices antiparallel → AFM")
-                    return PhaseType.AFM, 0.9
-                else:
-                    # Default to FM if unclear
-                    decision_path.append("DECISION: Q at Γ, magnetization unclear → FM (default)")
-                    return PhaseType.FM, 0.6
-            
-            # M point → Zigzag
-            if q1_type == "m":
-                decision_path.append("DECISION: Q at M point → Zigzag")
-                return PhaseType.ZIGZAG, 0.9
-            
-            # K point → 120° order
-            if q1_type == "k":
-                decision_path.append("DECISION: Q at K point → 120° Order")
-                return PhaseType.ORDER_120, 0.9
-            
-            # Incommensurate
-            if q1_type == "incomm_gm":
-                decision_path.append("DECISION: Incommensurate Q along Γ→M")
-                return PhaseType.INCOMM_GAMMA_M, 0.85
-            
-            if q1_type == "incomm_gk":
-                decision_path.append("DECISION: Incommensurate Q along Γ→K")
-                return PhaseType.INCOMM_GAMMA_K, 0.85
-            
-            if q1_type == "incomm":
-                decision_path.append("DECISION: General incommensurate order")
-                return PhaseType.INCOMMENSURATE, 0.8
-        
-        # === Triple-Q phases ===
-        elif flags.is_triple_q:
+        # === Triple-Q phases (check first since they're also double-Q) ===
+        if flags.is_triple_q:
             decision_path.append(f"DECISION: Triple-Q detected ({q1_type}, {q2_type}, {flags.q3_type}) → Triple-Q")
             return PhaseType.TRIPLE_Q, 0.85
         
         # === Double-Q phases ===
-        elif flags.is_double_q:
+        if flags.is_double_q:
             # Check if Q-vectors are parallel
             if flags.q_vectors_parallel:
                 decision_path.append(f"DECISION: Double-Q with parallel Q-vectors ({q1_type}, {q2_type}) → Beating")
@@ -552,13 +543,64 @@ class PhaseClassifier:
                 decision_path.append(f"DECISION: Double-Q with non-parallel Q-vectors ({q1_type}, {q2_type}) → Meron-Antimeron")
                 return PhaseType.MERON_ANTIMERON, 0.85
         
-        # Fallback
-        if flags.num_peaks == 0:
+        # === Single-Q phases ===
+        # Gamma point → FM or AFM
+        if q1_type == "gamma":
+            if flags.sublattice_parallel or flags.total_mag > 0.5:
+                decision_path.append("DECISION: Q at Γ, sublattices parallel → FM")
+                return PhaseType.FM, 0.9
+            elif flags.sublattice_antiparallel or flags.staggered_mag > 0.5:
+                decision_path.append("DECISION: Q at Γ, sublattices antiparallel → AFM")
+                return PhaseType.AFM, 0.9
+            else:
+                # Default to FM if unclear
+                decision_path.append("DECISION: Q at Γ, magnetization unclear → FM (default)")
+                return PhaseType.FM, 0.6
+        
+        # M point → Zigzag
+        if q1_type == "m":
+            decision_path.append("DECISION: Q at M point → Zigzag")
+            return PhaseType.ZIGZAG, 0.9
+        
+        # K point → 120° order
+        if q1_type == "k":
+            decision_path.append("DECISION: Q at K point → 120° Order")
+            return PhaseType.ORDER_120, 0.9
+        
+        # Commensurate but not at special point - treat as incommensurate 
+        # (this can happen for commensurate fractions like 1/4, 1/5, etc.)
+        if q1_type == "commensurate":
+            # Check if it's closer to Gamma-M or Gamma-K direction
+            q1 = np.array(flags.q1)
+            # Check direction
+            if abs(q1[1]) < 0.1 or abs(q1[0]) < 0.1 or abs(q1[0] - q1[1]) < 0.1:
+                decision_path.append(f"DECISION: Commensurate Q along Γ→M direction → Incommensurate Γ→M")
+                return PhaseType.INCOMM_GAMMA_M, 0.8
+            else:
+                decision_path.append(f"DECISION: Commensurate Q ({q1[0]:.3f}, {q1[1]:.3f}) → Incommensurate")
+                return PhaseType.INCOMMENSURATE, 0.8
+        
+        # Incommensurate
+        if q1_type == "incomm_gm":
+            decision_path.append("DECISION: Incommensurate Q along Γ→M")
+            return PhaseType.INCOMM_GAMMA_M, 0.85
+        
+        if q1_type == "incomm_gk":
+            decision_path.append("DECISION: Incommensurate Q along Γ→K")
+            return PhaseType.INCOMM_GAMMA_K, 0.85
+        
+        if q1_type == "incomm":
+            decision_path.append("DECISION: General incommensurate order")
+            return PhaseType.INCOMMENSURATE, 0.8
+        
+        # Fallback for unhandled cases
+        if flags.num_peaks == 0 or q1_type == "none":
             decision_path.append("DECISION: No clear peaks → Disordered")
             return PhaseType.DISORDERED, 0.7
         
-        decision_path.append("DECISION: Could not classify → Unknown")
-        return PhaseType.UNKNOWN, 0.5
+        # Log the unhandled q1_type for debugging
+        decision_path.append(f"DECISION: Unhandled q1_type='{q1_type}' → Incommensurate (fallback)")
+        return PhaseType.INCOMMENSURATE, 0.6
 
 
 def classify_spin_config(spins: np.ndarray, positions: np.ndarray,

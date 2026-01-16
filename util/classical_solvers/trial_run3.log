@@ -1,0 +1,114 @@
+/home/pc_linux/ClassicalSpin_Cpp/util/classical_solvers/active_learning_explorer.py:73: UserWarning: scikit-learn not available. Some features will be disabled.
+  warnings.warn("scikit-learn not available. Some features will be disabled.")
+
+======================================================================
+  BCAO HONEYCOMB SPIN PHASE EXPLORER
+  Active Learning for Magnetic Phase Discovery
+======================================================================
+  Started: 2026-01-16 01:18:48
+======================================================================
+
+[Fresh Start] Removing existing history: active_learning_results/exploration_history.json
+
+[Step 1] Adding known seed parameters...
+
+[Step 2] Generating 5 initial Latin Hypercube samples...
+
+[LSWT Screening] Enabled
+         R² threshold (total): 0.7
+         R² threshold (lower band): 0.75
+
+[Step 3] Creating simulation pipeline...
+         Monte Carlo Mode: fast (~15s/sim), L=12
+         Pipeline: LSWT Screening → Monte Carlo → Phase Classification
+Warning: pandas not available. LSWT screening will be skipped.
+
+[Step 4] Classifying initial samples...
+
+[Step 5] Fitting surrogate model...
+
+[Step 6] Running 2 active learning iterations...
+======================================================================
+
+--- Iteration 1/2 ---
+  Classifying 2 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 7 (70.0%)
+    Meron-Antimeron: 3 (30.0%)
+  LSWT pass rate: 0/7 (0.0%)
+
+--- Iteration 2/2 ---
+  Classifying 2 new points...
+  Updating surrogate model...
+  Current phase distribution:
+    Timeout: 9 (75.0%)
+    Meron-Antimeron: 3 (25.0%)
+  LSWT pass rate: 0/9 (0.0%)
+
+======================================================================
+[Step 7] FINAL RESULTS
+======================================================================
+
+LSWT Screening Statistics:
+  Total screened: 9
+  Passed: 0 (0.0%)
+  Rejected: 9 (100.0%)
+  R² total: 0.000 ± 0.000
+
+
+======================================================================
+EXPLORATION SUMMARY
+======================================================================
+
+Total points explored: 12
+  Classified: 12
+  Pending: 0
+
+Phase distribution:
+  Timeout: 9 (75.0%)
+  Meron-Antimeron: 3 (25.0%)
+
+Selection methods:
+  lhs: 5
+  balanced: 4
+  initial: 3
+
+Target phase (Meron-Antimeron): 3 points
+  Example parameters:
+    NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+======================================================================
+Feature importances not available
+
+======================================================================
+INTERESTING FINDINGS
+======================================================================
+
+Found 3 Double-Q Meron-Antimeron configurations:
+------------------------------------------------------------
+
+  Configuration 1 (Point 0):
+    Parameters: NormalizedParams(J1z=-0.279, D=0.120, E=0.191, F=-0.013, G=0.093, J3xy=0.269, J3z=-0.023)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 2 (Point 1):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.200, F=-0.228, G=0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+  Configuration 3 (Point 2):
+    Parameters: NormalizedParams(J1z=-0.314, D=0.102, E=0.188, F=-0.228, G=-0.032, J3xy=0.255, J3z=0.006)
+    Confidence: 90.00%
+    Selection: initial
+
+======================================================================
+PHASE BOUNDARY INSIGHTS
+======================================================================
+
+======================================================================
+EXPLORATION COMPLETE
+Results saved to: active_learning_results/
+======================================================================

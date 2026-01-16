@@ -27,15 +27,16 @@ field_scan_start = 0.0
 field_scan_end = 1.0
 field_scan_steps = 50
 
-# Parallel Tempering Parameters
-num_replicas = 20
+# Simulated Annealing
 T_start = 20.0
-T_end = 5.0
-thermalization_sweeps = 1000000
-measurement_sweeps = 1000000
-overrelaxation_rate = 2000
-swap_interval = 50
-use_twist_boundary = true
+T_end = 0.01
+annealing_steps = 50000
+overrelaxation_rate = 10
+use_twist_boundary = false
+gaussian_move = false
+cooling_rate = 0.9
+T_zero = true
+n_deterministics = 10000
 
 # Output
 output_dir = Potential_Param_Scan/fitting_param_2_x
