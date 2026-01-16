@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import sys
 import os
 
-# Optional pandas import for data loading
+# Optional pandas import for data loading (not required - numpy fallback available)
 try:
     import pandas as pd
     HAS_PANDAS = True
@@ -68,8 +68,8 @@ class LSWTConfig:
     PHI: np.ndarray = None
     
     # Screening threshold (R² > threshold passes)
-    R2_THRESHOLD: float = 0.7
-    R2_LOWER_THRESHOLD: float = 0.75  # Lower band R² threshold
+    R2_THRESHOLD: float = 0.80
+    R2_LOWER_THRESHOLD: float = 0.80  # Lower band R² threshold
     
     # Direction for spin wave calculation
     DIRECTION: str = 'b'
@@ -121,6 +121,13 @@ class ExperimentalDataLoader:
         self.data_lower = None
         self.data_upper = None
         self._loaded = False
+        self._data_available = False  # Track if data was successfully loaded
+    
+    def _load_csv_numpy(self, filepath: Path) -> np.ndarray:
+        """Load CSV file using numpy (no pandas required)."""
+        # Skip header row, load x and y columns
+        data = np.genfromtxt(filepath, delimiter=',', skip_header=1)
+        return data  # Returns (N, 2) array with [x, y] columns
     
     def load_data(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -132,25 +139,12 @@ class ExperimentalDataLoader:
         if self._loaded:
             return self.data_lower, self.data_upper
         
-        if not HAS_PANDAS:
-            print("Warning: pandas not available. LSWT screening will be skipped.")
-            self.data_lower = np.zeros((3, 1))
-            self.data_upper = np.zeros((3, 1))
-            self._loaded = True
-            return self.data_lower, self.data_upper
-        
         try:
-            # Load CSV files
-            df1 = pd.read_csv(self.data_dir / "plot-data big1.csv")
-            df2 = pd.read_csv(self.data_dir / "plot-data big2.csv")
-            df3 = pd.read_csv(self.data_dir / "plot-data big3.csv")
-            df4 = pd.read_csv(self.data_dir / "plot-data big3 up.csv")
-            
-            # Extract x, y columns
-            data1 = df1[["x", " y"]].values
-            data2 = df2[["x", " y"]].values
-            data3 = df3[["x", " y"]].values
-            data4 = df4[["x", " y"]].values
+            # Load CSV files using numpy (no pandas dependency)
+            data1 = self._load_csv_numpy(self.data_dir / "plot-data big1.csv")
+            data2 = self._load_csv_numpy(self.data_dir / "plot-data big2.csv")
+            data3 = self._load_csv_numpy(self.data_dir / "plot-data big3.csv")
+            data4 = self._load_csv_numpy(self.data_dir / "plot-data big3 up.csv")
             
             # Stack all data
             data_all = np.vstack((data1, data2, data3, data4))
@@ -162,14 +156,22 @@ class ExperimentalDataLoader:
             # Transform to momentum space
             self.data_lower, self.data_upper = self._transform_to_momentum_space(data_all)
             self._loaded = True
+            self._data_available = True
             
         except FileNotFoundError as e:
             print(f"Warning: Could not load experimental data: {e}")
             print(f"LSWT screening will be skipped.")
-            # Create empty placeholder data
-            self.data_lower = np.zeros((3, 1))
-            self.data_upper = np.zeros((3, 1))
+            self.data_lower = None
+            self.data_upper = None
             self._loaded = True
+            self._data_available = False
+        except Exception as e:
+            print(f"Warning: Error loading experimental data: {e}")
+            print(f"LSWT screening will be skipped.")
+            self.data_lower = None
+            self.data_upper = None
+            self._loaded = True
+            self._data_available = False
         
         return self.data_lower, self.data_upper
     
@@ -334,10 +336,12 @@ class LSWTScreener:
         # Base parameter dictionary for Hamiltonian
         self.base_params = self._create_base_params()
         
-        # Check if LSWT Hamiltonian is available
-        self.available = HAS_LSWT_HAM
-        if not self.available:
+        # Check if LSWT Hamiltonian is available AND experimental data loaded
+        self.available = HAS_LSWT_HAM and self.data_loader._data_available
+        if not HAS_LSWT_HAM:
             print("Warning: LSWT Hamiltonian module not available. Screening disabled.")
+        elif not self.data_loader._data_available:
+            print("Warning: Experimental data not available. Screening disabled.")
     
     def _create_base_params(self) -> Dict:
         """Create base parameter dictionary for Hamiltonian."""
@@ -682,6 +686,11 @@ def create_lswt_screened_simulation_simple(
         if lswt_result.r2_total >= 0:
             stats['r2_total_values'].append(lswt_result.r2_total)
             stats['r2_lower_values'].append(lswt_result.r2_lower)
+        
+        # Return with LSWT rejection marker if rejected
+        if not lswt_result.passed:
+            # Return special marker: "LSWT_REJECTED" as energy to signal rejection
+            return None, None, "LSWT_REJECTED"
         
         return spins, positions, energy
     

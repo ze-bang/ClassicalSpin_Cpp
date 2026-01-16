@@ -89,10 +89,19 @@ try:
         LSWTScreeningResult,
         create_lswt_screened_simulation_simple,
     )
+    # Check if LSWT is fully functional (hamiltonian + data)
+    _test_screener = LSWTScreener(verbose=False)
+    LSWT_AVAILABLE = _test_screener.available
+    if not LSWT_AVAILABLE:
+        LSWT_UNAVAILABLE_REASON = "LSWT hamiltonian or experimental data not available"
+    else:
+        LSWT_UNAVAILABLE_REASON = None
+    del _test_screener
     HAS_LSWT = True
-except ImportError:
+except ImportError as e:
     HAS_LSWT = False
-    print("Warning: LSWT screener module not available. LSWT screening disabled.")
+    LSWT_AVAILABLE = False
+    LSWT_UNAVAILABLE_REASON = f"LSWT screener module import failed: {e}"
 
 
 def print_banner():
@@ -217,20 +226,25 @@ def run_exploration(args):
     fast_mode = args.fast_mode and not args.accurate and not screening_mode
     
     # Determine LSWT screening settings
-    enable_lswt = args.enable_lswt and not args.disable_lswt and HAS_LSWT
+    enable_lswt = args.enable_lswt and not args.disable_lswt
     lswt_r2_threshold = args.lswt_r2_threshold
     lswt_r2_lower = args.lswt_r2_lower
     
-    # Print LSWT screening status
+    # Print LSWT screening status and enforce requirement
     if enable_lswt:
+        if not LSWT_AVAILABLE:
+            print(f"\n[ERROR] LSWT screening is required but not available!")
+            print(f"        Reason: {LSWT_UNAVAILABLE_REASON}")
+            print(f"\nTo fix this, either:")
+            print(f"  1. Install pandas: pip install pandas")
+            print(f"  2. Ensure workflow/LSWT_fit/ contains experimental data CSV files")
+            print(f"  3. Use --disable-lswt to skip LSWT screening (not recommended)")
+            sys.exit(1)
         print(f"\n[LSWT Screening] Enabled")
         print(f"         R² threshold (total): {lswt_r2_threshold}")
         print(f"         R² threshold (lower band): {lswt_r2_lower}")
     else:
-        if not HAS_LSWT:
-            print(f"\n[LSWT Screening] Disabled (module not available)")
-        else:
-            print(f"\n[LSWT Screening] Disabled by user")
+        print(f"\n[LSWT Screening] Disabled by user")
     
     # Step 3: Create simulation function
     if args.skip_simulation:

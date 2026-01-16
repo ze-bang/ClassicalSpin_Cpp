@@ -136,6 +136,9 @@ DEFAULT_BOUNDS = {
     'J3z_norm': (-1.0, 1.0),
 }
 
+# Default bounds for J1xy_abs (energy scale)
+DEFAULT_J1XY_ABS_BOUNDS = (4.0, 8.0)  # Typical range for BCAO
+
 
 @dataclass
 class FeatureSet:
@@ -525,20 +528,28 @@ class FeatureExtractor:
 
 def generate_random_normalized_params(bounds: Dict[str, Tuple[float, float]] = None,
                                        J1xy_sign: float = -1.0,
-                                       J1xy_abs: float = 6.0) -> NormalizedParameters:
+                                       J1xy_abs: float = None,
+                                       J1xy_abs_bounds: Tuple[float, float] = None) -> NormalizedParameters:
     """
     Generate random normalized parameters within bounds.
     
     Args:
         bounds: Dictionary of (min, max) for each parameter. Defaults to DEFAULT_BOUNDS.
         J1xy_sign: Sign of J1xy (+1 or -1)
-        J1xy_abs: Absolute value of J1xy for unnormalization
+        J1xy_abs: Absolute value of J1xy. If None, sampled from J1xy_abs_bounds.
+        J1xy_abs_bounds: Bounds for J1xy_abs sampling. Defaults to DEFAULT_J1XY_ABS_BOUNDS.
         
     Returns:
         NormalizedParameters with random values
     """
     if bounds is None:
         bounds = DEFAULT_BOUNDS
+    
+    # Sample J1xy_abs if not provided
+    if J1xy_abs is None:
+        if J1xy_abs_bounds is None:
+            J1xy_abs_bounds = DEFAULT_J1XY_ABS_BOUNDS
+        J1xy_abs = np.random.uniform(*J1xy_abs_bounds)
     
     return NormalizedParameters(
         J1xy_sign=J1xy_sign,
@@ -556,16 +567,18 @@ def generate_random_normalized_params(bounds: Dict[str, Tuple[float, float]] = N
 def generate_latin_hypercube_samples(n_samples: int,
                                       bounds: Dict[str, Tuple[float, float]] = None,
                                       J1xy_sign: float = -1.0,
-                                      J1xy_abs: float = 6.0,
+                                      J1xy_abs: float = None,
+                                      J1xy_abs_bounds: Tuple[float, float] = None,
                                       seed: int = None) -> List[NormalizedParameters]:
     """
     Generate Latin Hypercube samples in the parameter space.
     
     Args:
         n_samples: Number of samples to generate
-        bounds: Parameter bounds
+        bounds: Parameter bounds for normalized parameters
         J1xy_sign: Sign of J1xy
-        J1xy_abs: Absolute value of J1xy
+        J1xy_abs: Fixed absolute value of J1xy. If None, sampled from J1xy_abs_bounds.
+        J1xy_abs_bounds: Bounds for J1xy_abs sampling. Defaults to DEFAULT_J1XY_ABS_BOUNDS.
         seed: Random seed for reproducibility
         
     Returns:
@@ -574,27 +587,46 @@ def generate_latin_hypercube_samples(n_samples: int,
     if bounds is None:
         bounds = DEFAULT_BOUNDS
     
+    if J1xy_abs_bounds is None:
+        J1xy_abs_bounds = DEFAULT_J1XY_ABS_BOUNDS
+    
     if seed is not None:
         np.random.seed(seed)
     
     param_names = list(bounds.keys())
     n_params = len(param_names)
     
-    # Generate LHS samples
-    samples = np.zeros((n_samples, n_params))
+    # Add J1xy_abs as an extra dimension if not fixed
+    sample_J1xy_abs = (J1xy_abs is None)
+    total_dims = n_params + (1 if sample_J1xy_abs else 0)
     
+    # Generate LHS samples
+    samples = np.zeros((n_samples, total_dims))
+    
+    # Sample normalized parameters
     for i, name in enumerate(param_names):
         lo, hi = bounds[name]
-        # Create n_samples bins
         bin_edges = np.linspace(lo, hi, n_samples + 1)
-        # Randomly sample one point from each bin
         perm = np.random.permutation(n_samples)
         for j in range(n_samples):
             samples[perm[j], i] = np.random.uniform(bin_edges[j], bin_edges[j + 1])
     
+    # Sample J1xy_abs if not fixed
+    if sample_J1xy_abs:
+        lo, hi = J1xy_abs_bounds
+        bin_edges = np.linspace(lo, hi, n_samples + 1)
+        perm = np.random.permutation(n_samples)
+        for j in range(n_samples):
+            samples[perm[j], n_params] = np.random.uniform(bin_edges[j], bin_edges[j + 1])
+    
     # Convert to NormalizedParameters
     result = []
     for s in samples:
+        if sample_J1xy_abs:
+            j1xy_abs_val = s[n_params]
+        else:
+            j1xy_abs_val = J1xy_abs
+        
         params = NormalizedParameters(
             J1xy_sign=J1xy_sign,
             J1z_norm=s[param_names.index('J1z_norm')],
@@ -604,7 +636,7 @@ def generate_latin_hypercube_samples(n_samples: int,
             G_norm=s[param_names.index('G_norm')],
             J3xy_norm=s[param_names.index('J3xy_norm')],
             J3z_norm=s[param_names.index('J3z_norm')],
-            J1xy_abs=J1xy_abs,
+            J1xy_abs=j1xy_abs_val,
         )
         result.append(params)
     
