@@ -435,6 +435,9 @@ class ActiveLearningExplorer:
         point.confidence = result.confidence
         point.energy = energy if energy is not None else 0.0
         point.features = features.to_dict()
+        # Add J1xy_abs to features for MC bookkeeping
+        point.features['J1xy_abs'] = point.params.J1xy_abs
+        point.features['J1xy'] = point.params.J1xy_sign * point.params.J1xy_abs
         point.decision_flags = result.flags.to_dict()
         
         self._update_phase_counts(point.phase)
