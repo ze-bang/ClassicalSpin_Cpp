@@ -245,7 +245,7 @@ class SpinSolverRunner:
         return str(param_file)
     
     def run_simulation(self, params: NormalizedParameters,
-                       timeout: float = 300) -> Tuple[np.ndarray, np.ndarray, float]:
+                       timeout: float = 600) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Run a simulation with the given parameters.
         
