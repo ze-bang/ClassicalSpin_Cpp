@@ -219,9 +219,35 @@ def run_exploration(args):
     print("\n[Step 1] Adding known seed parameters...")
     explorer.add_known_seeds()
     
-    # Step 2: Add initial LHS samples
-    print(f"\n[Step 2] Generating {args.n_initial} initial Latin Hypercube samples...")
-    explorer.add_lhs_samples(n_samples=args.n_initial, seed=args.seed)
+    # Step 2: Add initial samples (LHS, LSWT-guided, or local perturbation)
+    lswt_guided = getattr(args, 'lswt_guided', False)
+    local_perturbation = getattr(args, 'local_perturbation', False)
+    
+    if local_perturbation:
+        print(f"\n[Step 2] Generating {args.n_initial} local perturbation samples...")
+        print(f"         (Perturbing known seeds with scale={args.perturbation_scale})")
+        n_added = explorer.add_local_perturbation_samples(
+            n_samples=args.n_initial,
+            perturbation_scale=args.perturbation_scale,
+            seed=args.seed,
+        )
+    elif lswt_guided:
+        print(f"\n[Step 2] Generating {args.n_initial} LSWT-guided samples...")
+        print(f"         (Pre-filtering with LSWT to focus on physically-relevant regions)")
+        lswt_multiplier = getattr(args, 'lswt_guided_multiplier', 20)
+        n_added = explorer.add_lswt_guided_samples(
+            n_samples=args.n_initial,
+            max_attempts_multiplier=lswt_multiplier,
+            r2_threshold=args.lswt_r2_threshold,
+            r2_lower_threshold=args.lswt_r2_lower,
+            seed=args.seed,
+        )
+        if n_added < args.n_initial:
+            print(f"\n[Warning] Only found {n_added} LSWT-accepted samples out of {args.n_initial} requested")
+            print(f"          Consider: relaxing thresholds, narrowing parameter bounds, or increasing multiplier")
+    else:
+        print(f"\n[Step 2] Generating {args.n_initial} initial Latin Hypercube samples...")
+        explorer.add_lhs_samples(n_samples=args.n_initial, seed=args.seed)
     
     # Determine simulation mode (--accurate overrides --fast-mode, --screening is separate)
     screening_mode = getattr(args, 'screening', False)
@@ -484,6 +510,20 @@ def main():
                             help='R² threshold for LSWT total fit (default: 0.7)')
     lswt_group.add_argument('--lswt-r2-lower', type=float, default=0.75,
                             help='R² threshold for LSWT lower band fit (default: 0.75)')
+    lswt_group.add_argument('--lswt-guided', action='store_true',
+                            help='Use LSWT-guided sampling: pre-filter samples with fast LSWT screening '
+                                 'to focus on physically-relevant parameter regions')
+    lswt_group.add_argument('--lswt-guided-multiplier', type=int, default=20,
+                            help='Max attempts = n_initial * this multiplier when using LSWT-guided sampling (default: 20)')
+    
+    # Sampling strategy options
+    sampling_group = parser.add_argument_group('Sampling Strategy',
+                                               'Options for initial sample generation strategy')
+    sampling_group.add_argument('--local-perturbation', action='store_true',
+                                help='Use local perturbation sampling around known seeds instead of global LHS. '
+                                     'Good when LSWT-accepted region is narrow.')
+    sampling_group.add_argument('--perturbation-scale', type=float, default=0.1,
+                                help='Std dev of Gaussian perturbation for local sampling (default: 0.1, ~10%% variation)')
     
     args = parser.parse_args()
     

@@ -372,6 +372,231 @@ class ActiveLearningExplorer:
         
         self._log(f"  Added {n_samples} LHS samples (pending classification)")
     
+    def add_lswt_guided_samples(self, n_samples: int = 50, 
+                                 max_attempts_multiplier: int = 20,
+                                 r2_threshold: float = 0.7,
+                                 r2_lower_threshold: float = 0.75,
+                                 seed: int = None):
+        """
+        Add samples that pass LSWT pre-screening.
+        
+        Generates random candidates and keeps only those that pass the LSWT
+        threshold. This focuses exploration on the physically-relevant region
+        of parameter space that fits experimental dispersion data.
+        
+        Args:
+            n_samples: Target number of LSWT-accepted samples to generate
+            max_attempts_multiplier: Max attempts = n_samples * this factor
+            r2_threshold: LSWT R² threshold for total fit
+            r2_lower_threshold: LSWT R² threshold for lower band
+            seed: Random seed for reproducibility
+        
+        Returns:
+            Number of samples actually added (may be < n_samples if acceptance rate is very low)
+        """
+        # Import LSWT screener
+        try:
+            from lswt_screener import LSWTScreener, LSWTConfig
+        except ImportError:
+            self._log("  Warning: LSWT screener not available, falling back to regular LHS")
+            return self.add_lhs_samples(n_samples, seed)
+        
+        self._log(f"\nGenerating up to {n_samples} LSWT-guided samples...")
+        self._log(f"  LSWT thresholds: R²_total >= {r2_threshold}, R²_lower >= {r2_lower_threshold}")
+        
+        if seed is not None:
+            np.random.seed(seed)
+        
+        # Initialize LSWT screener
+        config = LSWTConfig()
+        config.R2_THRESHOLD = r2_threshold
+        config.R2_LOWER_THRESHOLD = r2_lower_threshold
+        screener = LSWTScreener(config=config, verbose=False)
+        
+        if not screener.available:
+            self._log("  Warning: LSWT screener not functional, falling back to regular LHS")
+            return self.add_lhs_samples(n_samples, seed)
+        
+        max_attempts = n_samples * max_attempts_multiplier
+        accepted = 0
+        attempted = 0
+        r2_values = []
+        
+        while accepted < n_samples and attempted < max_attempts:
+            # Generate a random candidate
+            params = self._generate_random_params()
+            attempted += 1
+            
+            # Screen with LSWT
+            result = screener.screen(params)
+            r2_values.append(result.r2_total)
+            
+            if result.passed:
+                # Add to exploration pool
+                point = ExplorationPoint(
+                    point_id=self.next_id,
+                    params=params,
+                    phase=PhaseType.UNKNOWN.value,
+                    confidence=0.0,
+                    timestamp=datetime.now().isoformat(),
+                    selection_method='lswt_guided',
+                )
+                self.history.append(point)
+                self.next_id += 1
+                accepted += 1
+                
+                if accepted % 10 == 0:
+                    self._log(f"    Accepted {accepted}/{n_samples} (attempted {attempted}, rate: {100*accepted/attempted:.1f}%)")
+        
+        acceptance_rate = 100 * accepted / attempted if attempted > 0 else 0
+        r2_mean = np.mean(r2_values) if r2_values else 0
+        r2_max = np.max(r2_values) if r2_values else 0
+        
+        self._log(f"  Added {accepted} LSWT-guided samples")
+        self._log(f"  Acceptance rate: {acceptance_rate:.1f}% ({accepted}/{attempted})")
+        self._log(f"  R² stats: mean={r2_mean:.3f}, max={r2_max:.3f}")
+        
+        if accepted < n_samples:
+            self._log(f"  Warning: Only found {accepted} samples (target was {n_samples})")
+            self._log(f"           Consider relaxing thresholds or narrowing parameter bounds")
+        
+        return accepted
+    
+    def _generate_random_params(self) -> NormalizedParameters:
+        """Generate a single random parameter set within bounds."""
+        # Sample normalized parameters uniformly in bounds
+        J1z = np.random.uniform(*self.bounds.get('J1z_norm', (-1, 1)))
+        D = np.random.uniform(*self.bounds.get('D_norm', (-1, 1)))
+        E = np.random.uniform(*self.bounds.get('E_norm', (-1, 1)))
+        F = np.random.uniform(*self.bounds.get('F_norm', (-1, 1)))
+        G = np.random.uniform(*self.bounds.get('G_norm', (-1, 1)))
+        J3xy = np.random.uniform(*self.bounds.get('J3xy_norm', (-1, 1)))
+        J3z = np.random.uniform(*self.bounds.get('J3z_norm', (-1, 1)))
+        
+        # Sample J1xy_abs if variable
+        if self.J1xy_abs is None:
+            j1xy_abs = np.random.uniform(*self.J1xy_abs_bounds)
+        else:
+            j1xy_abs = self.J1xy_abs
+        
+        return NormalizedParameters(
+            J1xy_sign=self.J1xy_sign,
+            J1z_norm=J1z,
+            D_norm=D,
+            E_norm=E,
+            F_norm=F,
+            G_norm=G,
+            J3xy_norm=J3xy,
+            J3z_norm=J3z,
+            J1xy_abs=j1xy_abs,
+        )
+    
+    def add_local_perturbation_samples(self, n_samples: int = 50, 
+                                        perturbation_scale: float = 0.1,
+                                        seed: int = None):
+        """
+        Add samples by perturbing known seeds with Gaussian noise.
+        
+        This focuses exploration in the vicinity of known-good parameters,
+        which is useful when the LSWT-accepted region is narrow.
+        
+        Args:
+            n_samples: Number of samples to generate (distributed among seeds)
+            perturbation_scale: Std dev of Gaussian perturbation for normalized params
+                               (e.g., 0.1 means ~10% variation around each param)
+            seed: Random seed for reproducibility
+        
+        Returns:
+            Number of samples added
+        """
+        self._log(f"\nGenerating {n_samples} local perturbation samples around seeds...")
+        self._log(f"  Perturbation scale: {perturbation_scale} (std dev)")
+        
+        if seed is not None:
+            np.random.seed(seed)
+        
+        # Get seed parameters
+        seed_params = list(KNOWN_SEEDS.values())
+        n_seeds = len(seed_params)
+        
+        if n_seeds == 0:
+            self._log("  Warning: No known seeds available, falling back to LHS")
+            return self.add_lhs_samples(n_samples, seed)
+        
+        # Distribute samples among seeds (round-robin style)
+        samples_per_seed = n_samples // n_seeds
+        extra_samples = n_samples % n_seeds
+        
+        added = 0
+        for i, seed_param in enumerate(seed_params):
+            n_this_seed = samples_per_seed + (1 if i < extra_samples else 0)
+            
+            for j in range(n_this_seed):
+                # Perturb the normalized parameters
+                perturbed = self._perturb_params(seed_param, perturbation_scale)
+                
+                point = ExplorationPoint(
+                    point_id=self.next_id,
+                    params=perturbed,
+                    phase=PhaseType.UNKNOWN.value,
+                    confidence=0.0,
+                    timestamp=datetime.now().isoformat(),
+                    selection_method='local_perturbation',
+                )
+                self.history.append(point)
+                self.next_id += 1
+                added += 1
+        
+        self._log(f"  Added {added} local perturbation samples (pending classification)")
+        return added
+    
+    def _perturb_params(self, base_params: NormalizedParameters, 
+                        scale: float) -> NormalizedParameters:
+        """
+        Create a perturbed copy of parameters with Gaussian noise.
+        
+        Args:
+            base_params: Base parameter set to perturb
+            scale: Standard deviation of Gaussian perturbation
+            
+        Returns:
+            New NormalizedParameters with added noise (clipped to bounds)
+        """
+        # Perturb each normalized parameter
+        def perturb_and_clip(val, key):
+            lo, hi = self.bounds.get(key, (-1, 1))
+            perturbed = val + np.random.normal(0, scale)
+            return np.clip(perturbed, lo, hi)
+        
+        J1z = perturb_and_clip(base_params.J1z_norm, 'J1z_norm')
+        D = perturb_and_clip(base_params.D_norm, 'D_norm')
+        E = perturb_and_clip(base_params.E_norm, 'E_norm')
+        F = perturb_and_clip(base_params.F_norm, 'F_norm')
+        G = perturb_and_clip(base_params.G_norm, 'G_norm')
+        J3xy = perturb_and_clip(base_params.J3xy_norm, 'J3xy_norm')
+        J3z = perturb_and_clip(base_params.J3z_norm, 'J3z_norm')
+        
+        # Perturb J1xy_abs if variable
+        if self.J1xy_abs is None:
+            # Use relative perturbation for J1xy_abs
+            j1xy_abs_scale = scale * base_params.J1xy_abs
+            j1xy_abs = base_params.J1xy_abs + np.random.normal(0, j1xy_abs_scale)
+            j1xy_abs = np.clip(j1xy_abs, *self.J1xy_abs_bounds)
+        else:
+            j1xy_abs = self.J1xy_abs
+        
+        return NormalizedParameters(
+            J1xy_sign=self.J1xy_sign,
+            J1z_norm=J1z,
+            D_norm=D,
+            E_norm=E,
+            F_norm=F,
+            G_norm=G,
+            J3xy_norm=J3xy,
+            J3z_norm=J3z,
+            J1xy_abs=j1xy_abs,
+        )
+    
     def classify_point(self, point: ExplorationPoint,
                        spins: np.ndarray = None,
                        positions: np.ndarray = None,
