@@ -597,6 +597,252 @@ class ActiveLearningExplorer:
             J1xy_abs=j1xy_abs,
         )
     
+    def add_adaptive_lswt_samples(self, n_samples: int = 50,
+                                   n_initial_screen: int = 500,
+                                   n_iterations: int = 5,
+                                   exploitation_ratio: float = 0.7,
+                                   r2_threshold: float = 0.7,
+                                   r2_lower_threshold: float = 0.75,
+                                   seed: int = None):
+        """
+        Adaptive sampling that learns where LSWT-accepted regions are.
+        
+        Uses a two-phase approach:
+        1. Initial broad screening to learn the R² landscape
+        2. Surrogate model guides sampling toward high-R² regions
+        
+        This can find disconnected pockets of LSWT-accepted parameters
+        that local perturbation would miss.
+        
+        Args:
+            n_samples: Target number of LSWT-accepted samples
+            n_initial_screen: Number of random samples for initial survey
+            n_iterations: Number of adaptive refinement iterations
+            exploitation_ratio: Fraction of samples near predicted high-R² (vs exploration)
+            r2_threshold: LSWT R² threshold for acceptance (total)
+            r2_lower_threshold: LSWT R² threshold for lower band
+            seed: Random seed
+            
+        Returns:
+            Number of samples actually added
+        """
+        # Import LSWT screener
+        try:
+            from lswt_screener import LSWTScreener, LSWTConfig
+        except ImportError:
+            self._log("  Warning: LSWT screener not available, falling back to LHS")
+            return self.add_lhs_samples(n_samples, seed)
+        
+        if not HAS_SKLEARN:
+            self._log("  Warning: sklearn not available for surrogate, falling back to LHS")
+            return self.add_lhs_samples(n_samples, seed)
+        
+        from sklearn.ensemble import RandomForestRegressor
+        
+        self._log(f"\n{'='*60}")
+        self._log(f"ADAPTIVE LSWT SAMPLING")
+        self._log(f"{'='*60}")
+        self._log(f"  Target samples: {n_samples}")
+        self._log(f"  Initial screening: {n_initial_screen} random candidates")
+        self._log(f"  Adaptive iterations: {n_iterations}")
+        self._log(f"  Exploitation ratio: {exploitation_ratio:.0%}")
+        self._log(f"  LSWT thresholds: R²_total >= {r2_threshold}, R²_lower >= {r2_lower_threshold}")
+        
+        if seed is not None:
+            np.random.seed(seed)
+        
+        # Initialize LSWT screener
+        config = LSWTConfig()
+        config.R2_THRESHOLD = r2_threshold
+        config.R2_LOWER_THRESHOLD = r2_lower_threshold
+        screener = LSWTScreener(config=config, verbose=False)
+        
+        if not screener.available:
+            self._log("  Warning: LSWT screener not functional, falling back to LHS")
+            return self.add_lhs_samples(n_samples, seed)
+        
+        # Storage for screening results
+        all_params = []  # List of NormalizedParameters
+        all_features = []  # Feature vectors for surrogate
+        all_r2 = []  # R² values
+        all_passed = []  # Pass/fail flags
+        accepted_params = []  # Parameters that passed screening
+        
+        # === Phase 0: Seed with known good parameters ===
+        self._log(f"\n[Phase 0] Seeding with known good parameters...")
+        for name, seed_params in KNOWN_SEEDS.items():
+            # Verify seeds pass LSWT (they should)
+            result = screener.screen(seed_params)
+            all_params.append(seed_params)
+            all_features.append(seed_params.to_feature_vector())
+            all_r2.append(result.r2_total)
+            all_passed.append(result.passed)
+            
+            if result.passed:
+                accepted_params.append(seed_params)
+                self._log(f"    Seed '{name}': R²={result.r2_total:.3f} (PASS)")
+            else:
+                self._log(f"    Seed '{name}': R²={result.r2_total:.3f} (FAIL - unexpected!)")
+        
+        self._log(f"  Seeded with {len(accepted_params)} known-good parameters")
+        
+        # === Phase 1: Initial broad screening ===
+        self._log(f"\n[Phase 1] Initial broad screening ({n_initial_screen} samples)...")
+        
+        for i in range(n_initial_screen):
+            params = self._generate_random_params()
+            result = screener.screen(params)
+            
+            all_params.append(params)
+            all_features.append(params.to_feature_vector())
+            all_r2.append(result.r2_total)
+            all_passed.append(result.passed)
+            
+            if result.passed:
+                accepted_params.append(params)
+            
+            if (i + 1) % 100 == 0:
+                n_pass = sum(all_passed)
+                self._log(f"    Screened {i+1}/{n_initial_screen}, accepted: {n_pass} ({100*n_pass/(i+1):.1f}%)")
+        
+        n_initial_accepted = len(accepted_params)
+        self._log(f"  Initial screening complete: {n_initial_accepted}/{n_initial_screen} accepted ({100*n_initial_accepted/n_initial_screen:.1f}%)")
+        
+        if n_initial_accepted >= n_samples:
+            # Already have enough, just add the first n_samples
+            self._log(f"  Found enough in initial screening, adding {n_samples} samples")
+            for params in accepted_params[:n_samples]:
+                self._add_exploration_point(params, 'adaptive_lswt')
+            return n_samples
+        
+        # === Phase 2: Train surrogate and adaptively sample ===
+        self._log(f"\n[Phase 2] Adaptive refinement ({n_iterations} iterations)...")
+        
+        X = np.array(all_features)
+        y = np.array(all_r2)
+        
+        samples_per_iter = max(1, (n_samples - n_initial_accepted) // n_iterations)
+        candidates_per_iter = samples_per_iter * 20  # Generate 20x candidates per target
+        
+        for iteration in range(n_iterations):
+            if len(accepted_params) >= n_samples:
+                break
+            
+            # Train surrogate model to predict R²
+            surrogate = RandomForestRegressor(
+                n_estimators=100, 
+                max_depth=10,
+                random_state=seed + iteration if seed else None,
+                n_jobs=-1
+            )
+            surrogate.fit(X, y)
+            
+            # Generate candidates
+            candidates = []
+            candidate_features = []
+            
+            # Exploitation: sample near predicted high-R² regions
+            n_exploit = int(candidates_per_iter * exploitation_ratio)
+            # Exploration: random samples
+            n_explore = candidates_per_iter - n_exploit
+            
+            # For exploitation, generate candidates near existing accepted points
+            # or where surrogate predicts high R²
+            if accepted_params and n_exploit > 0:
+                # Strategy: perturb accepted parameters with varying scales
+                for _ in range(n_exploit):
+                    base = accepted_params[np.random.randint(len(accepted_params))]
+                    scale = np.random.uniform(0.02, 0.15)  # Variable perturbation
+                    params = self._perturb_params(base, scale)
+                    candidates.append(params)
+                    candidate_features.append(params.to_feature_vector())
+            
+            # Exploration: uniform random
+            for _ in range(n_explore):
+                params = self._generate_random_params()
+                candidates.append(params)
+                candidate_features.append(params.to_feature_vector())
+            
+            # Predict R² for candidates
+            candidate_features_arr = np.array(candidate_features)
+            predicted_r2 = surrogate.predict(candidate_features_arr)
+            
+            # Also get uncertainty (std of tree predictions)
+            tree_predictions = np.array([tree.predict(candidate_features_arr) 
+                                         for tree in surrogate.estimators_])
+            uncertainty = np.std(tree_predictions, axis=0)
+            
+            # Acquisition: UCB-like (high predicted R² + high uncertainty)
+            # Normalized acquisition score
+            pred_norm = (predicted_r2 - predicted_r2.mean()) / (predicted_r2.std() + 1e-6)
+            unc_norm = (uncertainty - uncertainty.mean()) / (uncertainty.std() + 1e-6)
+            acquisition = pred_norm + 0.5 * unc_norm  # Balance exploitation/exploration
+            
+            # Select top candidates by acquisition score
+            top_indices = np.argsort(acquisition)[::-1]
+            
+            # Screen top candidates until we find enough or run out
+            new_accepted = 0
+            screened_this_iter = 0
+            
+            for idx in top_indices:
+                if len(accepted_params) >= n_samples:
+                    break
+                if screened_this_iter >= samples_per_iter * 5:  # Don't screen too many
+                    break
+                
+                params = candidates[idx]
+                result = screener.screen(params)
+                screened_this_iter += 1
+                
+                # Add to training data
+                all_params.append(params)
+                all_features.append(params.to_feature_vector())
+                all_r2.append(result.r2_total)
+                all_passed.append(result.passed)
+                
+                if result.passed:
+                    accepted_params.append(params)
+                    new_accepted += 1
+            
+            # Update training data
+            X = np.array(all_features)
+            y = np.array(all_r2)
+            
+            self._log(f"    Iteration {iteration+1}: screened {screened_this_iter}, "
+                     f"accepted {new_accepted}, total accepted: {len(accepted_params)}")
+        
+        # === Phase 3: Add accepted samples to exploration pool ===
+        n_to_add = min(len(accepted_params), n_samples)
+        self._log(f"\n[Phase 3] Adding {n_to_add} accepted samples to exploration pool...")
+        
+        for params in accepted_params[:n_to_add]:
+            self._add_exploration_point(params, 'adaptive_lswt')
+        
+        # Summary
+        total_screened = len(all_params)
+        acceptance_rate = 100 * len(accepted_params) / total_screened if total_screened > 0 else 0
+        self._log(f"\n  Summary:")
+        self._log(f"    Total screened: {total_screened}")
+        self._log(f"    Total accepted: {len(accepted_params)} ({acceptance_rate:.1f}%)")
+        self._log(f"    Added to pool: {n_to_add}")
+        self._log(f"    R² range: [{min(all_r2):.3f}, {max(all_r2):.3f}]")
+        
+        return n_to_add
+    
+    def _add_exploration_point(self, params: NormalizedParameters, method: str):
+        """Helper to add a single exploration point."""
+        point = ExplorationPoint(
+            point_id=self.next_id,
+            params=params,
+            phase=PhaseType.UNKNOWN.value,
+            confidence=0.0,
+            timestamp=datetime.now().isoformat(),
+            selection_method=method,
+        )
+        self.history.append(point)
+        self.next_id += 1
+    
     def classify_point(self, point: ExplorationPoint,
                        spins: np.ndarray = None,
                        positions: np.ndarray = None,

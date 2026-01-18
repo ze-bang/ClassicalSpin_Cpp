@@ -219,11 +219,24 @@ def run_exploration(args):
     print("\n[Step 1] Adding known seed parameters...")
     explorer.add_known_seeds()
     
-    # Step 2: Add initial samples (LHS, LSWT-guided, or local perturbation)
+    # Step 2: Add initial samples (LHS, LSWT-guided, local perturbation, or adaptive)
     lswt_guided = getattr(args, 'lswt_guided', False)
     local_perturbation = getattr(args, 'local_perturbation', False)
+    adaptive_lswt = getattr(args, 'adaptive_lswt', False)
     
-    if local_perturbation:
+    if adaptive_lswt:
+        print(f"\n[Step 2] Adaptive LSWT sampling (target: {args.n_initial} accepted samples)...")
+        print(f"         Learning R² landscape to find all LSWT-accepted regions")
+        n_added = explorer.add_adaptive_lswt_samples(
+            n_samples=args.n_initial,
+            n_initial_screen=getattr(args, 'n_initial_screen', 500),
+            n_iterations=getattr(args, 'adaptive_iterations', 5),
+            exploitation_ratio=getattr(args, 'exploitation_ratio', 0.7),
+            r2_threshold=args.lswt_r2_threshold,
+            r2_lower_threshold=args.lswt_r2_lower,
+            seed=args.seed,
+        )
+    elif local_perturbation:
         print(f"\n[Step 2] Generating {args.n_initial} local perturbation samples...")
         print(f"         (Perturbing known seeds with scale={args.perturbation_scale})")
         n_added = explorer.add_local_perturbation_samples(
@@ -524,6 +537,15 @@ def main():
                                      'Good when LSWT-accepted region is narrow.')
     sampling_group.add_argument('--perturbation-scale', type=float, default=0.1,
                                 help='Std dev of Gaussian perturbation for local sampling (default: 0.1, ~10%% variation)')
+    sampling_group.add_argument('--adaptive-lswt', action='store_true',
+                                help='Use adaptive LSWT sampling: learns R² landscape with surrogate model '
+                                     'to find disconnected LSWT-accepted regions. Best for broad exploration.')
+    sampling_group.add_argument('--n-initial-screen', type=int, default=500,
+                                help='Number of initial random screens for adaptive LSWT (default: 500)')
+    sampling_group.add_argument('--adaptive-iterations', type=int, default=5,
+                                help='Number of adaptive refinement iterations (default: 5)')
+    sampling_group.add_argument('--exploitation-ratio', type=float, default=0.7,
+                                help='Fraction of adaptive samples near known high-R² regions (default: 0.7)')
     
     args = parser.parse_args()
     
