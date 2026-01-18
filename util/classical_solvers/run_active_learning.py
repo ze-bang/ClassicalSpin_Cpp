@@ -199,10 +199,12 @@ def run_exploration(args):
             history_file.unlink()
     
     # Create explorer
+    # J1xy_abs=None enables sampling J1xy_abs from J1xy_abs_bounds during LHS
     explorer = ActiveLearningExplorer(
         output_dir=args.output_dir,
         L=args.lattice_size,
-        J1xy_abs=6.0,
+        J1xy_abs=None,  # Sample J1xy_abs (not fixed)
+        J1xy_abs_bounds=(4.0, 8.0),  # Range for J1xy_abs sampling
         J1xy_sign=-1.0,
         target_phase=PhaseType.MERON_ANTIMERON.value,
         surrogate_type='random_forest',
