@@ -1189,7 +1189,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                       window_type: str = 'gaussian',
                       energy_levels_mev: Optional[Dict[str, float]] = None,
                       load_from_cache: bool = False,
-                      reload_components: bool = False) -> Dict[str, np.ndarray]:
+                      reload_components: bool = False,
+                      save_intermediates: bool = False) -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for mixed SU(2)+SU(3) systems.
     
     Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
@@ -1216,6 +1217,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             from .txt files. Only regenerates plots. Default: False
         reload_components: If True, load component FFTs (individual λ components, x/y/z) from
             cache and recompute composite spectra. Faster than full calculation. Default: False
+        save_intermediates: If True, save intermediate M0, M1, M01 spectra and debug plots.
+            Default: False (only saves final M_NL and composite spectra)
         
     Returns:
         Dictionary with 2DCS results for both sublattices
@@ -1633,92 +1636,93 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.close(fig_wind)
                 print(f"    Saved: windowed_time_evolution_SU2_debug.pdf")
             
-            # Process individual signals (M0, M1, M01)
-            for sig_name, sig_components in [('M0_SU2', M0_comp_SU2), ('M1_SU2', M1_comp_SU2), ('M01_SU2', M01_comp_SU2)]:
-                print(f"    Processing {sig_name}...")
-                
-                # Pre-compute all FFTs with caching
-                sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
-                               for comp in range(spin_dim_SU2)]
-                
-                # Create debug plot
-                n_rows = min(spin_dim_SU2, 3)
-                fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
-                if n_rows == 1:
-                    axes_sig = axes_sig.reshape(1, -1)
-                
-                for comp in range(n_rows):
-                    sig_comp = sig_components[comp]
-                    label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
+            # Process individual signals (M0, M1, M01) - only if save_intermediates is True
+            if save_intermediates:
+                for sig_name, sig_components in [('M0_SU2', M0_comp_SU2), ('M1_SU2', M1_comp_SU2), ('M01_SU2', M01_comp_SU2)]:
+                    print(f"    Processing {sig_name}...")
                     
-                    # Time domain plot
-                    ax_time = axes_sig[comp, 0]
-                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                        ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                    ax_time.set_xlabel('Time index')
-                    ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
-                    ax_time.set_title(f'{label}-component (time domain)')
-                    ax_time.legend(fontsize=6)
-                    ax_time.grid(True, alpha=0.3)
+                    # Pre-compute all FFTs with caching
+                    sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
+                                   for comp in range(spin_dim_SU2)]
                     
-                    # 2D time-tau plot
-                    ax_2d = axes_sig[comp, 1]
-                    im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
-                                      extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
-                    ax_2d.set_xlabel('Time index')
-                    ax_2d.set_ylabel('τ')
-                    ax_2d.set_title(f'{label}-component (τ, t)')
-                    plt.colorbar(im, ax=ax_2d)
+                    # Create debug plot
+                    n_rows = min(spin_dim_SU2, 3)
+                    fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
+                    if n_rows == 1:
+                        axes_sig = axes_sig.reshape(1, -1)
                     
-                    # Frequency domain plot (use cached FFT)
-                    sig_comp_FF = sig_comp_FFs[comp]
-                    ax_freq = axes_sig[comp, 2]
-                    im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
-                    ax_freq.set_xlabel('$\\omega_{\\tau}$ (THz)')
-                    ax_freq.set_ylabel('$\\omega_t$ (THz)')
-                    ax_freq.set_title(f'{label}-component (freq domain)')
+                    for comp in range(n_rows):
+                        sig_comp = sig_components[comp]
+                        label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
+                        
+                        # Time domain plot
+                        ax_time = axes_sig[comp, 0]
+                        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                            ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                        ax_time.set_xlabel('Time index')
+                        ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
+                        ax_time.set_title(f'{label}-component (time domain)')
+                        ax_time.legend(fontsize=6)
+                        ax_time.grid(True, alpha=0.3)
+                        
+                        # 2D time-tau plot
+                        ax_2d = axes_sig[comp, 1]
+                        im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                          extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+                        ax_2d.set_xlabel('Time index')
+                        ax_2d.set_ylabel('τ')
+                        ax_2d.set_title(f'{label}-component (τ, t)')
+                        plt.colorbar(im, ax=ax_2d)
+                        
+                        # Frequency domain plot (use cached FFT)
+                        sig_comp_FF = sig_comp_FFs[comp]
+                        ax_freq = axes_sig[comp, 2]
+                        im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                                  norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
+                        ax_freq.set_xlabel('$\\omega_{\\tau}$ (THz)')
+                        ax_freq.set_ylabel('$\\omega_t$ (THz)')
+                        ax_freq.set_title(f'{label}-component (freq domain)')
+                        if omega_tau_window is not None:
+                            ax_freq.set_xlim(omega_tau_window[0], omega_tau_window[1])
+                        if omega_t_window is not None:
+                            ax_freq.set_ylim(omega_t_window)
+                        # Add energy level reference lines
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im_freq, ax=ax_freq)
+                        
+                        np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
+                    
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
+                    plt.clf()
+                    plt.close()
+                    
+                    # Main spectrum plot (z-component for SU2) - use cached FFT
+                    z_idx = 2 if spin_dim_SU2 > 2 else 0
+                    sig_z_FF = sig_comp_FFs[z_idx]  # Reuse cached FFT
+                    np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_z_FF)
+                    results[f'{sig_name}_FF'] = sig_z_FF
+                    
+                    # Calculate appropriate figure size
+                    tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
+                    t_range = omega_t_window if omega_t_window else (omega_t[0], omega_t[-1])
+                    figsize_spec = calculate_spectrum_figsize(tau_range, t_range)
+                    
+                    fig_spec = plt.figure(figsize=figsize_spec)
+                    plt.imshow(sig_z_FF, origin='lower',
+                               extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]],
+                               aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_z_FF, norm_type))
+                    plt.xlabel('$\\omega_{\\tau}$ (THz)')
+                    plt.ylabel('$\\omega_t$ (THz)')
+                    plt.colorbar(label='Intensity')
+                    plt.title(f'{sig_name} Spectrum')
                     if omega_tau_window is not None:
-                        ax_freq.set_xlim(omega_tau_window[0], omega_tau_window[1])
+                        plt.xlim(omega_tau_window[0], omega_tau_window[1])
                     if omega_t_window is not None:
-                        ax_freq.set_ylim(omega_t_window)
-                    # Add energy level reference lines
-                    if energy_levels_mev:
-                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im_freq, ax=ax_freq)
-                    
-                    np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
-                plt.clf()
-                plt.close()
-                
-                # Main spectrum plot (z-component for SU2) - use cached FFT
-                z_idx = 2 if spin_dim_SU2 > 2 else 0
-                sig_z_FF = sig_comp_FFs[z_idx]  # Reuse cached FFT
-                np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_z_FF)
-                results[f'{sig_name}_FF'] = sig_z_FF
-                
-                # Calculate appropriate figure size
-                tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
-                t_range = omega_t_window if omega_t_window else (omega_t[0], omega_t[-1])
-                figsize_spec = calculate_spectrum_figsize(tau_range, t_range)
-                
-                fig_spec = plt.figure(figsize=figsize_spec)
-                plt.imshow(sig_z_FF, origin='lower',
-                           extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]],
-                           aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_z_FF, norm_type))
-                plt.xlabel('$\\omega_{\\tau}$ (THz)')
-                plt.ylabel('$\\omega_t$ (THz)')
-                plt.colorbar(label='Intensity')
-                plt.title(f'{sig_name} Spectrum')
-                if omega_tau_window is not None:
-                    plt.xlim(omega_tau_window[0], omega_tau_window[1])
-                if omega_t_window is not None:
-                    plt.ylim(omega_t_window)
-                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
-                plt.close(fig_spec)
+                        plt.ylim(omega_t_window)
+                    plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
+                    plt.close(fig_spec)
             
             # M_NL analysis for SU2
             print("    Processing M_NL_SU2...")
@@ -1934,90 +1938,91 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.close(fig_wind)
                 print(f"    Saved: windowed_time_evolution_SU3_debug.pdf")
             
-            # Process individual signals (M0, M1, M01)
-            for sig_name, sig_components in [('M0_SU3', M0_comp_SU3), ('M1_SU3', M1_comp_SU3), ('M01_SU3', M01_comp_SU3)]:
-                print(f"    Processing {sig_name}...")
-                
-                # Pre-compute all FFTs with caching
-                sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
-                               for comp in range(spin_dim_SU3)]
-                
-                # Create debug plot
-                n_rows = min(spin_dim_SU3, 8)
-                fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
-                if n_rows == 1:
-                    axes_sig = axes_sig.reshape(1, -1)
-                
-                for comp in range(n_rows):
-                    sig_comp = sig_components[comp]
-                    label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
+            # Process individual signals (M0, M1, M01) - only if save_intermediates is True
+            if save_intermediates:
+                for sig_name, sig_components in [('M0_SU3', M0_comp_SU3), ('M1_SU3', M1_comp_SU3), ('M01_SU3', M01_comp_SU3)]:
+                    print(f"    Processing {sig_name}...")
                     
-                    # Time domain plot
-                    ax_time = axes_sig[comp, 0]
-                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                        ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                    ax_time.set_xlabel('Time index')
-                    ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
-                    ax_time.set_title(f'{label}-component (time domain)')
-                    ax_time.legend(fontsize=6)
-                    ax_time.grid(True, alpha=0.3)
+                    # Pre-compute all FFTs with caching
+                    sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
+                                   for comp in range(spin_dim_SU3)]
                     
-                    # 2D time-tau plot
-                    ax_2d = axes_sig[comp, 1]
-                    im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
-                                      extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
-                    ax_2d.set_xlabel('Time index')
-                    ax_2d.set_ylabel('τ')
-                    ax_2d.set_title(f'{label}-component (τ, t)')
-                    plt.colorbar(im, ax=ax_2d)
+                    # Create debug plot
+                    n_rows = min(spin_dim_SU3, 8)
+                    fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
+                    if n_rows == 1:
+                        axes_sig = axes_sig.reshape(1, -1)
                     
-                    # Frequency domain plot (use cached FFT)
-                    sig_comp_FF = sig_comp_FFs[comp]
-                    ax_freq = axes_sig[comp, 2]
-                    im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                              norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
-                    ax_freq.set_xlabel('$\\omega_{\\tau}$ (THz)')
-                    ax_freq.set_ylabel('$\\omega_t$ (THz)')
-                    ax_freq.set_title(f'{label}-component (freq domain)')
+                    for comp in range(n_rows):
+                        sig_comp = sig_components[comp]
+                        label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
+                        
+                        # Time domain plot
+                        ax_time = axes_sig[comp, 0]
+                        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                            ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                        ax_time.set_xlabel('Time index')
+                        ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
+                        ax_time.set_title(f'{label}-component (time domain)')
+                        ax_time.legend(fontsize=6)
+                        ax_time.grid(True, alpha=0.3)
+                        
+                        # 2D time-tau plot
+                        ax_2d = axes_sig[comp, 1]
+                        im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                          extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+                        ax_2d.set_xlabel('Time index')
+                        ax_2d.set_ylabel('τ')
+                        ax_2d.set_title(f'{label}-component (τ, t)')
+                        plt.colorbar(im, ax=ax_2d)
+                        
+                        # Frequency domain plot (use cached FFT)
+                        sig_comp_FF = sig_comp_FFs[comp]
+                        ax_freq = axes_sig[comp, 2]
+                        im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                                  norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]])
+                        ax_freq.set_xlabel('$\\omega_{\\tau}$ (THz)')
+                        ax_freq.set_ylabel('$\\omega_t$ (THz)')
+                        ax_freq.set_title(f'{label}-component (freq domain)')
+                        if omega_tau_window is not None:
+                            ax_freq.set_xlim(omega_tau_window[0], omega_tau_window[1])
+                        if omega_t_window is not None:
+                            ax_freq.set_ylim(omega_t_window)
+                        # Add energy level reference lines
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im_freq, ax=ax_freq)
+                        
+                        np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
+                    
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"), dpi=100)
+                    plt.close(fig_sig)  # Explicitly close figure
+                    
+                    # Total spectrum (sum over cached FFTs - no recomputation needed)
+                    sig_total_FF = sum(sig_comp_FFs)
+                    np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_total_FF)
+                    results[f'{sig_name}_FF'] = sig_total_FF
+                    
+                    # Calculate appropriate figure size
+                    tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
+                    t_range = omega_t_window if omega_t_window else (omega_t[0], omega_t[-1])
+                    figsize_spec = calculate_spectrum_figsize(tau_range, t_range)
+                    
+                    fig_spec = plt.figure(figsize=figsize_spec)
+                    plt.imshow(sig_total_FF, origin='lower',
+                               extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]],
+                               aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_total_FF, norm_type))
+                    plt.xlabel('$\\omega_{\\tau}$ (THz)')
+                    plt.ylabel('$\\omega_t$ (THz)')
+                    plt.colorbar(label='Intensity')
+                    plt.title(f'{sig_name} Spectrum (total)')
                     if omega_tau_window is not None:
-                        ax_freq.set_xlim(omega_tau_window[0], omega_tau_window[1])
+                        plt.xlim(omega_tau_window[0], omega_tau_window[1])
                     if omega_t_window is not None:
-                        ax_freq.set_ylim(omega_t_window)
-                    # Add energy level reference lines
-                    if energy_levels_mev:
-                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im_freq, ax=ax_freq)
-                    
-                    np.savetxt(os.path.join(dir, f"{sig_name}_FF_{label}.txt"), sig_comp_FF)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"), dpi=100)
-                plt.close(fig_sig)  # Explicitly close figure
-                
-                # Total spectrum (sum over cached FFTs - no recomputation needed)
-                sig_total_FF = sum(sig_comp_FFs)
-                np.savetxt(os.path.join(dir, f"{sig_name}_FF.txt"), sig_total_FF)
-                results[f'{sig_name}_FF'] = sig_total_FF
-                
-                # Calculate appropriate figure size
-                tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
-                t_range = omega_t_window if omega_t_window else (omega_t[0], omega_t[-1])
-                figsize_spec = calculate_spectrum_figsize(tau_range, t_range)
-                
-                fig_spec = plt.figure(figsize=figsize_spec)
-                plt.imshow(sig_total_FF, origin='lower',
-                           extent=[omega_tau[0], omega_tau[-1], omega_t[0], omega_t[-1]],
-                           aspect='auto', cmap='gnuplot2', norm=_get_norm(sig_total_FF, norm_type))
-                plt.xlabel('$\\omega_{\\tau}$ (THz)')
-                plt.ylabel('$\\omega_t$ (THz)')
-                plt.colorbar(label='Intensity')
-                plt.title(f'{sig_name} Spectrum (total)')
-                if omega_tau_window is not None:
-                    plt.xlim(omega_tau_window[0], omega_tau_window[1])
-                if omega_t_window is not None:
-                    plt.ylim(omega_t_window)
-                plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
-                plt.close(fig_spec)
+                        plt.ylim(omega_t_window)
+                    plt.savefig(os.path.join(dir, f"{sig_name}_SPEC.pdf"), dpi=100)
+                    plt.close(fig_spec)
             
             # M_NL analysis for SU3
             print("    Processing M_NL_SU3...")
@@ -2192,13 +2197,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 # Save data
                 np.savetxt(os.path.join(dir, "M_NL_lambda57_FF.txt"), M_NL_lambda57_FF)
-                np.savetxt(os.path.join(dir, "M0_lambda57_FF.txt"), M0_lambda57_FF)
-                np.savetxt(os.path.join(dir, "M1_lambda57_FF.txt"), M1_lambda57_FF)
-                np.savetxt(os.path.join(dir, "M01_lambda57_FF.txt"), M01_lambda57_FF)
                 results['M_NL_lambda57_FF'] = M_NL_lambda57_FF
-                results['M0_lambda57_FF'] = M0_lambda57_FF
-                results['M1_lambda57_FF'] = M1_lambda57_FF
-                results['M01_lambda57_FF'] = M01_lambda57_FF
+                if save_intermediates:
+                    np.savetxt(os.path.join(dir, "M0_lambda57_FF.txt"), M0_lambda57_FF)
+                    np.savetxt(os.path.join(dir, "M1_lambda57_FF.txt"), M1_lambda57_FF)
+                    np.savetxt(os.path.join(dir, "M01_lambda57_FF.txt"), M01_lambda57_FF)
+                    results['M0_lambda57_FF'] = M0_lambda57_FF
+                    results['M1_lambda57_FF'] = M1_lambda57_FF
+                    results['M01_lambda57_FF'] = M01_lambda57_FF
                 
                 # Main λ5 + λ7 spectrum plot
                 tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
@@ -2307,13 +2313,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 # Save data
                 np.savetxt(os.path.join(dir, "M_NL_lambda25_FF.txt"), M_NL_lambda25_FF)
-                np.savetxt(os.path.join(dir, "M0_lambda25_FF.txt"), M0_lambda25_FF)
-                np.savetxt(os.path.join(dir, "M1_lambda25_FF.txt"), M1_lambda25_FF)
-                np.savetxt(os.path.join(dir, "M01_lambda25_FF.txt"), M01_lambda25_FF)
                 results['M_NL_lambda25_FF'] = M_NL_lambda25_FF
-                results['M0_lambda25_FF'] = M0_lambda25_FF
-                results['M1_lambda25_FF'] = M1_lambda25_FF
-                results['M01_lambda25_FF'] = M01_lambda25_FF
+                if save_intermediates:
+                    np.savetxt(os.path.join(dir, "M0_lambda25_FF.txt"), M0_lambda25_FF)
+                    np.savetxt(os.path.join(dir, "M1_lambda25_FF.txt"), M1_lambda25_FF)
+                    np.savetxt(os.path.join(dir, "M01_lambda25_FF.txt"), M01_lambda25_FF)
+                    results['M0_lambda25_FF'] = M0_lambda25_FF
+                    results['M1_lambda25_FF'] = M1_lambda25_FF
+                    results['M01_lambda25_FF'] = M01_lambda25_FF
                 
                 # Main λ2 + λ5 spectrum plot
                 tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
@@ -2423,13 +2430,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 # Save data
                 np.savetxt(os.path.join(dir, "M_NL_lambda257_FF.txt"), M_NL_lambda257_FF)
-                np.savetxt(os.path.join(dir, "M0_lambda257_FF.txt"), M0_lambda257_FF)
-                np.savetxt(os.path.join(dir, "M1_lambda257_FF.txt"), M1_lambda257_FF)
-                np.savetxt(os.path.join(dir, "M01_lambda257_FF.txt"), M01_lambda257_FF)
                 results['M_NL_lambda257_FF'] = M_NL_lambda257_FF
-                results['M0_lambda257_FF'] = M0_lambda257_FF
-                results['M1_lambda257_FF'] = M1_lambda257_FF
-                results['M01_lambda257_FF'] = M01_lambda257_FF
+                if save_intermediates:
+                    np.savetxt(os.path.join(dir, "M0_lambda257_FF.txt"), M0_lambda257_FF)
+                    np.savetxt(os.path.join(dir, "M1_lambda257_FF.txt"), M1_lambda257_FF)
+                    np.savetxt(os.path.join(dir, "M01_lambda257_FF.txt"), M01_lambda257_FF)
+                    results['M0_lambda257_FF'] = M0_lambda257_FF
+                    results['M1_lambda257_FF'] = M1_lambda257_FF
+                    results['M01_lambda257_FF'] = M01_lambda257_FF
                 
                 # Main λ2 + λ5 + λ7 spectrum plot
                 tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
@@ -2539,13 +2547,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 # Save data
                 np.savetxt(os.path.join(dir, "M_NL_lambda27x_FF.txt"), M_NL_lambda27x_FF)
-                np.savetxt(os.path.join(dir, "M0_lambda27x_FF.txt"), M0_lambda27x_FF)
-                np.savetxt(os.path.join(dir, "M1_lambda27x_FF.txt"), M1_lambda27x_FF)
-                np.savetxt(os.path.join(dir, "M01_lambda27x_FF.txt"), M01_lambda27x_FF)
                 results['M_NL_lambda27x_FF'] = M_NL_lambda27x_FF
-                results['M0_lambda27x_FF'] = M0_lambda27x_FF
-                results['M1_lambda27x_FF'] = M1_lambda27x_FF
-                results['M01_lambda27x_FF'] = M01_lambda27x_FF
+                if save_intermediates:
+                    np.savetxt(os.path.join(dir, "M0_lambda27x_FF.txt"), M0_lambda27x_FF)
+                    np.savetxt(os.path.join(dir, "M1_lambda27x_FF.txt"), M1_lambda27x_FF)
+                    np.savetxt(os.path.join(dir, "M01_lambda27x_FF.txt"), M01_lambda27x_FF)
+                    results['M0_lambda27x_FF'] = M0_lambda27x_FF
+                    results['M1_lambda27x_FF'] = M1_lambda27x_FF
+                    results['M01_lambda27x_FF'] = M01_lambda27x_FF
                 
                 # Main λ2 + λ7 + x spectrum plot
                 tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
@@ -2655,13 +2664,14 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 
                 # Save data
                 np.savetxt(os.path.join(dir, "M_NL_lambda27x_v2_FF.txt"), M_NL_lambda27x_v2_FF)
-                np.savetxt(os.path.join(dir, "M0_lambda27x_v2_FF.txt"), M0_lambda27x_v2_FF)
-                np.savetxt(os.path.join(dir, "M1_lambda27x_v2_FF.txt"), M1_lambda27x_v2_FF)
-                np.savetxt(os.path.join(dir, "M01_lambda27x_v2_FF.txt"), M01_lambda27x_v2_FF)
                 results['M_NL_lambda27x_v2_FF'] = M_NL_lambda27x_v2_FF
-                results['M0_lambda27x_v2_FF'] = M0_lambda27x_v2_FF
-                results['M1_lambda27x_v2_FF'] = M1_lambda27x_v2_FF
-                results['M01_lambda27x_v2_FF'] = M01_lambda27x_v2_FF
+                if save_intermediates:
+                    np.savetxt(os.path.join(dir, "M0_lambda27x_v2_FF.txt"), M0_lambda27x_v2_FF)
+                    np.savetxt(os.path.join(dir, "M1_lambda27x_v2_FF.txt"), M1_lambda27x_v2_FF)
+                    np.savetxt(os.path.join(dir, "M01_lambda27x_v2_FF.txt"), M01_lambda27x_v2_FF)
+                    results['M0_lambda27x_v2_FF'] = M0_lambda27x_v2_FF
+                    results['M1_lambda27x_v2_FF'] = M1_lambda27x_v2_FF
+                    results['M01_lambda27x_v2_FF'] = M01_lambda27x_v2_FF
                 
                 # Main λ2 - 0.2*λ7 + x spectrum plot
                 tau_range = (omega_tau_window[0], omega_tau_window[1]) if omega_tau_window else (omega_tau[0], omega_tau[-1])
@@ -2735,7 +2745,8 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
                             window_type: str = 'gaussian',
                             energy_levels_mev: Optional[Dict[str, float]] = None,
                             load_from_cache: bool = False,
-                            reload_components: bool = False) -> Dict[str, np.ndarray]:
+                            reload_components: bool = False,
+                            save_intermediates: bool = False) -> Dict[str, np.ndarray]:
     """
     Read 2D coherent spectroscopy data and compute nonlinear spectra for both sublattices.
     
@@ -2751,6 +2762,7 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
             Keys: 'e1', 'e2', 'e2_e1', 'kc'. Values: energy in meV.
         load_from_cache: If True, skip FFT calculations and load from previously saved .txt files
         reload_components: If True, load component FFTs and recompute composites
+        save_intermediates: If True, save intermediate M0, M1, M01 spectra. Default: False
         
     Returns:
         Dictionary with 2DCS results for SU(2), SU(3), and combined
@@ -2761,7 +2773,8 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
     
     return read_2D_nonlinear(output_dir, omega_t_window, omega_tau_window, norm_type, 
                              window_type=window_type, energy_levels_mev=energy_levels_mev,
-                             load_from_cache=load_from_cache, reload_components=reload_components)
+                             load_from_cache=load_from_cache, reload_components=reload_components,
+                             save_intermediates=save_intermediates)
 
 
 def run_interactive_2dcs(filepath: str, 
