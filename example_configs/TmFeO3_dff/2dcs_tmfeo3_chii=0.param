@@ -32,9 +32,9 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
-chi5x = 0.6     # χ parameter
-chi2x = 0.0
-chi7x = 0.6
+chi5x = 0.05     # χ parameter
+chi2x = 0.05
+chi7x = 0.05
 
 # Tm-Tm Diagonal Bilinear Coupling (diagonal in Gell-Mann space)
 # J_a * λ_a ⊗ λ_a for each Gell-Mann generator (no cross terms)
@@ -67,13 +67,13 @@ T_zero = true
 pump_direction = 1,0,0
 pump_amplitude = 0.5
 pump_width = 0.5
-pump_frequency = 2.1
+pump_frequency = 4
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
 pump_amplitude_su3 = 0.5
 pump_width_su3 = 0.5
-pump_frequency_su3 = 2.1
+pump_frequency_su3 = 4
 pump_direction_su3 = 0,1,0,0,0,0,1,0
 
 # 2DCS Scan
