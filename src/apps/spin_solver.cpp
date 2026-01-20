@@ -4,6 +4,7 @@
 #include "classical_spin/lattice/lattice.h"
 #include "classical_spin/lattice/mixed_lattice.h"
 #include "classical_spin/lattice/phonon_lattice.h"
+#include "classical_spin/lattice/strain_phonon_lattice.h"
 #include <mpi.h>
 #include <iostream>
 #include <memory>
@@ -852,6 +853,242 @@ void build_phonon_params(const SpinConfig& config,
     dr_params.drive_strength_E2[0] = config.get_param("drive_strength_E2_0", 0.0);  // x-bond
     dr_params.drive_strength_E2[1] = config.get_param("drive_strength_E2_1", 0.0);  // y-bond
     dr_params.drive_strength_E2[2] = config.get_param("drive_strength_E2_2", 0.0);  // z-bond
+}
+
+/**
+ * Build StrainPhononLattice parameters from SpinConfig
+ * Uses Kitaev-Heisenberg-Γ-Γ' model with magnetoelastic (spin-strain) coupling
+ * 
+ * Magnetoelastic coupling (D3d point group):
+ * H_c^{A1g} = λ_{A1g} Σ_r (ε_xx + ε_yy) {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
+ * H_c^{Eg} = λ_{Eg} Σ_r {(ε_xx - ε_yy)[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
+ *                       + 2ε_xy[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+ */
+void build_strain_params(const SpinConfig& config,
+                         MagnetoelasticParams& me_params,
+                         ElasticParams& el_params,
+                         StrainDriveParams& dr_params) {
+    // Kitaev-Heisenberg-Γ-Γ' spin interaction parameters
+    me_params.J = config.get_param("J", -0.1);
+    me_params.K = config.get_param("K", -9.0);
+    me_params.Gamma = config.get_param("Gamma", 1.8);
+    me_params.Gammap = config.get_param("Gammap", 0.3);
+    
+    // 2nd neighbor (J2) - isotropic Heisenberg, sublattice-dependent
+    me_params.J2_A = config.get_param("J2_A", 0.3);
+    me_params.J2_B = config.get_param("J2_B", 0.3);
+    
+    // 3rd neighbor (J3) - isotropic Heisenberg
+    me_params.J3 = config.get_param("J3", 0.9);
+    
+    // Six-spin ring exchange on hexagonal plaquettes
+    me_params.J7 = config.get_param("J7", 0.0);
+    
+    // Gamma parameter for time-dependent J7 modulation via E1 phonon
+    // J7(t) = J7 * (1 - γ*f(t)*λ_Eg/4)^4 * (1 + γ*f(t)*λ_Eg/2)^2
+    me_params.gamma_J7 = config.get_param("gamma_J7", 0.0);
+    
+    // Magnetoelastic coupling strengths (A1g and Eg channels)
+    me_params.lambda_A1g = config.get_param("lambda_A1g", 0.0);
+    me_params.lambda_Eg = config.get_param("lambda_Eg", 0.0);
+    
+    // Elastic constants (Voigt notation)
+    // For isotropic solid: C44 = (C11 - C12) / 2
+    el_params.C11 = config.get_param("C11", 1.0);
+    el_params.C12 = config.get_param("C12", 0.3);
+    el_params.C44 = config.get_param("C44", 0.35);
+    
+    // Effective mass for strain dynamics
+    el_params.M = config.get_param("strain_mass", config.get_param("M", 1.0));
+    
+    // Damping coefficients
+    el_params.gamma_A1g = config.get_param("gamma_A1g", 0.1);
+    el_params.gamma_Eg = config.get_param("gamma_Eg", 0.1);
+    
+    // Quartic anharmonicity (optional)
+    el_params.lambda_A1g = config.get_param("lambda_A1g_quartic", 0.0);
+    el_params.lambda_Eg = config.get_param("lambda_Eg_quartic", 0.0);
+    
+    // Drive parameters (pulse 1 - pump)
+    dr_params.E0_1 = config.pump_amplitude;
+    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : el_params.omega_A1g();
+    dr_params.t_1 = config.pump_time;
+    dr_params.sigma_1 = config.pump_width;
+    dr_params.phi_1 = config.get_param("pump_phase", 0.0);
+    
+    // Drive parameters (pulse 2 - probe)
+    dr_params.E0_2 = config.probe_amplitude;
+    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : el_params.omega_A1g();
+    dr_params.t_2 = config.probe_time;
+    dr_params.sigma_2 = config.probe_width;
+    dr_params.phi_2 = config.get_param("probe_phase", 0.0);
+    
+    // Drive strength for different strain modes
+    dr_params.drive_strength_A1g = config.get_param("drive_strength_A1g", 1.0);
+    dr_params.drive_strength_Eg1 = config.get_param("drive_strength_Eg1", 0.0);
+    dr_params.drive_strength_Eg2 = config.get_param("drive_strength_Eg2", 0.0);
+}
+
+/**
+ * Run simulated annealing for StrainPhononLattice (spin subsystem only)
+ */
+void run_simulated_annealing_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running simulated annealing on StrainPhononLattice (spin subsystem)..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+    }
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
+        
+        // Save final configuration
+        lattice.save_spin_config(trial_dir + "/spins.txt");
+        lattice.save_strain_state(trial_dir + "/strain_state.txt");
+        
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "StrainPhononLattice simulated annealing completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
+/**
+ * Run molecular dynamics for StrainPhononLattice (full spin-strain dynamics)
+ */
+void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running spin-strain molecular dynamics on StrainPhononLattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+    }
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
+                              config.md_save_interval, trial_dir);
+        
+        // Save final configuration
+        lattice.save_spin_config(trial_dir + "/spins_final.txt");
+        lattice.save_strain_state(trial_dir + "/strain_state_final.txt");
+        
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "StrainPhononLattice molecular dynamics completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
+/**
+ * Run pump-probe for StrainPhononLattice (strain-driven spin dynamics)
+ * 
+ * This simulates a THz/acoustic pump-probe experiment on the magnetoelastic system:
+ * 1. Equilibrate spins via simulated annealing
+ * 2. Run spin-strain dynamics with acoustic drive
+ * 3. Record magnetization trajectories
+ */
+void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "Running acoustic pump-probe on StrainPhononLattice..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+        cout << "\nDrive parameters:" << endl;
+        cout << "  Pump amplitude: " << config.pump_amplitude << endl;
+        cout << "  Pump frequency: " << config.pump_frequency << endl;
+        cout << "  Pump time: " << config.pump_time << endl;
+        cout << "  Pump width: " << config.pump_width << endl;
+        cout << "  Drive strength A1g: " << lattice.drive_params.drive_strength_A1g << endl;
+        cout << "  Drive strength Eg1: " << lattice.drive_params.drive_strength_Eg1 << endl;
+        cout << "  Drive strength Eg2: " << lattice.drive_params.drive_strength_Eg2 << endl;
+        cout << "\nTime-dependent J7 modulation:" << endl;
+        cout << "  J7 = " << lattice.magnetoelastic_params.J7 << endl;
+        cout << "  gamma_J7 = " << lattice.magnetoelastic_params.gamma_J7 << endl;
+        cout << "  lambda_Eg = " << lattice.magnetoelastic_params.lambda_Eg << endl;
+    }
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        
+        if (config.num_trials > 1) {
+            cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+        }
+        
+        // Re-initialize for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        // Equilibrate spin subsystem via simulated annealing
+        if (config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Equilibrating spin subsystem via simulated annealing..." << endl;
+            }
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
+        } else {
+            lattice.load_spin_config(config.initial_spin_config);
+        }
+        
+        // Relax strain to equilibrium given the spin configuration
+        if (rank == 0) {
+            cout << "Relaxing strain to adiabatic equilibrium..." << endl;
+        }
+        lattice.relax_strain();
+        
+        // Save initial configuration
+        lattice.save_spin_config(trial_dir + "/initial_spins.txt");
+        lattice.save_strain_state(trial_dir + "/initial_strain.txt");
+        
+        // Run spin-strain dynamics with acoustic drive
+        if (rank == 0) {
+            cout << "Starting strain-driven spin dynamics..." << endl;
+            cout << "  Time range: " << config.md_time_start << " to " << config.md_time_end << endl;
+            cout << "  Timestep: " << config.md_timestep << endl;
+        }
+        
+        lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
+                              config.md_save_interval, trial_dir);
+        
+        // Save final configuration
+        lattice.save_spin_config(trial_dir + "/final_spins.txt");
+        lattice.save_strain_state(trial_dir + "/final_strain.txt");
+        
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "StrainPhononLattice pump-probe completed (" << config.num_trials << " trials)." << endl;
+    }
 }
 
 /**
@@ -2254,7 +2491,110 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
         filesystem::create_directories(sweep_config.output_dir);
         
         // Build unit cell with updated parameters
-        if (sweep_config.system == SystemType::TMFEO3) {
+        if (sweep_config.system == SystemType::NCTO) {
+            // PhononLattice spin-phonon coupled system (honeycomb)
+            PhononLattice phonon_lattice(sweep_config.lattice_size[0],
+                                         sweep_config.lattice_size[1],
+                                         sweep_config.lattice_size[2],
+                                         sweep_config.spin_length);
+            
+            // Build parameters from config
+            SpinPhononCouplingParams sp_params;
+            PhononParams ph_params;
+            DriveParams dr_params;
+            TimeDependentSpinPhononParams td_sp_params;
+            build_phonon_params(sweep_config, sp_params, ph_params, dr_params, td_sp_params);
+            
+            // Set parameters
+            phonon_lattice.set_parameters(sp_params, ph_params, dr_params);
+            phonon_lattice.set_time_dependent_spin_phonon(td_sp_params);
+            phonon_lattice.alpha_gilbert = sweep_config.get_param("alpha_gilbert", 0.0);
+            
+            // Set magnetic field
+            Eigen::Vector3d B;
+            B << sweep_config.field_strength * sweep_config.field_direction[0],
+                 sweep_config.field_strength * sweep_config.field_direction[1],
+                 sweep_config.field_strength * sweep_config.field_direction[2];
+            phonon_lattice.set_field(B);
+            
+            // Initialize spins
+            if (sweep_config.use_ferromagnetic_init) {
+                Eigen::Vector3d dir;
+                dir << sweep_config.ferromagnetic_direction[0],
+                       sweep_config.ferromagnetic_direction[1],
+                       sweep_config.ferromagnetic_direction[2];
+                phonon_lattice.init_ferromagnetic(dir);
+            } else if (!sweep_config.initial_spin_config.empty()) {
+                phonon_lattice.load_spin_config(sweep_config.initial_spin_config);
+            } else {
+                phonon_lattice.init_random();
+            }
+            
+            // Run appropriate simulation
+            switch (sweep_config.simulation) {
+                case SimulationType::SIMULATED_ANNEALING:
+                    run_simulated_annealing_phonon(phonon_lattice, sweep_config, 0, 1);
+                    break;
+                case SimulationType::MOLECULAR_DYNAMICS:
+                    run_molecular_dynamics_phonon(phonon_lattice, sweep_config, 0, 1);
+                    break;
+                case SimulationType::PUMP_PROBE:
+                    run_pump_probe_phonon(phonon_lattice, sweep_config, 0, 1);
+                    break;
+                case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
+                    run_2dcs_phonon(phonon_lattice, sweep_config, 0, 1);
+                    break;
+                default:
+                    cerr << "[Rank " << rank << "] Error: Unsupported base simulation for parameter sweep with PhononLattice" << endl;
+                    break;
+            }
+        } else if (sweep_config.system == SystemType::NCTO_STRAIN) {
+            // StrainPhononLattice magnetoelastic (spin-strain) coupled system (honeycomb)
+            StrainPhononLattice strain_lattice(sweep_config.lattice_size[0],
+                                               sweep_config.lattice_size[1],
+                                               sweep_config.lattice_size[2],
+                                               sweep_config.spin_length);
+            
+            // Build parameters from config
+            MagnetoelasticParams me_params;
+            ElasticParams el_params;
+            StrainDriveParams dr_params;
+            build_strain_params(sweep_config, me_params, el_params, dr_params);
+            
+            // Set parameters
+            strain_lattice.set_parameters(me_params, el_params, dr_params);
+            strain_lattice.alpha_gilbert = sweep_config.get_param("alpha_gilbert", 0.0);
+            
+            // Set magnetic field
+            Eigen::Vector3d B;
+            B << sweep_config.field_strength * sweep_config.field_direction[0],
+                 sweep_config.field_strength * sweep_config.field_direction[1],
+                 sweep_config.field_strength * sweep_config.field_direction[2];
+            strain_lattice.set_uniform_field(B);
+            
+            // Initialize spins
+            if (!sweep_config.initial_spin_config.empty()) {
+                strain_lattice.load_spin_config(sweep_config.initial_spin_config);
+            } else {
+                strain_lattice.init_random();
+            }
+            
+            // Run appropriate simulation
+            switch (sweep_config.simulation) {
+                case SimulationType::SIMULATED_ANNEALING:
+                    run_simulated_annealing_strain(strain_lattice, sweep_config, 0, 1);
+                    break;
+                case SimulationType::MOLECULAR_DYNAMICS:
+                    run_molecular_dynamics_strain(strain_lattice, sweep_config, 0, 1);
+                    break;
+                case SimulationType::PUMP_PROBE:
+                    run_pump_probe_strain(strain_lattice, sweep_config, 0, 1);
+                    break;
+                default:
+                    cerr << "[Rank " << rank << "] Error: Unsupported base simulation for parameter sweep with StrainPhononLattice" << endl;
+                    break;
+            }
+        } else if (sweep_config.system == SystemType::TMFEO3) {
             MixedUnitCell mixed_uc = build_tmfeo3(sweep_config);
             MixedLattice mixed_lattice(mixed_uc, sweep_config.lattice_size[0], 
                                       sweep_config.lattice_size[1], 
@@ -2510,10 +2850,71 @@ int main(int argc, char** argv) {
                 case SimulationType::TWOD_COHERENT_SPECTROSCOPY:
                     run_2dcs_phonon(phonon_lattice, config, rank, size);
                     break;
+                case SimulationType::PARAMETER_SWEEP:
+                    run_parameter_sweep(config, rank, size);
+                    break;
                 default:
                     if (rank == 0) {
                         cerr << "Simulation type not supported for PhononLattice. "
-                             << "Supported: SA, MD, pump_probe, 2dcs" << endl;
+                             << "Supported: SA, MD, pump_probe, 2dcs, parameter_sweep" << endl;
+                    }
+                    break;
+            }
+        } else if (config.system == SystemType::NCTO_STRAIN) {
+            // StrainPhononLattice magnetoelastic (spin-strain) coupled system (honeycomb)
+            if (rank == 0) {
+                cout << "\nBuilding StrainPhononLattice magnetoelastic lattice..." << endl;
+            }
+            
+            StrainPhononLattice strain_lattice(config.lattice_size[0],
+                                               config.lattice_size[1],
+                                               config.lattice_size[2],
+                                               config.spin_length);
+            
+            // Build parameters from config
+            MagnetoelasticParams me_params;
+            ElasticParams el_params;
+            StrainDriveParams dr_params;
+            build_strain_params(config, me_params, el_params, dr_params);
+            
+            // Set parameters (this builds the interaction matrices)
+            strain_lattice.set_parameters(me_params, el_params, dr_params);
+            
+            // Set Gilbert damping if specified
+            strain_lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);
+            
+            // Set magnetic field
+            Eigen::Vector3d B;
+            B << config.field_strength * config.field_direction[0],
+                 config.field_strength * config.field_direction[1],
+                 config.field_strength * config.field_direction[2];
+            strain_lattice.set_uniform_field(B);
+            
+            // Initialize spins
+            if (!config.initial_spin_config.empty()) {
+                strain_lattice.load_spin_config(config.initial_spin_config);
+            } else {
+                strain_lattice.init_random();
+            }
+            
+            // Run simulation
+            switch (config.simulation) {
+                case SimulationType::SIMULATED_ANNEALING:
+                    run_simulated_annealing_strain(strain_lattice, config, rank, size);
+                    break;
+                case SimulationType::MOLECULAR_DYNAMICS:
+                    run_molecular_dynamics_strain(strain_lattice, config, rank, size);
+                    break;
+                case SimulationType::PUMP_PROBE:
+                    run_pump_probe_strain(strain_lattice, config, rank, size);
+                    break;
+                case SimulationType::PARAMETER_SWEEP:
+                    run_parameter_sweep(config, rank, size);
+                    break;
+                default:
+                    if (rank == 0) {
+                        cerr << "Simulation type not supported for StrainPhononLattice. "
+                             << "Supported: SA, MD, pump_probe, parameter_sweep" << endl;
                     }
                     break;
             }

@@ -208,6 +208,7 @@ set(CLASSICAL_SPIN_HEADERS
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/mixed_lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/phonon_lattice.h
+    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/strain_phonon_lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/io/hdf5_io.h
 )
 
@@ -226,6 +227,7 @@ set(CORE_SOURCES
     src/core/unitcell_builders.cpp
     src/core/spin_config.cpp
     src/core/phonon_lattice.cpp
+    src/core/strain_phonon_lattice.cpp
 )
 
 if(ENABLE_CUDA)

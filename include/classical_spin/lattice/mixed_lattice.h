@@ -3068,9 +3068,53 @@ public:
         field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
         field_drive_SU2[1] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
         
+        int mpi_rank = 0;
+        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+        
         for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
-            field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2) = sublattice_frames_SU2[atom] * field_in1[atom];
-            field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2) = sublattice_frames_SU2[atom] * field_in2[atom];
+            SpinVector local_field1 = sublattice_frames_SU2[atom] * field_in1[atom];
+            SpinVector local_field2 = sublattice_frames_SU2[atom] * field_in2[atom];
+            field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2) = local_field1;
+            field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2) = local_field2;
+        }
+        
+        if (mpi_rank == 0) {
+            cout << "\n========== SU(2) Pulse Configuration ==========" << endl;
+            cout << "Pulse 1: t_center = " << t_B1 << ", Pulse 2: t_center = " << t_B2 << endl;
+            cout << "Amplitude = " << amp << ", Width = " << width << ", Frequency = " << freq << endl;
+            cout << "------------------------------------------------" << endl;
+            
+            for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
+                SpinVector local_field1 = field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2);
+                SpinVector local_field2 = field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2);
+                
+                cout << "SU(2) Atom " << atom << ":" << endl;
+                cout << "  Pulse 1 - Global: [";
+                for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << field_in1[atom](d);
+                    if (d < spin_dim_SU2 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+                cout << "           Local:  [";
+                for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << local_field1(d);
+                    if (d < spin_dim_SU2 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+                cout << "  Pulse 2 - Global: [";
+                for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << field_in2[atom](d);
+                    if (d < spin_dim_SU2 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+                cout << "           Local:  [";
+                for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << local_field2(d);
+                    if (d < spin_dim_SU2 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+            }
+            cout << "================================================\n" << endl;
         }
         
         t_pulse_SU2[0] = t_B1;
@@ -3090,9 +3134,53 @@ public:
         field_drive_SU3[0] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
         field_drive_SU3[1] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
         
+        int mpi_rank = 0;
+        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+        
         for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
-            field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3) = sublattice_frames_SU3[atom] * field_in1[atom];
-            field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3) = sublattice_frames_SU3[atom] * field_in2[atom];
+            SpinVector local_field1 = sublattice_frames_SU3[atom] * field_in1[atom];
+            SpinVector local_field2 = sublattice_frames_SU3[atom] * field_in2[atom];
+            field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3) = local_field1;
+            field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3) = local_field2;
+        }
+        
+        if (mpi_rank == 0) {
+            cout << "\n========== SU(3) Pulse Configuration ==========" << endl;
+            cout << "Pulse 1: t_center = " << t_B1 << ", Pulse 2: t_center = " << t_B2 << endl;
+            cout << "Amplitude = " << amp << ", Width = " << width << ", Frequency = " << freq << endl;
+            cout << "------------------------------------------------" << endl;
+            
+            for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
+                SpinVector local_field1 = field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3);
+                SpinVector local_field2 = field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3);
+                
+                cout << "SU(3) Atom " << atom << ":" << endl;
+                cout << "  Pulse 1 - Global: [";
+                for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << field_in1[atom](d);
+                    if (d < spin_dim_SU3 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+                cout << "           Local:  [";
+                for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << local_field1(d);
+                    if (d < spin_dim_SU3 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+                cout << "  Pulse 2 - Global: [";
+                for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << field_in2[atom](d);
+                    if (d < spin_dim_SU3 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+                cout << "           Local:  [";
+                for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                    cout << std::setw(10) << std::setprecision(6) << local_field2(d);
+                    if (d < spin_dim_SU3 - 1) cout << ", ";
+                }
+                cout << "]" << endl;
+            }
+            cout << "================================================\n" << endl;
         }
         
         t_pulse_SU3[0] = t_B1;

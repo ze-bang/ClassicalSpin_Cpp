@@ -58,4 +58,4 @@ use_gpu = false
 output_dir = TmFeO3_Fe_md
 save_observables = true
 
-initial_spin_config = TmFeO3_Fe_sa/sample_0/spins_T=0.103076.dat
+#initial_spin_config = TmFeO3_Fe_sa/sample_0/spins_T=0.103076.dat

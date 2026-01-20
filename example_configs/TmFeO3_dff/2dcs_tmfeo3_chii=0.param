@@ -20,8 +20,8 @@ Ka = 0.0
 Kc = -0.120794758807550 #To get the AFM band gap at zero to be 0.91 THz = 3.7634575979 meV
 
 # DM Interaction (in meV)
-D1 = 0.0 #0 for now just for the AFM mode
-D2 = 0.0
+D1 = 0.01 #0 for now just for the AFM mode
+D2 = 0.01
 
 # Tm Energy Splitting (in meV)
 e1 = 2.19190387888 #0.53*4.135667696 = 2.19190387888
@@ -32,9 +32,9 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
-chi5x = 0.15     # χ parameter
-chi2x = 0.15
-chi7x = 0.15
+chi5x = 0.6     # χ parameter
+chi7x = 0.6
+chi2x = 0.6
 
 # Tm-Tm Diagonal Bilinear Coupling (diagonal in Gell-Mann space)
 # J_a * λ_a ⊗ λ_a for each Gell-Mann generator (no cross terms)
@@ -71,7 +71,7 @@ pump_frequency = 4
 
 # For SU(3) spins (Tm) - specify Gell-Mann basis direction (8 components)
 # Single direction broadcasts to all Tm sublattices, or provide one per sublattice
-pump_amplitude_su3 = 0.5
+pump_amplitude_su3 = 0.0
 pump_width_su3 = 0.5
 pump_frequency_su3 = 4
 pump_direction_su3 = 0,1,0,0,0,0,1,0
@@ -90,5 +90,5 @@ md_integrator = rk4
 use_gpu = false              # Recommended for TmFeO3 2DCS
 
 # Output
-output_dir = TmFeO3_2DCS
+output_dir = TmFeO3_2DCS_D=0.005
 save_observables = false
