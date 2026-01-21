@@ -1,0 +1,152 @@
+# NCTO Magnetoelastic (Spin-Strain) Coupling Configuration
+# =========================================================
+# 
+# This configuration file sets up a simulation of the 
+# NCTO-like spin-strain coupled honeycomb lattice using
+# the StrainPhononLattice class.
+#
+# The model includes:
+# - Classical spins on honeycomb lattice with Kitaev-Heisenberg-Γ-Γ' interactions
+# - Strain field phonons: A1g (ε_xx + ε_yy) and Eg (ε_xx - ε_yy, 2ε_xy)
+# - Magnetoelastic coupling through A1g and Eg symmetry channels of D3d
+#
+# Magnetoelastic coupling Hamiltonian:
+# H_c^{A1g} = λ_{A1g} Σ_r (ε_xx + ε_yy) {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
+# H_c^{Eg} = λ_{Eg} Σ_r {(ε_xx - ε_yy)[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
+#                       + 2ε_xy[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+#
+# where f_X^{IRR} are the spin basis functions for D3d point group irreps.
+
+# ============================================
+# SYSTEM TYPE
+# ============================================
+# Use NCTO_STRAIN for magnetoelastic (spin-strain) coupling
+# Use NCTO for original phonon (Q-coordinate) coupling
+system = NCTO_STRAIN
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 8,8,1
+
+# Simulation type: SA, MD
+simulation_mode = molecular_dynamics
+
+# Output directory
+output_dir = NCTO_strain_output
+
+# Number of trials (samples)
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+# Kitaev-Heisenberg-Gamma-Gamma' model
+# H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α) + Γ'(...)]
+
+J = -1.0                 # Heisenberg coupling (meV)
+K = -6.0                 # Kitaev coupling (meV, ferromagnetic)
+Gamma = 8.0              # Gamma coupling (meV)
+Gammap = -4.0            # Gamma' coupling (meV)
+J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0.0                 # Third-neighbor Heisenberg (meV)
+J7 = 0.0                 # Six-spin ring exchange (meV)
+
+# Time-dependent J7 modulation via E1 phonon drive
+# J7(t) = J7 * (1 - γ*f(t)*λ_Eg/4)^4 * (1 + γ*f(t)*λ_Eg/2)^2
+# where f(t) is the drive waveform
+# Set gamma_J7 = 0 to disable time dependence
+gamma_J7 = 0.0           # γ scaling factor for J7 modulation
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# Gilbert damping for spin dynamics
+alpha_gilbert = 0.01
+
+# ============================================
+# MAGNETOELASTIC COUPLING PARAMETERS
+# ============================================
+# These are the two independent coupling constants for D3d symmetry
+# λ_{A1g} couples strain A1g mode (ε_xx + ε_yy) to spin A1g basis functions
+# λ_{Eg} couples strain Eg modes (ε_xx - ε_yy, 2ε_xy) to spin Eg basis functions
+
+lambda_A1g = 0.5         # A1g channel magnetoelastic coupling
+lambda_Eg = 0.3          # Eg channel magnetoelastic coupling
+
+# ============================================
+# ELASTIC PARAMETERS
+# ============================================
+# Elastic constants in Voigt notation
+# H_elastic = (1/2)[C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²]
+# For isotropic solid: C44 = (C11 - C12) / 2
+
+C11 = 1.0                # Longitudinal stiffness
+C12 = 0.3                # Off-diagonal coupling
+C44 = 0.35               # Shear stiffness
+
+# Effective mass for strain dynamics (M = 1 means frequencies in natural units)
+strain_mass = 1.0
+# Alternatively:
+# M = 1.0
+
+# Characteristic frequencies derived from elastic constants:
+# ω_A1g² ≈ (C11 + C12) / M ≈ 1.3 → ω_A1g ≈ 1.14
+# ω_Eg² ≈ 2*C44 / M ≈ 0.7 → ω_Eg ≈ 0.84
+
+# Damping coefficients
+gamma_A1g = 0.1          # A1g mode damping
+gamma_Eg = 0.1           # Eg mode damping
+
+# Optional: quartic anharmonicity for strain potential
+lambda_A1g_quartic = 0.0  # A1g quartic coefficient
+lambda_Eg_quartic = 0.0   # Eg quartic coefficient
+
+# ============================================
+# DRIVE PARAMETERS (ACOUSTIC EXCITATION)
+# ============================================
+# Pulse 1 (pump)
+pump_amplitude = 0.1      # Drive amplitude
+pump_frequency = 1.14     # Drive frequency (match ω_A1g for resonance)
+pump_time = 0.0           # Pulse center time
+pump_width = 2.0          # Gaussian envelope width
+pump_phase = 0.0          # Phase
+
+# Pulse 2 (probe) - for pump-probe style experiments
+probe_amplitude = 0.0
+probe_frequency = 1.14
+probe_time = 10.0
+probe_width = 2.0
+probe_phase = 0.0
+
+# Drive strength for different strain modes
+# A1g is typically acoustic/dilatational, can be driven by pressure
+# Eg modes are shear modes
+drive_strength_A1g = 1.0   # Drive A1g mode
+drive_strength_Eg1 = 0.0   # Drive Eg,1 (ε_xx - ε_yy)
+drive_strength_Eg2 = 0.0   # Drive Eg,2 (2ε_xy)
+
+# ============================================
+# MOLECULAR DYNAMICS PARAMETERS
+# ============================================
+dt = 0.01                 # Time step
+t_final = 100.0           # Total simulation time
+md_output_every = 100     # Output every N steps
+
+# ============================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================
+# Used if simulation_mode = simulated_annealing
+T_start = 15.0            # Starting temperature
+T_end = 0.001             # Final temperature
+annealing_steps = 10000   # Number of temperature steps
+overrelaxation_rate = 10  # MC sweeps per temperature step
+cooling_rate = 0.99       # Exponential cooling factor
+
+# ============================================
+# INITIALIZATION
+# ============================================
+# Options: random (default), or load from file
+# initial_spin_config = path/to/spins.txt
+use_ferromagnetic_init = false
+ferromagnetic_direction = 0,0,1

@@ -1,0 +1,55 @@
+# Parameter Sweep for Non-Kramers Pyrochlore - Field Variation
+# Jzz = 3, Jpm = -0.5, Jpmpm = 0
+# Sweep field from 1.5 T to 3.0 T
+# Field couples only to Sz (delta1 = delta2 = 0)
+
+# System specification
+system = pyrochlore_non_kramer
+simulation_mode = parameter_sweep
+
+# Lattice size
+lattice_size = 8, 8, 8
+
+# Exchange parameters
+Jzz = 3.0
+Jpm = -0.5
+Jpmpm = 0.0
+
+# Non-Kramers field response (set to 0 for pure Sz coupling)
+delta1 = 0.0
+delta2 = 0.0
+
+# External magnetic field along [111] direction
+field_strength = 2.0
+field_direction = 1, 1, 1
+
+# Parameter sweep configuration
+# Note: field_strength above is just the base value and gets overridden by sweep values
+sweep_parameter = field_strength
+sweep_start = 1.5
+sweep_end = 3.0
+sweep_step = 0.1
+sweep_base_simulation = parallel_tempering
+
+# Parallel tempering parameters for each sweep point
+T_start = 5.0               # Highest temperature
+T_end = 0.01                # Lowest temperature
+annealing_steps = 50000
+overrelaxation_rate = 10
+pt_exchange_frequency = 10  # Attempt replica exchange every N steps
+
+# MPI distribution for sweep + PT
+# pt_ranks_per_point: how many MPI ranks per sweep point (each runs PT with that many replicas)
+# Set to 0 for auto (all ranks share one sweep point), or >1 for concurrent sweep points
+pt_ranks_per_point = 4
+
+# Which temperature replicas to save
+# Options: 
+#   - Specific ranks: 0 or 0, 1, 2 (0 = coldest/lowest T)
+#   - All ranks: FULL or ALL
+ranks_to_write = 0
+save_observables = true
+
+# Output
+output_dir = output_non_kramer_field_sweep
+num_trials = 1

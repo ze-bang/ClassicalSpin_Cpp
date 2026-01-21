@@ -1,0 +1,100 @@
+# Example configuration for parameter sweep with NCTO_STRAIN
+# This sweeps over the lambda_Eg (magnetoelastic coupling) parameter
+
+# ============================================
+# SYSTEM TYPE
+# ============================================
+system = NCTO_STRAIN
+
+# Lattice dimensions (honeycomb, 2D) - smaller for quick test
+lattice_size = 6,6,1
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# ============================================
+# PARAMETER SWEEP SETTINGS
+# ============================================
+sweep_parameter = lambda_Eg
+sweep_start = 0.005
+sweep_end = 0.02
+sweep_step = 0.005
+sweep_base_simulation = simulated_annealing
+
+# ============================================
+# OUTPUT
+# ============================================
+output_dir = output_ncto_strain_sweep
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+J = -1.0
+K = -6.0
+Gamma = 8.0
+Gammap = -4.0
+J2_A = 0.0
+J2_B = 0.0
+J3 = 0.0
+J7 = -0.5
+gamma_J7 = 1.0
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# Gilbert damping
+alpha_gilbert = 0.01
+
+# ============================================
+# MAGNETOELASTIC COUPLING PARAMETERS
+# ============================================
+lambda_A1g = 0.0
+lambda_Eg = 0.01   # This will be swept
+
+# ============================================
+# ELASTIC PARAMETERS
+# ============================================
+C11 = 1.0
+C12 = 0.3
+C44 = 0.35
+strain_mass = 1.0
+gamma_A1g = 0.0
+gamma_Eg = 0.2
+lambda_A1g_quartic = 0.0
+lambda_Eg_quartic = 0.0
+
+# ============================================
+# DRIVE PARAMETERS (not used for SA)
+# ============================================
+drive_strength_A1g = 0.0
+drive_strength_Eg1 = 0.0
+drive_strength_Eg2 = 0.0
+pump_amplitude = 0.0
+pump_frequency = 8.0
+pump_time = 0.0
+pump_width = 2.0
+pump_phase = 0.0
+probe_amplitude = 0.0
+probe_frequency = 8.0
+probe_time = 50.0
+probe_width = 2.0
+probe_phase = 0.0
+
+# ============================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================
+adiabatic_phonons = true
+relax_phonons = true
+phonon_only_relax = false
+T_start = 10.0
+T_end = 0.01
+T_zero = true
+annealing_steps = 10000
+cooling_rate = 0.9
+overrelaxation_rate = 5
+use_twist_boundary = false
+save_observables = true

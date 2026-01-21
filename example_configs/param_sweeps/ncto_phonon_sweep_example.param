@@ -1,0 +1,79 @@
+# Example configuration for parameter sweep with NCTO (PhononLattice)
+# This sweeps over the J coupling parameter
+
+# ============================================
+# SYSTEM TYPE
+# ============================================
+system = NCTO
+
+# Lattice dimensions (honeycomb, 2D) - smaller for quick test
+lattice_size = 6,6,1
+
+# Simulation mode - parameter sweep
+simulation_mode = parameter_sweep
+
+# ============================================
+# PARAMETER SWEEP SETTINGS
+# ============================================
+sweep_parameter = J
+sweep_start = -2.0
+sweep_end = 0.0
+sweep_step = 0.5
+sweep_base_simulation = simulated_annealing
+
+# ============================================
+# OUTPUT
+# ============================================
+output_dir = output_ncto_phonon_sweep
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+J = -1.0
+K = -6.0
+Gamma = 8.0
+Gammap = -4.0
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# Gilbert damping
+alpha_gilbert = 0.01
+
+# ============================================
+# PHONON PARAMETERS
+# ============================================
+phonon_mass = 1.0
+phonon_omega_E1 = 3.0
+phonon_omega_E2 = 5.0
+phonon_gamma_E1 = 0.1
+phonon_gamma_E2 = 0.1
+
+# Spin-phonon coupling
+lambda_sp_E1 = 0.1
+lambda_sp_E2 = 0.1
+
+# ============================================
+# DRIVE PARAMETERS (not used for SA)
+# ============================================
+pump_amplitude = 0.0
+pump_frequency = 3.0
+pump_time = 0.0
+pump_width = 2.0
+
+# ============================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================
+adiabatic_phonons = true
+relax_phonons = true
+T_start = 10.0
+T_end = 0.01
+T_zero = true
+annealing_steps = 10000
+cooling_rate = 0.9
+use_twist_boundary = false
+save_observables = true
