@@ -2501,11 +2501,12 @@ public:
      * Parallel tempering with MPI
      * Collects: energy, specific heat, sublattice magnetizations, and cross-correlations
      * All with binning analysis for error estimation
+     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
-                           bool gaussian_move = true) {
+                           bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -2514,8 +2515,8 @@ public:
         }
         
         int rank, size;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &size);
         
         // Set random seed
         seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 1000) * 2 + 1);
@@ -2555,7 +2556,7 @@ public:
             
             // Attempt replica exchange
             if (swap_rate > 0 && i % swap_rate == 0) {
-                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
             }
         }
         
@@ -2577,7 +2578,7 @@ public:
             }
             
             if (swap_rate > 0 && i % swap_rate == 0) {
-                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
             }
             
             if (i % probe_rate == 0) {
@@ -2595,14 +2596,15 @@ public:
                                                   heat_capacity, dHeat, temp, dir_name, 
                                                   rank_to_write, n_anneal, n_measure, 
                                                   curr_accept, swap_accept,
-                                                  swap_rate, overrelaxation_rate, probe_rate);
+                                                  swap_rate, overrelaxation_rate, probe_rate, comm);
     }
 
     /**
      * Attempt replica exchange between neighboring temperatures
+     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
      */
     int attempt_replica_exchange(int rank, int size, const vector<double>& temp,
-                                double curr_Temp, size_t swap_parity) {
+                                double curr_Temp, size_t swap_parity, MPI_Comm comm = MPI_COMM_WORLD) {
         // Determine partner based on checkerboard pattern
         int partner_rank;
         if (swap_parity % 2 == 0) {
@@ -2621,7 +2623,7 @@ public:
         
         MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
                     &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
-                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    comm, MPI_STATUS_IGNORE);
         
         // Decide acceptance
         bool accept = false;
@@ -2634,7 +2636,7 @@ public:
         
         // Broadcast decision
         int accept_int = accept ? 1 : 0;
-        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), MPI_COMM_WORLD);
+        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), comm);
         accept = (accept_int == 1);
         
         // Exchange configurations if accepted
@@ -2651,7 +2653,7 @@ public:
             
             MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 1,
                         recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 1,
-                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        comm, MPI_STATUS_IGNORE);
             
             // Deserialize
             for (size_t i = 0; i < lattice_size; ++i) {
@@ -2731,8 +2733,8 @@ public:
         if (!dir_name.empty()) {
             filesystem::create_directories(dir_name);
             
-            // Check if this rank should write
-            bool should_write = std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end();
+            // Check if this rank should write (supports FULL mode with sentinel -1)
+            bool should_write = should_rank_write(rank, rank_to_write);
             
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
@@ -2755,6 +2757,7 @@ public:
     /**
      * Gather and save comprehensive statistics with binning analysis (MPI version)
      * Includes: energy, specific heat, sublattice magnetizations, cross-correlations
+     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
      */
     void gather_and_save_statistics_comprehensive(int rank, int size, double curr_Temp,
                                    const vector<double>& energies,
@@ -2766,7 +2769,7 @@ public:
                                    size_t n_anneal, size_t n_measure,
                                    double curr_accept, int swap_accept,
                                    size_t swap_rate, size_t overrelaxation_rate,
-                                   size_t probe_rate) {
+                                   size_t probe_rate, MPI_Comm comm = MPI_COMM_WORLD) {
         
         // Compute comprehensive thermodynamic observables with binning analysis
         ThermodynamicObservables obs = compute_thermodynamic_observables(
@@ -2777,9 +2780,9 @@ public:
         
         // Gather heat capacity to root
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
-                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                   1, MPI_DOUBLE, 0, comm);
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 
-                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                   1, MPI_DOUBLE, 0, comm);
         
         // Report acceptance rates
         double total_steps = n_anneal + n_measure;
@@ -2797,8 +2800,8 @@ public:
         if (!dir_name.empty()) {
             filesystem::create_directories(dir_name);
             
-            // Check if this rank should write
-            bool should_write = std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end();
+            // Check if this rank should write (supports FULL mode with sentinel -1)
+            bool should_write = should_rank_write(rank, rank_to_write);
             
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
@@ -2828,7 +2831,7 @@ public:
         }
         
         // Synchronize before finishing
-        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(comm);
     }
 
     // ============================================================

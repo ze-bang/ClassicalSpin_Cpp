@@ -155,6 +155,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "ranks_to_write") {
                 config.ranks_to_write = parse_int_list(value);
             }
+            else if (key == "pt_ranks_per_point") {
+                config.pt_ranks_per_point = stoi(value);
+            }
             else if (key == "pump_amplitude") {
                 config.pump_amplitude = stod(value);
             }
@@ -312,6 +315,7 @@ void SpinConfig::to_file(const string& filename) const {
         case SystemType::HONEYCOMB_BCAO: file << "honeycomb_bcao"; break;
         case SystemType::HONEYCOMB_KITAEV: file << "honeycomb_kitaev"; break;
         case SystemType::PYROCHLORE: file << "pyrochlore"; break;
+        case SystemType::PYROCHLORE_NON_KRAMER: file << "pyrochlore_non_kramer"; break;
         case SystemType::TMFEO3: file << "tmfeo3"; break;
         case SystemType::TMFEO3_FE: file << "tmfeo3_fe"; break;
         case SystemType::TMFEO3_TM: file << "tmfeo3_tm"; break;
@@ -423,6 +427,7 @@ void SpinConfig::print() const {
         case SystemType::HONEYCOMB_BCAO: cout << "BCAO Honeycomb"; break;
         case SystemType::HONEYCOMB_KITAEV: cout << "Kitaev Honeycomb"; break;
         case SystemType::PYROCHLORE: cout << "Pyrochlore"; break;
+        case SystemType::PYROCHLORE_NON_KRAMER: cout << "Pyrochlore (Non-Kramers)"; break;
         case SystemType::TMFEO3: cout << "TmFeO3"; break;
         case SystemType::TMFEO3_FE: cout << "TmFeO3 (Fe only)"; break;
         case SystemType::TMFEO3_TM: cout << "TmFeO3 (Tm only)"; break;

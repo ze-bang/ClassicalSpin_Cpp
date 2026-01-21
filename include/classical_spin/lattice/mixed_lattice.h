@@ -2664,11 +2664,13 @@ public:
      * and cross-correlations. All with binning analysis for error estimation.
      * 
      * Automatically uses interleaved sweeps when mixed interactions are present.
+     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
-                           bool gaussian_move = true, bool use_interleaved = true) {
+                           bool gaussian_move = true, bool use_interleaved = true,
+                           MPI_Comm comm = MPI_COMM_WORLD) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -2677,8 +2679,8 @@ public:
         }
         
         int rank, size;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &size);
         
         if (size != static_cast<int>(temp.size())) {
             if (rank == 0) {
@@ -2737,7 +2739,7 @@ public:
             
             // Attempt replica exchange
             if (swap_rate > 0 && i % swap_rate == 0) {
-                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
             }
         }
         
@@ -2766,7 +2768,7 @@ public:
             }
             
             if (swap_rate > 0 && i % swap_rate == 0) {
-                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate);
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
             }
             
             if (i % probe_rate == 0) {
@@ -2792,9 +2794,9 @@ public:
         }
         
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
-                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                   1, MPI_DOUBLE, 0, comm);
         MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 
-                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                   1, MPI_DOUBLE, 0, comm);
         
         // Report statistics
         double total_steps = n_anneal + n_measure;
@@ -2812,7 +2814,8 @@ public:
         if (!dir_name.empty()) {
             ensure_directory_exists(dir_name);
             
-            bool should_write = std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end();
+            // Check if this rank should write (supports FULL mode with sentinel -1)
+            bool should_write = should_rank_write(rank, rank_to_write);
             
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
@@ -2841,7 +2844,7 @@ public:
             }
         }
         
-        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(comm);
         
         if (rank == 0) {
             cout << "Parallel tempering completed" << endl;
@@ -2852,9 +2855,10 @@ private:
     /**
      * Attempt replica exchange between neighboring temperatures
      * Returns 1 if exchange successful, 0 otherwise
+     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
      */
     int attempt_replica_exchange(int rank, int size, const vector<double>& temp,
-                                double curr_Temp, size_t swap_parity) {
+                                double curr_Temp, size_t swap_parity, MPI_Comm comm = MPI_COMM_WORLD) {
         // Determine partner based on checkerboard pattern
         int partner_rank;
         if (swap_parity % 2 == 0) {
@@ -2873,7 +2877,7 @@ private:
         
         MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
                     &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
-                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    comm, MPI_STATUS_IGNORE);
         
         // Decide acceptance
         bool accept = false;
@@ -2886,7 +2890,7 @@ private:
         
         // Broadcast decision
         int accept_int = accept ? 1 : 0;
-        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), MPI_COMM_WORLD);
+        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), comm);
         accept = (accept_int == 1);
         
         // Exchange configurations if accepted
@@ -2903,7 +2907,7 @@ private:
             
             MPI_Sendrecv(send_buf_SU2.data(), send_buf_SU2.size(), MPI_DOUBLE, partner_rank, 1,
                         recv_buf_SU2.data(), recv_buf_SU2.size(), MPI_DOUBLE, partner_rank, 1,
-                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        comm, MPI_STATUS_IGNORE);
             
             // Deserialize SU(2)
             for (size_t i = 0; i < lattice_size_SU2; ++i) {
@@ -2924,7 +2928,7 @@ private:
             
             MPI_Sendrecv(send_buf_SU3.data(), send_buf_SU3.size(), MPI_DOUBLE, partner_rank, 2,
                         recv_buf_SU3.data(), recv_buf_SU3.size(), MPI_DOUBLE, partner_rank, 2,
-                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        comm, MPI_STATUS_IGNORE);
             
             // Deserialize SU(3)
             for (size_t i = 0; i < lattice_size_SU3; ++i) {

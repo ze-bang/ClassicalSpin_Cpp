@@ -81,8 +81,9 @@ void run_simulated_annealing(Lattice& lattice, const SpinConfig& config, int ran
 
 /**
  * Run parallel tempering
+ * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
  */
-void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank, int size) {
+void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank, int size, MPI_Comm comm = MPI_COMM_WORLD) {
     if (rank == 0) {
         cout << "Running parallel tempering with " << size << " replicas..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -98,7 +99,10 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
-        filesystem::create_directories(trial_dir);
+        if (rank == 0) {
+            filesystem::create_directories(trial_dir);
+        }
+        MPI_Barrier(comm);  // Ensure directory is created before others proceed
         
         if (rank == 0 && config.num_trials > 1) {
             cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
@@ -118,7 +122,8 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             config.probe_rate,
             trial_dir,
             config.ranks_to_write,
-            config.gaussian_move
+            config.gaussian_move,
+            comm
         );
         
         if (rank == 0) {
@@ -127,7 +132,7 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
     }
     
     // Synchronize all ranks
-    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(comm);
     
     if (rank == 0) {
         cout << "Parallel tempering completed (" << config.num_trials << " trials)." << endl;
@@ -1031,6 +1036,9 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         cout << "  J7 = " << lattice.magnetoelastic_params.J7 << endl;
         cout << "  gamma_J7 = " << lattice.magnetoelastic_params.gamma_J7 << endl;
         cout << "  lambda_Eg = " << lattice.magnetoelastic_params.lambda_Eg << endl;
+        cout << "\nEquilibration:" << endl;
+        cout << "  T_zero = " << (config.T_zero ? "true" : "false") << endl;
+        cout << "  n_deterministics = " << config.n_deterministics << endl;
     }
     
     // Distribute trials across MPI ranks
@@ -1053,6 +1061,15 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
                 cout << "Equilibrating spin subsystem via simulated annealing..." << endl;
             }
             lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
+            
+            // T=0 deterministic sweeps to align spins with local field
+            // This eliminates precession by ensuring S × H_eff = 0
+            if (config.T_zero && config.n_deterministics > 0) {
+                if (rank == 0) {
+                    cout << "Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+                }
+                lattice.deterministic_sweep(config.n_deterministics);
+            }
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }
@@ -1518,8 +1535,9 @@ void run_simulated_annealing_mixed(MixedLattice& lattice, const SpinConfig& conf
 
 /**
  * Run parallel tempering for mixed lattice
+ * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
  */
-void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
+void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size, MPI_Comm comm = MPI_COMM_WORLD) {
     if (rank == 0) {
         cout << "Running parallel tempering on mixed lattice with " << size << " replicas..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
@@ -1535,7 +1553,10 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
-        filesystem::create_directories(trial_dir);
+        if (rank == 0) {
+            filesystem::create_directories(trial_dir);
+        }
+        MPI_Barrier(comm);  // Ensure directory is created before others proceed
         
         if (rank == 0 && config.num_trials > 1) {
             cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
@@ -1555,7 +1576,9 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             config.probe_rate,
             trial_dir,
             config.ranks_to_write,
-            config.gaussian_move
+            config.gaussian_move,
+            true,  // use_interleaved
+            comm
         );
         
         if (rank == 0) {
@@ -1564,7 +1587,7 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
     }
     
     // Synchronize all ranks
-    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(comm);
     
     if (rank == 0) {
         cout << "Parallel tempering completed (" << config.num_trials << " trials)." << endl;
@@ -2449,8 +2472,203 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
         cout << "Total sweep points: " << all_sweep_points.size() << endl;
     }
     
-    // Distribute sweep points across MPI ranks
-    for (size_t i = rank; i < all_sweep_points.size(); i += size) {
+    // ========================================================================
+    // PARALLEL TEMPERING SPECIAL HANDLING
+    // For parallel tempering, we need to split MPI_COMM_WORLD into sub-communicators
+    // so each sweep point can run proper PT with multiple temperature replicas
+    // ========================================================================
+    bool is_parallel_tempering = (base_config.sweep_base_simulation == SimulationType::PARALLEL_TEMPERING);
+    
+    MPI_Comm sweep_comm = MPI_COMM_WORLD;  // Communicator for this rank's sweep point
+    int sweep_rank = rank;                  // Rank within sweep_comm
+    int sweep_size = size;                  // Size of sweep_comm
+    int sweep_point_idx = -1;               // Which sweep point this rank is assigned to
+    
+    if (is_parallel_tempering) {
+        // Determine ranks per sweep point
+        int ranks_per_point = base_config.pt_ranks_per_point;
+        if (ranks_per_point <= 0) {
+            // Auto-detect: divide total ranks among sweep points, minimum 2 for PT
+            ranks_per_point = max(2, size / static_cast<int>(all_sweep_points.size()));
+        }
+        
+        // Calculate number of concurrent sweep points we can run
+        int num_concurrent_points = size / ranks_per_point;
+        if (num_concurrent_points < 1) {
+            num_concurrent_points = 1;
+            ranks_per_point = size;
+        }
+        
+        // Assign this rank to a sweep point group (color) and compute local rank
+        int color = rank / ranks_per_point;  // Which group (sweep point) this rank belongs to
+        if (color >= num_concurrent_points) {
+            // Extra ranks that don't fit into groups - assign to last group
+            color = num_concurrent_points - 1;
+        }
+        
+        // Create sub-communicator for this group
+        MPI_Comm_split(MPI_COMM_WORLD, color, rank, &sweep_comm);
+        MPI_Comm_rank(sweep_comm, &sweep_rank);
+        MPI_Comm_size(sweep_comm, &sweep_size);
+        
+        if (rank == 0) {
+            cout << "\nParallel Tempering in Parameter Sweep Mode:" << endl;
+            cout << "  Ranks per sweep point: " << ranks_per_point << endl;
+            cout << "  Concurrent sweep points: " << num_concurrent_points << endl;
+            cout << "  Total sweep points: " << all_sweep_points.size() << endl;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+        
+        // Distribute sweep points across groups (not individual ranks)
+        // Each group processes sweep points in round-robin fashion
+        for (size_t i = color; i < all_sweep_points.size(); i += num_concurrent_points) {
+            const auto& param_values = all_sweep_points[i];
+            
+            // Print progress (only rank 0 of each group)
+            if (sweep_rank == 0) {
+                stringstream progress;
+                progress << "[Group " << color << "] Processing point " << i+1 << "/" << all_sweep_points.size() << ": ";
+                for (size_t p = 0; p < params.size(); ++p) {
+                    if (p > 0) progress << ", ";
+                    progress << params[p] << "=" << param_values[p];
+                }
+                cout << progress.str() << endl;
+            }
+            
+            // Create modified config for this sweep point
+            SpinConfig sweep_config = base_config;
+            sweep_config.simulation = base_config.sweep_base_simulation;
+            
+            // Apply all parameter values
+            for (size_t p = 0; p < params.size(); ++p) {
+                const string& param_name = params[p];
+                double param_value = param_values[p];
+                
+                sweep_config.set_param(param_name, param_value);
+                
+                if (param_name == "field_strength" || param_name == "h") {
+                    sweep_config.field_strength = param_value;
+                }
+            }
+            
+            // Create output directory for this sweep point
+            stringstream ss;
+            ss << base_config.output_dir;
+            for (size_t p = 0; p < params.size(); ++p) {
+                ss << "/" << params[p] << "_" << scientific << param_values[p];
+            }
+            sweep_config.output_dir = ss.str();
+            if (sweep_rank == 0) {
+                filesystem::create_directories(sweep_config.output_dir);
+            }
+            MPI_Barrier(sweep_comm);  // Ensure directory is created before others proceed
+            
+            // Run parallel tempering with the sub-communicator's rank/size
+            if (sweep_config.system == SystemType::TMFEO3) {
+                MixedUnitCell mixed_uc = build_tmfeo3(sweep_config);
+                MixedLattice mixed_lattice(mixed_uc, sweep_config.lattice_size[0], 
+                                          sweep_config.lattice_size[1], 
+                                          sweep_config.lattice_size[2],
+                                          sweep_config.use_twist_boundary);
+                
+                // Initialize spins
+                if (sweep_config.use_ferromagnetic_init) {
+                    SpinVector dir_su2(mixed_lattice.spin_dim_SU2);
+                    for (size_t d = 0; d < mixed_lattice.spin_dim_SU2; ++d) {
+                        dir_su2(d) = (d < sweep_config.ferromagnetic_direction.size()) ? 
+                                     sweep_config.ferromagnetic_direction[d] : 0.0;
+                    }
+                    SpinVector dir_su3 = SpinVector::Zero(mixed_lattice.spin_dim_SU3);
+                    const int su3_init_component = static_cast<int>(sweep_config.get_param("su3_init_component", 2.0));
+                    if (su3_init_component >= 0 && su3_init_component < static_cast<int>(mixed_lattice.spin_dim_SU3)) {
+                        dir_su3(su3_init_component) = 1.0;
+                    } else {
+                        dir_su3(2) = 1.0;
+                    }
+                    mixed_lattice.init_ferromagnetic(dir_su2, dir_su3);
+                } else if (!sweep_config.initial_spin_config.empty()) {
+                    mixed_lattice.load_spin_config(sweep_config.initial_spin_config);
+                }
+                
+                // Run PT with proper sub-communicator rank/size
+                run_parallel_tempering_mixed(mixed_lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
+            } else {
+                // Standard lattice systems
+                UnitCell* uc_ptr = nullptr;
+                switch (sweep_config.system) {
+                    case SystemType::HONEYCOMB_BCAO:
+                        uc_ptr = new UnitCell(build_bcao_honeycomb(sweep_config));
+                        break;
+                    case SystemType::HONEYCOMB_KITAEV:
+                        uc_ptr = new UnitCell(build_kitaev_honeycomb(sweep_config));
+                        break;
+                    case SystemType::PYROCHLORE:
+                        uc_ptr = new UnitCell(build_pyrochlore(sweep_config));
+                        break;
+                    case SystemType::PYROCHLORE_NON_KRAMER:
+                        uc_ptr = new UnitCell(build_pyrochlore_non_kramer(sweep_config));
+                        break;
+                    case SystemType::TMFEO3_FE:
+                        uc_ptr = new UnitCell(build_tmfeo3_fe(sweep_config));
+                        break;
+                    case SystemType::TMFEO3_TM:
+                        uc_ptr = new UnitCell(build_tmfeo3_tm(sweep_config));
+                        break;
+                    default:
+                        if (sweep_rank == 0) {
+                            cerr << "Error: Unknown system type for parameter sweep with parallel tempering" << endl;
+                        }
+                        MPI_Abort(MPI_COMM_WORLD, 1);
+                        return;
+                }
+                
+                Lattice lattice(*uc_ptr, sweep_config.lattice_size[0], 
+                              sweep_config.lattice_size[1], 
+                              sweep_config.lattice_size[2],
+                              sweep_config.use_twist_boundary);
+                
+                // Initialize spins
+                if (sweep_config.use_ferromagnetic_init) {
+                    SpinVector dir(lattice.spin_dim);
+                    for (size_t d = 0; d < lattice.spin_dim; ++d) {
+                        dir(d) = (d < sweep_config.ferromagnetic_direction.size()) ? 
+                                 sweep_config.ferromagnetic_direction[d] : 0.0;
+                    }
+                    lattice.init_ferromagnetic(dir);
+                } else if (!sweep_config.initial_spin_config.empty()) {
+                    lattice.load_spin_config(sweep_config.initial_spin_config);
+                }
+                
+                // Run PT with proper sub-communicator rank/size
+                run_parallel_tempering(lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
+                
+                delete uc_ptr;
+            }
+            
+            // Print completion message (only rank 0 of each group)
+            if (sweep_rank == 0) {
+                stringstream completion;
+                completion << "[Group " << color << "] Completed point " << i+1 << ": ";
+                for (size_t p = 0; p < params.size(); ++p) {
+                    if (p > 0) completion << ", ";
+                    completion << params[p] << "=" << param_values[p];
+                }
+                cout << completion.str() << endl;
+            }
+            
+            // Synchronize within the group before moving to next sweep point
+            MPI_Barrier(sweep_comm);
+        }
+        
+        // Free the sub-communicator
+        MPI_Comm_free(&sweep_comm);
+        
+    } else {
+        // ====================================================================
+        // NON-PARALLEL-TEMPERING: Original behavior
+        // Distribute sweep points across MPI ranks (one rank per point)
+        // ====================================================================
+        for (size_t i = rank; i < all_sweep_points.size(); i += size) {
         const auto& param_values = all_sweep_points[i];
         
         // Print progress
@@ -2659,6 +2877,9 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 case SystemType::PYROCHLORE:
                     uc_ptr = new UnitCell(build_pyrochlore(sweep_config));
                     break;
+                case SystemType::PYROCHLORE_NON_KRAMER:
+                    uc_ptr = new UnitCell(build_pyrochlore_non_kramer(sweep_config));
+                    break;
                 case SystemType::TMFEO3_FE:
                     uc_ptr = new UnitCell(build_tmfeo3_fe(sweep_config));
                     break;
@@ -2728,7 +2949,8 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
             completion << params[p] << "=" << param_values[p];
         }
         cout << completion.str() << endl;
-    }
+        }  // End of for loop over sweep points
+    }  // End of else (non-PT)
     
     // Synchronize all ranks
     MPI_Barrier(MPI_COMM_WORLD);
@@ -2997,6 +3219,9 @@ int main(int argc, char** argv) {
                     break;
                 case SystemType::PYROCHLORE:
                     uc_ptr = new UnitCell(build_pyrochlore(config));
+                    break;
+                case SystemType::PYROCHLORE_NON_KRAMER:
+                    uc_ptr = new UnitCell(build_pyrochlore_non_kramer(config));
                     break;
                 case SystemType::TMFEO3_FE:
                     uc_ptr = new UnitCell(build_tmfeo3_fe(config));

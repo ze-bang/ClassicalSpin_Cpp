@@ -20,6 +20,9 @@ UnitCell build_kitaev_honeycomb(const SpinConfig& config);
 // Build pyrochlore unit cell
 UnitCell build_pyrochlore(const SpinConfig& config);
 
+// Build non-Kramers pyrochlore unit cell (Jpm, Jzz, Jpmpm exchange)
+UnitCell build_pyrochlore_non_kramer(const SpinConfig& config);
+
 // Build TmFeO3 mixed unit cell (SU2 Fe + SU3 Tm)
 MixedUnitCell build_tmfeo3(const SpinConfig& config);
 
