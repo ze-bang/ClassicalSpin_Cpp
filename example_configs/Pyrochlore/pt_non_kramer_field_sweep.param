@@ -1,0 +1,44 @@
+# Parallel Tempering Parameter Sweep for Non-Kramers Pyrochlore - Field Variation
+# Jzz = 3, Jpm = -0.5, Jpmpm = 0
+# Sweep field from 1.5 T to 3.0 T
+# Field couples only to Sz (delta1 = delta2 = 0)
+
+# System specification
+system = pyrochlore_non_kramer
+simulation_mode = parameter_sweep
+
+# Lattice size
+lattice_size = 8, 8, 8
+
+# Exchange parameters
+Jzz = 3.0
+Jpm = -0.5
+Jpmpm = 0.0
+
+# Non-Kramers field response (set to 0 for pure Sz coupling)
+delta1 = 0.0
+delta2 = 0.0
+
+# External magnetic field along [111] direction
+field_strength = 2.0
+field_direction = 1, 1, 1
+
+# Parameter sweep configuration using parallel tempering
+sweep_parameter = field_strength
+sweep_start = 1.5
+sweep_end = 3.0
+sweep_step = 0.2
+sweep_base_simulation = parallel_tempering
+
+# Parallel tempering parameters
+# pt_ranks_per_point: MPI ranks per sweep point (0 = auto, uses all ranks)
+# For sweep with 8 points on 16 MPI ranks, use pt_ranks_per_point = 2
+pt_ranks_per_point = 2
+T_start = 5.0
+T_end = 0.01
+annealing_steps = 50000
+overrelaxation_rate = 10
+
+# Output
+output_dir = output_non_kramer_pt_field_sweep
+num_trials = 1

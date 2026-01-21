@@ -208,6 +208,99 @@ UnitCell build_pyrochlore(const SpinConfig& config) {
     return atoms;
 }
 
+UnitCell build_pyrochlore_non_kramer(const SpinConfig& config) {
+    // Non-Kramers pyrochlore with Jpm, Jzz, Jpmpm exchange
+    // Following legacy/run_scripts/experiments.h: simulated_annealing_pyrochlore_non_kramer
+    const double Jpm = config.get_param("Jpm", 0.0);
+    const double Jzz = config.get_param("Jzz", 1.0);
+    const double Jpmpm = config.get_param("Jpmpm", 0.0);
+    const double h = config.field_strength;
+    
+    // Non-Kramers field response parameters (delta1 and delta2)
+    const double delta1 = config.get_param("delta1", 0.00075);
+    const double delta2 = config.get_param("delta2", -0.000088);
+    
+    // Use Pyrochlore class from unitcell.h
+    Pyrochlore atoms(3);
+    
+    // Local axes for each sublattice
+    Eigen::Vector3d z1(1, 1, 1);   z1 /= sqrt(3.0);
+    Eigen::Vector3d z2(1, -1, -1); z2 /= sqrt(3.0);
+    Eigen::Vector3d z3(-1, 1, -1); z3 /= sqrt(3.0);
+    Eigen::Vector3d z4(-1, -1, 1); z4 /= sqrt(3.0);
+    
+    Eigen::Vector3d y1(0, -1, 1);  y1 /= sqrt(2.0);
+    Eigen::Vector3d y2(0, 1, -1);  y2 /= sqrt(2.0);
+    Eigen::Vector3d y3(0, -1, -1); y3 /= sqrt(2.0);
+    Eigen::Vector3d y4(0, 1, 1);   y4 /= sqrt(2.0);
+    
+    Eigen::Vector3d x1(-2, 1, 1);  x1 /= sqrt(6.0);
+    Eigen::Vector3d x2(-2, -1, -1); x2 /= sqrt(6.0);
+    Eigen::Vector3d x3(2, 1, -1);  x3 /= sqrt(6.0);
+    Eigen::Vector3d x4(2, -1, 1);  x4 /= sqrt(6.0);
+    
+    // Exchange matrix as function of angle theta
+    // J(theta) = [[-2*Jpm + 2*Jpmpm*cos(theta), -2*Jpmpm*sin(theta), 0],
+    //             [-2*Jpmpm*sin(theta), -2*Jpm - 2*Jpmpm*cos(theta), 0],
+    //             [0, 0, Jzz]]
+    auto build_exchange = [&](double theta) -> Eigen::Matrix3d {
+        Eigen::Matrix3d J;
+        J << -2*Jpm + 2*Jpmpm*cos(theta), -2*Jpmpm*sin(theta), 0,
+             -2*Jpmpm*sin(theta), -2*Jpm - 2*Jpmpm*cos(theta), 0,
+             0, 0, Jzz;
+        return J;
+    };
+    
+    // Three types of bonds with different angles
+    Eigen::Matrix3d Jx = build_exchange(2*M_PI/3);
+    Eigen::Matrix3d Jy = build_exchange(4*M_PI/3);
+    Eigen::Matrix3d Jz = build_exchange(0);
+    
+    // Intra-tetrahedron interactions (following legacy pattern)
+    atoms.set_bilinear_interaction(Jz, 0, 1, Eigen::Vector3i(0, 0, 0));
+    atoms.set_bilinear_interaction(Jx, 0, 2, Eigen::Vector3i(0, 0, 0));
+    atoms.set_bilinear_interaction(Jy, 0, 3, Eigen::Vector3i(0, 0, 0));
+    atoms.set_bilinear_interaction(Jy, 1, 2, Eigen::Vector3i(0, 0, 0));
+    atoms.set_bilinear_interaction(Jx, 1, 3, Eigen::Vector3i(0, 0, 0));
+    atoms.set_bilinear_interaction(Jz, 2, 3, Eigen::Vector3i(0, 0, 0));
+    
+    // Inter-tetrahedron interactions
+    atoms.set_bilinear_interaction(Jz, 0, 1, Eigen::Vector3i(1, 0, 0));
+    atoms.set_bilinear_interaction(Jx, 0, 2, Eigen::Vector3i(0, 1, 0));
+    atoms.set_bilinear_interaction(Jy, 0, 3, Eigen::Vector3i(0, 0, 1));
+    atoms.set_bilinear_interaction(Jy, 1, 2, Eigen::Vector3i(-1, 1, 0));
+    atoms.set_bilinear_interaction(Jx, 1, 3, Eigen::Vector3i(-1, 0, 1));
+    atoms.set_bilinear_interaction(Jz, 2, 3, Eigen::Vector3i(0, 1, -1));
+    
+    // Build field vector
+    Eigen::Vector3d field_global;
+    field_global << config.field_direction[0] * h,
+                    config.field_direction[1] * h,
+                    config.field_direction[2] * h;
+    
+    // Compute local field components for each sublattice
+    std::array<Eigen::Vector3d, 4> x_arr = {x1, x2, x3, x4};
+    std::array<Eigen::Vector3d, 4> y_arr = {y1, y2, y3, y4};
+    std::array<Eigen::Vector3d, 4> z_arr = {z1, z2, z3, z4};
+    
+    // Non-Kramers field response: 
+    // field_local = {delta1*hx*hz + delta2*(hy^2 - hx^2), delta1*hy*hz + 2*delta2*hx*hy, hz}
+    for (int i = 0; i < 4; ++i) {
+        double hx = field_global.dot(x_arr[i]);
+        double hy = field_global.dot(y_arr[i]);
+        double hz = field_global.dot(z_arr[i]);
+        
+        Eigen::Vector3d field_local;
+        field_local << delta1*hx*hz + delta2*(hy*hy - hx*hx),
+                       delta1*hy*hz + 2*delta2*hx*hy,
+                       hz;
+        
+        atoms.set_field(field_local, i);
+    }
+    
+    return atoms;
+}
+
 MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double Jai = config.get_param("J1ab", 4.92);
     const double Jbi = Jai;

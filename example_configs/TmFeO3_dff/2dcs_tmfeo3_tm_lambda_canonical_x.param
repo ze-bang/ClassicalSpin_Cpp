@@ -20,8 +20,8 @@ Ka = 0.0
 Kc = -0.120794758807550 #To get the AFM band gap at zero to be 0.91 THz
 
 # DM Interaction (in meV)
-D1 = 0.0 #0 for now just for the AFM mode
-D2 = 0.0
+D1 = 0.005 #0 for now just for the AFM mode
+D2 = 0.005
 
 # Tm Energy Splitting (in meV)
 e1 = 2.19190387888 #0.53*4.135667696 = 2.19190387888

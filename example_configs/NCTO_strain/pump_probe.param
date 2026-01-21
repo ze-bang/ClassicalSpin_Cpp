@@ -1,0 +1,159 @@
+# NCTO Spin-Strain Pump-Probe Configuration
+# ============================================
+# 
+# This configuration file sets up a THz pump-probe experiment on the 
+# NCTO (Na2Co2TeO6-like) spin-strain coupled honeycomb lattice.
+#
+# The model includes:
+# - Classical spins on honeycomb lattice with Kitaev-Heisenberg-Γ-Γ' interactions
+# - Strain field phonons: A1g (ε_xx + ε_yy) and Eg (ε_xx - ε_yy, 2ε_xy)
+# - Magnetoelastic coupling through A1g and Eg symmetry channels of D3d
+# - Time-dependent J7 modulation via Eg strain deviation:
+#   J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
+#   where |δε_Eg| is the Eg strain deviation from equilibrium
+#
+# Magnetoelastic coupling Hamiltonian:
+# H_c^{A1g} = λ_{A1g} Σ_r (ε_xx + ε_yy) {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
+# H_c^{Eg} = λ_{Eg} Σ_r {(ε_xx - ε_yy)[...] + 2ε_xy[...]}
+
+# ============================================
+# SYSTEM TYPE
+# ============================================
+system = NCTO_STRAIN
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 8,8,1
+
+# Simulation type
+simulation_mode = pump_probe
+
+# Output directory
+output_dir = NCTO_strain_pump_probe
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+
+# Kitaev-Heisenberg-Gamma-Gamma' model
+# H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α) + Γ'(...)]
+J = -1.0                 # Heisenberg coupling (meV)
+K = -6.0                 # Kitaev coupling (meV, ferromagnetic)
+Gamma = 8.0              # Gamma coupling (meV)
+Gammap = -4.0            # Gamma' coupling (meV)
+J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0.0                 # Third-neighbor Heisenberg (meV)
+J7 = -0.5          # Six-spin ring exchange (meV)
+
+# Time-dependent J7 modulation via Eg strain deviation
+# J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
+# where |δε_Eg| is the Eg strain deviation from equilibrium
+gamma_J7 = 4.0           # γ scaling factor (0 = no time dependence)
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# Gilbert damping for spin dynamics
+alpha_gilbert = 0.00
+
+# ============================================
+# MAGNETOELASTIC COUPLING PARAMETERS
+# ============================================
+
+# These are the two independent coupling constants for D3d symmetry
+# λ_{A1g} couples strain A1g mode (ε_xx + ε_yy) to spin A1g basis functions
+# λ_{Eg} couples strain Eg modes (ε_xx - ε_yy, 2ε_xy) to spin Eg basis functions
+#
+# NOTE: The coupling strength should be chosen such that equilibrium strains
+# are small (|ε| << 1). With the spin exchange parameters (K=-6, Γ=8), 
+# setting λ ~ 0.01 typically gives |ε| ~ O(1-10).
+lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
+lambda_Eg = 0.001         # Eg channel magnetoelastic coupling (reduced for stability)
+
+# ============================================
+# ELASTIC PARAMETERS
+# ============================================
+
+# Elastic constants in Voigt notation
+# H_elastic = (1/2)[C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²]
+# For isotropic solid: C44 = (C11 - C12) / 2
+C11 = 1.0                # Longitudinal stiffness
+C12 = 0.3                # Off-diagonal coupling
+C44 = 0.35               # Shear stiffness
+
+# Effective mass for strain dynamics
+strain_mass = 1.0
+
+# Damping coefficients (mode-specific)
+gamma_A1g = 0.0          # A1g mode damping
+gamma_Eg = 0.1           # Eg mode damping
+
+# Quartic anharmonicity (optional)
+lambda_A1g_quartic = 0.0 # A1g quartic stabilization
+lambda_Eg_quartic = 0.0  # Eg quartic stabilization
+
+# ============================================
+# ACOUSTIC DRIVE PARAMETERS
+# ============================================
+
+# Drive strength for different strain modes
+# These control the relative coupling of the drive to A1g vs Eg modes
+drive_strength_A1g = 0.0  # Drive A1g (breathing) mode
+drive_strength_Eg1 = 1.0  # Drive Eg1 (ε_xx - ε_yy shear) mode  
+drive_strength_Eg2 = 1.0  # Drive Eg2 (2ε_xy shear) mode
+
+# Pump pulse (acoustic driving)
+pump_amplitude = 5.0     # Drive amplitude
+pump_frequency = 8.0     # Drive frequency (should match characteristic strain frequency)
+pump_time = 0.0          # Pulse center time
+pump_width = 1.0         # Gaussian width (FWHM ~ 2.35 * width)
+pump_phase = 0.0         # Carrier-envelope phase
+
+# Probe pulse (optional second pulse)
+probe_amplitude = 0.0    # Set to 0 for single-pulse experiment
+probe_frequency = 8.0
+probe_time = 50.0
+probe_width = 2.0
+probe_phase = 0.0
+
+# ============================================
+# MOLECULAR DYNAMICS PARAMETERS
+# ============================================
+
+# Time integration
+# NOTE: Timestep should be small enough for numerical stability.
+# For the coupled spin-strain system, dt ~ 0.01-0.02 is typically safe.
+md_time_start = -30.0
+md_time_end = 100.0      # Reduced for testing
+md_timestep = 0.01       # Small timestep for stability
+md_save_interval = 10    # Save every 10 steps (t=0.1 intervals)
+md_integrator = rkf54
+
+# ============================================
+# THERMAL EQUILIBRATION (before dynamics)
+# ============================================
+
+# Temperature sweep (simulated annealing)
+adiabatic_phonons = true
+relax_phonons = true
+phonon_only_relax = false
+T_start = 20.0
+T_end = 0.01
+T_zero = true
+n_deterministics = 1000
+annealing_steps = 50000
+cooling_rate = 0.9
+overrelaxation_rate = 5
+use_twist_boundary = false
+
+# ============================================
+# INITIALIZATION
+# ============================================
+
+# Start from random configuration (default)
+# use_ferromagnetic_init = false
+# ferromagnetic_direction = 0,0,1

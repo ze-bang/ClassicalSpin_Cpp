@@ -1,0 +1,33 @@
+# Simulated Annealing for Non-Kramers Pyrochlore (Ising-like)
+# Jzz = 3, Jpm = -0.5, Jpmpm = 0
+# Field couples only to Sz (delta1 = delta2 = 0)
+
+# System specification
+system = pyrochlore_non_kramer
+simulation_mode = simulated_annealing
+
+# Lattice size
+lattice_size = 8, 8, 8
+
+# Exchange parameters
+Jzz = 3.0
+Jpm = -0.5
+Jpmpm = 0.0
+
+# Non-Kramers field response (set to 0 for pure Sz coupling)
+delta1 = 0.0
+delta2 = 0.0
+
+# External magnetic field along [111] direction
+field_strength = 2.0
+field_direction = 1, 1, 1
+
+# Simulated annealing parameters
+T_start = 10.0
+T_end = 0.01
+annealing_steps = 50000
+overrelaxation_rate = 10
+
+# Output
+output_dir = output_pyrochlore_non_kramer
+num_trials = 1

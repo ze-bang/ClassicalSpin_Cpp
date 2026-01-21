@@ -19,11 +19,13 @@ using namespace std;
 enum class SystemType {
     HONEYCOMB_BCAO,           // Ba3CoAl2O9 honeycomb
     HONEYCOMB_KITAEV,         // Generic Kitaev honeycomb
-    PYROCHLORE,               // Pyrochlore lattice
+    PYROCHLORE,               // Pyrochlore lattice (Kramers)
+    PYROCHLORE_NON_KRAMER,    // Pyrochlore lattice (non-Kramers, Jpm/Jzz/Jpmpm)
     TMFEO3,                   // TmFeO3 (mixed SU2+SU3)
     TMFEO3_FE,                // TmFeO3 Fe-only (SU2 only, no Tm)
     TMFEO3_TM,                // TmFeO3 Tm-only (SU3 only, no Fe)
     NCTO,                     // NCTO spin-phonon coupled honeycomb
+    NCTO_STRAIN,              // NCTO magnetoelastic (spin-strain) coupled honeycomb
     CUSTOM                    // Custom from JSON
 };
 
@@ -97,6 +99,7 @@ struct SpinConfig {
     size_t overrelaxation_rate = 0;
     size_t probe_rate = 2000;
     vector<int> ranks_to_write = {0};
+    int pt_ranks_per_point = 0;  // Number of MPI ranks per sweep point for parallel tempering (0 = auto)
     
     // Pump-probe parameters (SU2 / default)
     double pump_amplitude = 1.0;
@@ -190,10 +193,12 @@ inline SystemType parse_system(const string& str) {
     if (s == "honeycomb_bcao" || s == "HONEYCOMB_BCAO" || s == "BCAO") return SystemType::HONEYCOMB_BCAO;
     if (s == "honeycomb_kitaev" || s == "HONEYCOMB_KITAEV" || s == "KITAEV") return SystemType::HONEYCOMB_KITAEV;
     if (s == "pyrochlore" || s == "PYROCHLORE") return SystemType::PYROCHLORE;
+    if (s == "pyrochlore_non_kramer" || s == "PYROCHLORE_NON_KRAMER" || s == "non_kramer") return SystemType::PYROCHLORE_NON_KRAMER;
     if (s == "tmfeo3" || s == "TMFEO3" || s == "TmFeO3") return SystemType::TMFEO3;
     if (s == "tmfeo3_fe" || s == "TMFEO3_FE" || s == "TmFeO3_Fe") return SystemType::TMFEO3_FE;
     if (s == "tmfeo3_tm" || s == "TMFEO3_TM" || s == "TmFeO3_Tm") return SystemType::TMFEO3_TM;
     if (s == "ncto" || s == "NCTO" || s == "Na2Co2TeO6") return SystemType::NCTO;
+    if (s == "ncto_strain" || s == "NCTO_STRAIN" || s == "strain") return SystemType::NCTO_STRAIN;
     if (s == "custom" || s == "CUSTOM") return SystemType::CUSTOM;
     throw runtime_error("Unknown system type: " + str);
 }
@@ -385,6 +390,16 @@ inline vector<array<double, 8>> parse_vector8_list(const string& str) {
 inline vector<int> parse_int_list(const string& str) {
     vector<int> result;
     string s = trim(str);
+    
+    // Check for special "FULL" or "ALL" keyword (case-insensitive)
+    string s_upper = s;
+    std::transform(s_upper.begin(), s_upper.end(), s_upper.begin(), ::toupper);
+    if (s_upper == "FULL" || s_upper == "ALL") {
+        // Return sentinel value -1 to indicate all ranks should write
+        result.push_back(-1);
+        return result;
+    }
+    
     s.erase(std::remove(s.begin(), s.end(), '['), s.end());
     s.erase(std::remove(s.begin(), s.end(), ']'), s.end());
     
@@ -408,6 +423,21 @@ inline vector<double> parse_double_list(const string& str) {
         result.push_back(stod(trim(item)));
     }
     return result;
+}
+
+/**
+ * Check if a rank should write based on ranks_to_write list
+ * Returns true if:
+ *   - ranks_to_write contains -1 (FULL mode, all ranks write)
+ *   - ranks_to_write contains the specific rank
+ */
+inline bool should_rank_write(int rank, const vector<int>& ranks_to_write) {
+    // Check for FULL mode (sentinel value -1)
+    if (!ranks_to_write.empty() && ranks_to_write[0] == -1) {
+        return true;
+    }
+    // Check if rank is in the list
+    return std::find(ranks_to_write.begin(), ranks_to_write.end(), rank) != ranks_to_write.end();
 }
 
 inline vector<string> parse_string_list(const string& str) {
