@@ -2115,7 +2115,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # λ5 and λ7 are indices 4 and 6 respectively
             # Weighted sum: λ5 + λ7 (equal weight)
             # =====================================================================
-            if spin_dim_SU3 >= 8:
+            if save_intermediates and spin_dim_SU3 >= 8:
                 print("    Processing λ5 + λ7 mode (equal weight)...")
                 
                 # Equal weights for λ5 and λ7 combination
@@ -2231,7 +2231,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.close(fig_l57_main)
             
             # λ2 + λ5 combined mode (equal weight)
-            if spin_dim_SU3 >= 8:
+            if save_intermediates and spin_dim_SU3 >= 8:
                 print("    Processing λ2 + λ5 mode (equal weight)...")
                 
                 # Equal weights for λ2 and λ5 combination
@@ -2347,7 +2347,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.close(fig_l25_main)
             
             # λ2 + λ5 + λ7 combined mode
-            if spin_dim_SU3 >= 8:
+            if save_intermediates and spin_dim_SU3 >= 8:
                 print("    Processing λ2 + λ5 + λ7 mode (equal weight)...")
                 
                 # Equal weights for λ2, λ5 and λ7 combination
@@ -2464,7 +2464,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.close(fig_l257_main)
             
             # λ2 + λ7 + x component combined mode
-            if spin_dim_SU3 >= 8 and M_NL_SU2 is not None and M_NL_SU2.shape[0] >= 1:
+            if save_intermediates and spin_dim_SU3 >= 8 and M_NL_SU2 is not None and M_NL_SU2.shape[0] >= 1:
                 print("    Processing λ2 + λ7 + x component mode (equal weight)...")
                 
                 # Equal weights for λ2, λ7 and x combination
@@ -2581,7 +2581,7 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.close(fig_l27x_main)
             
             # λ2 - 0.2*λ7 + x component combined mode (custom weights)
-            if spin_dim_SU3 >= 8 and M_NL_SU2 is not None and M_NL_SU2.shape[0] >= 1:
+            if save_intermediates and spin_dim_SU3 >= 8 and M_NL_SU2 is not None and M_NL_SU2.shape[0] >= 1:
                 print("    Processing λ2 - 0.2*λ7 + x component mode (custom weights)...")
                 
                 # Custom weights for λ2, λ7 and x combination

@@ -32,9 +32,9 @@ tm_alpha_scale = 1.0
 tm_beta_scale = 1.0
 
 # Fe-Tm Bilinear Coupling
-chi5x = 0.05     # χ parameter
-chi2x = 0.05
-chi7x = 0.05
+chi5x = 0.15     # χ parameter
+chi2x = 0.15
+chi7x = 0.15
 
 # Tm-Tm Diagonal Bilinear Coupling (diagonal in Gell-Mann space)
 # J_a * λ_a ⊗ λ_a for each Gell-Mann generator (no cross terms)
