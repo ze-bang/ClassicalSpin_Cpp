@@ -2810,15 +2810,21 @@ public:
              << ", C_V=" << obs.specific_heat.value << "±" << obs.specific_heat.error
              << endl;
         
-        // Save results
+        // Save results with proper MPI synchronization
         if (!dir_name.empty()) {
-            ensure_directory_exists(dir_name);
+            // Rank 0 creates the main output directory first
+            if (rank == 0) {
+                ensure_directory_exists(dir_name);
+            }
+            // Ensure directory exists before other ranks proceed
+            MPI_Barrier(comm);
             
             // Check if this rank should write (supports FULL mode with sentinel -1)
             bool should_write = should_rank_write(rank, rank_to_write);
             
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
+                // Each rank creates its own subdirectory (no race condition)
                 ensure_directory_exists(rank_dir);
                 
                 // Save comprehensive observables
@@ -2831,6 +2837,9 @@ public:
                 // Save spin configuration
                 save_spin_config_to_dir(rank_dir, "spins_T=" + std::to_string(curr_Temp));
             }
+            
+            // Wait for all ranks to finish writing before rank 0 writes aggregated results
+            MPI_Barrier(comm);
             
             // Root process saves aggregated heat capacity
             if (rank == 0) {
