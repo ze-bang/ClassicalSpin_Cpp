@@ -2089,17 +2089,27 @@ class lattice
              << " with local acceptance rate: " << curr_accept / total_steps * overrelaxation_flag 
              << " Swap Acceptance rate: " << double(swap_accept) / total_steps * swap_rate * overrelaxation_flag << endl;
         
-        // Save results if requested
+        // Save results if requested with proper MPI synchronization
         if (!dir_name.empty()) {
-            filesystem::create_directory(dir_name);
+            // Rank 0 creates the main output directory first
+            if (rank == 0) {
+                filesystem::create_directory(dir_name);
+            }
+            // Ensure directory exists before other ranks proceed
+            MPI_Barrier(MPI_COMM_WORLD);
             
             // Save per-rank data
             for (int write_rank : rank_to_write) {
                 if (rank == write_rank) {
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    // Save spin configuration for this replica
+                    write_to_file_spin(dir_name + "/spins_rank" + to_string(rank) + "_T=" + to_string(curr_Temp) + ".txt");
                 }
             }
+            
+            // Wait for all ranks to finish writing before rank 0 writes aggregated results
+            MPI_Barrier(MPI_COMM_WORLD);
             
             // Save global data from root
             if (rank == 0) {
@@ -2339,15 +2349,22 @@ class lattice
              << " with local acceptance rate: " << curr_accept / total_steps * overrelaxation_flag 
              << " Swap Acceptance rate: " << double(swap_accept) / total_steps * swap_rate * overrelaxation_flag << endl;
         
-        // Save results if requested
+        // Save results if requested with proper MPI synchronization
         if (!dir_name.empty()) {
-            filesystem::create_directory(dir_name);
+            // Rank 0 creates the main output directory first
+            if (rank == 0) {
+                filesystem::create_directory(dir_name);
+            }
+            // Ensure directory exists before other ranks proceed
+            MPI_Barrier(MPI_COMM_WORLD);
             
             // Save per-rank data
             for (int write_rank : rank_to_write) {
                 if (rank == write_rank) {
                     write_to_file_2d_vector_array(dir_name + "/magnetization" + to_string(rank) + ".txt", magnetizations);
                     write_column_vector(dir_name + "/energy" + to_string(rank) + ".txt", energies);
+                    // Save spin configuration for this replica
+                    write_to_file_spin(dir_name + "/spins_rank" + to_string(rank) + "_T=" + to_string(curr_Temp) + ".txt");
                     
                     // Save autocorrelation info
                     ofstream acf_file(dir_name + "/autocorr_rank" + to_string(rank) + ".txt");
@@ -2366,6 +2383,9 @@ class lattice
                     save_twist_matrices(dir_name + "/twist_matrices_rank" + to_string(rank) + ".txt");
                 }
             }
+            
+            // Wait for all ranks to finish writing before rank 0 writes aggregated results
+            MPI_Barrier(MPI_COMM_WORLD);
             
             // Save global data from root
             if (rank == 0) {
