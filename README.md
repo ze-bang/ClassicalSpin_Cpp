@@ -165,6 +165,37 @@ save_observables = true
 | 2D Spectroscopy | `2dcs` | Two-pulse coherent spectroscopy |
 | Parameter Sweep | `parameter_sweep` | Systematic parameter exploration |
 
+### Optimized Parallel Tempering
+
+The code implements the feedback-optimized temperature grid algorithm from [Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)](https://arxiv.org/abs/0809.0571). This automatically generates optimal temperature spacing to:
+
+- Achieve **uniform 50% acceptance rate** across all temperature pairs
+- **Minimize round-trip time** in temperature space (maximizes diffusivity)
+- Adapt to system-specific energy landscape
+
+Configuration options:
+
+```ini
+# Enable optimized temperature grid (default: true)
+pt_optimize_temperatures = true
+
+# Target acceptance rate (0.5 = optimal per Bittner et al.)
+pt_target_acceptance = 0.5
+
+# Optimization parameters
+pt_optimization_warmup = 500      # Warmup sweeps per replica
+pt_optimization_sweeps = 500      # MC sweeps per feedback iteration
+pt_optimization_iterations = 20    # Number of feedback iterations
+```
+
+The algorithm outputs diagnostic information including:
+- Final acceptance rates for each temperature pair
+- Local diffusivities D(T) = A(1-A)
+- Estimated round-trip time
+- Convergence status
+
+Set `pt_optimize_temperatures = false` to use simple geometric (logarithmic) spacing instead.
+
 ## Example Configurations
 
 The `example_configs/` directory contains ready-to-use configurations:

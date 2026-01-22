@@ -89,13 +89,65 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
         cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    // Generate temperature ladder: rank 0 = coldest (T_end), highest rank = hottest (T_start)
+    // Generate temperature ladder
     vector<double> temps(size);
-    for (int i = 0; i < size; ++i) {
-        double log_T = log10(config.T_end) + 
-                      (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
-        temps[i] = pow(10, log_T);
+    
+    if (config.pt_optimize_temperatures && rank == 0) {
+        // Use feedback-optimized temperature grid (Bittner et al., arXiv:0809.0571)
+        // Only rank 0 performs the optimization, then broadcasts
+        cout << "Generating optimized temperature grid (Bittner et al.)..." << endl;
+        
+        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid(
+            config.T_end,    // Tmin (coldest)
+            config.T_start,  // Tmax (hottest)
+            size,
+            config.pt_optimization_warmup,
+            config.pt_optimization_sweeps,
+            config.pt_optimization_iterations,
+            config.gaussian_move,
+            config.overrelaxation_rate,
+            config.pt_target_acceptance,
+            0.05  // convergence tolerance
+        );
+        temps = opt_result.temperatures;
+        
+        // Save optimized temperature grid info to file
+        if (!config.output_dir.empty()) {
+            filesystem::create_directories(config.output_dir);
+            ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
+            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
+            opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
+            opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
+            opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
+            opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
+            opt_file << "#\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            for (int i = 0; i < size; ++i) {
+                opt_file << i << "  " << scientific << setprecision(12) << temps[i];
+                if (i < size - 1) {
+                    opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
+                             << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                }
+                opt_file << "\n";
+            }
+            opt_file.close();
+        }
+    } else if (!config.pt_optimize_temperatures && rank == 0) {
+        // Use geometric (logarithmic) temperature spacing
+        cout << "Using geometric temperature grid..." << endl;
+        temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
+    } else if (rank == 0) {
+        // Fallback to simple logarithmic spacing (legacy)
+        for (int i = 0; i < size; ++i) {
+            double log_T = log10(config.T_end) + 
+                          (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
+            temps[i] = pow(10, log_T);
+        }
     }
+    
+    // Broadcast optimized temperatures from rank 0 to all ranks
+    MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -1543,13 +1595,65 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
         cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    // Generate temperature ladder: rank 0 = coldest (T_end), highest rank = hottest (T_start)
+    // Generate temperature ladder
     vector<double> temps(size);
-    for (int i = 0; i < size; ++i) {
-        double log_T = log10(config.T_end) + 
-                      (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
-        temps[i] = pow(10, log_T);
+    
+    if (config.pt_optimize_temperatures && rank == 0) {
+        // Use feedback-optimized temperature grid (Bittner et al., arXiv:0809.0571)
+        // Only rank 0 performs the optimization, then broadcasts
+        cout << "Generating optimized temperature grid (Bittner et al.) for MixedLattice..." << endl;
+        
+        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid(
+            config.T_end,    // Tmin (coldest)
+            config.T_start,  // Tmax (hottest)
+            size,
+            config.pt_optimization_warmup,
+            config.pt_optimization_sweeps,
+            config.pt_optimization_iterations,
+            config.gaussian_move,
+            config.overrelaxation_rate,
+            config.pt_target_acceptance,
+            0.05  // convergence tolerance
+        );
+        temps = opt_result.temperatures;
+        
+        // Save optimized temperature grid info to file
+        if (!config.output_dir.empty()) {
+            filesystem::create_directories(config.output_dir);
+            ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
+            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
+            opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
+            opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
+            opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
+            opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
+            opt_file << "#\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            for (int i = 0; i < size; ++i) {
+                opt_file << i << "  " << scientific << setprecision(12) << temps[i];
+                if (i < size - 1) {
+                    opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
+                             << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                }
+                opt_file << "\n";
+            }
+            opt_file.close();
+        }
+    } else if (!config.pt_optimize_temperatures && rank == 0) {
+        // Use geometric (logarithmic) temperature spacing
+        cout << "Using geometric temperature grid..." << endl;
+        temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
+    } else if (rank == 0) {
+        // Fallback to simple logarithmic spacing (legacy)
+        for (int i = 0; i < size; ++i) {
+            double log_T = log10(config.T_end) + 
+                          (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
+            temps[i] = pow(10, log_T);
+        }
     }
+    
+    // Broadcast optimized temperatures from rank 0 to all ranks
+    MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);

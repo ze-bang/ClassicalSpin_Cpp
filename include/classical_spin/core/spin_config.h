@@ -101,6 +101,13 @@ struct SpinConfig {
     vector<int> ranks_to_write = {0};
     int pt_ranks_per_point = 0;  // Number of MPI ranks per sweep point for parallel tempering (0 = auto)
     
+    // Optimized temperature grid parameters (Bittner et al., Phys. Rev. Lett. 101, 130603 (2008))
+    bool pt_optimize_temperatures = true;          // Use feedback-optimized temperature grid
+    double pt_target_acceptance = 0.5;             // Target acceptance rate (0.5 = optimal per Bittner)
+    size_t pt_optimization_warmup = 500;           // Warmup sweeps for temperature optimization
+    size_t pt_optimization_sweeps = 500;           // Sweeps per feedback iteration
+    size_t pt_optimization_iterations = 20;        // Number of feedback iterations
+    
     // Pump-probe parameters (SU2 / default)
     double pump_amplitude = 1.0;
     double pump_width = 10.0;

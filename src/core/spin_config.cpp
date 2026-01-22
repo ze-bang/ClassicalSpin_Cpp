@@ -158,6 +158,22 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pt_ranks_per_point") {
                 config.pt_ranks_per_point = stoi(value);
             }
+            // Optimized temperature grid parameters (Bittner et al.)
+            else if (key == "pt_optimize_temperatures") {
+                config.pt_optimize_temperatures = parse_bool(value);
+            }
+            else if (key == "pt_target_acceptance") {
+                config.pt_target_acceptance = stod(value);
+            }
+            else if (key == "pt_optimization_warmup") {
+                config.pt_optimization_warmup = stoull(value);
+            }
+            else if (key == "pt_optimization_sweeps") {
+                config.pt_optimization_sweeps = stoull(value);
+            }
+            else if (key == "pt_optimization_iterations") {
+                config.pt_optimization_iterations = stoull(value);
+            }
             else if (key == "pump_amplitude") {
                 config.pump_amplitude = stod(value);
             }
@@ -356,6 +372,17 @@ void SpinConfig::to_file(const string& filename) const {
     file << "md_integrator = " << md_integrator << "\n";
     file << "use_gpu = " << (use_gpu ? "true" : "false") << "\n\n";
     
+    file << "# Parallel Tempering Parameters\n";
+    file << "pt_exchange_frequency = " << pt_exchange_frequency << "\n";
+    file << "overrelaxation_rate = " << overrelaxation_rate << "\n";
+    file << "probe_rate = " << probe_rate << "\n";
+    file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+    file << "pt_optimize_temperatures = " << (pt_optimize_temperatures ? "true" : "false") << "\n";
+    file << "pt_target_acceptance = " << pt_target_acceptance << "\n";
+    file << "pt_optimization_warmup = " << pt_optimization_warmup << "\n";
+    file << "pt_optimization_sweeps = " << pt_optimization_sweeps << "\n";
+    file << "pt_optimization_iterations = " << pt_optimization_iterations << "\n\n";
+    
     file << "# Parameter Sweep Parameters\n";
     file << "sweep_parameter = " << sweep_parameter << "\n";
     file << "sweep_start = " << sweep_start << "\n";
@@ -453,6 +480,21 @@ void SpinConfig::print() const {
     cout << "Temperature: " << T_start << " -> " << T_end << "\n";
     cout << "Field: " << field_strength << " along [" 
          << field_direction[0] << "," << field_direction[1] << "," << field_direction[2] << "]\n";
+    
+    // Parallel tempering specific output
+    if (simulation == SimulationType::PARALLEL_TEMPERING) {
+        cout << "\nParallel Tempering Settings:\n";
+        cout << "  Exchange frequency: " << pt_exchange_frequency << "\n";
+        cout << "  Overrelaxation rate: " << overrelaxation_rate << "\n";
+        cout << "  Probe rate: " << probe_rate << "\n";
+        cout << "  Optimize temperatures: " << (pt_optimize_temperatures ? "yes (Bittner et al.)" : "no (geometric)") << "\n";
+        if (pt_optimize_temperatures) {
+            cout << "  Target acceptance rate: " << pt_target_acceptance * 100 << "%\n";
+            cout << "  Optimization warmup: " << pt_optimization_warmup << " sweeps\n";
+            cout << "  Optimization sweeps: " << pt_optimization_sweeps << " per iteration\n";
+            cout << "  Optimization iterations: " << pt_optimization_iterations << "\n";
+        }
+    }
     
     if (!hamiltonian_params.empty()) {
         cout << "\nHamiltonian Parameters:\n";

@@ -2698,6 +2698,272 @@ public:
     }
 
     // ============================================================
+    // TEMPERATURE LADDER OPTIMIZATION
+    // Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+    // arXiv:0809.0571 - "Make life simple: unleash the full power 
+    // of the parallel tempering algorithm"
+    // ============================================================
+
+    /**
+     * Generate optimized temperature grid for parallel tempering (MixedLattice version)
+     * 
+     * Implements the feedback-optimized algorithm from Bittner et al.
+     * Key insight: Optimal round-trip time is achieved when acceptance rate
+     * is uniform across all temperature pairs, with target A ≈ 0.5 (50%).
+     * 
+     * @param Tmin              Minimum (coldest) temperature
+     * @param Tmax              Maximum (hottest) temperature  
+     * @param R                 Number of replicas (temperatures)
+     * @param warmup_sweeps     MC sweeps for initial equilibration per replica
+     * @param sweeps_per_iter   MC sweeps per feedback iteration
+     * @param feedback_iters    Number of feedback optimization iterations
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
+     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
+     * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
+     * @return OptimizedTempGridResult containing temperatures and diagnostics
+     */
+    OptimizedTempGridResult generate_optimized_temperature_grid(
+        double Tmin, double Tmax, size_t R,
+        size_t warmup_sweeps = 500,
+        size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0,
+        double target_acceptance = 0.5,
+        double convergence_tol = 0.05) {
+        
+        OptimizedTempGridResult result;
+        result.converged = false;
+        result.feedback_iterations_used = 0;
+        
+        if (R < 2) {
+            result.temperatures = {Tmin};
+            if (R == 1) return result;
+        }
+        if (R == 2) {
+            result.temperatures = {Tmin, Tmax};
+            result.acceptance_rates = {0.5};
+            result.converged = true;
+            return result;
+        }
+        
+        cout << "=== Bittner et al. Optimized Temperature Grid (MixedLattice) ===" << endl;
+        cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+        cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        
+        // Helper: linear spacing
+        auto linspace = [](double a, double b, size_t n) {
+            vector<double> result(n);
+            for (size_t i = 0; i < n; ++i) {
+                result[i] = a + (b - a) * double(i) / double(n - 1);
+            }
+            return result;
+        };
+        
+        // Helper: convert beta to temperature
+        auto temps_from_beta = [](const vector<double>& b) {
+            vector<double> T(b.size());
+            for (size_t i = 0; i < b.size(); ++i) {
+                T[i] = 1.0 / b[i];
+            }
+            return T;
+        };
+        
+        // Initialize with geometric spacing in temperature
+        double beta_min = 1.0 / Tmax;  // Hottest = smallest beta
+        double beta_max = 1.0 / Tmin;  // Coldest = largest beta
+        vector<double> beta = linspace(beta_min, beta_max, R);
+        
+        // Store original spins
+        SpinConfigSU2 original_spins_SU2 = spins_SU2;
+        SpinConfigSU3 original_spins_SU3 = spins_SU3;
+        
+        // Initialize replicas at each temperature
+        vector<SpinConfigSU2> reps_SU2(R, spins_SU2);
+        vector<SpinConfigSU3> reps_SU3(R, spins_SU3);
+        double sigma = 1000.0;
+        
+        // Warmup phase: equilibrate each replica at its temperature
+        cout << "Warming up " << R << " replicas..." << endl;
+        for (size_t k = 0; k < R; ++k) {
+            spins_SU2 = reps_SU2[k];
+            spins_SU3 = reps_SU3[k];
+            double T_k = 1.0 / beta[k];
+            for (size_t i = 0; i < warmup_sweeps; ++i) {
+                metropolis_interleaved(T_k, gaussian_move, sigma);
+                if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                    overrelaxation();
+                }
+            }
+            reps_SU2[k] = spins_SU2;
+            reps_SU3[k] = spins_SU3;
+        }
+        
+        // Feedback optimization loop
+        vector<double> acceptance_rates(R - 1, 0.0);
+        
+        for (size_t iter = 0; iter < feedback_iters; ++iter) {
+            vector<size_t> attempts(R - 1, 0);
+            vector<size_t> accepts(R - 1, 0);
+            
+            // Run MC sweeps and measure acceptance rates
+            for (size_t sweep = 0; sweep < sweeps_per_iter; ++sweep) {
+                // Update each replica
+                for (size_t k = 0; k < R; ++k) {
+                    spins_SU2 = reps_SU2[k];
+                    spins_SU3 = reps_SU3[k];
+                    double T_k = 1.0 / beta[k];
+                    metropolis_interleaved(T_k, gaussian_move, sigma);
+                    if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
+                        overrelaxation();
+                    }
+                    reps_SU2[k] = spins_SU2;
+                    reps_SU3[k] = spins_SU3;
+                }
+                
+                // Attempt replica exchanges for ALL adjacent pairs
+                for (int parity = 0; parity <= 1; ++parity) {
+                    for (size_t e = parity; e < R - 1; e += 2) {
+                        // Compute energies
+                        spins_SU2 = reps_SU2[e];
+                        spins_SU3 = reps_SU3[e];
+                        double E_cold = total_energy();
+                        
+                        spins_SU2 = reps_SU2[e + 1];
+                        spins_SU3 = reps_SU3[e + 1];
+                        double E_hot = total_energy();
+                        
+                        // Metropolis criterion for replica exchange
+                        double dBeta = beta[e] - beta[e + 1];
+                        double dE = E_hot - E_cold;
+                        double delta = dBeta * dE;
+                        
+                        ++attempts[e];
+                        if (delta >= 0 || random_double_lehman(0.0, 1.0) < std::exp(delta)) {
+                            ++accepts[e];
+                            std::swap(reps_SU2[e], reps_SU2[e + 1]);
+                            std::swap(reps_SU3[e], reps_SU3[e + 1]);
+                        }
+                    }
+                }
+            }
+            
+            // Compute acceptance rates
+            for (size_t e = 0; e < R - 1; ++e) {
+                acceptance_rates[e] = double(accepts[e]) / double(attempts[e]);
+            }
+            
+            // Check convergence
+            double max_deviation = 0.0;
+            double mean_rate = 0.0;
+            for (size_t e = 0; e < R - 1; ++e) {
+                max_deviation = std::max(max_deviation, std::abs(acceptance_rates[e] - target_acceptance));
+                mean_rate += acceptance_rates[e];
+            }
+            mean_rate /= (R - 1);
+            
+            cout << "Iter " << iter + 1 << "/" << feedback_iters 
+                 << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
+                 << ", max deviation = " << max_deviation << endl;
+            
+            result.feedback_iterations_used = iter + 1;
+            
+            if (max_deviation < convergence_tol) {
+                result.converged = true;
+                cout << "Converged at iteration " << iter + 1 << endl;
+                break;
+            }
+            
+            // Adjust β spacing using feedback rule
+            vector<double> new_beta(R);
+            new_beta[0] = beta[0];
+            
+            for (size_t e = 0; e < R - 1; ++e) {
+                double A_e = acceptance_rates[e];
+                if (A_e < 0.01) A_e = 0.01;
+                if (A_e > 0.99) A_e = 0.99;
+                
+                double log_ratio = std::log(target_acceptance) / std::log(A_e);
+                double ratio = std::sqrt(std::abs(log_ratio));
+                double damping = 0.5;
+                ratio = 1.0 + damping * (ratio - 1.0);
+                ratio = std::clamp(ratio, 0.7, 1.5);
+                
+                double d_beta = (beta[e + 1] - beta[e]) * ratio;
+                new_beta[e + 1] = new_beta[e] + d_beta;
+            }
+            
+            // Rescale to preserve endpoints
+            double scale = (beta_max - beta_min) / (new_beta.back() - new_beta.front());
+            for (size_t k = 1; k < R; ++k) {
+                new_beta[k] = beta_min + scale * (new_beta[k] - new_beta.front());
+            }
+            beta = new_beta;
+        }
+        
+        // Restore original spins
+        spins_SU2 = original_spins_SU2;
+        spins_SU3 = original_spins_SU3;
+        
+        // Build result
+        result.temperatures = temps_from_beta(beta);
+        std::sort(result.temperatures.begin(), result.temperatures.end());
+        result.acceptance_rates = acceptance_rates;
+        
+        // Compute local diffusivities D(T) = A(1-A)
+        result.local_diffusivities.resize(R - 1);
+        for (size_t e = 0; e < R - 1; ++e) {
+            double A = acceptance_rates[e];
+            result.local_diffusivities[e] = A * (1.0 - A);
+        }
+        
+        // Mean acceptance rate
+        result.mean_acceptance_rate = 0.0;
+        for (double A : acceptance_rates) {
+            result.mean_acceptance_rate += A;
+        }
+        result.mean_acceptance_rate /= (R - 1);
+        
+        // Estimate round-trip time
+        double tau_rt = 0.0;
+        for (size_t e = 0; e < R - 1; ++e) {
+            double d_beta = std::abs(beta[e + 1] - beta[e]);
+            double D = result.local_diffusivities[e];
+            if (D > 1e-6) {
+                tau_rt += d_beta / D;
+            } else {
+                tau_rt += d_beta / 1e-6;
+            }
+        }
+        result.round_trip_estimate = tau_rt;
+        
+        // Print summary
+        cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
+        cout << "Temperatures (ascending):" << endl;
+        for (size_t k = 0; k < std::min(R, size_t(15)); ++k) {
+            cout << "  T[" << k << "] = " << std::scientific << std::setprecision(6) 
+                 << result.temperatures[k];
+            if (k < R - 1) {
+                cout << "  (A = " << std::fixed << std::setprecision(3) 
+                     << acceptance_rates[k] << ")";
+            }
+            cout << endl;
+        }
+        if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+        
+        cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
+             << result.mean_acceptance_rate * 100 << "%" << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        cout << "Estimated round-trip time scale: " << std::scientific 
+             << result.round_trip_estimate << endl;
+        cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+        
+        return result;
+    }
+
+    // ============================================================
     // PARALLEL TEMPERING
     // ============================================================
 
