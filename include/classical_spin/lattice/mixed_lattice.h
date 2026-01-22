@@ -2181,54 +2181,95 @@ public:
         // 2. Specific heat per site with jackknife error estimation
         //    c_V = Var(E) / (T² N²) = Var(E/N) / T²
         {
+            double N2 = double(total_sites) * double(total_sites);
+            
+            // Extract energies for easier access
             vector<double> E_total(n_samples);
-            vector<double> E2(n_samples);
             for (size_t i = 0; i < n_samples; ++i) {
                 E_total[i] = measurements[i].energy;
-                E2[i] = measurements[i].energy * measurements[i].energy;
             }
             
-            double E_mean = 0.0, E2_mean = 0.0;
-            for (size_t i = 0; i < n_samples; ++i) {
-                E_mean += E_total[i];
-                E2_mean += E2[i];
-            }
-            E_mean /= n_samples;
-            E2_mean /= n_samples;
-            
-            double var_E = E2_mean - E_mean * E_mean;
-            double N2 = double(total_sites) * double(total_sites);
-            obs.specific_heat.value = var_E / (T * T * N2);
-            
-            // Jackknife error estimation
-            size_t n_jack = std::min(n_samples, size_t(100));
-            size_t block_size = n_samples / n_jack;
-            vector<double> C_jack(n_jack);
-            
-            for (size_t j = 0; j < n_jack; ++j) {
-                double E_sum = 0.0, E2_sum = 0.0;
-                size_t count = 0;
+            // Handle edge case: need at least 2 samples for variance
+            if (n_samples < 2) {
+                obs.specific_heat.value = 0.0;
+                obs.specific_heat.error = 0.0;
+            } else {
+                // Compute mean first for numerical stability (two-pass algorithm)
+                double E_mean = 0.0;
                 for (size_t i = 0; i < n_samples; ++i) {
-                    if (i / block_size != j) {
-                        E_sum += E_total[i];
-                        E2_sum += E2[i];
-                        ++count;
-                    }
+                    E_mean += E_total[i];
                 }
-                double E_j = E_sum / count;
-                double E2_j = E2_sum / count;
-                double var_j = E2_j - E_j * E_j;
-                C_jack[j] = var_j / (T * T * N2);
+                E_mean /= n_samples;
+                
+                // Compute variance using shifted data for numerical stability
+                // Var(E) = <(E - E_mean)²> which avoids catastrophic cancellation
+                double var_E = 0.0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    double delta = E_total[i] - E_mean;
+                    var_E += delta * delta;
+                }
+                var_E /= n_samples;  // Biased estimator (for heat capacity)
+                
+                // Ensure non-negative variance (numerical protection)
+                var_E = std::max(0.0, var_E);
+                obs.specific_heat.value = var_E / (T * T * N2);
+                
+                // Jackknife error estimation
+                // Use at most 100 jackknife blocks, at least 2
+                size_t n_jack = std::min(n_samples, size_t(100));
+                n_jack = std::max(n_jack, size_t(2));
+                size_t block_size = std::max(size_t(1), n_samples / n_jack);
+                // Recalculate n_jack based on actual block_size to handle remainders
+                n_jack = (n_samples + block_size - 1) / block_size;
+                
+                vector<double> C_jack(n_jack);
+                
+                for (size_t j = 0; j < n_jack; ++j) {
+                    // Leave out block j: indices [j*block_size, min((j+1)*block_size, n_samples))
+                    size_t block_start = j * block_size;
+                    size_t block_end = std::min((j + 1) * block_size, n_samples);
+                    
+                    // Compute jackknife mean (excluding block j)
+                    double E_sum = 0.0;
+                    size_t count = 0;
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        if (i < block_start || i >= block_end) {
+                            E_sum += E_total[i];
+                            ++count;
+                        }
+                    }
+                    
+                    if (count < 2) {
+                        C_jack[j] = obs.specific_heat.value;  // Fallback
+                        continue;
+                    }
+                    
+                    double E_j = E_sum / count;
+                    
+                    // Compute jackknife variance (excluding block j)
+                    double var_j = 0.0;
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        if (i < block_start || i >= block_end) {
+                            double delta = E_total[i] - E_j;
+                            var_j += delta * delta;
+                        }
+                    }
+                    var_j /= count;
+                    var_j = std::max(0.0, var_j);  // Numerical protection
+                    
+                    C_jack[j] = var_j / (T * T * N2);
+                }
+                
+                // Compute jackknife error estimate
+                double C_mean = 0.0;
+                for (double c : C_jack) C_mean += c;
+                C_mean /= n_jack;
+                
+                double C_var = 0.0;
+                for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
+                C_var *= double(n_jack - 1) / double(n_jack);  // Jackknife variance factor
+                obs.specific_heat.error = std::sqrt(std::max(0.0, C_var));
             }
-            
-            double C_mean = 0.0;
-            for (double c : C_jack) C_mean += c;
-            C_mean /= n_jack;
-            
-            double C_var = 0.0;
-            for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
-            C_var *= double(n_jack - 1) / n_jack;
-            obs.specific_heat.error = std::sqrt(C_var);
         }
         
         // 3. SU(2) sublattice magnetizations with binning analysis
