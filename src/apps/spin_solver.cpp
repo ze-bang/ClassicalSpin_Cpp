@@ -89,11 +89,11 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
         cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    // Generate temperature ladder
+    // Generate temperature ladder: rank 0 = coldest (T_end), highest rank = hottest (T_start)
     vector<double> temps(size);
     for (int i = 0; i < size; ++i) {
-        double log_T = log10(config.T_start) + 
-                      (log10(config.T_end) - log10(config.T_start)) * i / (size - 1);
+        double log_T = log10(config.T_end) + 
+                      (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
         temps[i] = pow(10, log_T);
     }
     
@@ -1543,11 +1543,11 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
         cout << "Number of trials: " << config.num_trials << endl;
     }
     
-    // Generate temperature ladder
+    // Generate temperature ladder: rank 0 = coldest (T_end), highest rank = hottest (T_start)
     vector<double> temps(size);
     for (int i = 0; i < size; ++i) {
-        double log_T = log10(config.T_start) + 
-                      (log10(config.T_end) - log10(config.T_start)) * i / (size - 1);
+        double log_T = log10(config.T_end) + 
+                      (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
         temps[i] = pow(10, log_T);
     }
     

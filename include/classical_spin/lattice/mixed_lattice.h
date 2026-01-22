@@ -2888,13 +2888,18 @@ private:
                     &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
                     comm, MPI_STATUS_IGNORE);
         
-        // Decide acceptance
+        // Decide acceptance using parallel tempering Metropolis criterion:
+        // P_swap = min(1, exp[Δ]) where Δ = (β_j - β_i)(E_i - E_j)
+        // With ordering: rank 0 = coldest (β large), highest rank = hottest (β small)
+        // rank < partner_rank means: curr is COLDER, partner is HOTTER
         bool accept = false;
         if (rank < partner_rank) {
-            double delta_beta = (1.0 / curr_Temp) - (1.0 / T_partner);
-            double delta_E = E_partner - E;
-            double P_swap = std::exp(delta_beta * delta_E);
-            accept = (random_double_lehman(0.0, 1.0) < P_swap);
+            // curr = cold (i), partner = hot (j)
+            // Δ = (β_partner - β_curr)(E - E_partner) = (negative)(negative) = positive → accept
+            double beta_curr = 1.0 / curr_Temp;
+            double beta_partner = 1.0 / T_partner;
+            double delta = (beta_partner - beta_curr) * (E - E_partner);
+            accept = (delta >= 0) || (random_double_lehman(0.0, 1.0) < std::exp(delta));
         }
         
         // Broadcast decision
