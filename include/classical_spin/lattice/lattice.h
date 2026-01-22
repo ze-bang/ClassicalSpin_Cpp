@@ -2802,7 +2802,9 @@ public:
         
         // Report acceptance rates
         double total_steps = n_anneal + n_measure;
-        double acc_rate = curr_accept / total_steps;
+        // Account for overrelaxation: Metropolis is only called every overrelaxation_rate steps
+        double metro_steps = (overrelaxation_rate > 0) ? total_steps / overrelaxation_rate : total_steps;
+        double acc_rate = curr_accept / metro_steps;
         double swap_rate_actual = (swap_rate > 0) ? double(swap_accept) / (total_steps / swap_rate) : 0.0;
         
         cout << "Rank " << rank << ": T=" << curr_Temp 
