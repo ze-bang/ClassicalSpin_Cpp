@@ -1363,7 +1363,8 @@ public:
         obs.energy.value = E_result.mean;
         obs.energy.error = E_result.error;
         
-        // 2. Specific heat: C_V = (<E²> - <E>²) / (T² N)
+        // 2. Specific heat per site: c_V = Var(E) / (T² N²) = Var(E/N) / T²
+        //    Since E is extensive (E ~ N), Var(E) ~ N², so c_V ~ O(1)
         //    Error propagation via jackknife on binned data
         {
             vector<double> E2(n_samples);
@@ -1380,7 +1381,8 @@ public:
             E2_mean /= n_samples;
             
             double var_E = E2_mean - E_mean * E_mean;
-            obs.specific_heat.value = var_E / (T * T * double(lattice_size));
+            double N2 = double(lattice_size) * double(lattice_size);
+            obs.specific_heat.value = var_E / (T * T * N2);
             
             // Jackknife error estimation for specific heat
             size_t n_jack = std::min(n_samples, size_t(100));
@@ -1401,7 +1403,7 @@ public:
                 double E_j = E_sum / count;
                 double E2_j = E2_sum / count;
                 double var_j = E2_j - E_j * E_j;
-                C_jack[j] = var_j / (T * T * double(lattice_size));
+                C_jack[j] = var_j / (T * T * N2);
             }
             
             double C_mean = 0.0;
@@ -2707,8 +2709,8 @@ public:
                                    double curr_accept, int swap_accept,
                                    size_t swap_rate, size_t overrelaxation_rate,
                                    size_t probe_rate) {
-        // Compute local heat capacity using binning analysis
-        // (Simplified - full version would use binning_analysis from original code)
+        // Compute local heat capacity per site using binning analysis
+        // c_V = Var(E) / (T² N²) = Var(E/N) / T²
         double E_mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
         double E2_mean = 0.0;
         for (double E : energies) {
@@ -2717,8 +2719,9 @@ public:
         E2_mean /= energies.size();
         double var_E = E2_mean - E_mean * E_mean;
         
-        double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * lattice_size);
-        double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * lattice_size);
+        double N2 = double(lattice_size) * double(lattice_size);
+        double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * N2);
+        double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * N2);
         
         // Gather to root
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 

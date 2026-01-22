@@ -2178,7 +2178,8 @@ public:
         obs.energy_SU3.value = E_SU3_result.mean;
         obs.energy_SU3.error = E_SU3_result.error;
         
-        // 2. Specific heat with jackknife error estimation
+        // 2. Specific heat per site with jackknife error estimation
+        //    c_V = Var(E) / (T² N²) = Var(E/N) / T²
         {
             vector<double> E_total(n_samples);
             vector<double> E2(n_samples);
@@ -2196,7 +2197,8 @@ public:
             E2_mean /= n_samples;
             
             double var_E = E2_mean - E_mean * E_mean;
-            obs.specific_heat.value = var_E / (T * T * double(total_sites));
+            double N2 = double(total_sites) * double(total_sites);
+            obs.specific_heat.value = var_E / (T * T * N2);
             
             // Jackknife error estimation
             size_t n_jack = std::min(n_samples, size_t(100));
@@ -2216,7 +2218,7 @@ public:
                 double E_j = E_sum / count;
                 double E2_j = E2_sum / count;
                 double var_j = E2_j - E_j * E_j;
-                C_jack[j] = var_j / (T * T * double(total_sites));
+                C_jack[j] = var_j / (T * T * N2);
             }
             
             double C_mean = 0.0;
