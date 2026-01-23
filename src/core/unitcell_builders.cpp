@@ -214,11 +214,12 @@ UnitCell build_pyrochlore_non_kramer(const SpinConfig& config) {
     const double Jpm = config.get_param("Jpm", 0.0);
     const double Jzz = config.get_param("Jzz", 1.0);
     const double Jpmpm = config.get_param("Jpmpm", 0.0);
+    const double J2 = config.get_param("J2", 0.0);  // Second nearest neighbor Heisenberg
     const double h = config.field_strength;
     
     // Non-Kramers field response parameters (delta1 and delta2)
-    const double delta1 = config.get_param("delta1", 0.00075);
-    const double delta2 = config.get_param("delta2", -0.000088);
+    const double delta1 = config.get_param("delta1", 0.0);
+    const double delta2 = config.get_param("delta2", 0.0);
     
     // Use Pyrochlore class from unitcell.h
     Pyrochlore atoms(3);
@@ -271,6 +272,38 @@ UnitCell build_pyrochlore_non_kramer(const SpinConfig& config) {
     atoms.set_bilinear_interaction(Jy, 1, 2, Eigen::Vector3i(-1, 1, 0));
     atoms.set_bilinear_interaction(Jx, 1, 3, Eigen::Vector3i(-1, 0, 1));
     atoms.set_bilinear_interaction(Jz, 2, 3, Eigen::Vector3i(0, 1, -1));
+    
+    // Second nearest neighbor J2 Heisenberg interaction (same sublattice)
+    // In pyrochlore, second nearest neighbors are same-sublattice atoms
+    // connected along the lattice vector directions.
+    // Pyrochlore positions from unitcell.h:
+    //   Atom 0: (0.125, 0.125, 0.125)
+    //   Atom 1: (0.125, -0.125, -0.125)
+    //   Atom 2: (-0.125, 0.125, -0.125)
+    //   Atom 3: (-0.125, -0.125, 0.125)
+    // Lattice vectors: (0, 0.5, 0.5), (0.5, 0, 0.5), (0.5, 0.5, 0)
+    // Each sublattice has 6 second nearest neighbors at offsets ±a₁, ±a₂, ±a₃
+    Eigen::Matrix3d J2_mat = Eigen::Matrix3d::Identity() * J2;
+    
+    // Sublattice 0 -> sublattice 0 (same sublattice in neighboring cells)
+    atoms.set_bilinear_interaction(J2_mat, 0, 0, Eigen::Vector3i(1, 0, 0));
+    atoms.set_bilinear_interaction(J2_mat, 0, 0, Eigen::Vector3i(0, 1, 0));
+    atoms.set_bilinear_interaction(J2_mat, 0, 0, Eigen::Vector3i(0, 0, 1));
+    
+    // Sublattice 1 -> sublattice 1
+    atoms.set_bilinear_interaction(J2_mat, 1, 1, Eigen::Vector3i(1, 0, 0));
+    atoms.set_bilinear_interaction(J2_mat, 1, 1, Eigen::Vector3i(0, 1, 0));
+    atoms.set_bilinear_interaction(J2_mat, 1, 1, Eigen::Vector3i(0, 0, 1));
+    
+    // Sublattice 2 -> sublattice 2
+    atoms.set_bilinear_interaction(J2_mat, 2, 2, Eigen::Vector3i(1, 0, 0));
+    atoms.set_bilinear_interaction(J2_mat, 2, 2, Eigen::Vector3i(0, 1, 0));
+    atoms.set_bilinear_interaction(J2_mat, 2, 2, Eigen::Vector3i(0, 0, 1));
+    
+    // Sublattice 3 -> sublattice 3
+    atoms.set_bilinear_interaction(J2_mat, 3, 3, Eigen::Vector3i(1, 0, 0));
+    atoms.set_bilinear_interaction(J2_mat, 3, 3, Eigen::Vector3i(0, 1, 0));
+    atoms.set_bilinear_interaction(J2_mat, 3, 3, Eigen::Vector3i(0, 0, 1));
     
     // Build field vector
     Eigen::Vector3d field_global;

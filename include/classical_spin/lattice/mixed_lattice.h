@@ -2748,7 +2748,7 @@ public:
             return result;
         }
         
-        cout << "=== Bittner et al. Optimized Temperature Grid (MixedLattice) ===" << endl;
+        cout << "=== Bittner et al. Optimized Temperature Grid (MixedLattice Fast) ===" << endl;
         cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
         cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << endl;
         cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
@@ -2785,6 +2785,9 @@ public:
         vector<SpinConfigSU3> reps_SU3(R, spins_SU3);
         double sigma = 1000.0;
         
+        // OPTIMIZATION 1: Cache energies to avoid redundant calculations
+        vector<double> cached_energies(R);
+        
         // Warmup phase: equilibrate each replica at its temperature
         cout << "Warming up " << R << " replicas..." << endl;
         for (size_t k = 0; k < R; ++k) {
@@ -2799,17 +2802,32 @@ public:
             }
             reps_SU2[k] = spins_SU2;
             reps_SU3[k] = spins_SU3;
+            cached_energies[k] = total_energy();
         }
         
         // Feedback optimization loop
         vector<double> acceptance_rates(R - 1, 0.0);
         
+        // OPTIMIZATION 2: Adaptive damping - start aggressive, become conservative
+        double base_damping = 0.3;
+        
         for (size_t iter = 0; iter < feedback_iters; ++iter) {
+            // Adaptive damping
+            double damping = base_damping + 0.4 * (double(iter) / double(feedback_iters));
+            
             vector<size_t> attempts(R - 1, 0);
             vector<size_t> accepts(R - 1, 0);
             
+            // OPTIMIZATION 3: Reduced sweeps for early iterations
+            size_t effective_sweeps = sweeps_per_iter;
+            if (iter < 3) {
+                effective_sweeps = std::max(size_t(50), sweeps_per_iter / 4);
+            } else if (iter < 6) {
+                effective_sweeps = std::max(size_t(100), sweeps_per_iter / 2);
+            }
+            
             // Run MC sweeps and measure acceptance rates
-            for (size_t sweep = 0; sweep < sweeps_per_iter; ++sweep) {
+            for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
                 // Update each replica
                 for (size_t k = 0; k < R; ++k) {
                     spins_SU2 = reps_SU2[k];
@@ -2821,30 +2839,31 @@ public:
                     }
                     reps_SU2[k] = spins_SU2;
                     reps_SU3[k] = spins_SU3;
+                    cached_energies[k] = total_energy();
                 }
                 
                 // Attempt replica exchanges for ALL adjacent pairs
                 for (int parity = 0; parity <= 1; ++parity) {
                     for (size_t e = parity; e < R - 1; e += 2) {
-                        // Compute energies
-                        spins_SU2 = reps_SU2[e];
-                        spins_SU3 = reps_SU3[e];
-                        double E_cold = total_energy();
+                        // Use cached energies
+                        // beta array is sorted: beta[0] = beta_min (hottest), beta[R-1] = beta_max (coldest)
+                        // So beta[e] < beta[e+1] (e is hotter, e+1 is colder)
+                        double E_hot = cached_energies[e];
+                        double E_cold = cached_energies[e + 1];
                         
-                        spins_SU2 = reps_SU2[e + 1];
-                        spins_SU3 = reps_SU3[e + 1];
-                        double E_hot = total_energy();
-                        
-                        // Metropolis criterion for replica exchange
-                        double dBeta = beta[e] - beta[e + 1];
-                        double dE = E_hot - E_cold;
-                        double delta = dBeta * dE;
+                        // Metropolis criterion for replica exchange:
+                        // P_swap = min(1, exp(Δ)) where Δ = (β_cold - β_hot)(E_cold - E_hot)
+                        // When energies are properly ordered (E_cold < E_hot), Δ < 0
+                        double dBeta = beta[e + 1] - beta[e];  // > 0 (β_cold - β_hot)
+                        double dE = E_cold - E_hot;            // typically < 0 (E_cold - E_hot)
+                        double delta = dBeta * dE;             // typically < 0
                         
                         ++attempts[e];
                         if (delta >= 0 || random_double_lehman(0.0, 1.0) < std::exp(delta)) {
                             ++accepts[e];
                             std::swap(reps_SU2[e], reps_SU2[e + 1]);
                             std::swap(reps_SU3[e], reps_SU3[e + 1]);
+                            std::swap(cached_energies[e], cached_energies[e + 1]);
                         }
                     }
                 }
@@ -2866,7 +2885,8 @@ public:
             
             cout << "Iter " << iter + 1 << "/" << feedback_iters 
                  << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
-                 << ", max deviation = " << max_deviation << endl;
+                 << ", max dev = " << max_deviation 
+                 << " (sweeps=" << effective_sweeps << ", damp=" << std::setprecision(2) << damping << ")" << endl;
             
             result.feedback_iterations_used = iter + 1;
             
@@ -2887,9 +2907,12 @@ public:
                 
                 double log_ratio = std::log(target_acceptance) / std::log(A_e);
                 double ratio = std::sqrt(std::abs(log_ratio));
-                double damping = 0.5;
                 ratio = 1.0 + damping * (ratio - 1.0);
-                ratio = std::clamp(ratio, 0.7, 1.5);
+                
+                // Adaptive clamping
+                double clamp_min = (iter < 3) ? 0.5 : 0.7;
+                double clamp_max = (iter < 3) ? 2.0 : 1.5;
+                ratio = std::clamp(ratio, clamp_min, clamp_max);
                 
                 double d_beta = (beta[e + 1] - beta[e]) * ratio;
                 new_beta[e + 1] = new_beta[e] + d_beta;
@@ -2965,6 +2988,312 @@ public:
 
     // ============================================================
     // PARALLEL TEMPERING
+
+    /**
+     * MPI-distributed temperature grid optimization for MixedLattice (FAST VERSION)
+     * 
+     * Each MPI rank handles one replica. Much faster than serial version.
+     * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+     */
+    OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
+        double Tmin, double Tmax,
+        size_t warmup_sweeps = 500,
+        size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0,
+        double target_acceptance = 0.5,
+        double convergence_tol = 0.05,
+        MPI_Comm comm = MPI_COMM_WORLD) {
+        
+        int rank, R;
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &R);
+        
+        OptimizedTempGridResult result;
+        result.converged = false;
+        result.feedback_iterations_used = 0;
+        
+        if (R < 2) {
+            result.temperatures = {Tmin};
+            result.converged = true;
+            return result;
+        }
+        if (R == 2) {
+            result.temperatures = {Tmin, Tmax};
+            result.acceptance_rates = {0.5};
+            result.converged = true;
+            return result;
+        }
+        
+        seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
+        
+        if (rank == 0) {
+            cout << "=== Bittner et al. Optimized Temperature Grid (MixedLattice MPI) ===" << endl;
+            cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << " (MPI ranks)" << endl;
+            cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        }
+        
+        // Initialize beta array
+        double beta_min = 1.0 / Tmax;
+        double beta_max = 1.0 / Tmin;
+        vector<double> beta(R);
+        for (int i = 0; i < R; ++i) {
+            beta[i] = beta_min + (beta_max - beta_min) * double(i) / double(R - 1);
+        }
+        
+        double my_beta = beta[rank];
+        double my_T = 1.0 / my_beta;
+        double sigma = 1000.0;
+        
+        // Warmup
+        if (rank == 0) cout << "Warming up replicas..." << endl;
+        for (size_t i = 0; i < warmup_sweeps; ++i) {
+            metropolis_interleaved(my_T, gaussian_move, sigma);
+            if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                overrelaxation();
+            }
+        }
+        MPI_Barrier(comm);
+        
+        vector<double> acceptance_rates(R - 1, 0.0);
+        double base_damping = 0.5;  // Less aggressive for faster convergence
+        
+        for (size_t iter = 0; iter < feedback_iters; ++iter) {
+            double damping = base_damping + 0.3 * (double(iter) / double(feedback_iters));
+            
+            int local_attempts = 0;
+            int local_accepts = 0;
+            
+            // Use full sweeps for better statistics
+            size_t effective_sweeps = sweeps_per_iter;
+            
+            for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
+                metropolis_interleaved(my_T, gaussian_move, sigma);
+                if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
+                    overrelaxation();
+                }
+                
+                // Replica exchanges
+                for (int parity = 0; parity <= 1; ++parity) {
+                    int partner_rank;
+                    if (parity == 0) {
+                        partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+                    } else {
+                        partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+                    }
+                    
+                    if (partner_rank < 0 || partner_rank >= R) continue;
+                    
+                    double my_E = total_energy();
+                    double partner_E;
+                    MPI_Sendrecv(&my_E, 1, MPI_DOUBLE, partner_rank, 0,
+                                &partner_E, 1, MPI_DOUBLE, partner_rank, 0,
+                                comm, MPI_STATUS_IGNORE);
+                    
+                    int accept_int = 0;
+                    if (rank < partner_rank) {
+                        double beta_hot = my_beta;
+                        double beta_cold = beta[partner_rank];
+                        double E_hot = my_E;
+                        double E_cold = partner_E;
+                        double delta = (beta_cold - beta_hot) * (E_hot - E_cold);
+                        bool accept = (delta >= 0) || (random_double_lehman(0.0, 1.0) < std::exp(delta));
+                        accept_int = accept ? 1 : 0;
+                        ++local_attempts;
+                        if (accept) ++local_accepts;
+                    }
+                    
+                    int recv_accept_int = 0;
+                    MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 1,
+                                &recv_accept_int, 1, MPI_INT, partner_rank, 1,
+                                comm, MPI_STATUS_IGNORE);
+                    
+                    bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
+                    
+                    if (accept) {
+                        // Exchange SU2 spins
+                        size_t su2_size = spins_SU2.size() * 3;
+                        vector<double> send_su2(su2_size), recv_su2(su2_size);
+                        for (size_t i = 0; i < spins_SU2.size(); ++i) {
+                            for (size_t j = 0; j < 3; ++j) {
+                                send_su2[i * 3 + j] = spins_SU2[i](j);
+                            }
+                        }
+                        MPI_Sendrecv(send_su2.data(), su2_size, MPI_DOUBLE, partner_rank, 2,
+                                    recv_su2.data(), su2_size, MPI_DOUBLE, partner_rank, 2,
+                                    comm, MPI_STATUS_IGNORE);
+                        for (size_t i = 0; i < spins_SU2.size(); ++i) {
+                            for (size_t j = 0; j < 3; ++j) {
+                                spins_SU2[i](j) = recv_su2[i * 3 + j];
+                            }
+                        }
+                        
+                        // Exchange SU3 spins
+                        size_t su3_size = spins_SU3.size() * 8;
+                        vector<double> send_su3(su3_size), recv_su3(su3_size);
+                        for (size_t i = 0; i < spins_SU3.size(); ++i) {
+                            for (size_t j = 0; j < 8; ++j) {
+                                send_su3[i * 8 + j] = spins_SU3[i](j);
+                            }
+                        }
+                        MPI_Sendrecv(send_su3.data(), su3_size, MPI_DOUBLE, partner_rank, 3,
+                                    recv_su3.data(), su3_size, MPI_DOUBLE, partner_rank, 3,
+                                    comm, MPI_STATUS_IGNORE);
+                        for (size_t i = 0; i < spins_SU3.size(); ++i) {
+                            for (size_t j = 0; j < 8; ++j) {
+                                spins_SU3[i](j) = recv_su3[i * 8 + j];
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Gather statistics using MPI_Gather (cleaner and safer than Send/Recv)
+            // Each rank k sends stats for edge k (if k < R-1)
+            int my_attempts = (rank < R - 1) ? local_attempts : 0;
+            int my_accepts = (rank < R - 1) ? local_accepts : 0;
+            
+            vector<int> recv_attempts(R);
+            vector<int> recv_accepts(R);
+            MPI_Gather(&my_attempts, 1, MPI_INT, recv_attempts.data(), 1, MPI_INT, 0, comm);
+            MPI_Gather(&my_accepts, 1, MPI_INT, recv_accepts.data(), 1, MPI_INT, 0, comm);
+            
+            bool converged = false;
+            if (rank == 0) {
+                for (int e = 0; e < R - 1; ++e) {
+                    if (recv_attempts[e] > 0) {
+                        acceptance_rates[e] = double(recv_accepts[e]) / double(recv_attempts[e]);
+                    }
+                }
+                
+                // Check convergence using mean deviation (more stable than max)
+                double max_deviation = 0.0;
+                double mean_deviation = 0.0;
+                double mean_rate = 0.0;
+                double min_rate = 1.0, max_rate = 0.0;
+                for (int e = 0; e < R - 1; ++e) {
+                    double dev = std::abs(acceptance_rates[e] - target_acceptance);
+                    max_deviation = std::max(max_deviation, dev);
+                    mean_deviation += dev;
+                    mean_rate += acceptance_rates[e];
+                    min_rate = std::min(min_rate, acceptance_rates[e]);
+                    max_rate = std::max(max_rate, acceptance_rates[e]);
+                }
+                mean_rate /= (R - 1);
+                mean_deviation /= (R - 1);
+                
+                cout << "Iter " << iter + 1 << "/" << feedback_iters 
+                     << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
+                     << " [" << min_rate << ", " << max_rate << "]"
+                     << ", mean dev = " << mean_deviation << endl;
+                
+                // Warn if acceptance is uniformly low - need more replicas
+                if (mean_rate < 0.1 && iter == 0) {
+                    cout << "WARNING: Mean acceptance rate is very low (" << mean_rate << ").\n"
+                         << "         Consider using more replicas or a smaller temperature range." << endl;
+                }
+                
+                result.feedback_iterations_used = iter + 1;
+                
+                // Converge based on mean deviation (less sensitive to noise)
+                if (mean_deviation < convergence_tol) {
+                    converged = true;
+                    cout << "Converged at iteration " << iter + 1 << endl;
+                }
+                
+                if (!converged) {
+                    // Bittner et al. feedback: Δβ_i ∝ A_i
+                    // High A → more spacing, Low A → less spacing (closer temps)
+                    
+                    vector<double> weights(R - 1);
+                    double total_weight = 0.0;
+                    
+                    for (int e = 0; e < R - 1; ++e) {
+                        double A_e = acceptance_rates[e];
+                        if (A_e < 0.01) A_e = 0.01;
+                        if (A_e > 0.99) A_e = 0.99;
+                        weights[e] = A_e;  // Weight proportional to A
+                        total_weight += weights[e];
+                    }
+                    
+                    for (int e = 0; e < R - 1; ++e) {
+                        weights[e] /= total_weight;
+                    }
+                    
+                    vector<double> new_beta(R);
+                    new_beta[0] = beta_min;
+                    double cumulative = 0.0;
+                    for (int e = 0; e < R - 1; ++e) {
+                        cumulative += weights[e];
+                        new_beta[e + 1] = beta_min + cumulative * (beta_max - beta_min);
+                    }
+                    new_beta[R - 1] = beta_max;
+                    
+                    // Damping
+                    for (int k = 1; k < R - 1; ++k) {
+                        new_beta[k] = (1.0 - damping) * beta[k] + damping * new_beta[k];
+                    }
+                    
+                    beta = new_beta;
+                }
+            }
+            
+            int conv_int = converged ? 1 : 0;
+            MPI_Bcast(&conv_int, 1, MPI_INT, 0, comm);
+            MPI_Bcast(beta.data(), R, MPI_DOUBLE, 0, comm);
+            
+            my_beta = beta[rank];
+            my_T = 1.0 / my_beta;
+            
+            if (conv_int == 1) {
+                result.converged = true;
+                break;
+            }
+        }
+        
+        MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
+        
+        result.temperatures.resize(R);
+        for (int i = 0; i < R; ++i) {
+            result.temperatures[i] = 1.0 / beta[i];
+        }
+        std::sort(result.temperatures.begin(), result.temperatures.end());
+        result.acceptance_rates = acceptance_rates;
+        
+        result.local_diffusivities.resize(R - 1);
+        for (int e = 0; e < R - 1; ++e) {
+            double A = acceptance_rates[e];
+            result.local_diffusivities[e] = A * (1.0 - A);
+        }
+        
+        result.mean_acceptance_rate = 0.0;
+        for (double A : acceptance_rates) {
+            result.mean_acceptance_rate += A;
+        }
+        result.mean_acceptance_rate /= (R - 1);
+        
+        double tau_rt = 0.0;
+        for (int e = 0; e < R - 1; ++e) {
+            double d_beta = std::abs(beta[e + 1] - beta[e]);
+            double D = result.local_diffusivities[e];
+            tau_rt += d_beta / std::max(D, 1e-6);
+        }
+        result.round_trip_estimate = tau_rt;
+        
+        if (rank == 0) {
+            cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
+            cout << "Mean acceptance rate: " << std::fixed << std::setprecision(3) 
+                 << result.mean_acceptance_rate * 100 << "%" << endl;
+            cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+        }
+        
+        // CRITICAL: Synchronize all ranks before returning
+        // This ensures no stray MPI messages remain and all ranks exit together
+        MPI_Barrier(comm);
+        
+        return result;
+    }
     // ============================================================
 
     /**
@@ -2979,7 +3308,7 @@ public:
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
                            bool gaussian_move = true, bool use_interleaved = true,
-                           MPI_Comm comm = MPI_COMM_WORLD) {
+                           MPI_Comm comm = MPI_COMM_WORLD, bool verbose = false) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -3145,8 +3474,10 @@ public:
                 save_observables(rank_dir, energies, magnetizations);
                 save_sublattice_magnetization_timeseries(rank_dir, measurements);
                 
-                // Save spin configuration
-                save_spin_config_to_dir(rank_dir, "spins_T=" + std::to_string(curr_Temp));
+                // Save spin configuration only if verbose mode is enabled
+                if (verbose) {
+                    save_spin_config_to_dir(rank_dir, "spins_T=" + std::to_string(curr_Temp));
+                }
             }
             
             // Wait for all ranks to finish writing before rank 0 writes aggregated results
@@ -3200,23 +3531,40 @@ private:
                     comm, MPI_STATUS_IGNORE);
         
         // Decide acceptance using parallel tempering Metropolis criterion:
-        // P_swap = min(1, exp[Δ]) where Δ = (β_j - β_i)(E_i - E_j)
+        // P_swap = min(1, exp[Δ]) where Δ = (β_cold - β_hot)(E_cold - E_hot)
         // With ordering: rank 0 = coldest (β large), highest rank = hottest (β small)
         // rank < partner_rank means: curr is COLDER, partner is HOTTER
         bool accept = false;
         if (rank < partner_rank) {
+            // Only the lower rank computes the acceptance decision
             // curr = cold (i), partner = hot (j)
-            // Δ = (β_partner - β_curr)(E - E_partner) = (negative)(negative) = positive → accept
+            // β_curr > β_partner, typically E_curr < E_partner (cold has lower energy)
+            // Δ = (β_curr - β_partner)(E_curr - E_partner) = (positive)(negative) = negative typically
             double beta_curr = 1.0 / curr_Temp;
             double beta_partner = 1.0 / T_partner;
-            double delta = (beta_partner - beta_curr) * (E - E_partner);
+            double delta = (beta_curr - beta_partner) * (E - E_partner);
             accept = (delta >= 0) || (random_double_lehman(0.0, 1.0) < std::exp(delta));
+            
+            // DEBUG: Print exchange details (only first few times to avoid spam)
+            static int debug_count = 0;
+            if (debug_count < 20) {
+                cout << "[PT DEBUG] rank=" << rank << "->" << partner_rank
+                     << " T_cold=" << curr_Temp << " T_hot=" << T_partner
+                     << " E_cold=" << E << " E_hot=" << E_partner
+                     << " delta=" << delta << " accept=" << accept << endl;
+                ++debug_count;
+            }
         }
         
-        // Broadcast decision
+        // Communicate decision between partners using point-to-point
+        // (MPI_Bcast is collective and cannot be used pairwise)
         int accept_int = accept ? 1 : 0;
-        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), comm);
-        accept = (accept_int == 1);
+        int recv_accept_int = 0;
+        MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 3,
+                     &recv_accept_int, 1, MPI_INT, partner_rank, 3,
+                     comm, MPI_STATUS_IGNORE);
+        // The lower-ranked partner made the decision; both use that result
+        accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
         
         // Exchange configurations if accepted
         if (accept) {

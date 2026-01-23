@@ -92,27 +92,29 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
     // Generate temperature ladder
     vector<double> temps(size);
     
-    if (config.pt_optimize_temperatures && rank == 0) {
-        // Use feedback-optimized temperature grid (Bittner et al., arXiv:0809.0571)
-        // Only rank 0 performs the optimization, then broadcasts
-        cout << "Generating optimized temperature grid (Bittner et al.)..." << endl;
+    if (config.pt_optimize_temperatures) {
+        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        // All ranks participate - much faster than single-rank optimization
+        if (rank == 0) {
+            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed)..." << endl;
+        }
         
-        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid(
+        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
             config.T_end,    // Tmin (coldest)
             config.T_start,  // Tmax (hottest)
-            size,
             config.pt_optimization_warmup,
             config.pt_optimization_sweeps,
             config.pt_optimization_iterations,
             config.gaussian_move,
             config.overrelaxation_rate,
             config.pt_target_acceptance,
-            0.05  // convergence tolerance
+            0.05,  // convergence tolerance
+            comm
         );
         temps = opt_result.temperatures;
         
-        // Save optimized temperature grid info to file
-        if (!config.output_dir.empty()) {
+        // Save optimized temperature grid info to file (rank 0 only)
+        if (rank == 0 && !config.output_dir.empty()) {
             filesystem::create_directories(config.output_dir);
             ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
             opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
@@ -133,21 +135,21 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             }
             opt_file.close();
         }
-    } else if (!config.pt_optimize_temperatures && rank == 0) {
+    } else {
         // Use geometric (logarithmic) temperature spacing
-        cout << "Using geometric temperature grid..." << endl;
-        temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
-    } else if (rank == 0) {
-        // Fallback to simple logarithmic spacing (legacy)
-        for (int i = 0; i < size; ++i) {
-            double log_T = log10(config.T_end) + 
-                          (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
-            temps[i] = pow(10, log_T);
+        if (rank == 0) {
+            cout << "Using geometric temperature grid..." << endl;
+            temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
         }
+        // Broadcast temperatures from rank 0 to all ranks
+        MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
     }
     
-    // Broadcast optimized temperatures from rank 0 to all ranks
-    MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
+    // Re-initialize spins after temperature optimization (or geometric grid setup)
+    // This ensures each rank starts with fresh random spins - the optimization
+    // phase leaves spins in a "mixed" state from many replica exchanges
+    lattice.init_random();
+    MPI_Barrier(comm);
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -1598,27 +1600,29 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
     // Generate temperature ladder
     vector<double> temps(size);
     
-    if (config.pt_optimize_temperatures && rank == 0) {
-        // Use feedback-optimized temperature grid (Bittner et al., arXiv:0809.0571)
-        // Only rank 0 performs the optimization, then broadcasts
-        cout << "Generating optimized temperature grid (Bittner et al.) for MixedLattice..." << endl;
+    if (config.pt_optimize_temperatures) {
+        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        // All ranks participate - much faster than single-rank optimization
+        if (rank == 0) {
+            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed) for MixedLattice..." << endl;
+        }
         
-        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid(
+        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
             config.T_end,    // Tmin (coldest)
             config.T_start,  // Tmax (hottest)
-            size,
             config.pt_optimization_warmup,
             config.pt_optimization_sweeps,
             config.pt_optimization_iterations,
             config.gaussian_move,
             config.overrelaxation_rate,
             config.pt_target_acceptance,
-            0.05  // convergence tolerance
+            0.05,  // convergence tolerance
+            comm
         );
         temps = opt_result.temperatures;
         
-        // Save optimized temperature grid info to file
-        if (!config.output_dir.empty()) {
+        // Save optimized temperature grid info to file (rank 0 only)
+        if (rank == 0 && !config.output_dir.empty()) {
             filesystem::create_directories(config.output_dir);
             ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
             opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
@@ -1639,21 +1643,21 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             }
             opt_file.close();
         }
-    } else if (!config.pt_optimize_temperatures && rank == 0) {
+    } else {
         // Use geometric (logarithmic) temperature spacing
-        cout << "Using geometric temperature grid..." << endl;
-        temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
-    } else if (rank == 0) {
-        // Fallback to simple logarithmic spacing (legacy)
-        for (int i = 0; i < size; ++i) {
-            double log_T = log10(config.T_end) + 
-                          (log10(config.T_start) - log10(config.T_end)) * i / (size - 1);
-            temps[i] = pow(10, log_T);
+        if (rank == 0) {
+            cout << "Using geometric temperature grid..." << endl;
+            temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
         }
+        // Broadcast temperatures from rank 0 to all ranks
+        MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
     }
     
-    // Broadcast optimized temperatures from rank 0 to all ranks
-    MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
+    // Re-initialize spins after temperature optimization (or geometric grid setup)
+    // This ensures each rank starts with fresh random spins - the optimization
+    // phase leaves spins in a "mixed" state from many replica exchanges
+    lattice.init_random();
+    MPI_Barrier(comm);
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
