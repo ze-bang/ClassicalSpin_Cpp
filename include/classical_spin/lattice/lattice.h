@@ -3041,13 +3041,11 @@ public:
                                                    sublattice_mags, n_anneal, n_measure,
                                                    probe_rate, swap_rate, overrelaxation_rate,
                                                    acc_rate, swap_rate_actual);
+#else
+                if (rank == 0) {
+                    cerr << "Warning: HDF5 not enabled. Compile with -DHDF5_ENABLED=ON to enable output." << endl;
+                }
 #endif
-                
-                // Also save text files for backward compatibility (optional)
-                // Uncomment these lines if you want both HDF5 and text output
-                // save_thermodynamic_observables(rank_dir, obs);
-                // save_observables(rank_dir, energies, magnetizations);
-                // save_sublattice_magnetization_timeseries(rank_dir, sublattice_mags);
                 
                 // Save spin configuration only if verbose mode is enabled
                 if (verbose) {
@@ -3064,14 +3062,6 @@ public:
                 // Save heat capacity to HDF5
                 save_heat_capacity_hdf5(dir_name, temp, heat_capacity, dHeat);
 #endif
-                // Also save text file for backward compatibility
-                ofstream heat_file(dir_name + "/heat_capacity.txt");
-                heat_file << "# T C_V dC_V" << endl;
-                heat_file << std::scientific << std::setprecision(12);
-                for (int r = 0; r < size; ++r) {
-                    heat_file << temp[r] << " " << heat_capacity[r] << " " << dHeat[r] << "\n";
-                }
-                heat_file.close();
             }
         }
         
