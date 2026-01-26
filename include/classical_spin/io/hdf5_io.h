@@ -8,7 +8,7 @@
 #include <ctime>
 #include <sstream>
 #include <iomanip>
-#include "simple_linear_alg.h"
+#include "classical_spin/core/simple_linear_alg.h"
 
 /**
  * HDF5 Writer for molecular dynamics trajectories
@@ -1702,6 +1702,535 @@ private:
     H5::DataSet phonons_dataset_;
     H5::DataSet energy_dataset_;
     H5::DataSet spins_dataset_;
+};
+
+/**
+ * HDF5 Writer for Parallel Tempering Monte Carlo simulations
+ * 
+ * This class provides efficient I/O for parallel tempering by storing
+ * all data from a single temperature replica in a single HDF5 file.
+ * 
+ * File structure:
+ * /timeseries/
+ *   - energy [n_samples]                          : Energy per site time series
+ *   - magnetization [n_samples, spin_dim]         : Total magnetization time series
+ *   - sublattice_mag_[α] [n_samples, spin_dim]    : Sublattice α magnetization time series
+ * 
+ * /observables/
+ *   - energy_mean                : Mean energy per site
+ *   - energy_error               : Energy error estimate
+ *   - specific_heat_mean         : Mean specific heat
+ *   - specific_heat_error        : Specific heat error
+ *   - sublattice_mag_[α]_mean [spin_dim]  : Mean magnetization of sublattice α
+ *   - sublattice_mag_[α]_error [spin_dim] : Error of sublattice α magnetization
+ *   - energy_sublattice_[α]_cross_mean [spin_dim]  : Energy-sublattice cross correlation mean
+ *   - energy_sublattice_[α]_cross_error [spin_dim] : Energy-sublattice cross correlation error
+ * 
+ * /metadata/
+ *   - temperature           : Simulation temperature
+ *   - lattice_size          : Total number of sites
+ *   - spin_dim              : Dimension of spin vectors
+ *   - n_sublattices         : Number of sublattices (N_atoms)
+ *   - n_anneal              : Number of equilibration sweeps
+ *   - n_measure             : Number of measurement sweeps
+ *   - probe_rate            : Sampling interval
+ *   - swap_rate             : Replica exchange attempt rate
+ *   - overrelaxation_rate   : Overrelaxation sweep rate
+ *   - acceptance_rate       : Metropolis acceptance rate
+ *   - swap_acceptance_rate  : Replica exchange acceptance rate
+ *   - creation_time         : ISO 8601 timestamp
+ *   - code_version          : Version string
+ */
+class HDF5PTWriter {
+public:
+    HDF5PTWriter(const std::string& filename,
+                 double temperature,
+                 size_t lattice_size,
+                 size_t spin_dim,
+                 size_t n_sublattices,
+                 size_t n_samples,
+                 size_t n_anneal,
+                 size_t n_measure,
+                 size_t probe_rate,
+                 size_t swap_rate,
+                 size_t overrelaxation_rate,
+                 double acceptance_rate,
+                 double swap_acceptance_rate)
+        : filename_(filename),
+          lattice_size_(lattice_size),
+          spin_dim_(spin_dim),
+          n_sublattices_(n_sublattices)
+    {
+        // Create HDF5 file
+        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        
+        // Create groups
+        timeseries_group_ = file_.createGroup("/timeseries");
+        observables_group_ = file_.createGroup("/observables");
+        metadata_group_ = file_.createGroup("/metadata");
+        
+        // Get current timestamp
+        std::time_t now = std::time(nullptr);
+        char time_str[100];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+        
+        // Write metadata
+        write_double_attribute(metadata_group_, "temperature", temperature);
+        write_scalar_attribute(metadata_group_, "lattice_size", lattice_size);
+        write_scalar_attribute(metadata_group_, "spin_dim", spin_dim);
+        write_scalar_attribute(metadata_group_, "n_sublattices", n_sublattices);
+        write_scalar_attribute(metadata_group_, "n_anneal", n_anneal);
+        write_scalar_attribute(metadata_group_, "n_measure", n_measure);
+        write_scalar_attribute(metadata_group_, "probe_rate", probe_rate);
+        write_scalar_attribute(metadata_group_, "swap_rate", swap_rate);
+        write_scalar_attribute(metadata_group_, "overrelaxation_rate", overrelaxation_rate);
+        write_double_attribute(metadata_group_, "acceptance_rate", acceptance_rate);
+        write_double_attribute(metadata_group_, "swap_acceptance_rate", swap_acceptance_rate);
+        write_string_attribute(metadata_group_, "creation_time", std::string(time_str));
+        write_string_attribute(metadata_group_, "code_version", "ClassicalSpin_Cpp v1.0");
+        write_string_attribute(metadata_group_, "file_format", "HDF5_PT_v1.0");
+    }
+    
+    /**
+     * Write time series data
+     */
+    void write_timeseries(const std::vector<double>& energies,
+                         const std::vector<SpinVector>& magnetizations,
+                         const std::vector<std::vector<SpinVector>>& sublattice_mags) {
+        size_t n_samples = energies.size();
+        
+        // Write energy time series [n_samples]
+        hsize_t energy_dims[1] = {n_samples};
+        H5::DataSpace energy_space(1, energy_dims);
+        H5::DataSet energy_dataset = timeseries_group_.createDataSet(
+            "energy", H5::PredType::NATIVE_DOUBLE, energy_space);
+        
+        std::vector<double> energy_per_site(n_samples);
+        for (size_t i = 0; i < n_samples; ++i) {
+            energy_per_site[i] = energies[i] / lattice_size_;
+        }
+        energy_dataset.write(energy_per_site.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write magnetization time series [n_samples, spin_dim]
+        hsize_t mag_dims[2] = {n_samples, spin_dim_};
+        H5::DataSpace mag_space(2, mag_dims);
+        H5::DataSet mag_dataset = timeseries_group_.createDataSet(
+            "magnetization", H5::PredType::NATIVE_DOUBLE, mag_space);
+        
+        std::vector<double> mag_data(n_samples * spin_dim_);
+        for (size_t i = 0; i < n_samples; ++i) {
+            for (size_t d = 0; d < spin_dim_; ++d) {
+                mag_data[i * spin_dim_ + d] = magnetizations[i](d);
+            }
+        }
+        mag_dataset.write(mag_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write sublattice magnetization time series for each sublattice
+        for (size_t alpha = 0; alpha < n_sublattices_; ++alpha) {
+            std::string dataset_name = "sublattice_mag_" + std::to_string(alpha);
+            H5::DataSet sub_mag_dataset = timeseries_group_.createDataSet(
+                dataset_name, H5::PredType::NATIVE_DOUBLE, mag_space);
+            
+            std::vector<double> sub_mag_data(n_samples * spin_dim_);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (size_t d = 0; d < spin_dim_; ++d) {
+                    sub_mag_data[i * spin_dim_ + d] = sublattice_mags[i][alpha](d);
+                }
+            }
+            sub_mag_dataset.write(sub_mag_data.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+    }
+    
+    /**
+     * Write thermodynamic observables with error estimates
+     * Assumes ThermodynamicObservables structure (Observable, VectorObservable)
+     */
+    void write_observables(double energy_mean, double energy_error,
+                          double specific_heat_mean, double specific_heat_error,
+                          const std::vector<std::vector<double>>& sublattice_mag_means,
+                          const std::vector<std::vector<double>>& sublattice_mag_errors,
+                          const std::vector<std::vector<double>>& energy_cross_means,
+                          const std::vector<std::vector<double>>& energy_cross_errors) {
+        // Write scalar observables
+        write_double_dataset(observables_group_, "energy_mean", energy_mean);
+        write_double_dataset(observables_group_, "energy_error", energy_error);
+        write_double_dataset(observables_group_, "specific_heat_mean", specific_heat_mean);
+        write_double_dataset(observables_group_, "specific_heat_error", specific_heat_error);
+        
+        // Write sublattice magnetization means and errors
+        for (size_t alpha = 0; alpha < n_sublattices_; ++alpha) {
+            std::string mean_name = "sublattice_mag_" + std::to_string(alpha) + "_mean";
+            std::string error_name = "sublattice_mag_" + std::to_string(alpha) + "_error";
+            
+            write_vector_dataset(observables_group_, mean_name, sublattice_mag_means[alpha]);
+            write_vector_dataset(observables_group_, error_name, sublattice_mag_errors[alpha]);
+        }
+        
+        // Write energy-sublattice cross correlations
+        for (size_t alpha = 0; alpha < n_sublattices_; ++alpha) {
+            std::string mean_name = "energy_sublattice_" + std::to_string(alpha) + "_cross_mean";
+            std::string error_name = "energy_sublattice_" + std::to_string(alpha) + "_cross_error";
+            
+            write_vector_dataset(observables_group_, mean_name, energy_cross_means[alpha]);
+            write_vector_dataset(observables_group_, error_name, energy_cross_errors[alpha]);
+        }
+    }
+    
+    void close() {
+        timeseries_group_.close();
+        observables_group_.close();
+        metadata_group_.close();
+        file_.close();
+    }
+    
+    ~HDF5PTWriter() {
+        try {
+            if (file_.getId() > 0) {
+                close();
+            }
+        } catch (...) {}
+    }
+    
+private:
+    void write_scalar_attribute(H5::Group& group, const std::string& name, hsize_t value) {
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(
+            name, H5::PredType::NATIVE_HSIZE, attr_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &value);
+    }
+    
+    void write_double_attribute(H5::Group& group, const std::string& name, double value) {
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(
+            name, H5::PredType::NATIVE_DOUBLE, attr_space);
+        attr.write(H5::PredType::NATIVE_DOUBLE, &value);
+    }
+    
+    void write_string_attribute(H5::Group& group, const std::string& name, const std::string& value) {
+        H5::StrType str_type(H5::PredType::C_S1, value.size() + 1);
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(name, str_type, attr_space);
+        attr.write(str_type, value.c_str());
+    }
+    
+    void write_double_dataset(H5::Group& group, const std::string& name, double value) {
+        H5::DataSpace space(H5S_SCALAR);
+        H5::DataSet dataset = group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, space);
+        dataset.write(&value, H5::PredType::NATIVE_DOUBLE);
+    }
+    
+    void write_vector_dataset(H5::Group& group, const std::string& name, 
+                             const std::vector<double>& data) {
+        hsize_t dims[1] = {data.size()};
+        H5::DataSpace space(1, dims);
+        H5::DataSet dataset = group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, space);
+        dataset.write(data.data(), H5::PredType::NATIVE_DOUBLE);
+    }
+    
+    std::string filename_;
+    size_t lattice_size_;
+    size_t spin_dim_;
+    size_t n_sublattices_;
+    
+    H5::H5File file_;
+    H5::Group timeseries_group_;
+    H5::Group observables_group_;
+    H5::Group metadata_group_;
+};
+
+/**
+ * HDF5 Writer for Mixed Lattice Parallel Tempering Monte Carlo simulations
+ * 
+ * This class provides efficient I/O for parallel tempering with mixed SU(2)/SU(3) lattices
+ * by storing all data from a single temperature replica in a single HDF5 file.
+ * 
+ * File structure:
+ * /timeseries/
+ *   - energy [n_samples]                          : Total energy per site time series
+ *   - magnetization_SU2 [n_samples, spin_dim_SU2] : Total SU(2) magnetization time series
+ *   - magnetization_SU3 [n_samples, spin_dim_SU3] : Total SU(3) magnetization time series
+ *   - sublattice_mag_SU2_[α] [n_samples, spin_dim_SU2]  : SU(2) sublattice α magnetization
+ *   - sublattice_mag_SU3_[α] [n_samples, spin_dim_SU3]  : SU(3) sublattice α magnetization
+ * 
+ * /observables/
+ *   - energy_total_mean/error           : Total energy observables
+ *   - energy_SU2_mean/error             : SU(2) subsystem energy
+ *   - energy_SU3_mean/error             : SU(3) subsystem energy
+ *   - specific_heat_mean/error          : Specific heat
+ *   - sublattice_mag_SU2_[α]_mean/error : SU(2) sublattice magnetizations
+ *   - sublattice_mag_SU3_[α]_mean/error : SU(3) sublattice magnetizations
+ *   - energy_sublattice_SU2_[α]_cross_mean/error : Cross-correlations
+ *   - energy_sublattice_SU3_[α]_cross_mean/error : Cross-correlations
+ * 
+ * /metadata/
+ *   - temperature, lattice parameters, simulation settings
+ */
+class HDF5MixedPTWriter {
+public:
+    HDF5MixedPTWriter(const std::string& filename,
+                      double temperature,
+                      size_t lattice_size_SU2,
+                      size_t lattice_size_SU3,
+                      size_t spin_dim_SU2,
+                      size_t spin_dim_SU3,
+                      size_t n_sublattices_SU2,
+                      size_t n_sublattices_SU3,
+                      size_t n_samples,
+                      size_t n_anneal,
+                      size_t n_measure,
+                      size_t probe_rate,
+                      size_t swap_rate,
+                      size_t overrelaxation_rate,
+                      double acceptance_rate,
+                      double swap_acceptance_rate)
+        : filename_(filename),
+          lattice_size_SU2_(lattice_size_SU2),
+          lattice_size_SU3_(lattice_size_SU3),
+          spin_dim_SU2_(spin_dim_SU2),
+          spin_dim_SU3_(spin_dim_SU3),
+          n_sublattices_SU2_(n_sublattices_SU2),
+          n_sublattices_SU3_(n_sublattices_SU3)
+    {
+        // Create HDF5 file (NOTE: for MPI, use H5F_ACC_TRUNC with single process per file)
+        // Each MPI rank writes its own file, so no MPI-parallel HDF5 needed
+        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        
+        // Create groups
+        timeseries_group_ = file_.createGroup("/timeseries");
+        observables_group_ = file_.createGroup("/observables");
+        metadata_group_ = file_.createGroup("/metadata");
+        
+        // Get current timestamp
+        std::time_t now = std::time(nullptr);
+        char time_str[100];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+        
+        // Write metadata
+        write_double_attribute(metadata_group_, "temperature", temperature);
+        write_scalar_attribute(metadata_group_, "lattice_size_SU2", lattice_size_SU2);
+        write_scalar_attribute(metadata_group_, "lattice_size_SU3", lattice_size_SU3);
+        write_scalar_attribute(metadata_group_, "spin_dim_SU2", spin_dim_SU2);
+        write_scalar_attribute(metadata_group_, "spin_dim_SU3", spin_dim_SU3);
+        write_scalar_attribute(metadata_group_, "n_sublattices_SU2", n_sublattices_SU2);
+        write_scalar_attribute(metadata_group_, "n_sublattices_SU3", n_sublattices_SU3);
+        write_scalar_attribute(metadata_group_, "n_anneal", n_anneal);
+        write_scalar_attribute(metadata_group_, "n_measure", n_measure);
+        write_scalar_attribute(metadata_group_, "probe_rate", probe_rate);
+        write_scalar_attribute(metadata_group_, "swap_rate", swap_rate);
+        write_scalar_attribute(metadata_group_, "overrelaxation_rate", overrelaxation_rate);
+        write_double_attribute(metadata_group_, "acceptance_rate", acceptance_rate);
+        write_double_attribute(metadata_group_, "swap_acceptance_rate", swap_acceptance_rate);
+        write_string_attribute(metadata_group_, "creation_time", std::string(time_str));
+        write_string_attribute(metadata_group_, "code_version", "ClassicalSpin_Cpp v1.0");
+        write_string_attribute(metadata_group_, "file_format", "HDF5_MixedPT_v1.0");
+    }
+    
+    /**
+     * Write time series data for mixed lattice
+     */
+    void write_timeseries(const std::vector<double>& energies,
+                         const std::vector<std::pair<SpinVector, SpinVector>>& magnetizations,
+                         const std::vector<std::vector<SpinVector>>& sublattice_mags_SU2,
+                         const std::vector<std::vector<SpinVector>>& sublattice_mags_SU3) {
+        size_t n_samples = energies.size();
+        size_t lattice_size_total = lattice_size_SU2_ + lattice_size_SU3_;
+        
+        // Write energy time series [n_samples]
+        hsize_t energy_dims[1] = {n_samples};
+        H5::DataSpace energy_space(1, energy_dims);
+        H5::DataSet energy_dataset = timeseries_group_.createDataSet(
+            "energy", H5::PredType::NATIVE_DOUBLE, energy_space);
+        
+        std::vector<double> energy_per_site(n_samples);
+        for (size_t i = 0; i < n_samples; ++i) {
+            energy_per_site[i] = energies[i] / lattice_size_total;
+        }
+        energy_dataset.write(energy_per_site.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write SU(2) magnetization time series [n_samples, spin_dim_SU2]
+        hsize_t mag_SU2_dims[2] = {n_samples, spin_dim_SU2_};
+        H5::DataSpace mag_SU2_space(2, mag_SU2_dims);
+        H5::DataSet mag_SU2_dataset = timeseries_group_.createDataSet(
+            "magnetization_SU2", H5::PredType::NATIVE_DOUBLE, mag_SU2_space);
+        
+        std::vector<double> mag_SU2_data(n_samples * spin_dim_SU2_);
+        for (size_t i = 0; i < n_samples; ++i) {
+            for (size_t d = 0; d < spin_dim_SU2_; ++d) {
+                mag_SU2_data[i * spin_dim_SU2_ + d] = magnetizations[i].first(d);
+            }
+        }
+        mag_SU2_dataset.write(mag_SU2_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write SU(3) magnetization time series [n_samples, spin_dim_SU3]
+        hsize_t mag_SU3_dims[2] = {n_samples, spin_dim_SU3_};
+        H5::DataSpace mag_SU3_space(2, mag_SU3_dims);
+        H5::DataSet mag_SU3_dataset = timeseries_group_.createDataSet(
+            "magnetization_SU3", H5::PredType::NATIVE_DOUBLE, mag_SU3_space);
+        
+        std::vector<double> mag_SU3_data(n_samples * spin_dim_SU3_);
+        for (size_t i = 0; i < n_samples; ++i) {
+            for (size_t d = 0; d < spin_dim_SU3_; ++d) {
+                mag_SU3_data[i * spin_dim_SU3_ + d] = magnetizations[i].second(d);
+            }
+        }
+        mag_SU3_dataset.write(mag_SU3_data.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write SU(2) sublattice magnetization time series
+        for (size_t alpha = 0; alpha < n_sublattices_SU2_; ++alpha) {
+            std::string dataset_name = "sublattice_mag_SU2_" + std::to_string(alpha);
+            H5::DataSet sub_mag_dataset = timeseries_group_.createDataSet(
+                dataset_name, H5::PredType::NATIVE_DOUBLE, mag_SU2_space);
+            
+            std::vector<double> sub_mag_data(n_samples * spin_dim_SU2_);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (size_t d = 0; d < spin_dim_SU2_; ++d) {
+                    sub_mag_data[i * spin_dim_SU2_ + d] = sublattice_mags_SU2[i][alpha](d);
+                }
+            }
+            sub_mag_dataset.write(sub_mag_data.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+        
+        // Write SU(3) sublattice magnetization time series
+        for (size_t alpha = 0; alpha < n_sublattices_SU3_; ++alpha) {
+            std::string dataset_name = "sublattice_mag_SU3_" + std::to_string(alpha);
+            H5::DataSet sub_mag_dataset = timeseries_group_.createDataSet(
+                dataset_name, H5::PredType::NATIVE_DOUBLE, mag_SU3_space);
+            
+            std::vector<double> sub_mag_data(n_samples * spin_dim_SU3_);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (size_t d = 0; d < spin_dim_SU3_; ++d) {
+                    sub_mag_data[i * spin_dim_SU3_ + d] = sublattice_mags_SU3[i][alpha](d);
+                }
+            }
+            sub_mag_dataset.write(sub_mag_data.data(), H5::PredType::NATIVE_DOUBLE);
+        }
+    }
+    
+    /**
+     * Write thermodynamic observables with error estimates for mixed lattice
+     */
+    void write_observables(double energy_total_mean, double energy_total_error,
+                          double energy_SU2_mean, double energy_SU2_error,
+                          double energy_SU3_mean, double energy_SU3_error,
+                          double specific_heat_mean, double specific_heat_error,
+                          const std::vector<std::vector<double>>& sublattice_mag_SU2_means,
+                          const std::vector<std::vector<double>>& sublattice_mag_SU2_errors,
+                          const std::vector<std::vector<double>>& sublattice_mag_SU3_means,
+                          const std::vector<std::vector<double>>& sublattice_mag_SU3_errors,
+                          const std::vector<std::vector<double>>& energy_cross_SU2_means,
+                          const std::vector<std::vector<double>>& energy_cross_SU2_errors,
+                          const std::vector<std::vector<double>>& energy_cross_SU3_means,
+                          const std::vector<std::vector<double>>& energy_cross_SU3_errors) {
+        // Write scalar observables
+        write_double_dataset(observables_group_, "energy_total_mean", energy_total_mean);
+        write_double_dataset(observables_group_, "energy_total_error", energy_total_error);
+        write_double_dataset(observables_group_, "energy_SU2_mean", energy_SU2_mean);
+        write_double_dataset(observables_group_, "energy_SU2_error", energy_SU2_error);
+        write_double_dataset(observables_group_, "energy_SU3_mean", energy_SU3_mean);
+        write_double_dataset(observables_group_, "energy_SU3_error", energy_SU3_error);
+        write_double_dataset(observables_group_, "specific_heat_mean", specific_heat_mean);
+        write_double_dataset(observables_group_, "specific_heat_error", specific_heat_error);
+        
+        // Write SU(2) sublattice magnetization means and errors
+        for (size_t alpha = 0; alpha < n_sublattices_SU2_; ++alpha) {
+            std::string mean_name = "sublattice_mag_SU2_" + std::to_string(alpha) + "_mean";
+            std::string error_name = "sublattice_mag_SU2_" + std::to_string(alpha) + "_error";
+            
+            write_vector_dataset(observables_group_, mean_name, sublattice_mag_SU2_means[alpha]);
+            write_vector_dataset(observables_group_, error_name, sublattice_mag_SU2_errors[alpha]);
+        }
+        
+        // Write SU(3) sublattice magnetization means and errors
+        for (size_t alpha = 0; alpha < n_sublattices_SU3_; ++alpha) {
+            std::string mean_name = "sublattice_mag_SU3_" + std::to_string(alpha) + "_mean";
+            std::string error_name = "sublattice_mag_SU3_" + std::to_string(alpha) + "_error";
+            
+            write_vector_dataset(observables_group_, mean_name, sublattice_mag_SU3_means[alpha]);
+            write_vector_dataset(observables_group_, error_name, sublattice_mag_SU3_errors[alpha]);
+        }
+        
+        // Write SU(2) energy-sublattice cross correlations
+        for (size_t alpha = 0; alpha < n_sublattices_SU2_; ++alpha) {
+            std::string mean_name = "energy_sublattice_SU2_" + std::to_string(alpha) + "_cross_mean";
+            std::string error_name = "energy_sublattice_SU2_" + std::to_string(alpha) + "_cross_error";
+            
+            write_vector_dataset(observables_group_, mean_name, energy_cross_SU2_means[alpha]);
+            write_vector_dataset(observables_group_, error_name, energy_cross_SU2_errors[alpha]);
+        }
+        
+        // Write SU(3) energy-sublattice cross correlations
+        for (size_t alpha = 0; alpha < n_sublattices_SU3_; ++alpha) {
+            std::string mean_name = "energy_sublattice_SU3_" + std::to_string(alpha) + "_cross_mean";
+            std::string error_name = "energy_sublattice_SU3_" + std::to_string(alpha) + "_cross_error";
+            
+            write_vector_dataset(observables_group_, mean_name, energy_cross_SU3_means[alpha]);
+            write_vector_dataset(observables_group_, error_name, energy_cross_SU3_errors[alpha]);
+        }
+    }
+    
+    void close() {
+        timeseries_group_.close();
+        observables_group_.close();
+        metadata_group_.close();
+        file_.close();
+    }
+    
+    ~HDF5MixedPTWriter() {
+        try {
+            if (file_.getId() > 0) {
+                close();
+            }
+        } catch (...) {}
+    }
+    
+private:
+    void write_scalar_attribute(H5::Group& group, const std::string& name, hsize_t value) {
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(
+            name, H5::PredType::NATIVE_HSIZE, attr_space);
+        attr.write(H5::PredType::NATIVE_HSIZE, &value);
+    }
+    
+    void write_double_attribute(H5::Group& group, const std::string& name, double value) {
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(
+            name, H5::PredType::NATIVE_DOUBLE, attr_space);
+        attr.write(H5::PredType::NATIVE_DOUBLE, &value);
+    }
+    
+    void write_string_attribute(H5::Group& group, const std::string& name, const std::string& value) {
+        H5::StrType str_type(H5::PredType::C_S1, value.size() + 1);
+        H5::DataSpace attr_space(H5S_SCALAR);
+        H5::Attribute attr = group.createAttribute(name, str_type, attr_space);
+        attr.write(str_type, value.c_str());
+    }
+    
+    void write_double_dataset(H5::Group& group, const std::string& name, double value) {
+        H5::DataSpace space(H5S_SCALAR);
+        H5::DataSet dataset = group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, space);
+        dataset.write(&value, H5::PredType::NATIVE_DOUBLE);
+    }
+    
+    void write_vector_dataset(H5::Group& group, const std::string& name, 
+                             const std::vector<double>& data) {
+        hsize_t dims[1] = {data.size()};
+        H5::DataSpace space(1, dims);
+        H5::DataSet dataset = group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, space);
+        dataset.write(data.data(), H5::PredType::NATIVE_DOUBLE);
+    }
+    
+    std::string filename_;
+    size_t lattice_size_SU2_;
+    size_t lattice_size_SU3_;
+    size_t spin_dim_SU2_;
+    size_t spin_dim_SU3_;
+    size_t n_sublattices_SU2_;
+    size_t n_sublattices_SU3_;
+    
+    H5::H5File file_;
+    H5::Group timeseries_group_;
+    H5::Group observables_group_;
+    H5::Group metadata_group_;
 };
 
 #endif // HDF5_IO_H

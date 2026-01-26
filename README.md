@@ -270,8 +270,14 @@ output/
 │   ├── final_energy.txt   # Ground state energy
 │   ├── observables.txt    # Temperature-dependent observables
 │   └── trajectory.h5      # MD trajectory (HDF5)
+├── rank_0/
+│   └── parallel_tempering_data.h5  # PT replica data (HDF5)
+├── parallel_tempering_aggregated.h5  # PT temperature scan (HDF5)
 └── simulation_parameters.txt  # Copy of input parameters
 ```
+
+**HDF5 Output:**  
+Parallel tempering simulations use structured HDF5 format to minimize file count on cluster filesystems. See [PARALLEL_TEMPERING_HDF5.md](PARALLEL_TEMPERING_HDF5.md) for detailed documentation.
 
 ## GPU Acceleration
 
@@ -297,6 +303,9 @@ python util/readers_new/reader_honeycomb.py output_dir/ plot
 
 # Read pyrochlore results
 python util/readers_new/reader_pyrochlore.py output_dir/ analyze
+
+# Read and visualize parallel tempering HDF5 output
+python util/read_pt_hdf5.py output_parallel_tempering/
 ```
 
 ## Contributing

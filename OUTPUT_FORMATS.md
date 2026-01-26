@@ -77,15 +77,60 @@ Magnetization vector at each temperature step.
 **Output Directory Structure:**
 ```
 <output_dir>/
-└── sample_<trial>/
-    ├── heat_capacity.txt
-    └── rank_<r>/
-        ├── energy.txt
-        ├── magnetization.txt
-        └── spins_final.dat
+├── rank_<r>/
+│   ├── parallel_tempering_data.h5  (HDF5 format, if enabled)
+│   ├── observables_summary.txt     (text format, optional)
+│   ├── energy.txt                  (text format, optional)
+│   └── ...                         (additional text files, optional)
+├── parallel_tempering_aggregated.h5 (rank 0 only, HDF5)
+└── heat_capacity.txt                (rank 0 only, text)
 ```
 
-### Text Files
+**Note:** When compiled with `-DHDF5_ENABLED`, parallel tempering uses a structured HDF5 format
+to minimize file count. See [PARALLEL_TEMPERING_HDF5.md](PARALLEL_TEMPERING_HDF5.md) for detailed
+documentation of the HDF5 format.
+
+### HDF5 Files (Preferred Format)
+
+#### `rank_<r>/parallel_tempering_data.h5`
+Single comprehensive file per replica containing all simulation data.
+
+**Structure:**
+```
+/timeseries/
+├── energy                  [n_samples]
+├── magnetization          [n_samples, spin_dim]
+└── sublattice_mag_<α>     [n_samples, spin_dim] for each sublattice
+
+/observables/
+├── energy_mean
+├── energy_error
+├── specific_heat_mean
+├── specific_heat_error
+├── sublattice_mag_<α>_mean    [spin_dim]
+├── sublattice_mag_<α>_error   [spin_dim]
+└── ... (cross-correlations)
+
+/metadata/
+└── (simulation parameters as attributes)
+```
+
+See [PARALLEL_TEMPERING_HDF5.md](PARALLEL_TEMPERING_HDF5.md) for complete details and examples.
+
+#### `parallel_tempering_aggregated.h5`
+Temperature-dependent data across all replicas (created by rank 0).
+
+**Structure:**
+```
+/temperature_scan/
+├── temperature           [n_temperatures]
+├── specific_heat        [n_temperatures]
+└── specific_heat_error  [n_temperatures]
+```
+
+### Text Files (Legacy/Optional Format)
+
+When HDF5 is not available or text output is explicitly enabled:
 
 #### `heat_capacity.txt`
 Heat capacity vs temperature (saved by rank 0 only).

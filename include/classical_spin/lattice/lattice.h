@@ -1627,6 +1627,145 @@ public:
         }
     }
 
+    /**
+     * Save thermodynamic observables to HDF5 format
+     * Single file per rank with all data organized in groups
+     */
+    void save_thermodynamic_observables_hdf5(const string& out_dir,
+                                              const ThermodynamicObservables& obs,
+                                              const vector<double>& energies,
+                                              const vector<SpinVector>& magnetizations,
+                                              const vector<vector<SpinVector>>& sublattice_mags,
+                                              size_t n_anneal,
+                                              size_t n_measure,
+                                              size_t probe_rate,
+                                              size_t swap_rate,
+                                              size_t overrelaxation_rate,
+                                              double acceptance_rate,
+                                              double swap_acceptance_rate) const {
+#ifdef HDF5_ENABLED
+        ensure_directory_exists(out_dir);
+        
+        string filename = out_dir + "/parallel_tempering_data.h5";
+        size_t n_samples = energies.size();
+        
+        // Create HDF5 writer
+        HDF5PTWriter writer(filename, obs.temperature, lattice_size, spin_dim, N_atoms,
+                           n_samples, n_anneal, n_measure, probe_rate, swap_rate,
+                           overrelaxation_rate, acceptance_rate, swap_acceptance_rate);
+        
+        // Write time series data
+        writer.write_timeseries(energies, magnetizations, sublattice_mags);
+        
+        // Prepare observable data in format expected by writer
+        vector<vector<double>> sublattice_mag_means(N_atoms);
+        vector<vector<double>> sublattice_mag_errors(N_atoms);
+        vector<vector<double>> energy_cross_means(N_atoms);
+        vector<vector<double>> energy_cross_errors(N_atoms);
+        
+        for (size_t alpha = 0; alpha < N_atoms; ++alpha) {
+            sublattice_mag_means[alpha] = obs.sublattice_magnetization[alpha].values;
+            sublattice_mag_errors[alpha] = obs.sublattice_magnetization[alpha].errors;
+            energy_cross_means[alpha] = obs.energy_sublattice_cross[alpha].values;
+            energy_cross_errors[alpha] = obs.energy_sublattice_cross[alpha].errors;
+        }
+        
+        // Write observables
+        writer.write_observables(obs.energy.value, obs.energy.error,
+                                obs.specific_heat.value, obs.specific_heat.error,
+                                sublattice_mag_means, sublattice_mag_errors,
+                                energy_cross_means, energy_cross_errors);
+        
+        writer.close();
+#else
+        std::cerr << "Warning: HDF5 support not enabled. Cannot save HDF5 output." << std::endl;
+        std::cerr << "Compile with -DHDF5_ENABLED to enable HDF5 output." << std::endl;
+#endif
+    }
+
+    /**
+     * Save aggregated heat capacity data from all temperatures to HDF5 format
+     * Called by rank 0 to save temperature-dependent thermodynamic data
+     */
+    void save_heat_capacity_hdf5(const string& out_dir,
+                                  const vector<double>& temperatures,
+                                  const vector<double>& heat_capacity,
+                                  const vector<double>& dHeat) const {
+#ifdef HDF5_ENABLED
+        ensure_directory_exists(out_dir);
+        
+        string filename = out_dir + "/parallel_tempering_aggregated.h5";
+        size_t n_temps = temperatures.size();
+        
+        // Create HDF5 file
+        H5::H5File file(filename, H5F_ACC_TRUNC);
+        
+        // Create main data group
+        H5::Group data_group = file.createGroup("/temperature_scan");
+        H5::Group metadata_group = file.createGroup("/metadata");
+        
+        // Write metadata
+        std::time_t now = std::time(nullptr);
+        char time_str[100];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+        
+        H5::DataSpace scalar_space(H5S_SCALAR);
+        
+        // Number of temperatures
+        H5::Attribute n_temps_attr = metadata_group.createAttribute(
+            "n_temperatures", H5::PredType::NATIVE_HSIZE, scalar_space);
+        n_temps_attr.write(H5::PredType::NATIVE_HSIZE, &n_temps);
+        
+        // Timestamp
+        H5::StrType str_type(H5::PredType::C_S1, strlen(time_str) + 1);
+        H5::Attribute time_attr = metadata_group.createAttribute(
+            "creation_time", str_type, scalar_space);
+        time_attr.write(str_type, time_str);
+        
+        // Version info
+        std::string version = "ClassicalSpin_Cpp v1.0";
+        H5::StrType version_type(H5::PredType::C_S1, version.size() + 1);
+        H5::Attribute version_attr = metadata_group.createAttribute(
+            "code_version", version_type, scalar_space);
+        version_attr.write(version_type, version.c_str());
+        
+        std::string format = "HDF5_PT_Aggregated_v1.0";
+        H5::StrType format_type(H5::PredType::C_S1, format.size() + 1);
+        H5::Attribute format_attr = metadata_group.createAttribute(
+            "file_format", format_type, scalar_space);
+        format_attr.write(format_type, format.c_str());
+        
+        // Write temperature array
+        hsize_t dims[1] = {n_temps};
+        H5::DataSpace dataspace(1, dims);
+        
+        H5::DataSet temp_dataset = data_group.createDataSet(
+            "temperature", H5::PredType::NATIVE_DOUBLE, dataspace);
+        temp_dataset.write(temperatures.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write heat capacity array
+        H5::DataSet heat_dataset = data_group.createDataSet(
+            "specific_heat", H5::PredType::NATIVE_DOUBLE, dataspace);
+        heat_dataset.write(heat_capacity.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write heat capacity error array
+        H5::DataSet dheat_dataset = data_group.createDataSet(
+            "specific_heat_error", H5::PredType::NATIVE_DOUBLE, dataspace);
+        dheat_dataset.write(dHeat.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Close everything
+        temp_dataset.close();
+        heat_dataset.close();
+        dheat_dataset.close();
+        data_group.close();
+        metadata_group.close();
+        file.close();
+#else
+        std::cerr << "Warning: HDF5 support not enabled. Cannot save HDF5 output." << std::endl;
+        std::cerr << "Compile with -DHDF5_ENABLED to enable HDF5 output." << std::endl;
+#endif
+    }
+
     // ============================================================
     // MONTE CARLO METHODS
     // ============================================================
@@ -2896,12 +3035,19 @@ public:
                 // Each rank creates its own subdirectory (no race condition)
                 filesystem::create_directories(rank_dir);
                 
-                // Save comprehensive observables
-                save_thermodynamic_observables(rank_dir, obs);
+                // Save to HDF5 format (single file with all data)
+#ifdef HDF5_ENABLED
+                save_thermodynamic_observables_hdf5(rank_dir, obs, energies, magnetizations,
+                                                   sublattice_mags, n_anneal, n_measure,
+                                                   probe_rate, swap_rate, overrelaxation_rate,
+                                                   acc_rate, swap_rate_actual);
+#endif
                 
-                // Save raw time series
-                save_observables(rank_dir, energies, magnetizations);
-                save_sublattice_magnetization_timeseries(rank_dir, sublattice_mags);
+                // Also save text files for backward compatibility (optional)
+                // Uncomment these lines if you want both HDF5 and text output
+                // save_thermodynamic_observables(rank_dir, obs);
+                // save_observables(rank_dir, energies, magnetizations);
+                // save_sublattice_magnetization_timeseries(rank_dir, sublattice_mags);
                 
                 // Save spin configuration only if verbose mode is enabled
                 if (verbose) {
@@ -2914,7 +3060,11 @@ public:
             
             // Root process saves aggregated results across all temperatures
             if (rank == 0) {
-                // Heat capacity vs temperature
+#ifdef HDF5_ENABLED
+                // Save heat capacity to HDF5
+                save_heat_capacity_hdf5(dir_name, temp, heat_capacity, dHeat);
+#endif
+                // Also save text file for backward compatibility
                 ofstream heat_file(dir_name + "/heat_capacity.txt");
                 heat_file << "# T C_V dC_V" << endl;
                 heat_file << std::scientific << std::setprecision(12);
