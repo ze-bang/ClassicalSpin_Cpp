@@ -2487,50 +2487,112 @@ void StrainPhononLattice::relax_strain(bool verbose) {
 // MONTE CARLO
 // ============================================================
 
-void StrainPhononLattice::mc_sweep(double temperature) {
-    double beta = 1.0 / temperature;
+SpinVector StrainPhononLattice::gen_random_spin(float spin_l) {
+    // Efficient sphere sampling for 3D using cylindrical projection
+    // (same method as Lattice::gen_random_spin in lattice.h)
+    SpinVector spin(spin_dim);  // spin_dim = 3 for this class
     
-    for (size_t i = 0; i < lattice_size; ++i) {
-        // Propose a random spin flip
-        std::normal_distribution<double> normal_dist(0.0, 1.0);
-        double x = normal_dist(rng);
-        double y = normal_dist(rng);
-        double z = normal_dist(rng);
-        double norm = std::sqrt(x*x + y*y + z*z);
-        Eigen::Vector3d new_spin(x/norm * spin_length, y/norm * spin_length, z/norm * spin_length);
+    double z = uniform_dist(rng) * 2.0 - 1.0;  // uniform in [-1, 1]
+    double phi = uniform_dist(rng) * 2.0 * M_PI;  // uniform in [0, 2π]
+    double r = std::sqrt(1.0 - z * z);
+    
+    spin(0) = r * std::cos(phi);
+    spin(1) = r * std::sin(phi);
+    spin(2) = z;
+    
+    return spin * spin_l;
+}
+
+SpinVector StrainPhononLattice::gaussian_spin_move(const SpinVector& current_spin, double sigma) {
+    // Perturb current spin by adding a random direction scaled by sigma
+    SpinVector perturbation = gen_random_spin(1.0) * sigma;
+    
+    SpinVector new_spin = current_spin + perturbation;
+    double norm = new_spin.norm();
+    if (norm < 1e-10) return current_spin;
+    return new_spin * (spin_length / norm);
+}
+
+double StrainPhononLattice::mc_sweep(double temperature, bool gaussian_move, double sigma) {
+    if (temperature <= 0) return 0.0;
+    
+    const double beta = 1.0 / temperature;
+    size_t accepted = 0;
+    
+    // Use random site selection like in lattice.h for better sampling
+    std::uniform_int_distribution<size_t> site_dist(0, lattice_size - 1);
+    
+    for (size_t sweep_step = 0; sweep_step < lattice_size; ++sweep_step) {
+        // Random site selection
+        size_t site = site_dist(rng);
+        
+        // Generate new spin
+        SpinVector new_spin;
+        if (gaussian_move) {
+            new_spin = gaussian_spin_move(spins[site], sigma);
+        } else {
+            // Propose a completely random spin on the sphere
+            new_spin = gen_random_spin(spin_length);
+        }
         
         // Compute energy difference using full local field
         // H_eff includes exchange + magnetoelastic + ring exchange
-        Eigen::Vector3d old_spin = spins[i];
-        Eigen::Vector3d delta = new_spin - old_spin;
+        SpinVector old_spin = spins[site];
+        SpinVector delta = new_spin - old_spin;
         
         // dE = H_spin(new) - H_spin(old) = -delta · H_eff
         // Note: get_local_field returns H_eff = -∂H/∂S, so dE = -delta · H_eff
-        SpinVector H_eff = get_local_field(i);
+        SpinVector H_eff = get_local_field(site);
         double dE = -delta.dot(H_eff);
         
-        // Metropolis acceptance
-        if (dE < 0 || uniform_dist(rng) < std::exp(-beta * dE)) {
-            spins[i] = new_spin;
+        // Metropolis acceptance (branchless style)
+        double rand_uniform = uniform_dist(rng);
+        const bool accept = (dE < 0.0) || (rand_uniform < std::exp(-beta * dE));
+        if (accept) {
+            spins[site] = new_spin;
+            ++accepted;
         }
     }
+    
+    return double(accepted) / double(lattice_size);
 }
 
 void StrainPhononLattice::anneal(double T_start, double T_end, 
-                                 size_t n_steps, size_t sweeps_per_step) {
-    double dT = (T_end - T_start) / n_steps;
+                                 size_t n_sweeps,
+                                 double cooling_rate,
+                                 bool gaussian_move,
+                                 const string& out_dir,
+                                 bool T_zero,
+                                 size_t n_deterministics) {
+    // Setup output directory
+    if (!out_dir.empty()) {
+        std::filesystem::create_directories(out_dir);
+    }
+    
     double T = T_start;
+    double sigma = 1000.0;  // Initial Gaussian width (will be adapted)
+    
+    cout << "Starting simulated annealing: T=" << T_start << " → " << T_end << endl;
+    cout << "Cooling rate: " << cooling_rate << ", sweeps per temperature: " << n_sweeps << endl;
+    if (gaussian_move) {
+        cout << "Using Gaussian spin moves with adaptive sigma" << endl;
+    }
+    if (T_zero) {
+        cout << "T=0 mode enabled: will perform " << n_deterministics << " deterministic sweeps at T=0" << endl;
+    }
     
     // Relax strain at the start to get initial magnetoelastic field
-    relax_strain(false);  // quiet during annealing
+    relax_strain(false);
     
     // How often to re-relax strain during MC sweeps
-    // More frequent = more accurate but slower
     const size_t strain_relax_interval = 1;  // Every sweep
     
-    for (size_t step = 0; step < n_steps; ++step) {
-        for (size_t s = 0; s < sweeps_per_step; ++s) {
-            mc_sweep(T);
+    size_t temp_step = 0;
+    while (T > T_end) {
+        // Perform sweeps at this temperature
+        double acc_sum = 0.0;
+        for (size_t s = 0; s < n_sweeps; ++s) {
+            acc_sum += mc_sweep(T, gaussian_move, sigma);
             
             // Periodically relax strain to maintain adiabatic equilibrium
             if ((s + 1) % strain_relax_interval == 0) {
@@ -2538,17 +2600,80 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
             }
         }
         
-        T += dT;
+        // Calculate acceptance rate
+        double acceptance = acc_sum / double(n_sweeps);
+        
+        // Progress report every 10 steps or near T_end
+        if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+            double E = spin_energy() / lattice_size;  // Energy per spin
+            cout << "T=" << std::scientific << T << ", E/N=" << E 
+                 << ", acc=" << std::fixed << std::setprecision(3) << acceptance;
+            if (gaussian_move) cout << ", σ=" << sigma;
+            cout << endl;
+        }
+        
+        // Adaptive sigma adjustment for gaussian moves
+        if (gaussian_move && acceptance < 0.5) {
+            sigma = sigma * 0.5 / (1.0 - acceptance);
+            if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+                cout << "Sigma adjusted to " << sigma << endl;
+            }
+        }
+        
+        // Cool down
+        T *= cooling_rate;
+        ++temp_step;
     }
     
-    // Additional sweeps at T_end for better equilibration
-    for (size_t s = 0; s < sweeps_per_step; ++s) {
-        mc_sweep(T_end);
+    // Additional sweeps at T_end for equilibration
+    cout << "Equilibrating at T=" << T_end << "..." << endl;
+    double final_acc_sum = 0.0;
+    for (size_t s = 0; s < n_sweeps; ++s) {
+        final_acc_sum += mc_sweep(T_end, gaussian_move, sigma);
         relax_strain(false);
     }
+    double final_acceptance = final_acc_sum / double(n_sweeps);
+    double final_E = spin_energy() / lattice_size;
+    cout << "Final T=" << T_end << ", E/N=" << final_E 
+         << ", acc=" << std::fixed << std::setprecision(3) << final_acceptance << endl;
     
     // Final strain relaxation (verbose)
     relax_strain(true);
+    
+    // Save spin config after annealing (before deterministic sweeps)
+    if (!out_dir.empty()) {
+        save_spin_config(out_dir + "/spins_T=" + std::to_string(T_end) + ".txt");
+    }
+    
+    // T=0 deterministic sweeps if requested
+    if (T_zero && n_deterministics > 0) {
+        cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
+        for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
+            deterministic_sweep(1);
+            relax_strain(false);  // Relax strain after each deterministic sweep
+            
+            if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
+                double E = spin_energy() / lattice_size;
+                cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
+                     << ", E/N=" << E << endl;
+            }
+        }
+        relax_strain(true);  // Final verbose strain relaxation
+        cout << "Deterministic sweeps completed. Final energy: " << spin_energy() / lattice_size << endl;
+        
+        // Save final configuration
+        if (!out_dir.empty()) {
+            save_spin_config(out_dir + "/spins_T=0.txt");
+        }
+    }
+    
+    // Save final spin config
+    if (!out_dir.empty()) {
+        save_spin_config(out_dir + "/spins.txt");
+        save_strain_state(out_dir + "/strain.txt");
+    }
+    
+    cout << "Annealing complete!" << endl;
 }
 
 void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {

@@ -442,6 +442,11 @@ public:
     void init_zigzag();
     void set_spin(size_t site, const SpinVector& s);
     
+    /**
+     * Generate random spin on unit sphere (efficient cylindrical projection for 3D)
+     */
+    SpinVector gen_random_spin(float spin_l);
+    
     // ============================================================
     // TIME-DEPENDENT PARAMETERS
     // ============================================================
@@ -652,8 +657,37 @@ public:
     // MONTE CARLO
     // ============================================================
     
-    void mc_sweep(double temperature);
-    void anneal(double T_start, double T_end, size_t n_steps, size_t sweeps_per_step);
+    /**
+     * Perform one Monte Carlo sweep using Metropolis algorithm
+     * @param temperature  Temperature for Boltzmann weights
+     * @param gaussian_move If true, use Gaussian perturbation; if false, propose random spin
+     * @param sigma        Width of Gaussian perturbation (only used if gaussian_move=true)
+     * @return Acceptance rate (0.0 to 1.0)
+     */
+    double mc_sweep(double temperature, bool gaussian_move = false, double sigma = 60.0);
+    
+    /**
+     * Gaussian move around current spin
+     */
+    SpinVector gaussian_spin_move(const SpinVector& current_spin, double sigma);
+    
+    /**
+     * Simulated annealing with progress reporting
+     * @param T_start         Starting temperature
+     * @param T_end           Final temperature
+     * @param n_sweeps        Sweeps per temperature
+     * @param cooling_rate    Multiplicative cooling factor (default 0.9)
+     * @param gaussian_move   Use Gaussian moves (default false)
+     * @param out_dir         Output directory for configs (empty = no save)
+     * @param T_zero          If true, perform deterministic sweeps at end
+     * @param n_deterministics Number of deterministic sweeps at T=0
+     */
+    void anneal(double T_start, double T_end, size_t n_sweeps,
+                double cooling_rate = 0.9,
+                bool gaussian_move = false,
+                const string& out_dir = "",
+                bool T_zero = false,
+                size_t n_deterministics = 1000);
     
     /**
      * Deterministic sweep: align each spin parallel to its local field.

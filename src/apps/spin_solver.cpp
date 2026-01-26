@@ -1012,7 +1012,9 @@ void run_simulated_annealing_strain(StrainPhononLattice& lattice, const SpinConf
             lattice.init_random();
         }
         
-        lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
+        lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                       config.cooling_rate, config.gaussian_move, trial_dir,
+                       config.T_zero, config.n_deterministics);
         
         // Save final configuration
         lattice.save_spin_config(trial_dir + "/spins.txt");
@@ -1114,16 +1116,9 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
             if (rank == 0) {
                 cout << "Equilibrating spin subsystem via simulated annealing..." << endl;
             }
-            lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
-            
-            // T=0 deterministic sweeps to align spins with local field
-            // This eliminates precession by ensuring S × H_eff = 0
-            if (config.T_zero && config.n_deterministics > 0) {
-                if (rank == 0) {
-                    cout << "Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
-                }
-                lattice.deterministic_sweep(config.n_deterministics);
-            }
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                           config.cooling_rate, config.gaussian_move, trial_dir,
+                           config.T_zero, config.n_deterministics);
         } else {
             lattice.load_spin_config(config.initial_spin_config);
         }

@@ -25,13 +25,13 @@
 system = NCTO_STRAIN
 
 # Lattice dimensions (honeycomb, 2D)
-lattice_size = 8,8,1
+lattice_size = 24,24,1
 
 # Simulation type: SA, MD
-simulation_mode = molecular_dynamics
+simulation_mode = simulated_annealing
 
 # Output directory
-output_dir = NCTO_strain_output
+output_dir = NCTO_strain_SA
 
 # Number of trials (samples)
 num_trials = 1
@@ -71,8 +71,8 @@ alpha_gilbert = 0.01
 # λ_{A1g} couples strain A1g mode (ε_xx + ε_yy) to spin A1g basis functions
 # λ_{Eg} couples strain Eg modes (ε_xx - ε_yy, 2ε_xy) to spin Eg basis functions
 
-lambda_A1g = 0.5         # A1g channel magnetoelastic coupling
-lambda_Eg = 0.3          # Eg channel magnetoelastic coupling
+lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
+lambda_Eg = 0.0          # Eg channel magnetoelastic coupling
 
 # ============================================
 # ELASTIC PARAMETERS
@@ -137,11 +137,12 @@ md_output_every = 100     # Output every N steps
 # SIMULATED ANNEALING PARAMETERS
 # ============================================
 # Used if simulation_mode = simulated_annealing
-T_start = 15.0            # Starting temperature
-T_end = 0.001             # Final temperature
+T_start = 25.0            # Starting temperature
+T_end = 0.01             # Final temperature
 annealing_steps = 10000   # Number of temperature steps
 overrelaxation_rate = 10  # MC sweeps per temperature step
-cooling_rate = 0.99       # Exponential cooling factor
+cooling_rate = 0.9       # Exponential cooling factor
+T_zero = true
 
 # ============================================
 # INITIALIZATION
