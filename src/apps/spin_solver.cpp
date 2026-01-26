@@ -1013,7 +1013,8 @@ void run_simulated_annealing_strain(StrainPhononLattice& lattice, const SpinConf
         }
         
         lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
-                       config.cooling_rate, config.gaussian_move, trial_dir,
+                       config.cooling_rate, config.overrelaxation_rate,
+                       config.gaussian_move, trial_dir,
                        config.T_zero, config.n_deterministics);
         
         // Save final configuration
@@ -1117,7 +1118,8 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
                 cout << "Equilibrating spin subsystem via simulated annealing..." << endl;
             }
             lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
-                           config.cooling_rate, config.gaussian_move, trial_dir,
+                           config.cooling_rate, config.overrelaxation_rate,
+                           config.gaussian_move, trial_dir,
                            config.T_zero, config.n_deterministics);
         } else {
             lattice.load_spin_config(config.initial_spin_config);

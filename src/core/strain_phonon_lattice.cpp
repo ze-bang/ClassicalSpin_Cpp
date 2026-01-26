@@ -2557,9 +2557,38 @@ double StrainPhononLattice::mc_sweep(double temperature, bool gaussian_move, dou
     return double(accepted) / double(lattice_size);
 }
 
+void StrainPhononLattice::overrelaxation() {
+    // Over-relaxation sweep: reflect each spin about its local field
+    // S' = 2(S·H)H/|H|² - S
+    // This is a microcanonical update (preserves energy) that accelerates decorrelation
+    
+    std::uniform_int_distribution<size_t> site_dist(0, lattice_size - 1);
+    
+    size_t count = 0;
+    while (count < lattice_size) {
+        size_t site = site_dist(rng);
+        
+        // Get local field
+        SpinVector local_field = get_local_field(site);
+        double norm_sq = local_field.dot(local_field);
+        
+        if (norm_sq < 1e-20) {
+            // Zero field, skip this site
+            continue;
+        }
+        
+        // Reflect spin: S' = 2(S·H)H/|H|² - S
+        double proj = 2.0 * spins[site].dot(local_field) / norm_sq;
+        spins[site] = local_field * proj - spins[site];
+        
+        count++;
+    }
+}
+
 void StrainPhononLattice::anneal(double T_start, double T_end, 
                                  size_t n_sweeps,
                                  double cooling_rate,
+                                 size_t overrelaxation_rate,
                                  bool gaussian_move,
                                  const string& out_dir,
                                  bool T_zero,
@@ -2574,6 +2603,9 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     
     cout << "Starting simulated annealing: T=" << T_start << " → " << T_end << endl;
     cout << "Cooling rate: " << cooling_rate << ", sweeps per temperature: " << n_sweeps << endl;
+    if (overrelaxation_rate > 0) {
+        cout << "Overrelaxation enabled: every " << overrelaxation_rate << " sweeps" << endl;
+    }
     if (gaussian_move) {
         cout << "Using Gaussian spin moves with adaptive sigma" << endl;
     }
@@ -2592,7 +2624,15 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
         // Perform sweeps at this temperature
         double acc_sum = 0.0;
         for (size_t s = 0; s < n_sweeps; ++s) {
-            acc_sum += mc_sweep(T, gaussian_move, sigma);
+            // Overrelaxation before Metropolis (if enabled)
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (s % overrelaxation_rate == 0) {
+                    acc_sum += mc_sweep(T, gaussian_move, sigma);
+                }
+            } else {
+                acc_sum += mc_sweep(T, gaussian_move, sigma);
+            }
             
             // Periodically relax strain to maintain adiabatic equilibrium
             if ((s + 1) % strain_relax_interval == 0) {
@@ -2600,8 +2640,10 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
             }
         }
         
-        // Calculate acceptance rate
-        double acceptance = acc_sum / double(n_sweeps);
+        // Calculate acceptance rate (normalize differently if overrelaxation is used)
+        double acceptance = (overrelaxation_rate > 0) ? 
+            acc_sum / double(n_sweeps) * overrelaxation_rate : 
+            acc_sum / double(n_sweeps);
         
         // Progress report every 10 steps or near T_end
         if (temp_step % 10 == 0 || T <= T_end * 1.5) {

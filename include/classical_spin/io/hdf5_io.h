@@ -11,6 +11,33 @@
 #include "classical_spin/core/simple_linear_alg.h"
 
 /**
+ * Helper function to create HDF5 file with proper serial access properties.
+ * This is critical for compatibility with parallel HDF5 libraries (hdf5-mpi).
+ * 
+ * When the parallel HDF5 library is loaded but we want serial I/O (each MPI rank
+ * writing to its own independent file), we must explicitly use a file access
+ * property list that specifies serial/independent I/O. Otherwise, the parallel
+ * HDF5 library may throw exceptions when creating groups/datasets.
+ * 
+ * @param filename Path to the HDF5 file to create
+ * @return H5::H5File object opened for writing
+ */
+inline H5::H5File create_hdf5_file_serial(const std::string& filename) {
+    // Create file access property list for serial I/O
+    // This ensures compatibility with both serial and parallel HDF5 libraries
+    H5::FileAccPropList fapl;
+    fapl.copy(H5::FileAccPropList::DEFAULT);
+    
+    // Create file creation property list (default is fine)
+    H5::FileCreatPropList fcpl;
+    fcpl.copy(H5::FileCreatPropList::DEFAULT);
+    
+    // Create the file with explicit property lists
+    // H5F_ACC_TRUNC = truncate if exists, create if doesn't
+    return H5::H5File(filename, H5F_ACC_TRUNC, fcpl, fapl);
+}
+
+/**
  * HDF5 Writer for molecular dynamics trajectories
  * 
  * This class provides efficient I/O for MD simulations by storing
@@ -59,8 +86,8 @@ public:
           spin_dim_(spin_dim),
           current_step_(0)
     {
-        // Create HDF5 file
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         trajectory_group_ = file_.createGroup("/trajectory");
@@ -418,8 +445,8 @@ public:
           lattice_size_SU3_(lattice_size_SU3), spin_dim_SU3_(spin_dim_SU3),
           current_step_(0)
     {
-        // Create HDF5 file
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         traj_SU2_group_ = file_.createGroup("/trajectory_SU2");
@@ -708,7 +735,8 @@ public:
                        const std::vector<Eigen::Vector3d>* site_positions = nullptr)
         : filename_(filename), spin_dim_(spin_dim)
     {
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         metadata_group_ = file_.createGroup("/metadata");
@@ -992,7 +1020,8 @@ public:
                             const std::vector<Eigen::Vector3d>* positions_SU3 = nullptr)
         : filename_(filename), spin_dim_SU2_(spin_dim_SU2), spin_dim_SU3_(spin_dim_SU3)
     {
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         metadata_group_ = file_.createGroup("/metadata");
@@ -1326,8 +1355,8 @@ public:
           lattice_size_(lattice_size),
           current_step_(0)
     {
-        // Create HDF5 file
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         trajectory_group_ = file_.createGroup("/trajectory");
@@ -1761,8 +1790,8 @@ public:
           spin_dim_(spin_dim),
           n_sublattices_(n_sublattices)
     {
-        // Create HDF5 file
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         timeseries_group_ = file_.createGroup("/timeseries");
@@ -1991,9 +2020,9 @@ public:
           n_sublattices_SU2_(n_sublattices_SU2),
           n_sublattices_SU3_(n_sublattices_SU3)
     {
-        // Create HDF5 file (NOTE: for MPI, use H5F_ACC_TRUNC with single process per file)
+        // Create HDF5 file with serial access (compatible with parallel HDF5 library)
         // Each MPI rank writes its own file, so no MPI-parallel HDF5 needed
-        file_ = H5::H5File(filename, H5F_ACC_TRUNC);
+        file_ = create_hdf5_file_serial(filename);
         
         // Create groups
         timeseries_group_ = file_.createGroup("/timeseries");

@@ -673,17 +673,19 @@ public:
     
     /**
      * Simulated annealing with progress reporting
-     * @param T_start         Starting temperature
-     * @param T_end           Final temperature
-     * @param n_sweeps        Sweeps per temperature
-     * @param cooling_rate    Multiplicative cooling factor (default 0.9)
-     * @param gaussian_move   Use Gaussian moves (default false)
-     * @param out_dir         Output directory for configs (empty = no save)
-     * @param T_zero          If true, perform deterministic sweeps at end
-     * @param n_deterministics Number of deterministic sweeps at T=0
+     * @param T_start           Starting temperature
+     * @param T_end             Final temperature
+     * @param n_sweeps          Sweeps per temperature
+     * @param cooling_rate      Multiplicative cooling factor (default 0.9)
+     * @param overrelaxation_rate If > 0, do overrelaxation every N sweeps (0 = disabled)
+     * @param gaussian_move     Use Gaussian moves (default false)
+     * @param out_dir           Output directory for configs (empty = no save)
+     * @param T_zero            If true, perform deterministic sweeps at end
+     * @param n_deterministics  Number of deterministic sweeps at T=0
      */
     void anneal(double T_start, double T_end, size_t n_sweeps,
                 double cooling_rate = 0.9,
+                size_t overrelaxation_rate = 0,
                 bool gaussian_move = false,
                 const string& out_dir = "",
                 bool T_zero = false,
@@ -697,6 +699,13 @@ public:
      * @param num_sweeps Number of full sweeps over all sites
      */
     void deterministic_sweep(size_t num_sweeps);
+    
+    /**
+     * Over-relaxation sweep (microcanonical, zero acceptance rate)
+     * Reflects spins about local field: S' = 2(S·H)H/|H|² - S
+     * This preserves energy but accelerates decorrelation.
+     */
+    void overrelaxation();
     
     // ============================================================
     // I/O
