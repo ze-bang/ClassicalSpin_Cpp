@@ -15,26 +15,40 @@
  * This is critical for compatibility with parallel HDF5 libraries (hdf5-mpi).
  * 
  * When the parallel HDF5 library is loaded but we want serial I/O (each MPI rank
- * writing to its own independent file), we must explicitly use a file access
- * property list that specifies serial/independent I/O. Otherwise, the parallel
- * HDF5 library may throw exceptions when creating groups/datasets.
+ * writing to its own independent file), we must explicitly use the SEC2 (POSIX)
+ * file driver which bypasses MPI-IO. Otherwise, the parallel HDF5 library may
+ * throw exceptions when creating groups/datasets due to invalid file handles.
  * 
  * @param filename Path to the HDF5 file to create
  * @return H5::H5File object opened for writing
  */
 inline H5::H5File create_hdf5_file_serial(const std::string& filename) {
-    // Create file access property list for serial I/O
-    // This ensures compatibility with both serial and parallel HDF5 libraries
-    H5::FileAccPropList fapl;
-    fapl.copy(H5::FileAccPropList::DEFAULT);
+    // Use low-level C API for maximum compatibility with parallel HDF5
+    // Set up file access property list with SEC2 (POSIX) driver
+    // This forces serial/independent I/O even when linked against parallel HDF5
+    hid_t fapl_id = H5Pcreate(H5P_FILE_ACCESS);
+    if (fapl_id < 0) {
+        throw H5::FileIException("create_hdf5_file_serial", "Failed to create file access property list");
+    }
     
-    // Create file creation property list (default is fine)
-    H5::FileCreatPropList fcpl;
-    fcpl.copy(H5::FileCreatPropList::DEFAULT);
+    // Use the SEC2 (standard POSIX) driver - this bypasses MPI-IO
+    herr_t status = H5Pset_fapl_sec2(fapl_id);
+    if (status < 0) {
+        H5Pclose(fapl_id);
+        throw H5::FileIException("create_hdf5_file_serial", "Failed to set SEC2 file driver");
+    }
     
-    // Create the file with explicit property lists
-    // H5F_ACC_TRUNC = truncate if exists, create if doesn't
-    return H5::H5File(filename, H5F_ACC_TRUNC, fcpl, fapl);
+    // Create file with the SEC2 driver
+    hid_t file_id = H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl_id);
+    H5Pclose(fapl_id);
+    
+    if (file_id < 0) {
+        throw H5::FileIException("create_hdf5_file_serial", "Failed to create HDF5 file: " + filename);
+    }
+    
+    // Wrap the C file handle in C++ H5File object
+    // The H5File constructor takes ownership of the file_id
+    return H5::H5File(file_id);
 }
 
 /**
