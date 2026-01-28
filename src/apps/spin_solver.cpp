@@ -1160,6 +1160,117 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
 }
 
 /**
+ * Run parallel tempering for StrainPhononLattice
+ * Uses MPI for replica exchange between temperatures
+ */
+void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size, MPI_Comm comm = MPI_COMM_WORLD) {
+    if (rank == 0) {
+        cout << "Running parallel tempering on StrainPhononLattice with " << size << " replicas..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+    }
+    
+    // Generate temperature ladder
+    vector<double> temps(size);
+    
+    if (config.pt_optimize_temperatures) {
+        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        if (rank == 0) {
+            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed)..." << endl;
+        }
+        
+        SPL_OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
+            config.T_end,    // Tmin (coldest)
+            config.T_start,  // Tmax (hottest)
+            config.pt_optimization_warmup,
+            config.pt_optimization_sweeps,
+            config.pt_optimization_iterations,
+            config.gaussian_move,
+            config.overrelaxation_rate,
+            config.pt_target_acceptance,
+            0.05,  // convergence tolerance
+            comm
+        );
+        temps = opt_result.temperatures;
+        
+        // Save optimized temperature grid info to file (rank 0 only)
+        if (rank == 0 && !config.output_dir.empty()) {
+            filesystem::create_directories(config.output_dir);
+            ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
+            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
+            opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
+            opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
+            opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
+            opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
+            opt_file << "#\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            for (int i = 0; i < size; ++i) {
+                opt_file << i << "  " << scientific << setprecision(12) << temps[i];
+                if (i < size - 1) {
+                    opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
+                             << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                }
+                opt_file << "\n";
+            }
+            opt_file.close();
+        }
+    } else {
+        // Use geometric (logarithmic) temperature spacing
+        if (rank == 0) {
+            cout << "Using geometric temperature grid..." << endl;
+            temps = StrainPhononLattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
+        }
+        // Broadcast temperatures from rank 0 to all ranks
+        MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
+    }
+    
+    // Re-initialize spins after temperature optimization
+    lattice.init_random();
+    MPI_Barrier(comm);
+    
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        if (rank == 0) {
+            filesystem::create_directories(trial_dir);
+        }
+        MPI_Barrier(comm);  // Ensure directory is created before others proceed
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.parallel_tempering(
+            temps,
+            config.annealing_steps,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.pt_exchange_frequency,
+            config.probe_rate,
+            trial_dir,
+            config.ranks_to_write,
+            config.gaussian_move,
+            comm
+        );
+        
+        if (rank == 0) {
+            cout << "Trial " << trial << " completed." << endl;
+        }
+    }
+    
+    // Synchronize all ranks
+    MPI_Barrier(comm);
+    
+    if (rank == 0) {
+        cout << "StrainPhononLattice parallel tempering completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
+/**
  * Run simulated annealing for PhononLattice (spin subsystem only)
  */
 void run_simulated_annealing_phonon(PhononLattice& lattice, const SpinConfig& config, int rank, int size) {
@@ -2697,6 +2808,39 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 
                 // Run PT with proper sub-communicator rank/size
                 run_parallel_tempering_mixed(mixed_lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
+            } else if (sweep_config.system == SystemType::NCTO_STRAIN) {
+                // StrainPhononLattice magnetoelastic system
+                StrainPhononLattice strain_lattice(sweep_config.lattice_size[0],
+                                                   sweep_config.lattice_size[1],
+                                                   sweep_config.lattice_size[2],
+                                                   sweep_config.spin_length);
+                
+                // Build parameters from config
+                MagnetoelasticParams me_params;
+                ElasticParams el_params;
+                StrainDriveParams dr_params;
+                build_strain_params(sweep_config, me_params, el_params, dr_params);
+                
+                // Set parameters
+                strain_lattice.set_parameters(me_params, el_params, dr_params);
+                strain_lattice.alpha_gilbert = sweep_config.get_param("alpha_gilbert", 0.0);
+                
+                // Set magnetic field
+                Eigen::Vector3d B;
+                B << sweep_config.field_strength * sweep_config.field_direction[0],
+                     sweep_config.field_strength * sweep_config.field_direction[1],
+                     sweep_config.field_strength * sweep_config.field_direction[2];
+                strain_lattice.set_uniform_field(B);
+                
+                // Initialize spins
+                if (!sweep_config.initial_spin_config.empty()) {
+                    strain_lattice.load_spin_config(sweep_config.initial_spin_config);
+                } else {
+                    strain_lattice.init_random();
+                }
+                
+                // Run PT with proper sub-communicator rank/size
+                run_parallel_tempering_strain(strain_lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
             } else {
                 // Standard lattice systems
                 UnitCell* uc_ptr = nullptr;
@@ -3229,6 +3373,9 @@ int main(int argc, char** argv) {
                 case SimulationType::SIMULATED_ANNEALING:
                     run_simulated_annealing_strain(strain_lattice, config, rank, size);
                     break;
+                case SimulationType::PARALLEL_TEMPERING:
+                    run_parallel_tempering_strain(strain_lattice, config, rank, size, MPI_COMM_WORLD);
+                    break;
                 case SimulationType::MOLECULAR_DYNAMICS:
                     run_molecular_dynamics_strain(strain_lattice, config, rank, size);
                     break;
@@ -3241,7 +3388,7 @@ int main(int argc, char** argv) {
                 default:
                     if (rank == 0) {
                         cerr << "Simulation type not supported for StrainPhononLattice. "
-                             << "Supported: SA, MD, pump_probe, parameter_sweep" << endl;
+                             << "Supported: SA, PT, MD, pump_probe, parameter_sweep" << endl;
                     }
                     break;
             }

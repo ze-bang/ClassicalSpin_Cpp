@@ -127,13 +127,6 @@ drive_strength_Eg1 = 0.0   # Drive Eg,1 (ε_xx - ε_yy)
 drive_strength_Eg2 = 0.0   # Drive Eg,2 (2ε_xy)
 
 # ============================================
-# MOLECULAR DYNAMICS PARAMETERS
-# ============================================
-dt = 0.01                 # Time step
-t_final = 100.0           # Total simulation time
-md_output_every = 100     # Output every N steps
-
-# ============================================
 # SIMULATED ANNEALING PARAMETERS
 # ============================================
 # Used if simulation_mode = simulated_annealing
@@ -143,11 +136,3 @@ annealing_steps = 10000   # Number of temperature steps
 overrelaxation_rate = 1  # MC sweeps per temperature step
 cooling_rate = 0.9       # Exponential cooling factor
 T_zero = true
-
-# ============================================
-# INITIALIZATION
-# ============================================
-# Options: random (default), or load from file
-# initial_spin_config = path/to/spins.txt
-use_ferromagnetic_init = false
-ferromagnetic_direction = 0,0,1
