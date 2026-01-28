@@ -1254,7 +1254,8 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
             trial_dir,
             config.ranks_to_write,
             config.gaussian_move,
-            comm
+            comm,
+            true  // verbose: save spin configurations
         );
         
         if (rank == 0) {
