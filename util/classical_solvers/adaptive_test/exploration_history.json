@@ -1,0 +1,91 @@
+{
+  "metadata": {
+    "L": 12,
+    "J1xy_abs": null,
+    "J1xy_sign": -1.0,
+    "target_phase": "Meron-Antimeron",
+    "surrogate_type": "random_forest",
+    "total_points": 3,
+    "timestamp": "2026-01-18T18:00:42.481171"
+  },
+  "phase_counts": {
+    "Meron-Antimeron": 3
+  },
+  "points": [
+    {
+      "point_id": 0,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.2786473715298287,
+        "D_norm": 0.12034849379799172,
+        "E_norm": 0.19078558771411694,
+        "F_norm": -0.013437684583579444,
+        "G_norm": 0.09258712344949793,
+        "J3xy_norm": 0.26919669226225634,
+        "J3z_norm": -0.023183697578263437,
+        "J1xy_abs": 6.772
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_2"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2026-01-18T18:00:35.409986",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 1,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.31357207342762566,
+        "D_norm": 0.10156485103821848,
+        "E_norm": 0.20012037315678605,
+        "F_norm": -0.2281071321095396,
+        "G_norm": 0.03159795365633464,
+        "J3xy_norm": 0.2553415588323804,
+        "J3z_norm": 0.0058681913933192895,
+        "J1xy_abs": 6.646
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_4"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2026-01-18T18:00:35.410033",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    },
+    {
+      "point_id": 2,
+      "params": {
+        "J1xy_sign": -1.0,
+        "J1z_norm": -0.31357207342762566,
+        "D_norm": 0.10156485103821848,
+        "E_norm": 0.18808305747818238,
+        "F_norm": -0.2281071321095396,
+        "G_norm": -0.03159795365633464,
+        "J3xy_norm": 0.2553415588323804,
+        "J3z_norm": 0.0058681913933192895,
+        "J1xy_abs": 6.646
+      },
+      "phase": "Meron-Antimeron",
+      "confidence": 0.9,
+      "decision_flags": {
+        "known_seed": true,
+        "seed_name": "fitting_param_8"
+      },
+      "features": {},
+      "energy": 0.0,
+      "timestamp": "2026-01-18T18:00:35.410077",
+      "selection_method": "initial",
+      "acquisition_value": 0.0
+    }
+  ]
+}
