@@ -2923,3 +2923,906 @@ void StrainPhononLattice::save_trajectory_txt(const string& output_dir,
     cout << "  energy.txt: " << times.size() << " timesteps" << endl;
     cout << "  strain_trajectory.txt: " << times.size() << " timesteps" << endl;
 }
+// ============================================================
+// PARALLEL TEMPERING IMPLEMENTATION
+// ============================================================
+
+void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+                       size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                       string dir_name, const vector<int>& rank_to_write,
+                       bool gaussian_move, MPI_Comm comm,
+                       bool verbose) {
+    // Initialize MPI
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized) {
+        MPI_Init(nullptr, nullptr);
+    }
+    
+    int rank, size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+    
+    // Set random seed unique to each rank
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    rng.seed(static_cast<unsigned int>(seed + rank * 1000));
+    
+    double curr_Temp = temp[rank];
+    double sigma = 1000.0;
+    int swap_accept = 0;
+    double curr_accept = 0;
+    
+    vector<double> heat_capacity, dHeat;
+    if (rank == 0) {
+        heat_capacity.resize(size);
+        dHeat.resize(size);
+    }
+    
+    vector<double> energies;
+    vector<SpinVector> magnetizations;
+    vector<vector<SpinVector>> sublattice_mags;
+    size_t expected_samples = n_measure / probe_rate + 100;
+    energies.reserve(expected_samples);
+    magnetizations.reserve(expected_samples);
+    sublattice_mags.reserve(expected_samples);
+    
+    cout << "Rank " << rank << ": T=" << curr_Temp << endl;
+    
+    // Equilibration
+    cout << "Rank " << rank << ": Equilibrating..." << endl;
+    for (size_t i = 0; i < n_anneal; ++i) {
+        if (overrelaxation_rate > 0) {
+            overrelaxation();
+            if (i % overrelaxation_rate == 0) {
+                curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+            }
+        } else {
+            curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+        }
+        
+        // Attempt replica exchange
+        if (swap_rate > 0 && i % swap_rate == 0) {
+            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+        }
+    }
+    
+    // Main measurement phase
+    cout << "Rank " << rank << ": Measuring..." << endl;
+    for (size_t i = 0; i < n_measure; ++i) {
+        if (overrelaxation_rate > 0) {
+            overrelaxation();
+            if (i % overrelaxation_rate == 0) {
+                curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+            }
+        } else {
+            curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+        }
+        
+        if (swap_rate > 0 && i % swap_rate == 0) {
+            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+        }
+        
+        if (i % probe_rate == 0) {
+            energies.push_back(total_energy());
+            magnetizations.push_back(magnetization_global());
+            sublattice_mags.push_back(magnetization_sublattice());
+        }
+    }
+    
+    cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
+    
+    // Gather and save statistics with comprehensive observables
+    gather_and_save_statistics_comprehensive(rank, size, curr_Temp, energies, 
+                                              magnetizations, sublattice_mags,
+                                              heat_capacity, dHeat, temp, dir_name, 
+                                              rank_to_write, n_anneal, n_measure, 
+                                              curr_accept, swap_accept,
+                                              swap_rate, overrelaxation_rate, probe_rate, comm, verbose);
+}
+
+int StrainPhononLattice::attempt_replica_exchange(int rank, int size, const vector<double>& temp,
+                            double curr_Temp, size_t swap_parity, MPI_Comm comm) {
+    // Determine partner based on checkerboard pattern
+    int partner_rank;
+    if (swap_parity % 2 == 0) {
+        partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+    } else {
+        partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+    }
+    
+    if (partner_rank < 0 || partner_rank >= size) {
+        return 0;
+    }
+    
+    // Exchange energies
+    double E = total_energy();
+    double E_partner, T_partner = temp[partner_rank];
+    
+    MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
+                &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
+                comm, MPI_STATUS_IGNORE);
+    
+    // Decide acceptance using parallel tempering Metropolis criterion
+    int accept_int = 0;
+    if (rank < partner_rank) {
+        double beta_curr = 1.0 / curr_Temp;
+        double beta_partner = 1.0 / T_partner;
+        double delta = (beta_curr - beta_partner) * (E - E_partner);
+        bool accept = (delta >= 0) || (uniform_dist(rng) < std::exp(delta));
+        accept_int = accept ? 1 : 0;
+    }
+    
+    // Communicate decision between partners
+    int recv_accept_int = 0;
+    MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 2,
+                 &recv_accept_int, 1, MPI_INT, partner_rank, 2,
+                 comm, MPI_STATUS_IGNORE);
+    
+    bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
+    
+    // Exchange configurations if accepted
+    if (accept) {
+        // Serialize spins
+        vector<double> send_buf(lattice_size * spin_dim);
+        vector<double> recv_buf(lattice_size * spin_dim);
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t j = 0; j < spin_dim; ++j) {
+                send_buf[i * spin_dim + j] = spins[i](j);
+            }
+        }
+        
+        MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 1,
+                    recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 1,
+                    comm, MPI_STATUS_IGNORE);
+        
+        // Deserialize
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t j = 0; j < spin_dim; ++j) {
+                spins[i](j) = recv_buf[i * spin_dim + j];
+            }
+        }
+    }
+    
+    return accept ? 1 : 0;
+}
+
+vector<SpinVector> StrainPhononLattice::magnetization_sublattice() const {
+    vector<SpinVector> M_sub(N_atoms);
+    size_t n_cells = dim1 * dim2 * dim3;
+    
+    for (size_t atom = 0; atom < N_atoms; ++atom) {
+        M_sub[atom] = SpinVector::Zero(spin_dim);
+    }
+    
+    // Sum over all unit cells for each sublattice
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t atom = 0; atom < N_atoms; ++atom) {
+                    size_t site_idx = flatten_index(i, j, k, atom);
+                    
+                    // Transform to global frame using sublattice frame
+                    SpinVector spin_global = SpinVector::Zero(spin_dim);
+                    for (size_t mu = 0; mu < spin_dim; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim; ++nu) {
+                            spin_global(mu) += sublattice_frames[atom](nu, mu) * spins[site_idx](nu);
+                        }
+                    }
+                    M_sub[atom] += spin_global;
+                }
+            }
+        }
+    }
+    
+    // Normalize by number of unit cells
+    for (size_t atom = 0; atom < N_atoms; ++atom) {
+        M_sub[atom] /= double(n_cells);
+    }
+    
+    return M_sub;
+}
+
+SpinVector StrainPhononLattice::magnetization_global() const {
+    SpinVector M = SpinVector::Zero(spin_dim);
+    
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t l = 0; l < N_atoms; ++l) {
+                    size_t current_site_index = flatten_index(i, j, k, l);
+                    
+                    // Transform spin to global frame using sublattice frame
+                    SpinVector spin_global = SpinVector::Zero(spin_dim);
+                    for (size_t mu = 0; mu < spin_dim; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim; ++nu) {
+                            spin_global(mu) += sublattice_frames[l](nu, mu) * spins[current_site_index](nu);
+                        }
+                    }
+                    M += spin_global;
+                }
+            }
+        }
+    }
+    
+    return M / double(lattice_size);
+}
+
+SPL_BinningResult StrainPhononLattice::binning_analysis(const vector<double>& data) {
+    SPL_BinningResult result;
+    
+    if (data.empty()) {
+        result.mean = 0.0;
+        result.error = 0.0;
+        result.tau_int = 1.0;
+        result.optimal_bin_level = 0;
+        return result;
+    }
+    
+    size_t n = data.size();
+    
+    // Compute mean
+    result.mean = std::accumulate(data.begin(), data.end(), 0.0) / double(n);
+    
+    if (n < 4) {
+        double var = 0.0;
+        for (double x : data) var += (x - result.mean) * (x - result.mean);
+        result.error = std::sqrt(var / (n * (n - 1)));
+        result.tau_int = 1.0;
+        result.optimal_bin_level = 0;
+        return result;
+    }
+    
+    // Recursive blocking
+    vector<double> binned_data = data;
+    size_t level = 0;
+    size_t max_levels = static_cast<size_t>(std::log2(n)) - 1;
+    
+    result.errors_by_level.reserve(max_levels);
+    
+    while (binned_data.size() >= 4) {
+        size_t m = binned_data.size();
+        
+        // Compute variance at this level
+        double sum = 0.0, sum2 = 0.0;
+        for (double x : binned_data) {
+            sum += x;
+            sum2 += x * x;
+        }
+        double mean_level = sum / m;
+        double var_level = (sum2 / m - mean_level * mean_level);
+        double error_level = std::sqrt(var_level / (m - 1));
+        
+        result.errors_by_level.push_back(error_level);
+        
+        // Block the data: average consecutive pairs
+        vector<double> new_binned;
+        new_binned.reserve(m / 2);
+        for (size_t i = 0; i + 1 < m; i += 2) {
+            new_binned.push_back(0.5 * (binned_data[i] + binned_data[i + 1]));
+        }
+        binned_data = std::move(new_binned);
+        ++level;
+    }
+    
+    // Find optimal level where error has plateaued
+    result.optimal_bin_level = 0;
+    if (result.errors_by_level.size() > 2) {
+        double max_error = 0.0;
+        for (size_t l = 0; l < result.errors_by_level.size(); ++l) {
+            if (result.errors_by_level[l] > max_error) {
+                max_error = result.errors_by_level[l];
+                result.optimal_bin_level = l;
+            }
+        }
+    }
+    
+    // Use error from optimal level
+    if (!result.errors_by_level.empty()) {
+        size_t use_level = std::min(result.optimal_bin_level + 1, result.errors_by_level.size() - 1);
+        result.error = result.errors_by_level[use_level];
+        
+        // Estimate tau_int
+        if (result.errors_by_level[0] > 1e-20) {
+            double ratio = result.error / result.errors_by_level[0];
+            result.tau_int = 0.5 * ratio * ratio;
+        } else {
+            result.tau_int = 1.0;
+        }
+    } else {
+        result.error = 0.0;
+        result.tau_int = 1.0;
+    }
+    
+    return result;
+}
+
+SPL_ThermodynamicObservables StrainPhononLattice::compute_thermodynamic_observables(
+    const vector<double>& energies,
+    const vector<vector<SpinVector>>& sublattice_mags,
+    double temperature) const {
+    
+    SPL_ThermodynamicObservables obs;
+    obs.temperature = temperature;
+    
+    size_t n_samples = energies.size();
+    if (n_samples == 0) return obs;
+    
+    // Energy per site
+    vector<double> E_per_site(n_samples);
+    for (size_t i = 0; i < n_samples; ++i) {
+        E_per_site[i] = energies[i] / double(lattice_size);
+    }
+    
+    SPL_BinningResult E_result = binning_analysis(E_per_site);
+    obs.energy.value = E_result.mean;
+    obs.energy.error = E_result.error;
+    
+    // Specific heat: C_V = (<E²> - <E>²) / (T² * N)
+    double E_mean = 0.0, E2_mean = 0.0;
+    for (double E : energies) {
+        E_mean += E;
+        E2_mean += E * E;
+    }
+    E_mean /= n_samples;
+    E2_mean /= n_samples;
+    double var_E = E2_mean - E_mean * E_mean;
+    
+    obs.specific_heat.value = var_E / (temperature * temperature * double(lattice_size));
+    obs.specific_heat.error = obs.specific_heat.value * std::sqrt(2.0 / n_samples);
+    
+    // Sublattice magnetizations
+    obs.sublattice_magnetization.resize(N_atoms);
+    obs.energy_sublattice_cross.resize(N_atoms);
+    
+    for (size_t alpha = 0; alpha < N_atoms; ++alpha) {
+        obs.sublattice_magnetization[alpha] = SPL_VectorObservable(spin_dim);
+        obs.energy_sublattice_cross[alpha] = SPL_VectorObservable(spin_dim);
+        
+        for (size_t d = 0; d < spin_dim; ++d) {
+            vector<double> S_alpha_d(n_samples);
+            for (size_t i = 0; i < n_samples; ++i) {
+                S_alpha_d[i] = sublattice_mags[i][alpha](d);
+            }
+            
+            SPL_BinningResult S_result = binning_analysis(S_alpha_d);
+            obs.sublattice_magnetization[alpha].values[d] = S_result.mean;
+            obs.sublattice_magnetization[alpha].errors[d] = S_result.error;
+            
+            // Cross correlation: <E*S> - <E><S>
+            vector<double> ES_alpha_d(n_samples);
+            for (size_t i = 0; i < n_samples; ++i) {
+                ES_alpha_d[i] = energies[i] * sublattice_mags[i][alpha](d);
+            }
+            
+            SPL_BinningResult ES_result = binning_analysis(ES_alpha_d);
+            double cross_val = ES_result.mean - E_mean * S_result.mean;
+            
+            obs.energy_sublattice_cross[alpha].values[d] = cross_val;
+            obs.energy_sublattice_cross[alpha].errors[d] = ES_result.error;
+        }
+    }
+    
+    return obs;
+}
+
+void StrainPhononLattice::gather_and_save_statistics_comprehensive(int rank, int size, double curr_Temp,
+                               const vector<double>& energies,
+                               const vector<SpinVector>& magnetizations,
+                               const vector<vector<SpinVector>>& sublattice_mags,
+                               vector<double>& heat_capacity, vector<double>& dHeat,
+                               const vector<double>& temp, const string& dir_name,
+                               const vector<int>& rank_to_write,
+                               size_t n_anneal, size_t n_measure,
+                               double curr_accept, int swap_accept,
+                               size_t swap_rate, size_t overrelaxation_rate,
+                               size_t probe_rate, MPI_Comm comm,
+                               bool verbose) {
+    
+    // Compute comprehensive thermodynamic observables with binning analysis
+    SPL_ThermodynamicObservables obs = compute_thermodynamic_observables(
+        energies, sublattice_mags, curr_Temp);
+    
+    double curr_heat_capacity = obs.specific_heat.value;
+    double curr_dHeat = obs.specific_heat.error;
+    
+    // Gather heat capacity to root
+    MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
+               1, MPI_DOUBLE, 0, comm);
+    MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 
+               1, MPI_DOUBLE, 0, comm);
+    
+    // Report acceptance rates
+    double total_steps = n_anneal + n_measure;
+    double metro_steps = (overrelaxation_rate > 0) ? total_steps / overrelaxation_rate : total_steps;
+    double acc_rate = curr_accept / metro_steps;
+    double swap_rate_actual = (swap_rate > 0) ? double(swap_accept) / (total_steps / swap_rate) : 0.0;
+    
+    cout << "Rank " << rank << ": T=" << curr_Temp 
+         << ", acc=" << acc_rate 
+         << ", swap_acc=" << swap_rate_actual 
+         << ", <E>/N=" << obs.energy.value << "±" << obs.energy.error
+         << ", C_V=" << obs.specific_heat.value << "±" << obs.specific_heat.error
+         << endl;
+    
+    // Save results with proper MPI synchronization
+    if (!dir_name.empty()) {
+        // Rank 0 creates the main output directory first
+        if (rank == 0) {
+            std::filesystem::create_directories(dir_name);
+        }
+        MPI_Barrier(comm);
+        
+        // Check if this rank should write
+        bool should_write = should_rank_write(rank, rank_to_write);
+        
+        if (should_write) {
+            string rank_dir = dir_name + "/rank_" + std::to_string(rank);
+            std::filesystem::create_directories(rank_dir);
+            
+#ifdef HDF5_ENABLED
+            save_thermodynamic_observables_hdf5(rank_dir, obs, energies, magnetizations,
+                                               sublattice_mags, n_anneal, n_measure,
+                                               probe_rate, swap_rate, overrelaxation_rate,
+                                               acc_rate, swap_rate_actual);
+#else
+            if (rank == 0) {
+                std::cerr << "Warning: HDF5 not enabled. Compile with -DHDF5_ENABLED=ON to enable output." << endl;
+            }
+#endif
+            
+            // Save spin configuration only if verbose mode is enabled
+            if (verbose) {
+                save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
+            }
+        }
+        
+        MPI_Barrier(comm);
+        
+        // Root process saves aggregated results
+        if (rank == 0) {
+#ifdef HDF5_ENABLED
+            save_heat_capacity_hdf5(dir_name, temp, heat_capacity, dHeat);
+#endif
+        }
+    }
+    
+    MPI_Barrier(comm);
+}
+
+SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_grid_mpi(
+    double Tmin, double Tmax,
+    size_t warmup_sweeps,
+    size_t sweeps_per_iter,
+    size_t feedback_iters,
+    bool gaussian_move,
+    size_t overrelaxation_rate,
+    double target_acceptance,
+    double convergence_tol,
+    MPI_Comm comm) {
+    
+    int rank, R;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &R);
+    
+    SPL_OptimizedTempGridResult result;
+    result.converged = false;
+    result.feedback_iterations_used = 0;
+    
+    if (R < 2) {
+        result.temperatures = {Tmin};
+        result.converged = true;
+        return result;
+    }
+    if (R == 2) {
+        result.temperatures = {Tmin, Tmax};
+        result.acceptance_rates = {0.5};
+        result.converged = true;
+        return result;
+    }
+    
+    // Set random seed unique to each rank
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    rng.seed(static_cast<unsigned int>(seed + rank * 12345));
+    
+    if (rank == 0) {
+        cout << "=== Bittner et al. Optimized Temperature Grid (MPI) ===" << endl;
+        cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+        cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << " (MPI ranks)" << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+    }
+    
+    // Initialize beta array (linear spacing)
+    double beta_min = 1.0 / Tmax;
+    double beta_max = 1.0 / Tmin;
+    vector<double> beta(R);
+    for (int i = 0; i < R; ++i) {
+        beta[i] = beta_min + (beta_max - beta_min) * double(i) / double(R - 1);
+    }
+    
+    double my_beta = beta[rank];
+    double my_T = 1.0 / my_beta;
+    double sigma = 1000.0;
+    
+    // Warmup phase
+    if (rank == 0) cout << "Warming up replicas..." << endl;
+    for (size_t i = 0; i < warmup_sweeps; ++i) {
+        mc_sweep(my_T, gaussian_move, sigma);
+        if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+            overrelaxation();
+        }
+    }
+    MPI_Barrier(comm);
+    
+    // Acceptance rate tracking
+    vector<double> acceptance_rates(R - 1, 0.0);
+    double base_damping = 0.5;
+    
+    // Feedback optimization loop
+    for (size_t iter = 0; iter < feedback_iters; ++iter) {
+        double damping = base_damping + 0.3 * (double(iter) / double(feedback_iters));
+        
+        int local_attempts = 0;
+        int local_accepts = 0;
+        
+        size_t effective_sweeps = sweeps_per_iter;
+        
+        // MC sweeps with replica exchanges
+        for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
+            mc_sweep(my_T, gaussian_move, sigma);
+            if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
+                overrelaxation();
+            }
+            
+            // Attempt replica exchanges using checkerboard pattern
+            for (int parity = 0; parity <= 1; ++parity) {
+                int partner_rank;
+                if (parity == 0) {
+                    partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+                } else {
+                    partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+                }
+                
+                if (partner_rank < 0 || partner_rank >= R) continue;
+                
+                double my_E = total_energy();
+                double partner_E;
+                MPI_Sendrecv(&my_E, 1, MPI_DOUBLE, partner_rank, 0,
+                            &partner_E, 1, MPI_DOUBLE, partner_rank, 0,
+                            comm, MPI_STATUS_IGNORE);
+                
+                int accept_int = 0;
+                if (rank < partner_rank) {
+                    double beta_hot = my_beta;
+                    double beta_cold = beta[partner_rank];
+                    double E_hot = my_E;
+                    double E_cold = partner_E;
+                    
+                    double delta = -(beta_cold - beta_hot) * (E_hot - E_cold);
+                    bool accept = (delta >= 0) || (uniform_dist(rng) < std::exp(delta));
+                    accept_int = accept ? 1 : 0;
+                    
+                    ++local_attempts;
+                    if (accept) ++local_accepts;
+                }
+                
+                int recv_accept_int = 0;
+                MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 1,
+                            &recv_accept_int, 1, MPI_INT, partner_rank, 1,
+                            comm, MPI_STATUS_IGNORE);
+                
+                bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
+                
+                if (accept) {
+                    vector<double> send_buf(lattice_size * spin_dim);
+                    vector<double> recv_buf(lattice_size * spin_dim);
+                    
+                    for (size_t i = 0; i < lattice_size; ++i) {
+                        for (size_t j = 0; j < spin_dim; ++j) {
+                            send_buf[i * spin_dim + j] = spins[i](j);
+                        }
+                    }
+                    
+                    MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 2,
+                                recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 2,
+                                comm, MPI_STATUS_IGNORE);
+                    
+                    for (size_t i = 0; i < lattice_size; ++i) {
+                        for (size_t j = 0; j < spin_dim; ++j) {
+                            spins[i](j) = recv_buf[i * spin_dim + j];
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Gather acceptance statistics
+        int my_attempts = (rank < R - 1) ? local_attempts : 0;
+        int my_accepts = (rank < R - 1) ? local_accepts : 0;
+        
+        vector<int> recv_attempts(R);
+        vector<int> recv_accepts(R);
+        MPI_Gather(&my_attempts, 1, MPI_INT, recv_attempts.data(), 1, MPI_INT, 0, comm);
+        MPI_Gather(&my_accepts, 1, MPI_INT, recv_accepts.data(), 1, MPI_INT, 0, comm);
+        
+        bool converged = false;
+        if (rank == 0) {
+            for (int e = 0; e < R - 1; ++e) {
+                if (recv_attempts[e] > 0) {
+                    acceptance_rates[e] = double(recv_accepts[e]) / double(recv_attempts[e]);
+                }
+            }
+            
+            double max_deviation = 0.0;
+            double mean_deviation = 0.0;
+            double mean_rate = 0.0;
+            double min_rate = 1.0, max_rate = 0.0;
+            for (int e = 0; e < R - 1; ++e) {
+                double dev = std::abs(acceptance_rates[e] - target_acceptance);
+                max_deviation = std::max(max_deviation, dev);
+                mean_deviation += dev;
+                mean_rate += acceptance_rates[e];
+                min_rate = std::min(min_rate, acceptance_rates[e]);
+                max_rate = std::max(max_rate, acceptance_rates[e]);
+            }
+            mean_rate /= (R - 1);
+            mean_deviation /= (R - 1);
+            
+            cout << "Iter " << iter + 1 << "/" << feedback_iters 
+                 << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
+                 << " [" << min_rate << ", " << max_rate << "]"
+                 << ", mean dev = " << mean_deviation << endl;
+            
+            result.feedback_iterations_used = iter + 1;
+            
+            if (mean_deviation < convergence_tol) {
+                converged = true;
+                cout << "Converged at iteration " << iter + 1 << endl;
+            }
+            
+            if (!converged) {
+                // Bittner feedback optimization
+                vector<double> weights(R - 1);
+                double total_weight = 0.0;
+                
+                for (int e = 0; e < R - 1; ++e) {
+                    double A_e = acceptance_rates[e];
+                    if (A_e < 0.01) A_e = 0.01;
+                    if (A_e > 0.99) A_e = 0.99;
+                    weights[e] = A_e;
+                    total_weight += weights[e];
+                }
+                
+                for (int e = 0; e < R - 1; ++e) {
+                    weights[e] /= total_weight;
+                }
+                
+                vector<double> new_beta(R);
+                new_beta[0] = beta_min;
+                
+                double cumulative = 0.0;
+                for (int e = 0; e < R - 1; ++e) {
+                    cumulative += weights[e];
+                    new_beta[e + 1] = beta_min + cumulative * (beta_max - beta_min);
+                }
+                new_beta[R - 1] = beta_max;
+                
+                for (int k = 1; k < R - 1; ++k) {
+                    new_beta[k] = (1.0 - damping) * beta[k] + damping * new_beta[k];
+                }
+                
+                beta = new_beta;
+            }
+        }
+        
+        // Broadcast convergence flag and new beta array
+        int conv_int = converged ? 1 : 0;
+        MPI_Bcast(&conv_int, 1, MPI_INT, 0, comm);
+        MPI_Bcast(beta.data(), R, MPI_DOUBLE, 0, comm);
+        
+        my_beta = beta[rank];
+        my_T = 1.0 / my_beta;
+        
+        if (conv_int == 1) {
+            result.converged = true;
+            break;
+        }
+    }
+    
+    // Broadcast final acceptance rates
+    MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
+    
+    // Build result
+    result.temperatures.resize(R);
+    for (int i = 0; i < R; ++i) {
+        result.temperatures[i] = 1.0 / beta[i];
+    }
+    std::sort(result.temperatures.begin(), result.temperatures.end());
+    
+    result.acceptance_rates = acceptance_rates;
+    
+    // Compute diagnostics
+    result.local_diffusivities.resize(R - 1);
+    for (int e = 0; e < R - 1; ++e) {
+        double A = acceptance_rates[e];
+        result.local_diffusivities[e] = A * (1.0 - A);
+    }
+    
+    result.mean_acceptance_rate = 0.0;
+    for (double A : acceptance_rates) {
+        result.mean_acceptance_rate += A;
+    }
+    result.mean_acceptance_rate /= (R - 1);
+    
+    double tau_rt = 0.0;
+    for (int e = 0; e < R - 1; ++e) {
+        double d_beta = std::abs(beta[e + 1] - beta[e]);
+        double D = result.local_diffusivities[e];
+        tau_rt += d_beta / std::max(D, 1e-6);
+    }
+    result.round_trip_estimate = tau_rt;
+    
+    if (rank == 0) {
+        cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
+        cout << "Temperatures (ascending):" << endl;
+        for (int k = 0; k < std::min(R, 15); ++k) {
+            cout << "  T[" << k << "] = " << std::scientific << std::setprecision(6) 
+                 << result.temperatures[k];
+            if (k < R - 1) {
+                cout << "  (A = " << std::fixed << std::setprecision(3) 
+                     << acceptance_rates[k] << ")";
+            }
+            cout << endl;
+        }
+        if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+        
+        cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
+             << result.mean_acceptance_rate * 100 << "%" << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+    }
+    
+    MPI_Barrier(comm);
+    
+    return result;
+}
+
+vector<double> StrainPhononLattice::generate_geometric_temperature_ladder(
+    double Tmin, double Tmax, size_t R) {
+    
+    vector<double> temps(R);
+    if (R == 1) {
+        temps[0] = Tmin;
+        return temps;
+    }
+    
+    for (size_t i = 0; i < R; ++i) {
+        double frac = double(i) / double(R - 1);
+        temps[i] = Tmin * std::pow(Tmax / Tmin, frac);
+    }
+    return temps;
+}
+
+#ifdef HDF5_ENABLED
+void StrainPhononLattice::save_thermodynamic_observables_hdf5(const string& out_dir,
+                                          const SPL_ThermodynamicObservables& obs,
+                                          const vector<double>& energies,
+                                          const vector<SpinVector>& magnetizations,
+                                          const vector<vector<SpinVector>>& sublattice_mags,
+                                          size_t n_anneal,
+                                          size_t n_measure,
+                                          size_t probe_rate,
+                                          size_t swap_rate,
+                                          size_t overrelaxation_rate,
+                                          double acceptance_rate,
+                                          double swap_acceptance_rate) const {
+    std::filesystem::create_directories(out_dir);
+    
+    string filename = out_dir + "/parallel_tempering_data.h5";
+    size_t n_samples = energies.size();
+    
+    // Create HDF5 writer
+    HDF5PTWriter writer(filename, obs.temperature, lattice_size, spin_dim, N_atoms,
+                       n_samples, n_anneal, n_measure, probe_rate, swap_rate,
+                       overrelaxation_rate, acceptance_rate, swap_acceptance_rate);
+    
+    // Write time series data
+    writer.write_timeseries(energies, magnetizations, sublattice_mags);
+    
+    // Prepare observable data
+    vector<vector<double>> sublattice_mag_means(N_atoms);
+    vector<vector<double>> sublattice_mag_errors(N_atoms);
+    vector<vector<double>> energy_cross_means(N_atoms);
+    vector<vector<double>> energy_cross_errors(N_atoms);
+    
+    for (size_t alpha = 0; alpha < N_atoms; ++alpha) {
+        sublattice_mag_means[alpha] = obs.sublattice_magnetization[alpha].values;
+        sublattice_mag_errors[alpha] = obs.sublattice_magnetization[alpha].errors;
+        energy_cross_means[alpha] = obs.energy_sublattice_cross[alpha].values;
+        energy_cross_errors[alpha] = obs.energy_sublattice_cross[alpha].errors;
+    }
+    
+    // Write observables
+    writer.write_observables(obs.energy.value, obs.energy.error,
+                            obs.specific_heat.value, obs.specific_heat.error,
+                            sublattice_mag_means, sublattice_mag_errors,
+                            energy_cross_means, energy_cross_errors);
+    
+    writer.close();
+}
+
+void StrainPhononLattice::save_heat_capacity_hdf5(const string& out_dir,
+                              const vector<double>& temperatures,
+                              const vector<double>& heat_capacity,
+                              const vector<double>& dHeat) const {
+    std::filesystem::create_directories(out_dir);
+    
+    string filename = out_dir + "/parallel_tempering_aggregated.h5";
+    size_t n_temps = temperatures.size();
+    
+    // Create HDF5 file
+    H5::H5File file(filename, H5F_ACC_TRUNC);
+    
+    // Create main data group
+    H5::Group data_group = file.createGroup("/temperature_scan");
+    H5::Group metadata_group = file.createGroup("/metadata");
+    
+    // Write metadata
+    std::time_t now = std::time(nullptr);
+    char time_str[100];
+    std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+    
+    H5::DataSpace scalar_space(H5S_SCALAR);
+    
+    // Number of temperatures
+    H5::Attribute n_temps_attr = metadata_group.createAttribute(
+        "n_temperatures", H5::PredType::NATIVE_HSIZE, scalar_space);
+    hsize_t n_temps_val = n_temps;
+    n_temps_attr.write(H5::PredType::NATIVE_HSIZE, &n_temps_val);
+    
+    // Timestamp
+    H5::StrType str_type(H5::PredType::C_S1, strlen(time_str) + 1);
+    H5::Attribute time_attr = metadata_group.createAttribute(
+        "creation_time", str_type, scalar_space);
+    time_attr.write(str_type, time_str);
+    
+    // Version info
+    std::string version = "ClassicalSpin_Cpp v1.0";
+    H5::StrType version_type(H5::PredType::C_S1, version.size() + 1);
+    H5::Attribute version_attr = metadata_group.createAttribute(
+        "code_version", version_type, scalar_space);
+    version_attr.write(version_type, version.c_str());
+    
+    std::string format = "HDF5_PT_Aggregated_v1.0";
+    H5::StrType format_type(H5::PredType::C_S1, format.size() + 1);
+    H5::Attribute format_attr = metadata_group.createAttribute(
+        "file_format", format_type, scalar_space);
+    format_attr.write(format_type, format.c_str());
+    
+    // Write temperature array
+    hsize_t dims[1] = {n_temps};
+    H5::DataSpace dataspace(1, dims);
+    
+    H5::DataSet temp_dataset = data_group.createDataSet(
+        "temperature", H5::PredType::NATIVE_DOUBLE, dataspace);
+    temp_dataset.write(temperatures.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Write heat capacity array
+    H5::DataSet heat_dataset = data_group.createDataSet(
+        "specific_heat", H5::PredType::NATIVE_DOUBLE, dataspace);
+    heat_dataset.write(heat_capacity.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Write heat capacity error array
+    H5::DataSet dheat_dataset = data_group.createDataSet(
+        "specific_heat_error", H5::PredType::NATIVE_DOUBLE, dataspace);
+    dheat_dataset.write(dHeat.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Close everything
+    temp_dataset.close();
+    heat_dataset.close();
+    dheat_dataset.close();
+    data_group.close();
+    metadata_group.close();
+    file.close();
+}
+#endif

@@ -37,6 +37,7 @@
 
 #include "unitcell.h"
 #include "simple_linear_alg.h"
+#include "classical_spin/core/spin_config.h"  // For should_rank_write
 #include <vector>
 #include <array>
 #include <functional>
@@ -258,10 +259,16 @@ struct MagnetoelasticParams {
         return Jz;
     }
     
-    // Build bond-dependent exchange matrices in GLOBAL frame
-    SpinMatrix get_Jx() const { return to_global_frame(get_Jx_local()); }
-    SpinMatrix get_Jy() const { return to_global_frame(get_Jy_local()); }
-    SpinMatrix get_Jz() const { return to_global_frame(get_Jz_local()); }
+    // Build bond-dependent exchange matrices
+    // NOTE: We work in the LOCAL Kitaev frame where:
+    //   - x-bond has Kitaev term K*S^x*S^x (K on diagonal element 0,0)
+    //   - y-bond has Kitaev term K*S^y*S^y (K on diagonal element 1,1)
+    //   - z-bond has Kitaev term K*S^z*S^z (K on diagonal element 2,2)
+    // This ensures the spin basis functions f_K, f_J, f_Gamma are correctly computed
+    // using the bond_type index directly as the spin component.
+    SpinMatrix get_Jx() const { return get_Jx_local(); }
+    SpinMatrix get_Jy() const { return get_Jy_local(); }
+    SpinMatrix get_Jz() const { return get_Jz_local(); }
     
     // J2 and J3 matrices
     SpinMatrix get_J3_matrix() const { return J3 * SpinMatrix::Identity(3, 3); }
@@ -324,6 +331,67 @@ struct StrainDriveParams {
     double Eg2_force(double t) const {
         return drive_strength_Eg2 * drive_force(t);
     }
+};
+
+// ============================================================
+// HELPER STRUCTS FOR PARALLEL TEMPERING
+// ============================================================
+
+/**
+ * Binning analysis result for error estimation
+ */
+struct SPL_BinningResult {
+    double mean;
+    double error;
+    double tau_int;  // Integrated autocorrelation time estimate
+    size_t optimal_bin_level;
+    vector<double> errors_by_level;
+};
+
+/**
+ * Observable with uncertainty (mean ± error)
+ */
+struct SPL_Observable {
+    double value;
+    double error;
+    
+    SPL_Observable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
+};
+
+/**
+ * Vector observable with uncertainty for each component
+ */
+struct SPL_VectorObservable {
+    vector<double> values;
+    vector<double> errors;
+    
+    SPL_VectorObservable() = default;
+    SPL_VectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
+};
+
+/**
+ * Complete set of thermodynamic observables with uncertainties
+ */
+struct SPL_ThermodynamicObservables {
+    double temperature;
+    SPL_Observable energy;                      // <E>/N
+    SPL_Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
+    vector<SPL_VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
+    vector<SPL_VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α>
+};
+
+/**
+ * Result from optimized temperature grid generation
+ * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+ */
+struct SPL_OptimizedTempGridResult {
+    vector<double> temperatures;              // Optimized temperature ladder
+    vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
+    vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A) at each T
+    double mean_acceptance_rate;              // Average acceptance rate across all pairs
+    double round_trip_estimate;               // Estimated round-trip time in sweeps
+    size_t feedback_iterations_used;          // Number of feedback iterations performed
+    bool converged;                           // Whether the algorithm converged
 };
 
 /**
@@ -706,6 +774,162 @@ public:
      * This preserves energy but accelerates decorrelation.
      */
     void overrelaxation();
+    
+    // ============================================================
+    // PARALLEL TEMPERING
+    // ============================================================
+    
+    /**
+     * Parallel tempering with MPI
+     * Collects: energy, specific heat, sublattice magnetizations, and cross-correlations
+     * All with binning analysis for error estimation
+     * 
+     * @param temp              Temperature ladder (one per MPI rank)
+     * @param n_anneal          Number of equilibration sweeps
+     * @param n_measure         Number of measurement sweeps
+     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
+     * @param swap_rate         Attempt replica exchange every N sweeps
+     * @param probe_rate        Record observables every N sweeps
+     * @param dir_name          Output directory
+     * @param rank_to_write     List of ranks that should write output (-1 = all)
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @param verbose           If true, save spin configurations
+     */
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+                           size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                           string dir_name, const vector<int>& rank_to_write,
+                           bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
+                           bool verbose = false);
+    
+    /**
+     * Attempt replica exchange between neighboring temperatures
+     * Uses checkerboard pattern for non-blocking exchanges
+     * 
+     * @param rank          Current MPI rank
+     * @param size          Total number of MPI ranks
+     * @param temp          Temperature ladder
+     * @param curr_Temp     Current temperature for this rank
+     * @param swap_parity   Parity for checkerboard pattern (even/odd)
+     * @param comm          MPI communicator
+     * @return 1 if exchange was accepted, 0 otherwise
+     */
+    int attempt_replica_exchange(int rank, int size, const vector<double>& temp,
+                                double curr_Temp, size_t swap_parity, 
+                                MPI_Comm comm = MPI_COMM_WORLD);
+    
+    /**
+     * Gather and save comprehensive statistics with binning analysis
+     */
+    void gather_and_save_statistics_comprehensive(int rank, int size, double curr_Temp,
+                                   const vector<double>& energies,
+                                   const vector<SpinVector>& magnetizations,
+                                   const vector<vector<SpinVector>>& sublattice_mags,
+                                   vector<double>& heat_capacity, vector<double>& dHeat,
+                                   const vector<double>& temp, const string& dir_name,
+                                   const vector<int>& rank_to_write,
+                                   size_t n_anneal, size_t n_measure,
+                                   double curr_accept, int swap_accept,
+                                   size_t swap_rate, size_t overrelaxation_rate,
+                                   size_t probe_rate, MPI_Comm comm = MPI_COMM_WORLD,
+                                   bool verbose = false);
+    
+    /**
+     * Generate optimized temperature grid for parallel tempering
+     * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+     * 
+     * MPI-distributed version: each rank handles one replica
+     * 
+     * @param Tmin              Minimum (coldest) temperature
+     * @param Tmax              Maximum (hottest) temperature  
+     * @param warmup_sweeps     MC sweeps for initial equilibration
+     * @param sweeps_per_iter   MC sweeps per feedback iteration
+     * @param feedback_iters    Number of feedback optimization iterations
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
+     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
+     * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
+     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @return OptimizedTempGridResult containing temperatures and diagnostics
+     */
+    SPL_OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
+        double Tmin, double Tmax,
+        size_t warmup_sweeps = 500,
+        size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0,
+        double target_acceptance = 0.5,
+        double convergence_tol = 0.05,
+        MPI_Comm comm = MPI_COMM_WORLD);
+    
+    /**
+     * Generate geometric temperature ladder (simple, no optimization)
+     * Uses logarithmic spacing: T_i = T_min * (T_max/T_min)^(i/(R-1))
+     * 
+     * @param Tmin  Minimum temperature
+     * @param Tmax  Maximum temperature
+     * @param R     Number of temperatures
+     * @return Vector of temperatures in ascending order
+     */
+    static vector<double> generate_geometric_temperature_ladder(
+        double Tmin, double Tmax, size_t R);
+    
+    // ============================================================
+    // HELPER METHODS FOR PARALLEL TEMPERING
+    // ============================================================
+    
+    /**
+     * Compute magnetization for each sublattice separately
+     * @return Vector of SpinVectors, one per sublattice (N_atoms sublattices)
+     */
+    vector<SpinVector> magnetization_sublattice() const;
+    
+    /**
+     * Compute global magnetization: M = Σ S_i / N (transformed to global frame)
+     */
+    SpinVector magnetization_global() const;
+    
+    /**
+     * Binning analysis for error estimation of a scalar observable
+     * @param data Vector of observable measurements
+     * @return BinningResult containing mean, error, and binning information
+     */
+    static SPL_BinningResult binning_analysis(const vector<double>& data);
+    
+    /**
+     * Compute comprehensive thermodynamic observables with binning error analysis
+     */
+    SPL_ThermodynamicObservables compute_thermodynamic_observables(
+        const vector<double>& energies,
+        const vector<vector<SpinVector>>& sublattice_mags,
+        double temperature) const;
+    
+#ifdef HDF5_ENABLED
+    /**
+     * Save thermodynamic observables to HDF5 format
+     */
+    void save_thermodynamic_observables_hdf5(const string& out_dir,
+                                              const SPL_ThermodynamicObservables& obs,
+                                              const vector<double>& energies,
+                                              const vector<SpinVector>& magnetizations,
+                                              const vector<vector<SpinVector>>& sublattice_mags,
+                                              size_t n_anneal,
+                                              size_t n_measure,
+                                              size_t probe_rate,
+                                              size_t swap_rate,
+                                              size_t overrelaxation_rate,
+                                              double acceptance_rate,
+                                              double swap_acceptance_rate) const;
+    
+    /**
+     * Save aggregated heat capacity data from all temperatures to HDF5 format
+     */
+    void save_heat_capacity_hdf5(const string& out_dir,
+                                  const vector<double>& temperatures,
+                                  const vector<double>& heat_capacity,
+                                  const vector<double>& dHeat) const;
+#endif
     
     // ============================================================
     // I/O

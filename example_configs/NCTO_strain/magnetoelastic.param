@@ -42,14 +42,14 @@ num_trials = 1
 # Kitaev-Heisenberg-Gamma-Gamma' model
 # H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α) + Γ'(...)]
 
-J = -1.23                 # Heisenberg coupling (meV)
-K = -8.29                 # Kitaev coupling (meV, ferromagnetic)
-Gamma = 1.86              # Gamma coupling (meV)
-Gammap = -2.27           # Gamma' coupling (meV)
-J2_A = 0.32               # 2nd NN Heisenberg (sublattice A, meV)
-J2_B = -0.24               # 2nd NN Heisenberg (sublattice B, meV)
-J3 = 0.47                 # Third-neighbor Heisenberg (meV)
-J7 = -1                 # Six-spin ring exchange (meV)
+J = 0.68                 # Heisenberg coupling (meV)
+K = -7.89               # Kitaev coupling (meV, ferromagnetic)
+Gamma = 3.07              # Gamma coupling (meV)
+Gammap = -2.94           # Gamma' coupling (meV)
+J2_A = -0.06               # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = -0.70               # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0.52                 # Third-neighbor Heisenberg (meV)
+J7 = 0                 # Six-spin ring exchange (meV)
 
 # Time-dependent J7 modulation via E1 phonon drive
 # J7(t) = J7 * (1 - γ*f(t)*λ_Eg/4)^4 * (1 + γ*f(t)*λ_Eg/2)^2
@@ -140,7 +140,7 @@ md_output_every = 100     # Output every N steps
 T_start = 25.0            # Starting temperature
 T_end = 0.01             # Final temperature
 annealing_steps = 10000   # Number of temperature steps
-overrelaxation_rate = 10  # MC sweeps per temperature step
+overrelaxation_rate = 1  # MC sweeps per temperature step
 cooling_rate = 0.9       # Exponential cooling factor
 T_zero = true
 
