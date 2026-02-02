@@ -1,6 +1,7 @@
 #include "classical_spin/core/spin_config.h"
 #include "classical_spin/core/unitcell.h"
 #include "classical_spin/core/unitcell_builders.h"
+#include "classical_spin/core/gneb.h"
 #include "classical_spin/lattice/lattice.h"
 #include "classical_spin/lattice/mixed_lattice.h"
 #include "classical_spin/lattice/phonon_lattice.h"
@@ -179,6 +180,22 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             config.gaussian_move,
             comm
         );
+        
+        // T=0 deterministic quench for coldest replica (rank 0)
+        if (config.T_zero && rank == 0 && config.n_deterministics > 0) {
+            cout << "Rank 0: Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < config.n_deterministics; ++sweep) {
+                lattice.deterministic_sweep(1);
+                if (sweep % 100 == 0 || sweep == config.n_deterministics - 1) {
+                    cout << "Deterministic sweep " << sweep << "/" << config.n_deterministics 
+                         << ", E/N = " << lattice.energy_density() << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << lattice.energy_density() << endl;
+            // Save the T=0 quenched configuration
+            lattice.save_spin_config(trial_dir + "/rank_0/spins_T0_quench.txt");
+        }
+        MPI_Barrier(comm);
         
         if (rank == 0) {
             cout << "Trial " << trial << " completed." << endl;
@@ -1069,6 +1086,313 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
 }
 
 /**
+ * Run kinetic barrier analysis for StrainPhononLattice using GNEB
+ * 
+ * This showcases the finite-time evolution of the kinetic barrier between 
+ * triple-Q and zigzag phases under phonon driving:
+ * 
+ * 1. Initialize triple-Q and zigzag states as GNEB endpoints
+ * 2. Find minimum energy path (MEP) via GNEB
+ * 3. As phonon amplitude Q(t) evolves, track:
+ *    - How the barrier height ΔE(Q) changes
+ *    - Force projection P(s,Q) = -dE/ds along the MEP tangent
+ *    - Spinodal point Q_c where barrier vanishes
+ * 4. Optionally evolve the spin state along the MEP under the phonon force
+ * 
+ * Key physics: The E1 phonon provides a symmetry-directed push in the E1 channel,
+ * not random thermal fluctuations. The phonon force is:
+ *   F_phonon = -g * Q_E1(t) * ∂f_E1/∂S_i
+ * which is non-zero even when f_E1 = 0 (at triple-Q).
+ */
+void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "\n" << string(70, '=') << endl;
+        cout << "KINETIC BARRIER ANALYSIS (GNEB)" << endl;
+        cout << string(70, '=') << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+        cout << "\nGNEB parameters:" << endl;
+        cout << "  N images:         " << config.gneb_n_images << endl;
+        cout << "  Spring constant:  " << config.gneb_spring_constant << endl;
+        cout << "  Max iterations:   " << config.gneb_max_iterations << endl;
+        cout << "  Force tolerance:  " << config.gneb_force_tolerance << endl;
+        cout << "  Climbing image:   " << (config.gneb_use_climbing_image ? "yes" : "no") << endl;
+        cout << "\nBarrier evolution:" << endl;
+        cout << "  Analysis steps:   " << config.gneb_analysis_steps << endl;
+        cout << "  Max phonon amp:   " << config.gneb_phonon_amplitude_max << endl;
+        cout << "\nDrive parameters:" << endl;
+        cout << "  Drive Eg1: " << lattice.drive_params.drive_strength_Eg1 << endl;
+        cout << "  Drive Eg2: " << lattice.drive_params.drive_strength_Eg2 << endl;
+        cout << "\nMagnetoelastic coupling:" << endl;
+        cout << "  lambda_Eg: " << lattice.magnetoelastic_params.lambda_Eg << endl;
+        cout << string(70, '-') << endl;
+    }
+    
+    // Get lattice dimensions
+    const size_t n_sites = lattice.lattice_size;
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        filesystem::create_directories(trial_dir + "/gneb");
+        
+        if (rank == 0 || config.num_trials > 1) {
+            cout << "\n[Rank " << rank << "] === Trial " << trial << " ===" << endl;
+        }
+        
+        // ================================================================
+        // STEP 1: Find ground states via simulated annealing
+        // ================================================================
+        cout << "[Rank " << rank << "] Finding initial (triple-Q) ground state..." << endl;
+        
+        // Zero out strain
+        for (size_t b = 0; b < 3; ++b) {
+            lattice.strain.epsilon_xx[b] = 0.0;
+            lattice.strain.epsilon_yy[b] = 0.0;
+            lattice.strain.epsilon_xy[b] = 0.0;
+        }
+        
+        // Initialize randomly
+        lattice.init_random();
+        
+        // Anneal to find ground state (should be triple-Q at zero strain)
+        lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                       config.cooling_rate, config.overrelaxation_rate,
+                       config.gaussian_move, trial_dir + "/initial_anneal",
+                       config.T_zero, config.n_deterministics);
+        
+        // Save and analyze initial state
+        auto initial_cv = lattice.compute_collective_variables();
+        cout << "[Rank " << rank << "] Initial state collective variables:" << endl;
+        cout << "  m_3Q       = " << initial_cv.m_3Q << endl;
+        cout << "  m_zigzag   = " << initial_cv.m_zigzag << endl;
+        cout << "  f_Eg_amp   = " << initial_cv.f_Eg_amplitude << endl;
+        
+        // Extract initial state as triple-Q
+        GNEBSpinConfig triple_q_state(n_sites);
+        for (size_t i = 0; i < n_sites; ++i) {
+            triple_q_state[i] = lattice.spins[i];
+        }
+        lattice.save_spin_config(trial_dir + "/triple_q_state.txt");
+        
+        // ================================================================
+        // STEP 2: Find zigzag state
+        // ================================================================
+        // For zigzag, we apply a strong E_g strain to bias the system
+        cout << "[Rank " << rank << "] Finding zigzag state with applied strain..." << endl;
+        
+        // Save original drive parameters
+        double original_Eg1 = lattice.drive_params.drive_strength_Eg1;
+        double original_Eg2 = lattice.drive_params.drive_strength_Eg2;
+        
+        // Apply strong Eg strain to induce zigzag (Eg1 = ε_xx - ε_yy)
+        const double bias_strain = 3.0;
+        for (size_t b = 0; b < 3; ++b) {
+            lattice.strain.epsilon_xx[b] = bias_strain / 2.0;
+            lattice.strain.epsilon_yy[b] = -bias_strain / 2.0;
+            lattice.strain.epsilon_xy[b] = 0.0;
+        }
+        
+        // Re-initialize and anneal
+        lattice.init_random();
+        lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                       config.cooling_rate, config.overrelaxation_rate,
+                       config.gaussian_move, trial_dir + "/zigzag_anneal",
+                       config.T_zero, config.n_deterministics);
+        
+        // Reset strain
+        for (size_t b = 0; b < 3; ++b) {
+            lattice.strain.epsilon_xx[b] = 0.0;
+            lattice.strain.epsilon_yy[b] = 0.0;
+            lattice.strain.epsilon_xy[b] = 0.0;
+        }
+        
+        // Restore drive parameters
+        lattice.drive_params.drive_strength_Eg1 = original_Eg1;
+        lattice.drive_params.drive_strength_Eg2 = original_Eg2;
+        
+        auto zigzag_cv = lattice.compute_collective_variables();
+        cout << "[Rank " << rank << "] Zigzag state collective variables:" << endl;
+        cout << "  m_3Q       = " << zigzag_cv.m_3Q << endl;
+        cout << "  m_zigzag   = " << zigzag_cv.m_zigzag << endl;
+        cout << "  f_Eg_amp   = " << zigzag_cv.f_Eg_amplitude << endl;
+        
+        // Extract zigzag state
+        GNEBSpinConfig zigzag_state(n_sites);
+        for (size_t i = 0; i < n_sites; ++i) {
+            zigzag_state[i] = lattice.spins[i];
+        }
+        lattice.save_spin_config(trial_dir + "/zigzag_state.txt");
+        
+        // ================================================================
+        // STEP 3: Set up GNEB optimizer
+        // ================================================================
+        cout << "[Rank " << rank << "] Setting up GNEB optimizer..." << endl;
+        
+        // Energy and gradient functions using lattice
+        auto energy_func = [&lattice](const GNEBSpinConfig& cfg) -> double {
+            return lattice.energy_for_gneb(cfg);
+        };
+        
+        auto gradient_func = [&lattice](const GNEBSpinConfig& cfg) -> GNEBSpinConfig {
+            return lattice.gradient_for_gneb(cfg);
+        };
+        
+        GNEBOptimizer gneb(energy_func, gradient_func, n_sites);
+        
+        // GNEB parameters from config
+        GNEBParams gneb_params;
+        gneb_params.n_images = config.gneb_n_images;
+        gneb_params.spring_constant = config.gneb_spring_constant;
+        gneb_params.max_iterations = config.gneb_max_iterations;
+        gneb_params.force_tolerance = config.gneb_force_tolerance;
+        gneb_params.climbing_image = config.gneb_use_climbing_image;
+        gneb_params.verbosity = (rank == 0) ? 1 : 0;
+        
+        // ================================================================
+        // STEP 4: Find initial MEP at zero phonon amplitude
+        // ================================================================
+        cout << "[Rank " << rank << "] Finding minimum energy path (Q=0)..." << endl;
+        
+        auto mep_result = gneb.find_mep(triple_q_state, zigzag_state, gneb_params);
+        
+        cout << "[Rank " << rank << "] MEP converged in " << mep_result.iterations_used << " iterations" << endl;
+        cout << "  Barrier height (Q=0): " << mep_result.barrier << endl;
+        cout << "  Saddle image: " << mep_result.saddle_index << endl;
+        cout << "  Final max force: " << mep_result.max_force << endl;
+        
+        // Save initial MEP
+        {
+            ofstream mep_file(trial_dir + "/mep_Q0.txt");
+            mep_file << "# Minimum energy path at Q=0\n";
+            mep_file << "# image  reaction_coord  energy  m_3Q  m_zigzag  f_Eg_amp\n";
+            for (size_t i = 0; i < mep_result.energies.size(); ++i) {
+                // Temporarily set lattice to this configuration
+                for (size_t j = 0; j < n_sites; ++j) {
+                    lattice.spins[j] = mep_result.images[i][j];
+                }
+                auto cv = lattice.compute_collective_variables();
+                mep_file << i << "  " << mep_result.arc_lengths[i] 
+                         << "  " << mep_result.energies[i]
+                         << "  " << cv.m_3Q << "  " << cv.m_zigzag 
+                         << "  " << cv.f_Eg_amplitude << "\n";
+            }
+        }
+        
+        // ================================================================
+        // STEP 5: Analyze barrier evolution vs phonon (strain) amplitude
+        // ================================================================
+        cout << "[Rank " << rank << "] Computing barrier vs strain amplitude..." << endl;
+        
+        ofstream barrier_file(trial_dir + "/barrier_evolution.txt");
+        barrier_file << "# Kinetic barrier evolution under E_g strain\n";
+        barrier_file << "# Q_Eg: E_g strain amplitude (dimensionless)\n";
+        barrier_file << "# Delta_E: barrier height (energy at saddle - energy at initial)\n";
+        barrier_file << "# E_saddle: absolute energy at saddle\n";
+        barrier_file << "# E_initial: energy at triple-Q state\n";
+        barrier_file << "# E_final: energy at zigzag state\n";
+        barrier_file << "# Q_Eg  Delta_E  E_saddle  E_initial  E_final\n";
+        
+        const double Q_max = config.gneb_phonon_amplitude_max;
+        const size_t n_Q_steps = config.gneb_analysis_steps;
+        
+        double Q_spinodal = -1.0;  // Will store spinodal point if found
+        double barrier_at_zero = mep_result.barrier;
+        
+        for (size_t iQ = 0; iQ <= n_Q_steps; ++iQ) {
+            double Q_Eg = Q_max * static_cast<double>(iQ) / n_Q_steps;
+            
+            // Apply this strain amplitude (Eg1 = ε_xx - ε_yy)
+            for (size_t b = 0; b < 3; ++b) {
+                lattice.strain.epsilon_xx[b] = Q_Eg / 2.0;
+                lattice.strain.epsilon_yy[b] = -Q_Eg / 2.0;
+                lattice.strain.epsilon_xy[b] = 0.0;
+            }
+            
+            // Compute energies along the path at this strain
+            double E_initial = lattice.energy_for_gneb(mep_result.images[0]);
+            double E_final = lattice.energy_for_gneb(mep_result.images.back());
+            double E_saddle = lattice.energy_for_gneb(mep_result.images[mep_result.saddle_index]);
+            double barrier = E_saddle - E_initial;
+            
+            barrier_file << Q_Eg << "  " << barrier 
+                         << "  " << E_saddle << "  " << E_initial 
+                         << "  " << E_final << "\n";
+            
+            // Check for spinodal (barrier vanishes)
+            if (Q_spinodal < 0 && barrier < 0.01 * barrier_at_zero) {
+                Q_spinodal = Q_Eg;
+                cout << "[Rank " << rank << "] Spinodal point detected at Q_c = " << Q_spinodal << endl;
+            }
+            
+            // Progress
+            if ((iQ * 10) / n_Q_steps > ((iQ - 1) * 10) / n_Q_steps && rank == 0) {
+                cout << "  Progress: " << (100 * iQ / n_Q_steps) << "%" << endl;
+            }
+        }
+        
+        // Reset strain
+        for (size_t b = 0; b < 3; ++b) {
+            lattice.strain.epsilon_xx[b] = 0.0;
+            lattice.strain.epsilon_yy[b] = 0.0;
+            lattice.strain.epsilon_xy[b] = 0.0;
+        }
+        
+        // ================================================================
+        // STEP 6: Save summary
+        // ================================================================
+        {
+            ofstream summary(trial_dir + "/barrier_summary.txt");
+            summary << "# Kinetic Barrier Analysis Summary\n";
+            summary << "# Trial: " << trial << "\n";
+            summary << "#\n";
+            summary << "barrier_Q0 = " << mep_result.barrier << "\n";
+            summary << "spinodal_Q = " << Q_spinodal << "\n";
+            summary << "gneb_iterations = " << mep_result.iterations_used << "\n";
+            summary << "gneb_converged = " << (mep_result.converged ? "true" : "false") << "\n";
+            summary << "saddle_image = " << mep_result.saddle_index << "\n";
+            summary << "#\n";
+            summary << "# Initial (triple-Q) state:\n";
+            summary << "initial_m_3Q = " << initial_cv.m_3Q << "\n";
+            summary << "initial_m_zigzag = " << initial_cv.m_zigzag << "\n";
+            summary << "initial_f_Eg_amp = " << initial_cv.f_Eg_amplitude << "\n";
+            summary << "#\n";
+            summary << "# Final (zigzag) state:\n";
+            summary << "final_m_3Q = " << zigzag_cv.m_3Q << "\n";
+            summary << "final_m_zigzag = " << zigzag_cv.m_zigzag << "\n";
+            summary << "final_f_Eg_amp = " << zigzag_cv.f_Eg_amplitude << "\n";
+        }
+        
+        // Save MEP images if requested
+        if (config.gneb_save_path_evolution) {
+            for (size_t img = 0; img < mep_result.images.size(); ++img) {
+                string img_file = trial_dir + "/gneb/image_" + to_string(img) + ".txt";
+                ofstream out(img_file);
+                out << "# MEP image " << img << "\n";
+                out << "# site  Sx  Sy  Sz\n";
+                for (size_t i = 0; i < n_sites; ++i) {
+                    out << i << "  " << mep_result.images[img][i].x() 
+                        << "  " << mep_result.images[img][i].y()
+                        << "  " << mep_result.images[img][i].z() << "\n";
+                }
+            }
+        }
+        
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+        cout << "  Output saved to: " << trial_dir << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "\n" << string(70, '=') << endl;
+        cout << "Kinetic barrier analysis completed (" << config.num_trials << " trials)" << endl;
+        cout << string(70, '=') << endl;
+    }
+}
+
+/**
  * Run pump-probe for StrainPhononLattice (strain-driven spin dynamics)
  * 
  * This simulates a THz/acoustic pump-probe experiment on the magnetoelastic system:
@@ -1257,6 +1581,23 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
             comm,
             true  // verbose: save spin configurations
         );
+        
+        // T=0 deterministic quench for coldest replica (rank 0)
+        if (config.T_zero && rank == 0 && config.n_deterministics > 0) {
+            cout << "Rank 0: Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < config.n_deterministics; ++sweep) {
+                lattice.deterministic_sweep(1);
+                lattice.relax_strain(false);  // Relax strain after each deterministic sweep
+                if (sweep % 100 == 0 || sweep == config.n_deterministics - 1) {
+                    cout << "Deterministic sweep " << sweep << "/" << config.n_deterministics 
+                         << ", E/N = " << lattice.spin_energy() / lattice.lattice_size << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << lattice.spin_energy() / lattice.lattice_size << endl;
+            // Save the T=0 quenched configuration
+            lattice.save_spin_config(trial_dir + "/rank_0/spins_T0_quench.txt");
+        }
+        MPI_Barrier(comm);
         
         if (rank == 0) {
             cout << "Trial " << trial << " completed." << endl;
@@ -1797,6 +2138,23 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             true,  // use_interleaved
             comm
         );
+        
+        // T=0 deterministic quench for coldest replica (rank 0)
+        if (config.T_zero && rank == 0 && config.n_deterministics > 0) {
+            size_t total_sites = lattice.lattice_size_SU2 + lattice.lattice_size_SU3;
+            cout << "Rank 0: Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < config.n_deterministics; ++sweep) {
+                lattice.deterministic_sweep();
+                if (sweep % 100 == 0 || sweep == config.n_deterministics - 1) {
+                    cout << "Deterministic sweep " << sweep << "/" << config.n_deterministics 
+                         << ", E/N = " << lattice.total_energy() / total_sites << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << lattice.total_energy() / total_sites << endl;
+            // Save the T=0 quenched configuration
+            lattice.save_spin_config_to_dir(trial_dir + "/rank_0", "spins_T0_quench");
+        }
+        MPI_Barrier(comm);
         
         if (rank == 0) {
             cout << "Trial " << trial << " completed." << endl;
@@ -3383,13 +3741,16 @@ int main(int argc, char** argv) {
                 case SimulationType::PUMP_PROBE:
                     run_pump_probe_strain(strain_lattice, config, rank, size);
                     break;
+                case SimulationType::KINETIC_BARRIER_ANALYSIS:
+                    run_kinetic_barrier_analysis_strain(strain_lattice, config, rank, size);
+                    break;
                 case SimulationType::PARAMETER_SWEEP:
                     run_parameter_sweep(config, rank, size);
                     break;
                 default:
                     if (rank == 0) {
                         cerr << "Simulation type not supported for StrainPhononLattice. "
-                             << "Supported: SA, PT, MD, pump_probe, parameter_sweep" << endl;
+                             << "Supported: SA, PT, MD, pump_probe, kinetic_barrier, parameter_sweep" << endl;
                     }
                     break;
             }

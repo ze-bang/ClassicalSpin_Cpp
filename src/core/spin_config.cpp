@@ -353,6 +353,7 @@ void SpinConfig::to_file(const string& filename) const {
         case SimulationType::PUMP_PROBE: file << "pump_probe"; break;
         case SimulationType::TWOD_COHERENT_SPECTROSCOPY: file << "2dcs"; break;
         case SimulationType::PARAMETER_SWEEP: file << "parameter_sweep"; break;
+        case SimulationType::KINETIC_BARRIER_ANALYSIS: file << "kinetic_barrier"; break;
         case SimulationType::CUSTOM: file << "custom"; break;
     }
     file << "\n";
@@ -472,6 +473,7 @@ void SpinConfig::print() const {
         case SimulationType::PUMP_PROBE: cout << "Pump-Probe"; break;
         case SimulationType::TWOD_COHERENT_SPECTROSCOPY: cout << "2DCS Spectroscopy"; break;
         case SimulationType::PARAMETER_SWEEP: cout << "Parameter Sweep"; break;
+        case SimulationType::KINETIC_BARRIER_ANALYSIS: cout << "Kinetic Barrier (GNEB)"; break;
         case SimulationType::CUSTOM: cout << "Custom"; break;
     }
     cout << "\n";

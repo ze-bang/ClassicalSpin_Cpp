@@ -37,6 +37,7 @@ enum class SimulationType {
     PUMP_PROBE,
     TWOD_COHERENT_SPECTROSCOPY,  // 2DCS / pump-probe spectroscopy
     PARAMETER_SWEEP,             // Sweep over any Hamiltonian parameter
+    KINETIC_BARRIER_ANALYSIS,    // GNEB-based kinetic barrier evolution during phonon driving
     CUSTOM
 };
 
@@ -147,6 +148,17 @@ struct SpinConfig {
     
     SimulationType sweep_base_simulation = SimulationType::SIMULATED_ANNEALING;  // Simulation to run at each sweep point
     
+    // GNEB kinetic barrier analysis parameters
+    size_t gneb_n_images = 16;              // Number of images on the MEP
+    double gneb_spring_constant = 1.0;      // Spring constant for NEB
+    size_t gneb_max_iterations = 1000;      // Maximum GNEB iterations
+    double gneb_force_tolerance = 1e-4;     // Convergence tolerance on force
+    bool gneb_use_climbing_image = true;    // Use climbing image NEB
+    double gneb_climbing_threshold = 0.1;   // When to switch to climbing image
+    size_t gneb_analysis_steps = 100;       // Number of time steps for barrier evolution analysis
+    double gneb_phonon_amplitude_max = 1.0; // Maximum phonon amplitude for sweep
+    bool gneb_save_path_evolution = true;   // Save MEP at each time step
+    
     // Field parameters
     double field_strength = 0.0;
     vector<double> field_direction = {0, 1, 0};  // Field direction (dimension inferred from lattice)
@@ -218,6 +230,7 @@ inline SimulationType parse_simulation(const string& str) {
     if (s == "pump_probe" || s == "PUMP_PROBE" || s == "pump-probe") return SimulationType::PUMP_PROBE;
     if (s == "2dcs" || s == "2DCS" || s == "spectroscopy" || s == "pump_probe_spectroscopy") return SimulationType::TWOD_COHERENT_SPECTROSCOPY;
     if (s == "parameter_sweep" || s == "PARAMETER_SWEEP" || s == "sweep") return SimulationType::PARAMETER_SWEEP;
+    if (s == "kinetic_barrier" || s == "KINETIC_BARRIER" || s == "gneb" || s == "GNEB" || s == "barrier_analysis") return SimulationType::KINETIC_BARRIER_ANALYSIS;
     if (s == "custom" || s == "CUSTOM") return SimulationType::CUSTOM;
     throw runtime_error("Unknown simulation type: " + str);
 }

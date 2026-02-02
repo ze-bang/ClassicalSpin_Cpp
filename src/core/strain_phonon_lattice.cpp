@@ -3244,62 +3244,195 @@ SPL_ThermodynamicObservables StrainPhononLattice::compute_thermodynamic_observab
     
     SPL_ThermodynamicObservables obs;
     obs.temperature = temperature;
+    double T = temperature;
     
     size_t n_samples = energies.size();
     if (n_samples == 0) return obs;
     
-    // Energy per site
-    vector<double> E_per_site(n_samples);
+    // 1. Energy per site with binning analysis
+    vector<double> energy_per_site(n_samples);
     for (size_t i = 0; i < n_samples; ++i) {
-        E_per_site[i] = energies[i] / double(lattice_size);
+        energy_per_site[i] = energies[i] / double(lattice_size);
     }
-    
-    SPL_BinningResult E_result = binning_analysis(E_per_site);
+    SPL_BinningResult E_result = binning_analysis(energy_per_site);
     obs.energy.value = E_result.mean;
     obs.energy.error = E_result.error;
     
-    // Specific heat: C_V = (<E²> - <E>²) / (T² * N)
-    double E_mean = 0.0, E2_mean = 0.0;
-    for (double E : energies) {
-        E_mean += E;
-        E2_mean += E * E;
-    }
-    E_mean /= n_samples;
-    E2_mean /= n_samples;
-    double var_E = E2_mean - E_mean * E_mean;
-    
-    obs.specific_heat.value = var_E / (temperature * temperature * double(lattice_size));
-    obs.specific_heat.error = obs.specific_heat.value * std::sqrt(2.0 / n_samples);
-    
-    // Sublattice magnetizations
-    obs.sublattice_magnetization.resize(N_atoms);
-    obs.energy_sublattice_cross.resize(N_atoms);
-    
-    for (size_t alpha = 0; alpha < N_atoms; ++alpha) {
-        obs.sublattice_magnetization[alpha] = SPL_VectorObservable(spin_dim);
-        obs.energy_sublattice_cross[alpha] = SPL_VectorObservable(spin_dim);
+    // 2. Specific heat per site: c_V = Var(E) / (T² N²) = Var(E/N) / T²
+    //    Since E is extensive (E ~ N), Var(E) ~ N², so c_V ~ O(1)
+    //    Error propagation via jackknife on binned data
+    {
+        double N2 = double(lattice_size) * double(lattice_size);
         
-        for (size_t d = 0; d < spin_dim; ++d) {
-            vector<double> S_alpha_d(n_samples);
+        // Handle edge case: need at least 2 samples for variance
+        if (n_samples < 2) {
+            obs.specific_heat.value = 0.0;
+            obs.specific_heat.error = 0.0;
+        } else {
+            // Compute mean first for numerical stability (two-pass algorithm)
+            double E_mean = 0.0;
             for (size_t i = 0; i < n_samples; ++i) {
-                S_alpha_d[i] = sublattice_mags[i][alpha](d);
+                E_mean += energies[i];
+            }
+            E_mean /= n_samples;
+            
+            // Compute variance using shifted data for numerical stability
+            // Var(E) = <(E - E_mean)²> which avoids catastrophic cancellation
+            double var_E = 0.0;
+            for (size_t i = 0; i < n_samples; ++i) {
+                double delta = energies[i] - E_mean;
+                var_E += delta * delta;
+            }
+            var_E /= n_samples;  // Biased estimator (for heat capacity)
+            
+            // Ensure non-negative variance (numerical protection)
+            var_E = std::max(0.0, var_E);
+            obs.specific_heat.value = var_E / (T * T * N2);
+            
+            // Jackknife error estimation for specific heat
+            // Use at most 100 jackknife blocks, at least 2
+            size_t n_jack = std::min(n_samples, size_t(100));
+            n_jack = std::max(n_jack, size_t(2));
+            size_t block_size = std::max(size_t(1), n_samples / n_jack);
+            // Recalculate n_jack based on actual block_size to handle remainders
+            n_jack = (n_samples + block_size - 1) / block_size;
+            
+            vector<double> C_jack(n_jack);
+            
+            for (size_t j = 0; j < n_jack; ++j) {
+                // Leave out block j: indices [j*block_size, min((j+1)*block_size, n_samples))
+                size_t block_start = j * block_size;
+                size_t block_end = std::min((j + 1) * block_size, n_samples);
+                
+                // Compute jackknife mean (excluding block j)
+                double E_sum = 0.0;
+                size_t count = 0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    if (i < block_start || i >= block_end) {
+                        E_sum += energies[i];
+                        ++count;
+                    }
+                }
+                
+                if (count < 2) {
+                    C_jack[j] = obs.specific_heat.value;  // Fallback
+                    continue;
+                }
+                
+                double E_j = E_sum / count;
+                
+                // Compute jackknife variance (excluding block j)
+                double var_j = 0.0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    if (i < block_start || i >= block_end) {
+                        double delta = energies[i] - E_j;
+                        var_j += delta * delta;
+                    }
+                }
+                var_j /= count;
+                var_j = std::max(0.0, var_j);  // Numerical protection
+                
+                C_jack[j] = var_j / (T * T * N2);
             }
             
-            SPL_BinningResult S_result = binning_analysis(S_alpha_d);
-            obs.sublattice_magnetization[alpha].values[d] = S_result.mean;
-            obs.sublattice_magnetization[alpha].errors[d] = S_result.error;
+            // Compute jackknife error estimate
+            double C_mean = 0.0;
+            for (double c : C_jack) C_mean += c;
+            C_mean /= n_jack;
             
-            // Cross correlation: <E*S> - <E><S>
-            vector<double> ES_alpha_d(n_samples);
-            for (size_t i = 0; i < n_samples; ++i) {
-                ES_alpha_d[i] = energies[i] * sublattice_mags[i][alpha](d);
+            double C_var = 0.0;
+            for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
+            C_var *= double(n_jack - 1) / double(n_jack);  // Jackknife variance factor
+            obs.specific_heat.error = std::sqrt(std::max(0.0, C_var));
+        }
+    }
+    
+    // 3. Sublattice magnetizations with binning analysis
+    if (!sublattice_mags.empty() && !sublattice_mags[0].empty()) {
+        size_t n_sublattices = sublattice_mags[0].size();
+        size_t sdim = sublattice_mags[0][0].size();
+        
+        obs.sublattice_magnetization.resize(n_sublattices);
+        
+        for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+            obs.sublattice_magnetization[alpha] = SPL_VectorObservable(sdim);
+            
+            // Extract time series for each component
+            for (size_t d = 0; d < sdim; ++d) {
+                vector<double> M_alpha_d(n_samples);
+                for (size_t i = 0; i < n_samples; ++i) {
+                    M_alpha_d[i] = sublattice_mags[i][alpha](d);
+                }
+                SPL_BinningResult M_result = binning_analysis(M_alpha_d);
+                obs.sublattice_magnetization[alpha].values[d] = M_result.mean;
+                obs.sublattice_magnetization[alpha].errors[d] = M_result.error;
             }
+        }
+        
+        // 4. Cross term <E * S_α> - <E><S_α> for each sublattice
+        //    Use total E (not per site) for cross correlation
+        double E_mean_total = 0.0;
+        for (double E : energies) E_mean_total += E;
+        E_mean_total /= n_samples;
+        
+        obs.energy_sublattice_cross.resize(n_sublattices);
+        
+        for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+            obs.energy_sublattice_cross[alpha] = SPL_VectorObservable(sdim);
             
-            SPL_BinningResult ES_result = binning_analysis(ES_alpha_d);
-            double cross_val = ES_result.mean - E_mean * S_result.mean;
-            
-            obs.energy_sublattice_cross[alpha].values[d] = cross_val;
-            obs.energy_sublattice_cross[alpha].errors[d] = ES_result.error;
+            for (size_t d = 0; d < sdim; ++d) {
+                // Compute <E * S_α,d>
+                vector<double> ES_alpha_d(n_samples);
+                for (size_t i = 0; i < n_samples; ++i) {
+                    ES_alpha_d[i] = energies[i] * sublattice_mags[i][alpha](d);
+                }
+                
+                SPL_BinningResult ES_result = binning_analysis(ES_alpha_d);
+                
+                // Cross correlation = <ES> - <E><S>
+                double S_mean = obs.sublattice_magnetization[alpha].values[d];
+                double cross_val = ES_result.mean - E_mean_total * S_mean;
+                
+                // Error propagation: use jackknife for proper covariance handling
+                size_t n_jack = std::min(n_samples, size_t(100));
+                size_t block_size = n_samples / n_jack;
+                if (block_size == 0) block_size = 1;
+                n_jack = n_samples / block_size;
+                
+                vector<double> cross_jack(n_jack);
+                
+                for (size_t j = 0; j < n_jack; ++j) {
+                    double E_sum = 0.0, S_sum = 0.0, ES_sum = 0.0;
+                    size_t count = 0;
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        if (i / block_size != j) {
+                            E_sum += energies[i];
+                            S_sum += sublattice_mags[i][alpha](d);
+                            ES_sum += energies[i] * sublattice_mags[i][alpha](d);
+                            ++count;
+                        }
+                    }
+                    if (count == 0) {
+                        cross_jack[j] = cross_val;
+                        continue;
+                    }
+                    double E_j = E_sum / count;
+                    double S_j = S_sum / count;
+                    double ES_j = ES_sum / count;
+                    cross_jack[j] = ES_j - E_j * S_j;
+                }
+                
+                double cross_mean = 0.0;
+                for (double c : cross_jack) cross_mean += c;
+                cross_mean /= n_jack;
+                
+                double cross_var = 0.0;
+                for (double c : cross_jack) cross_var += (c - cross_mean) * (c - cross_mean);
+                cross_var *= double(n_jack - 1) / n_jack;
+                
+                obs.energy_sublattice_cross[alpha].values[d] = cross_val;
+                obs.energy_sublattice_cross[alpha].errors[d] = std::sqrt(std::max(0.0, cross_var));
+            }
         }
     }
     
@@ -3826,3 +3959,294 @@ void StrainPhononLattice::save_heat_capacity_hdf5(const string& out_dir,
     file.close();
 }
 #endif
+
+// ============================================================
+// GNEB AND TRANSITION PATH ANALYSIS
+// ============================================================
+
+double StrainPhononLattice::energy_for_gneb(const vector<Eigen::Vector3d>& config) const {
+    // Temporarily set spins and compute energy
+    // This is a bit ugly but necessary for the GNEB interface
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    double E = spin_energy();
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return E;
+}
+
+vector<Eigen::Vector3d> StrainPhononLattice::gradient_for_gneb(
+    const vector<Eigen::Vector3d>& config) const {
+    // Temporarily set spins to compute gradient
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    // Compute gradient: ∂E/∂S_i = -H_eff_i (effective field is -gradient)
+    vector<Eigen::Vector3d> grad(lattice_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H_eff = get_local_field(i);
+        grad[i] = -H_eff;  // gradient is negative of effective field
+    }
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return grad;
+}
+
+vector<Eigen::Vector3d> StrainPhononLattice::compute_Eg_phonon_force(
+    const vector<Eigen::Vector3d>& config, double Q_Eg) const {
+    // Compute the force from Eg phonon coupling:
+    // F_i = +g Q_Eg · ∂f_Eg/∂S_i
+    //
+    // The key insight: even if f_Eg = 0 at the triple-Q state (A1g symmetry),
+    // ∂f_Eg/∂S_i ≠ 0 generically, so the drive produces a linear-in-Q
+    // restoring force that pushes along the E1 symmetry direction.
+    
+    // Temporarily set configuration
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    // Get the Eg derivatives
+    auto [df_Eg1, df_Eg2] = compute_Eg_derivatives(config);
+    
+    // Coupling strength (combines K, J, Gamma contributions)
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    
+    // The Eg phonon couples via:
+    // H_sp-ph = -λ_Eg * [(ε_xx - ε_yy) * f_Eg1 + 2ε_xy * f_Eg2]
+    //
+    // For a driven phonon Q_Eg in the Eg1 channel:
+    // F_i = λ_Eg * Q_Eg * ∂f_Eg1/∂S_i
+    
+    vector<Eigen::Vector3d> force(lattice_size);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        // Force from Eg1 channel (assuming drive is in Eg1 direction)
+        force[i] = lambda_Eg * Q_Eg * df_Eg1[i];
+        
+        // Could add Eg2 component if needed:
+        // force[i] += lambda_Eg * Q_Eg2 * df_Eg2[i];
+    }
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return force;
+}
+
+std::pair<vector<Eigen::Vector3d>, vector<Eigen::Vector3d>> 
+StrainPhononLattice::compute_Eg_derivatives(const vector<Eigen::Vector3d>& config) const {
+    // Compute ∂f_Eg1/∂S_i and ∂f_Eg2/∂S_i for each site
+    // These are the directions in spin space that the Eg phonon "pushes"
+    
+    // Temporarily set configuration (already done in caller, but be safe)
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    vector<Eigen::Vector3d> df_Eg1(lattice_size);
+    vector<Eigen::Vector3d> df_Eg2(lattice_size);
+    
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        // Total Eg1 derivative combines K, J, and Γ contributions
+        // f_Eg1 = (J+K) f_K_Eg1 + J f_J_Eg1 + Γ f_Γ_Eg1
+        // So ∂f_Eg1/∂S = (J+K) ∂f_K_Eg1/∂S + J ∂f_J_Eg1/∂S + Γ ∂f_Γ_Eg1/∂S
+        
+        SpinVector dfK_Eg1 = df_K_Eg1_dS(i);
+        SpinVector dfJ_Eg1 = df_J_Eg1_dS(i);
+        SpinVector dfG_Eg1 = df_Gamma_Eg1_dS(i);
+        
+        df_Eg1[i] = (J + K) * dfK_Eg1 + J * dfJ_Eg1 + Gamma * dfG_Eg1;
+        
+        // Same for Eg2
+        SpinVector dfK_Eg2 = df_K_Eg2_dS(i);
+        SpinVector dfJ_Eg2 = df_J_Eg2_dS(i);
+        SpinVector dfG_Eg2 = df_Gamma_Eg2_dS(i);
+        
+        df_Eg2[i] = (J + K) * dfK_Eg2 + J * dfJ_Eg2 + Gamma * dfG_Eg2;
+    }
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return {df_Eg1, df_Eg2};
+}
+
+vector<Eigen::Vector3d> StrainPhononLattice::get_spin_config() const {
+    vector<Eigen::Vector3d> config(lattice_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        config[i] = spins[i];
+    }
+    return config;
+}
+
+void StrainPhononLattice::set_spin_config(const vector<Eigen::Vector3d>& config) {
+    if (config.size() != lattice_size) {
+        throw std::runtime_error("Config size mismatch in set_spin_config");
+    }
+    for (size_t i = 0; i < lattice_size; ++i) {
+        spins[i] = config[i];
+        spins[i].normalize();
+    }
+}
+
+void StrainPhononLattice::init_zigzag_pattern(int direction) {
+    // Zigzag pattern: FM chains along one direction, AFM perpendicular
+    // The "direction" specifies which bond type has AFM coupling
+    
+    // For honeycomb, zigzag has ordering wavevector at M point
+    // Depending on direction, the pattern differs
+    
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                size_t siteA = flatten_index(i, j, k, 0);
+                size_t siteB = flatten_index(i, j, k, 1);
+                
+                int sign;
+                switch (direction) {
+                    case 0:  // x-bond zigzag
+                        sign = ((i + j) % 2 == 0) ? 1 : -1;
+                        break;
+                    case 1:  // y-bond zigzag
+                        sign = (i % 2 == 0) ? 1 : -1;
+                        break;
+                    case 2:  // z-bond zigzag
+                    default:
+                        sign = (j % 2 == 0) ? 1 : -1;
+                        break;
+                }
+                
+                // Spins point along z (can be generalized)
+                spins[siteA] = sign * Eigen::Vector3d(0, 0, 1);
+                spins[siteB] = sign * Eigen::Vector3d(0, 0, 1);  // Same sign within unit cell
+            }
+        }
+    }
+    
+    // Normalize (already done but be safe)
+    for (size_t i = 0; i < lattice_size; ++i) {
+        spins[i].normalize();
+    }
+    
+    cout << "Initialized zigzag pattern (direction = " << direction << ")" << endl;
+}
+
+void StrainPhononLattice::init_triple_q() {
+    // Triple-Q pattern: superposition of three M-point ordering vectors
+    // This is a 120° coplanar or non-coplanar structure depending on parameters
+    
+    // For simplicity, we initialize with a 120° structure
+    // Real triple-Q would require solving for the ground state
+    
+    // Triple-Q wavevectors at M points of honeycomb BZ:
+    // M1 = (π, π/√3), M2 = (0, 2π/√3), M3 = (-π, π/√3)
+    
+    Eigen::Vector3d Q1(M_PI, M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d Q2(0, 2.0 * M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d Q3(-M_PI, M_PI / std::sqrt(3.0), 0);
+    
+    // Three ordering directions (120° apart in spin space)
+    Eigen::Vector3d n1(1, 0, 0);
+    Eigen::Vector3d n2(-0.5, std::sqrt(3.0)/2.0, 0);
+    Eigen::Vector3d n3(-0.5, -std::sqrt(3.0)/2.0, 0);
+    
+    for (size_t idx = 0; idx < lattice_size; ++idx) {
+        Eigen::Vector3d r = site_positions[idx];
+        
+        // Superposition of three M-point waves
+        double phase1 = Q1.dot(r);
+        double phase2 = Q2.dot(r);
+        double phase3 = Q3.dot(r);
+        
+        Eigen::Vector3d S = std::cos(phase1) * n1 
+                         + std::cos(phase2) * n2 
+                         + std::cos(phase3) * n3;
+        
+        if (S.norm() > 1e-10) {
+            spins[idx] = S.normalized();
+        } else {
+            spins[idx] = Eigen::Vector3d(0, 0, 1);
+        }
+    }
+    
+    cout << "Initialized triple-Q pattern (3M superposition)" << endl;
+}
+
+double StrainPhononLattice::structure_factor(const Eigen::Vector3d& q) const {
+    // S(q) = |Σ_i S_i exp(-i q·r_i)|² / N
+    std::complex<double> Sq_x(0, 0), Sq_y(0, 0), Sq_z(0, 0);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        double phase = q.dot(site_positions[i]);
+        std::complex<double> exp_factor(std::cos(phase), -std::sin(phase));
+        
+        Sq_x += spins[i](0) * exp_factor;
+        Sq_y += spins[i](1) * exp_factor;
+        Sq_z += spins[i](2) * exp_factor;
+    }
+    
+    double S_total = (std::norm(Sq_x) + std::norm(Sq_y) + std::norm(Sq_z)) / lattice_size;
+    
+    return S_total;
+}
+
+StrainPhononLattice::CollectiveVars StrainPhononLattice::compute_collective_variables() const {
+    CollectiveVars cv;
+    
+    // Triple-Q order: sum of structure factors at three M points
+    Eigen::Vector3d M1(M_PI, M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d M2(0, 2.0 * M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d M3(-M_PI, M_PI / std::sqrt(3.0), 0);
+    
+    cv.m_3Q = structure_factor(M1) + structure_factor(M2) + structure_factor(M3);
+    cv.m_3Q /= 3.0;  // Average
+    
+    // Zigzag order: structure factor at the zigzag wavevector
+    // For honeycomb, zigzag has q at the M point (same as triple-Q components)
+    // But zigzag picks one dominant M point, while triple-Q has equal weight at all three
+    // We use the max of the three
+    cv.m_zigzag = std::max({structure_factor(M1), structure_factor(M2), structure_factor(M3)});
+    
+    // Eg symmetry breaking: |f_Eg| = sqrt(f_Eg1² + f_Eg2²)
+    // where f_Eg = (J+K)f_K_Eg + J f_J_Eg + Γ f_Γ_Eg
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    
+    double fEg1 = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
+    double fEg2 = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2();
+    
+    cv.f_Eg_amplitude = std::sqrt(fEg1 * fEg1 + fEg2 * fEg2);
+    
+    // Total energy
+    cv.E_total = spin_energy();
+    
+    return cv;
+}

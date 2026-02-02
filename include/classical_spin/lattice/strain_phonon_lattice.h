@@ -961,6 +961,93 @@ public:
     double Eg1_amplitude() const;
     double Eg2_amplitude() const;
     
+    // ============================================================
+    // GNEB AND TRANSITION PATH ANALYSIS
+    // ============================================================
+    
+    /**
+     * Wrapper to compute energy for GNEB
+     * Takes a vector of Eigen::Vector3d (spin config)
+     */
+    double energy_for_gneb(const vector<Eigen::Vector3d>& config) const;
+    
+    /**
+     * Wrapper to compute gradient (∂E/∂S) for GNEB
+     * Returns the gradient at each site (NOT the effective field, but the actual gradient)
+     */
+    vector<Eigen::Vector3d> gradient_for_gneb(const vector<Eigen::Vector3d>& config) const;
+    
+    /**
+     * Compute the Eg phonon-driven force on spins: -∂H_sp-ph/∂S_i
+     * 
+     * H_sp-ph = -g Q_E1(t) · f_E1[{S_i}]
+     * 
+     * Force = +g Q_E1 · ∂f_E1/∂S_i
+     * 
+     * This is the "symmetry-directed push" in the E1 channel.
+     * Even if f_E1 = 0 at the triple-Q state, ∂f_E1/∂S ≠ 0 generically.
+     * 
+     * @param config Spin configuration
+     * @param Q_Eg   Eg phonon amplitude (can be Q_E1 for IR modes)
+     * @return Force vector at each site
+     */
+    vector<Eigen::Vector3d> compute_Eg_phonon_force(
+        const vector<Eigen::Vector3d>& config, double Q_Eg) const;
+    
+    /**
+     * Compute the derivative of Eg spin basis functions w.r.t. spins
+     * ∂f_Eg/∂S_i = (∂f_K_Eg1/∂S_i, ∂f_K_Eg2/∂S_i, ∂f_J_Eg1/∂S_i, ...)
+     * 
+     * This gives the direction in spin space that the Eg phonon "pushes"
+     * 
+     * @param config Spin configuration
+     * @return Vector of (df_Eg1/dS, df_Eg2/dS) at each site, combining K, J, Γ contributions
+     */
+    std::pair<vector<Eigen::Vector3d>, vector<Eigen::Vector3d>> 
+    compute_Eg_derivatives(const vector<Eigen::Vector3d>& config) const;
+    
+    /**
+     * Get the current spin configuration as a vector for GNEB
+     */
+    vector<Eigen::Vector3d> get_spin_config() const;
+    
+    /**
+     * Set spins from a GNEB-style configuration vector
+     */
+    void set_spin_config(const vector<Eigen::Vector3d>& config);
+    
+    /**
+     * Initialize spins to a zigzag pattern
+     * @param direction  Zigzag direction: 0=x-bond, 1=y-bond, 2=z-bond
+     */
+    void init_zigzag_pattern(int direction = 2);
+    
+    /**
+     * Initialize spins to triple-Q pattern
+     */
+    void init_triple_q();
+    
+    /**
+     * Structure factor at a specific wavevector
+     * S(q) = |Σ_i S_i exp(-i q·r_i)|² / N
+     */
+    double structure_factor(const Eigen::Vector3d& q) const;
+    
+    /**
+     * Compute collective variables for MEP analysis:
+     * - m_3Q: triple-Q order parameter (structure factor at M points)
+     * - m_zz: zigzag order parameter
+     * - f_Eg: Eg symmetry breaking bilinear |f_Eg| = sqrt(f_Eg1² + f_Eg2²)
+     */
+    struct CollectiveVars {
+        double m_3Q;
+        double m_zigzag;
+        double f_Eg_amplitude;
+        double E_total;
+    };
+    
+    CollectiveVars compute_collective_variables() const;
+    
 private:
     // Random number generation
     std::mt19937 rng;
