@@ -1,0 +1,93 @@
+# NCTO Triple-Q Parallel Tempering - Krüger/Janssen PRL 2023 Best Fit
+# ======================================================================
+# 
+# ACTUAL best-fit parameters from: PRL 131, 146702 (2023) - Krüger & Janssen
+# "Triple-q Order in Na2Co2TeO6 from Proximity to Hidden-SU(2)-Symmetric Point"
+#
+# These parameters are from the APPENDIX of the paper - the experimentally
+# fitted values to INS data, which place NCTO near (but not exactly at)
+# the hidden SU(2) point.
+#
+# Parameters (meV):
+#   J1 = 0.68, K = -7.89, Γ = 3.07, Γ' = -2.94
+#   J2_A = -0.06, J2_B = -0.70, J3 = 0.52, J7 = -0.26
+#
+# PARALLEL TEMPERING: Better at escaping local minima than simulated annealing.
+# Multiple replicas at different temperatures exchange configurations.
+
+# System type
+system = NCTO_STRAIN
+
+# Lattice dimensions (must be multiple of 2 for triple-Q magnetic unit cell)
+lattice_size = 24,24,1
+
+# Simulation type
+simulation_mode = parallel_tempering
+
+# Output directory
+output_dir = NCTO_triple_q_kruger_bestfit_PT
+
+# Number of trials (run multiple to check for domain formation)
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS (Krüger/Janssen best fit)
+# ============================================
+
+J = 0.68                  # Heisenberg (meV) - NOTE: positive/AFM!
+K = -7.89                 # Kitaev (meV, ferromagnetic)
+Gamma = 3.07              # Γ coupling (meV)
+Gammap = -2.94            # Γ' coupling (meV)
+
+# Second neighbor Heisenberg (sublattice-dependent)
+J2_A = -0.06              # Sublattice A (meV)
+J2_B = -0.70              # Sublattice B (meV)
+
+# Third neighbor Heisenberg
+J3 = 0.52                 # meV
+
+# Six-spin ring exchange (CRITICAL for triple-Q selection)
+# J7 < 0 selects triple-Q over single-Q zigzag
+J7 = -0.26                # meV (from best fit)
+
+# External magnetic field (zero for ground state search)
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PARALLEL TEMPERING PARAMETERS
+# ============================================
+
+# Number of temperature replicas
+num_replicas = 16
+
+# Temperature range (geometric spacing)
+T_min = 0.01              # Lowest temperature replica
+T_max = 20.0              # Highest temperature replica
+
+# MC sweeps per exchange attempt
+pt_sweeps_per_exchange = 10
+
+# Total number of PT exchange cycles
+pt_exchange_cycles = 50000
+
+# Equilibration cycles before measurement
+pt_equilibration_cycles = 10000
+
+# Overrelaxation sweeps per MC sweep
+overrelaxation_rate = 5
+
+# Final T=0 relaxation after PT
+T_zero = true
+
+# ============================================
+# DIAGNOSTICS
+# ============================================
+# To verify triple-Q:
+# - Check spin structure factor S(q) at M1, M2, M3 points
+# - Triple-Q: equal intensity at all three M points
+# - Single-Q: intensity at only one M point
+# - Check for C3 rotational symmetry in real space
+#
+# Note: J7 = -0.26 meV is relatively small. If you're not getting
+# triple-Q, try increasing |J7| (e.g., J7 = -0.5 or -1.0)

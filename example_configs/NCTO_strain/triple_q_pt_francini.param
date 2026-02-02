@@ -1,0 +1,85 @@
+# NCTO Triple-Q Parallel Tempering - Francini Parameters
+# ========================================================
+# 
+# Parameters based on existing NCTO_francini config with added J7 ring exchange.
+# These parameters are from a different fitting than the hidden SU(2) point.
+#
+# Ratios: J:K:Γ:Γ' = -0.2 : -0.667 : 3.0 : -0.5
+#                  ≈ -1 : -3.33 : 15 : -2.5 (normalized to J)
+#
+# Note: This is NOT the hidden SU(2) point, so single-Q and triple-Q
+# are not degenerate here. The ground state depends on exact parameter values.
+#
+# PARALLEL TEMPERING: Better at escaping local minima than simulated annealing.
+
+# System type
+system = NCTO_STRAIN
+
+# Lattice dimensions
+lattice_size = 24,24,1
+
+# Simulation type
+simulation_mode = parallel_tempering
+
+# Output directory
+output_dir = NCTO_triple_q_francini_PT
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS (Francini fitting)
+# ============================================
+
+J = -0.2                  # Heisenberg (meV)
+K = -0.667                # Kitaev (meV, ferromagnetic)
+Gamma = 3.0               # Γ coupling (meV)
+Gammap = -0.5             # Γ' coupling (meV)
+
+# 2nd NN Heisenberg (sublattice-dependent from Francini)
+J2_A = -0.25              # Sublattice A (AFM)
+J2_B = 0.25               # Sublattice B (FM)
+
+# 3rd NN Heisenberg
+J3 = -0.2
+
+# Six-spin ring exchange (try negative for triple-Q)
+J7 = -2.0                 # Larger magnitude since not at SU(2) point
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PARALLEL TEMPERING PARAMETERS
+# ============================================
+
+# Number of temperature replicas
+num_replicas = 16
+
+# Temperature range (geometric spacing)
+T_min = 0.01              # Lowest temperature replica
+T_max = 25.0              # Highest temperature replica
+
+# MC sweeps per exchange attempt
+pt_sweeps_per_exchange = 10
+
+# Total number of PT exchange cycles
+pt_exchange_cycles = 50000
+
+# Equilibration cycles before measurement
+pt_equilibration_cycles = 10000
+
+# Overrelaxation sweeps per MC sweep
+overrelaxation_rate = 5
+
+# Final T=0 relaxation after PT
+T_zero = true
+
+# ============================================
+# NOTES
+# ============================================
+# The Francini parameters have different ratios than the hidden SU(2) point.
+# If this doesn't give triple-Q, the parameters may intrinsically prefer
+# single-Q zigzag. In that case, use the Krüger best-fit or Janssen 
+# hidden SU(2) parameters instead.

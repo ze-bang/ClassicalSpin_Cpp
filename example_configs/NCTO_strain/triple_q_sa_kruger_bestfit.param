@@ -1,0 +1,95 @@
+# NCTO Triple-Q Simulated Annealing - Krüger/Janssen PRL 2023 Best Fit
+# ======================================================================
+# 
+# ACTUAL best-fit parameters from: PRL 131, 146702 (2023) - Krüger & Janssen
+# "Triple-q Order in Na2Co2TeO6 from Proximity to Hidden-SU(2)-Symmetric Point"
+#
+# These parameters are from the APPENDIX of the paper - the experimentally
+# fitted values to INS data, which place NCTO near (but not exactly at)
+# the hidden SU(2) point.
+#
+# Parameters (meV):
+#   J1 = 0.68, K = -7.89, Γ = 3.07, Γ' = -2.94
+#   J2_A = -0.06, J2_B = -0.70, J3 = 0.52, J7 = -0.26
+
+# System type
+system = NCTO_STRAIN
+
+# Lattice dimensions (must be multiple of 2 for triple-Q magnetic unit cell)
+lattice_size = 24,24,1
+
+# Simulation type
+simulation_mode = SA
+
+# Output directory
+output_dir = NCTO_triple_q_kruger_bestfit
+
+# Number of trials (run multiple to check for domain formation)
+num_trials = 5
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS (Krüger/Janssen best fit)
+# ============================================
+
+J = 0.68                  # Heisenberg (meV) - NOTE: positive/AFM!
+K = -7.89                 # Kitaev (meV, ferromagnetic)
+Gamma = 3.07              # Γ coupling (meV)
+Gammap = -2.94            # Γ' coupling (meV)
+
+# Second neighbor Heisenberg (sublattice-dependent)
+J2_A = -0.06              # Sublattice A (meV)
+J2_B = -0.70              # Sublattice B (meV)
+
+# Third neighbor Heisenberg
+J3 = 0.52                 # meV
+
+# Six-spin ring exchange (CRITICAL for triple-Q selection)
+# J7 < 0 selects triple-Q over single-Q zigzag
+J7 = -0.26                # meV (from best fit)
+
+# External magnetic field (zero for ground state search)
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PHONON PARAMETERS (not active during SA)
+# ============================================
+omega_E = 5.0
+gamma_E = 0.1
+lambda_E = 0.0
+
+omega_A = 2.5
+gamma_A = 0.05
+lambda_A = 0.0
+
+g3 = 0.0
+
+# ============================================
+# SPIN-PHONON COUPLING (disabled for pure spin SA)
+# ============================================
+lambda_xy = 0.0
+lambda_R = 0.0
+
+# ============================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================
+# Triple-Q is fragile - use aggressive annealing protocol
+
+T_start = 50.0            # Start high (well above Tc)
+T_end = 1e-5              # Go very low to resolve ground state
+annealing_steps = 100000  # Long annealing for convergence
+cooling_rate = 0.9     # Very slow geometric cooling
+overrelaxation_rate = 10  # Microcanonical moves to escape local minima
+T_zero = true             # Final T=0 relaxation
+
+# ============================================
+# DIAGNOSTICS
+# ============================================
+# To verify triple-Q:
+# - Check spin structure factor S(q) at M1, M2, M3 points
+# - Triple-Q: equal intensity at all three M points
+# - Single-Q: intensity at only one M point
+# - Check for C3 rotational symmetry in real space
+#
+# Note: J7 = -0.26 meV is relatively small. If you're not getting
+# triple-Q, try increasing |J7| (e.g., J7 = -0.5 or -1.0)

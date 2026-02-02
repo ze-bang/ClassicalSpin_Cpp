@@ -1,0 +1,95 @@
+# NCTO Magnetoelastic (Spin-Strain) Parallel Tempering Configuration
+# =====================================================================
+# 
+# This configuration file sets up a parallel tempering simulation of the 
+# NCTO-like spin-strain coupled honeycomb lattice using the 
+# StrainPhononLattice class.
+#
+# Run with multiple MPI ranks, e.g.:
+#   mpirun -np 8 ./build/spin_solver example_configs/NCTO_strain/parallel_tempering.param
+#
+# Each MPI rank handles one temperature replica.
+
+# ============================================
+# SYSTEM TYPE
+# ============================================
+system = NCTO_STRAIN
+
+# Lattice dimensions (honeycomb, 2D)
+lattice_size = 12,12,1
+
+# Simulation type: parallel_tempering (or PT)
+simulation_mode = PT
+
+# Output directory
+output_dir = NCTO_strain_PT
+
+# Number of trials (samples)
+num_trials = 1
+
+# ============================================
+# PARALLEL TEMPERING PARAMETERS
+# ============================================
+# Temperature range (T_start = highest, T_end = lowest)
+T_start = 1.0            # Maximum temperature
+T_end = 0.01             # Minimum temperature
+
+# Monte Carlo sweeps
+annealing_steps = 10000  # Sweeps for equilibration AND measurement
+
+# Overrelaxation: if > 0, apply overrelaxation every N sweeps
+overrelaxation_rate = 5
+
+# Replica exchange frequency (attempt swap every N sweeps)
+pt_exchange_frequency = 10
+
+# Probe rate (record observables every N sweeps)
+probe_rate = 10
+
+# Temperature optimization (Bittner et al. algorithm)
+pt_optimize_temperatures = true
+pt_target_acceptance = 0.5
+pt_optimization_warmup = 200
+pt_optimization_sweeps = 200
+pt_optimization_iterations = 15
+
+# Move type (gaussian for better efficiency at low T)
+gaussian_move = true
+
+# Output control (-1 = all ranks write, or specify list like [0,1,2])
+ranks_to_write = -1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+# Kitaev-Heisenberg-Gamma-Gamma' model
+
+J = 0.68                 # Heisenberg coupling (meV)
+K = -7.89               # Kitaev coupling (meV, ferromagnetic)
+Gamma = 3.07              # Gamma coupling (meV)
+Gammap = -2.94           # Gamma' coupling (meV)
+J2_A = -0.06              # 2nd NN Heisenberg (sublattice A, meV)
+J2_B = -0.70              # 2nd NN Heisenberg (sublattice B, meV)
+J3 = 0.52                 # Third-neighbor Heisenberg (meV)
+J7 = 0.0                  # Six-spin ring exchange (meV)
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# MAGNETOELASTIC COUPLING PARAMETERS
+# ============================================
+# For pure spin system simulations, set these to 0
+lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
+lambda_Eg = 0.0          # Eg channel magnetoelastic coupling
+
+# ============================================
+# ELASTIC PARAMETERS
+# ============================================
+C11 = 1.0
+C12 = 0.3
+C44 = 0.35
+strain_mass = 1.0
+gamma_A1g = 0.1
+gamma_Eg = 0.1
