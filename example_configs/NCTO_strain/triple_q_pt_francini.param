@@ -58,8 +58,8 @@ field_direction = 0,0,1
 num_replicas = 16
 
 # Temperature range (geometric spacing)
-T_min = 0.01              # Lowest temperature replica
-T_max = 25.0              # Highest temperature replica
+T_min = 0.0001              # Lowest temperature replica
+T_max = 10.0              # Highest temperature replica
 
 # MC sweeps per exchange attempt
 pt_sweeps_per_exchange = 10
@@ -71,7 +71,7 @@ pt_exchange_cycles = 50000
 pt_equilibration_cycles = 10000
 
 # Overrelaxation sweeps per MC sweep
-overrelaxation_rate = 5
+overrelaxation_rate = 1
 
 # Final T=0 relaxation after PT
 T_zero = true

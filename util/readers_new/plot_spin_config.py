@@ -69,34 +69,111 @@ def transform_local_to_global(spins):
     return spins_global
 
 
+def generate_honeycomb_positions(n_sites):
+    """Generate honeycomb lattice site positions from the number of sites.
+    
+    This function infers the lattice dimensions from the number of sites
+    and generates positions matching the StrainPhononLattice geometry.
+    
+    The honeycomb lattice has:
+    - Lattice vectors: a1 = (1, 0, 0), a2 = (0.5, sqrt(3)/2, 0)
+    - 2 atoms per unit cell at: r_A = (0, 0, 0), r_B = (0, 1/sqrt(3), 0)
+    - Site indexing: ((i * dim2 + j) * dim3 + k) * 2 + atom
+    
+    Args:
+        n_sites: Total number of sites (must be even, = 2 * dim1 * dim2 * dim3)
+        
+    Returns:
+        positions: (n_sites, 3) array of site positions
+    """
+    if n_sites % 2 != 0:
+        raise ValueError(f"Number of sites ({n_sites}) must be even for honeycomb lattice")
+    
+    n_unit_cells = n_sites // 2
+    
+    # Try to infer dimensions - assume square-ish lattice
+    dim3 = 1  # Usually 1 for 2D simulations
+    
+    # Find factors for dim1 * dim2 = n_unit_cells
+    sqrt_n = int(np.sqrt(n_unit_cells))
+    dim1, dim2 = None, None
+    
+    for d1 in range(sqrt_n, 0, -1):
+        if n_unit_cells % d1 == 0:
+            dim1 = d1
+            dim2 = n_unit_cells // d1
+            break
+    
+    if dim1 is None:
+        raise ValueError(f"Could not factorize {n_unit_cells} unit cells")
+    
+    print(f"  Inferred lattice dimensions: {dim1} x {dim2} x {dim3} (total {n_sites} sites)")
+    
+    # Generate positions
+    a1 = np.array([1.0, 0.0, 0.0])
+    a2 = np.array([0.5, np.sqrt(3.0)/2.0, 0.0])
+    a3 = np.array([0.0, 0.0, 1.0])
+    
+    pos0 = np.array([0.0, 0.0, 0.0])  # Sublattice A
+    pos1 = np.array([0.0, 1.0/np.sqrt(3.0), 0.0])  # Sublattice B
+    
+    positions = np.zeros((n_sites, 3))
+    site_idx = 0
+    
+    for i in range(dim1):
+        for j in range(dim2):
+            for k in range(dim3):
+                positions[site_idx] = pos0 + i*a1 + j*a2 + k*a3
+                site_idx += 1
+                positions[site_idx] = pos1 + i*a1 + j*a2 + k*a3
+                site_idx += 1
+    
+    return positions
+
+
 def load_spin_config(directory):
     """Load spin configuration and positions from text files.
     
+    If positions.txt is not found, positions are inferred from the 
+    StrainPhononLattice honeycomb geometry.
+    
     Args:
-        directory: Path to directory containing spins.txt and positions.txt
+        directory: Path to directory containing spins.txt (and optionally positions.txt)
         
     Returns:
         positions: (N, 3) array of site positions
         spins: (N, 3) array of spin vectors
     """
+    # Look for spin config file
     spin_file = os.path.join(directory, 'spins.txt')
-    pos_file = os.path.join(directory, 'positions.txt')
-    
     if not os.path.exists(spin_file):
-        raise FileNotFoundError(f"Spin file not found: {spin_file}")
-    if not os.path.exists(pos_file):
-        raise FileNotFoundError(f"Position file not found: {pos_file}")
+        # Try temperature-specific files
+        import glob
+        spin_pattern = os.path.join(directory, 'spins_T=*.txt')
+        spin_files_T = sorted(glob.glob(spin_pattern))
+        if spin_files_T:
+            spin_file = spin_files_T[0]  # Use lowest temperature
+        else:
+            raise FileNotFoundError(f"No spin file found in: {directory}")
     
     spins = np.loadtxt(spin_file)
-    positions = np.loadtxt(pos_file)
+    n_sites = len(spins)
     
-    print(f"Loaded {len(spins)} spins from {directory}")
+    # Load or generate positions
+    pos_file = os.path.join(directory, 'positions.txt')
+    if os.path.exists(pos_file):
+        positions = np.loadtxt(pos_file)
+        print(f"Loaded {n_sites} spins from {os.path.basename(spin_file)}")
+    else:
+        print(f"Loaded {n_sites} spins from {os.path.basename(spin_file)}")
+        print(f"  Position file not found, generating honeycomb positions...")
+        positions = generate_honeycomb_positions(n_sites)
+    
     print(f"  Spin magnitude range: [{np.linalg.norm(spins, axis=1).min():.4f}, {np.linalg.norm(spins, axis=1).max():.4f}]")
     print(f"  Position range: x=[{positions[:,0].min():.2f}, {positions[:,0].max():.2f}], "
           f"y=[{positions[:,1].min():.2f}, {positions[:,1].max():.2f}]")
     
     return positions, spins
-
 
 def identify_sublattices(positions):
     """Identify A and B sublattices based on position pattern.

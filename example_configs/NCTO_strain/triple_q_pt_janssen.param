@@ -48,7 +48,7 @@ J2_B = 0.0
 J3 = 0.0
 
 # Six-spin ring exchange (CRITICAL for triple-Q selection)
-J7 = -1.5                 # Try range: -0.5 to -3.0
+J7 = -0.1                 # Try range: -0.5 to -3.0
 
 # External magnetic field
 field_strength = 0.0

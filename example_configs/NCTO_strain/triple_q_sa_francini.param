@@ -15,7 +15,7 @@
 system = NCTO_STRAIN
 
 # Lattice dimensions
-lattice_size = 24,24,1
+lattice_size = 12,12,1
 
 # Simulation type
 simulation_mode = SA
@@ -24,7 +24,7 @@ simulation_mode = SA
 output_dir = NCTO_triple_q_francini
 
 # Number of trials
-num_trials = 5
+num_trials = 1
 
 # ============================================
 # SPIN HAMILTONIAN PARAMETERS (Francini fitting)
@@ -76,7 +76,7 @@ T_start = 25.0            # Lower start (smaller energy scale)
 T_end = 1e-5
 annealing_steps = 100000
 cooling_rate = 0.9
-overrelaxation_rate = 10
+overrelaxation_rate = 1
 T_zero = true
 
 # ============================================

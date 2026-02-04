@@ -25,7 +25,7 @@ simulation_mode = SA
 output_dir = NCTO_triple_q_kruger_bestfit
 
 # Number of trials (run multiple to check for domain formation)
-num_trials = 5
+num_trials = 1
 
 # ============================================
 # SPIN HAMILTONIAN PARAMETERS (Krüger/Janssen best fit)

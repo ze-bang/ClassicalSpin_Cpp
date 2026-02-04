@@ -22,7 +22,7 @@
 system = NCTO_STRAIN
 
 # Lattice dimensions (must be multiple of 2 for triple-Q magnetic unit cell)
-lattice_size = 24,24,1
+lattice_size = 12,12,1
 
 # Simulation type
 simulation_mode = SA
@@ -31,7 +31,7 @@ simulation_mode = SA
 output_dir = NCTO_triple_q_janssen
 
 # Number of trials (run multiple to check for domain formation)
-num_trials = 5
+num_trials = 1
 
 # ============================================
 # SPIN HAMILTONIAN PARAMETERS
@@ -82,11 +82,11 @@ lambda_R = 0.0
 # ============================================
 # Triple-Q is fragile - use aggressive annealing protocol
 
-T_start = 50.0            # Start high (well above Tc ~ 5-10 meV)
+T_start = 25.0            # Start high (well above Tc ~ 5-10 meV)
 T_end = 1e-5              # Go very low to resolve ground state
-annealing_steps = 100000  # Long annealing for convergence
+annealing_steps = 50000  # Long annealing for convergence
 cooling_rate = 0.9     # Very slow geometric cooling
-overrelaxation_rate = 10  # Microcanonical moves to escape local minima
+overrelaxation_rate = 0  # Microcanonical moves to escape local minima
 T_zero = true             # Final T=0 relaxation
 
 # ============================================

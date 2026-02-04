@@ -564,6 +564,38 @@ public:
         return total_energy() / lattice_size;
     }
     
+    /**
+     * Compute energy contribution of a single site
+     * Includes: Zeeman, NN/2nd NN/3rd NN exchange, magnetoelastic, ring exchange
+     * 
+     * @param spin_here The spin at this site
+     * @param site_index The site index
+     * @return Energy contribution from this site's interactions
+     */
+    double site_energy(const SpinVector& spin_here, size_t site_index) const;
+    
+    /**
+     * Compute energy difference for local spin update (optimized for Metropolis)
+     * dE = E(new_spin) - E(old_spin)
+     * 
+     * @param new_spin Proposed new spin
+     * @param old_spin Current spin at site
+     * @param site_index The site index
+     * @return Energy change if the spin were updated
+     */
+    double site_energy_diff(const SpinVector& new_spin, const SpinVector& old_spin,
+                           size_t site_index) const;
+    
+    /**
+     * Compute ring exchange energy contribution for a single site
+     * Returns the portion of H_7 that involves this site's spin
+     * 
+     * @param spin_here The spin at this site
+     * @param site_index The site index
+     * @return Ring exchange energy contribution from hexagons containing this site
+     */
+    double site_ring_exchange_energy(const SpinVector& spin_here, size_t site_index) const;
+    
     // ============================================================
     // SPIN BASIS FUNCTIONS FOR D3d IRREPS
     // ============================================================
@@ -936,8 +968,10 @@ public:
     // ============================================================
     
     void save_spin_config(const string& filename) const;
+    void save_spin_config_global(const string& filename) const;
     void load_spin_config(const string& filename);
     void save_strain_state(const string& filename) const;
+    void save_positions(const string& filename) const;
     void save_trajectory_txt(const string& output_dir,
                              const vector<double>& times,
                              const vector<Eigen::Vector3d>& M_traj,
@@ -1032,6 +1066,36 @@ public:
      * S(q) = |Σ_i S_i exp(-i q·r_i)|² / N
      */
     double structure_factor(const Eigen::Vector3d& q) const;
+    
+    /**
+     * Compute the full static spin structure factor S(q) on a grid
+     * Returns S^{αβ}(q) = (1/N) Σ_{ij} S_i^α S_j^β exp(-i q·(r_i - r_j))
+     * 
+     * @param n_q1  Number of q-points along b1* direction
+     * @param n_q2  Number of q-points along b2* direction  
+     * @param q1_range  Range of q1 in units of 2π (default: [-2, 2])
+     * @param q2_range  Range of q2 in units of 2π (default: [-2, 2])
+     * @return struct with q-grid and S(q) tensor components
+     */
+    struct StructureFactorResult {
+        vector<double> q1_vals;  // q-points along b1*
+        vector<double> q2_vals;  // q-points along b2*
+        vector<vector<double>> S_total;   // Total S(q) = Σ_α S^{αα}(q)
+        vector<vector<double>> S_xx;      // S^{xx}(q)
+        vector<vector<double>> S_yy;      // S^{yy}(q)
+        vector<vector<double>> S_zz;      // S^{zz}(q)
+    };
+    
+    StructureFactorResult compute_static_structure_factor(
+        size_t n_q1 = 100, size_t n_q2 = 100,
+        double q1_min = -2.0, double q1_max = 2.0,
+        double q2_min = -2.0, double q2_max = 2.0) const;
+    
+    /**
+     * Save structure factor to file
+     */
+    void save_structure_factor(const string& filename, 
+                               const StructureFactorResult& sf) const;
     
     /**
      * Compute collective variables for MEP analysis:

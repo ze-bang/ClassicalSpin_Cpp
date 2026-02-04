@@ -980,6 +980,162 @@ double StrainPhononLattice::strain_energy() const {
 }
 
 // ============================================================
+// SITE ENERGY FOR METROPOLIS
+// ============================================================
+
+double StrainPhononLattice::site_energy(const SpinVector& spin_here, size_t site) const {
+    double E = 0.0;
+    
+    // Zeeman term: -B · S
+    E -= spin_here.dot(field[site]);
+    
+    // NN exchange: S_i · J · S_j
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        E += spin_here.dot(nn_interaction[site][n] * spins[j]);
+    }
+    
+    // 2nd NN exchange
+    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+        size_t j = j2_partners[site][n];
+        E += spin_here.dot(j2_interaction[site][n] * spins[j]);
+    }
+    
+    // 3rd NN exchange
+    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+        size_t j = j3_partners[site][n];
+        E += spin_here.dot(j3_interaction[site][n] * spins[j]);
+    }
+    
+    // Magnetoelastic coupling contribution
+    // This is more complex - we need the derivative w.r.t. spin dotted with spin
+    // H_c = λ_{A1g} (ε_xx + ε_yy) [(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}] + ...
+    // For simplicity, we use the effective field approach here
+    SpinVector H_me = get_magnetoelastic_field(site);
+    E -= spin_here.dot(H_me);  // H_me = -∂H_c/∂S, so E contribution is -S · H_me
+    
+    // Ring exchange contribution from hexagons containing this site
+    E += site_ring_exchange_energy(spin_here, site);
+    
+    return E;
+}
+
+double StrainPhononLattice::site_energy_diff(const SpinVector& new_spin, 
+                                              const SpinVector& old_spin,
+                                              size_t site) const {
+    SpinVector delta = new_spin - old_spin;
+    double dE = 0.0;
+    
+    // Zeeman: -B · δS
+    dE -= delta.dot(field[site]);
+    
+    // NN exchange: δS · J · S_j
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        dE += delta.dot(nn_interaction[site][n] * spins[j]);
+    }
+    
+    // 2nd NN exchange
+    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+        size_t j = j2_partners[site][n];
+        dE += delta.dot(j2_interaction[site][n] * spins[j]);
+    }
+    
+    // 3rd NN exchange
+    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+        size_t j = j3_partners[site][n];
+        dE += delta.dot(j3_interaction[site][n] * spins[j]);
+    }
+    
+    // Magnetoelastic contribution: -δS · H_me
+    SpinVector H_me = get_magnetoelastic_field(site);
+    dE -= delta.dot(H_me);
+    
+    // Ring exchange: need to compute E_ring(new) - E_ring(old) for hexagons containing this site
+    // Since ring exchange is linear in each spin, we can compute this efficiently
+    dE += site_ring_exchange_energy(new_spin, site) - site_ring_exchange_energy(old_spin, site);
+    
+    return dE;
+}
+
+double StrainPhononLattice::site_ring_exchange_energy(const SpinVector& spin_here, 
+                                                       size_t site) const {
+    // Compute the ring exchange energy contribution from hexagons containing this site
+    // when the spin at 'site' is 'spin_here'
+    //
+    // H_7 = (J_7/6) Σ_{hex} Σ_{cyclic perms} [terms]
+    // Each hexagon is counted once, but we sum over all hexagons containing this site
+    
+    double J7 = magnetoelastic_params.J7;
+    if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
+        return 0.0;
+    }
+    
+    double E = 0.0;
+    const double prefactor = J7 / 6.0;  // J7/6 * 1/6 for per-site contribution
+    
+    // Loop over all hexagons containing this site
+    for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+        const auto& hex = hexagons[hex_idx];
+        
+        // Load all 6 spins into local array for better cache locality
+        // Substitute spin_here at the appropriate position
+        const SpinVector* S[6];
+        SpinVector S_local;
+        for (size_t i = 0; i < 6; ++i) {
+            if (hex[i] == site) {
+                S_local = spin_here;
+                S[i] = &S_local;
+            } else {
+                S[i] = &spins[hex[i]];
+            }
+        }
+        
+        // Precompute only the 15 unique pairwise dot products in a flat array
+        // Indexing: d[i,j] where i<j is stored at index (i*(11-i))/2 + j - 1
+        // But for simplicity and performance, we use explicit variables
+        // This is more cache-friendly than a 2D array
+        const double d01 = S[0]->dot(*S[1]), d02 = S[0]->dot(*S[2]), d03 = S[0]->dot(*S[3]);
+        const double d04 = S[0]->dot(*S[4]), d05 = S[0]->dot(*S[5]);
+        const double d12 = S[1]->dot(*S[2]), d13 = S[1]->dot(*S[3]), d14 = S[1]->dot(*S[4]);
+        const double d15 = S[1]->dot(*S[5]);
+        const double d23 = S[2]->dot(*S[3]), d24 = S[2]->dot(*S[4]), d25 = S[2]->dot(*S[5]);
+        const double d34 = S[3]->dot(*S[4]), d35 = S[3]->dot(*S[5]);
+        const double d45 = S[4]->dot(*S[5]);
+        
+        // Sum over 6 cyclic permutations using explicit expressions
+        // This unrolling improves instruction-level parallelism
+        // Permutation 0: (0,1,2,3,4,5)
+        double hex_E = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
+                     + 3.0*d02*d14*d35 - d03*d14*d25;
+        
+        // Permutation 1: (1,2,3,4,5,0)
+        hex_E += 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
+               + 3.0*d13*d25*d04 - d14*d25*d03;
+        
+        // Permutation 2: (2,3,4,5,0,1)
+        hex_E += 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
+               + 3.0*d24*d03*d15 - d25*d03*d14;
+        
+        // Permutation 3: (3,4,5,0,1,2)
+        hex_E += 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
+               + 3.0*d35*d14*d02 - d03*d14*d25;
+        
+        // Permutation 4: (4,5,0,1,2,3)
+        hex_E += 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
+               + 3.0*d04*d25*d13 - d14*d25*d03;
+        
+        // Permutation 5: (5,0,1,2,3,4)
+        hex_E += 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
+               + 3.0*d15*d03*d24 - d25*d03*d14;
+        
+        E += prefactor * hex_E;
+    }
+    
+    return E;
+}
+
+// ============================================================
 // SPIN BASIS FUNCTIONS FOR D3d IRREPS
 // ============================================================
 
@@ -1635,130 +1791,97 @@ SpinVector StrainPhononLattice::get_local_field(size_t site) const {
 
 SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site) const {
     // Compute H_eff_ring = -∂H_7/∂S_site
+    // Following the same explicit unrolling as site_ring_exchange_energy
     //
-    // H_7 = (J_7/6) Σ_{hex} Σ_{cyclic perms} [
-    //   2*(S_i·S_j)*(S_k·S_l)*(S_m·S_n) - 6*(S_i·S_k)*(S_j·S_l)*(S_m·S_n)
-    //   + 3*(S_i·S_l)*(S_j·S_k)*(S_m·S_n) + 3*(S_i·S_k)*(S_j·S_m)*(S_l·S_n)
-    //   - (S_i·S_l)*(S_j·S_m)*(S_k·S_n)
-    // ]
+    // For each hexagon containing this site, compute the derivative of all 6 cyclic permutations
+    // with respect to the spin at this site
     
     Eigen::Vector3d H = Eigen::Vector3d::Zero();
-    double J7 = magnetoelastic_params.J7;
+    const double J7 = magnetoelastic_params.J7;
     
     if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
         return H;
     }
     
-    double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
+    const double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
     
     // Loop over all hexagons containing this site
     for (const auto& [hex_idx, pos] : site_hexagons[site]) {
         const auto& hex = hexagons[hex_idx];
         
-        // Get all 6 spins
-        const Eigen::Vector3d& S0 = spins[hex[0]];
-        const Eigen::Vector3d& S1 = spins[hex[1]];
-        const Eigen::Vector3d& S2 = spins[hex[2]];
-        const Eigen::Vector3d& S3 = spins[hex[3]];
-        const Eigen::Vector3d& S4 = spins[hex[4]];
-        const Eigen::Vector3d& S5 = spins[hex[5]];
+        // Pre-load spin pointers for better cache locality
+        const SpinVector* S[6] = {
+            &spins[hex[0]], &spins[hex[1]], &spins[hex[2]],
+            &spins[hex[3]], &spins[hex[4]], &spins[hex[5]]
+        };
         
-        // Precompute all pairwise dot products
-        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
-        double d04 = S0.dot(S4), d05 = S0.dot(S5);
-        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
-        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
-        double d34 = S3.dot(S4), d35 = S3.dot(S5);
-        double d45 = S4.dot(S5);
+        // Precompute all 15 unique pairwise dot products
+        const double d01 = S[0]->dot(*S[1]), d02 = S[0]->dot(*S[2]), d03 = S[0]->dot(*S[3]);
+        const double d04 = S[0]->dot(*S[4]), d05 = S[0]->dot(*S[5]);
+        const double d12 = S[1]->dot(*S[2]), d13 = S[1]->dot(*S[3]), d14 = S[1]->dot(*S[4]);
+        const double d15 = S[1]->dot(*S[5]);
+        const double d23 = S[2]->dot(*S[3]), d24 = S[2]->dot(*S[4]), d25 = S[2]->dot(*S[5]);
+        const double d34 = S[3]->dot(*S[4]), d35 = S[3]->dot(*S[5]);
+        const double d45 = S[4]->dot(*S[5]);
+        
+        // Compute derivative explicitly for all 6 permutations
+        // Each permutation: 2*S_j*d_kl*d_mn - 6*S_k*d_jl*d_mn + 3*S_l*d_jk*d_mn + 3*S_k*d_jm*d_ln - S_l*d_jm*d_kn
+        // where (i,j,k,l,m,n) is the cyclic permutation and site is at position 'pos'
         
         Eigen::Vector3d dH = Eigen::Vector3d::Zero();
         
-        // Compute contributions from all 6 cyclic permutations
-        for (int shift = 0; shift < 6; ++shift) {
-            // Map: i=shift, j=shift+1, k=shift+2, l=shift+3, m=shift+4, n=shift+5 (mod 6)
-            size_t pi = shift % 6;
-            size_t pj = (shift + 1) % 6;
-            size_t pk = (shift + 2) % 6;
-            size_t pl = (shift + 3) % 6;
-            size_t pm = (shift + 4) % 6;
-            size_t pn = (shift + 5) % 6;
-            
-            // Get the spins for this permutation
-            const Eigen::Vector3d& Si = spins[hex[pi]];
-            const Eigen::Vector3d& Sj_perm = spins[hex[pj]];
-            const Eigen::Vector3d& Sk = spins[hex[pk]];
-            const Eigen::Vector3d& Sl = spins[hex[pl]];
-            const Eigen::Vector3d& Sm = spins[hex[pm]];
-            const Eigen::Vector3d& Sn = spins[hex[pn]];
-            
-            // Compute dot products for this permutation
-            double dij = Si.dot(Sj_perm);
-            double dik = Si.dot(Sk);
-            double dil = Si.dot(Sl);
-            double djk = Sj_perm.dot(Sk);
-            double djl = Sj_perm.dot(Sl);
-            double djm = Sj_perm.dot(Sm);
-            double dkl = Sk.dot(Sl);
-            double dkn = Sk.dot(Sn);
-            double dln = Sl.dot(Sn);
-            double dmn = Sm.dot(Sn);
-            
-            // Determine which role our site plays in this permutation
-            int role = -1;
-            if (pos == pi) role = 0;       // site is i
-            else if (pos == pj) role = 1;  // site is j
-            else if (pos == pk) role = 2;  // site is k
-            else if (pos == pl) role = 3;  // site is l
-            else if (pos == pm) role = 4;  // site is m
-            else if (pos == pn) role = 5;  // site is n
-            
-            // Compute derivative based on which role our site plays
-            // T1 = 2*(i·j)*(k·l)*(m·n), T2 = -6*(i·k)*(j·l)*(m·n)
-            // T3 = 3*(i·l)*(j·k)*(m·n), T4 = 3*(i·k)*(j·m)*(l·n)
-            // T5 = -(i·l)*(j·m)*(k·n)
-            
-            if (role == 0) {  // site is i
-                dH += 2.0 * Sj_perm * dkl * dmn;
-                dH += -6.0 * Sk * djl * dmn;
-                dH += 3.0 * Sl * djk * dmn;
-                dH += 3.0 * Sk * djm * dln;
-                dH += -Sl * djm * dkn;
-            }
-            else if (role == 1) {  // site is j
-                dH += 2.0 * Si * dkl * dmn;
-                dH += -6.0 * Sl * dik * dmn;
-                dH += 3.0 * Sk * dil * dmn;
-                dH += 3.0 * Sm * dik * dln;
-                dH += -Sm * dil * dkn;
-            }
-            else if (role == 2) {  // site is k
-                dH += 2.0 * Sl * dij * dmn;
-                dH += -6.0 * Si * djl * dmn;
-                dH += 3.0 * Sj_perm * dil * dmn;
-                dH += 3.0 * Si * djm * dln;
-                dH += -Sn * dil * djm;
-            }
-            else if (role == 3) {  // site is l
-                dH += 2.0 * Sk * dij * dmn;
-                dH += -6.0 * Sj_perm * dik * dmn;
-                dH += 3.0 * Si * djk * dmn;
-                dH += 3.0 * Sn * dik * djm;
-                dH += -Si * djm * dkn;
-            }
-            else if (role == 4) {  // site is m
-                dH += 2.0 * Sn * dij * dkl;
-                dH += -6.0 * Sn * dik * djl;
-                dH += 3.0 * Sn * dil * djk;
-                dH += 3.0 * Sj_perm * dik * dln;
-                dH += -Sj_perm * dil * dkn;
-            }
-            else if (role == 5) {  // site is n
-                dH += 2.0 * Sm * dij * dkl;
-                dH += -6.0 * Sm * dik * djl;
-                dH += 3.0 * Sm * dil * djk;
-                dH += 3.0 * Sl * dik * djm;
-                dH += -Sk * dil * djm;
-            }
+        // Permutation 0: (0,1,2,3,4,5) - if site is at position 0
+        if (pos == 0) {
+            dH += 2.0 * (*S[1]) * d23 * d45;
+            dH += -6.0 * (*S[2]) * d13 * d45;
+            dH += 3.0 * (*S[3]) * d12 * d45;
+            dH += 3.0 * (*S[2]) * d14 * d35;
+            dH += -(*S[3]) * d14 * d25;
+        }
+        
+        // Permutation 1: (1,2,3,4,5,0) - if site is at position 1
+        if (pos == 1) {
+            dH += 2.0 * (*S[2]) * d34 * d05;
+            dH += -6.0 * (*S[3]) * d24 * d05;
+            dH += 3.0 * (*S[4]) * d23 * d05;
+            dH += 3.0 * (*S[3]) * d25 * d04;
+            dH += -(*S[4]) * d25 * d03;
+        }
+        
+        // Permutation 2: (2,3,4,5,0,1) - if site is at position 2
+        if (pos == 2) {
+            dH += 2.0 * (*S[3]) * d45 * d01;
+            dH += -6.0 * (*S[4]) * d35 * d01;
+            dH += 3.0 * (*S[5]) * d34 * d01;
+            dH += 3.0 * (*S[4]) * d03 * d15;
+            dH += -(*S[5]) * d03 * d14;
+        }
+        
+        // Permutation 3: (3,4,5,0,1,2) - if site is at position 3
+        if (pos == 3) {
+            dH += 2.0 * (*S[4]) * d05 * d12;
+            dH += -6.0 * (*S[5]) * d04 * d12;
+            dH += 3.0 * (*S[0]) * d45 * d12;
+            dH += 3.0 * (*S[5]) * d14 * d02;
+            dH += -(*S[0]) * d14 * d25;
+        }
+        
+        // Permutation 4: (4,5,0,1,2,3) - if site is at position 4
+        if (pos == 4) {
+            dH += 2.0 * (*S[5]) * d01 * d23;
+            dH += -6.0 * (*S[0]) * d15 * d23;
+            dH += 3.0 * (*S[1]) * d05 * d23;
+            dH += 3.0 * (*S[0]) * d25 * d13;
+            dH += -(*S[1]) * d25 * d03;
+        }
+        
+        // Permutation 5: (5,0,1,2,3,4) - if site is at position 5
+        if (pos == 5) {
+            dH += 2.0 * (*S[0]) * d12 * d34;
+            dH += -6.0 * (*S[1]) * d02 * d34;
+            dH += 3.0 * (*S[2]) * d01 * d34;
+            dH += 3.0 * (*S[1]) * d03 * d24;
+            dH += -(*S[2]) * d03 * d14;
         }
         
         H += prefactor * dH;
@@ -2535,17 +2658,13 @@ double StrainPhononLattice::mc_sweep(double temperature, bool gaussian_move, dou
             new_spin = gen_random_spin(spin_length);
         }
         
-        // Compute energy difference using full local field
-        // H_eff includes exchange + magnetoelastic + ring exchange
+        // Compute energy difference using explicit site_energy_diff
+        // This computes E(new_spin) - E(old_spin) for all terms:
+        // exchange (NN, 2nd NN, 3rd NN) + magnetoelastic + ring exchange
         SpinVector old_spin = spins[site];
-        SpinVector delta = new_spin - old_spin;
+        double dE = site_energy_diff(new_spin, old_spin, site);
         
-        // dE = H_spin(new) - H_spin(old) = -delta · H_eff
-        // Note: get_local_field returns H_eff = -∂H/∂S, so dE = -delta · H_eff
-        SpinVector H_eff = get_local_field(site);
-        double dE = -delta.dot(H_eff);
-        
-        // Metropolis acceptance (branchless style)
+        // Metropolis acceptance
         double rand_uniform = uniform_dist(rng);
         const bool accept = (dE < 0.0) || (rand_uniform < std::exp(-beta * dE));
         if (accept) {
@@ -2712,7 +2831,9 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     // Save final spin config
     if (!out_dir.empty()) {
         save_spin_config(out_dir + "/spins.txt");
+        save_spin_config_global(out_dir + "/spins_global.txt");
         save_strain_state(out_dir + "/strain.txt");
+        save_positions(out_dir + "/positions.txt");
     }
     
     cout << "Annealing complete!" << endl;
@@ -2792,6 +2913,36 @@ void StrainPhononLattice::save_strain_state(const string& filename) const {
              << strain.V_xx[b] << " "
              << strain.V_yy[b] << " "
              << strain.V_xy[b] << "\n";
+    }
+}
+
+void StrainPhononLattice::save_positions(const string& filename) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        file << site_positions[i](0) << " " 
+             << site_positions[i](1) << " " 
+             << site_positions[i](2) << "\n";
+    }
+}
+
+void StrainPhononLattice::save_spin_config_global(const string& filename) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    // Transform each spin from local Kitaev frame to global Cartesian frame
+    // S_global = R * S_local where R is the sublattice rotation matrix
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t atom = 0; atom < N_atoms; ++atom) {
+                    size_t site_idx = flatten_index(i, j, k, atom);
+                    SpinVector spin_global = sublattice_frames[atom] * spins[site_idx];
+                    file << spin_global(0) << " " << spin_global(1) << " " << spin_global(2) << "\n";
+                }
+            }
+        }
     }
 }
 
@@ -3507,6 +3658,7 @@ void StrainPhononLattice::gather_and_save_statistics_comprehensive(int rank, int
             // Save spin configuration only if verbose mode is enabled
             if (verbose) {
                 save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
+                save_positions(rank_dir + "/positions.txt");
             }
         }
         
@@ -4249,4 +4401,92 @@ StrainPhononLattice::CollectiveVars StrainPhononLattice::compute_collective_vari
     cv.E_total = spin_energy();
     
     return cv;
+}
+
+// ============================================================
+// STATIC STRUCTURE FACTOR
+// ============================================================
+
+StrainPhononLattice::StructureFactorResult StrainPhononLattice::compute_static_structure_factor(
+    size_t n_q1, size_t n_q2,
+    double q1_min, double q1_max,
+    double q2_min, double q2_max) const {
+    
+    StructureFactorResult result;
+    
+    // Reciprocal lattice vectors for honeycomb lattice
+    // Real space: a1 = (1, 0, 0), a2 = (1/2, sqrt(3)/2, 0)
+    // Reciprocal: b1* = 2π(1, -1/sqrt(3), 0), b2* = 2π(0, 2/sqrt(3), 0)
+    const double sqrt3 = std::sqrt(3.0);
+    Eigen::Vector3d b1(2.0 * M_PI, -2.0 * M_PI / sqrt3, 0.0);
+    Eigen::Vector3d b2(0.0, 4.0 * M_PI / sqrt3, 0.0);
+    
+    // Generate q-grid
+    result.q1_vals.resize(n_q1);
+    result.q2_vals.resize(n_q2);
+    
+    for (size_t i = 0; i < n_q1; ++i) {
+        result.q1_vals[i] = q1_min + (q1_max - q1_min) * double(i) / double(n_q1 - 1);
+    }
+    for (size_t j = 0; j < n_q2; ++j) {
+        result.q2_vals[j] = q2_min + (q2_max - q2_min) * double(j) / double(n_q2 - 1);
+    }
+    
+    // Initialize S(q) arrays
+    result.S_total.resize(n_q1, vector<double>(n_q2, 0.0));
+    result.S_xx.resize(n_q1, vector<double>(n_q2, 0.0));
+    result.S_yy.resize(n_q1, vector<double>(n_q2, 0.0));
+    result.S_zz.resize(n_q1, vector<double>(n_q2, 0.0));
+    
+    // Compute S(q) for each q-point
+    for (size_t i = 0; i < n_q1; ++i) {
+        for (size_t j = 0; j < n_q2; ++j) {
+            // q = q1 * b1* + q2 * b2*
+            Eigen::Vector3d q = result.q1_vals[i] * b1 + result.q2_vals[j] * b2;
+            
+            // Compute Fourier transform: Σ_k S_k exp(-i q·r_k)
+            std::complex<double> Sq_x(0, 0), Sq_y(0, 0), Sq_z(0, 0);
+            
+            for (size_t k = 0; k < lattice_size; ++k) {
+                double phase = q.dot(site_positions[k]);
+                std::complex<double> exp_factor(std::cos(phase), -std::sin(phase));
+                
+                Sq_x += spins[k](0) * exp_factor;
+                Sq_y += spins[k](1) * exp_factor;
+                Sq_z += spins[k](2) * exp_factor;
+            }
+            
+            // Structure factor components
+            result.S_xx[i][j] = std::norm(Sq_x) / lattice_size;
+            result.S_yy[i][j] = std::norm(Sq_y) / lattice_size;
+            result.S_zz[i][j] = std::norm(Sq_z) / lattice_size;
+            result.S_total[i][j] = result.S_xx[i][j] + result.S_yy[i][j] + result.S_zz[i][j];
+        }
+    }
+    
+    return result;
+}
+
+void StrainPhononLattice::save_structure_factor(const string& filename, 
+                                                 const StructureFactorResult& sf) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    // Header
+    file << "# Static spin structure factor S(q)\n";
+    file << "# Columns: q1 q2 S_total S_xx S_yy S_zz\n";
+    file << "# q1, q2 are in units of reciprocal lattice vectors (b1*, b2*)\n";
+    file << "# Grid: " << sf.q1_vals.size() << " x " << sf.q2_vals.size() << "\n";
+    
+    // Data
+    for (size_t i = 0; i < sf.q1_vals.size(); ++i) {
+        for (size_t j = 0; j < sf.q2_vals.size(); ++j) {
+            file << sf.q1_vals[i] << " " << sf.q2_vals[j] << " "
+                 << sf.S_total[i][j] << " "
+                 << sf.S_xx[i][j] << " "
+                 << sf.S_yy[i][j] << " "
+                 << sf.S_zz[i][j] << "\n";
+        }
+        file << "\n";  // Blank line between q1 slices for gnuplot
+    }
 }
