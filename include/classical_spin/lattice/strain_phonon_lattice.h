@@ -634,6 +634,13 @@ public:
     double f_Gamma_Eg1() const;
     double f_Gamma_Eg2() const;
     
+    /**
+     * Eg spin basis functions for Gammap (Γ') term: f_Γ'^{Eg,1}, f_Γ'^{Eg,2}
+     * The Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ where α,β ≠ γ
+     */
+    double f_Gammap_Eg1() const;
+    double f_Gammap_Eg2() const;
+    
     // ============================================================
     // DERIVATIVES
     // ============================================================
@@ -658,6 +665,8 @@ public:
     SpinVector df_J_Eg2_dS(size_t site) const;
     SpinVector df_Gamma_Eg1_dS(size_t site) const;
     SpinVector df_Gamma_Eg2_dS(size_t site) const;
+    SpinVector df_Gammap_Eg1_dS(size_t site) const;
+    SpinVector df_Gammap_Eg2_dS(size_t site) const;
     
     /**
      * Effective field on spin from magnetoelastic coupling

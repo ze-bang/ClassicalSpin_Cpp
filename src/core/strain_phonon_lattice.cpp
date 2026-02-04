@@ -1386,44 +1386,94 @@ double StrainPhononLattice::f_Gamma_Eg2() const {
     return std::sqrt(3.0) * (f_x - f_y);
 }
 
+double StrainPhononLattice::f_Gammap_Eg1() const {
+    // f_Γ'^{Eg,1} = O_x + O_y - 2*O_z where O_γ is the Γ' operator on γ-bonds
+    // Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ where α,β ≠ γ
+    double f_x = 0.0, f_y = 0.0, f_z = 0.0;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const Eigen::Vector3d& Si = spins[i];
+        
+        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+            size_t j = nn_partners[i][n];
+            if (j > i) {
+                const Eigen::Vector3d& Sj = spins[j];
+                int gamma = nn_bond_types[i][n];
+                int alpha = (gamma + 1) % 3;
+                int beta = (gamma + 2) % 3;
+                
+                // Γ' term: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
+                double gammap_term = Si(gamma) * (Sj(alpha) + Sj(beta)) 
+                                   + (Si(alpha) + Si(beta)) * Sj(gamma);
+                if (gamma == 0) f_x += gammap_term;
+                else if (gamma == 1) f_y += gammap_term;
+                else f_z += gammap_term;
+            }
+        }
+    }
+    
+    // f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
+    return f_x + f_y - 2.0 * f_z;
+}
+
+double StrainPhononLattice::f_Gammap_Eg2() const {
+    // f_Γ'^{Eg,2} = √3 (O_x - O_y) where O_γ is the Γ' operator on γ-bonds
+    double f_x = 0.0, f_y = 0.0;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const Eigen::Vector3d& Si = spins[i];
+        
+        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+            size_t j = nn_partners[i][n];
+            if (j > i) {
+                const Eigen::Vector3d& Sj = spins[j];
+                int gamma = nn_bond_types[i][n];
+                int alpha = (gamma + 1) % 3;
+                int beta = (gamma + 2) % 3;
+                
+                // Γ' term: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
+                double gammap_term = Si(gamma) * (Sj(alpha) + Sj(beta)) 
+                                   + (Si(alpha) + Si(beta)) * Sj(gamma);
+                if (gamma == 0) f_x += gammap_term;
+                else if (gamma == 1) f_y += gammap_term;
+            }
+        }
+    }
+    
+    // f_Γ'^{Eg,2} = √3 * (f_x - f_y)
+    return std::sqrt(3.0) * (f_x - f_y);
+}
+
 // ============================================================
 // MAGNETOELASTIC ENERGY
 // ============================================================
 
 double StrainPhononLattice::magnetoelastic_energy() const {
-    // H_c = H_c^{A1g} + H_c^{Eg}
+    // H_c = H_c^{Eg} (A1g terms removed)
     //
-    // H_c^{A1g} = λ_{A1g} Σ_b (ε_xx + ε_yy)_b {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
-    //
-    // H_c^{Eg} = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
-    //                      + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+    // H_c^{Eg} = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
+    //                      + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Compute spin basis functions
-    double fK_A1g = f_K_A1g();
-    double fJ_A1g = f_J_A1g();
-    double fG_A1g = f_Gamma_A1g();
-    
+    // Compute Eg spin basis functions
     double fK_Eg1 = f_K_Eg1();
     double fK_Eg2 = f_K_Eg2();
     double fJ_Eg1 = f_J_Eg1();
     double fJ_Eg2 = f_J_Eg2();
     double fG_Eg1 = f_Gamma_Eg1();
     double fG_Eg2 = f_Gamma_Eg2();
+    double fGp_Eg1 = f_Gammap_Eg1();
+    double fGp_Eg2 = f_Gammap_Eg2();
     
-    // A1g channel contribution
-    double A1g_spin_factor = (J + K) * fK_A1g + J * fJ_A1g + Gamma * fG_A1g;
+    // Eg channel contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg1_spin_factor = (J + K) * fK_Eg1 + J * fJ_Eg1 + Gamma * fG_Eg1 + Gammap * fGp_Eg1;
+    double Eg2_spin_factor = (J + K) * fK_Eg2 + J * fJ_Eg2 + Gamma * fG_Eg2 + Gammap * fGp_Eg2;
     
-    // Eg channel contribution
-    double Eg1_spin_factor = (J + K) * fK_Eg1 + J * fJ_Eg1 + Gamma * fG_Eg1;
-    double Eg2_spin_factor = (J + K) * fK_Eg2 + J * fJ_Eg2 + Gamma * fG_Eg2;
-    
-    double E_A1g = 0.0;
     double E_Eg = 0.0;
     
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
@@ -1431,14 +1481,11 @@ double StrainPhononLattice::magnetoelastic_energy() const {
         double eyy = strain.epsilon_yy[b];
         double exy = strain.epsilon_xy[b];
         
-        // A1g: (ε_xx + ε_yy)
-        E_A1g += lambda_A1g * (exx + eyy) * A1g_spin_factor;
-        
         // Eg: (ε_xx - ε_yy) * Eg1 + 2ε_xy * Eg2
         E_Eg += lambda_Eg * ((exx - eyy) * Eg1_spin_factor + 2.0 * exy * Eg2_spin_factor);
     }
     
-    return E_A1g + E_Eg;
+    return E_Eg;
 }
 
 // ============================================================
@@ -1446,40 +1493,41 @@ double StrainPhononLattice::magnetoelastic_energy() const {
 // ============================================================
 
 double StrainPhononLattice::dH_deps_xx(size_t bond_type) const {
-    // ∂H_c/∂ε_xx = λ_{A1g} * A1g_spin_factor + λ_{Eg} * Eg1_spin_factor
+    // ∂H_c/∂ε_xx = λ_{Eg} * Eg1_spin_factor (A1g terms removed)
     //            + elastic terms: C11 * ε_xx + C12 * ε_yy
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Spin factors
-    double A1g_spin_factor = (J + K) * f_K_A1g() + J * f_J_A1g() + Gamma * f_Gamma_A1g();
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
+    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
     
-    // Magnetoelastic contribution
-    double dH_me = lambda_A1g * A1g_spin_factor + lambda_Eg * Eg1_spin_factor;
+    // Magnetoelastic contribution: ∂/∂ε_xx of (ε_xx - ε_yy) = +1
+    double dH_me = lambda_Eg * Eg1_spin_factor;
     
     return dH_me;
 }
 
 double StrainPhononLattice::dH_deps_yy(size_t bond_type) const {
-    // ∂H_c/∂ε_yy = λ_{A1g} * A1g_spin_factor - λ_{Eg} * Eg1_spin_factor
+    // ∂H_c/∂ε_yy = -λ_{Eg} * Eg1_spin_factor (A1g terms removed)
     //            + elastic terms: C11 * ε_yy + C12 * ε_xx
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    double A1g_spin_factor = (J + K) * f_K_A1g() + J * f_J_A1g() + Gamma * f_Gamma_A1g();
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
+    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
     
-    // Note: ε_yy contributes +1 to A1g and -1 to Eg1
-    double dH_me = lambda_A1g * A1g_spin_factor - lambda_Eg * Eg1_spin_factor;
+    // Magnetoelastic contribution: ∂/∂ε_yy of (ε_xx - ε_yy) = -1
+    double dH_me = -lambda_Eg * Eg1_spin_factor;
     
     return dH_me;
 }
@@ -1491,10 +1539,14 @@ double StrainPhononLattice::dH_deps_xy(size_t bond_type) const {
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2();
+    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
     
+    // Magnetoelastic contribution: ∂/∂ε_xy of 2ε_xy = 2
     double dH_me = 2.0 * lambda_Eg * Eg2_spin_factor;
     
     return dH_me;
@@ -1702,59 +1754,109 @@ SpinVector StrainPhononLattice::df_Gamma_Eg2_dS(size_t site) const {
     return std::sqrt(3.0) * (df_x - df_y);
 }
 
+SpinVector StrainPhononLattice::df_Gammap_Eg1_dS(size_t site) const {
+    // ∂f_Γ'^{Eg,1}/∂S_site where f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
+    // The Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
+    // Derivative w.r.t. S_i:
+    //   ∂/∂S_i^γ: S_j^α + S_j^β
+    //   ∂/∂S_i^α: S_j^γ
+    //   ∂/∂S_i^β: S_j^γ
+    SpinVector df_x = Eigen::Vector3d::Zero();
+    SpinVector df_y = Eigen::Vector3d::Zero();
+    SpinVector df_z = Eigen::Vector3d::Zero();
+    
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        int gamma = nn_bond_types[site][n];
+        int alpha = (gamma + 1) % 3;
+        int beta = (gamma + 2) % 3;
+        
+        SpinVector contrib = Eigen::Vector3d::Zero();
+        // ∂/∂S_i^γ contributes S_j^α + S_j^β
+        contrib(gamma) = spins[j](alpha) + spins[j](beta);
+        // ∂/∂S_i^α and ∂/∂S_i^β both contribute S_j^γ
+        contrib(alpha) = spins[j](gamma);
+        contrib(beta) = spins[j](gamma);
+        
+        if (gamma == 0) df_x += contrib;
+        else if (gamma == 1) df_y += contrib;
+        else df_z += contrib;
+    }
+    
+    // f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
+    return df_x + df_y - 2.0 * df_z;
+}
+
+SpinVector StrainPhononLattice::df_Gammap_Eg2_dS(size_t site) const {
+    // ∂f_Γ'^{Eg,2}/∂S_site where f_Γ'^{Eg,2} = √3*(f_x - f_y)
+    SpinVector df_x = Eigen::Vector3d::Zero();
+    SpinVector df_y = Eigen::Vector3d::Zero();
+    
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        int gamma = nn_bond_types[site][n];
+        int alpha = (gamma + 1) % 3;
+        int beta = (gamma + 2) % 3;
+        
+        SpinVector contrib = Eigen::Vector3d::Zero();
+        // ∂/∂S_i^γ contributes S_j^α + S_j^β
+        contrib(gamma) = spins[j](alpha) + spins[j](beta);
+        // ∂/∂S_i^α and ∂/∂S_i^β both contribute S_j^γ
+        contrib(alpha) = spins[j](gamma);
+        contrib(beta) = spins[j](gamma);
+        
+        if (gamma == 0) df_x += contrib;
+        else if (gamma == 1) df_y += contrib;
+    }
+    
+    // f_Γ'^{Eg,2} = √3 * (f_x - f_y)
+    return std::sqrt(3.0) * (df_x - df_y);
+}
+
 // ============================================================
 // EFFECTIVE FIELD
 // ============================================================
 
 SpinVector StrainPhononLattice::get_magnetoelastic_field(size_t site) const {
-    // H_me = -∂H_c/∂S_i
+    // H_me = -∂H_c/∂S_i (A1g terms removed)
     // 
-    // H_c = λ_{A1g} Σ_b (ε_xx + ε_yy)_b [(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}]
-    //     + λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
-    //                  + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+    // H_c = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
+    //                  + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Compute strain factors (summed over bond types)
-    double A1g_strain = 0.0;
+    // Compute Eg strain factors (summed over bond types)
     double Eg1_strain = 0.0;
     double Eg2_strain = 0.0;
     
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        A1g_strain += strain.epsilon_xx[b] + strain.epsilon_yy[b];
         Eg1_strain += strain.epsilon_xx[b] - strain.epsilon_yy[b];
         Eg2_strain += 2.0 * strain.epsilon_xy[b];
     }
     
-    // Compute spin derivatives
-    SpinVector df_K_A1g = df_K_A1g_dS(site);
-    SpinVector df_J_A1g = df_J_A1g_dS(site);
-    SpinVector df_G_A1g = df_Gamma_A1g_dS(site);
-    
+    // Compute spin derivatives (Eg only, includes Gammap)
     SpinVector df_K_Eg1 = df_K_Eg1_dS(site);
     SpinVector df_J_Eg1 = df_J_Eg1_dS(site);
     SpinVector df_G_Eg1 = df_Gamma_Eg1_dS(site);
+    SpinVector df_Gp_Eg1 = df_Gammap_Eg1_dS(site);
     
     SpinVector df_K_Eg2 = df_K_Eg2_dS(site);
     SpinVector df_J_Eg2 = df_J_Eg2_dS(site);
     SpinVector df_G_Eg2 = df_Gamma_Eg2_dS(site);
+    SpinVector df_Gp_Eg2 = df_Gammap_Eg2_dS(site);
     
-    // A1g contribution
-    SpinVector H_A1g = lambda_A1g * A1g_strain * 
-                       ((J + K) * df_K_A1g + J * df_J_A1g + Gamma * df_G_A1g);
-    
-    // Eg contribution
+    // Eg contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
     SpinVector H_Eg1 = lambda_Eg * Eg1_strain *
-                       ((J + K) * df_K_Eg1 + J * df_J_Eg1 + Gamma * df_G_Eg1);
+                       ((J + K) * df_K_Eg1 + J * df_J_Eg1 + Gamma * df_G_Eg1 + Gammap * df_Gp_Eg1);
     SpinVector H_Eg2 = lambda_Eg * Eg2_strain *
-                       ((J + K) * df_K_Eg2 + J * df_J_Eg2 + Gamma * df_G_Eg2);
+                       ((J + K) * df_K_Eg2 + J * df_J_Eg2 + Gamma * df_G_Eg2 + Gammap * df_Gp_Eg2);
     
     // Total magnetoelastic field (negative because H_eff = -∂H/∂S)
-    return -(H_A1g + H_Eg1 + H_Eg2);
+    return -(H_Eg1 + H_Eg2);
 }
 
 SpinVector StrainPhononLattice::get_local_field(size_t site) const {
@@ -4224,24 +4326,27 @@ StrainPhononLattice::compute_Eg_derivatives(const vector<Eigen::Vector3d>& confi
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
     
     for (size_t i = 0; i < lattice_size; ++i) {
-        // Total Eg1 derivative combines K, J, and Γ contributions
-        // f_Eg1 = (J+K) f_K_Eg1 + J f_J_Eg1 + Γ f_Γ_Eg1
-        // So ∂f_Eg1/∂S = (J+K) ∂f_K_Eg1/∂S + J ∂f_J_Eg1/∂S + Γ ∂f_Γ_Eg1/∂S
+        // Total Eg1 derivative combines K, J, Γ, and Γ' contributions
+        // f_Eg1 = (J+K) f_K_Eg1 + J f_J_Eg1 + Γ f_Γ_Eg1 + Γ' f_Γ'_Eg1
+        // So ∂f_Eg1/∂S = (J+K) ∂f_K_Eg1/∂S + J ∂f_J_Eg1/∂S + Γ ∂f_Γ_Eg1/∂S + Γ' ∂f_Γ'_Eg1/∂S
         
         SpinVector dfK_Eg1 = df_K_Eg1_dS(i);
         SpinVector dfJ_Eg1 = df_J_Eg1_dS(i);
         SpinVector dfG_Eg1 = df_Gamma_Eg1_dS(i);
+        SpinVector dfGp_Eg1 = df_Gammap_Eg1_dS(i);
         
-        df_Eg1[i] = (J + K) * dfK_Eg1 + J * dfJ_Eg1 + Gamma * dfG_Eg1;
+        df_Eg1[i] = (J + K) * dfK_Eg1 + J * dfJ_Eg1 + Gamma * dfG_Eg1 + Gammap * dfGp_Eg1;
         
         // Same for Eg2
         SpinVector dfK_Eg2 = df_K_Eg2_dS(i);
         SpinVector dfJ_Eg2 = df_J_Eg2_dS(i);
         SpinVector dfG_Eg2 = df_Gamma_Eg2_dS(i);
+        SpinVector dfGp_Eg2 = df_Gammap_Eg2_dS(i);
         
-        df_Eg2[i] = (J + K) * dfK_Eg2 + J * dfJ_Eg2 + Gamma * dfG_Eg2;
+        df_Eg2[i] = (J + K) * dfK_Eg2 + J * dfJ_Eg2 + Gamma * dfG_Eg2 + Gammap * dfGp_Eg2;
     }
     
     // Restore original spins

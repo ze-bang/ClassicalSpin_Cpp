@@ -1142,9 +1142,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         }
         
         // ================================================================
-        // STEP 1: Find ground states via simulated annealing
+        // STEP 1: Get initial state (load from file or anneal)
         // ================================================================
-        cout << "[Rank " << rank << "] Finding initial (triple-Q) ground state..." << endl;
+        GNEBSpinConfig triple_q_state(n_sites);
         
         // Zero out strain
         for (size_t b = 0; b < 3; ++b) {
@@ -1153,14 +1153,20 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             lattice.strain.epsilon_xy[b] = 0.0;
         }
         
-        // Initialize randomly
-        lattice.init_random();
-        
-        // Anneal to find ground state (should be triple-Q at zero strain)
-        lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
-                       config.cooling_rate, config.overrelaxation_rate,
-                       config.gaussian_move, trial_dir + "/initial_anneal",
-                       config.T_zero, config.n_deterministics);
+        if (!config.gneb_initial_state_file.empty()) {
+            // Load from file
+            cout << "[Rank " << rank << "] Loading initial state from file..." << endl;
+            lattice.load_spin_config(config.gneb_initial_state_file);
+            cout << "  File: " << config.gneb_initial_state_file << endl;
+        } else {
+            // Find via annealing
+            cout << "[Rank " << rank << "] Finding initial (triple-Q) ground state..." << endl;
+            lattice.init_random();
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                           config.cooling_rate, config.overrelaxation_rate,
+                           config.gaussian_move, trial_dir + "/initial_anneal",
+                           config.T_zero, config.n_deterministics);
+        }
         
         // Save and analyze initial state
         auto initial_cv = lattice.compute_collective_variables();
@@ -1169,57 +1175,65 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         cout << "  m_zigzag   = " << initial_cv.m_zigzag << endl;
         cout << "  f_Eg_amp   = " << initial_cv.f_Eg_amplitude << endl;
         
-        // Extract initial state as triple-Q
-        GNEBSpinConfig triple_q_state(n_sites);
+        // Extract initial state
         for (size_t i = 0; i < n_sites; ++i) {
             triple_q_state[i] = lattice.spins[i];
         }
         lattice.save_spin_config(trial_dir + "/triple_q_state.txt");
         
         // ================================================================
-        // STEP 2: Find zigzag state
+        // STEP 2: Get final state (load from file or anneal)
         // ================================================================
-        // For zigzag, we apply a strong E_g strain to bias the system
-        cout << "[Rank " << rank << "] Finding zigzag state with applied strain..." << endl;
+        GNEBSpinConfig zigzag_state(n_sites);
         
-        // Save original drive parameters
-        double original_Eg1 = lattice.drive_params.drive_strength_Eg1;
-        double original_Eg2 = lattice.drive_params.drive_strength_Eg2;
-        
-        // Apply strong Eg strain to induce zigzag (Eg1 = ε_xx - ε_yy)
-        const double bias_strain = 3.0;
-        for (size_t b = 0; b < 3; ++b) {
-            lattice.strain.epsilon_xx[b] = bias_strain / 2.0;
-            lattice.strain.epsilon_yy[b] = -bias_strain / 2.0;
-            lattice.strain.epsilon_xy[b] = 0.0;
+        if (!config.gneb_final_state_file.empty()) {
+            // Load from file
+            cout << "[Rank " << rank << "] Loading final state from file..." << endl;
+            lattice.load_spin_config(config.gneb_final_state_file);
+            cout << "  File: " << config.gneb_final_state_file << endl;
+        } else {
+            // Find via annealing with bias strain
+            cout << "[Rank " << rank << "] Finding zigzag state with applied strain..." << endl;
+            
+            // Save original drive parameters
+            double original_Eg1 = lattice.drive_params.drive_strength_Eg1;
+            double original_Eg2 = lattice.drive_params.drive_strength_Eg2;
+            
+            // Apply strong Eg strain to induce zigzag (Eg1 = ε_xx - ε_yy)
+            const double bias_strain = 3.0;
+            for (size_t b = 0; b < 3; ++b) {
+                lattice.strain.epsilon_xx[b] = bias_strain / 2.0;
+                lattice.strain.epsilon_yy[b] = -bias_strain / 2.0;
+                lattice.strain.epsilon_xy[b] = 0.0;
+            }
+            
+            // Re-initialize and anneal
+            lattice.init_random();
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                           config.cooling_rate, config.overrelaxation_rate,
+                           config.gaussian_move, trial_dir + "/zigzag_anneal",
+                           config.T_zero, config.n_deterministics);
+            
+            // Reset strain
+            for (size_t b = 0; b < 3; ++b) {
+                lattice.strain.epsilon_xx[b] = 0.0;
+                lattice.strain.epsilon_yy[b] = 0.0;
+                lattice.strain.epsilon_xy[b] = 0.0;
+            }
+            
+            // Restore drive parameters
+            lattice.drive_params.drive_strength_Eg1 = original_Eg1;
+            lattice.drive_params.drive_strength_Eg2 = original_Eg2;
         }
         
-        // Re-initialize and anneal
-        lattice.init_random();
-        lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
-                       config.cooling_rate, config.overrelaxation_rate,
-                       config.gaussian_move, trial_dir + "/zigzag_anneal",
-                       config.T_zero, config.n_deterministics);
-        
-        // Reset strain
-        for (size_t b = 0; b < 3; ++b) {
-            lattice.strain.epsilon_xx[b] = 0.0;
-            lattice.strain.epsilon_yy[b] = 0.0;
-            lattice.strain.epsilon_xy[b] = 0.0;
-        }
-        
-        // Restore drive parameters
-        lattice.drive_params.drive_strength_Eg1 = original_Eg1;
-        lattice.drive_params.drive_strength_Eg2 = original_Eg2;
-        
+        // Analyze and save final state
         auto zigzag_cv = lattice.compute_collective_variables();
-        cout << "[Rank " << rank << "] Zigzag state collective variables:" << endl;
+        cout << "[Rank " << rank << "] Final state collective variables:" << endl;
         cout << "  m_3Q       = " << zigzag_cv.m_3Q << endl;
         cout << "  m_zigzag   = " << zigzag_cv.m_zigzag << endl;
         cout << "  f_Eg_amp   = " << zigzag_cv.f_Eg_amplitude << endl;
         
-        // Extract zigzag state
-        GNEBSpinConfig zigzag_state(n_sites);
+        // Extract final state
         for (size_t i = 0; i < n_sites; ++i) {
             zigzag_state[i] = lattice.spins[i];
         }

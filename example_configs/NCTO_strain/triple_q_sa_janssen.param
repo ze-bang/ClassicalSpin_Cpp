@@ -28,7 +28,7 @@ lattice_size = 12,12,1
 simulation_mode = SA
 
 # Output directory
-output_dir = NCTO_triple_q_janssen
+output_dir = NCTO_triple_q_janssen_zigzag
 
 # Number of trials (run multiple to check for domain formation)
 num_trials = 1
@@ -52,7 +52,7 @@ J3 = 0.0
 
 # Six-spin ring exchange (CRITICAL for triple-Q selection)
 # J7 < 0 selects triple-Q over single-Q zigzag
-J7 = -1.5                 # Try range: -0.5 to -3.0
+J7 = 1.5                 # Try range: -0.5 to -3.0
 
 # External magnetic field (zero for ground state search)
 field_strength = 0.0

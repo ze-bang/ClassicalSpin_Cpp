@@ -158,6 +158,8 @@ struct SpinConfig {
     size_t gneb_analysis_steps = 100;       // Number of time steps for barrier evolution analysis
     double gneb_phonon_amplitude_max = 1.0; // Maximum phonon amplitude for sweep
     bool gneb_save_path_evolution = true;   // Save MEP at each time step
+    string gneb_initial_state_file = "";    // Path to initial state config (if empty, will anneal)
+    string gneb_final_state_file = "";      // Path to final state config (if empty, will anneal)
     
     // Field parameters
     double field_strength = 0.0;
