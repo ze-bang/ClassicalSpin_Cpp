@@ -1260,7 +1260,7 @@ public:
      * Compute magnetization for each sublattice separately
      * 
      * @return Vector of SpinVectors, one per sublattice (N_atoms sublattices)
-     *         Each vector is averaged over all unit cells and transformed to global frame
+     *         Each vector is averaged over all unit cells in the local sublattice frame
      */
     vector<SpinVector> magnetization_sublattice() const {
         vector<SpinVector> M_sub(N_atoms);
@@ -1270,21 +1270,13 @@ public:
             M_sub[atom] = SpinVector::Zero(spin_dim);
         }
         
-        // Sum over all unit cells for each sublattice
+        // Sum over all unit cells for each sublattice (in local frame)
         for (size_t i = 0; i < dim1; ++i) {
             for (size_t j = 0; j < dim2; ++j) {
                 for (size_t k = 0; k < dim3; ++k) {
                     for (size_t atom = 0; atom < N_atoms; ++atom) {
                         size_t site_idx = flatten_index(i, j, k, atom);
-                        
-                        // Transform to global frame using sublattice frame
-                        SpinVector spin_global = SpinVector::Zero(spin_dim);
-                        for (size_t mu = 0; mu < spin_dim; ++mu) {
-                            for (size_t nu = 0; nu < spin_dim; ++nu) {
-                                spin_global(mu) += sublattice_frames[atom](nu, mu) * spins[site_idx](nu);
-                            }
-                        }
-                        M_sub[atom] += spin_global;
+                        M_sub[atom] += spins[site_idx];
                     }
                 }
             }
@@ -1302,7 +1294,7 @@ public:
      * Compute magnetization for each sublattice from flat state array
      * 
      * @param state_flat Flat spin state array [lattice_size * spin_dim]
-     * @param M_sub_out Output: N_atoms SpinVectors for sublattice magnetizations
+     * @param M_sub_out Output: N_atoms SpinVectors for sublattice magnetizations (in local frame)
      */
     void magnetization_sublattice_from_flat(const double* state_flat, 
                                              vector<SpinVector>& M_sub_out) const {
@@ -1313,16 +1305,13 @@ public:
             M_sub_out[atom] = SpinVector::Zero(spin_dim);
         }
         
-        // Sum over all sites
+        // Sum over all sites (in local frame)
         for (size_t i = 0; i < lattice_size; ++i) {
             size_t atom = i % N_atoms;
             const double* spin_ptr = state_flat + i * spin_dim;
             
-            // Transform to global frame
             for (size_t mu = 0; mu < spin_dim; ++mu) {
-                for (size_t nu = 0; nu < spin_dim; ++nu) {
-                    M_sub_out[atom](mu) += sublattice_frames[atom](nu, mu) * spin_ptr[nu];
-                }
+                M_sub_out[atom](mu) += spin_ptr[mu];
             }
         }
         
