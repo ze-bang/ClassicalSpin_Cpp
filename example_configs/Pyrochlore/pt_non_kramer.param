@@ -3,7 +3,7 @@
 
 # System specification
 system = pyrochlore_non_kramer
-lattice_size = 8,8,8
+lattice_size = 4,4,4
 spin_length = 0.5
 
 # Simulation settings
@@ -12,8 +12,8 @@ num_trials = 1
 output_dir = output_non_kramer
 
 # Temperature schedule
-T_start = 1.0
-T_end = 0.01
+T_start = 5.0
+T_end = 0.001
 cooling_rate = 0.9
 annealing_steps = 100000
 
@@ -31,7 +31,7 @@ delta1 = 0.000
 delta2 = -0.0000
 
 # Magnetic field
-field_strength = 4.0
+field_strength = 8.0
 field_direction = 1,1,1
 
 # MC parameters
