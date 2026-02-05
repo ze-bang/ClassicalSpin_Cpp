@@ -46,12 +46,12 @@ Gammap = -4.0            # Gamma' coupling (meV)
 J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # Third-neighbor Heisenberg (meV)
-J7 = -0.5          # Six-spin ring exchange (meV)
+J7 = -0.8          # Six-spin ring exchange (meV)
 
 # Time-dependent J7 modulation via Eg strain deviation
 # J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
 # where |δε_Eg| is the Eg strain deviation from equilibrium
-gamma_J7 = 4.0           # γ scaling factor (0 = no time dependence)
+gamma_J7 = 0.0           # γ scaling factor (0 = no time dependence)
 
 # External magnetic field
 field_strength = 0.0
@@ -72,7 +72,7 @@ alpha_gilbert = 0.00
 # are small (|ε| << 1). With the spin exchange parameters (K=-6, Γ=8), 
 # setting λ ~ 0.01 typically gives |ε| ~ O(1-10).
 lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
-lambda_Eg = 0.001         # Eg channel magnetoelastic coupling (reduced for stability)
+lambda_Eg = 0.01         # Eg channel magnetoelastic coupling (reduced for stability)
 
 # ============================================
 # ELASTIC PARAMETERS
@@ -90,7 +90,7 @@ strain_mass = 1.0
 
 # Damping coefficients (mode-specific)
 gamma_A1g = 0.0          # A1g mode damping
-gamma_Eg = 0.1           # Eg mode damping
+gamma_Eg = 0.0           # Eg mode damping
 
 # Quartic anharmonicity (optional)
 lambda_A1g_quartic = 0.0 # A1g quartic stabilization
@@ -142,18 +142,24 @@ adiabatic_phonons = true
 relax_phonons = true
 phonon_only_relax = false
 T_start = 20.0
-T_end = 0.01
+T_end = 0.001
 T_zero = true
 n_deterministics = 1000
 annealing_steps = 50000
 cooling_rate = 0.9
-overrelaxation_rate = 5
+overrelaxation_rate = 0
 use_twist_boundary = false
 
 # ============================================
 # INITIALIZATION
 # ============================================
 
-# Start from random configuration (default)
+# Initial state file (spin_strain_config.txt format from SA/PT/GNEB)
+# If specified, loads both spins and strain from file
+# If empty, starts from random configuration with simulated annealing
+# Example: NCTO_triple_q_janssen/sample_0/spin_strain_config.txt
+initial_spin_config = 
+
+# Alternative: start from random configuration (default)
 # use_ferromagnetic_init = false
 # ferromagnetic_direction = 0,0,1

@@ -52,7 +52,7 @@ J3 = 0.0
 
 # Six-spin ring exchange (CRITICAL for triple-Q selection)
 # J7 < 0 selects triple-Q over single-Q zigzag
-J7 = 1.5                 # Try range: -0.5 to -3.0
+J7 = -0                 # Try range: -0.5 to -3.0
 
 # External magnetic field (zero for ground state search)
 field_strength = 0.0

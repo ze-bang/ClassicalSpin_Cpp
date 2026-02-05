@@ -2935,6 +2935,7 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
         save_spin_config(out_dir + "/spins.txt");
         save_spin_config_global(out_dir + "/spins_global.txt");
         save_strain_state(out_dir + "/strain.txt");
+        save_spin_strain_config(out_dir + "/spin_strain_config.txt");  // Combined for GNEB
         save_positions(out_dir + "/positions.txt");
     }
     
@@ -2965,7 +2966,7 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
             
             // Align spin PARALLEL to local field (minimizes energy)
             // H_eff = -∂H/∂Si, so Si should point along H_eff to minimize E = -Si·H_eff
-            spins[i] = local_field / norm * spin_length;
+            spins[i] = -local_field / norm * spin_length;
             count++;
         }
         
@@ -2996,6 +2997,85 @@ void StrainPhononLattice::load_spin_config(const string& filename) {
     ifstream file(filename);
     
     for (size_t i = 0; i < lattice_size; ++i) {
+        file >> spins[i](0) >> spins[i](1) >> spins[i](2);
+    }
+}
+
+void StrainPhononLattice::save_spin_strain_config(const string& filename) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    // Header with strain information
+    // Compute uniform Eg strain components (averaged over bond types)
+    double Eg1 = 0.0, Eg2 = 0.0;
+    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+        Eg1 += (strain.epsilon_xx[b] - strain.epsilon_yy[b]) / 2.0;
+        Eg2 += strain.epsilon_xy[b];
+    }
+    Eg1 /= StrainState::N_BONDS;
+    Eg2 /= StrainState::N_BONDS;
+    
+    file << "# Combined spin-strain configuration for GNEB\n";
+    file << "# strain_Eg1 = " << Eg1 << "\n";
+    file << "# strain_Eg2 = " << Eg2 << "\n";
+    file << "# n_sites = " << lattice_size << "\n";
+    file << "# Sx Sy Sz\n";
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        file << spins[i](0) << " " << spins[i](1) << " " << spins[i](2) << "\n";
+    }
+}
+
+void StrainPhononLattice::load_spin_strain_config(const string& filename) {
+    ifstream file(filename);
+    string line;
+    
+    double Eg1 = 0.0, Eg2 = 0.0;
+    bool found_Eg1 = false, found_Eg2 = false;
+    
+    // Parse header for strain values
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        
+        if (line[0] == '#') {
+            // Look for strain values in comments
+            if (line.find("strain_Eg1") != string::npos) {
+                size_t eq_pos = line.find('=');
+                if (eq_pos != string::npos) {
+                    Eg1 = std::stod(line.substr(eq_pos + 1));
+                    found_Eg1 = true;
+                }
+            } else if (line.find("strain_Eg2") != string::npos) {
+                size_t eq_pos = line.find('=');
+                if (eq_pos != string::npos) {
+                    Eg2 = std::stod(line.substr(eq_pos + 1));
+                    found_Eg2 = true;
+                }
+            }
+        } else {
+            // First non-comment line is spin data - rewind and read
+            break;
+        }
+    }
+    
+    // Apply uniform Eg strain if found
+    if (found_Eg1 || found_Eg2) {
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = Eg1;
+            strain.epsilon_yy[b] = -Eg1;
+            strain.epsilon_xy[b] = Eg2;
+        }
+        // Note: strain values are used directly in energy/field calculations,
+        // no separate update function needed
+    }
+    
+    // Parse spin data starting from current position
+    // First spin is in 'line'
+    std::istringstream first_iss(line);
+    first_iss >> spins[0](0) >> spins[0](1) >> spins[0](2);
+    
+    // Read remaining spins
+    for (size_t i = 1; i < lattice_size; ++i) {
         file >> spins[i](0) >> spins[i](1) >> spins[i](2);
     }
 }
@@ -3760,6 +3840,8 @@ void StrainPhononLattice::gather_and_save_statistics_comprehensive(int rank, int
             // Save spin configuration only if verbose mode is enabled
             if (verbose) {
                 save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
+                save_spin_strain_config(rank_dir + "/spin_strain_config.txt");  // Combined for GNEB
+                save_strain_state(rank_dir + "/strain.txt");
                 save_positions(rank_dir + "/positions.txt");
             }
         }
@@ -4371,6 +4453,128 @@ void StrainPhononLattice::set_spin_config(const vector<Eigen::Vector3d>& config)
         spins[i] = config[i];
         spins[i].normalize();
     }
+}
+
+// ============================================================
+// GNEB WITH STRAIN: Combined spin + strain configuration space
+// ============================================================
+
+double StrainPhononLattice::energy_for_gneb_with_strain(
+    const vector<Eigen::Vector3d>& spins_in,
+    double strain_Eg1, double strain_Eg2) const {
+    
+    // Save current state
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    StrainState original_strain = self->strain;
+    
+    // Set new configuration
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = spins_in[i];
+    }
+    
+    // Apply uniform Eg strain to all bond types
+    // Eg1 = (ε_xx - ε_yy)/2, Eg2 = ε_xy
+    // So: ε_xx = ε_Eg1, ε_yy = -ε_Eg1, ε_xy = ε_Eg2
+    for (size_t b = 0; b < 3; ++b) {
+        self->strain.epsilon_xx[b] = strain_Eg1;
+        self->strain.epsilon_yy[b] = -strain_Eg1;
+        self->strain.epsilon_xy[b] = strain_Eg2;
+    }
+    
+    // Compute total energy (spin + elastic + magnetoelastic)
+    double E = total_energy();
+    
+    // Restore original state
+    self->spins = original_spins;
+    self->strain = original_strain;
+    
+    return E;
+}
+
+std::tuple<vector<Eigen::Vector3d>, double, double>
+StrainPhononLattice::gradient_for_gneb_with_strain(
+    const vector<Eigen::Vector3d>& spins_in,
+    double strain_Eg1, double strain_Eg2) const {
+    
+    // Save current state
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    StrainState original_strain = self->strain;
+    
+    // Set new configuration
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = spins_in[i];
+    }
+    
+    // Apply strain
+    for (size_t b = 0; b < 3; ++b) {
+        self->strain.epsilon_xx[b] = strain_Eg1;
+        self->strain.epsilon_yy[b] = -strain_Eg1;
+        self->strain.epsilon_xy[b] = strain_Eg2;
+    }
+    
+    // Compute spin gradients: ∂E/∂S_i = -H_eff_i
+    vector<Eigen::Vector3d> grad_spins(lattice_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H_eff = get_local_field(i);
+        grad_spins[i] = -H_eff;
+    }
+    
+    // Compute strain gradients using finite differences
+    // (more robust than analytic for complex magnetoelastic coupling)
+    const double delta = 1e-5;
+    
+    // ∂E/∂ε_Eg1
+    double E_plus_Eg1 = energy_for_gneb_with_strain(spins_in, strain_Eg1 + delta, strain_Eg2);
+    double E_minus_Eg1 = energy_for_gneb_with_strain(spins_in, strain_Eg1 - delta, strain_Eg2);
+    double dE_dEg1 = (E_plus_Eg1 - E_minus_Eg1) / (2.0 * delta);
+    
+    // ∂E/∂ε_Eg2
+    double E_plus_Eg2 = energy_for_gneb_with_strain(spins_in, strain_Eg1, strain_Eg2 + delta);
+    double E_minus_Eg2 = energy_for_gneb_with_strain(spins_in, strain_Eg1, strain_Eg2 - delta);
+    double dE_dEg2 = (E_plus_Eg2 - E_minus_Eg2) / (2.0 * delta);
+    
+    // Restore original state
+    self->spins = original_spins;
+    self->strain = original_strain;
+    
+    return {grad_spins, dE_dEg1, dE_dEg2};
+}
+
+std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
+    const vector<Eigen::Vector3d>& spins_in,
+    size_t max_iter,
+    double tolerance) const {
+    
+    // Start from zero strain
+    double Eg1 = 0.0;
+    double Eg2 = 0.0;
+    
+    // Steepest descent with adaptive step size
+    double step = 0.01;
+    
+    for (size_t iter = 0; iter < max_iter; ++iter) {
+        auto [grad_spins, dE_dEg1, dE_dEg2] = gradient_for_gneb_with_strain(spins_in, Eg1, Eg2);
+        (void)grad_spins;  // Not needed for strain relaxation
+        
+        double force_norm = std::sqrt(dE_dEg1 * dE_dEg1 + dE_dEg2 * dE_dEg2);
+        
+        if (force_norm < tolerance) {
+            break;
+        }
+        
+        // Update strain (gradient descent)
+        Eg1 -= step * dE_dEg1;
+        Eg2 -= step * dE_dEg2;
+        
+        // Adaptive step size (simple backtracking would be better)
+        if (iter > 0 && iter % 100 == 0) {
+            step *= 0.9;
+        }
+    }
+    
+    return {Eg1, Eg2};
 }
 
 void StrainPhononLattice::init_zigzag_pattern(int direction) {

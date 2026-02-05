@@ -507,6 +507,138 @@ def read_all_samples(output_dir, n_samples=None):
 
 
 # ============================================================================
+# GNEB KINETIC BARRIER ANALYSIS
+# ============================================================================
+
+def read_mep_result(filepath):
+    """Read minimum energy path (MEP) result from GNEB.
+    
+    Args:
+        filepath: Path to mep_Q0.txt or similar MEP file
+        
+    Returns:
+        dict with keys: 'image', 'reaction_coord', 'energy', 'm_3Q', 'm_zigzag', 'f_Eg_amp'
+    """
+    data = np.loadtxt(filepath)
+    return {
+        'image': data[:, 0].astype(int),
+        'reaction_coord': data[:, 1],
+        's': data[:, 1],  # Alias
+        'energy': data[:, 2],
+        'm_3Q': data[:, 3],
+        'm_zigzag': data[:, 4],
+        'f_Eg_amp': data[:, 5]
+    }
+
+
+def read_barrier_evolution(filepath):
+    """Read barrier evolution vs phonon amplitude from GNEB.
+    
+    Args:
+        filepath: Path to barrier_evolution.txt
+        
+    Returns:
+        dict with keys: 'Q_Eg', 'Delta_E', 'E_saddle', 'E_initial', 'E_final'
+    """
+    data = np.loadtxt(filepath)
+    return {
+        'Q_Eg': data[:, 0],
+        'Q': data[:, 0],  # Alias
+        'Delta_E': data[:, 1],
+        'barrier': data[:, 1],  # Alias
+        'E_saddle': data[:, 2],
+        'E_initial': data[:, 3],
+        'E_final': data[:, 4]
+    }
+
+
+def read_barrier_summary(filepath):
+    """Read barrier analysis summary.
+    
+    Args:
+        filepath: Path to barrier_summary.txt
+        
+    Returns:
+        dict with summary statistics
+    """
+    summary = {}
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('#') or not line or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            
+            # Try to convert to appropriate type
+            if value in ['true', 'True', 'TRUE']:
+                summary[key] = True
+            elif value in ['false', 'False', 'FALSE']:
+                summary[key] = False
+            else:
+                try:
+                    summary[key] = float(value)
+                except ValueError:
+                    summary[key] = value
+    return summary
+
+
+def read_gneb_results(sample_dir):
+    """Read all GNEB kinetic barrier analysis results from a sample directory.
+    
+    Args:
+        sample_dir: Path to sample directory (e.g., 'NCTO_Eg_kinetic_barrier/sample_0')
+        
+    Returns:
+        dict containing:
+        - 'mep': MEP energy and order parameters at Q=0
+        - 'barrier_evolution': Barrier vs phonon amplitude
+        - 'summary': Summary statistics
+        - 'initial_state': Initial spin configuration
+        - 'final_state': Final spin configuration
+    """
+    result = {}
+    
+    # Read MEP at Q=0
+    mep_file = os.path.join(sample_dir, 'mep_Q0.txt')
+    if os.path.exists(mep_file):
+        result['mep'] = read_mep_result(mep_file)
+        print(f"  Loaded MEP with {len(result['mep']['image'])} images")
+    else:
+        print(f"  Warning: MEP file not found: {mep_file}")
+        result['mep'] = None
+    
+    # Read barrier evolution
+    barrier_file = os.path.join(sample_dir, 'barrier_evolution.txt')
+    if os.path.exists(barrier_file):
+        result['barrier_evolution'] = read_barrier_evolution(barrier_file)
+        print(f"  Loaded barrier evolution with {len(result['barrier_evolution']['Q'])} Q points")
+    else:
+        print(f"  Warning: Barrier evolution file not found: {barrier_file}")
+        result['barrier_evolution'] = None
+    
+    # Read summary
+    summary_file = os.path.join(sample_dir, 'barrier_summary.txt')
+    if os.path.exists(summary_file):
+        result['summary'] = read_barrier_summary(summary_file)
+        print(f"  Loaded barrier summary")
+    else:
+        result['summary'] = {}
+    
+    # Read initial and final states
+    initial_file = os.path.join(sample_dir, 'triple_q_state.txt')
+    if os.path.exists(initial_file):
+        result['initial_state'] = read_spin_config(initial_file)
+        
+    final_file = os.path.join(sample_dir, 'zigzag_state.txt')
+    if os.path.exists(final_file):
+        result['final_state'] = read_spin_config(final_file)
+    
+    return result
+
+
+# ============================================================================
 # ANALYSIS FUNCTIONS
 # ============================================================================
 
@@ -1555,6 +1687,331 @@ def plot_pump_response(result, t_window=(-5, 50), output_file=None):
 
 
 # ============================================================================
+# GNEB KINETIC BARRIER PLOTTING
+# ============================================================================
+
+def plot_mep_energy_profile(gneb_result, output_file=None):
+    """Plot energy profile along the minimum energy path.
+    
+    Args:
+        gneb_result: Dictionary from read_gneb_results
+        output_file: Path to save figure (None = display)
+    """
+    if not HAS_MATPLOTLIB:
+        print("Error: matplotlib not available")
+        return
+    
+    if gneb_result['mep'] is None:
+        print("Error: No MEP data available")
+        return
+    
+    mep = gneb_result['mep']
+    summary = gneb_result.get('summary', {})
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    s = mep['reaction_coord']
+    E = mep['energy']
+    
+    # Plot energy profile
+    ax.plot(s, E, 'b-o', linewidth=2, markersize=4, label='E(s)')
+    
+    # Mark initial, saddle, and final points
+    ax.plot(s[0], E[0], 'go', markersize=10, label='Initial (triple-Q)')
+    ax.plot(s[-1], E[-1], 'ro', markersize=10, label='Final (zigzag)')
+    
+    # Mark saddle point if available
+    if 'saddle_image' in summary:
+        saddle_idx = int(summary['saddle_image'])
+        if saddle_idx < len(s):
+            ax.plot(s[saddle_idx], E[saddle_idx], 'ms', markersize=12, 
+                   label=f'Saddle (image {saddle_idx})')
+            
+            # Draw barrier arrow
+            barrier = summary.get('barrier_Q0', E[saddle_idx] - E[0])
+            ax.annotate('', xy=(s[saddle_idx], E[saddle_idx]), 
+                       xytext=(s[saddle_idx], E[0]),
+                       arrowprops=dict(arrowstyle='<->', color='red', lw=2))
+            ax.text(s[saddle_idx] + 0.05, (E[saddle_idx] + E[0])/2, 
+                   f'ΔE = {barrier:.2f}',
+                   fontsize=12, color='red', weight='bold')
+    
+    ax.set_xlabel('Reaction Coordinate s', fontsize=14)
+    ax.set_ylabel('Energy', fontsize=14)
+    ax.set_title('Minimum Energy Path (Q=0)', fontsize=16, weight='bold')
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved MEP energy profile to {output_file}")
+    else:
+        plt.show()
+
+
+def plot_mep_order_parameters(gneb_result, output_file=None):
+    """Plot order parameters along the minimum energy path.
+    
+    Args:
+        gneb_result: Dictionary from read_gneb_results
+        output_file: Path to save figure (None = display)
+    """
+    if not HAS_MATPLOTLIB:
+        print("Error: matplotlib not available")
+        return
+    
+    if gneb_result['mep'] is None:
+        print("Error: No MEP data available")
+        return
+    
+    mep = gneb_result['mep']
+    summary = gneb_result.get('summary', {})
+    
+    fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
+    
+    s = mep['reaction_coord']
+    
+    # Triple-Q order parameter
+    axes[0].plot(s, mep['m_3Q'], 'b-o', linewidth=2, markersize=3)
+    axes[0].set_ylabel('m_3Q', fontsize=12)
+    axes[0].grid(True, alpha=0.3)
+    axes[0].set_title('Order Parameters Along MEP', fontsize=14, weight='bold')
+    
+    # Zigzag order parameter
+    axes[1].plot(s, mep['m_zigzag'], 'r-o', linewidth=2, markersize=3)
+    axes[1].set_ylabel('m_zigzag', fontsize=12)
+    axes[1].grid(True, alpha=0.3)
+    
+    # E_g amplitude
+    axes[2].plot(s, mep['f_Eg_amp'], 'g-o', linewidth=2, markersize=3)
+    axes[2].set_ylabel('|f_Eg|', fontsize=12)
+    axes[2].set_xlabel('Reaction Coordinate s', fontsize=14)
+    axes[2].grid(True, alpha=0.3)
+    
+    # Mark saddle point on all panels
+    if 'saddle_image' in summary:
+        saddle_idx = int(summary['saddle_image'])
+        if saddle_idx < len(s):
+            for ax in axes:
+                ax.axvline(s[saddle_idx], color='magenta', linestyle='--', 
+                          linewidth=2, alpha=0.7, label='Saddle')
+            axes[0].legend(fontsize=10)
+    
+    plt.tight_layout()
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved MEP order parameters to {output_file}")
+    else:
+        plt.show()
+
+
+def plot_barrier_evolution(gneb_result, output_file=None):
+    """Plot barrier height evolution vs phonon amplitude.
+    
+    Args:
+        gneb_result: Dictionary from read_gneb_results
+        output_file: Path to save figure (None = display)
+    """
+    if not HAS_MATPLOTLIB:
+        print("Error: matplotlib not available")
+        return
+    
+    if gneb_result['barrier_evolution'] is None:
+        print("Error: No barrier evolution data available")
+        return
+    
+    barrier = gneb_result['barrier_evolution']
+    summary = gneb_result.get('summary', {})
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
+    
+    Q = barrier['Q']
+    Delta_E = barrier['barrier']
+    
+    # Barrier height vs Q
+    ax1.plot(Q, Delta_E, 'b-o', linewidth=2, markersize=4)
+    ax1.set_ylabel('Barrier Height ΔE', fontsize=14)
+    ax1.set_title('Kinetic Barrier Evolution Under E$_g$ Phonon Drive', 
+                  fontsize=16, weight='bold')
+    ax1.grid(True, alpha=0.3)
+    
+    # Mark spinodal point if found
+    if 'spinodal_Q' in summary and summary['spinodal_Q'] > 0:
+        Q_spinodal = summary['spinodal_Q']
+        ax1.axvline(Q_spinodal, color='red', linestyle='--', linewidth=2,
+                   label=f'Spinodal Q$_c$ = {Q_spinodal:.3f}')
+        ax1.axhline(0, color='gray', linestyle=':', linewidth=1)
+        ax1.legend(fontsize=12)
+    
+    # Annotate Q=0 barrier
+    if len(Q) > 0:
+        ax1.plot(Q[0], Delta_E[0], 'go', markersize=10, zorder=5)
+        ax1.text(Q[0] + 0.05, Delta_E[0], 
+                f'ΔE(Q=0) = {Delta_E[0]:.2f}',
+                fontsize=11, color='green', weight='bold')
+    
+    # Energy levels
+    ax2.plot(Q, barrier['E_initial'], 'g-', linewidth=2, label='E$_{initial}$ (triple-Q)')
+    ax2.plot(Q, barrier['E_saddle'], 'm-', linewidth=2, label='E$_{saddle}$')
+    ax2.plot(Q, barrier['E_final'], 'r-', linewidth=2, label='E$_{final}$ (zigzag)')
+    ax2.fill_between(Q, barrier['E_initial'], barrier['E_saddle'], 
+                     alpha=0.2, color='blue', label='Barrier')
+    ax2.set_xlabel('Phonon Amplitude Q$_{Eg}$', fontsize=14)
+    ax2.set_ylabel('Energy', fontsize=14)
+    ax2.legend(fontsize=11)
+    ax2.grid(True, alpha=0.3)
+    
+    # Mark spinodal on energy plot too
+    if 'spinodal_Q' in summary and summary['spinodal_Q'] > 0:
+        ax2.axvline(summary['spinodal_Q'], color='red', linestyle='--', linewidth=2)
+    
+    plt.tight_layout()
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved barrier evolution to {output_file}")
+    else:
+        plt.show()
+
+
+def plot_gneb_summary(gneb_result, output_file=None):
+    """Plot comprehensive summary of GNEB kinetic barrier analysis.
+    
+    Args:
+        gneb_result: Dictionary from read_gneb_results
+        output_file: Path to save figure (None = display)
+    """
+    if not HAS_MATPLOTLIB:
+        print("Error: matplotlib not available")
+        return
+    
+    fig = plt.figure(figsize=(16, 10))
+    gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.3)
+    
+    # Top left: Energy profile along MEP
+    ax1 = fig.add_subplot(gs[0, 0])
+    if gneb_result['mep'] is not None:
+        mep = gneb_result['mep']
+        summary = gneb_result.get('summary', {})
+        
+        s = mep['reaction_coord']
+        E = mep['energy']
+        ax1.plot(s, E, 'b-o', linewidth=2, markersize=4)
+        ax1.plot(s[0], E[0], 'go', markersize=10, label='Initial')
+        ax1.plot(s[-1], E[-1], 'ro', markersize=10, label='Final')
+        
+        if 'saddle_image' in summary:
+            saddle_idx = int(summary['saddle_image'])
+            if saddle_idx < len(s):
+                ax1.plot(s[saddle_idx], E[saddle_idx], 'ms', markersize=12, label='Saddle')
+        
+        ax1.set_xlabel('Reaction Coordinate s')
+        ax1.set_ylabel('Energy')
+        ax1.set_title('Energy Profile Along MEP', weight='bold')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+    
+    # Top right: Order parameters
+    ax2 = fig.add_subplot(gs[0, 1])
+    if gneb_result['mep'] is not None:
+        mep = gneb_result['mep']
+        s = mep['reaction_coord']
+        
+        ax2.plot(s, mep['m_3Q'], 'b-', linewidth=2, label='m$_{3Q}$')
+        ax2.plot(s, mep['m_zigzag'], 'r-', linewidth=2, label='m$_{zigzag}$')
+        ax2_twin = ax2.twinx()
+        ax2_twin.plot(s, mep['f_Eg_amp'], 'g-', linewidth=2, label='|f$_{Eg}$|', alpha=0.7)
+        
+        ax2.set_xlabel('Reaction Coordinate s')
+        ax2.set_ylabel('m$_{3Q}$, m$_{zigzag}$', color='black')
+        ax2_twin.set_ylabel('|f$_{Eg}$|', color='green')
+        ax2.set_title('Order Parameters Along MEP', weight='bold')
+        
+        # Combine legends
+        lines1, labels1 = ax2.get_legend_handles_labels()
+        lines2, labels2 = ax2_twin.get_legend_handles_labels()
+        ax2.legend(lines1 + lines2, labels1 + labels2, loc='best')
+        ax2.grid(True, alpha=0.3)
+    
+    # Bottom left: Barrier evolution
+    ax3 = fig.add_subplot(gs[1, 0])
+    if gneb_result['barrier_evolution'] is not None:
+        barrier = gneb_result['barrier_evolution']
+        summary = gneb_result.get('summary', {})
+        
+        Q = barrier['Q']
+        Delta_E = barrier['barrier']
+        ax3.plot(Q, Delta_E, 'b-o', linewidth=2, markersize=4)
+        ax3.axhline(0, color='gray', linestyle=':', linewidth=1)
+        
+        if 'spinodal_Q' in summary and summary['spinodal_Q'] > 0:
+            Q_spinodal = summary['spinodal_Q']
+            ax3.axvline(Q_spinodal, color='red', linestyle='--', linewidth=2,
+                       label=f'Q$_c$ = {Q_spinodal:.3f}')
+            ax3.legend()
+        
+        ax3.set_xlabel('Phonon Amplitude Q$_{Eg}$')
+        ax3.set_ylabel('Barrier Height ΔE')
+        ax3.set_title('Barrier vs Phonon Amplitude', weight='bold')
+        ax3.grid(True, alpha=0.3)
+    
+    # Bottom right: Summary text
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.axis('off')
+    
+    if gneb_result.get('summary'):
+        summary = gneb_result['summary']
+        summary_text = 'GNEB Analysis Summary\\n'
+        summary_text += '='*40 + '\\n\\n'
+        
+        if 'barrier_Q0' in summary:
+            summary_text += f"Barrier at Q=0: {summary['barrier_Q0']:.4f}\\n"
+        if 'spinodal_Q' in summary:
+            if summary['spinodal_Q'] > 0:
+                summary_text += f"Spinodal point: Q_c = {summary['spinodal_Q']:.4f}\\n"
+            else:
+                summary_text += f"Spinodal point: Not found\\n"
+        if 'gneb_iterations' in summary:
+            summary_text += f"GNEB iterations: {int(summary['gneb_iterations'])}\\n"
+        if 'gneb_converged' in summary:
+            converged = 'Yes' if summary['gneb_converged'] else 'No'
+            summary_text += f"Converged: {converged}\\n"
+        if 'saddle_image' in summary:
+            summary_text += f"Saddle image: {int(summary['saddle_image'])}\\n"
+        
+        summary_text += '\\nInitial State (triple-Q):\\n'
+        if 'initial_m_3Q' in summary:
+            summary_text += f"  m_3Q = {summary['initial_m_3Q']:.4f}\\n"
+        if 'initial_m_zigzag' in summary:
+            summary_text += f"  m_zigzag = {summary['initial_m_zigzag']:.4f}\\n"
+        if 'initial_f_Eg_amp' in summary:
+            summary_text += f"  |f_Eg| = {summary['initial_f_Eg_amp']:.4f}\\n"
+        
+        summary_text += '\\nFinal State (zigzag):\\n'
+        if 'final_m_3Q' in summary:
+            summary_text += f"  m_3Q = {summary['final_m_3Q']:.4f}\\n"
+        if 'final_m_zigzag' in summary:
+            summary_text += f"  m_zigzag = {summary['final_m_zigzag']:.4f}\\n"
+        if 'final_f_Eg_amp' in summary:
+            summary_text += f"  |f_Eg| = {summary['final_f_Eg_amp']:.4f}\\n"
+        
+        ax4.text(0.1, 0.9, summary_text, transform=ax4.transAxes,
+                fontsize=11, verticalalignment='top', family='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
+    fig.suptitle('GNEB Kinetic Barrier Analysis', fontsize=18, weight='bold', y=0.98)
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved GNEB summary to {output_file}")
+    else:
+        plt.show()
+
+
+# ============================================================================
 # SPIN CONFIGURATION ANIMATION
 # ============================================================================
 
@@ -1858,8 +2315,8 @@ def main():
         description='Analyze StrainPhononLattice simulation data')
     parser.add_argument('directory', type=str,
                         help='Path to sample directory or output directory')
-    parser.add_argument('--mode', choices=['pp', 'md', 'all', 'static'], default='pp',
-                        help='Analysis mode: pp=pump-probe, md=MD, all=all samples, static=spin config + structure factor')
+    parser.add_argument('--mode', choices=['pp', 'md', 'all', 'static', 'gneb'], default='pp',
+                        help='Analysis mode: pp=pump-probe, md=MD, all=all samples, static=spin config + structure factor, gneb=kinetic barrier')
     parser.add_argument('--plot', action='store_true',
                         help='Generate plots')
     parser.add_argument('--spectrum', action='store_true',
@@ -2040,6 +2497,11 @@ def main():
         
         return
     
+    elif args.mode == 'gneb':
+        # GNEB kinetic barrier analysis mode
+        process_gneb_mode(args)
+        return
+    
     # Determine sample directory
     if os.path.exists(os.path.join(args.directory, 'magnetization.txt')):
         # Direct sample directory
@@ -2117,6 +2579,120 @@ def main():
             if args.output:
                 output_file = f"{args.output}_snapshot_t{args.snapshot}.png"
             plot_spin_snapshot(result, time_index=args.snapshot, output_file=output_file)
+
+
+def process_gneb_mode(args):
+    """Process GNEB kinetic barrier analysis mode."""
+    print(f"\n{'='*70}")
+    print("GNEB Kinetic Barrier Analysis")
+    print(f"{'='*70}")
+    
+    # Determine sample directory
+    if os.path.exists(os.path.join(args.directory, 'mep_Q0.txt')):
+        # Direct sample directory
+        sample_dir = args.directory
+    else:
+        # Output directory with samples
+        sample_dir = os.path.join(args.directory, f'sample_{args.sample}')
+    
+    if not os.path.exists(sample_dir):
+        print(f"Error: Directory not found: {sample_dir}")
+        print("Expected to find GNEB output files:")
+        print("  - mep_Q0.txt")
+        print("  - barrier_evolution.txt")
+        print("  - barrier_summary.txt")
+        return
+    
+    # Read GNEB results
+    print(f"\\nReading GNEB results from {sample_dir}...")
+    gneb_result = read_gneb_results(sample_dir)
+    
+    if gneb_result['mep'] is None and gneb_result['barrier_evolution'] is None:
+        print("\\nError: No GNEB data found in directory")
+        print("Expected files: mep_Q0.txt, barrier_evolution.txt")
+        return
+    
+    # Print summary
+    print(f"\\n{'-'*70}")
+    print("Summary Statistics")
+    print(f"{'-'*70}")
+    if gneb_result.get('summary'):
+        summary = gneb_result['summary']
+        
+        if 'barrier_Q0' in summary:
+            print(f"Barrier at Q=0:        {summary['barrier_Q0']:.4f}")
+        if 'spinodal_Q' in summary:
+            if summary['spinodal_Q'] > 0:
+                print(f"Spinodal point Q_c:    {summary['spinodal_Q']:.4f}")
+                print(f"  → Barrier vanishes at Q > {summary['spinodal_Q']:.4f}")
+                print(f"  → Deterministic switching possible!")
+            else:
+                print(f"Spinodal point Q_c:    Not found")
+                print(f"  → Barrier remains positive at Q_max")
+        if 'gneb_converged' in summary:
+            converged = 'Yes' if summary['gneb_converged'] else 'No'
+            print(f"GNEB converged:        {converged}")
+        if 'gneb_iterations' in summary:
+            print(f"GNEB iterations:       {int(summary['gneb_iterations'])}")
+        if 'saddle_image' in summary:
+            print(f"Saddle image index:    {int(summary['saddle_image'])}")
+        
+        print(f"\\n{'-'*70}")
+        print("Initial State (triple-Q)")
+        print(f"{'-'*70}")
+        if 'initial_m_3Q' in summary:
+            print(f"m_3Q       = {summary['initial_m_3Q']:.4f}")
+        if 'initial_m_zigzag' in summary:
+            print(f"m_zigzag   = {summary['initial_m_zigzag']:.4f}")
+        if 'initial_f_Eg_amp' in summary:
+            print(f"|f_Eg|     = {summary['initial_f_Eg_amp']:.4f}")
+        
+        print(f"\\n{'-'*70}")
+        print("Final State (zigzag)")
+        print(f"{'-'*70}")
+        if 'final_m_3Q' in summary:
+            print(f"m_3Q       = {summary['final_m_3Q']:.4f}")
+        if 'final_m_zigzag' in summary:
+            print(f"m_zigzag   = {summary['final_m_zigzag']:.4f}")
+        if 'final_f_Eg_amp' in summary:
+            print(f"|f_Eg|     = {summary['final_f_Eg_amp']:.4f}")
+    
+    # Generate plots
+    if args.plot or args.output:
+        print(f"\\n{'='*70}")
+        print("Generating Plots")
+        print(f"{'='*70}")
+        
+        output_dir = args.output if args.output else '.'
+        if args.output and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # Comprehensive summary
+        summary_file = os.path.join(output_dir, 'gneb_summary.png') if args.output else None
+        print("  - Comprehensive summary plot...")
+        plot_gneb_summary(gneb_result, output_file=summary_file)
+        
+        # Individual plots
+        if gneb_result['mep'] is not None:
+            energy_file = os.path.join(output_dir, 'mep_energy_profile.png') if args.output else None
+            print("  - MEP energy profile...")
+            plot_mep_energy_profile(gneb_result, output_file=energy_file)
+            
+            order_file = os.path.join(output_dir, 'mep_order_parameters.png') if args.output else None
+            print("  - MEP order parameters...")
+            plot_mep_order_parameters(gneb_result, output_file=order_file)
+        
+        if gneb_result['barrier_evolution'] is not None:
+            barrier_file = os.path.join(output_dir, 'barrier_evolution.png') if args.output else None
+            print("  - Barrier evolution...")
+            plot_barrier_evolution(gneb_result, output_file=barrier_file)
+        
+        if args.output:
+            print(f"\\nAll plots saved to {output_dir}/")
+    
+    print(f"\\n{'='*70}")
+    print("Analysis Complete")
+    print(f"{'='*70}\\n")
 
 
 if __name__ == '__main__':

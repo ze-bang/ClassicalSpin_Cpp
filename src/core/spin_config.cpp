@@ -301,6 +301,40 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "use_mpi") {
                 config.use_mpi = parse_bool(value);
             }
+            // GNEB kinetic barrier analysis parameters
+            else if (key == "gneb_n_images") {
+                config.gneb_n_images = stoull(value);
+            }
+            else if (key == "gneb_spring_constant") {
+                config.gneb_spring_constant = stod(value);
+            }
+            else if (key == "gneb_max_iterations") {
+                config.gneb_max_iterations = stoull(value);
+            }
+            else if (key == "gneb_force_tolerance") {
+                config.gneb_force_tolerance = stod(value);
+            }
+            else if (key == "gneb_use_climbing_image") {
+                config.gneb_use_climbing_image = parse_bool(value);
+            }
+            else if (key == "gneb_climbing_threshold") {
+                config.gneb_climbing_threshold = stod(value);
+            }
+            else if (key == "gneb_analysis_steps") {
+                config.gneb_analysis_steps = stoull(value);
+            }
+            else if (key == "gneb_phonon_amplitude_max") {
+                config.gneb_phonon_amplitude_max = stod(value);
+            }
+            else if (key == "gneb_save_path_evolution") {
+                config.gneb_save_path_evolution = parse_bool(value);
+            }
+            else if (key == "gneb_initial_state_file") {
+                config.gneb_initial_state_file = value;
+            }
+            else if (key == "gneb_final_state_file") {
+                config.gneb_final_state_file = value;
+            }
             else {
                 // Treat as Hamiltonian parameter
                 config.hamiltonian_params[key] = stod(value);

@@ -981,6 +981,19 @@ public:
     void load_spin_config(const string& filename);
     void save_strain_state(const string& filename) const;
     void save_positions(const string& filename) const;
+    
+    /**
+     * Save combined (spin, strain) configuration for GNEB
+     * Format includes both spin vectors and Eg strain components
+     */
+    void save_spin_strain_config(const string& filename) const;
+    
+    /**
+     * Load combined (spin, strain) configuration for GNEB
+     * Reads both spin vectors and Eg strain components
+     */
+    void load_spin_strain_config(const string& filename);
+    
     void save_trajectory_txt(const string& output_dir,
                              const vector<double>& times,
                              const vector<Eigen::Vector3d>& M_traj,
@@ -1058,6 +1071,57 @@ public:
      * Set spins from a GNEB-style configuration vector
      */
     void set_spin_config(const vector<Eigen::Vector3d>& config);
+    
+    // ============================================================
+    // GNEB WITH STRAIN: Combined spin + strain configuration space
+    // ============================================================
+    
+    /**
+     * Compute total energy for GNEB with strain degrees of freedom
+     * E(spins, ε_Eg1, ε_Eg2) = E_spin(spins; ε) + E_elastic(ε)
+     * 
+     * The strain is applied uniformly to all bond types.
+     * 
+     * @param spins      Spin configuration (N unit vectors)
+     * @param strain_Eg1 Eg1 strain component (ε_xx - ε_yy)/2
+     * @param strain_Eg2 Eg2 strain component (ε_xy)
+     * @return Total energy including spin-strain coupling
+     */
+    double energy_for_gneb_with_strain(const vector<Eigen::Vector3d>& spins,
+                                        double strain_Eg1, double strain_Eg2) const;
+    
+    /**
+     * Compute gradients for GNEB with strain
+     * Returns (∂E/∂S_i, ∂E/∂ε_Eg1, ∂E/∂ε_Eg2)
+     * 
+     * The spin gradients are the standard effective field gradients.
+     * The strain gradients come from elastic + magnetoelastic contributions.
+     * 
+     * @param spins       Spin configuration
+     * @param strain_Eg1  Eg1 strain
+     * @param strain_Eg2  Eg2 strain
+     * @return Tuple of (spin_gradients, dE/dε_Eg1, dE/dε_Eg2)
+     */
+    std::tuple<vector<Eigen::Vector3d>, double, double>
+    gradient_for_gneb_with_strain(const vector<Eigen::Vector3d>& spins,
+                                   double strain_Eg1, double strain_Eg2) const;
+    
+    /**
+     * Relax strain at fixed spin configuration
+     * Finds ε* = argmin_ε E(spins, ε)
+     * 
+     * This is useful for finding equilibrium strain for a given spin state,
+     * e.g., to set up initial/final states for GNEB.
+     * 
+     * @param spins       Fixed spin configuration
+     * @param max_iter    Maximum optimization iterations
+     * @param tolerance   Convergence tolerance for strain force
+     * @return Pair of (ε_Eg1*, ε_Eg2*) at equilibrium
+     */
+    std::pair<double, double> relax_strain_at_fixed_spins(
+        const vector<Eigen::Vector3d>& spins,
+        size_t max_iter = 1000,
+        double tolerance = 1e-6) const;
     
     /**
      * Initialize spins to a zigzag pattern

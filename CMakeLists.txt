@@ -230,6 +230,7 @@ set(CORE_SOURCES
     src/core/phonon_lattice.cpp
     src/core/strain_phonon_lattice.cpp
     src/core/gneb.cpp
+    src/core/gneb_strain.cpp
 )
 
 if(ENABLE_CUDA)
