@@ -3037,9 +3037,7 @@ public:
 #endif
                 
                 // Save spin configuration only if verbose mode is enabled
-                if (verbose) {
-                    save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
-                }
+                save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
             }
             
             // Wait for all ranks to finish writing before rank 0 writes aggregated results
