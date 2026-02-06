@@ -4542,11 +4542,12 @@ public:
                     for (size_t l = 0; l < N_atoms; ++l) {
                         size_t current_site_index = flatten_index(i, j, k, l);
                         
-                        // Transform spin to global frame using sublattice frame
+                        // Transform spin to global frame: spin_global = R * spin_local
+                        // where R = sublattice_frames[l] has columns [x_local | y_local | z_local]
                         SpinVector spin_global = SpinVector::Zero(spin_dim);
                         for (size_t mu = 0; mu < spin_dim; ++mu) {
                             for (size_t nu = 0; nu < spin_dim; ++nu) {
-                                spin_global(mu) += sublattice_frames[l](nu, mu) * spins[current_site_index](nu);
+                                spin_global(mu) += sublattice_frames[l](mu, nu) * spins[current_site_index](nu);
                             }
                         }
                         M += spin_global;
@@ -4574,10 +4575,11 @@ public:
             size_t atom = i % N_atoms;
             size_t idx = i * spin_dim;
             
-            // Transform to global frame using sublattice frame
+            // Transform to global frame: spin_global = R * spin_local
+            // where R = sublattice_frames[atom] has columns [x_local | y_local | z_local]
             for (size_t mu = 0; mu < spin_dim; ++mu) {
                 for (size_t nu = 0; nu < spin_dim; ++nu) {
-                    M_global_arr[mu] += sublattice_frames[atom](nu, mu) * x[idx + nu];
+                    M_global_arr[mu] += sublattice_frames[atom](mu, nu) * x[idx + nu];
                 }
             }
         }
