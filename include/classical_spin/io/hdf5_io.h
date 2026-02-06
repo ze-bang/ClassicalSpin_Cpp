@@ -1890,6 +1890,8 @@ public:
      */
     void write_observables(double energy_mean, double energy_error,
                           double specific_heat_mean, double specific_heat_error,
+                          const std::vector<double>& magnetization_means,
+                          const std::vector<double>& magnetization_errors,
                           const std::vector<std::vector<double>>& sublattice_mag_means,
                           const std::vector<std::vector<double>>& sublattice_mag_errors,
                           const std::vector<std::vector<double>>& energy_cross_means,
@@ -1899,6 +1901,12 @@ public:
         write_double_dataset(observables_group_, "energy_error", energy_error);
         write_double_dataset(observables_group_, "specific_heat_mean", specific_heat_mean);
         write_double_dataset(observables_group_, "specific_heat_error", specific_heat_error);
+        
+        // Write total magnetization
+        if (!magnetization_means.empty()) {
+            write_vector_dataset(observables_group_, "magnetization_mean", magnetization_means);
+            write_vector_dataset(observables_group_, "magnetization_error", magnetization_errors);
+        }
         
         // Write sublattice magnetization means and errors
         for (size_t alpha = 0; alpha < n_sublattices_; ++alpha) {

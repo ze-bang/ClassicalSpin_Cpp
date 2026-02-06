@@ -112,6 +112,7 @@ struct ThermodynamicObservables {
     double temperature;
     Observable energy;                      // <E>/N
     Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
+    VectorObservable magnetization;         // <M> = <Σ_i S_i> / N (total magnetization per site)
     vector<VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
     vector<VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α> for each sublattice
 };
@@ -1364,6 +1365,28 @@ public:
         obs.energy.value = E_result.mean;
         obs.energy.error = E_result.error;
         
+        // 1b. Total magnetization per site with binning analysis
+        //     M = (1/N) Σ_α Σ_i∈α S_i = (1/N_atoms) Σ_α M_α
+        if (!sublattice_mags.empty() && !sublattice_mags[0].empty()) {
+            size_t sdim = sublattice_mags[0][0].size();
+            size_t n_sublattices = sublattice_mags[0].size();
+            obs.magnetization = VectorObservable(sdim);
+            
+            for (size_t d = 0; d < sdim; ++d) {
+                vector<double> M_total_d(n_samples);
+                for (size_t i = 0; i < n_samples; ++i) {
+                    double M_sum = 0.0;
+                    for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+                        M_sum += sublattice_mags[i][alpha](d);
+                    }
+                    M_total_d[i] = M_sum / double(n_sublattices);
+                }
+                BinningResult M_result = binning_analysis(M_total_d);
+                obs.magnetization.values[d] = M_result.mean;
+                obs.magnetization.errors[d] = M_result.error;
+            }
+        }
+        
         // 2. Specific heat per site: c_V = Var(E) / (T² N²) = Var(E/N) / T²
         //    Since E is extensive (E ~ N), Var(E) ~ N², so c_V ~ O(1)
         //    Error propagation via jackknife on binned data
@@ -1550,6 +1573,13 @@ public:
         
         summary_file << "energy_per_site " << obs.energy.value << " " << obs.energy.error << endl;
         summary_file << "specific_heat " << obs.specific_heat.value << " " << obs.specific_heat.error << endl;
+        
+        // Save total magnetization
+        for (size_t d = 0; d < obs.magnetization.values.size(); ++d) {
+            summary_file << "magnetization_" << d << " " 
+                        << obs.magnetization.values[d] << " " 
+                        << obs.magnetization.errors[d] << endl;
+        }
         summary_file.close();
         
         // Save sublattice magnetizations
@@ -1592,6 +1622,12 @@ public:
         
         cout << "<E>/N = " << obs.energy.value << " ± " << obs.energy.error << endl;
         cout << "C_V   = " << obs.specific_heat.value << " ± " << obs.specific_heat.error << endl;
+        
+        cout << "\nTotal magnetization <M>/N:" << endl;
+        for (size_t d = 0; d < obs.magnetization.values.size(); ++d) {
+            cout << "  M_" << d << " = " << obs.magnetization.values[d] 
+                 << " ± " << obs.magnetization.errors[d] << endl;
+        }
         
         cout << "\nSublattice magnetizations:" << endl;
         for (size_t alpha = 0; alpha < obs.sublattice_magnetization.size(); ++alpha) {
@@ -1659,9 +1695,10 @@ public:
             energy_cross_errors[alpha] = obs.energy_sublattice_cross[alpha].errors;
         }
         
-        // Write observables
+        // Write observables (including total magnetization)
         writer.write_observables(obs.energy.value, obs.energy.error,
                                 obs.specific_heat.value, obs.specific_heat.error,
+                                obs.magnetization.values, obs.magnetization.errors,
                                 sublattice_mag_means, sublattice_mag_errors,
                                 energy_cross_means, energy_cross_errors);
         

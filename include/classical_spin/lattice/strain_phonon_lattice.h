@@ -376,6 +376,7 @@ struct SPL_ThermodynamicObservables {
     double temperature;
     SPL_Observable energy;                      // <E>/N
     SPL_Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
+    SPL_VectorObservable magnetization;         // Total magnetization <M>
     vector<SPL_VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
     vector<SPL_VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α>
 };
