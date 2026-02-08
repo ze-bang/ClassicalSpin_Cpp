@@ -158,6 +158,12 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pt_ranks_per_point") {
                 config.pt_ranks_per_point = stoi(value);
             }
+            else if (key == "pt_accumulate_correlations") {
+                config.pt_accumulate_correlations = parse_bool(value);
+            }
+            else if (key == "pt_n_bond_types") {
+                config.pt_n_bond_types = stoull(value);
+            }
             // Optimized temperature grid parameters (Bittner et al.)
             else if (key == "pt_optimize_temperatures") {
                 config.pt_optimize_temperatures = parse_bool(value);

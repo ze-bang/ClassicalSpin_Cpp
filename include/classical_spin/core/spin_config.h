@@ -101,6 +101,8 @@ struct SpinConfig {
     size_t probe_rate = 2000;
     vector<int> ranks_to_write = {0};
     int pt_ranks_per_point = 0;  // Number of MPI ranks per sweep point for parallel tempering (0 = auto)
+    bool pt_accumulate_correlations = false;  // Accumulate real-space correlations for S(q)
+    size_t pt_n_bond_types = 3;               // Number of bond types for dimer correlations
     
     // Optimized temperature grid parameters (Bittner et al., Phys. Rev. Lett. 101, 130603 (2008))
     bool pt_optimize_temperatures = true;          // Use feedback-optimized temperature grid

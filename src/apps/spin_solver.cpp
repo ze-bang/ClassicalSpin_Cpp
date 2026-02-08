@@ -179,7 +179,10 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             trial_dir,
             config.ranks_to_write,
             config.gaussian_move,
-            comm
+            comm,
+            false,  // verbose
+            config.pt_accumulate_correlations,
+            config.pt_n_bond_types
         );
         
         // T=0 deterministic quench for coldest replica (rank 0)

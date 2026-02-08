@@ -657,6 +657,14 @@ struct RealSpaceCorrelationAccumulator {
                 dataset.write(vec.data(), H5::PredType::NATIVE_DOUBLE);
             };
             
+            // Helper lambda for writing 1D int vectors
+            auto write_int_vec = [](H5::Group& grp, const string& name, const vector<int>& vec) {
+                hsize_t dims[1] = {vec.size()};
+                H5::DataSpace dataspace(1, dims);
+                H5::DataSet dataset = grp.createDataSet(name, H5::PredType::NATIVE_INT, dataspace);
+                dataset.write(vec.data(), H5::PredType::NATIVE_INT);
+            };
+            
             // Save metadata
             write_attr(group, "n_samples", n_samples);
             write_attr(group, "dim1", dim1);
@@ -664,6 +672,20 @@ struct RealSpaceCorrelationAccumulator {
             write_attr(group, "dim3", dim3);
             write_attr(group, "n_sublattices", n_sublattices);
             write_attr(group, "n_bond_types", n_bond_types);
+            write_attr(group, "n_displacements", n_displacements);
+            
+            // ========== SPIN CORRELATION METADATA ==========
+            // Save displacement indices: (dn1, dn2, dn3, sub_i, sub_j) for each displacement
+            // This allows computing sublattice-resolved S(q)
+            vector<int> disp_indices_flat(n_displacements * 5);
+            for (size_t i = 0; i < n_displacements; ++i) {
+                disp_indices_flat[i * 5 + 0] = displacement_indices[i][0];  // dn1
+                disp_indices_flat[i * 5 + 1] = displacement_indices[i][1];  // dn2
+                disp_indices_flat[i * 5 + 2] = displacement_indices[i][2];  // dn3
+                disp_indices_flat[i * 5 + 3] = displacement_indices[i][3];  // sub_i
+                disp_indices_flat[i * 5 + 4] = displacement_indices[i][4];  // sub_j
+            }
+            write_int_vec(group, "displacement_indices", disp_indices_flat);
             
             // Save spin correlations (flatten 3x3 matrices to 9-vectors)
             vector<double> spin_corr_flat(n_displacements * 9);
@@ -676,6 +698,15 @@ struct RealSpaceCorrelationAccumulator {
             }
             write_vec(group, "spin_corr_sum", spin_corr_flat);
             
+            // Save spin means per sublattice
+            vector<double> spin_mean_flat(n_sublattices * 3);
+            for (size_t i = 0; i < n_sublattices; ++i) {
+                spin_mean_flat[i * 3 + 0] = spin_mean_sum[i](0);
+                spin_mean_flat[i * 3 + 1] = spin_mean_sum[i](1);
+                spin_mean_flat[i * 3 + 2] = spin_mean_sum[i](2);
+            }
+            write_vec(group, "spin_mean_sum", spin_mean_flat);
+            
             // Save displacement vectors
             vector<double> disp_flat(n_displacements * 3);
             for (size_t i = 0; i < n_displacements; ++i) {
@@ -685,9 +716,35 @@ struct RealSpaceCorrelationAccumulator {
             }
             write_vec(group, "displacement_vectors", disp_flat);
             
+            // ========== DIMER CORRELATION METADATA ==========
+            // Save bond type info: for each bond type, store (sub_i, sub_j)
+            // Bond type = s_max*(s_max+1)/2 + s_min where s_min <= s_max
+            // Invert this to get sublattice pair
+            vector<int> bond_type_sublattices(n_bond_types * 2);
+            for (size_t t = 0; t < n_bond_types; ++t) {
+                // Invert triangular index: find s_max such that s_max*(s_max+1)/2 <= t
+                size_t s_max = 0;
+                while ((s_max + 1) * (s_max + 2) / 2 <= t) {
+                    s_max++;
+                }
+                size_t s_min = t - s_max * (s_max + 1) / 2;
+                bond_type_sublattices[t * 2 + 0] = static_cast<int>(s_min);
+                bond_type_sublattices[t * 2 + 1] = static_cast<int>(s_max);
+            }
+            write_int_vec(group, "bond_type_sublattices", bond_type_sublattices);
+            
             // Save dimer correlations
             write_vec(group, "dimer_corr_sum", dimer_corr_sum);
             write_vec(group, "dimer_mean_sum", dimer_mean_sum);
+            
+            // Save bond displacement vectors
+            vector<double> bond_disp_flat(n_bond_displacements * 3);
+            for (size_t i = 0; i < n_bond_displacements; ++i) {
+                bond_disp_flat[i * 3 + 0] = bond_displacement_vectors[i](0);
+                bond_disp_flat[i * 3 + 1] = bond_displacement_vectors[i](1);
+                bond_disp_flat[i * 3 + 2] = bond_displacement_vectors[i](2);
+            }
+            write_vec(group, "bond_displacement_vectors", bond_disp_flat);
             
             file.close();
         } catch (const H5::Exception& e) {
@@ -733,11 +790,14 @@ struct RealSpaceCorrelationAccumulator {
         file << std::scientific << std::setprecision(8);
         
         for (size_t i1 = 0; i1 < n_q1; ++i1) {
-            double q1 = q1_range.first + (q1_range.second - q1_range.first) * i1 / (n_q1 - 1);
+            double q1 = (n_q1 > 1) ? q1_range.first + (q1_range.second - q1_range.first) * i1 / (n_q1 - 1)
+                                   : 0.5 * (q1_range.first + q1_range.second);
             for (size_t i2 = 0; i2 < n_q2; ++i2) {
-                double q2 = q2_range.first + (q2_range.second - q2_range.first) * i2 / (n_q2 - 1);
+                double q2 = (n_q2 > 1) ? q2_range.first + (q2_range.second - q2_range.first) * i2 / (n_q2 - 1)
+                                       : 0.5 * (q2_range.first + q2_range.second);
                 for (size_t i3 = 0; i3 < n_q3; ++i3) {
-                    double q3 = q3_range.first + (q3_range.second - q3_range.first) * i3 / (n_q3 - 1);
+                    double q3 = (n_q3 > 1) ? q3_range.first + (q3_range.second - q3_range.first) * i3 / (n_q3 - 1)
+                                           : 0.5 * (q3_range.first + q3_range.second);
                     
                     // Convert to Cartesian q-vector
                     Eigen::Vector3d q = q1 * b1 + q2 * b2 + q3 * b3;
@@ -3456,13 +3516,27 @@ public:
      * Parallel tempering with MPI
      * Collects: energy, specific heat, sublattice magnetizations, and cross-correlations
      * All with binning analysis for error estimation
-     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
+     * 
+     * @param temp              Temperature ladder (one per MPI rank)
+     * @param n_anneal          Number of equilibration sweeps
+     * @param n_measure         Number of measurement sweeps
+     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
+     * @param swap_rate         Attempt replica exchange every N sweeps
+     * @param probe_rate        Record observables every N sweeps
+     * @param dir_name          Output directory
+     * @param rank_to_write     List of ranks that should write output (-1 = all)
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @param verbose           If true, save spin configurations
+     * @param accumulate_correlations  If true, accumulate real-space correlations for S(q)
+     * @param n_bond_types      Number of bond types for dimer correlations (default: 3)
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
                            bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
-                           bool verbose = false) {
+                           bool verbose = false, bool accumulate_correlations = false,
+                           size_t n_bond_types = 3) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -3490,11 +3564,19 @@ public:
         
         vector<double> energies;
         vector<SpinVector> magnetizations;
-        vector<vector<SpinVector>> sublattice_mags;  // NEW: sublattice magnetizations
+        vector<vector<SpinVector>> sublattice_mags;  // sublattice magnetizations
         size_t expected_samples = n_measure / probe_rate + 100;
         energies.reserve(expected_samples);
         magnetizations.reserve(expected_samples);
         sublattice_mags.reserve(expected_samples);
+        
+        // Initialize correlation accumulator if requested
+        RealSpaceCorrelationAccumulator corr_acc;
+        if (accumulate_correlations) {
+            corr_acc = create_correlation_accumulator(n_bond_types);
+            cout << "Rank " << rank << ": Correlation accumulator initialized ("
+                 << corr_acc.storage_bytes() / 1024.0 << " KB)" << endl;
+        }
         
         cout << "Rank " << rank << ": T=" << curr_Temp << endl;
         
@@ -3535,11 +3617,36 @@ public:
             if (i % probe_rate == 0) {
                 energies.push_back(total_energy(spins));
                 magnetizations.push_back(magnetization_global());
-                sublattice_mags.push_back(magnetization_sublattice());  // NEW
+                sublattice_mags.push_back(magnetization_sublattice());
+                
+                // Accumulate real-space correlations for S(q)
+                if (accumulate_correlations) {
+                    accumulate_correlations_internal(corr_acc);
+                }
             }
         }
         
         cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
+        
+        // Save correlation data before MPI operations
+        if (accumulate_correlations) {
+            // Each rank saves its own correlation data
+            bool should_write = (std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())
+                               || (std::find(rank_to_write.begin(), rank_to_write.end(), -1) != rank_to_write.end());
+            
+            if (should_write) {
+                string corr_dir = dir_name + "/sample_0";
+                std::filesystem::create_directories(corr_dir);
+                
+#ifdef HDF5_ENABLED
+                // Save raw correlations to HDF5
+                string h5_filename = corr_dir + "/correlations_T" + std::to_string(curr_Temp) + ".h5";
+                corr_acc.save_hdf5(h5_filename);
+                cout << "Rank " << rank << ": Saved correlations to " << h5_filename 
+                     << " (" << corr_acc.n_samples << " samples)" << endl;
+#endif
+            }
+        }
         
         // Gather and save statistics with comprehensive observables
         gather_and_save_statistics_comprehensive(rank, size, curr_Temp, energies, 
@@ -3548,6 +3655,31 @@ public:
                                                   rank_to_write, n_anneal, n_measure, 
                                                   curr_accept, swap_accept,
                                                   swap_rate, overrelaxation_rate, probe_rate, comm, verbose);
+    }
+    
+    /**
+     * Internal helper to accumulate correlations (avoids name conflict with parameter)
+     */
+    void accumulate_correlations_internal(RealSpaceCorrelationAccumulator& acc) const {
+        // Define site-to-sublattice mapping
+        auto site_to_sublattice = [this](size_t site) -> size_t {
+            return site % N_atoms;
+        };
+        
+        // Define site-to-cell mapping
+        auto site_to_cell = [this](size_t site) -> array<size_t, 3> {
+            size_t cell_idx = site / N_atoms;
+            size_t n3 = cell_idx % dim3;
+            size_t n2 = (cell_idx / dim3) % dim2;
+            size_t n1 = cell_idx / (dim2 * dim3);
+            return {n1, n2, n3};
+        };
+        
+        // Accumulate spin-spin correlations
+        acc.accumulate_spin_correlations(spins, site_to_sublattice, site_to_cell);
+        
+        // Accumulate dimer-dimer correlations (extracts bonds from bilinear_partners)
+        accumulate_dimer_correlations(acc);
     }
 
     /**
@@ -5389,15 +5521,16 @@ public:
     /**
      * Create a RealSpaceCorrelationAccumulator initialized for this lattice
      * 
-     * @param n_bond_types  Number of distinct bond types (default: N_atoms for simple cases)
+     * @param n_bond_types  Number of distinct bond types (default: N*(N+1)/2 for N sublattices)
      * @return Initialized accumulator ready to accumulate samples
      */
     RealSpaceCorrelationAccumulator create_correlation_accumulator(size_t n_bond_types = 0) const {
         RealSpaceCorrelationAccumulator acc;
         
         if (n_bond_types == 0) {
-            // Default: one bond type per sublattice pair, or 3 for honeycomb-like
-            n_bond_types = std::max(size_t(3), N_atoms);
+            // Default: number of undirected sublattice pairs = N*(N+1)/2
+            // This covers all possible bond types (0,0), (0,1), (1,1), etc.
+            n_bond_types = N_atoms * (N_atoms + 1) / 2;
         }
         
         // Get lattice vectors from unit cell
@@ -5449,6 +5582,10 @@ public:
      * This extracts bond information from the bilinear_partners structure
      * and classifies bonds by type based on sublattice pair.
      * 
+     * Bond type = sorted sublattice pair (sub_i, sub_j) mapped to linear index.
+     * For N sublattices, there are N*(N+1)/2 undirected bond types:
+     *   (0,0), (0,1), (1,1), (0,2), (1,2), (2,2), ...
+     * 
      * @param acc  Reference to the accumulator to update
      */
     void accumulate_dimer_correlations(RealSpaceCorrelationAccumulator& acc) const {
@@ -5457,8 +5594,14 @@ public:
         vector<size_t> bond_types;
         vector<array<size_t, 3>> bond_cells;
         
-        // Count bonds per type for proper indexing
-        // For honeycomb: type 0 = Z-bond (intra-cell), type 1,2 = X,Y bonds (inter-cell)
+        // Helper: compute bond type from sorted sublattice pair
+        // Maps (min(sub_i, sub_j), max(sub_i, sub_j)) to linear index
+        // Using triangular number indexing: type = max*(max+1)/2 + min
+        auto sublattice_pair_to_bond_type = [](size_t sub_i, size_t sub_j) -> size_t {
+            size_t s_min = std::min(sub_i, sub_j);
+            size_t s_max = std::max(sub_i, sub_j);
+            return s_max * (s_max + 1) / 2 + s_min;
+        };
         
         for (size_t site_i = 0; site_i < lattice_size; ++site_i) {
             size_t sub_i = site_i % N_atoms;
@@ -5474,13 +5617,13 @@ public:
                 if (site_j > site_i) {
                     size_t sub_j = site_j % N_atoms;
                     
-                    // Classify bond type based on sublattice pair
-                    // For honeycomb with 2 sublattices:
-                    //   Type 0: intra-cell (sub_i != sub_j, same cell)
-                    //   Type 1: X-direction (cross cell boundary in x)
-                    //   Type 2: Y-direction (cross cell boundary in y)
-                    // For general case: use neighbor index modulo n_bond_types
-                    size_t bond_type = nb % acc.n_bond_types;
+                    // Classify bond type by sorted sublattice pair
+                    size_t bond_type = sublattice_pair_to_bond_type(sub_i, sub_j);
+                    
+                    // Clamp to n_bond_types in case accumulator was initialized with fewer
+                    if (bond_type >= acc.n_bond_types) {
+                        bond_type = bond_type % acc.n_bond_types;
+                    }
                     
                     bonds.push_back({site_i, site_j});
                     bond_types.push_back(bond_type);

@@ -38,3 +38,5 @@ field_direction = 1,1,1
 gaussian_move = false
 
 ranks_to_write = ALL
+
+pt_accumulate_correlations = true
