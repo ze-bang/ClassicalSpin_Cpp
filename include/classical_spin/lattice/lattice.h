@@ -3630,12 +3630,12 @@ public:
         
         // Save correlation data before MPI operations
         if (accumulate_correlations) {
-            // Each rank saves its own correlation data
+            // Each rank saves its own correlation data to rank_#/correlations_T*.h5
             bool should_write = (std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())
                                || (std::find(rank_to_write.begin(), rank_to_write.end(), -1) != rank_to_write.end());
             
             if (should_write) {
-                string corr_dir = dir_name + "/sample_0";
+                string corr_dir = dir_name + "/rank_" + std::to_string(rank);
                 std::filesystem::create_directories(corr_dir);
                 
 #ifdef HDF5_ENABLED
