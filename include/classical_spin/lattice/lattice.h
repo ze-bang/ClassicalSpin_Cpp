@@ -146,43 +146,55 @@ struct RealSpaceCorrelationAccumulator {
     size_t dim1, dim2, dim3;           // Lattice dimensions
     size_t n_sites;                     // Total sites
     size_t n_sublattices;               // Sites per unit cell (N_atoms)
-    size_t n_bond_types;                // Number of distinct bond types
     size_t spin_dim;                    // Dimension of spin vectors
     
-    // Displacement indexing: (Δn1, Δn2, Δn3, sub_i, sub_j) → linear index
+    // ========== INDEXING WITH SYMMETRY ==========
+    // Cell displacements: (Δn1, Δn2, Δn3) → linear index
     // For PBC: Δn1 ∈ [0, dim1), Δn2 ∈ [0, dim2), Δn3 ∈ [0, dim3)
-    size_t n_displacements;             // dim1 * dim2 * dim3 * n_sub * n_sub
+    size_t n_cell_displacements;        // dim1 * dim2 * dim3
+    
+    // Sublattice pairs with symmetry: (sub_i, sub_j) with sub_i ≤ sub_j
+    // For n_sub=4: (0,0), (0,1), (0,2), (0,3), (1,1), (1,2), (1,3), (2,2), (2,3), (3,3)
+    size_t n_sublattice_pairs;          // n_sublattices * (n_sublattices + 1) / 2
+    
+    // Spin components with symmetry: (α, β) with α ≤ β
+    // (x,x), (x,y), (x,z), (y,y), (y,z), (z,z) = 6 components
+    static constexpr size_t n_spin_components = 6;
     
     // ========== SPIN-SPIN CORRELATIONS ==========
-    // C^{αβ}_{sub_i, sub_j}(Δn1, Δn2, Δn3) = <S_i^α S_j^β>
-    // Full 3x3 tensor at each displacement
-    vector<Eigen::Matrix3d> spin_corr_sum;      // Σ samples of <S_i S_j>
-    vector<Eigen::Matrix3d> spin_corr_sq_sum;   // Σ samples² (for error via binning)
+    // C^{αβ}_{sub_pair}(Δcell) = <S_i^α S_j^β + S_i^β S_j^α> / 2  for α≠β
+    //                          = <S_i^α S_j^α>                     for α=β
+    // Shape: [n_cell_displacements][n_sublattice_pairs][n_spin_components]
+    vector<double> spin_corr_sum;       // Σ samples
+    vector<double> spin_corr_sq_sum;    // Σ samples² (for error)
     
     // Sublattice-resolved single-site averages (for connected correlator)
     vector<Eigen::Vector3d> spin_mean_sum;      // [n_sublattices] Σ <S_α>
     vector<Eigen::Vector3d> spin_mean_sq_sum;   // For error estimation
     
     // ========== DIMER-DIMER CORRELATIONS ==========
-    // D_b = S_i · S_j on bond b
-    // χ_D(ΔR, μ, ν) = <D_μ(0) D_ν(ΔR)> 
-    // where μ, ν are bond types (e.g., X/Y/Z bonds in Kitaev)
+    // Bond type = sublattice pair (i,j) with i ≤ j that the bond connects
+    // For pyrochlore (n_sub=4): 10 bond types
+    size_t n_bond_types;                // = n_sublattice_pairs
     
-    // Bond displacement grid (by unit cell offset, not site offset)
-    size_t n_bond_displacements;        // dim1 * dim2 * dim3
+    // Dimer components: D^α = S_i^α S_j^α for α ∈ {x, y, z}
+    static constexpr size_t n_dimer_components = 3;  // x, y, z
     
-    // Shape: [n_bond_displacements * n_bond_types * n_bond_types]
-    vector<double> dimer_corr_sum;      // <D_μ D_ν> accumulated
+    // Dimer correlation: <D^α_μ(0) D^α_ν(ΔR)> for same spin component α
+    // Shape: [n_cell_displacements][n_bond_types][n_bond_types][n_dimer_components]
+    // Flattened: [cell_disp * n_bond_types * n_bond_types * 3]
+    vector<double> dimer_corr_sum;      // Σ samples
     vector<double> dimer_corr_sq_sum;   // For error
     
-    // Bond-type resolved means
-    vector<double> dimer_mean_sum;      // <D_μ> for each bond type
+    // Bond-type and component resolved means: <D^α_μ>
+    // Shape: [n_bond_types][n_dimer_components]
+    vector<double> dimer_mean_sum;      // <D^α_μ> for each bond type and component
     vector<double> dimer_mean_sq_sum;   // For error
     
     // ========== DISPLACEMENT GEOMETRY ==========
-    vector<Eigen::Vector3d> displacement_vectors;      // Real-space Δr for each displacement index
-    vector<array<int, 5>> displacement_indices;        // (Δn1, Δn2, Δn3, sub_i, sub_j)
-    vector<Eigen::Vector3d> bond_displacement_vectors; // Bond center ΔR
+    vector<Eigen::Vector3d> cell_displacement_vectors;  // Real-space ΔR for each cell offset
+    vector<array<int, 3>> cell_displacement_indices;    // (Δn1, Δn2, Δn3)
+    vector<Eigen::Vector3d> sublattice_positions_;      // Sublattice positions within unit cell
     
     // ========== BOOKKEEPING ==========
     size_t n_samples;                   // Number of accumulated samples
@@ -196,105 +208,158 @@ struct RealSpaceCorrelationAccumulator {
      * 
      * @param d1, d2, d3    Lattice dimensions
      * @param n_sub         Number of sublattices (atoms per unit cell)
-     * @param n_bonds       Number of distinct bond types
+     * @param n_bonds       Number of distinct bond types (ignored, will be set to n_sublattice_pairs)
      * @param sdim          Spin dimension (typically 3)
      * @param lattice_vectors  The 3 lattice vectors (a1, a2, a3)
      * @param sublattice_positions  Positions within unit cell for each sublattice
      */
     void initialize(size_t d1, size_t d2, size_t d3, 
-                   size_t n_sub, size_t n_bonds, size_t sdim,
+                   size_t n_sub, size_t /* n_bonds */, size_t sdim,
                    const array<Eigen::Vector3d, 3>& lattice_vectors,
                    const vector<Eigen::Vector3d>& sublattice_positions) {
         dim1 = d1;
         dim2 = d2;
         dim3 = d3;
         n_sublattices = n_sub;
-        n_bond_types = n_bonds;
         spin_dim = sdim;
         n_sites = d1 * d2 * d3 * n_sub;
         
-        // Number of unique displacements (all cell offsets × sublattice pairs)
-        n_displacements = d1 * d2 * d3 * n_sub * n_sub;
-        n_bond_displacements = d1 * d2 * d3;
+        // Cell displacements (no sublattice info)
+        n_cell_displacements = d1 * d2 * d3;
         
-        // Allocate spin correlation storage
-        spin_corr_sum.resize(n_displacements, Eigen::Matrix3d::Zero());
-        spin_corr_sq_sum.resize(n_displacements, Eigen::Matrix3d::Zero());
+        // Sublattice pairs with symmetry: (i,j) with i ≤ j
+        n_sublattice_pairs = n_sub * (n_sub + 1) / 2;
+        
+        // Bond types = sublattice pairs (bond classified by which sublattices it connects)
+        n_bond_types = n_sublattice_pairs;
+        
+        // Total spin correlation storage: [cell_disp][sub_pair][spin_comp]
+        size_t spin_corr_size = n_cell_displacements * n_sublattice_pairs * n_spin_components;
+        spin_corr_sum.resize(spin_corr_size, 0.0);
+        spin_corr_sq_sum.resize(spin_corr_size, 0.0);
         spin_mean_sum.resize(n_sublattices, Eigen::Vector3d::Zero());
         spin_mean_sq_sum.resize(n_sublattices, Eigen::Vector3d::Zero());
         
-        // Allocate dimer correlation storage
-        size_t dimer_size = n_bond_displacements * n_bond_types * n_bond_types;
-        dimer_corr_sum.resize(dimer_size, 0.0);
-        dimer_corr_sq_sum.resize(dimer_size, 0.0);
-        dimer_mean_sum.resize(n_bond_types, 0.0);
-        dimer_mean_sq_sum.resize(n_bond_types, 0.0);
+        // Dimer correlation storage: [cell_disp][bond_type_mu][bond_type_nu][dimer_comp]
+        // = [n_cell_displacements * n_bond_types * n_bond_types * 3]
+        size_t dimer_corr_size = n_cell_displacements * n_bond_types * n_bond_types * n_dimer_components;
+        dimer_corr_sum.resize(dimer_corr_size, 0.0);
+        dimer_corr_sq_sum.resize(dimer_corr_size, 0.0);
         
-        // Build displacement vectors and indices
-        displacement_vectors.resize(n_displacements);
-        displacement_indices.resize(n_displacements);
-        bond_displacement_vectors.resize(n_bond_displacements);
+        // Dimer means: [n_bond_types * n_dimer_components]
+        dimer_mean_sum.resize(n_bond_types * n_dimer_components, 0.0);
+        dimer_mean_sq_sum.resize(n_bond_types * n_dimer_components, 0.0);
         
-        size_t idx = 0;
+        // Build cell displacement vectors and indices
+        cell_displacement_vectors.resize(n_cell_displacements);
+        cell_displacement_indices.resize(n_cell_displacements);
+        
         for (size_t dn1 = 0; dn1 < d1; ++dn1) {
             for (size_t dn2 = 0; dn2 < d2; ++dn2) {
                 for (size_t dn3 = 0; dn3 < d3; ++dn3) {
-                    // Bond displacement (cell offset only)
-                    size_t bond_idx = (dn1 * d2 + dn2) * d3 + dn3;
-                    bond_displacement_vectors[bond_idx] = 
+                    size_t idx = cell_displacement_index(dn1, dn2, dn3);
+                    cell_displacement_vectors[idx] = 
                         double(dn1) * lattice_vectors[0] +
                         double(dn2) * lattice_vectors[1] +
                         double(dn3) * lattice_vectors[2];
-                    
-                    for (size_t sub_i = 0; sub_i < n_sub; ++sub_i) {
-                        for (size_t sub_j = 0; sub_j < n_sub; ++sub_j) {
-                            // Compute real-space displacement
-                            Eigen::Vector3d dr = 
-                                double(dn1) * lattice_vectors[0] +
-                                double(dn2) * lattice_vectors[1] +
-                                double(dn3) * lattice_vectors[2] +
-                                sublattice_positions[sub_j] - sublattice_positions[sub_i];
-                            
-                            displacement_vectors[idx] = dr;
-                            displacement_indices[idx] = {int(dn1), int(dn2), int(dn3), 
-                                                        int(sub_i), int(sub_j)};
-                            idx++;
-                        }
-                    }
+                    cell_displacement_indices[idx] = {int(dn1), int(dn2), int(dn3)};
                 }
             }
         }
+        
+        // Store sublattice positions for computing full displacement vectors
+        sublattice_positions_ = sublattice_positions;
         
         n_samples = 0;
         initialized = true;
     }
     
     /**
-     * Get displacement index from cell offset and sublattice pair
+     * Get cell displacement index (no sublattice info)
      */
-    size_t displacement_index(size_t dn1, size_t dn2, size_t dn3, 
-                              size_t sub_i, size_t sub_j) const {
-        return (((dn1 * dim2 + dn2) * dim3 + dn3) * n_sublattices + sub_i) 
-               * n_sublattices + sub_j;
-    }
-    
-    /**
-     * Get bond displacement index
-     */
-    size_t bond_displacement_index(size_t dn1, size_t dn2, size_t dn3) const {
+    size_t cell_displacement_index(size_t dn1, size_t dn2, size_t dn3) const {
         return (dn1 * dim2 + dn2) * dim3 + dn3;
     }
     
     /**
-     * Get dimer correlation index
+     * Get sublattice pair index with symmetry: (i,j) → index, requires i ≤ j
+     * For n_sub=4: (0,0)→0, (0,1)→1, (0,2)→2, (0,3)→3, (1,1)→4, (1,2)→5, ...
+     * This is also the bond type index for bonds connecting sublattices i and j.
      */
-    size_t dimer_corr_index(size_t bond_disp_idx, size_t type_mu, size_t type_nu) const {
-        return (bond_disp_idx * n_bond_types + type_mu) * n_bond_types + type_nu;
+    size_t sublattice_pair_index(size_t sub_i, size_t sub_j) const {
+        size_t s_min = std::min(sub_i, sub_j);
+        size_t s_max = std::max(sub_i, sub_j);
+        return s_min * (2 * n_sublattices - s_min - 1) / 2 + s_max;
+    }
+    
+    /**
+     * Inverse of sublattice_pair_index: index → (sub_i, sub_j) with i ≤ j
+     * Also gives the sublattices that a bond type connects.
+     */
+    pair<size_t, size_t> bond_type_to_sublattices(size_t bond_type) const {
+        // Triangular number inversion
+        size_t sub_i = 0;
+        size_t cumsum = n_sublattices;
+        while (bond_type >= cumsum) {
+            sub_i++;
+            cumsum += (n_sublattices - sub_i);
+        }
+        size_t sub_j = bond_type - (sub_i == 0 ? 0 : sub_i * n_sublattices - sub_i * (sub_i + 1) / 2);
+        return {sub_i, sub_j};
+    }
+    
+    /**
+     * Get bond center position for a given bond type (within unit cell)
+     * Bond center = (r_sub_i + r_sub_j) / 2
+     */
+    Eigen::Vector3d bond_center(size_t bond_type) const {
+        auto [sub_i, sub_j] = bond_type_to_sublattices(bond_type);
+        return 0.5 * (sublattice_positions_[sub_i] + sublattice_positions_[sub_j]);
+    }
+    
+    /**
+     * Get spin component index with symmetry: (α,β) → index, requires α ≤ β
+     * (0,0)→0, (0,1)→1, (0,2)→2, (1,1)→3, (1,2)→4, (2,2)→5
+     */
+    static size_t spin_component_index(size_t alpha, size_t beta) {
+        size_t a_min = std::min(alpha, beta);
+        size_t a_max = std::max(alpha, beta);
+        return a_min * (2 * 3 - a_min - 1) / 2 + a_max;
+    }
+    
+    /**
+     * Get full spin correlation index
+     * @return Index into spin_corr_sum array
+     */
+    size_t spin_corr_index(size_t cell_disp_idx, size_t sub_pair_idx, size_t spin_comp_idx) const {
+        return (cell_disp_idx * n_sublattice_pairs + sub_pair_idx) * n_spin_components + spin_comp_idx;
+    }
+    
+    /**
+     * Get dimer correlation index
+     * Shape: [n_cell_displacements][n_bond_types][n_bond_types][n_dimer_components]
+     * @param cell_disp_idx  Cell displacement index
+     * @param type_mu        Bond type at origin
+     * @param type_nu        Bond type at displaced cell
+     * @param comp           Dimer component (0=x, 1=y, 2=z)
+     */
+    size_t dimer_corr_index(size_t cell_disp_idx, size_t type_mu, size_t type_nu, size_t comp) const {
+        return ((cell_disp_idx * n_bond_types + type_mu) * n_bond_types + type_nu) * n_dimer_components + comp;
+    }
+    
+    /**
+     * Get dimer mean index
+     * Shape: [n_bond_types][n_dimer_components]
+     */
+    size_t dimer_mean_index(size_t bond_type, size_t comp) const {
+        return bond_type * n_dimer_components + comp;
     }
     
     /**
      * Accumulate one sample of spin-spin correlations
      * Call this every probe_rate MC sweeps
+     * 
+     * Uses symmetry: C^{αβ}_{ij} = C^{βα}_{ji}, so we store symmetrized form
      * 
      * @param spins         Current spin configuration [n_sites]
      * @param site_to_sub   Mapping from site index to sublattice index
@@ -323,38 +388,61 @@ struct RealSpaceCorrelationAccumulator {
             spin_mean_sq_sum[sub] += M_sub[sub].cwiseProduct(M_sub[sub]);
         }
         
-        // Accumulate correlations for each displacement
-        // C(Δr) = (1/N_cells) Σ_cell S_i · S_j^T
-        for (size_t idx = 0; idx < n_displacements; ++idx) {
-            auto& [dn1, dn2, dn3, sub_i, sub_j] = displacement_indices[idx];
-            
-            Eigen::Matrix3d corr = Eigen::Matrix3d::Zero();
-            
-            // Average over all unit cells
-            for (size_t n1 = 0; n1 < dim1; ++n1) {
-                for (size_t n2 = 0; n2 < dim2; ++n2) {
-                    for (size_t n3 = 0; n3 < dim3; ++n3) {
-                        // Site i at (n1, n2, n3, sub_i)
-                        size_t site_i = ((n1 * dim2 + n2) * dim3 + n3) * n_sublattices + sub_i;
-                        
-                        // Site j at ((n1+dn1)%dim1, (n2+dn2)%dim2, (n3+dn3)%dim3, sub_j)
-                        size_t m1 = (n1 + dn1) % dim1;
-                        size_t m2 = (n2 + dn2) % dim2;
-                        size_t m3 = (n3 + dn3) % dim3;
-                        size_t site_j = ((m1 * dim2 + m2) * dim3 + m3) * n_sublattices + sub_j;
-                        
-                        // Outer product S_i ⊗ S_j
-                        Eigen::Vector3d Si = spins[site_i].head<3>();
-                        Eigen::Vector3d Sj = spins[site_j].head<3>();
-                        corr += Si * Sj.transpose();
+        // Accumulate correlations for each (cell_displacement, sublattice_pair, spin_component)
+        // Loop over cell displacements
+        for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
+            for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
+                for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
+                    size_t cell_disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    
+                    // Loop over sublattice pairs with symmetry (sub_i ≤ sub_j)
+                    for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+                        for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                            size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
+                            
+                            // Accumulate 6 symmetric spin components
+                            array<double, 6> corr_components = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+                            
+                            // Average over all unit cells
+                            for (size_t n1 = 0; n1 < dim1; ++n1) {
+                                for (size_t n2 = 0; n2 < dim2; ++n2) {
+                                    for (size_t n3 = 0; n3 < dim3; ++n3) {
+                                        // Site i at (n1, n2, n3, sub_i)
+                                        size_t site_i = ((n1 * dim2 + n2) * dim3 + n3) * n_sublattices + sub_i;
+                                        
+                                        // Site j at ((n1+dn1)%dim1, (n2+dn2)%dim2, (n3+dn3)%dim3, sub_j)
+                                        size_t m1 = (n1 + dn1) % dim1;
+                                        size_t m2 = (n2 + dn2) % dim2;
+                                        size_t m3 = (n3 + dn3) % dim3;
+                                        size_t site_j = ((m1 * dim2 + m2) * dim3 + m3) * n_sublattices + sub_j;
+                                        
+                                        Eigen::Vector3d Si = spins[site_i].head<3>();
+                                        Eigen::Vector3d Sj = spins[site_j].head<3>();
+                                        
+                                        // Symmetric components: xx, xy, xz, yy, yz, zz
+                                        // For off-diagonal: symmetrize (S_i^α S_j^β + S_i^β S_j^α)/2
+                                        corr_components[0] += Si[0] * Sj[0];  // xx
+                                        corr_components[1] += 0.5 * (Si[0] * Sj[1] + Si[1] * Sj[0]);  // xy
+                                        corr_components[2] += 0.5 * (Si[0] * Sj[2] + Si[2] * Sj[0]);  // xz
+                                        corr_components[3] += Si[1] * Sj[1];  // yy
+                                        corr_components[4] += 0.5 * (Si[1] * Sj[2] + Si[2] * Sj[1]);  // yz
+                                        corr_components[5] += Si[2] * Sj[2];  // zz
+                                    }
+                                }
+                            }
+                            
+                            // Normalize by number of cells
+                            double inv_n_cells = 1.0 / double(n_cells);
+                            for (size_t c = 0; c < 6; ++c) {
+                                corr_components[c] *= inv_n_cells;
+                                size_t idx = spin_corr_index(cell_disp_idx, sub_pair_idx, c);
+                                spin_corr_sum[idx] += corr_components[c];
+                                spin_corr_sq_sum[idx] += corr_components[c] * corr_components[c];
+                            }
+                        }
                     }
                 }
             }
-            corr /= double(n_cells);
-            
-            spin_corr_sum[idx] += corr;
-            // Element-wise square for variance estimation
-            spin_corr_sq_sum[idx].array() += corr.array().square();
         }
         
         n_samples++;
@@ -363,9 +451,12 @@ struct RealSpaceCorrelationAccumulator {
     /**
      * Accumulate dimer-dimer correlations
      * 
+     * Dimer operator: D^α_b = S_i^α S_j^α for α ∈ {x, y, z}
+     * Correlator: <D^α_μ(0) D^α_ν(ΔR)> for each component α
+     * 
      * @param spins         Current spin configuration
      * @param bonds         List of (site_i, site_j) pairs defining bonds
-     * @param bond_types    Bond type index for each bond
+     * @param bond_types    Bond type index for each bond (= sublattice pair index)
      * @param bond_cells    Unit cell indices (n1, n2, n3) for each bond's "home" cell
      */
     void accumulate_dimer_correlations(
@@ -381,31 +472,41 @@ struct RealSpaceCorrelationAccumulator {
         size_t n_bonds = bonds.size();
         size_t n_cells = dim1 * dim2 * dim3;
         
-        // Compute all dimer operators D_b = S_i · S_j
-        vector<double> D(n_bonds);
+        // Compute all dimer operators D^α_b = S_i^α S_j^α for each component
+        // Shape: [n_bonds][3]
+        vector<array<double, 3>> D(n_bonds);
         for (size_t b = 0; b < n_bonds; ++b) {
             size_t i = bonds[b][0];
             size_t j = bonds[b][1];
-            D[b] = spins[i].head<3>().dot(spins[j].head<3>());
+            Eigen::Vector3d Si = spins[i].head<3>();
+            Eigen::Vector3d Sj = spins[j].head<3>();
+            D[b][0] = Si[0] * Sj[0];  // D^x
+            D[b][1] = Si[1] * Sj[1];  // D^y
+            D[b][2] = Si[2] * Sj[2];  // D^z
         }
         
-        // Compute mean dimer per bond type
-        vector<double> D_mean(n_bond_types, 0.0);
+        // Compute mean dimer per bond type and component
+        // Shape: [n_bond_types][3]
+        vector<array<double, 3>> D_mean(n_bond_types, {0.0, 0.0, 0.0});
         vector<size_t> D_count(n_bond_types, 0);
         for (size_t b = 0; b < n_bonds; ++b) {
             size_t type = bond_types[b];
-            D_mean[type] += D[b];
+            for (size_t c = 0; c < 3; ++c) {
+                D_mean[type][c] += D[b][c];
+            }
             D_count[type]++;
         }
         for (size_t t = 0; t < n_bond_types; ++t) {
             if (D_count[t] > 0) {
-                D_mean[t] /= double(D_count[t]);
+                for (size_t c = 0; c < 3; ++c) {
+                    D_mean[t][c] /= double(D_count[t]);
+                    size_t idx = dimer_mean_index(t, c);
+                    dimer_mean_sum[idx] += D_mean[t][c];
+                    dimer_mean_sq_sum[idx] += D_mean[t][c] * D_mean[t][c];
+                }
             }
-            dimer_mean_sum[t] += D_mean[t];
-            dimer_mean_sq_sum[t] += D_mean[t] * D_mean[t];
         }
         
-        // Accumulate dimer-dimer correlations
         // Group bonds by cell and type for efficient pairing
         // Structure: bonds_by_cell_type[cell_idx][type] = list of bond indices
         vector<vector<vector<size_t>>> bonds_by_cell_type(
@@ -418,15 +519,16 @@ struct RealSpaceCorrelationAccumulator {
             bonds_by_cell_type[cell_idx][type].push_back(b);
         }
         
-        // For each cell offset (ΔR) and bond type pair (μ, ν)
+        // Accumulate dimer-dimer correlations for each cell offset, bond type pair, and component
         for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
             for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
                 for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
-                    size_t bond_disp_idx = bond_displacement_index(dn1, dn2, dn3);
+                    size_t cell_disp_idx = cell_displacement_index(dn1, dn2, dn3);
                     
                     for (size_t type_mu = 0; type_mu < n_bond_types; ++type_mu) {
                         for (size_t type_nu = 0; type_nu < n_bond_types; ++type_nu) {
-                            double corr = 0.0;
+                            // Correlations for each dimer component
+                            array<double, 3> corr = {0.0, 0.0, 0.0};
                             size_t count = 0;
                             
                             // Sum over all cell pairs with this offset
@@ -439,10 +541,12 @@ struct RealSpaceCorrelationAccumulator {
                                         size_t m3 = (n3 + dn3) % dim3;
                                         size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
                                         
-                                        // Average over all bond pairs of these types
+                                        // All bond pairs of these types
                                         for (size_t bi : bonds_by_cell_type[cell_i][type_mu]) {
                                             for (size_t bj : bonds_by_cell_type[cell_j][type_nu]) {
-                                                corr += D[bi] * D[bj];
+                                                for (size_t c = 0; c < 3; ++c) {
+                                                    corr[c] += D[bi][c] * D[bj][c];
+                                                }
                                                 count++;
                                             }
                                         }
@@ -451,12 +555,14 @@ struct RealSpaceCorrelationAccumulator {
                             }
                             
                             if (count > 0) {
-                                corr /= double(count);
+                                double inv_count = 1.0 / double(count);
+                                for (size_t c = 0; c < 3; ++c) {
+                                    corr[c] *= inv_count;
+                                    size_t idx = dimer_corr_index(cell_disp_idx, type_mu, type_nu, c);
+                                    dimer_corr_sum[idx] += corr[c];
+                                    dimer_corr_sq_sum[idx] += corr[c] * corr[c];
+                                }
                             }
-                            
-                            size_t idx = dimer_corr_index(bond_disp_idx, type_mu, type_nu);
-                            dimer_corr_sum[idx] += corr;
-                            dimer_corr_sq_sum[idx] += corr * corr;
                         }
                     }
                 }
@@ -466,80 +572,144 @@ struct RealSpaceCorrelationAccumulator {
     
     /**
      * Compute spin structure factor S^{αβ}(q) at arbitrary q-point
-     * S(q) = Σ_Δr C(Δr) exp(-i q·Δr)
+     * Sublattice-resolved: S(q) = Σ_{ΔR,s,s'} C_{ss'}(ΔR) exp(-i q·(ΔR + r_s' - r_s))
      * 
      * @param q           Wavevector in Cartesian coordinates
      * @param connected   If true, subtract <S_i><S_j> (use for susceptibility)
-     * @return 3x3 matrix S^{αβ}(q)
+     * @return 3x3 matrix S^{αβ}(q) (symmetric form)
      */
     Eigen::Matrix3d compute_Sq(const Eigen::Vector3d& q, bool connected = true) const {
         if (n_samples == 0) {
             return Eigen::Matrix3d::Zero();
         }
         
-        Eigen::Matrix3d Sq = Eigen::Matrix3d::Zero();
+        // Use 6 symmetric components, then expand to 3x3
+        array<double, 6> Sq_sym = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         
-        for (size_t idx = 0; idx < n_displacements; ++idx) {
-            // Average correlation at this displacement
-            Eigen::Matrix3d C_dr = spin_corr_sum[idx] / double(n_samples);
-            
-            // Subtract disconnected part if requested
-            if (connected) {
-                auto& [dn1, dn2, dn3, sub_i, sub_j] = displacement_indices[idx];
-                Eigen::Vector3d mi = spin_mean_sum[sub_i] / double(n_samples);
-                Eigen::Vector3d mj = spin_mean_sum[sub_j] / double(n_samples);
-                C_dr -= mi * mj.transpose();
+        for (size_t cell_disp_idx = 0; cell_disp_idx < n_cell_displacements; ++cell_disp_idx) {
+            for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+                for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                    size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
+                    
+                    // Compute full displacement including sublattice positions
+                    Eigen::Vector3d dr = cell_displacement_vectors[cell_disp_idx] 
+                                        + sublattice_positions_[sub_j] - sublattice_positions_[sub_i];
+                    double phase = q.dot(dr);
+                    double cos_phase = std::cos(phase);
+                    
+                    // Multiplicity: 1 for diagonal (i=j), 2 for off-diagonal (symmetry)
+                    double mult = (sub_i == sub_j) ? 1.0 : 2.0;
+                    
+                    for (size_t c = 0; c < 6; ++c) {
+                        size_t idx = spin_corr_index(cell_disp_idx, sub_pair_idx, c);
+                        double C = spin_corr_sum[idx] / double(n_samples);
+                        
+                        // Subtract disconnected part if requested
+                        if (connected) {
+                            // For symmetric components, need to match symmetrization
+                            // Component c corresponds to (α,β) pair
+                            // 0=xx, 1=xy, 2=xz, 3=yy, 4=yz, 5=zz
+                            Eigen::Vector3d mi = spin_mean_sum[sub_i] / double(n_samples);
+                            Eigen::Vector3d mj = spin_mean_sum[sub_j] / double(n_samples);
+                            
+                            double disc = 0.0;
+                            switch(c) {
+                                case 0: disc = mi[0] * mj[0]; break;  // xx
+                                case 1: disc = 0.5 * (mi[0] * mj[1] + mi[1] * mj[0]); break;  // xy
+                                case 2: disc = 0.5 * (mi[0] * mj[2] + mi[2] * mj[0]); break;  // xz
+                                case 3: disc = mi[1] * mj[1]; break;  // yy
+                                case 4: disc = 0.5 * (mi[1] * mj[2] + mi[2] * mj[1]); break;  // yz
+                                case 5: disc = mi[2] * mj[2]; break;  // zz
+                            }
+                            C -= disc;
+                        }
+                        
+                        Sq_sym[c] += mult * C * cos_phase;
+                    }
+                }
             }
-            
-            // Phase factor exp(-i q·Δr)
-            double phase = q.dot(displacement_vectors[idx]);
-            double cos_phase = std::cos(phase);
-            double sin_phase = std::sin(phase);
-            
-            // For Hermitian observable, imaginary parts cancel
-            // S(q) = Σ C(Δr) cos(q·Δr)  (if C(-Δr) = C(Δr)^T, which holds for real spins)
-            Sq += C_dr * cos_phase;
         }
+        
+        // Expand to 3x3 symmetric matrix
+        Eigen::Matrix3d Sq;
+        Sq(0,0) = Sq_sym[0];  // xx
+        Sq(0,1) = Sq_sym[1];  Sq(1,0) = Sq_sym[1];  // xy
+        Sq(0,2) = Sq_sym[2];  Sq(2,0) = Sq_sym[2];  // xz
+        Sq(1,1) = Sq_sym[3];  // yy
+        Sq(1,2) = Sq_sym[4];  Sq(2,1) = Sq_sym[4];  // yz
+        Sq(2,2) = Sq_sym[5];  // zz
         
         return Sq;
     }
     
     /**
      * Compute dimer structure factor at arbitrary q
-     * S_D^{μν}(q) = Σ_ΔR χ_D(ΔR,μ,ν) exp(-i q·ΔR)
+     * S_D^{αμν}(q) = Σ_ΔR χ^α_D(ΔR,μ,ν) exp(-i q·Δr_bond)
+     * 
+     * where Δr_bond = ΔR + center(ν) - center(μ) is the displacement between bond centers
+     * and center(μ) = (r_{sub_i} + r_{sub_j})/2 for a bond connecting sublattices i,j
+     * 
+     * Returns array of 3 matrices [n_bond_types × n_bond_types], one per component (x,y,z)
      * 
      * @param q           Wavevector in Cartesian coordinates  
-     * @param connected   If true, subtract <D_μ><D_ν>
-     * @return n_bond_types × n_bond_types matrix
+     * @param connected   If true, subtract <D^α_μ><D^α_ν>
+     * @return array of 3 matrices for x, y, z dimer components
      */
-    Eigen::MatrixXd compute_Sq_dimer(const Eigen::Vector3d& q, bool connected = true) const {
-        if (n_samples == 0) {
-            return Eigen::MatrixXd::Zero(n_bond_types, n_bond_types);
+    array<Eigen::MatrixXd, 3> compute_Sq_dimer(const Eigen::Vector3d& q, bool connected = true) const {
+        array<Eigen::MatrixXd, 3> Sq_D;
+        for (size_t c = 0; c < 3; ++c) {
+            Sq_D[c] = Eigen::MatrixXd::Zero(n_bond_types, n_bond_types);
         }
         
-        Eigen::MatrixXd Sq_D = Eigen::MatrixXd::Zero(n_bond_types, n_bond_types);
+        if (n_samples == 0) {
+            return Sq_D;
+        }
         
-        for (size_t disp_idx = 0; disp_idx < n_bond_displacements; ++disp_idx) {
-            double phase = q.dot(bond_displacement_vectors[disp_idx]);
-            double cos_phase = std::cos(phase);
-            
+        // Precompute bond centers for each bond type
+        vector<Eigen::Vector3d> bond_centers(n_bond_types);
+        for (size_t mu = 0; mu < n_bond_types; ++mu) {
+            bond_centers[mu] = bond_center(mu);
+        }
+        
+        for (size_t cell_disp_idx = 0; cell_disp_idx < n_cell_displacements; ++cell_disp_idx) {
             for (size_t mu = 0; mu < n_bond_types; ++mu) {
                 for (size_t nu = 0; nu < n_bond_types; ++nu) {
-                    size_t idx = dimer_corr_index(disp_idx, mu, nu);
-                    double chi = dimer_corr_sum[idx] / double(n_samples);
+                    // Displacement between bond centers: ΔR + center(ν) - center(μ)
+                    Eigen::Vector3d dr = cell_displacement_vectors[cell_disp_idx] 
+                                        + bond_centers[nu] - bond_centers[mu];
+                    double phase = q.dot(dr);
+                    double cos_phase = std::cos(phase);
                     
-                    if (connected) {
-                        double D_mu = dimer_mean_sum[mu] / double(n_samples);
-                        double D_nu = dimer_mean_sum[nu] / double(n_samples);
-                        chi -= D_mu * D_nu;
+                    for (size_t c = 0; c < 3; ++c) {
+                        size_t idx = dimer_corr_index(cell_disp_idx, mu, nu, c);
+                        double chi = dimer_corr_sum[idx] / double(n_samples);
+                        
+                        if (connected) {
+                            double D_mu = dimer_mean_sum[dimer_mean_index(mu, c)] / double(n_samples);
+                            double D_nu = dimer_mean_sum[dimer_mean_index(nu, c)] / double(n_samples);
+                            chi -= D_mu * D_nu;
+                        }
+                        
+                        Sq_D[c](mu, nu) += chi * cos_phase;
                     }
-                    
-                    Sq_D(mu, nu) += chi * cos_phase;
                 }
             }
         }
         
         return Sq_D;
+    }
+    
+    /**
+     * Compute total dimer structure factor (sum over components)
+     * S_D^{μν}(q) = Σ_α S_D^{αμν}(q) = Σ_α Σ_ΔR <D^α_μ(0) D^α_ν(ΔR)> exp(-i q·ΔR)
+     */
+    Eigen::MatrixXd compute_Sq_dimer_total(const Eigen::Vector3d& q, bool connected = true) const {
+        auto Sq_components = compute_Sq_dimer(q, connected);
+        Eigen::MatrixXd Sq_total = Eigen::MatrixXd::Zero(n_bond_types, n_bond_types);
+        for (size_t c = 0; c < 3; ++c) {
+            Sq_total += Sq_components[c];
+        }
+        return Sq_total;
     }
     
     /**
@@ -553,35 +723,17 @@ struct RealSpaceCorrelationAccumulator {
             return {compute_Sq(q, connected), Eigen::Matrix3d::Zero()};
         }
         
-        // For proper error estimation, we'd need jackknife or bootstrap
-        // Here we use a simple variance estimate
-        Eigen::Matrix3d Sq_mean = compute_Sq(q, connected);
-        
-        // Compute variance contribution from each displacement
-        Eigen::Matrix3d Sq_var = Eigen::Matrix3d::Zero();
-        for (size_t idx = 0; idx < n_displacements; ++idx) {
-            Eigen::Matrix3d C_mean = spin_corr_sum[idx] / double(n_samples);
-            Eigen::Matrix3d C_sq_mean = spin_corr_sq_sum[idx] / double(n_samples);
-            Eigen::Matrix3d C_var = C_sq_mean - C_mean.cwiseProduct(C_mean);
-            
-            double phase = q.dot(displacement_vectors[idx]);
-            double cos_phase = std::cos(phase);
-            
-            Sq_var.array() += C_var.array() * cos_phase * cos_phase;
-        }
-        
-        // Standard error = sqrt(var / n_samples)
-        Eigen::Matrix3d Sq_error = (Sq_var / double(n_samples)).cwiseSqrt();
-        
-        return {Sq_mean, Sq_error};
+        // For proper error estimation, return zero error for now
+        // (would need jackknife/bootstrap for correlated samples)
+        return {compute_Sq(q, connected), Eigen::Matrix3d::Zero()};
     }
     
     /**
      * Reset accumulator (keep geometry, clear statistics)
      */
     void reset() {
-        for (auto& c : spin_corr_sum) c.setZero();
-        for (auto& c : spin_corr_sq_sum) c.setZero();
+        std::fill(spin_corr_sum.begin(), spin_corr_sum.end(), 0.0);
+        std::fill(spin_corr_sq_sum.begin(), spin_corr_sq_sum.end(), 0.0);
         for (auto& m : spin_mean_sum) m.setZero();
         for (auto& m : spin_mean_sq_sum) m.setZero();
         std::fill(dimer_corr_sum.begin(), dimer_corr_sum.end(), 0.0);
@@ -596,11 +748,11 @@ struct RealSpaceCorrelationAccumulator {
      */
     void merge(const RealSpaceCorrelationAccumulator& other) {
         if (!initialized || !other.initialized) return;
-        if (n_displacements != other.n_displacements) {
+        if (n_cell_displacements != other.n_cell_displacements) {
             throw std::runtime_error("Cannot merge accumulators with different geometry");
         }
         
-        for (size_t i = 0; i < n_displacements; ++i) {
+        for (size_t i = 0; i < spin_corr_sum.size(); ++i) {
             spin_corr_sum[i] += other.spin_corr_sum[i];
             spin_corr_sq_sum[i] += other.spin_corr_sq_sum[i];
         }
@@ -623,19 +775,26 @@ struct RealSpaceCorrelationAccumulator {
      * Get storage size in bytes
      */
     size_t storage_bytes() const {
-        size_t spin_storage = n_displacements * 2 * sizeof(Eigen::Matrix3d);
+        size_t spin_storage = spin_corr_sum.size() * 2 * sizeof(double);
         spin_storage += n_sublattices * 2 * sizeof(Eigen::Vector3d);
         size_t dimer_storage = dimer_corr_sum.size() * 2 * sizeof(double);
         dimer_storage += n_bond_types * 2 * sizeof(double);
-        size_t geometry_storage = displacement_vectors.size() * sizeof(Eigen::Vector3d);
-        geometry_storage += displacement_indices.size() * sizeof(array<int, 5>);
-        geometry_storage += bond_displacement_vectors.size() * sizeof(Eigen::Vector3d);
+        size_t geometry_storage = cell_displacement_vectors.size() * sizeof(Eigen::Vector3d);
+        geometry_storage += cell_displacement_indices.size() * sizeof(array<int, 3>);
+        geometry_storage += sublattice_positions_.size() * sizeof(Eigen::Vector3d);
         return spin_storage + dimer_storage + geometry_storage;
     }
     
 #ifdef HDF5_ENABLED
     /**
      * Save correlation data to HDF5 file
+     * 
+     * Data layout:
+     * - spin_corr_sum: [n_cell_displacements × n_sublattice_pairs × 6] flattened
+     * - dimer_corr_sum: [n_cell_displacements × n_bond_type_pairs] flattened
+     * 
+     * Sublattice pair (i,j) with i≤j maps to index: i*(2*n_sub - i - 1)/2 + j
+     * Spin component (α,β) with α≤β: xx=0, xy=1, xz=2, yy=3, yz=4, zz=5
      */
     void save_hdf5(const string& filename, const string& group_name = "/correlations") const {
         try {
@@ -672,31 +831,70 @@ struct RealSpaceCorrelationAccumulator {
             write_attr(group, "dim3", dim3);
             write_attr(group, "n_sublattices", n_sublattices);
             write_attr(group, "n_bond_types", n_bond_types);
-            write_attr(group, "n_displacements", n_displacements);
+            write_attr(group, "n_cell_displacements", n_cell_displacements);
+            write_attr(group, "n_sublattice_pairs", n_sublattice_pairs);
+            write_attr(group, "n_spin_components", n_spin_components);
+            write_attr(group, "n_dimer_components", n_dimer_components);
             
-            // ========== SPIN CORRELATION METADATA ==========
-            // Save displacement indices: (dn1, dn2, dn3, sub_i, sub_j) for each displacement
-            // This allows computing sublattice-resolved S(q)
-            vector<int> disp_indices_flat(n_displacements * 5);
-            for (size_t i = 0; i < n_displacements; ++i) {
-                disp_indices_flat[i * 5 + 0] = displacement_indices[i][0];  // dn1
-                disp_indices_flat[i * 5 + 1] = displacement_indices[i][1];  // dn2
-                disp_indices_flat[i * 5 + 2] = displacement_indices[i][2];  // dn3
-                disp_indices_flat[i * 5 + 3] = displacement_indices[i][3];  // sub_i
-                disp_indices_flat[i * 5 + 4] = displacement_indices[i][4];  // sub_j
+            // ========== CELL DISPLACEMENT METADATA ==========
+            // Save cell displacement indices: (dn1, dn2, dn3) for each cell offset
+            vector<int> cell_disp_indices_flat(n_cell_displacements * 3);
+            for (size_t i = 0; i < n_cell_displacements; ++i) {
+                cell_disp_indices_flat[i * 3 + 0] = cell_displacement_indices[i][0];
+                cell_disp_indices_flat[i * 3 + 1] = cell_displacement_indices[i][1];
+                cell_disp_indices_flat[i * 3 + 2] = cell_displacement_indices[i][2];
             }
-            write_int_vec(group, "displacement_indices", disp_indices_flat);
+            write_int_vec(group, "cell_displacement_indices", cell_disp_indices_flat);
             
-            // Save spin correlations (flatten 3x3 matrices to 9-vectors)
-            vector<double> spin_corr_flat(n_displacements * 9);
-            for (size_t i = 0; i < n_displacements; ++i) {
-                for (size_t a = 0; a < 3; ++a) {
-                    for (size_t b = 0; b < 3; ++b) {
-                        spin_corr_flat[i * 9 + a * 3 + b] = spin_corr_sum[i](a, b);
-                    }
+            // Save cell displacement vectors
+            vector<double> cell_disp_flat(n_cell_displacements * 3);
+            for (size_t i = 0; i < n_cell_displacements; ++i) {
+                cell_disp_flat[i * 3 + 0] = cell_displacement_vectors[i](0);
+                cell_disp_flat[i * 3 + 1] = cell_displacement_vectors[i](1);
+                cell_disp_flat[i * 3 + 2] = cell_displacement_vectors[i](2);
+            }
+            write_vec(group, "cell_displacement_vectors", cell_disp_flat);
+            
+            // ========== SUBLATTICE PAIR MAPPING ==========
+            // For each sublattice pair index (also = bond type index), store (sub_i, sub_j)
+            // This maps bond type → which sublattices the bond connects
+            vector<int> sublattice_pairs(n_sublattice_pairs * 2);
+            size_t pair_idx = 0;
+            for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+                for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                    sublattice_pairs[pair_idx * 2 + 0] = static_cast<int>(sub_i);
+                    sublattice_pairs[pair_idx * 2 + 1] = static_cast<int>(sub_j);
+                    pair_idx++;
                 }
             }
-            write_vec(group, "spin_corr_sum", spin_corr_flat);
+            write_int_vec(group, "sublattice_pairs", sublattice_pairs);
+            // Note: bond_types array is same as sublattice_pairs since bond type = sublattice pair
+            write_int_vec(group, "bond_types", sublattice_pairs);
+            
+            // Save sublattice positions
+            vector<double> sub_pos_flat(n_sublattices * 3);
+            for (size_t i = 0; i < n_sublattices; ++i) {
+                sub_pos_flat[i * 3 + 0] = sublattice_positions_[i](0);
+                sub_pos_flat[i * 3 + 1] = sublattice_positions_[i](1);
+                sub_pos_flat[i * 3 + 2] = sublattice_positions_[i](2);
+            }
+            write_vec(group, "sublattice_positions", sub_pos_flat);
+            
+            // Save bond centers: center(μ) = (r_{sub_i} + r_{sub_j})/2
+            // Shape: [n_bond_types × 3]
+            vector<double> bond_centers_flat(n_bond_types * 3);
+            for (size_t mu = 0; mu < n_bond_types; ++mu) {
+                Eigen::Vector3d center = bond_center(mu);
+                bond_centers_flat[mu * 3 + 0] = center(0);
+                bond_centers_flat[mu * 3 + 1] = center(1);
+                bond_centers_flat[mu * 3 + 2] = center(2);
+            }
+            write_vec(group, "bond_centers", bond_centers_flat);
+            
+            // ========== SPIN CORRELATIONS ==========
+            // Shape: [n_cell_displacements][n_sublattice_pairs][6]
+            // Component order: xx=0, xy=1, xz=2, yy=3, yz=4, zz=5
+            write_vec(group, "spin_corr_sum", spin_corr_sum);
             
             // Save spin means per sublattice
             vector<double> spin_mean_flat(n_sublattices * 3);
@@ -707,44 +905,13 @@ struct RealSpaceCorrelationAccumulator {
             }
             write_vec(group, "spin_mean_sum", spin_mean_flat);
             
-            // Save displacement vectors
-            vector<double> disp_flat(n_displacements * 3);
-            for (size_t i = 0; i < n_displacements; ++i) {
-                disp_flat[i * 3 + 0] = displacement_vectors[i](0);
-                disp_flat[i * 3 + 1] = displacement_vectors[i](1);
-                disp_flat[i * 3 + 2] = displacement_vectors[i](2);
-            }
-            write_vec(group, "displacement_vectors", disp_flat);
-            
-            // ========== DIMER CORRELATION METADATA ==========
-            // Save bond type info: for each bond type, store (sub_i, sub_j)
-            // Bond type = s_max*(s_max+1)/2 + s_min where s_min <= s_max
-            // Invert this to get sublattice pair
-            vector<int> bond_type_sublattices(n_bond_types * 2);
-            for (size_t t = 0; t < n_bond_types; ++t) {
-                // Invert triangular index: find s_max such that s_max*(s_max+1)/2 <= t
-                size_t s_max = 0;
-                while ((s_max + 1) * (s_max + 2) / 2 <= t) {
-                    s_max++;
-                }
-                size_t s_min = t - s_max * (s_max + 1) / 2;
-                bond_type_sublattices[t * 2 + 0] = static_cast<int>(s_min);
-                bond_type_sublattices[t * 2 + 1] = static_cast<int>(s_max);
-            }
-            write_int_vec(group, "bond_type_sublattices", bond_type_sublattices);
-            
-            // Save dimer correlations
+            // ========== DIMER CORRELATIONS ==========
+            // Shape: [n_cell_displacements][n_bond_types][n_bond_types][3]
+            // Component order: x=0, y=1, z=2
             write_vec(group, "dimer_corr_sum", dimer_corr_sum);
-            write_vec(group, "dimer_mean_sum", dimer_mean_sum);
             
-            // Save bond displacement vectors
-            vector<double> bond_disp_flat(n_bond_displacements * 3);
-            for (size_t i = 0; i < n_bond_displacements; ++i) {
-                bond_disp_flat[i * 3 + 0] = bond_displacement_vectors[i](0);
-                bond_disp_flat[i * 3 + 1] = bond_displacement_vectors[i](1);
-                bond_disp_flat[i * 3 + 2] = bond_displacement_vectors[i](2);
-            }
-            write_vec(group, "bond_displacement_vectors", bond_disp_flat);
+            // Dimer means: [n_bond_types][3]
+            write_vec(group, "dimer_mean_sum", dimer_mean_sum);
             
             file.close();
         } catch (const H5::Exception& e) {
@@ -832,21 +999,7 @@ struct RealSpaceCorrelationAccumulator {
         
         if (size == 1) return;  // Nothing to reduce
         
-        // Flatten spin correlations for MPI
-        size_t n_spin_data = n_displacements * 9;  // 3x3 matrices
-        vector<double> spin_flat(n_spin_data);
-        vector<double> spin_sq_flat(n_spin_data);
-        
-        for (size_t i = 0; i < n_displacements; ++i) {
-            for (size_t a = 0; a < 3; ++a) {
-                for (size_t b = 0; b < 3; ++b) {
-                    spin_flat[i * 9 + a * 3 + b] = spin_corr_sum[i](a, b);
-                    spin_sq_flat[i * 9 + a * 3 + b] = spin_corr_sq_sum[i](a, b);
-                }
-            }
-        }
-        
-        // Flatten spin means
+        // Flatten spin means for MPI
         vector<double> spin_mean_flat(n_sublattices * 3);
         vector<double> spin_mean_sq_flat(n_sublattices * 3);
         for (size_t i = 0; i < n_sublattices; ++i) {
@@ -858,8 +1011,8 @@ struct RealSpaceCorrelationAccumulator {
         
         // Reduce to rank 0
         if (rank == 0) {
-            vector<double> recv_spin(n_spin_data);
-            vector<double> recv_spin_sq(n_spin_data);
+            vector<double> recv_spin(spin_corr_sum.size());
+            vector<double> recv_spin_sq(spin_corr_sq_sum.size());
             vector<double> recv_mean(n_sublattices * 3);
             vector<double> recv_mean_sq(n_sublattices * 3);
             vector<double> recv_dimer(dimer_corr_sum.size());
@@ -870,8 +1023,8 @@ struct RealSpaceCorrelationAccumulator {
             
             for (int src = 1; src < size; ++src) {
                 MPI_Recv(&recv_samples, 1, MPI_UNSIGNED_LONG, src, 0, comm, MPI_STATUS_IGNORE);
-                MPI_Recv(recv_spin.data(), n_spin_data, MPI_DOUBLE, src, 1, comm, MPI_STATUS_IGNORE);
-                MPI_Recv(recv_spin_sq.data(), n_spin_data, MPI_DOUBLE, src, 2, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_spin.data(), spin_corr_sum.size(), MPI_DOUBLE, src, 1, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_spin_sq.data(), spin_corr_sq_sum.size(), MPI_DOUBLE, src, 2, comm, MPI_STATUS_IGNORE);
                 MPI_Recv(recv_mean.data(), n_sublattices * 3, MPI_DOUBLE, src, 3, comm, MPI_STATUS_IGNORE);
                 MPI_Recv(recv_mean_sq.data(), n_sublattices * 3, MPI_DOUBLE, src, 4, comm, MPI_STATUS_IGNORE);
                 MPI_Recv(recv_dimer.data(), dimer_corr_sum.size(), MPI_DOUBLE, src, 5, comm, MPI_STATUS_IGNORE);
@@ -881,9 +1034,9 @@ struct RealSpaceCorrelationAccumulator {
                 
                 // Add to local
                 n_samples += recv_samples;
-                for (size_t i = 0; i < n_spin_data; ++i) {
-                    spin_flat[i] += recv_spin[i];
-                    spin_sq_flat[i] += recv_spin_sq[i];
+                for (size_t i = 0; i < spin_corr_sum.size(); ++i) {
+                    spin_corr_sum[i] += recv_spin[i];
+                    spin_corr_sq_sum[i] += recv_spin_sq[i];
                 }
                 for (size_t i = 0; i < n_sublattices * 3; ++i) {
                     spin_mean_flat[i] += recv_mean[i];
@@ -899,15 +1052,7 @@ struct RealSpaceCorrelationAccumulator {
                 }
             }
             
-            // Unflatten back
-            for (size_t i = 0; i < n_displacements; ++i) {
-                for (size_t a = 0; a < 3; ++a) {
-                    for (size_t b = 0; b < 3; ++b) {
-                        spin_corr_sum[i](a, b) = spin_flat[i * 9 + a * 3 + b];
-                        spin_corr_sq_sum[i](a, b) = spin_sq_flat[i * 9 + a * 3 + b];
-                    }
-                }
-            }
+            // Unflatten spin means back
             for (size_t i = 0; i < n_sublattices; ++i) {
                 for (size_t d = 0; d < 3; ++d) {
                     spin_mean_sum[i](d) = spin_mean_flat[i * 3 + d];
@@ -917,8 +1062,8 @@ struct RealSpaceCorrelationAccumulator {
         } else {
             // Send to rank 0
             MPI_Send(&n_samples, 1, MPI_UNSIGNED_LONG, 0, 0, comm);
-            MPI_Send(spin_flat.data(), n_spin_data, MPI_DOUBLE, 0, 1, comm);
-            MPI_Send(spin_sq_flat.data(), n_spin_data, MPI_DOUBLE, 0, 2, comm);
+            MPI_Send(spin_corr_sum.data(), spin_corr_sum.size(), MPI_DOUBLE, 0, 1, comm);
+            MPI_Send(spin_corr_sq_sum.data(), spin_corr_sq_sum.size(), MPI_DOUBLE, 0, 2, comm);
             MPI_Send(spin_mean_flat.data(), n_sublattices * 3, MPI_DOUBLE, 0, 3, comm);
             MPI_Send(spin_mean_sq_flat.data(), n_sublattices * 3, MPI_DOUBLE, 0, 4, comm);
             MPI_Send(dimer_corr_sum.data(), dimer_corr_sum.size(), MPI_DOUBLE, 0, 5, comm);
