@@ -3263,6 +3263,7 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                               sweep_config.lattice_size[1], 
                               sweep_config.lattice_size[2],
                               sweep_config.use_twist_boundary);
+                lattice.lattice_type = system_type_to_string(sweep_config.system);
                 
                 // Initialize spins
                 if (sweep_config.use_ferromagnetic_init) {
@@ -3535,6 +3536,7 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                           sweep_config.lattice_size[1], 
                           sweep_config.lattice_size[2],
                           sweep_config.use_twist_boundary);
+            lattice.lattice_type = system_type_to_string(sweep_config.system);
             
             // Initialize spins
             if (sweep_config.use_ferromagnetic_init) {
@@ -3885,6 +3887,7 @@ int main(int argc, char** argv) {
                           config.lattice_size[1],
                           config.lattice_size[2],
                           config.spin_length);
+            lattice.lattice_type = system_type_to_string(config.system);
             
             // Initialize spins
             if (config.use_ferromagnetic_init) {

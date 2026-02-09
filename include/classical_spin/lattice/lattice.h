@@ -1095,6 +1095,7 @@ public:
 
     // Core lattice properties
     UnitCell unit_cell;
+    std::string lattice_type;  // Lattice type identifier (e.g., "pyrochlore", "pyrochlore_non_kramer")
     size_t spin_dim;         // Dimension of spin vectors (e.g., 3 for SU(2), 8 for SU(3))
     size_t N_atoms;          // Number of atoms per unit cell
     size_t dim1, dim2, dim3; // Lattice dimensions
@@ -1131,6 +1132,14 @@ public:
     double field_drive_amp;           // Pulse amplitude
     double field_drive_freq;          // Pulse frequency
     double field_drive_width;         // Pulse width (Gaussian)
+
+    /**
+     * Check if lattice is a pyrochlore type (pyrochlore or pyrochlore_non_kramer)
+     * Used to validate pyrochlore-specific order parameters.
+     */
+    bool is_pyrochlore() const {
+        return lattice_type == "pyrochlore" || lattice_type == "pyrochlore_non_kramer";
+    }
 
     /**
      * Constructor: Build a lattice from a unit cell
@@ -2265,6 +2274,342 @@ public:
         for (size_t atom = 0; atom < N_atoms; ++atom) {
             M_sub_out[atom] /= double(n_cells);
         }
+    }
+
+    // ============================================================
+    // KAGOME PLANE ORDER PARAMETERS (PYROCHLORE NON-KRAMERS)
+    // For pyrochlore: sublattices 0=apex, 1,2,3=kagome base
+    // 
+    // From unitcell_builders.cpp build_pyrochlore_non_kramer():
+    // 
+    // KAGOME NN BONDS (sublattices 1,2,3):
+    // ┌─────────┬─────────────────┬─────────────────┬────────┐
+    // │ Bond    │ Intra-cell      │ Inter-cell      │ J type │
+    // ├─────────┼─────────────────┼─────────────────┼────────┤
+    // │ (1,2)   │ (0, 0, 0)       │ (-1,+1, 0)      │ Jy     │
+    // │ (1,3)   │ (0, 0, 0)       │ (-1, 0,+1)      │ Jx     │
+    // │ (2,3)   │ (0, 0, 0)       │ ( 0,+1,-1)      │ Jz     │
+    // └─────────┴─────────────────┴─────────────────┴────────┘
+    // 
+    // TRIANGLES (chirality):
+    //   Per unit cell: 1 "up" triangle = {1(i,j,k), 2(i,j,k), 3(i,j,k)}
+    //   Uses intra-cell bonds only. The inter-cell bonds connect to
+    //   different triangles (no closed "down" kagome triangles on 1,2,3).
+    // 
+    // DIMERS (nematic):
+    //   Per unit cell: 6 bonds = 3 types × 2 (intra + inter)
+    //   Each bond type has 2N_cells total bonds in the lattice.
+    // 
+    // Spins are stored in LOCAL FRAME (x,y,z per sublattice).
+    // ============================================================
+
+    /**
+     * Compute scalar chirality on kagome triangles
+     * χ = S1 · (S2 × S3) per intra-cell triangle
+     * 
+     * Triangle vertices: 1(i,j,k), 2(i,j,k), 3(i,j,k)
+     * Edges: (1-2) Jy, (2-3) Jz, (3-1) Jx — all intra-cell
+     * 
+     * @return Average scalar chirality per triangle (1 triangle per unit cell)
+     */
+    double compute_kagome_scalar_chirality() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_kagome_scalar_chirality() is only valid for pyrochlore lattices" << std::endl;
+            return 0.0;
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return 0.0;  // Not applicable
+        }
+        
+        double chi_sum = 0.0;
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    // Intra-cell triangle: 1(i,j,k), 2(i,j,k), 3(i,j,k)
+                    size_t idx1 = flatten_index(i, j, k, 1);
+                    size_t idx2 = flatten_index(i, j, k, 2);
+                    size_t idx3 = flatten_index(i, j, k, 3);
+                    
+                    Eigen::Vector3d S1(spins[idx1](0), spins[idx1](1), spins[idx1](2));
+                    Eigen::Vector3d S2(spins[idx2](0), spins[idx2](1), spins[idx2](2));
+                    Eigen::Vector3d S3(spins[idx3](0), spins[idx3](1), spins[idx3](2));
+                    
+                    chi_sum += S1.dot(S2.cross(S3));
+                }
+            }
+        }
+        
+        return chi_sum / n_cells;
+    }
+    
+    /**
+     * Compute vector chirality on kagome triangles
+     * κ = S1 × S2 + S2 × S3 + S3 × S1 per intra-cell triangle
+     * 
+     * Triangle vertices: 1(i,j,k), 2(i,j,k), 3(i,j,k)
+     * 
+     * @return Average vector chirality (3-component) per triangle
+     */
+    Eigen::Vector3d compute_kagome_vector_chirality() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_kagome_vector_chirality() is only valid for pyrochlore lattices" << std::endl;
+            return Eigen::Vector3d::Zero();
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return Eigen::Vector3d::Zero();
+        }
+        
+        Eigen::Vector3d kappa_sum = Eigen::Vector3d::Zero();
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    size_t idx1 = flatten_index(i, j, k, 1);
+                    size_t idx2 = flatten_index(i, j, k, 2);
+                    size_t idx3 = flatten_index(i, j, k, 3);
+                    
+                    Eigen::Vector3d S1(spins[idx1](0), spins[idx1](1), spins[idx1](2));
+                    Eigen::Vector3d S2(spins[idx2](0), spins[idx2](1), spins[idx2](2));
+                    Eigen::Vector3d S3(spins[idx3](0), spins[idx3](1), spins[idx3](2));
+                    
+                    // κ = S1 × S2 + S2 × S3 + S3 × S1
+                    kappa_sum += S1.cross(S2) + S2.cross(S3) + S3.cross(S1);
+                }
+            }
+        }
+        
+        return kappa_sum / n_cells;
+    }
+    
+    /**
+     * Compute component-resolved nematic bond order on kagome NN bonds
+     * 
+     * Uses bilinear_partners to enumerate all NN bonds automatically.
+     * Bond types for kagome sublattices (1,2,3):
+     *   Type 0: (1-2) bonds — Jy type
+     *   Type 1: (2-3) bonds — Jz type  
+     *   Type 2: (1-3) bonds — Jx type
+     * 
+     * Returns 3×3 matrix: Q[bond_type][local_component]
+     * - Rows: bond types (0, 1, 2)
+     * - Cols: local spin components (x=0, y=1, z=2)
+     * 
+     * Q^α_μ = <S_i^α S_j^α> averaged over all bonds of type μ
+     */
+    Eigen::Matrix3d compute_kagome_nematic_order() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_kagome_nematic_order() is only valid for pyrochlore lattices" << std::endl;
+            return Eigen::Matrix3d::Zero();
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return Eigen::Matrix3d::Zero();
+        }
+        
+        Eigen::Matrix3d Q_sum = Eigen::Matrix3d::Zero();
+        Eigen::Vector3i bond_counts = Eigen::Vector3i::Zero();  // Count bonds per type
+        
+        // Loop over all kagome sites (sublattices 1, 2, 3)
+        for (size_t site_i = 0; site_i < lattice_size; ++site_i) {
+            size_t sub_i = site_i % N_atoms;
+            if (sub_i == 0) continue;  // Skip apex (sublattice 0)
+            
+            // Loop over NN partners from bilinear_partners
+            for (size_t partner_idx = 0; partner_idx < bilinear_partners[site_i].size(); ++partner_idx) {
+                size_t site_j = bilinear_partners[site_i][partner_idx];
+                size_t sub_j = site_j % N_atoms;
+                
+                if (sub_j == 0) continue;  // Skip apex bonds
+                if (site_j <= site_i) continue;  // Avoid double counting (only count i < j)
+                
+                // Determine bond type from sublattice pair
+                int bond_type = -1;
+                if ((sub_i == 1 && sub_j == 2) || (sub_i == 2 && sub_j == 1)) {
+                    bond_type = 0;  // (1-2) bond
+                } else if ((sub_i == 2 && sub_j == 3) || (sub_i == 3 && sub_j == 2)) {
+                    bond_type = 1;  // (2-3) bond
+                } else if ((sub_i == 1 && sub_j == 3) || (sub_i == 3 && sub_j == 1)) {
+                    bond_type = 2;  // (1-3) bond
+                }
+                
+                if (bond_type >= 0) {
+                    // Accumulate S_i^α * S_j^α for each component
+                    for (int alpha = 0; alpha < 3; ++alpha) {
+                        Q_sum(bond_type, alpha) += spins[site_i](alpha) * spins[site_j](alpha);
+                    }
+                    bond_counts(bond_type)++;
+                }
+            }
+        }
+        
+        // Normalize by number of bonds per type
+        for (int bond_type = 0; bond_type < 3; ++bond_type) {
+            if (bond_counts(bond_type) > 0) {
+                Q_sum.row(bond_type) /= bond_counts(bond_type);
+            }
+        }
+        
+        return Q_sum;
+    }
+    
+    /**
+     * Compute monopole density for pyrochlore (non-Kramers)
+     * 
+     * Monopole charge per tetrahedron: Q = Σ_μ S^z_μ where μ ∈ {0,1,2,3}
+     * In the local frame, S^z is the Ising-like component along local [111].
+     * 
+     * For ice rules: Q = 0 (2-in-2-out)
+     * Monopole: Q = ±2 (3-in-1-out or 1-in-3-out)
+     * Double monopole: Q = ±4 (all-in or all-out)
+     * 
+     * @return Average monopole density |Q| per tetrahedron
+     */
+    double compute_monopole_density() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_monopole_density() is only valid for pyrochlore lattices" << std::endl;
+            return 0.0;
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return 0.0;
+        }
+        
+        double Q_sum = 0.0;
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    // Sum S^z over all 4 sublattices in this tetrahedron
+                    double Q_tet = 0.0;
+                    for (size_t mu = 0; mu < N_atoms; ++mu) {
+                        size_t idx = flatten_index(i, j, k, mu);
+                        Q_tet += spins[idx](2);  // z-component in local frame
+                    }
+                    Q_sum += std::abs(Q_tet);
+                }
+            }
+        }
+        
+        return Q_sum / n_cells;
+    }
+    
+    /**
+     * Compute signed monopole density (net charge)
+     * 
+     * @return Average signed monopole charge Q per tetrahedron
+     */
+    double compute_monopole_density_signed() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_monopole_density_signed() is only valid for pyrochlore lattices" << std::endl;
+            return 0.0;
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return 0.0;
+        }
+        
+        double Q_sum = 0.0;
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    for (size_t mu = 0; mu < N_atoms; ++mu) {
+                        size_t idx = flatten_index(i, j, k, mu);
+                        Q_sum += spins[idx](2);
+                    }
+                }
+            }
+        }
+        
+        return Q_sum / n_cells;
+    }
+    
+    /**
+     * Compute monopole density decomposed by sublattice type
+     * 
+     * For a 3-in-1-out monopole, the "type" is determined by which sublattice μ
+     * has the minority spin (the 1-out). Similarly for 1-in-3-out.
+     * 
+     * Returns a 4-component vector:
+     *   density[μ] = fraction of tetrahedra where sublattice μ is the minority
+     * 
+     * For ice-rule states (2-in-2-out) or double monopoles (4-in or 4-out),
+     * no sublattice is counted as minority.
+     * 
+     * @return Eigen::Vector4d with monopole density per sublattice type
+     */
+    Eigen::Vector4d compute_monopole_density_by_sublattice() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_monopole_density_by_sublattice() is only valid for pyrochlore lattices" << std::endl;
+            return Eigen::Vector4d::Zero();
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return Eigen::Vector4d::Zero();
+        }
+        
+        Eigen::Vector4d density = Eigen::Vector4d::Zero();
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    // Get S^z for each sublattice
+                    std::array<double, 4> Sz;
+                    for (size_t mu = 0; mu < 4; ++mu) {
+                        size_t idx = flatten_index(i, j, k, mu);
+                        Sz[mu] = spins[idx](2);
+                    }
+                    
+                    // Count positive and negative S^z
+                    int n_pos = 0, n_neg = 0;
+                    for (size_t mu = 0; mu < 4; ++mu) {
+                        if (Sz[mu] > 0) n_pos++;
+                        else n_neg++;
+                    }
+                    
+                    // Check for 3-1 split (monopole)
+                    if (n_pos == 3 && n_neg == 1) {
+                        // Find the minority (negative) sublattice
+                        for (size_t mu = 0; mu < 4; ++mu) {
+                            if (Sz[mu] <= 0) {
+                                density(mu) += 1.0;
+                                break;
+                            }
+                        }
+                    } else if (n_pos == 1 && n_neg == 3) {
+                        // Find the minority (positive) sublattice
+                        for (size_t mu = 0; mu < 4; ++mu) {
+                            if (Sz[mu] > 0) {
+                                density(mu) += 1.0;
+                                break;
+                            }
+                        }
+                    }
+                    // 2-2 split or 4-0 split: no minority, don't count
+                }
+            }
+        }
+        
+        return density / n_cells;
+    }
+    
+    /**
+     * Compute all kagome order parameters at once
+     * 
+     * @return Tuple of (scalar_chirality, vector_chirality, nematic_order_matrix)
+     */
+    std::tuple<double, Eigen::Vector3d, Eigen::Matrix3d> compute_kagome_order_parameters() const {
+        return {compute_kagome_scalar_chirality(), 
+                compute_kagome_vector_chirality(),
+                compute_kagome_nematic_order()};
     }
 
     // ============================================================
@@ -3710,10 +4055,19 @@ public:
         vector<double> energies;
         vector<SpinVector> magnetizations;
         vector<vector<SpinVector>> sublattice_mags;  // sublattice magnetizations
+        
+        // Kagome order parameters (pyrochlore patch)
+        vector<double> scalar_chiralities;
+        vector<Eigen::Vector3d> vector_chiralities;
+        vector<Eigen::Matrix3d> nematic_orders;  // [bond_type x spin_component]
+        
         size_t expected_samples = n_measure / probe_rate + 100;
         energies.reserve(expected_samples);
         magnetizations.reserve(expected_samples);
         sublattice_mags.reserve(expected_samples);
+        scalar_chiralities.reserve(expected_samples);
+        vector_chiralities.reserve(expected_samples);
+        nematic_orders.reserve(expected_samples);
         
         // Initialize correlation accumulator if requested
         RealSpaceCorrelationAccumulator corr_acc;
@@ -3764,6 +4118,13 @@ public:
                 magnetizations.push_back(magnetization_global());
                 sublattice_mags.push_back(magnetization_sublattice());
                 
+                // Kagome order parameters (pyrochlore patch)
+                if (N_atoms >= 4) {
+                    scalar_chiralities.push_back(compute_kagome_scalar_chirality());
+                    vector_chiralities.push_back(compute_kagome_vector_chirality());
+                    nematic_orders.push_back(compute_kagome_nematic_order());
+                }
+                
                 // Accumulate real-space correlations for S(q)
                 if (accumulate_correlations) {
                     accumulate_correlations_internal(corr_acc);
@@ -3793,6 +4154,19 @@ public:
             }
         }
         
+        // Save kagome order parameters (pyrochlore patch)
+        if (N_atoms >= 4 && !scalar_chiralities.empty()) {
+            bool should_write = (std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())
+                               || (std::find(rank_to_write.begin(), rank_to_write.end(), -1) != rank_to_write.end());
+            
+            if (should_write) {
+                string rank_dir = dir_name + "/rank_" + std::to_string(rank);
+                std::filesystem::create_directories(rank_dir);
+                save_kagome_order_parameters(rank_dir, curr_Temp, 
+                                             scalar_chiralities, vector_chiralities, nematic_orders);
+            }
+        }
+        
         // Gather and save statistics with comprehensive observables
         gather_and_save_statistics_comprehensive(rank, size, curr_Temp, energies, 
                                                   magnetizations, sublattice_mags,
@@ -3800,6 +4174,175 @@ public:
                                                   rank_to_write, n_anneal, n_measure, 
                                                   curr_accept, swap_accept,
                                                   swap_rate, overrelaxation_rate, probe_rate, comm, verbose);
+    }
+    
+    /**
+     * Save kagome order parameters to HDF5 file (pyrochlore patch)
+     * Nematic order is now component-resolved: [bond_type x spin_component] 3x3 matrix
+     */
+    void save_kagome_order_parameters(const string& rank_dir, double temperature,
+                                       const vector<double>& scalar_chi,
+                                       const vector<Eigen::Vector3d>& vector_chi,
+                                       const vector<Eigen::Matrix3d>& nematic) const {
+#ifdef HDF5_ENABLED
+        string filename = rank_dir + "/kagome_order_T" + std::to_string(temperature) + ".h5";
+        
+        try {
+            H5::H5File file(filename, H5F_ACC_TRUNC);
+            
+            size_t n_samples = scalar_chi.size();
+            
+            // Create metadata group
+            H5::Group metadata = file.createGroup("/metadata");
+            H5::DataSpace scalar_space(H5S_SCALAR);
+            
+            H5::Attribute temp_attr = metadata.createAttribute("temperature", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            temp_attr.write(H5::PredType::NATIVE_DOUBLE, &temperature);
+            
+            H5::Attribute n_attr = metadata.createAttribute("n_samples", 
+                H5::PredType::NATIVE_HSIZE, scalar_space);
+            n_attr.write(H5::PredType::NATIVE_HSIZE, &n_samples);
+            
+            std::string desc = "Kagome order parameters for pyrochlore (sublattices 1,2,3)";
+            H5::StrType str_type(H5::PredType::C_S1, desc.size() + 1);
+            H5::Attribute desc_attr = metadata.createAttribute("description", str_type, scalar_space);
+            desc_attr.write(str_type, desc.c_str());
+            
+            // Create data group
+            H5::Group data = file.createGroup("/timeseries");
+            
+            // Write scalar chirality
+            hsize_t dims1d[1] = {n_samples};
+            H5::DataSpace space1d(1, dims1d);
+            
+            H5::DataSet chi_scalar = data.createDataSet("scalar_chirality", 
+                H5::PredType::NATIVE_DOUBLE, space1d);
+            chi_scalar.write(scalar_chi.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Write vector chirality [n_samples x 3]
+            hsize_t dims2d[2] = {n_samples, 3};
+            H5::DataSpace space2d(2, dims2d);
+            
+            vector<double> vec_chi_flat(n_samples * 3);
+            for (size_t i = 0; i < n_samples; ++i) {
+                vec_chi_flat[i * 3 + 0] = vector_chi[i](0);
+                vec_chi_flat[i * 3 + 1] = vector_chi[i](1);
+                vec_chi_flat[i * 3 + 2] = vector_chi[i](2);
+            }
+            
+            H5::DataSet chi_vec = data.createDataSet("vector_chirality", 
+                H5::PredType::NATIVE_DOUBLE, space2d);
+            chi_vec.write(vec_chi_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Write nematic order [n_samples x 3 bonds x 3 components]
+            // Q[bond_type][component] where bond_type = {12, 23, 31}, component = {x, y, z}
+            hsize_t dims3d[3] = {n_samples, 3, 3};
+            H5::DataSpace space3d(3, dims3d);
+            
+            vector<double> nem_flat(n_samples * 9);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (int b = 0; b < 3; ++b) {      // bond type
+                    for (int c = 0; c < 3; ++c) {  // spin component
+                        nem_flat[i * 9 + b * 3 + c] = nematic[i](b, c);
+                    }
+                }
+            }
+            
+            H5::DataSet nem_ds = data.createDataSet("nematic_bond_order", 
+                H5::PredType::NATIVE_DOUBLE, space3d);
+            nem_ds.write(nem_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Add attribute describing dimensions
+            std::string nem_desc = "Shape: [n_samples, bond_type, spin_component]. "
+                                   "bond_type: 0=1-2, 1=2-3, 2=3-1. "
+                                   "spin_component: 0=x, 1=y, 2=z. "
+                                   "Q_ij^alpha = <S_i^alpha * S_j^alpha>";
+            H5::StrType nem_str_type(H5::PredType::C_S1, nem_desc.size() + 1);
+            H5::Attribute nem_attr = nem_ds.createAttribute("description", nem_str_type, scalar_space);
+            nem_attr.write(nem_str_type, nem_desc.c_str());
+            
+            // Write summary statistics
+            H5::Group stats = file.createGroup("/statistics");
+            
+            // Scalar chirality stats
+            double chi_mean = std::accumulate(scalar_chi.begin(), scalar_chi.end(), 0.0) / n_samples;
+            double chi2_mean = 0.0;
+            for (double c : scalar_chi) chi2_mean += c * c;
+            chi2_mean /= n_samples;
+            double chi_std = std::sqrt(chi2_mean - chi_mean * chi_mean);
+            
+            H5::Attribute chi_mean_attr = stats.createAttribute("scalar_chirality_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_mean_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_mean);
+            
+            H5::Attribute chi_std_attr = stats.createAttribute("scalar_chirality_std", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_std_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_std);
+            
+            // Vector chirality component-resolved stats
+            Eigen::Vector3d kappa_mean = Eigen::Vector3d::Zero();
+            for (const auto& k : vector_chi) kappa_mean += k;
+            kappa_mean /= n_samples;
+            
+            hsize_t dims_kappa[1] = {3};
+            H5::DataSpace space_kappa(1, dims_kappa);
+            double kappa_arr[3] = {kappa_mean(0), kappa_mean(1), kappa_mean(2)};
+            H5::DataSet kappa_mean_ds = stats.createDataSet("vector_chirality_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_kappa);
+            kappa_mean_ds.write(kappa_arr, H5::PredType::NATIVE_DOUBLE);
+            
+            // Also save magnitude for convenience
+            double kappa_mag_mean = 0.0;
+            for (const auto& k : vector_chi) kappa_mag_mean += k.norm();
+            kappa_mag_mean /= n_samples;
+            
+            H5::Attribute kappa_mag_attr = stats.createAttribute("vector_chirality_magnitude_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            kappa_mag_attr.write(H5::PredType::NATIVE_DOUBLE, &kappa_mag_mean);
+            
+            // Nematic order stats: mean over samples [3 bonds x 3 components]
+            Eigen::Matrix3d Q_mean = Eigen::Matrix3d::Zero();
+            for (const auto& Q : nematic) Q_mean += Q;
+            Q_mean /= n_samples;
+            
+            hsize_t dims_q[2] = {3, 3};
+            H5::DataSpace space_q(2, dims_q);
+            double Q_arr[9];
+            for (int b = 0; b < 3; ++b) {
+                for (int c = 0; c < 3; ++c) {
+                    Q_arr[b * 3 + c] = Q_mean(b, c);
+                }
+            }
+            H5::DataSet Q_mean_ds = stats.createDataSet("nematic_bond_order_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_q);
+            Q_mean_ds.write(Q_arr, H5::PredType::NATIVE_DOUBLE);
+            
+            file.close();
+            
+        } catch (const H5::Exception& e) {
+            cerr << "HDF5 error saving kagome order parameters: " << e.getDetailMsg() << endl;
+        }
+#else
+        // Plain text fallback
+        string filename = rank_dir + "/kagome_order_T" + std::to_string(temperature) + ".txt";
+        ofstream file(filename);
+        file << "# Kagome order parameters (sublattices 1,2,3)\n";
+        file << "# Component-resolved nematic: Q_ij^alpha = <S_i^alpha * S_j^alpha>\n";
+        file << "# sample scalar_chi kappa_x kappa_y kappa_z "
+             << "Q12_x Q12_y Q12_z Q23_x Q23_y Q23_z Q31_x Q31_y Q31_z\n";
+        for (size_t i = 0; i < scalar_chi.size(); ++i) {
+            file << i << " " << scalar_chi[i] << " "
+                 << vector_chi[i](0) << " " << vector_chi[i](1) << " " << vector_chi[i](2);
+            for (int b = 0; b < 3; ++b) {
+                for (int c = 0; c < 3; ++c) {
+                    file << " " << nematic[i](b, c);
+                }
+            }
+            file << "\n";
+        }
+        file.close();
+#endif
     }
     
     /**

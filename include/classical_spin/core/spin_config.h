@@ -226,6 +226,25 @@ inline SystemType parse_system(const string& str) {
     throw runtime_error("Unknown system type: " + str);
 }
 
+/**
+ * Convert SystemType enum to string (inverse of parse_system)
+ */
+inline string system_type_to_string(SystemType sys) {
+    switch (sys) {
+        case SystemType::HONEYCOMB_BCAO: return "honeycomb_bcao";
+        case SystemType::HONEYCOMB_KITAEV: return "honeycomb_kitaev";
+        case SystemType::PYROCHLORE: return "pyrochlore";
+        case SystemType::PYROCHLORE_NON_KRAMER: return "pyrochlore_non_kramer";
+        case SystemType::TMFEO3: return "tmfeo3";
+        case SystemType::TMFEO3_FE: return "tmfeo3_fe";
+        case SystemType::TMFEO3_TM: return "tmfeo3_tm";
+        case SystemType::NCTO: return "ncto";
+        case SystemType::NCTO_STRAIN: return "ncto_strain";
+        case SystemType::CUSTOM: return "custom";
+        default: return "unknown";
+    }
+}
+
 inline SimulationType parse_simulation(const string& str) {
     string s = trim(str);
     if (s == "simulated_annealing" || s == "SA" || s == "annealing") return SimulationType::SIMULATED_ANNEALING;
