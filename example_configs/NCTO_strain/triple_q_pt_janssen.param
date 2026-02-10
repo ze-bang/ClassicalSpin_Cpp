@@ -1,0 +1,89 @@
+# NCTO Triple-Q Parallel Tempering - Janssen Hidden SU(2) Point
+# ===============================================================
+# 
+# Parameters from: PRL 131, 146702 (2023) - Krüger & Janssen
+# "Triple-q Order in Na2Co2TeO6 from Proximity to Hidden-SU(2)-Symmetric Point"
+#
+# The hidden SU(2) point has:
+#   (J, K, Γ, Γ') = (-1/9, -2/3, 8/9, -4/9) × A
+#
+# At this point, single-Q zigzag and triple-Q are exactly degenerate.
+# The six-spin ring exchange J7 lifts this degeneracy:
+#   J7 < 0 → favors triple-Q
+#   J7 > 0 → favors single-Q zigzag
+#
+# This config uses A = 9 meV for convenience (gives integer-ish values).
+#
+# PARALLEL TEMPERING: Better at escaping local minima than simulated annealing.
+
+# System type
+system = NCTO_STRAIN
+
+# Lattice dimensions (must be multiple of 2 for triple-Q magnetic unit cell)
+lattice_size = 24,24,1
+
+# Simulation type
+simulation_mode = parallel_tempering
+
+# Output directory
+output_dir = NCTO_triple_q_janssen_PT
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS
+# ============================================
+# Hidden SU(2) point: (J, K, Γ, Γ') = A × (-1/9, -2/3, 8/9, -4/9)
+# With A = 9 meV:
+
+J = -1.0                  # = 9 × (-1/9) = -1 meV (Heisenberg)
+K = -6.0                  # = 9 × (-2/3) = -6 meV (Kitaev, ferromagnetic)
+Gamma = 8.0               # = 9 × (8/9) = 8 meV
+Gammap = -4.0             # = 9 × (-4/9) = -4 meV
+
+# IMPORTANT: Set 2nd and 3rd neighbor to zero at SU(2) point
+J2_A = 0.0
+J2_B = 0.0
+J3 = 0.0
+
+# Six-spin ring exchange (CRITICAL for triple-Q selection)
+J7 = -0.1                 # Try range: -0.5 to -3.0
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PARALLEL TEMPERING PARAMETERS
+# ============================================
+
+# Number of temperature replicas
+num_replicas = 16
+
+# Temperature range (geometric spacing)
+T_min = 0.01              # Lowest temperature replica
+T_max = 50.0              # Highest temperature (above energy scale)
+
+# MC sweeps per exchange attempt
+pt_sweeps_per_exchange = 10
+
+# Total number of PT exchange cycles
+pt_exchange_cycles = 50000
+
+# Equilibration cycles before measurement
+pt_equilibration_cycles = 10000
+
+# Overrelaxation sweeps per MC sweep
+overrelaxation_rate = 5
+
+# Final T=0 relaxation after PT
+T_zero = true
+
+# ============================================
+# DIAGNOSTICS
+# ============================================
+# To verify triple-Q:
+# - Check spin structure factor S(q) at M1, M2, M3 points
+# - Triple-Q: equal intensity at all three M points
+# - Single-Q: intensity at only one M point

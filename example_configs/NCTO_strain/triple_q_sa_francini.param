@@ -1,0 +1,88 @@
+# NCTO Triple-Q Simulated Annealing - Francini/Existing Parameters
+# ==================================================================
+# 
+# Parameters based on existing NCTO_francini config with added J7 ring exchange.
+# These parameters are from a different fitting than the hidden SU(2) point.
+#
+# Ratios: J:K:Γ:Γ' = -0.2 : -0.667 : 3.0 : -0.5
+#                  ≈ -1 : -3.33 : 15 : -2.5 (normalized to J)
+#
+# Note: This is NOT the hidden SU(2) point, so single-Q and triple-Q
+# are not degenerate here. The ground state depends on exact parameter values.
+# Adding J7 < 0 may still help stabilize triple-Q if it exists nearby.
+
+# System type
+system = NCTO_STRAIN
+
+# Lattice dimensions
+lattice_size = 12,12,1
+
+# Simulation type
+simulation_mode = SA
+
+# Output directory
+output_dir = NCTO_triple_q_francini
+
+# Number of trials
+num_trials = 1
+
+# ============================================
+# SPIN HAMILTONIAN PARAMETERS (Francini fitting)
+# ============================================
+
+J = -0.2                  # Heisenberg (meV)
+K = -0.667                # Kitaev (meV, ferromagnetic)
+Gamma = 3.0               # Γ coupling (meV)
+Gammap = -0.5             # Γ' coupling (meV)
+
+# 2nd NN Heisenberg (sublattice-dependent from Francini)
+J2_A = -0.25              # Sublattice A (AFM)
+J2_B = 0.25               # Sublattice B (FM)
+
+# 3rd NN Heisenberg
+J3 = -0.2                 # From some fittings
+
+# Six-spin ring exchange (try negative for triple-Q)
+J7 = -2.0                 # Larger magnitude since not at SU(2) point
+
+# External magnetic field
+field_strength = 0.0
+field_direction = 0,0,1
+
+# ============================================
+# PHONON PARAMETERS (not active during SA)
+# ============================================
+omega_E = 5.0
+gamma_E = 0.1
+lambda_E = 0.0
+
+omega_A = 2.5
+gamma_A = 0.05
+lambda_A = 0.0
+
+g3 = 0.0
+
+# ============================================
+# SPIN-PHONON COUPLING (disabled)
+# ============================================
+lambda_xy = 0.0
+lambda_R = 0.0
+
+# ============================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================
+
+T_start = 25.0            # Lower start (smaller energy scale)
+T_end = 1e-5
+annealing_steps = 100000
+cooling_rate = 0.9
+overrelaxation_rate = 1
+T_zero = true
+
+# ============================================
+# NOTES
+# ============================================
+# The Francini parameters have different ratios than the hidden SU(2) point.
+# If this doesn't give triple-Q, the parameters may intrinsically prefer
+# single-Q zigzag. In that case, use the Janssen hidden SU(2) parameters
+# in triple_q_sa_janssen.param instead.

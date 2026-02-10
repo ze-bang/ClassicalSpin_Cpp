@@ -980,6 +980,162 @@ double StrainPhononLattice::strain_energy() const {
 }
 
 // ============================================================
+// SITE ENERGY FOR METROPOLIS
+// ============================================================
+
+double StrainPhononLattice::site_energy(const SpinVector& spin_here, size_t site) const {
+    double E = 0.0;
+    
+    // Zeeman term: -B · S
+    E -= spin_here.dot(field[site]);
+    
+    // NN exchange: S_i · J · S_j
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        E += spin_here.dot(nn_interaction[site][n] * spins[j]);
+    }
+    
+    // 2nd NN exchange
+    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+        size_t j = j2_partners[site][n];
+        E += spin_here.dot(j2_interaction[site][n] * spins[j]);
+    }
+    
+    // 3rd NN exchange
+    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+        size_t j = j3_partners[site][n];
+        E += spin_here.dot(j3_interaction[site][n] * spins[j]);
+    }
+    
+    // Magnetoelastic coupling contribution
+    // This is more complex - we need the derivative w.r.t. spin dotted with spin
+    // H_c = λ_{A1g} (ε_xx + ε_yy) [(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}] + ...
+    // For simplicity, we use the effective field approach here
+    SpinVector H_me = get_magnetoelastic_field(site);
+    E -= spin_here.dot(H_me);  // H_me = -∂H_c/∂S, so E contribution is -S · H_me
+    
+    // Ring exchange contribution from hexagons containing this site
+    E += site_ring_exchange_energy(spin_here, site);
+    
+    return E;
+}
+
+double StrainPhononLattice::site_energy_diff(const SpinVector& new_spin, 
+                                              const SpinVector& old_spin,
+                                              size_t site) const {
+    SpinVector delta = new_spin - old_spin;
+    double dE = 0.0;
+    
+    // Zeeman: -B · δS
+    dE -= delta.dot(field[site]);
+    
+    // NN exchange: δS · J · S_j
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        dE += delta.dot(nn_interaction[site][n] * spins[j]);
+    }
+    
+    // 2nd NN exchange
+    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+        size_t j = j2_partners[site][n];
+        dE += delta.dot(j2_interaction[site][n] * spins[j]);
+    }
+    
+    // 3rd NN exchange
+    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+        size_t j = j3_partners[site][n];
+        dE += delta.dot(j3_interaction[site][n] * spins[j]);
+    }
+    
+    // Magnetoelastic contribution: -δS · H_me
+    SpinVector H_me = get_magnetoelastic_field(site);
+    dE -= delta.dot(H_me);
+    
+    // Ring exchange: need to compute E_ring(new) - E_ring(old) for hexagons containing this site
+    // Since ring exchange is linear in each spin, we can compute this efficiently
+    dE += site_ring_exchange_energy(new_spin, site) - site_ring_exchange_energy(old_spin, site);
+    
+    return dE;
+}
+
+double StrainPhononLattice::site_ring_exchange_energy(const SpinVector& spin_here, 
+                                                       size_t site) const {
+    // Compute the ring exchange energy contribution from hexagons containing this site
+    // when the spin at 'site' is 'spin_here'
+    //
+    // H_7 = (J_7/6) Σ_{hex} Σ_{cyclic perms} [terms]
+    // Each hexagon is counted once, but we sum over all hexagons containing this site
+    
+    double J7 = magnetoelastic_params.J7;
+    if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
+        return 0.0;
+    }
+    
+    double E = 0.0;
+    const double prefactor = J7 / 6.0;  // J7/6 * 1/6 for per-site contribution
+    
+    // Loop over all hexagons containing this site
+    for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+        const auto& hex = hexagons[hex_idx];
+        
+        // Load all 6 spins into local array for better cache locality
+        // Substitute spin_here at the appropriate position
+        const SpinVector* S[6];
+        SpinVector S_local;
+        for (size_t i = 0; i < 6; ++i) {
+            if (hex[i] == site) {
+                S_local = spin_here;
+                S[i] = &S_local;
+            } else {
+                S[i] = &spins[hex[i]];
+            }
+        }
+        
+        // Precompute only the 15 unique pairwise dot products in a flat array
+        // Indexing: d[i,j] where i<j is stored at index (i*(11-i))/2 + j - 1
+        // But for simplicity and performance, we use explicit variables
+        // This is more cache-friendly than a 2D array
+        const double d01 = S[0]->dot(*S[1]), d02 = S[0]->dot(*S[2]), d03 = S[0]->dot(*S[3]);
+        const double d04 = S[0]->dot(*S[4]), d05 = S[0]->dot(*S[5]);
+        const double d12 = S[1]->dot(*S[2]), d13 = S[1]->dot(*S[3]), d14 = S[1]->dot(*S[4]);
+        const double d15 = S[1]->dot(*S[5]);
+        const double d23 = S[2]->dot(*S[3]), d24 = S[2]->dot(*S[4]), d25 = S[2]->dot(*S[5]);
+        const double d34 = S[3]->dot(*S[4]), d35 = S[3]->dot(*S[5]);
+        const double d45 = S[4]->dot(*S[5]);
+        
+        // Sum over 6 cyclic permutations using explicit expressions
+        // This unrolling improves instruction-level parallelism
+        // Permutation 0: (0,1,2,3,4,5)
+        double hex_E = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
+                     + 3.0*d02*d14*d35 - d03*d14*d25;
+        
+        // Permutation 1: (1,2,3,4,5,0)
+        hex_E += 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
+               + 3.0*d13*d25*d04 - d14*d25*d03;
+        
+        // Permutation 2: (2,3,4,5,0,1)
+        hex_E += 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
+               + 3.0*d24*d03*d15 - d25*d03*d14;
+        
+        // Permutation 3: (3,4,5,0,1,2)
+        hex_E += 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
+               + 3.0*d35*d14*d02 - d03*d14*d25;
+        
+        // Permutation 4: (4,5,0,1,2,3)
+        hex_E += 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
+               + 3.0*d04*d25*d13 - d14*d25*d03;
+        
+        // Permutation 5: (5,0,1,2,3,4)
+        hex_E += 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
+               + 3.0*d15*d03*d24 - d25*d03*d14;
+        
+        E += prefactor * hex_E;
+    }
+    
+    return E;
+}
+
+// ============================================================
 // SPIN BASIS FUNCTIONS FOR D3d IRREPS
 // ============================================================
 
@@ -1230,44 +1386,94 @@ double StrainPhononLattice::f_Gamma_Eg2() const {
     return std::sqrt(3.0) * (f_x - f_y);
 }
 
+double StrainPhononLattice::f_Gammap_Eg1() const {
+    // f_Γ'^{Eg,1} = O_x + O_y - 2*O_z where O_γ is the Γ' operator on γ-bonds
+    // Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ where α,β ≠ γ
+    double f_x = 0.0, f_y = 0.0, f_z = 0.0;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const Eigen::Vector3d& Si = spins[i];
+        
+        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+            size_t j = nn_partners[i][n];
+            if (j > i) {
+                const Eigen::Vector3d& Sj = spins[j];
+                int gamma = nn_bond_types[i][n];
+                int alpha = (gamma + 1) % 3;
+                int beta = (gamma + 2) % 3;
+                
+                // Γ' term: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
+                double gammap_term = Si(gamma) * (Sj(alpha) + Sj(beta)) 
+                                   + (Si(alpha) + Si(beta)) * Sj(gamma);
+                if (gamma == 0) f_x += gammap_term;
+                else if (gamma == 1) f_y += gammap_term;
+                else f_z += gammap_term;
+            }
+        }
+    }
+    
+    // f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
+    return f_x + f_y - 2.0 * f_z;
+}
+
+double StrainPhononLattice::f_Gammap_Eg2() const {
+    // f_Γ'^{Eg,2} = √3 (O_x - O_y) where O_γ is the Γ' operator on γ-bonds
+    double f_x = 0.0, f_y = 0.0;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const Eigen::Vector3d& Si = spins[i];
+        
+        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
+            size_t j = nn_partners[i][n];
+            if (j > i) {
+                const Eigen::Vector3d& Sj = spins[j];
+                int gamma = nn_bond_types[i][n];
+                int alpha = (gamma + 1) % 3;
+                int beta = (gamma + 2) % 3;
+                
+                // Γ' term: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
+                double gammap_term = Si(gamma) * (Sj(alpha) + Sj(beta)) 
+                                   + (Si(alpha) + Si(beta)) * Sj(gamma);
+                if (gamma == 0) f_x += gammap_term;
+                else if (gamma == 1) f_y += gammap_term;
+            }
+        }
+    }
+    
+    // f_Γ'^{Eg,2} = √3 * (f_x - f_y)
+    return std::sqrt(3.0) * (f_x - f_y);
+}
+
 // ============================================================
 // MAGNETOELASTIC ENERGY
 // ============================================================
 
 double StrainPhononLattice::magnetoelastic_energy() const {
-    // H_c = H_c^{A1g} + H_c^{Eg}
+    // H_c = H_c^{Eg} (A1g terms removed)
     //
-    // H_c^{A1g} = λ_{A1g} Σ_b (ε_xx + ε_yy)_b {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
-    //
-    // H_c^{Eg} = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
-    //                      + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+    // H_c^{Eg} = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
+    //                      + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Compute spin basis functions
-    double fK_A1g = f_K_A1g();
-    double fJ_A1g = f_J_A1g();
-    double fG_A1g = f_Gamma_A1g();
-    
+    // Compute Eg spin basis functions
     double fK_Eg1 = f_K_Eg1();
     double fK_Eg2 = f_K_Eg2();
     double fJ_Eg1 = f_J_Eg1();
     double fJ_Eg2 = f_J_Eg2();
     double fG_Eg1 = f_Gamma_Eg1();
     double fG_Eg2 = f_Gamma_Eg2();
+    double fGp_Eg1 = f_Gammap_Eg1();
+    double fGp_Eg2 = f_Gammap_Eg2();
     
-    // A1g channel contribution
-    double A1g_spin_factor = (J + K) * fK_A1g + J * fJ_A1g + Gamma * fG_A1g;
+    // Eg channel contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg1_spin_factor = (J + K) * fK_Eg1 + J * fJ_Eg1 + Gamma * fG_Eg1 + Gammap * fGp_Eg1;
+    double Eg2_spin_factor = (J + K) * fK_Eg2 + J * fJ_Eg2 + Gamma * fG_Eg2 + Gammap * fGp_Eg2;
     
-    // Eg channel contribution
-    double Eg1_spin_factor = (J + K) * fK_Eg1 + J * fJ_Eg1 + Gamma * fG_Eg1;
-    double Eg2_spin_factor = (J + K) * fK_Eg2 + J * fJ_Eg2 + Gamma * fG_Eg2;
-    
-    double E_A1g = 0.0;
     double E_Eg = 0.0;
     
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
@@ -1275,14 +1481,11 @@ double StrainPhononLattice::magnetoelastic_energy() const {
         double eyy = strain.epsilon_yy[b];
         double exy = strain.epsilon_xy[b];
         
-        // A1g: (ε_xx + ε_yy)
-        E_A1g += lambda_A1g * (exx + eyy) * A1g_spin_factor;
-        
         // Eg: (ε_xx - ε_yy) * Eg1 + 2ε_xy * Eg2
         E_Eg += lambda_Eg * ((exx - eyy) * Eg1_spin_factor + 2.0 * exy * Eg2_spin_factor);
     }
     
-    return E_A1g + E_Eg;
+    return E_Eg;
 }
 
 // ============================================================
@@ -1290,40 +1493,41 @@ double StrainPhononLattice::magnetoelastic_energy() const {
 // ============================================================
 
 double StrainPhononLattice::dH_deps_xx(size_t bond_type) const {
-    // ∂H_c/∂ε_xx = λ_{A1g} * A1g_spin_factor + λ_{Eg} * Eg1_spin_factor
+    // ∂H_c/∂ε_xx = λ_{Eg} * Eg1_spin_factor (A1g terms removed)
     //            + elastic terms: C11 * ε_xx + C12 * ε_yy
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Spin factors
-    double A1g_spin_factor = (J + K) * f_K_A1g() + J * f_J_A1g() + Gamma * f_Gamma_A1g();
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
+    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
     
-    // Magnetoelastic contribution
-    double dH_me = lambda_A1g * A1g_spin_factor + lambda_Eg * Eg1_spin_factor;
+    // Magnetoelastic contribution: ∂/∂ε_xx of (ε_xx - ε_yy) = +1
+    double dH_me = lambda_Eg * Eg1_spin_factor;
     
     return dH_me;
 }
 
 double StrainPhononLattice::dH_deps_yy(size_t bond_type) const {
-    // ∂H_c/∂ε_yy = λ_{A1g} * A1g_spin_factor - λ_{Eg} * Eg1_spin_factor
+    // ∂H_c/∂ε_yy = -λ_{Eg} * Eg1_spin_factor (A1g terms removed)
     //            + elastic terms: C11 * ε_yy + C12 * ε_xx
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    double A1g_spin_factor = (J + K) * f_K_A1g() + J * f_J_A1g() + Gamma * f_Gamma_A1g();
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
+    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
     
-    // Note: ε_yy contributes +1 to A1g and -1 to Eg1
-    double dH_me = lambda_A1g * A1g_spin_factor - lambda_Eg * Eg1_spin_factor;
+    // Magnetoelastic contribution: ∂/∂ε_yy of (ε_xx - ε_yy) = -1
+    double dH_me = -lambda_Eg * Eg1_spin_factor;
     
     return dH_me;
 }
@@ -1335,10 +1539,14 @@ double StrainPhononLattice::dH_deps_xy(size_t bond_type) const {
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2();
+    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
+    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
     
+    // Magnetoelastic contribution: ∂/∂ε_xy of 2ε_xy = 2
     double dH_me = 2.0 * lambda_Eg * Eg2_spin_factor;
     
     return dH_me;
@@ -1546,59 +1754,109 @@ SpinVector StrainPhononLattice::df_Gamma_Eg2_dS(size_t site) const {
     return std::sqrt(3.0) * (df_x - df_y);
 }
 
+SpinVector StrainPhononLattice::df_Gammap_Eg1_dS(size_t site) const {
+    // ∂f_Γ'^{Eg,1}/∂S_site where f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
+    // The Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
+    // Derivative w.r.t. S_i:
+    //   ∂/∂S_i^γ: S_j^α + S_j^β
+    //   ∂/∂S_i^α: S_j^γ
+    //   ∂/∂S_i^β: S_j^γ
+    SpinVector df_x = Eigen::Vector3d::Zero();
+    SpinVector df_y = Eigen::Vector3d::Zero();
+    SpinVector df_z = Eigen::Vector3d::Zero();
+    
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        int gamma = nn_bond_types[site][n];
+        int alpha = (gamma + 1) % 3;
+        int beta = (gamma + 2) % 3;
+        
+        SpinVector contrib = Eigen::Vector3d::Zero();
+        // ∂/∂S_i^γ contributes S_j^α + S_j^β
+        contrib(gamma) = spins[j](alpha) + spins[j](beta);
+        // ∂/∂S_i^α and ∂/∂S_i^β both contribute S_j^γ
+        contrib(alpha) = spins[j](gamma);
+        contrib(beta) = spins[j](gamma);
+        
+        if (gamma == 0) df_x += contrib;
+        else if (gamma == 1) df_y += contrib;
+        else df_z += contrib;
+    }
+    
+    // f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
+    return df_x + df_y - 2.0 * df_z;
+}
+
+SpinVector StrainPhononLattice::df_Gammap_Eg2_dS(size_t site) const {
+    // ∂f_Γ'^{Eg,2}/∂S_site where f_Γ'^{Eg,2} = √3*(f_x - f_y)
+    SpinVector df_x = Eigen::Vector3d::Zero();
+    SpinVector df_y = Eigen::Vector3d::Zero();
+    
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        int gamma = nn_bond_types[site][n];
+        int alpha = (gamma + 1) % 3;
+        int beta = (gamma + 2) % 3;
+        
+        SpinVector contrib = Eigen::Vector3d::Zero();
+        // ∂/∂S_i^γ contributes S_j^α + S_j^β
+        contrib(gamma) = spins[j](alpha) + spins[j](beta);
+        // ∂/∂S_i^α and ∂/∂S_i^β both contribute S_j^γ
+        contrib(alpha) = spins[j](gamma);
+        contrib(beta) = spins[j](gamma);
+        
+        if (gamma == 0) df_x += contrib;
+        else if (gamma == 1) df_y += contrib;
+    }
+    
+    // f_Γ'^{Eg,2} = √3 * (f_x - f_y)
+    return std::sqrt(3.0) * (df_x - df_y);
+}
+
 // ============================================================
 // EFFECTIVE FIELD
 // ============================================================
 
 SpinVector StrainPhononLattice::get_magnetoelastic_field(size_t site) const {
-    // H_me = -∂H_c/∂S_i
+    // H_me = -∂H_c/∂S_i (A1g terms removed)
     // 
-    // H_c = λ_{A1g} Σ_b (ε_xx + ε_yy)_b [(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}]
-    //     + λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
-    //                  + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+    // H_c = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
+    //                  + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
     
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
+    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Compute strain factors (summed over bond types)
-    double A1g_strain = 0.0;
+    // Compute Eg strain factors (summed over bond types)
     double Eg1_strain = 0.0;
     double Eg2_strain = 0.0;
     
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        A1g_strain += strain.epsilon_xx[b] + strain.epsilon_yy[b];
         Eg1_strain += strain.epsilon_xx[b] - strain.epsilon_yy[b];
         Eg2_strain += 2.0 * strain.epsilon_xy[b];
     }
     
-    // Compute spin derivatives
-    SpinVector df_K_A1g = df_K_A1g_dS(site);
-    SpinVector df_J_A1g = df_J_A1g_dS(site);
-    SpinVector df_G_A1g = df_Gamma_A1g_dS(site);
-    
+    // Compute spin derivatives (Eg only, includes Gammap)
     SpinVector df_K_Eg1 = df_K_Eg1_dS(site);
     SpinVector df_J_Eg1 = df_J_Eg1_dS(site);
     SpinVector df_G_Eg1 = df_Gamma_Eg1_dS(site);
+    SpinVector df_Gp_Eg1 = df_Gammap_Eg1_dS(site);
     
     SpinVector df_K_Eg2 = df_K_Eg2_dS(site);
     SpinVector df_J_Eg2 = df_J_Eg2_dS(site);
     SpinVector df_G_Eg2 = df_Gamma_Eg2_dS(site);
+    SpinVector df_Gp_Eg2 = df_Gammap_Eg2_dS(site);
     
-    // A1g contribution
-    SpinVector H_A1g = lambda_A1g * A1g_strain * 
-                       ((J + K) * df_K_A1g + J * df_J_A1g + Gamma * df_G_A1g);
-    
-    // Eg contribution
+    // Eg contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
     SpinVector H_Eg1 = lambda_Eg * Eg1_strain *
-                       ((J + K) * df_K_Eg1 + J * df_J_Eg1 + Gamma * df_G_Eg1);
+                       ((J + K) * df_K_Eg1 + J * df_J_Eg1 + Gamma * df_G_Eg1 + Gammap * df_Gp_Eg1);
     SpinVector H_Eg2 = lambda_Eg * Eg2_strain *
-                       ((J + K) * df_K_Eg2 + J * df_J_Eg2 + Gamma * df_G_Eg2);
+                       ((J + K) * df_K_Eg2 + J * df_J_Eg2 + Gamma * df_G_Eg2 + Gammap * df_Gp_Eg2);
     
     // Total magnetoelastic field (negative because H_eff = -∂H/∂S)
-    return -(H_A1g + H_Eg1 + H_Eg2);
+    return -(H_Eg1 + H_Eg2);
 }
 
 SpinVector StrainPhononLattice::get_local_field(size_t site) const {
@@ -1635,130 +1893,325 @@ SpinVector StrainPhononLattice::get_local_field(size_t site) const {
 
 SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site) const {
     // Compute H_eff_ring = -∂H_7/∂S_site
+    // 
+    // Ring exchange energy: H_7 = (J7/6) Σ_hex Σ_{perms} [2*d_ij*d_kl*d_mn - 6*d_ik*d_jl*d_mn 
+    //                                                    + 3*d_il*d_jk*d_mn + 3*d_ik*d_jm*d_ln - d_il*d_jm*d_kn]
     //
-    // H_7 = (J_7/6) Σ_{hex} Σ_{cyclic perms} [
-    //   2*(S_i·S_j)*(S_k·S_l)*(S_m·S_n) - 6*(S_i·S_k)*(S_j·S_l)*(S_m·S_n)
-    //   + 3*(S_i·S_l)*(S_j·S_k)*(S_m·S_n) + 3*(S_i·S_k)*(S_j·S_m)*(S_l·S_n)
-    //   - (S_i·S_l)*(S_j·S_m)*(S_k·S_n)
-    // ]
+    // For a site at position p in the hexagon, we need to differentiate ALL 6 permutations
+    // with respect to S_p. The derivative of d_ab w.r.t. S_p is S_b if a=p, or S_a if b=p, else 0.
     
     Eigen::Vector3d H = Eigen::Vector3d::Zero();
-    double J7 = magnetoelastic_params.J7;
+    const double J7 = magnetoelastic_params.J7;
     
     if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
         return H;
     }
     
-    double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
+    const double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
     
     // Loop over all hexagons containing this site
     for (const auto& [hex_idx, pos] : site_hexagons[site]) {
         const auto& hex = hexagons[hex_idx];
         
-        // Get all 6 spins
-        const Eigen::Vector3d& S0 = spins[hex[0]];
-        const Eigen::Vector3d& S1 = spins[hex[1]];
-        const Eigen::Vector3d& S2 = spins[hex[2]];
-        const Eigen::Vector3d& S3 = spins[hex[3]];
-        const Eigen::Vector3d& S4 = spins[hex[4]];
-        const Eigen::Vector3d& S5 = spins[hex[5]];
+        // Pre-load spin pointers for better cache locality
+        const SpinVector* S[6] = {
+            &spins[hex[0]], &spins[hex[1]], &spins[hex[2]],
+            &spins[hex[3]], &spins[hex[4]], &spins[hex[5]]
+        };
         
-        // Precompute all pairwise dot products
-        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
-        double d04 = S0.dot(S4), d05 = S0.dot(S5);
-        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
-        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
-        double d34 = S3.dot(S4), d35 = S3.dot(S5);
-        double d45 = S4.dot(S5);
+        // Precompute all 15 unique pairwise dot products
+        const double d01 = S[0]->dot(*S[1]), d02 = S[0]->dot(*S[2]), d03 = S[0]->dot(*S[3]);
+        const double d04 = S[0]->dot(*S[4]), d05 = S[0]->dot(*S[5]);
+        const double d12 = S[1]->dot(*S[2]), d13 = S[1]->dot(*S[3]), d14 = S[1]->dot(*S[4]);
+        const double d15 = S[1]->dot(*S[5]);
+        const double d23 = S[2]->dot(*S[3]), d24 = S[2]->dot(*S[4]), d25 = S[2]->dot(*S[5]);
+        const double d34 = S[3]->dot(*S[4]), d35 = S[3]->dot(*S[5]);
+        const double d45 = S[4]->dot(*S[5]);
         
         Eigen::Vector3d dH = Eigen::Vector3d::Zero();
         
-        // Compute contributions from all 6 cyclic permutations
-        for (int shift = 0; shift < 6; ++shift) {
-            // Map: i=shift, j=shift+1, k=shift+2, l=shift+3, m=shift+4, n=shift+5 (mod 6)
-            size_t pi = shift % 6;
-            size_t pj = (shift + 1) % 6;
-            size_t pk = (shift + 2) % 6;
-            size_t pl = (shift + 3) % 6;
-            size_t pm = (shift + 4) % 6;
-            size_t pn = (shift + 5) % 6;
+        // Compute ∂/∂S_p of ALL 6 permutations
+        // Permutation k: uses indices (k, k+1, k+2, k+3, k+4, k+5) mod 6 as (i,j,k,l,m,n)
+        // Energy term: 2*d_ij*d_kl*d_mn - 6*d_ik*d_jl*d_mn + 3*d_il*d_jk*d_mn + 3*d_ik*d_jm*d_ln - d_il*d_jm*d_kn
+        //
+        // For each permutation, the site at position 'pos' can appear as i,j,k,l,m, or n
+        // We need to differentiate each term that contains a dot product involving 'pos'
+        
+        // For clarity, we compute the full derivative for each position explicitly
+        // This is verbose but correct and verifiable
+        
+        if (pos == 0) {
+            // ∂/∂S_0 of all 6 permutations
+            // Perm 0 (0,1,2,3,4,5): 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
+            //   d01 → S1, d02 → S2, d03 → S3, d04 → S4, d05 → S5
+            dH += 2.0 * (*S[1]) * d23 * d45;   // ∂d01
+            dH += -6.0 * (*S[2]) * d13 * d45;  // ∂d02
+            dH += 3.0 * (*S[3]) * d12 * d45;   // ∂d03
+            dH += 3.0 * (*S[2]) * d14 * d35;   // ∂d02
+            dH += -(*S[3]) * d14 * d25;        // ∂d03
             
-            // Get the spins for this permutation
-            const Eigen::Vector3d& Si = spins[hex[pi]];
-            const Eigen::Vector3d& Sj_perm = spins[hex[pj]];
-            const Eigen::Vector3d& Sk = spins[hex[pk]];
-            const Eigen::Vector3d& Sl = spins[hex[pl]];
-            const Eigen::Vector3d& Sm = spins[hex[pm]];
-            const Eigen::Vector3d& Sn = spins[hex[pn]];
+            // Perm 1 (1,2,3,4,5,0): 2*d12*d34*d50 - 6*d13*d24*d50 + 3*d14*d23*d50 + 3*d13*d25*d40 - d14*d25*d30
+            //   d50=d05 → S5, d40=d04 → S4, d30=d03 → S3
+            dH += 2.0 * (*S[5]) * d12 * d34;   // ∂d05
+            dH += -6.0 * (*S[5]) * d13 * d24;  // ∂d05
+            dH += 3.0 * (*S[5]) * d14 * d23;   // ∂d05
+            dH += 3.0 * (*S[4]) * d13 * d25;   // ∂d04
+            dH += -(*S[3]) * d14 * d25;        // ∂d03
             
-            // Compute dot products for this permutation
-            double dij = Si.dot(Sj_perm);
-            double dik = Si.dot(Sk);
-            double dil = Si.dot(Sl);
-            double djk = Sj_perm.dot(Sk);
-            double djl = Sj_perm.dot(Sl);
-            double djm = Sj_perm.dot(Sm);
-            double dkl = Sk.dot(Sl);
-            double dkn = Sk.dot(Sn);
-            double dln = Sl.dot(Sn);
-            double dmn = Sm.dot(Sn);
+            // Perm 2 (2,3,4,5,0,1): 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d30*d15 - d25*d30*d14
+            //   d01 → S1, d30=d03 → S3
+            dH += 2.0 * (*S[1]) * d23 * d45;   // ∂d01
+            dH += -6.0 * (*S[1]) * d24 * d35;  // ∂d01
+            dH += 3.0 * (*S[1]) * d25 * d34;   // ∂d01
+            dH += 3.0 * (*S[3]) * d24 * d15;   // ∂d03
+            dH += -(*S[3]) * d25 * d14;        // ∂d03
             
-            // Determine which role our site plays in this permutation
-            int role = -1;
-            if (pos == pi) role = 0;       // site is i
-            else if (pos == pj) role = 1;  // site is j
-            else if (pos == pk) role = 2;  // site is k
-            else if (pos == pl) role = 3;  // site is l
-            else if (pos == pm) role = 4;  // site is m
-            else if (pos == pn) role = 5;  // site is n
+            // Perm 3 (3,4,5,0,1,2): 2*d34*d50*d12 - 6*d35*d40*d12 + 3*d30*d45*d12 + 3*d35*d01*d42 - d30*d01*d52
+            //   d50=d05 → S5, d40=d04 → S4, d30=d03 → S3, d01 → S1
+            dH += 2.0 * (*S[5]) * d34 * d12;   // ∂d05
+            dH += -6.0 * (*S[4]) * d35 * d12;  // ∂d04
+            dH += 3.0 * (*S[3]) * d45 * d12;   // ∂d03
+            dH += 3.0 * (*S[1]) * d35 * d24;   // ∂d01
+            dH += -(*S[3]) * d01 * d25;        // ∂d03
+            dH += -(*S[1]) * d03 * d25;        // ∂d01
             
-            // Compute derivative based on which role our site plays
-            // T1 = 2*(i·j)*(k·l)*(m·n), T2 = -6*(i·k)*(j·l)*(m·n)
-            // T3 = 3*(i·l)*(j·k)*(m·n), T4 = 3*(i·k)*(j·m)*(l·n)
-            // T5 = -(i·l)*(j·m)*(k·n)
+            // Perm 4 (4,5,0,1,2,3): 2*d45*d01*d23 - 6*d40*d15*d23 + 3*d41*d05*d23 + 3*d40*d12*d53 - d41*d12*d03
+            //   d01 → S1, d40=d04 → S4, d05 → S5
+            dH += 2.0 * (*S[1]) * d45 * d23;   // ∂d01
+            dH += -6.0 * (*S[4]) * d15 * d23;  // ∂d04
+            dH += 3.0 * (*S[5]) * d14 * d23;   // ∂d05
+            dH += 3.0 * (*S[4]) * d12 * d35;   // ∂d04
+            dH += -(*S[3]) * d14 * d12;        // ∂d03
             
-            if (role == 0) {  // site is i
-                dH += 2.0 * Sj_perm * dkl * dmn;
-                dH += -6.0 * Sk * djl * dmn;
-                dH += 3.0 * Sl * djk * dmn;
-                dH += 3.0 * Sk * djm * dln;
-                dH += -Sl * djm * dkn;
-            }
-            else if (role == 1) {  // site is j
-                dH += 2.0 * Si * dkl * dmn;
-                dH += -6.0 * Sl * dik * dmn;
-                dH += 3.0 * Sk * dil * dmn;
-                dH += 3.0 * Sm * dik * dln;
-                dH += -Sm * dil * dkn;
-            }
-            else if (role == 2) {  // site is k
-                dH += 2.0 * Sl * dij * dmn;
-                dH += -6.0 * Si * djl * dmn;
-                dH += 3.0 * Sj_perm * dil * dmn;
-                dH += 3.0 * Si * djm * dln;
-                dH += -Sn * dil * djm;
-            }
-            else if (role == 3) {  // site is l
-                dH += 2.0 * Sk * dij * dmn;
-                dH += -6.0 * Sj_perm * dik * dmn;
-                dH += 3.0 * Si * djk * dmn;
-                dH += 3.0 * Sn * dik * djm;
-                dH += -Si * djm * dkn;
-            }
-            else if (role == 4) {  // site is m
-                dH += 2.0 * Sn * dij * dkl;
-                dH += -6.0 * Sn * dik * djl;
-                dH += 3.0 * Sn * dil * djk;
-                dH += 3.0 * Sj_perm * dik * dln;
-                dH += -Sj_perm * dil * dkn;
-            }
-            else if (role == 5) {  // site is n
-                dH += 2.0 * Sm * dij * dkl;
-                dH += -6.0 * Sm * dik * djl;
-                dH += 3.0 * Sm * dil * djk;
-                dH += 3.0 * Sl * dik * djm;
-                dH += -Sk * dil * djm;
-            }
+            // Perm 5 (5,0,1,2,3,4): 2*d50*d12*d34 - 6*d51*d02*d34 + 3*d52*d01*d34 + 3*d51*d03*d24 - d52*d03*d14
+            //   d50=d05 → S5, d02 → S2, d01 → S1
+            dH += 2.0 * (*S[5]) * d12 * d34;   // ∂d05
+            dH += -6.0 * (*S[2]) * d15 * d34;  // ∂d02
+            dH += 3.0 * (*S[1]) * d25 * d34;   // ∂d01
+            dH += 3.0 * (*S[2]) * d15 * d24;   // ∂d02  (wait, there's also ∂d03)
+            dH += 3.0 * (*S[3]) * d15 * d24;   // ∂d03
+            dH += -(*S[3]) * d25 * d14;        // ∂d03
+        }
+        else if (pos == 1) {
+            // ∂/∂S_1 of all 6 permutations
+            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
+            dH += 2.0 * (*S[0]) * d23 * d45;   // ∂d01
+            dH += -6.0 * (*S[3]) * d02 * d45;  // ∂d13
+            dH += 3.0 * (*S[2]) * d03 * d45;   // ∂d12
+            dH += 3.0 * (*S[4]) * d02 * d35;   // ∂d14
+            dH += -(*S[4]) * d03 * d25;        // ∂d14
+            
+            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
+            dH += 2.0 * (*S[2]) * d34 * d05;   // ∂d12
+            dH += -6.0 * (*S[3]) * d24 * d05;  // ∂d13
+            dH += 3.0 * (*S[4]) * d23 * d05;   // ∂d14
+            dH += 3.0 * (*S[3]) * d25 * d04;   // ∂d13
+            dH += -(*S[4]) * d25 * d03;        // ∂d14
+            
+            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
+            dH += 2.0 * (*S[0]) * d23 * d45;   // ∂d01
+            dH += -6.0 * (*S[0]) * d24 * d35;  // ∂d01
+            dH += 3.0 * (*S[0]) * d25 * d34;   // ∂d01
+            dH += 3.0 * (*S[5]) * d24 * d03;   // ∂d15
+            dH += -(*S[4]) * d25 * d03;        // ∂d14
+            
+            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
+            dH += 2.0 * (*S[2]) * d34 * d05;   // ∂d12
+            dH += -6.0 * (*S[2]) * d35 * d04;  // ∂d12
+            dH += 3.0 * (*S[2]) * d03 * d45;   // ∂d12
+            dH += 3.0 * (*S[0]) * d35 * d24;   // ∂d01
+            dH += -(*S[0]) * d03 * d25;        // ∂d01
+            
+            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03  (typo fixed: last term uses d03)
+            dH += 2.0 * (*S[0]) * d45 * d23;   // ∂d01
+            dH += -6.0 * (*S[5]) * d04 * d23;  // ∂d15
+            dH += 3.0 * (*S[4]) * d05 * d23;   // ∂d14
+            dH += 3.0 * (*S[2]) * d04 * d35;   // ∂d12
+            dH += -(*S[4]) * d12 * d03;        // ∂d14
+            dH += -(*S[2]) * d14 * d03;        // ∂d12
+            
+            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
+            dH += 2.0 * (*S[2]) * d05 * d34;   // ∂d12
+            dH += -6.0 * (*S[5]) * d02 * d34;  // ∂d15
+            dH += 3.0 * (*S[0]) * d25 * d34;   // ∂d01
+            dH += 3.0 * (*S[5]) * d03 * d24;   // ∂d15
+            dH += -(*S[4]) * d25 * d03;        // ∂d14
+        }
+        else if (pos == 2) {
+            // ∂/∂S_2 of all 6 permutations
+            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
+            dH += 2.0 * (*S[3]) * d01 * d45;   // ∂d23
+            dH += -6.0 * (*S[0]) * d13 * d45;  // ∂d02
+            dH += 3.0 * (*S[1]) * d03 * d45;   // ∂d12
+            dH += 3.0 * (*S[0]) * d14 * d35;   // ∂d02
+            dH += -(*S[5]) * d03 * d14;        // ∂d25
+            
+            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
+            dH += 2.0 * (*S[1]) * d34 * d05;   // ∂d12
+            dH += -6.0 * (*S[4]) * d13 * d05;  // ∂d24
+            dH += 3.0 * (*S[3]) * d14 * d05;   // ∂d23
+            dH += 3.0 * (*S[5]) * d13 * d04;   // ∂d25
+            dH += -(*S[5]) * d14 * d03;        // ∂d25
+            
+            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
+            dH += 2.0 * (*S[3]) * d45 * d01;   // ∂d23
+            dH += -6.0 * (*S[4]) * d35 * d01;  // ∂d24
+            dH += 3.0 * (*S[5]) * d34 * d01;   // ∂d25
+            dH += 3.0 * (*S[4]) * d03 * d15;   // ∂d24
+            dH += -(*S[5]) * d03 * d14;        // ∂d25
+            
+            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
+            dH += 2.0 * (*S[1]) * d34 * d05;   // ∂d12
+            dH += -6.0 * (*S[1]) * d35 * d04;  // ∂d12
+            dH += 3.0 * (*S[1]) * d03 * d45;   // ∂d12
+            dH += 3.0 * (*S[4]) * d35 * d01;   // ∂d24
+            dH += -(*S[5]) * d03 * d01;        // ∂d25
+            
+            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
+            dH += 2.0 * (*S[3]) * d45 * d01;   // ∂d23
+            dH += -6.0 * (*S[3]) * d04 * d15;  // ∂d23
+            dH += 3.0 * (*S[3]) * d14 * d05;   // ∂d23
+            dH += 3.0 * (*S[1]) * d04 * d35;   // ∂d12
+            dH += -(*S[1]) * d14 * d03;        // ∂d12
+            
+            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
+            dH += 2.0 * (*S[1]) * d05 * d34;   // ∂d12
+            dH += -6.0 * (*S[0]) * d15 * d34;  // ∂d02
+            dH += 3.0 * (*S[5]) * d01 * d34;   // ∂d25
+            dH += 3.0 * (*S[4]) * d15 * d03;   // ∂d24
+            dH += -(*S[5]) * d03 * d14;        // ∂d25
+        }
+        else if (pos == 3) {
+            // ∂/∂S_3 of all 6 permutations
+            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
+            dH += 2.0 * (*S[2]) * d01 * d45;   // ∂d23
+            dH += -6.0 * (*S[1]) * d02 * d45;  // ∂d13
+            dH += 3.0 * (*S[0]) * d12 * d45;   // ∂d03
+            dH += 3.0 * (*S[5]) * d02 * d14;   // ∂d35
+            dH += -(*S[0]) * d14 * d25;        // ∂d03
+            
+            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
+            dH += 2.0 * (*S[4]) * d12 * d05;   // ∂d34
+            dH += -6.0 * (*S[1]) * d24 * d05;  // ∂d13
+            dH += 3.0 * (*S[2]) * d14 * d05;   // ∂d23
+            dH += 3.0 * (*S[1]) * d25 * d04;   // ∂d13
+            dH += -(*S[0]) * d14 * d25;        // ∂d03
+            
+            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
+            dH += 2.0 * (*S[2]) * d45 * d01;   // ∂d23
+            dH += -6.0 * (*S[5]) * d24 * d01;  // ∂d35
+            dH += 3.0 * (*S[4]) * d25 * d01;   // ∂d34
+            dH += 3.0 * (*S[0]) * d24 * d15;   // ∂d03
+            dH += -(*S[0]) * d25 * d14;        // ∂d03
+            
+            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
+            dH += 2.0 * (*S[4]) * d05 * d12;   // ∂d34
+            dH += -6.0 * (*S[5]) * d04 * d12;  // ∂d35
+            dH += 3.0 * (*S[0]) * d45 * d12;   // ∂d03
+            dH += 3.0 * (*S[5]) * d01 * d24;   // ∂d35
+            dH += -(*S[0]) * d01 * d25;        // ∂d03
+            
+            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
+            dH += 2.0 * (*S[2]) * d45 * d01;   // ∂d23
+            dH += -6.0 * (*S[2]) * d04 * d15;  // ∂d23
+            dH += 3.0 * (*S[2]) * d14 * d05;   // ∂d23
+            dH += 3.0 * (*S[5]) * d04 * d12;   // ∂d35
+            dH += -(*S[0]) * d14 * d12;        // ∂d03
+            
+            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
+            dH += 2.0 * (*S[4]) * d05 * d12;   // ∂d34
+            dH += -6.0 * (*S[4]) * d15 * d02;  // ∂d34
+            dH += 3.0 * (*S[4]) * d25 * d01;   // ∂d34
+            dH += 3.0 * (*S[0]) * d15 * d24;   // ∂d03
+            dH += -(*S[0]) * d25 * d14;        // ∂d03
+        }
+        else if (pos == 4) {
+            // ∂/∂S_4 of all 6 permutations
+            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
+            dH += 2.0 * (*S[5]) * d01 * d23;   // ∂d45
+            dH += -6.0 * (*S[5]) * d02 * d13;  // ∂d45
+            dH += 3.0 * (*S[5]) * d03 * d12;   // ∂d45
+            dH += 3.0 * (*S[1]) * d02 * d35;   // ∂d14
+            dH += -(*S[1]) * d03 * d25;        // ∂d14
+            
+            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
+            dH += 2.0 * (*S[3]) * d12 * d05;   // ∂d34
+            dH += -6.0 * (*S[2]) * d13 * d05;  // ∂d24
+            dH += 3.0 * (*S[1]) * d23 * d05;   // ∂d14
+            dH += 3.0 * (*S[0]) * d13 * d25;   // ∂d04
+            dH += -(*S[1]) * d25 * d03;        // ∂d14
+            
+            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
+            dH += 2.0 * (*S[5]) * d23 * d01;   // ∂d45
+            dH += -6.0 * (*S[2]) * d35 * d01;  // ∂d24
+            dH += 3.0 * (*S[3]) * d25 * d01;   // ∂d34
+            dH += 3.0 * (*S[2]) * d03 * d15;   // ∂d24
+            dH += -(*S[1]) * d25 * d03;        // ∂d14
+            
+            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
+            dH += 2.0 * (*S[3]) * d05 * d12;   // ∂d34
+            dH += -6.0 * (*S[0]) * d35 * d12;  // ∂d04
+            dH += 3.0 * (*S[5]) * d03 * d12;   // ∂d45
+            dH += 3.0 * (*S[2]) * d35 * d01;   // ∂d24
+            // no d04, d14, d24, d34, d45 in last term
+            
+            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
+            dH += 2.0 * (*S[5]) * d01 * d23;   // ∂d45
+            dH += -6.0 * (*S[0]) * d15 * d23;  // ∂d04
+            dH += 3.0 * (*S[1]) * d05 * d23;   // ∂d14
+            dH += 3.0 * (*S[0]) * d12 * d35;   // ∂d04
+            dH += -(*S[1]) * d12 * d03;        // ∂d14
+            
+            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
+            dH += 2.0 * (*S[3]) * d05 * d12;   // ∂d34
+            dH += -6.0 * (*S[3]) * d15 * d02;  // ∂d34
+            dH += 3.0 * (*S[3]) * d25 * d01;   // ∂d34
+            dH += 3.0 * (*S[2]) * d15 * d03;   // ∂d24
+            dH += -(*S[1]) * d25 * d03;        // ∂d14
+        }
+        else { // pos == 5
+            // ∂/∂S_5 of all 6 permutations
+            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
+            dH += 2.0 * (*S[4]) * d01 * d23;   // ∂d45
+            dH += -6.0 * (*S[4]) * d02 * d13;  // ∂d45
+            dH += 3.0 * (*S[4]) * d03 * d12;   // ∂d45
+            dH += 3.0 * (*S[3]) * d02 * d14;   // ∂d35
+            dH += -(*S[2]) * d03 * d14;        // ∂d25
+            
+            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
+            dH += 2.0 * (*S[0]) * d12 * d34;   // ∂d05
+            dH += -6.0 * (*S[0]) * d13 * d24;  // ∂d05
+            dH += 3.0 * (*S[0]) * d14 * d23;   // ∂d05
+            dH += 3.0 * (*S[2]) * d13 * d04;   // ∂d25
+            dH += -(*S[2]) * d14 * d03;        // ∂d25
+            
+            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
+            dH += 2.0 * (*S[4]) * d23 * d01;   // ∂d45
+            dH += -6.0 * (*S[3]) * d24 * d01;  // ∂d35
+            dH += 3.0 * (*S[2]) * d34 * d01;   // ∂d25
+            dH += 3.0 * (*S[1]) * d24 * d03;   // ∂d15
+            dH += -(*S[2]) * d03 * d14;        // ∂d25
+            
+            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
+            dH += 2.0 * (*S[0]) * d34 * d12;   // ∂d05
+            dH += -6.0 * (*S[3]) * d04 * d12;  // ∂d35
+            dH += 3.0 * (*S[4]) * d03 * d12;   // ∂d45
+            dH += 3.0 * (*S[3]) * d01 * d24;   // ∂d35
+            dH += -(*S[2]) * d03 * d01;        // ∂d25
+            
+            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
+            dH += 2.0 * (*S[4]) * d01 * d23;   // ∂d45
+            dH += -6.0 * (*S[1]) * d04 * d23;  // ∂d15
+            dH += 3.0 * (*S[0]) * d14 * d23;   // ∂d05
+            dH += 3.0 * (*S[3]) * d04 * d12;   // ∂d35
+            // no d*5 in last term
+            
+            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
+            dH += 2.0 * (*S[0]) * d12 * d34;   // ∂d05
+            dH += -6.0 * (*S[1]) * d02 * d34;  // ∂d15
+            dH += 3.0 * (*S[2]) * d01 * d34;   // ∂d25
+            dH += 3.0 * (*S[1]) * d03 * d24;   // ∂d15
+            dH += -(*S[2]) * d03 * d14;        // ∂d25
         }
         
         H += prefactor * dH;
@@ -2487,50 +2940,148 @@ void StrainPhononLattice::relax_strain(bool verbose) {
 // MONTE CARLO
 // ============================================================
 
-void StrainPhononLattice::mc_sweep(double temperature) {
-    double beta = 1.0 / temperature;
+SpinVector StrainPhononLattice::gen_random_spin(float spin_l) {
+    // Efficient sphere sampling for 3D using cylindrical projection
+    // (same method as Lattice::gen_random_spin in lattice.h)
+    SpinVector spin(spin_dim);  // spin_dim = 3 for this class
     
-    for (size_t i = 0; i < lattice_size; ++i) {
-        // Propose a random spin flip
-        std::normal_distribution<double> normal_dist(0.0, 1.0);
-        double x = normal_dist(rng);
-        double y = normal_dist(rng);
-        double z = normal_dist(rng);
-        double norm = std::sqrt(x*x + y*y + z*z);
-        Eigen::Vector3d new_spin(x/norm * spin_length, y/norm * spin_length, z/norm * spin_length);
+    double z = uniform_dist(rng) * 2.0 - 1.0;  // uniform in [-1, 1]
+    double phi = uniform_dist(rng) * 2.0 * M_PI;  // uniform in [0, 2π]
+    double r = std::sqrt(1.0 - z * z);
+    
+    spin(0) = r * std::cos(phi);
+    spin(1) = r * std::sin(phi);
+    spin(2) = z;
+    
+    return spin * spin_l;
+}
+
+SpinVector StrainPhononLattice::gaussian_spin_move(const SpinVector& current_spin, double sigma) {
+    // Perturb current spin by adding a random direction scaled by sigma
+    SpinVector perturbation = gen_random_spin(1.0) * sigma;
+    
+    SpinVector new_spin = current_spin + perturbation;
+    double norm = new_spin.norm();
+    if (norm < 1e-10) return current_spin;
+    return new_spin * (spin_length / norm);
+}
+
+double StrainPhononLattice::mc_sweep(double temperature, bool gaussian_move, double sigma) {
+    if (temperature <= 0) return 0.0;
+    
+    const double beta = 1.0 / temperature;
+    size_t accepted = 0;
+    
+    // Use random site selection like in lattice.h for better sampling
+    std::uniform_int_distribution<size_t> site_dist(0, lattice_size - 1);
+    
+    for (size_t sweep_step = 0; sweep_step < lattice_size; ++sweep_step) {
+        // Random site selection
+        size_t site = site_dist(rng);
         
-        // Compute energy difference using full local field
-        // H_eff includes exchange + magnetoelastic + ring exchange
-        Eigen::Vector3d old_spin = spins[i];
-        Eigen::Vector3d delta = new_spin - old_spin;
+        // Generate new spin
+        SpinVector new_spin;
+        if (gaussian_move) {
+            new_spin = gaussian_spin_move(spins[site], sigma);
+        } else {
+            // Propose a completely random spin on the sphere
+            new_spin = gen_random_spin(spin_length);
+        }
         
-        // dE = H_spin(new) - H_spin(old) = -delta · H_eff
-        // Note: get_local_field returns H_eff = -∂H/∂S, so dE = -delta · H_eff
-        SpinVector H_eff = get_local_field(i);
-        double dE = -delta.dot(H_eff);
+        // Compute energy difference using explicit site_energy_diff
+        // This computes E(new_spin) - E(old_spin) for all terms:
+        // exchange (NN, 2nd NN, 3rd NN) + magnetoelastic + ring exchange
+        SpinVector old_spin = spins[site];
+        double dE = site_energy_diff(new_spin, old_spin, site);
         
         // Metropolis acceptance
-        if (dE < 0 || uniform_dist(rng) < std::exp(-beta * dE)) {
-            spins[i] = new_spin;
+        double rand_uniform = uniform_dist(rng);
+        const bool accept = (dE < 0.0) || (rand_uniform < std::exp(-beta * dE));
+        if (accept) {
+            spins[site] = new_spin;
+            ++accepted;
         }
+    }
+    
+    return double(accepted) / double(lattice_size);
+}
+
+void StrainPhononLattice::overrelaxation() {
+    // Over-relaxation sweep: reflect each spin about its local field
+    // S' = 2(S·H)H/|H|² - S
+    // This is a microcanonical update (preserves energy) that accelerates decorrelation
+    
+    std::uniform_int_distribution<size_t> site_dist(0, lattice_size - 1);
+    
+    size_t count = 0;
+    while (count < lattice_size) {
+        size_t site = site_dist(rng);
+        
+        // Get local field
+        SpinVector local_field = get_local_field(site);
+        double norm_sq = local_field.dot(local_field);
+        
+        if (norm_sq < 1e-20) {
+            // Zero field, skip this site
+            continue;
+        }
+        
+        // Reflect spin: S' = 2(S·H)H/|H|² - S
+        double proj = 2.0 * spins[site].dot(local_field) / norm_sq;
+        spins[site] = local_field * proj - spins[site];
+        
+        count++;
     }
 }
 
 void StrainPhononLattice::anneal(double T_start, double T_end, 
-                                 size_t n_steps, size_t sweeps_per_step) {
-    double dT = (T_end - T_start) / n_steps;
+                                 size_t n_sweeps,
+                                 double cooling_rate,
+                                 size_t overrelaxation_rate,
+                                 bool gaussian_move,
+                                 const string& out_dir,
+                                 bool T_zero,
+                                 size_t n_deterministics) {
+    // Setup output directory
+    if (!out_dir.empty()) {
+        std::filesystem::create_directories(out_dir);
+    }
+    
     double T = T_start;
+    double sigma = 1000.0;  // Initial Gaussian width (will be adapted)
+    
+    cout << "Starting simulated annealing: T=" << T_start << " → " << T_end << endl;
+    cout << "Cooling rate: " << cooling_rate << ", sweeps per temperature: " << n_sweeps << endl;
+    if (overrelaxation_rate > 0) {
+        cout << "Overrelaxation enabled: every " << overrelaxation_rate << " sweeps" << endl;
+    }
+    if (gaussian_move) {
+        cout << "Using Gaussian spin moves with adaptive sigma" << endl;
+    }
+    if (T_zero) {
+        cout << "T=0 mode enabled: will perform " << n_deterministics << " deterministic sweeps at T=0" << endl;
+    }
     
     // Relax strain at the start to get initial magnetoelastic field
-    relax_strain(false);  // quiet during annealing
+    relax_strain(false);
     
     // How often to re-relax strain during MC sweeps
-    // More frequent = more accurate but slower
     const size_t strain_relax_interval = 1;  // Every sweep
     
-    for (size_t step = 0; step < n_steps; ++step) {
-        for (size_t s = 0; s < sweeps_per_step; ++s) {
-            mc_sweep(T);
+    size_t temp_step = 0;
+    while (T > T_end) {
+        // Perform sweeps at this temperature
+        double acc_sum = 0.0;
+        for (size_t s = 0; s < n_sweeps; ++s) {
+            // Overrelaxation before Metropolis (if enabled)
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (s % overrelaxation_rate == 0) {
+                    acc_sum += mc_sweep(T, gaussian_move, sigma);
+                }
+            } else {
+                acc_sum += mc_sweep(T, gaussian_move, sigma);
+            }
             
             // Periodically relax strain to maintain adiabatic equilibrium
             if ((s + 1) % strain_relax_interval == 0) {
@@ -2538,17 +3089,85 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
             }
         }
         
-        T += dT;
+        // Calculate acceptance rate (normalize differently if overrelaxation is used)
+        double acceptance = (overrelaxation_rate > 0) ? 
+            acc_sum / double(n_sweeps) * overrelaxation_rate : 
+            acc_sum / double(n_sweeps);
+        
+        // Progress report every 10 steps or near T_end
+        if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+            double E = spin_energy() / lattice_size;  // Energy per spin
+            cout << "T=" << std::scientific << T << ", E/N=" << E 
+                 << ", acc=" << std::fixed << std::setprecision(3) << acceptance;
+            if (gaussian_move) cout << ", σ=" << sigma;
+            cout << endl;
+        }
+        
+        // Adaptive sigma adjustment for gaussian moves
+        if (gaussian_move && acceptance < 0.5) {
+            sigma = sigma * 0.5 / (1.0 - acceptance);
+            if (temp_step % 10 == 0 || T <= T_end * 1.5) {
+                cout << "Sigma adjusted to " << sigma << endl;
+            }
+        }
+        
+        // Cool down
+        T *= cooling_rate;
+        ++temp_step;
     }
     
-    // Additional sweeps at T_end for better equilibration
-    for (size_t s = 0; s < sweeps_per_step; ++s) {
-        mc_sweep(T_end);
+    // Additional sweeps at T_end for equilibration
+    cout << "Equilibrating at T=" << T_end << "..." << endl;
+    double final_acc_sum = 0.0;
+    for (size_t s = 0; s < n_sweeps; ++s) {
+        final_acc_sum += mc_sweep(T_end, gaussian_move, sigma);
         relax_strain(false);
     }
+    double final_acceptance = final_acc_sum / double(n_sweeps);
+    double final_E = spin_energy() / lattice_size;
+    cout << "Final T=" << T_end << ", E/N=" << final_E 
+         << ", acc=" << std::fixed << std::setprecision(3) << final_acceptance << endl;
     
     // Final strain relaxation (verbose)
     relax_strain(true);
+    
+    // Save spin config after annealing (before deterministic sweeps)
+    if (!out_dir.empty()) {
+        save_spin_config(out_dir + "/spins_T=" + std::to_string(T_end) + ".txt");
+    }
+    
+    // T=0 deterministic sweeps if requested
+    if (T_zero && n_deterministics > 0) {
+        cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
+        for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
+            deterministic_sweep(1);
+            relax_strain(false);  // Relax strain after each deterministic sweep
+            
+            if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
+                double E = spin_energy() / lattice_size;
+                cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
+                     << ", E/N=" << E << endl;
+            }
+        }
+        relax_strain(true);  // Final verbose strain relaxation
+        cout << "Deterministic sweeps completed. Final energy: " << spin_energy() / lattice_size << endl;
+        
+        // Save final configuration
+        if (!out_dir.empty()) {
+            save_spin_config(out_dir + "/spins_T=0.txt");
+        }
+    }
+    
+    // Save final spin config
+    if (!out_dir.empty()) {
+        save_spin_config(out_dir + "/spins.txt");
+        save_spin_config_global(out_dir + "/spins_global.txt");
+        save_strain_state(out_dir + "/strain.txt");
+        save_spin_strain_config(out_dir + "/spin_strain_config.txt");  // Combined for GNEB
+        save_positions(out_dir + "/positions.txt");
+    }
+    
+    cout << "Annealing complete!" << endl;
 }
 
 void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
@@ -2610,6 +3229,85 @@ void StrainPhononLattice::load_spin_config(const string& filename) {
     }
 }
 
+void StrainPhononLattice::save_spin_strain_config(const string& filename) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    // Header with strain information
+    // Compute uniform Eg strain components (averaged over bond types)
+    double Eg1 = 0.0, Eg2 = 0.0;
+    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+        Eg1 += (strain.epsilon_xx[b] - strain.epsilon_yy[b]) / 2.0;
+        Eg2 += strain.epsilon_xy[b];
+    }
+    Eg1 /= StrainState::N_BONDS;
+    Eg2 /= StrainState::N_BONDS;
+    
+    file << "# Combined spin-strain configuration for GNEB\n";
+    file << "# strain_Eg1 = " << Eg1 << "\n";
+    file << "# strain_Eg2 = " << Eg2 << "\n";
+    file << "# n_sites = " << lattice_size << "\n";
+    file << "# Sx Sy Sz\n";
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        file << spins[i](0) << " " << spins[i](1) << " " << spins[i](2) << "\n";
+    }
+}
+
+void StrainPhononLattice::load_spin_strain_config(const string& filename) {
+    ifstream file(filename);
+    string line;
+    
+    double Eg1 = 0.0, Eg2 = 0.0;
+    bool found_Eg1 = false, found_Eg2 = false;
+    
+    // Parse header for strain values
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        
+        if (line[0] == '#') {
+            // Look for strain values in comments
+            if (line.find("strain_Eg1") != string::npos) {
+                size_t eq_pos = line.find('=');
+                if (eq_pos != string::npos) {
+                    Eg1 = std::stod(line.substr(eq_pos + 1));
+                    found_Eg1 = true;
+                }
+            } else if (line.find("strain_Eg2") != string::npos) {
+                size_t eq_pos = line.find('=');
+                if (eq_pos != string::npos) {
+                    Eg2 = std::stod(line.substr(eq_pos + 1));
+                    found_Eg2 = true;
+                }
+            }
+        } else {
+            // First non-comment line is spin data - rewind and read
+            break;
+        }
+    }
+    
+    // Apply uniform Eg strain if found
+    if (found_Eg1 || found_Eg2) {
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = Eg1;
+            strain.epsilon_yy[b] = -Eg1;
+            strain.epsilon_xy[b] = Eg2;
+        }
+        // Note: strain values are used directly in energy/field calculations,
+        // no separate update function needed
+    }
+    
+    // Parse spin data starting from current position
+    // First spin is in 'line'
+    std::istringstream first_iss(line);
+    first_iss >> spins[0](0) >> spins[0](1) >> spins[0](2);
+    
+    // Read remaining spins
+    for (size_t i = 1; i < lattice_size; ++i) {
+        file >> spins[i](0) >> spins[i](1) >> spins[i](2);
+    }
+}
+
 void StrainPhononLattice::save_strain_state(const string& filename) const {
     ofstream file(filename);
     file << std::scientific << std::setprecision(12);
@@ -2625,6 +3323,36 @@ void StrainPhononLattice::save_strain_state(const string& filename) const {
              << strain.V_xx[b] << " "
              << strain.V_yy[b] << " "
              << strain.V_xy[b] << "\n";
+    }
+}
+
+void StrainPhononLattice::save_positions(const string& filename) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        file << site_positions[i](0) << " " 
+             << site_positions[i](1) << " " 
+             << site_positions[i](2) << "\n";
+    }
+}
+
+void StrainPhononLattice::save_spin_config_global(const string& filename) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    // Transform each spin from local Kitaev frame to global Cartesian frame
+    // S_global = R * S_local where R is the sublattice rotation matrix
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t atom = 0; atom < N_atoms; ++atom) {
+                    size_t site_idx = flatten_index(i, j, k, atom);
+                    SpinVector spin_global = sublattice_frames[atom] * spins[site_idx];
+                    file << spin_global(0) << " " << spin_global(1) << " " << spin_global(2) << "\n";
+                }
+            }
+        }
     }
 }
 
@@ -2755,4 +3483,1565 @@ void StrainPhononLattice::save_trajectory_txt(const string& output_dir,
     cout << "  magnetization.txt: " << times.size() << " timesteps" << endl;
     cout << "  energy.txt: " << times.size() << " timesteps" << endl;
     cout << "  strain_trajectory.txt: " << times.size() << " timesteps" << endl;
+}
+// ============================================================
+// PARALLEL TEMPERING IMPLEMENTATION
+// ============================================================
+
+void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+                       size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                       string dir_name, const vector<int>& rank_to_write,
+                       bool gaussian_move, MPI_Comm comm,
+                       bool verbose) {
+    // Initialize MPI
+    int initialized;
+    MPI_Initialized(&initialized);
+    if (!initialized) {
+        MPI_Init(nullptr, nullptr);
+    }
+    
+    int rank, size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+    
+    // Set random seed unique to each rank
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    rng.seed(static_cast<unsigned int>(seed + rank * 1000));
+    
+    double curr_Temp = temp[rank];
+    double sigma = 1000.0;
+    int swap_accept = 0;
+    double curr_accept = 0;
+    
+    vector<double> heat_capacity, dHeat;
+    if (rank == 0) {
+        heat_capacity.resize(size);
+        dHeat.resize(size);
+    }
+    
+    vector<double> energies;
+    vector<SpinVector> magnetizations;
+    vector<vector<SpinVector>> sublattice_mags;
+    size_t expected_samples = n_measure / probe_rate + 100;
+    energies.reserve(expected_samples);
+    magnetizations.reserve(expected_samples);
+    sublattice_mags.reserve(expected_samples);
+    
+    cout << "Rank " << rank << ": T=" << curr_Temp << endl;
+    
+    // Equilibration
+    cout << "Rank " << rank << ": Equilibrating..." << endl;
+    for (size_t i = 0; i < n_anneal; ++i) {
+        if (overrelaxation_rate > 0) {
+            overrelaxation();
+            if (i % overrelaxation_rate == 0) {
+                curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+            }
+        } else {
+            curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+        }
+        
+        // Attempt replica exchange
+        if (swap_rate > 0 && i % swap_rate == 0) {
+            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+        }
+    }
+    
+    // Main measurement phase
+    cout << "Rank " << rank << ": Measuring..." << endl;
+    for (size_t i = 0; i < n_measure; ++i) {
+        if (overrelaxation_rate > 0) {
+            overrelaxation();
+            if (i % overrelaxation_rate == 0) {
+                curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+            }
+        } else {
+            curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+        }
+        
+        if (swap_rate > 0 && i % swap_rate == 0) {
+            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+        }
+        
+        if (i % probe_rate == 0) {
+            energies.push_back(total_energy());
+            magnetizations.push_back(magnetization_global());
+            sublattice_mags.push_back(magnetization_sublattice());
+        }
+    }
+    
+    cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
+    
+    // Gather and save statistics with comprehensive observables
+    gather_and_save_statistics_comprehensive(rank, size, curr_Temp, energies, 
+                                              magnetizations, sublattice_mags,
+                                              heat_capacity, dHeat, temp, dir_name, 
+                                              rank_to_write, n_anneal, n_measure, 
+                                              curr_accept, swap_accept,
+                                              swap_rate, overrelaxation_rate, probe_rate, comm, verbose);
+}
+
+int StrainPhononLattice::attempt_replica_exchange(int rank, int size, const vector<double>& temp,
+                            double curr_Temp, size_t swap_parity, MPI_Comm comm) {
+    // Determine partner based on checkerboard pattern
+    int partner_rank;
+    if (swap_parity % 2 == 0) {
+        partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+    } else {
+        partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+    }
+    
+    if (partner_rank < 0 || partner_rank >= size) {
+        return 0;
+    }
+    
+    // Exchange energies
+    double E = total_energy();
+    double E_partner, T_partner = temp[partner_rank];
+    
+    MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner_rank, 0,
+                &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
+                comm, MPI_STATUS_IGNORE);
+    
+    // Decide acceptance using parallel tempering Metropolis criterion
+    int accept_int = 0;
+    if (rank < partner_rank) {
+        double beta_curr = 1.0 / curr_Temp;
+        double beta_partner = 1.0 / T_partner;
+        double delta = (beta_curr - beta_partner) * (E - E_partner);
+        bool accept = (delta >= 0) || (uniform_dist(rng) < std::exp(delta));
+        accept_int = accept ? 1 : 0;
+    }
+    
+    // Communicate decision between partners
+    int recv_accept_int = 0;
+    MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 2,
+                 &recv_accept_int, 1, MPI_INT, partner_rank, 2,
+                 comm, MPI_STATUS_IGNORE);
+    
+    bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
+    
+    // Exchange configurations if accepted
+    if (accept) {
+        // Serialize spins
+        vector<double> send_buf(lattice_size * spin_dim);
+        vector<double> recv_buf(lattice_size * spin_dim);
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t j = 0; j < spin_dim; ++j) {
+                send_buf[i * spin_dim + j] = spins[i](j);
+            }
+        }
+        
+        MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 1,
+                    recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 1,
+                    comm, MPI_STATUS_IGNORE);
+        
+        // Deserialize
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t j = 0; j < spin_dim; ++j) {
+                spins[i](j) = recv_buf[i * spin_dim + j];
+            }
+        }
+    }
+    
+    return accept ? 1 : 0;
+}
+
+vector<SpinVector> StrainPhononLattice::magnetization_sublattice() const {
+    vector<SpinVector> M_sub(N_atoms);
+    size_t n_cells = dim1 * dim2 * dim3;
+    
+    for (size_t atom = 0; atom < N_atoms; ++atom) {
+        M_sub[atom] = SpinVector::Zero(spin_dim);
+    }
+    
+    // Sum over all unit cells for each sublattice
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t atom = 0; atom < N_atoms; ++atom) {
+                    size_t site_idx = flatten_index(i, j, k, atom);
+                    
+                    // Transform to global frame using sublattice frame
+                    SpinVector spin_global = SpinVector::Zero(spin_dim);
+                    for (size_t mu = 0; mu < spin_dim; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim; ++nu) {
+                            spin_global(mu) += sublattice_frames[atom](nu, mu) * spins[site_idx](nu);
+                        }
+                    }
+                    M_sub[atom] += spin_global;
+                }
+            }
+        }
+    }
+    
+    // Normalize by number of unit cells
+    for (size_t atom = 0; atom < N_atoms; ++atom) {
+        M_sub[atom] /= double(n_cells);
+    }
+    
+    return M_sub;
+}
+
+SpinVector StrainPhononLattice::magnetization_global() const {
+    SpinVector M = SpinVector::Zero(spin_dim);
+    
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t l = 0; l < N_atoms; ++l) {
+                    size_t current_site_index = flatten_index(i, j, k, l);
+                    
+                    // Transform spin to global frame using sublattice frame
+                    SpinVector spin_global = SpinVector::Zero(spin_dim);
+                    for (size_t mu = 0; mu < spin_dim; ++mu) {
+                        for (size_t nu = 0; nu < spin_dim; ++nu) {
+                            spin_global(mu) += sublattice_frames[l](nu, mu) * spins[current_site_index](nu);
+                        }
+                    }
+                    M += spin_global;
+                }
+            }
+        }
+    }
+    
+    return M / double(lattice_size);
+}
+
+SPL_BinningResult StrainPhononLattice::binning_analysis(const vector<double>& data) {
+    SPL_BinningResult result;
+    
+    if (data.empty()) {
+        result.mean = 0.0;
+        result.error = 0.0;
+        result.tau_int = 1.0;
+        result.optimal_bin_level = 0;
+        return result;
+    }
+    
+    size_t n = data.size();
+    
+    // Compute mean
+    result.mean = std::accumulate(data.begin(), data.end(), 0.0) / double(n);
+    
+    if (n < 4) {
+        double var = 0.0;
+        for (double x : data) var += (x - result.mean) * (x - result.mean);
+        result.error = std::sqrt(var / (n * (n - 1)));
+        result.tau_int = 1.0;
+        result.optimal_bin_level = 0;
+        return result;
+    }
+    
+    // Recursive blocking
+    vector<double> binned_data = data;
+    size_t level = 0;
+    size_t max_levels = static_cast<size_t>(std::log2(n)) - 1;
+    
+    result.errors_by_level.reserve(max_levels);
+    
+    while (binned_data.size() >= 4) {
+        size_t m = binned_data.size();
+        
+        // Compute variance at this level
+        double sum = 0.0, sum2 = 0.0;
+        for (double x : binned_data) {
+            sum += x;
+            sum2 += x * x;
+        }
+        double mean_level = sum / m;
+        double var_level = (sum2 / m - mean_level * mean_level);
+        double error_level = std::sqrt(var_level / (m - 1));
+        
+        result.errors_by_level.push_back(error_level);
+        
+        // Block the data: average consecutive pairs
+        vector<double> new_binned;
+        new_binned.reserve(m / 2);
+        for (size_t i = 0; i + 1 < m; i += 2) {
+            new_binned.push_back(0.5 * (binned_data[i] + binned_data[i + 1]));
+        }
+        binned_data = std::move(new_binned);
+        ++level;
+    }
+    
+    // Find optimal level where error has plateaued
+    result.optimal_bin_level = 0;
+    if (result.errors_by_level.size() > 2) {
+        double max_error = 0.0;
+        for (size_t l = 0; l < result.errors_by_level.size(); ++l) {
+            if (result.errors_by_level[l] > max_error) {
+                max_error = result.errors_by_level[l];
+                result.optimal_bin_level = l;
+            }
+        }
+    }
+    
+    // Use error from optimal level
+    if (!result.errors_by_level.empty()) {
+        size_t use_level = std::min(result.optimal_bin_level + 1, result.errors_by_level.size() - 1);
+        result.error = result.errors_by_level[use_level];
+        
+        // Estimate tau_int
+        if (result.errors_by_level[0] > 1e-20) {
+            double ratio = result.error / result.errors_by_level[0];
+            result.tau_int = 0.5 * ratio * ratio;
+        } else {
+            result.tau_int = 1.0;
+        }
+    } else {
+        result.error = 0.0;
+        result.tau_int = 1.0;
+    }
+    
+    return result;
+}
+
+SPL_ThermodynamicObservables StrainPhononLattice::compute_thermodynamic_observables(
+    const vector<double>& energies,
+    const vector<vector<SpinVector>>& sublattice_mags,
+    double temperature) const {
+    
+    SPL_ThermodynamicObservables obs;
+    obs.temperature = temperature;
+    double T = temperature;
+    
+    size_t n_samples = energies.size();
+    if (n_samples == 0) return obs;
+    
+    // 1. Energy per site with binning analysis
+    vector<double> energy_per_site(n_samples);
+    for (size_t i = 0; i < n_samples; ++i) {
+        energy_per_site[i] = energies[i] / double(lattice_size);
+    }
+    SPL_BinningResult E_result = binning_analysis(energy_per_site);
+    obs.energy.value = E_result.mean;
+    obs.energy.error = E_result.error;
+    
+    // 2. Specific heat per site: c_V = Var(E) / (T² N²) = Var(E/N) / T²
+    //    Since E is extensive (E ~ N), Var(E) ~ N², so c_V ~ O(1)
+    //    Error propagation via jackknife on binned data
+    {
+        double N2 = double(lattice_size) * double(lattice_size);
+        
+        // Handle edge case: need at least 2 samples for variance
+        if (n_samples < 2) {
+            obs.specific_heat.value = 0.0;
+            obs.specific_heat.error = 0.0;
+        } else {
+            // Compute mean first for numerical stability (two-pass algorithm)
+            double E_mean = 0.0;
+            for (size_t i = 0; i < n_samples; ++i) {
+                E_mean += energies[i];
+            }
+            E_mean /= n_samples;
+            
+            // Compute variance using shifted data for numerical stability
+            // Var(E) = <(E - E_mean)²> which avoids catastrophic cancellation
+            double var_E = 0.0;
+            for (size_t i = 0; i < n_samples; ++i) {
+                double delta = energies[i] - E_mean;
+                var_E += delta * delta;
+            }
+            var_E /= n_samples;  // Biased estimator (for heat capacity)
+            
+            // Ensure non-negative variance (numerical protection)
+            var_E = std::max(0.0, var_E);
+            obs.specific_heat.value = var_E / (T * T * N2);
+            
+            // Jackknife error estimation for specific heat
+            // Use at most 100 jackknife blocks, at least 2
+            size_t n_jack = std::min(n_samples, size_t(100));
+            n_jack = std::max(n_jack, size_t(2));
+            size_t block_size = std::max(size_t(1), n_samples / n_jack);
+            // Recalculate n_jack based on actual block_size to handle remainders
+            n_jack = (n_samples + block_size - 1) / block_size;
+            
+            vector<double> C_jack(n_jack);
+            
+            for (size_t j = 0; j < n_jack; ++j) {
+                // Leave out block j: indices [j*block_size, min((j+1)*block_size, n_samples))
+                size_t block_start = j * block_size;
+                size_t block_end = std::min((j + 1) * block_size, n_samples);
+                
+                // Compute jackknife mean (excluding block j)
+                double E_sum = 0.0;
+                size_t count = 0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    if (i < block_start || i >= block_end) {
+                        E_sum += energies[i];
+                        ++count;
+                    }
+                }
+                
+                if (count < 2) {
+                    C_jack[j] = obs.specific_heat.value;  // Fallback
+                    continue;
+                }
+                
+                double E_j = E_sum / count;
+                
+                // Compute jackknife variance (excluding block j)
+                double var_j = 0.0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    if (i < block_start || i >= block_end) {
+                        double delta = energies[i] - E_j;
+                        var_j += delta * delta;
+                    }
+                }
+                var_j /= count;
+                var_j = std::max(0.0, var_j);  // Numerical protection
+                
+                C_jack[j] = var_j / (T * T * N2);
+            }
+            
+            // Compute jackknife error estimate
+            double C_mean = 0.0;
+            for (double c : C_jack) C_mean += c;
+            C_mean /= n_jack;
+            
+            double C_var = 0.0;
+            for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
+            C_var *= double(n_jack - 1) / double(n_jack);  // Jackknife variance factor
+            obs.specific_heat.error = std::sqrt(std::max(0.0, C_var));
+        }
+    }
+    
+    // 3. Sublattice magnetizations with binning analysis
+    if (!sublattice_mags.empty() && !sublattice_mags[0].empty()) {
+        size_t n_sublattices = sublattice_mags[0].size();
+        size_t sdim = sublattice_mags[0][0].size();
+        
+        obs.sublattice_magnetization.resize(n_sublattices);
+        
+        for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+            obs.sublattice_magnetization[alpha] = SPL_VectorObservable(sdim);
+            
+            // Extract time series for each component
+            for (size_t d = 0; d < sdim; ++d) {
+                vector<double> M_alpha_d(n_samples);
+                for (size_t i = 0; i < n_samples; ++i) {
+                    M_alpha_d[i] = sublattice_mags[i][alpha](d);
+                }
+                SPL_BinningResult M_result = binning_analysis(M_alpha_d);
+                obs.sublattice_magnetization[alpha].values[d] = M_result.mean;
+                obs.sublattice_magnetization[alpha].errors[d] = M_result.error;
+            }
+        }
+        
+        // 3b. Total magnetization from sublattice magnetizations
+        obs.magnetization = SPL_VectorObservable(sdim);
+        for (size_t d = 0; d < sdim; ++d) {
+            // Total magnetization M = sum over sublattices of M_alpha
+            vector<double> M_total_d(n_samples);
+            for (size_t i = 0; i < n_samples; ++i) {
+                double total = 0.0;
+                for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+                    total += sublattice_mags[i][alpha](d);
+                }
+                M_total_d[i] = total / double(n_sublattices);  // Normalize by number of sublattices
+            }
+            SPL_BinningResult M_result = binning_analysis(M_total_d);
+            obs.magnetization.values[d] = M_result.mean;
+            obs.magnetization.errors[d] = M_result.error;
+        }
+        
+        // 4. Cross term <E * S_α> - <E><S_α> for each sublattice
+        //    Use total E (not per site) for cross correlation
+        double E_mean_total = 0.0;
+        for (double E : energies) E_mean_total += E;
+        E_mean_total /= n_samples;
+        
+        obs.energy_sublattice_cross.resize(n_sublattices);
+        
+        for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+            obs.energy_sublattice_cross[alpha] = SPL_VectorObservable(sdim);
+            
+            for (size_t d = 0; d < sdim; ++d) {
+                // Compute <E * S_α,d>
+                vector<double> ES_alpha_d(n_samples);
+                for (size_t i = 0; i < n_samples; ++i) {
+                    ES_alpha_d[i] = energies[i] * sublattice_mags[i][alpha](d);
+                }
+                
+                SPL_BinningResult ES_result = binning_analysis(ES_alpha_d);
+                
+                // Cross correlation = <ES> - <E><S>
+                double S_mean = obs.sublattice_magnetization[alpha].values[d];
+                double cross_val = ES_result.mean - E_mean_total * S_mean;
+                
+                // Error propagation: use jackknife for proper covariance handling
+                size_t n_jack = std::min(n_samples, size_t(100));
+                size_t block_size = n_samples / n_jack;
+                if (block_size == 0) block_size = 1;
+                n_jack = n_samples / block_size;
+                
+                vector<double> cross_jack(n_jack);
+                
+                for (size_t j = 0; j < n_jack; ++j) {
+                    double E_sum = 0.0, S_sum = 0.0, ES_sum = 0.0;
+                    size_t count = 0;
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        if (i / block_size != j) {
+                            E_sum += energies[i];
+                            S_sum += sublattice_mags[i][alpha](d);
+                            ES_sum += energies[i] * sublattice_mags[i][alpha](d);
+                            ++count;
+                        }
+                    }
+                    if (count == 0) {
+                        cross_jack[j] = cross_val;
+                        continue;
+                    }
+                    double E_j = E_sum / count;
+                    double S_j = S_sum / count;
+                    double ES_j = ES_sum / count;
+                    cross_jack[j] = ES_j - E_j * S_j;
+                }
+                
+                double cross_mean = 0.0;
+                for (double c : cross_jack) cross_mean += c;
+                cross_mean /= n_jack;
+                
+                double cross_var = 0.0;
+                for (double c : cross_jack) cross_var += (c - cross_mean) * (c - cross_mean);
+                cross_var *= double(n_jack - 1) / n_jack;
+                
+                obs.energy_sublattice_cross[alpha].values[d] = cross_val;
+                obs.energy_sublattice_cross[alpha].errors[d] = std::sqrt(std::max(0.0, cross_var));
+            }
+        }
+    }
+    
+    return obs;
+}
+
+void StrainPhononLattice::gather_and_save_statistics_comprehensive(int rank, int size, double curr_Temp,
+                               const vector<double>& energies,
+                               const vector<SpinVector>& magnetizations,
+                               const vector<vector<SpinVector>>& sublattice_mags,
+                               vector<double>& heat_capacity, vector<double>& dHeat,
+                               const vector<double>& temp, const string& dir_name,
+                               const vector<int>& rank_to_write,
+                               size_t n_anneal, size_t n_measure,
+                               double curr_accept, int swap_accept,
+                               size_t swap_rate, size_t overrelaxation_rate,
+                               size_t probe_rate, MPI_Comm comm,
+                               bool verbose) {
+    
+    // Compute comprehensive thermodynamic observables with binning analysis
+    SPL_ThermodynamicObservables obs = compute_thermodynamic_observables(
+        energies, sublattice_mags, curr_Temp);
+    
+    double curr_heat_capacity = obs.specific_heat.value;
+    double curr_dHeat = obs.specific_heat.error;
+    
+    // Gather heat capacity to root
+    MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
+               1, MPI_DOUBLE, 0, comm);
+    MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 
+               1, MPI_DOUBLE, 0, comm);
+    
+    // Report acceptance rates
+    double total_steps = n_anneal + n_measure;
+    double metro_steps = (overrelaxation_rate > 0) ? total_steps / overrelaxation_rate : total_steps;
+    double acc_rate = curr_accept / metro_steps;
+    double swap_rate_actual = (swap_rate > 0) ? double(swap_accept) / (total_steps / swap_rate) : 0.0;
+    
+    cout << "Rank " << rank << ": T=" << curr_Temp 
+         << ", acc=" << acc_rate 
+         << ", swap_acc=" << swap_rate_actual 
+         << ", <E>/N=" << obs.energy.value << "±" << obs.energy.error
+         << ", C_V=" << obs.specific_heat.value << "±" << obs.specific_heat.error
+         << endl;
+    
+    // Save results with proper MPI synchronization
+    if (!dir_name.empty()) {
+        // Rank 0 creates the main output directory first
+        if (rank == 0) {
+            std::filesystem::create_directories(dir_name);
+        }
+        MPI_Barrier(comm);
+        
+        // Check if this rank should write
+        bool should_write = should_rank_write(rank, rank_to_write);
+        
+        if (should_write) {
+            string rank_dir = dir_name + "/rank_" + std::to_string(rank);
+            std::filesystem::create_directories(rank_dir);
+            
+#ifdef HDF5_ENABLED
+            save_thermodynamic_observables_hdf5(rank_dir, obs, energies, magnetizations,
+                                               sublattice_mags, n_anneal, n_measure,
+                                               probe_rate, swap_rate, overrelaxation_rate,
+                                               acc_rate, swap_rate_actual);
+#else
+            if (rank == 0) {
+                std::cerr << "Warning: HDF5 not enabled. Compile with -DHDF5_ENABLED=ON to enable output." << endl;
+            }
+#endif
+            
+            // Save spin configuration only if verbose mode is enabled
+            if (verbose) {
+                save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
+                save_spin_strain_config(rank_dir + "/spin_strain_config.txt");  // Combined for GNEB
+                save_strain_state(rank_dir + "/strain.txt");
+                save_positions(rank_dir + "/positions.txt");
+            }
+        }
+        
+        MPI_Barrier(comm);
+        
+        // Root process saves aggregated results
+        if (rank == 0) {
+#ifdef HDF5_ENABLED
+            save_heat_capacity_hdf5(dir_name, temp, heat_capacity, dHeat);
+#endif
+        }
+    }
+    
+    MPI_Barrier(comm);
+}
+
+SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_grid_mpi(
+    double Tmin, double Tmax,
+    size_t warmup_sweeps,
+    size_t sweeps_per_iter,
+    size_t feedback_iters,
+    bool gaussian_move,
+    size_t overrelaxation_rate,
+    double target_acceptance,
+    double convergence_tol,
+    MPI_Comm comm) {
+    
+    int rank, R;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &R);
+    
+    SPL_OptimizedTempGridResult result;
+    result.converged = false;
+    result.feedback_iterations_used = 0;
+    
+    if (R < 2) {
+        result.temperatures = {Tmin};
+        result.converged = true;
+        return result;
+    }
+    if (R == 2) {
+        result.temperatures = {Tmin, Tmax};
+        result.acceptance_rates = {0.5};
+        result.converged = true;
+        return result;
+    }
+    
+    // Set random seed unique to each rank
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    rng.seed(static_cast<unsigned int>(seed + rank * 12345));
+    
+    if (rank == 0) {
+        cout << "=== Bittner et al. Optimized Temperature Grid (MPI) ===" << endl;
+        cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+        cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << " (MPI ranks)" << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+    }
+    
+    // Initialize beta array (linear spacing)
+    double beta_min = 1.0 / Tmax;
+    double beta_max = 1.0 / Tmin;
+    vector<double> beta(R);
+    for (int i = 0; i < R; ++i) {
+        beta[i] = beta_min + (beta_max - beta_min) * double(i) / double(R - 1);
+    }
+    
+    double my_beta = beta[rank];
+    double my_T = 1.0 / my_beta;
+    double sigma = 1000.0;
+    
+    // Warmup phase
+    if (rank == 0) cout << "Warming up replicas..." << endl;
+    for (size_t i = 0; i < warmup_sweeps; ++i) {
+        mc_sweep(my_T, gaussian_move, sigma);
+        if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+            overrelaxation();
+        }
+    }
+    MPI_Barrier(comm);
+    
+    // Acceptance rate tracking
+    vector<double> acceptance_rates(R - 1, 0.0);
+    double base_damping = 0.5;
+    
+    // Feedback optimization loop
+    for (size_t iter = 0; iter < feedback_iters; ++iter) {
+        double damping = base_damping + 0.3 * (double(iter) / double(feedback_iters));
+        
+        int local_attempts = 0;
+        int local_accepts = 0;
+        
+        size_t effective_sweeps = sweeps_per_iter;
+        
+        // MC sweeps with replica exchanges
+        for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
+            mc_sweep(my_T, gaussian_move, sigma);
+            if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
+                overrelaxation();
+            }
+            
+            // Attempt replica exchanges using checkerboard pattern
+            for (int parity = 0; parity <= 1; ++parity) {
+                int partner_rank;
+                if (parity == 0) {
+                    partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+                } else {
+                    partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+                }
+                
+                if (partner_rank < 0 || partner_rank >= R) continue;
+                
+                double my_E = total_energy();
+                double partner_E;
+                MPI_Sendrecv(&my_E, 1, MPI_DOUBLE, partner_rank, 0,
+                            &partner_E, 1, MPI_DOUBLE, partner_rank, 0,
+                            comm, MPI_STATUS_IGNORE);
+                
+                int accept_int = 0;
+                if (rank < partner_rank) {
+                    double beta_hot = my_beta;
+                    double beta_cold = beta[partner_rank];
+                    double E_hot = my_E;
+                    double E_cold = partner_E;
+                    
+                    double delta = -(beta_cold - beta_hot) * (E_hot - E_cold);
+                    bool accept = (delta >= 0) || (uniform_dist(rng) < std::exp(delta));
+                    accept_int = accept ? 1 : 0;
+                    
+                    ++local_attempts;
+                    if (accept) ++local_accepts;
+                }
+                
+                int recv_accept_int = 0;
+                MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 1,
+                            &recv_accept_int, 1, MPI_INT, partner_rank, 1,
+                            comm, MPI_STATUS_IGNORE);
+                
+                bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
+                
+                if (accept) {
+                    vector<double> send_buf(lattice_size * spin_dim);
+                    vector<double> recv_buf(lattice_size * spin_dim);
+                    
+                    for (size_t i = 0; i < lattice_size; ++i) {
+                        for (size_t j = 0; j < spin_dim; ++j) {
+                            send_buf[i * spin_dim + j] = spins[i](j);
+                        }
+                    }
+                    
+                    MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 2,
+                                recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 2,
+                                comm, MPI_STATUS_IGNORE);
+                    
+                    for (size_t i = 0; i < lattice_size; ++i) {
+                        for (size_t j = 0; j < spin_dim; ++j) {
+                            spins[i](j) = recv_buf[i * spin_dim + j];
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Gather acceptance statistics
+        int my_attempts = (rank < R - 1) ? local_attempts : 0;
+        int my_accepts = (rank < R - 1) ? local_accepts : 0;
+        
+        vector<int> recv_attempts(R);
+        vector<int> recv_accepts(R);
+        MPI_Gather(&my_attempts, 1, MPI_INT, recv_attempts.data(), 1, MPI_INT, 0, comm);
+        MPI_Gather(&my_accepts, 1, MPI_INT, recv_accepts.data(), 1, MPI_INT, 0, comm);
+        
+        bool converged = false;
+        if (rank == 0) {
+            for (int e = 0; e < R - 1; ++e) {
+                if (recv_attempts[e] > 0) {
+                    acceptance_rates[e] = double(recv_accepts[e]) / double(recv_attempts[e]);
+                }
+            }
+            
+            double max_deviation = 0.0;
+            double mean_deviation = 0.0;
+            double mean_rate = 0.0;
+            double min_rate = 1.0, max_rate = 0.0;
+            for (int e = 0; e < R - 1; ++e) {
+                double dev = std::abs(acceptance_rates[e] - target_acceptance);
+                max_deviation = std::max(max_deviation, dev);
+                mean_deviation += dev;
+                mean_rate += acceptance_rates[e];
+                min_rate = std::min(min_rate, acceptance_rates[e]);
+                max_rate = std::max(max_rate, acceptance_rates[e]);
+            }
+            mean_rate /= (R - 1);
+            mean_deviation /= (R - 1);
+            
+            cout << "Iter " << iter + 1 << "/" << feedback_iters 
+                 << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
+                 << " [" << min_rate << ", " << max_rate << "]"
+                 << ", mean dev = " << mean_deviation << endl;
+            
+            result.feedback_iterations_used = iter + 1;
+            
+            if (mean_deviation < convergence_tol) {
+                converged = true;
+                cout << "Converged at iteration " << iter + 1 << endl;
+            }
+            
+            if (!converged) {
+                // Bittner feedback optimization
+                vector<double> weights(R - 1);
+                double total_weight = 0.0;
+                
+                for (int e = 0; e < R - 1; ++e) {
+                    double A_e = acceptance_rates[e];
+                    if (A_e < 0.01) A_e = 0.01;
+                    if (A_e > 0.99) A_e = 0.99;
+                    weights[e] = A_e;
+                    total_weight += weights[e];
+                }
+                
+                for (int e = 0; e < R - 1; ++e) {
+                    weights[e] /= total_weight;
+                }
+                
+                vector<double> new_beta(R);
+                new_beta[0] = beta_min;
+                
+                double cumulative = 0.0;
+                for (int e = 0; e < R - 1; ++e) {
+                    cumulative += weights[e];
+                    new_beta[e + 1] = beta_min + cumulative * (beta_max - beta_min);
+                }
+                new_beta[R - 1] = beta_max;
+                
+                for (int k = 1; k < R - 1; ++k) {
+                    new_beta[k] = (1.0 - damping) * beta[k] + damping * new_beta[k];
+                }
+                
+                beta = new_beta;
+            }
+        }
+        
+        // Broadcast convergence flag and new beta array
+        int conv_int = converged ? 1 : 0;
+        MPI_Bcast(&conv_int, 1, MPI_INT, 0, comm);
+        MPI_Bcast(beta.data(), R, MPI_DOUBLE, 0, comm);
+        
+        my_beta = beta[rank];
+        my_T = 1.0 / my_beta;
+        
+        if (conv_int == 1) {
+            result.converged = true;
+            break;
+        }
+    }
+    
+    // Broadcast final acceptance rates
+    MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
+    
+    // Build result
+    result.temperatures.resize(R);
+    for (int i = 0; i < R; ++i) {
+        result.temperatures[i] = 1.0 / beta[i];
+    }
+    std::sort(result.temperatures.begin(), result.temperatures.end());
+    
+    result.acceptance_rates = acceptance_rates;
+    
+    // Compute diagnostics
+    result.local_diffusivities.resize(R - 1);
+    for (int e = 0; e < R - 1; ++e) {
+        double A = acceptance_rates[e];
+        result.local_diffusivities[e] = A * (1.0 - A);
+    }
+    
+    result.mean_acceptance_rate = 0.0;
+    for (double A : acceptance_rates) {
+        result.mean_acceptance_rate += A;
+    }
+    result.mean_acceptance_rate /= (R - 1);
+    
+    double tau_rt = 0.0;
+    for (int e = 0; e < R - 1; ++e) {
+        double d_beta = std::abs(beta[e + 1] - beta[e]);
+        double D = result.local_diffusivities[e];
+        tau_rt += d_beta / std::max(D, 1e-6);
+    }
+    result.round_trip_estimate = tau_rt;
+    
+    if (rank == 0) {
+        cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
+        cout << "Temperatures (ascending):" << endl;
+        for (int k = 0; k < std::min(R, 15); ++k) {
+            cout << "  T[" << k << "] = " << std::scientific << std::setprecision(6) 
+                 << result.temperatures[k];
+            if (k < R - 1) {
+                cout << "  (A = " << std::fixed << std::setprecision(3) 
+                     << acceptance_rates[k] << ")";
+            }
+            cout << endl;
+        }
+        if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+        
+        cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
+             << result.mean_acceptance_rate * 100 << "%" << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+    }
+    
+    MPI_Barrier(comm);
+    
+    return result;
+}
+
+vector<double> StrainPhononLattice::generate_geometric_temperature_ladder(
+    double Tmin, double Tmax, size_t R) {
+    
+    vector<double> temps(R);
+    if (R == 1) {
+        temps[0] = Tmin;
+        return temps;
+    }
+    
+    for (size_t i = 0; i < R; ++i) {
+        double frac = double(i) / double(R - 1);
+        temps[i] = Tmin * std::pow(Tmax / Tmin, frac);
+    }
+    return temps;
+}
+
+#ifdef HDF5_ENABLED
+void StrainPhononLattice::save_thermodynamic_observables_hdf5(const string& out_dir,
+                                          const SPL_ThermodynamicObservables& obs,
+                                          const vector<double>& energies,
+                                          const vector<SpinVector>& magnetizations,
+                                          const vector<vector<SpinVector>>& sublattice_mags,
+                                          size_t n_anneal,
+                                          size_t n_measure,
+                                          size_t probe_rate,
+                                          size_t swap_rate,
+                                          size_t overrelaxation_rate,
+                                          double acceptance_rate,
+                                          double swap_acceptance_rate) const {
+    std::filesystem::create_directories(out_dir);
+    
+    string filename = out_dir + "/parallel_tempering_data.h5";
+    size_t n_samples = energies.size();
+    
+    // Create HDF5 writer
+    HDF5PTWriter writer(filename, obs.temperature, lattice_size, spin_dim, N_atoms,
+                       n_samples, n_anneal, n_measure, probe_rate, swap_rate,
+                       overrelaxation_rate, acceptance_rate, swap_acceptance_rate);
+    
+    // Write time series data
+    writer.write_timeseries(energies, magnetizations, sublattice_mags);
+    
+    // Prepare observable data
+    vector<vector<double>> sublattice_mag_means(N_atoms);
+    vector<vector<double>> sublattice_mag_errors(N_atoms);
+    vector<vector<double>> energy_cross_means(N_atoms);
+    vector<vector<double>> energy_cross_errors(N_atoms);
+    
+    for (size_t alpha = 0; alpha < N_atoms; ++alpha) {
+        sublattice_mag_means[alpha] = obs.sublattice_magnetization[alpha].values;
+        sublattice_mag_errors[alpha] = obs.sublattice_magnetization[alpha].errors;
+        energy_cross_means[alpha] = obs.energy_sublattice_cross[alpha].values;
+        energy_cross_errors[alpha] = obs.energy_sublattice_cross[alpha].errors;
+    }
+    
+    // Write observables
+    writer.write_observables(obs.energy.value, obs.energy.error,
+                            obs.specific_heat.value, obs.specific_heat.error,
+                            obs.magnetization.values, obs.magnetization.errors,
+                            sublattice_mag_means, sublattice_mag_errors,
+                            energy_cross_means, energy_cross_errors);
+    
+    writer.close();
+}
+
+void StrainPhononLattice::save_heat_capacity_hdf5(const string& out_dir,
+                              const vector<double>& temperatures,
+                              const vector<double>& heat_capacity,
+                              const vector<double>& dHeat) const {
+    std::filesystem::create_directories(out_dir);
+    
+    string filename = out_dir + "/parallel_tempering_aggregated.h5";
+    size_t n_temps = temperatures.size();
+    
+    // Create HDF5 file
+    H5::H5File file(filename, H5F_ACC_TRUNC);
+    
+    // Create main data group
+    H5::Group data_group = file.createGroup("/temperature_scan");
+    H5::Group metadata_group = file.createGroup("/metadata");
+    
+    // Write metadata
+    std::time_t now = std::time(nullptr);
+    char time_str[100];
+    std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+    
+    H5::DataSpace scalar_space(H5S_SCALAR);
+    
+    // Number of temperatures
+    H5::Attribute n_temps_attr = metadata_group.createAttribute(
+        "n_temperatures", H5::PredType::NATIVE_HSIZE, scalar_space);
+    hsize_t n_temps_val = n_temps;
+    n_temps_attr.write(H5::PredType::NATIVE_HSIZE, &n_temps_val);
+    
+    // Timestamp
+    H5::StrType str_type(H5::PredType::C_S1, strlen(time_str) + 1);
+    H5::Attribute time_attr = metadata_group.createAttribute(
+        "creation_time", str_type, scalar_space);
+    time_attr.write(str_type, time_str);
+    
+    // Version info
+    std::string version = "ClassicalSpin_Cpp v1.0";
+    H5::StrType version_type(H5::PredType::C_S1, version.size() + 1);
+    H5::Attribute version_attr = metadata_group.createAttribute(
+        "code_version", version_type, scalar_space);
+    version_attr.write(version_type, version.c_str());
+    
+    std::string format = "HDF5_PT_Aggregated_v1.0";
+    H5::StrType format_type(H5::PredType::C_S1, format.size() + 1);
+    H5::Attribute format_attr = metadata_group.createAttribute(
+        "file_format", format_type, scalar_space);
+    format_attr.write(format_type, format.c_str());
+    
+    // Write temperature array
+    hsize_t dims[1] = {n_temps};
+    H5::DataSpace dataspace(1, dims);
+    
+    H5::DataSet temp_dataset = data_group.createDataSet(
+        "temperature", H5::PredType::NATIVE_DOUBLE, dataspace);
+    temp_dataset.write(temperatures.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Write heat capacity array
+    H5::DataSet heat_dataset = data_group.createDataSet(
+        "specific_heat", H5::PredType::NATIVE_DOUBLE, dataspace);
+    heat_dataset.write(heat_capacity.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Write heat capacity error array
+    H5::DataSet dheat_dataset = data_group.createDataSet(
+        "specific_heat_error", H5::PredType::NATIVE_DOUBLE, dataspace);
+    dheat_dataset.write(dHeat.data(), H5::PredType::NATIVE_DOUBLE);
+    
+    // Close everything
+    temp_dataset.close();
+    heat_dataset.close();
+    dheat_dataset.close();
+    data_group.close();
+    metadata_group.close();
+    file.close();
+}
+#endif
+
+// ============================================================
+// GNEB AND TRANSITION PATH ANALYSIS
+// ============================================================
+
+double StrainPhononLattice::energy_for_gneb(const vector<Eigen::Vector3d>& config) const {
+    // Temporarily set spins and compute energy
+    // This is a bit ugly but necessary for the GNEB interface
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    double E = spin_energy();
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return E;
+}
+
+vector<Eigen::Vector3d> StrainPhononLattice::gradient_for_gneb(
+    const vector<Eigen::Vector3d>& config) const {
+    // Temporarily set spins to compute gradient
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    // Compute gradient: ∂E/∂S_i = -H_eff_i (effective field is -gradient)
+    vector<Eigen::Vector3d> grad(lattice_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H_eff = get_local_field(i);
+        grad[i] = -H_eff;  // gradient is negative of effective field
+    }
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return grad;
+}
+
+vector<Eigen::Vector3d> StrainPhononLattice::compute_Eg_phonon_force(
+    const vector<Eigen::Vector3d>& config, double Q_Eg) const {
+    // Compute the force from Eg phonon coupling:
+    // F_i = +g Q_Eg · ∂f_Eg/∂S_i
+    //
+    // The key insight: even if f_Eg = 0 at the triple-Q state (A1g symmetry),
+    // ∂f_Eg/∂S_i ≠ 0 generically, so the drive produces a linear-in-Q
+    // restoring force that pushes along the E1 symmetry direction.
+    
+    // Temporarily set configuration
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    // Get the Eg derivatives
+    auto [df_Eg1, df_Eg2] = compute_Eg_derivatives(config);
+    
+    // Coupling strength (combines K, J, Gamma contributions)
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    
+    // The Eg phonon couples via:
+    // H_sp-ph = -λ_Eg * [(ε_xx - ε_yy) * f_Eg1 + 2ε_xy * f_Eg2]
+    //
+    // For a driven phonon Q_Eg in the Eg1 channel:
+    // F_i = λ_Eg * Q_Eg * ∂f_Eg1/∂S_i
+    
+    vector<Eigen::Vector3d> force(lattice_size);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        // Force from Eg1 channel (assuming drive is in Eg1 direction)
+        force[i] = lambda_Eg * Q_Eg * df_Eg1[i];
+        
+        // Could add Eg2 component if needed:
+        // force[i] += lambda_Eg * Q_Eg2 * df_Eg2[i];
+    }
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return force;
+}
+
+std::pair<vector<Eigen::Vector3d>, vector<Eigen::Vector3d>> 
+StrainPhononLattice::compute_Eg_derivatives(const vector<Eigen::Vector3d>& config) const {
+    // Compute ∂f_Eg1/∂S_i and ∂f_Eg2/∂S_i for each site
+    // These are the directions in spin space that the Eg phonon "pushes"
+    
+    // Temporarily set configuration (already done in caller, but be safe)
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = config[i];
+    }
+    
+    vector<Eigen::Vector3d> df_Eg1(lattice_size);
+    vector<Eigen::Vector3d> df_Eg2(lattice_size);
+    
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        // Total Eg1 derivative combines K, J, Γ, and Γ' contributions
+        // f_Eg1 = (J+K) f_K_Eg1 + J f_J_Eg1 + Γ f_Γ_Eg1 + Γ' f_Γ'_Eg1
+        // So ∂f_Eg1/∂S = (J+K) ∂f_K_Eg1/∂S + J ∂f_J_Eg1/∂S + Γ ∂f_Γ_Eg1/∂S + Γ' ∂f_Γ'_Eg1/∂S
+        
+        SpinVector dfK_Eg1 = df_K_Eg1_dS(i);
+        SpinVector dfJ_Eg1 = df_J_Eg1_dS(i);
+        SpinVector dfG_Eg1 = df_Gamma_Eg1_dS(i);
+        SpinVector dfGp_Eg1 = df_Gammap_Eg1_dS(i);
+        
+        df_Eg1[i] = (J + K) * dfK_Eg1 + J * dfJ_Eg1 + Gamma * dfG_Eg1 + Gammap * dfGp_Eg1;
+        
+        // Same for Eg2
+        SpinVector dfK_Eg2 = df_K_Eg2_dS(i);
+        SpinVector dfJ_Eg2 = df_J_Eg2_dS(i);
+        SpinVector dfG_Eg2 = df_Gamma_Eg2_dS(i);
+        SpinVector dfGp_Eg2 = df_Gammap_Eg2_dS(i);
+        
+        df_Eg2[i] = (J + K) * dfK_Eg2 + J * dfJ_Eg2 + Gamma * dfG_Eg2 + Gammap * dfGp_Eg2;
+    }
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    return {df_Eg1, df_Eg2};
+}
+
+vector<Eigen::Vector3d> StrainPhononLattice::get_spin_config() const {
+    vector<Eigen::Vector3d> config(lattice_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        config[i] = spins[i];
+    }
+    return config;
+}
+
+void StrainPhononLattice::set_spin_config(const vector<Eigen::Vector3d>& config) {
+    if (config.size() != lattice_size) {
+        throw std::runtime_error("Config size mismatch in set_spin_config");
+    }
+    for (size_t i = 0; i < lattice_size; ++i) {
+        spins[i] = config[i];
+        spins[i].normalize();
+    }
+}
+
+// ============================================================
+// GNEB WITH STRAIN: Combined spin + strain configuration space
+// ============================================================
+
+double StrainPhononLattice::energy_for_gneb_with_strain(
+    const vector<Eigen::Vector3d>& spins_in,
+    double strain_Eg1, double strain_Eg2) const {
+    
+    // Save current state
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    StrainState original_strain = self->strain;
+    
+    // Set new configuration
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = spins_in[i];
+    }
+    
+    // Apply uniform Eg strain to all bond types
+    // Eg1 = (ε_xx - ε_yy)/2, Eg2 = ε_xy
+    // So: ε_xx = ε_Eg1, ε_yy = -ε_Eg1, ε_xy = ε_Eg2
+    for (size_t b = 0; b < 3; ++b) {
+        self->strain.epsilon_xx[b] = strain_Eg1;
+        self->strain.epsilon_yy[b] = -strain_Eg1;
+        self->strain.epsilon_xy[b] = strain_Eg2;
+    }
+    
+    // Compute total energy (spin + elastic + magnetoelastic)
+    double E = total_energy();
+    
+    // Restore original state
+    self->spins = original_spins;
+    self->strain = original_strain;
+    
+    return E;
+}
+
+std::tuple<vector<Eigen::Vector3d>, double, double>
+StrainPhononLattice::gradient_for_gneb_with_strain(
+    const vector<Eigen::Vector3d>& spins_in,
+    double strain_Eg1, double strain_Eg2) const {
+    
+    // Save current state
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    StrainState original_strain = self->strain;
+    
+    // Set new configuration
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = spins_in[i];
+    }
+    
+    // Apply strain
+    for (size_t b = 0; b < 3; ++b) {
+        self->strain.epsilon_xx[b] = strain_Eg1;
+        self->strain.epsilon_yy[b] = -strain_Eg1;
+        self->strain.epsilon_xy[b] = strain_Eg2;
+    }
+    
+    // Compute spin gradients: ∂E/∂S_i = -H_eff_i
+    vector<Eigen::Vector3d> grad_spins(lattice_size);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H_eff = get_local_field(i);
+        grad_spins[i] = -H_eff;
+    }
+    
+    // Compute strain gradients using finite differences
+    // (more robust than analytic for complex magnetoelastic coupling)
+    const double delta = 1e-5;
+    
+    // ∂E/∂ε_Eg1
+    double E_plus_Eg1 = energy_for_gneb_with_strain(spins_in, strain_Eg1 + delta, strain_Eg2);
+    double E_minus_Eg1 = energy_for_gneb_with_strain(spins_in, strain_Eg1 - delta, strain_Eg2);
+    double dE_dEg1 = (E_plus_Eg1 - E_minus_Eg1) / (2.0 * delta);
+    
+    // ∂E/∂ε_Eg2
+    double E_plus_Eg2 = energy_for_gneb_with_strain(spins_in, strain_Eg1, strain_Eg2 + delta);
+    double E_minus_Eg2 = energy_for_gneb_with_strain(spins_in, strain_Eg1, strain_Eg2 - delta);
+    double dE_dEg2 = (E_plus_Eg2 - E_minus_Eg2) / (2.0 * delta);
+    
+    // Restore original state
+    self->spins = original_spins;
+    self->strain = original_strain;
+    
+    return {grad_spins, dE_dEg1, dE_dEg2};
+}
+
+std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
+    const vector<Eigen::Vector3d>& spins_in,
+    size_t max_iter,
+    double tolerance) const {
+    
+    // Start from zero strain
+    double Eg1 = 0.0;
+    double Eg2 = 0.0;
+    
+    // Steepest descent with adaptive step size
+    double step = 0.01;
+    
+    for (size_t iter = 0; iter < max_iter; ++iter) {
+        auto [grad_spins, dE_dEg1, dE_dEg2] = gradient_for_gneb_with_strain(spins_in, Eg1, Eg2);
+        (void)grad_spins;  // Not needed for strain relaxation
+        
+        double force_norm = std::sqrt(dE_dEg1 * dE_dEg1 + dE_dEg2 * dE_dEg2);
+        
+        if (force_norm < tolerance) {
+            break;
+        }
+        
+        // Update strain (gradient descent)
+        Eg1 -= step * dE_dEg1;
+        Eg2 -= step * dE_dEg2;
+        
+        // Adaptive step size (simple backtracking would be better)
+        if (iter > 0 && iter % 100 == 0) {
+            step *= 0.9;
+        }
+    }
+    
+    return {Eg1, Eg2};
+}
+
+void StrainPhononLattice::init_zigzag_pattern(int direction) {
+    // Zigzag pattern: FM chains along one direction, AFM perpendicular
+    // The "direction" specifies which bond type has AFM coupling
+    
+    // For honeycomb, zigzag has ordering wavevector at M point
+    // Depending on direction, the pattern differs
+    
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                size_t siteA = flatten_index(i, j, k, 0);
+                size_t siteB = flatten_index(i, j, k, 1);
+                
+                int sign;
+                switch (direction) {
+                    case 0:  // x-bond zigzag
+                        sign = ((i + j) % 2 == 0) ? 1 : -1;
+                        break;
+                    case 1:  // y-bond zigzag
+                        sign = (i % 2 == 0) ? 1 : -1;
+                        break;
+                    case 2:  // z-bond zigzag
+                    default:
+                        sign = (j % 2 == 0) ? 1 : -1;
+                        break;
+                }
+                
+                // Spins point along z (can be generalized)
+                spins[siteA] = sign * Eigen::Vector3d(0, 0, 1);
+                spins[siteB] = sign * Eigen::Vector3d(0, 0, 1);  // Same sign within unit cell
+            }
+        }
+    }
+    
+    // Normalize (already done but be safe)
+    for (size_t i = 0; i < lattice_size; ++i) {
+        spins[i].normalize();
+    }
+    
+    cout << "Initialized zigzag pattern (direction = " << direction << ")" << endl;
+}
+
+void StrainPhononLattice::init_triple_q() {
+    // Triple-Q pattern: superposition of three M-point ordering vectors
+    // This is a 120° coplanar or non-coplanar structure depending on parameters
+    
+    // For simplicity, we initialize with a 120° structure
+    // Real triple-Q would require solving for the ground state
+    
+    // Triple-Q wavevectors at M points of honeycomb BZ:
+    // M1 = (π, π/√3), M2 = (0, 2π/√3), M3 = (-π, π/√3)
+    
+    Eigen::Vector3d Q1(M_PI, M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d Q2(0, 2.0 * M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d Q3(-M_PI, M_PI / std::sqrt(3.0), 0);
+    
+    // Three ordering directions (120° apart in spin space)
+    Eigen::Vector3d n1(1, 0, 0);
+    Eigen::Vector3d n2(-0.5, std::sqrt(3.0)/2.0, 0);
+    Eigen::Vector3d n3(-0.5, -std::sqrt(3.0)/2.0, 0);
+    
+    for (size_t idx = 0; idx < lattice_size; ++idx) {
+        Eigen::Vector3d r = site_positions[idx];
+        
+        // Superposition of three M-point waves
+        double phase1 = Q1.dot(r);
+        double phase2 = Q2.dot(r);
+        double phase3 = Q3.dot(r);
+        
+        Eigen::Vector3d S = std::cos(phase1) * n1 
+                         + std::cos(phase2) * n2 
+                         + std::cos(phase3) * n3;
+        
+        if (S.norm() > 1e-10) {
+            spins[idx] = S.normalized();
+        } else {
+            spins[idx] = Eigen::Vector3d(0, 0, 1);
+        }
+    }
+    
+    cout << "Initialized triple-Q pattern (3M superposition)" << endl;
+}
+
+double StrainPhononLattice::structure_factor(const Eigen::Vector3d& q) const {
+    // S(q) = |Σ_i S_i exp(-i q·r_i)|² / N
+    std::complex<double> Sq_x(0, 0), Sq_y(0, 0), Sq_z(0, 0);
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        double phase = q.dot(site_positions[i]);
+        std::complex<double> exp_factor(std::cos(phase), -std::sin(phase));
+        
+        Sq_x += spins[i](0) * exp_factor;
+        Sq_y += spins[i](1) * exp_factor;
+        Sq_z += spins[i](2) * exp_factor;
+    }
+    
+    double S_total = (std::norm(Sq_x) + std::norm(Sq_y) + std::norm(Sq_z)) / lattice_size;
+    
+    return S_total;
+}
+
+StrainPhononLattice::CollectiveVars StrainPhononLattice::compute_collective_variables() const {
+    CollectiveVars cv;
+    
+    // Triple-Q order: sum of structure factors at three M points
+    Eigen::Vector3d M1(M_PI, M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d M2(0, 2.0 * M_PI / std::sqrt(3.0), 0);
+    Eigen::Vector3d M3(-M_PI, M_PI / std::sqrt(3.0), 0);
+    
+    cv.m_3Q = structure_factor(M1) + structure_factor(M2) + structure_factor(M3);
+    cv.m_3Q /= 3.0;  // Average
+    
+    // Zigzag order: structure factor at the zigzag wavevector
+    // For honeycomb, zigzag has q at the M point (same as triple-Q components)
+    // But zigzag picks one dominant M point, while triple-Q has equal weight at all three
+    // We use the max of the three
+    cv.m_zigzag = std::max({structure_factor(M1), structure_factor(M2), structure_factor(M3)});
+    
+    // Eg symmetry breaking: |f_Eg| = sqrt(f_Eg1² + f_Eg2²)
+    // where f_Eg = (J+K)f_K_Eg + J f_J_Eg + Γ f_Γ_Eg
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    
+    double fEg1 = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
+    double fEg2 = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2();
+    
+    cv.f_Eg_amplitude = std::sqrt(fEg1 * fEg1 + fEg2 * fEg2);
+    
+    // Total energy
+    cv.E_total = spin_energy();
+    
+    return cv;
+}
+
+// ============================================================
+// STATIC STRUCTURE FACTOR
+// ============================================================
+
+StrainPhononLattice::StructureFactorResult StrainPhononLattice::compute_static_structure_factor(
+    size_t n_q1, size_t n_q2,
+    double q1_min, double q1_max,
+    double q2_min, double q2_max) const {
+    
+    StructureFactorResult result;
+    
+    // Reciprocal lattice vectors for honeycomb lattice
+    // Real space: a1 = (1, 0, 0), a2 = (1/2, sqrt(3)/2, 0)
+    // Reciprocal: b1* = 2π(1, -1/sqrt(3), 0), b2* = 2π(0, 2/sqrt(3), 0)
+    const double sqrt3 = std::sqrt(3.0);
+    Eigen::Vector3d b1(2.0 * M_PI, -2.0 * M_PI / sqrt3, 0.0);
+    Eigen::Vector3d b2(0.0, 4.0 * M_PI / sqrt3, 0.0);
+    
+    // Generate q-grid
+    result.q1_vals.resize(n_q1);
+    result.q2_vals.resize(n_q2);
+    
+    for (size_t i = 0; i < n_q1; ++i) {
+        result.q1_vals[i] = q1_min + (q1_max - q1_min) * double(i) / double(n_q1 - 1);
+    }
+    for (size_t j = 0; j < n_q2; ++j) {
+        result.q2_vals[j] = q2_min + (q2_max - q2_min) * double(j) / double(n_q2 - 1);
+    }
+    
+    // Initialize S(q) arrays
+    result.S_total.resize(n_q1, vector<double>(n_q2, 0.0));
+    result.S_xx.resize(n_q1, vector<double>(n_q2, 0.0));
+    result.S_yy.resize(n_q1, vector<double>(n_q2, 0.0));
+    result.S_zz.resize(n_q1, vector<double>(n_q2, 0.0));
+    
+    // Compute S(q) for each q-point
+    for (size_t i = 0; i < n_q1; ++i) {
+        for (size_t j = 0; j < n_q2; ++j) {
+            // q = q1 * b1* + q2 * b2*
+            Eigen::Vector3d q = result.q1_vals[i] * b1 + result.q2_vals[j] * b2;
+            
+            // Compute Fourier transform: Σ_k S_k exp(-i q·r_k)
+            std::complex<double> Sq_x(0, 0), Sq_y(0, 0), Sq_z(0, 0);
+            
+            for (size_t k = 0; k < lattice_size; ++k) {
+                double phase = q.dot(site_positions[k]);
+                std::complex<double> exp_factor(std::cos(phase), -std::sin(phase));
+                
+                Sq_x += spins[k](0) * exp_factor;
+                Sq_y += spins[k](1) * exp_factor;
+                Sq_z += spins[k](2) * exp_factor;
+            }
+            
+            // Structure factor components
+            result.S_xx[i][j] = std::norm(Sq_x) / lattice_size;
+            result.S_yy[i][j] = std::norm(Sq_y) / lattice_size;
+            result.S_zz[i][j] = std::norm(Sq_z) / lattice_size;
+            result.S_total[i][j] = result.S_xx[i][j] + result.S_yy[i][j] + result.S_zz[i][j];
+        }
+    }
+    
+    return result;
+}
+
+void StrainPhononLattice::save_structure_factor(const string& filename, 
+                                                 const StructureFactorResult& sf) const {
+    ofstream file(filename);
+    file << std::scientific << std::setprecision(12);
+    
+    // Header
+    file << "# Static spin structure factor S(q)\n";
+    file << "# Columns: q1 q2 S_total S_xx S_yy S_zz\n";
+    file << "# q1, q2 are in units of reciprocal lattice vectors (b1*, b2*)\n";
+    file << "# Grid: " << sf.q1_vals.size() << " x " << sf.q2_vals.size() << "\n";
+    
+    // Data
+    for (size_t i = 0; i < sf.q1_vals.size(); ++i) {
+        for (size_t j = 0; j < sf.q2_vals.size(); ++j) {
+            file << sf.q1_vals[i] << " " << sf.q2_vals[j] << " "
+                 << sf.S_total[i][j] << " "
+                 << sf.S_xx[i][j] << " "
+                 << sf.S_yy[i][j] << " "
+                 << sf.S_zz[i][j] << "\n";
+        }
+        file << "\n";  // Blank line between q1 slices for gnuplot
+    }
 }

@@ -1,6 +1,8 @@
 #include "classical_spin/core/spin_config.h"
 #include "classical_spin/core/unitcell.h"
 #include "classical_spin/core/unitcell_builders.h"
+#include "classical_spin/core/gneb.h"
+#include "classical_spin/core/gneb_strain.h"
 #include "classical_spin/lattice/lattice.h"
 #include "classical_spin/lattice/mixed_lattice.h"
 #include "classical_spin/lattice/phonon_lattice.h"
@@ -91,11 +93,65 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
     
     // Generate temperature ladder
     vector<double> temps(size);
-    for (int i = 0; i < size; ++i) {
-        double log_T = log10(config.T_start) + 
-                      (log10(config.T_end) - log10(config.T_start)) * i / (size - 1);
-        temps[i] = pow(10, log_T);
+    
+    if (config.pt_optimize_temperatures) {
+        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        // All ranks participate - much faster than single-rank optimization
+        if (rank == 0) {
+            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed)..." << endl;
+        }
+        
+        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
+            config.T_end,    // Tmin (coldest)
+            config.T_start,  // Tmax (hottest)
+            config.pt_optimization_warmup,
+            config.pt_optimization_sweeps,
+            config.pt_optimization_iterations,
+            config.gaussian_move,
+            config.overrelaxation_rate,
+            config.pt_target_acceptance,
+            0.05,  // convergence tolerance
+            comm
+        );
+        temps = opt_result.temperatures;
+        
+        // Save optimized temperature grid info to file (rank 0 only)
+        if (rank == 0 && !config.output_dir.empty()) {
+            filesystem::create_directories(config.output_dir);
+            ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
+            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
+            opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
+            opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
+            opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
+            opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
+            opt_file << "#\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            for (int i = 0; i < size; ++i) {
+                opt_file << i << "  " << scientific << setprecision(12) << temps[i];
+                if (i < size - 1) {
+                    opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
+                             << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                }
+                opt_file << "\n";
+            }
+            opt_file.close();
+        }
+    } else {
+        // Use geometric (logarithmic) temperature spacing
+        if (rank == 0) {
+            cout << "Using geometric temperature grid..." << endl;
+            temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
+        }
+        // Broadcast temperatures from rank 0 to all ranks
+        MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
     }
+    
+    // Re-initialize spins after temperature optimization (or geometric grid setup)
+    // This ensures each rank starts with fresh random spins - the optimization
+    // phase leaves spins in a "mixed" state from many replica exchanges
+    lattice.init_random();
+    MPI_Barrier(comm);
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -123,8 +179,27 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             trial_dir,
             config.ranks_to_write,
             config.gaussian_move,
-            comm
+            comm,
+            false,  // verbose
+            config.pt_accumulate_correlations,
+            config.pt_n_bond_types
         );
+        
+        // T=0 deterministic quench for coldest replica (rank 0)
+        if (config.T_zero && rank == 0 && config.n_deterministics > 0) {
+            cout << "Rank 0: Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < config.n_deterministics; ++sweep) {
+                lattice.deterministic_sweep(1);
+                if (sweep % 100 == 0 || sweep == config.n_deterministics - 1) {
+                    cout << "Deterministic sweep " << sweep << "/" << config.n_deterministics 
+                         << ", E/N = " << lattice.energy_density() << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << lattice.energy_density() << endl;
+            // Save the T=0 quenched configuration
+            lattice.save_spin_config(trial_dir + "/rank_0/spins_T0_quench.txt");
+        }
+        MPI_Barrier(comm);
         
         if (rank == 0) {
             cout << "Trial " << trial << " completed." << endl;
@@ -958,7 +1033,10 @@ void run_simulated_annealing_strain(StrainPhononLattice& lattice, const SpinConf
             lattice.init_random();
         }
         
-        lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
+        lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                       config.cooling_rate, config.overrelaxation_rate,
+                       config.gaussian_move, trial_dir,
+                       config.T_zero, config.n_deterministics);
         
         // Save final configuration
         lattice.save_spin_config(trial_dir + "/spins.txt");
@@ -1012,6 +1090,333 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
 }
 
 /**
+ * Run kinetic barrier analysis for StrainPhononLattice using GNEB with strain
+ * 
+ * This finds the minimum energy path in the COMBINED (spin, strain) configuration
+ * space. The strain is a dynamical degree of freedom that relaxes along with
+ * spins to find the TRUE transition pathway including lattice distortion.
+ * 
+ * Key physics:
+ * - Configuration space is (S_1, ..., S_N, ε_Eg1, ε_Eg2)
+ * - Spins live on S^2 (geodesic manifold), strain is Euclidean
+ * - The MEP shows how the lattice distorts during the magnetic transition
+ * - No external parameter sweep needed - strain follows the optimal path
+ */
+void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
+    if (rank == 0) {
+        cout << "\n" << string(70, '=') << endl;
+        cout << "KINETIC BARRIER ANALYSIS (GNEB with STRAIN)" << endl;
+        cout << string(70, '=') << endl;
+        cout << "Configuration space: (spins, ε_Eg1, ε_Eg2)" << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+        cout << "MPI ranks: " << size << endl;
+        cout << "\nGNEB parameters:" << endl;
+        cout << "  N images:         " << config.gneb_n_images << endl;
+        cout << "  Spring constant:  " << config.gneb_spring_constant << endl;
+        cout << "  Max iterations:   " << config.gneb_max_iterations << endl;
+        cout << "  Force tolerance:  " << config.gneb_force_tolerance << endl;
+        cout << "  Climbing image:   " << (config.gneb_use_climbing_image ? "yes" : "no") << endl;
+        cout << "  Strain weight:    1.0 (equal to spin weight)" << endl;
+        cout << "\nMagnetoelastic coupling:" << endl;
+        cout << "  lambda_Eg: " << lattice.magnetoelastic_params.lambda_Eg << endl;
+        cout << string(70, '-') << endl;
+    }
+    
+    // Get lattice dimensions
+    const size_t n_sites = lattice.lattice_size;
+    
+    // Distribute trials across MPI ranks
+    for (int trial = rank; trial < config.num_trials; trial += size) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        filesystem::create_directories(trial_dir);
+        filesystem::create_directories(trial_dir + "/gneb");
+        
+        if (rank == 0 || config.num_trials > 1) {
+            cout << "\n[Rank " << rank << "] === Trial " << trial << " ===" << endl;
+        }
+        
+        // ================================================================
+        // STEP 1: Get initial spin state and relax strain
+        // ================================================================
+        SpinStrainConfig initial_state(n_sites);
+        
+        if (!config.gneb_initial_state_file.empty()) {
+            // Load combined (spins, strain) from file
+            cout << "[Rank " << rank << "] Loading initial spin+strain config from file..." << endl;
+            lattice.load_spin_strain_config(config.gneb_initial_state_file);
+            cout << "  File: " << config.gneb_initial_state_file << endl;
+            
+            // Extract to SpinStrainConfig
+            for (size_t i = 0; i < n_sites; ++i) {
+                initial_state.spins[i] = lattice.spins[i];
+            }
+            // Get Eg strain from lattice (averaging over bond types)
+            double Eg1 = 0.0, Eg2 = 0.0;
+            for (size_t b = 0; b < 3; ++b) {
+                Eg1 += (lattice.strain.epsilon_xx[b] - lattice.strain.epsilon_yy[b]) / 2.0;
+                Eg2 += lattice.strain.epsilon_xy[b];
+            }
+            initial_state.strain = StrainEg(Eg1 / 3.0, Eg2 / 3.0);
+        } else {
+            // Find via annealing (strain is relaxed during annealing)
+            cout << "[Rank " << rank << "] Finding initial (triple-Q) ground state..." << endl;
+            
+            // Zero out strain initially
+            for (size_t b = 0; b < 3; ++b) {
+                lattice.strain.epsilon_xx[b] = 0.0;
+                lattice.strain.epsilon_yy[b] = 0.0;
+                lattice.strain.epsilon_xy[b] = 0.0;
+            }
+            
+            lattice.init_random();
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                           config.cooling_rate, config.overrelaxation_rate,
+                           config.gaussian_move, trial_dir + "/initial_anneal",
+                           config.T_zero, config.n_deterministics);
+            
+            // Extract spin configuration
+            for (size_t i = 0; i < n_sites; ++i) {
+                initial_state.spins[i] = lattice.spins[i];
+            }
+            
+            // Relax strain at fixed initial spins to find equilibrium strain
+            cout << "[Rank " << rank << "] Relaxing strain for initial state..." << endl;
+            auto [init_Eg1, init_Eg2] = lattice.relax_strain_at_fixed_spins(initial_state.spins);
+            initial_state.strain = StrainEg(init_Eg1, init_Eg2);
+        }
+        
+        // Update lattice strain to match initial_state
+        for (size_t b = 0; b < 3; ++b) {
+            lattice.strain.epsilon_xx[b] = initial_state.strain.Eg1;
+            lattice.strain.epsilon_yy[b] = -initial_state.strain.Eg1;
+            lattice.strain.epsilon_xy[b] = initial_state.strain.Eg2;
+        }
+        
+        // Analyze initial state
+        auto initial_cv = lattice.compute_collective_variables();
+        cout << "[Rank " << rank << "] Initial state:" << endl;
+        cout << "  m_3Q       = " << initial_cv.m_3Q << endl;
+        cout << "  m_zigzag   = " << initial_cv.m_zigzag << endl;
+        cout << "  f_Eg_amp   = " << initial_cv.f_Eg_amplitude << endl;
+        cout << "  ε_Eg       = (" << initial_state.strain.Eg1 << ", " << initial_state.strain.Eg2 << ")" << endl;
+        
+        lattice.save_spin_strain_config(trial_dir + "/triple_q_state.txt");
+        
+        // ================================================================
+        // STEP 2: Get final spin state and relax strain
+        // ================================================================
+        SpinStrainConfig final_state(n_sites);
+        
+        if (!config.gneb_final_state_file.empty()) {
+            // Load combined (spins, strain) from file
+            cout << "[Rank " << rank << "] Loading final spin+strain config from file..." << endl;
+            lattice.load_spin_strain_config(config.gneb_final_state_file);
+            cout << "  File: " << config.gneb_final_state_file << endl;
+            
+            // Extract to SpinStrainConfig
+            for (size_t i = 0; i < n_sites; ++i) {
+                final_state.spins[i] = lattice.spins[i];
+            }
+            // Get Eg strain from lattice (averaging over bond types)
+            double Eg1 = 0.0, Eg2 = 0.0;
+            for (size_t b = 0; b < 3; ++b) {
+                Eg1 += (lattice.strain.epsilon_xx[b] - lattice.strain.epsilon_yy[b]) / 2.0;
+                Eg2 += lattice.strain.epsilon_xy[b];
+            }
+            final_state.strain = StrainEg(Eg1 / 3.0, Eg2 / 3.0);
+        } else {
+            // Find via annealing with bias strain
+            cout << "[Rank " << rank << "] Finding zigzag state with applied strain..." << endl;
+            
+            // Apply strong Eg strain to induce zigzag
+            const double bias_strain = 3.0;
+            for (size_t b = 0; b < 3; ++b) {
+                lattice.strain.epsilon_xx[b] = bias_strain / 2.0;
+                lattice.strain.epsilon_yy[b] = -bias_strain / 2.0;
+                lattice.strain.epsilon_xy[b] = 0.0;
+            }
+            
+            lattice.init_random();
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                           config.cooling_rate, config.overrelaxation_rate,
+                           config.gaussian_move, trial_dir + "/zigzag_anneal",
+                           config.T_zero, config.n_deterministics);
+            
+            // Extract spin configuration - strain will be relaxed below
+            for (size_t i = 0; i < n_sites; ++i) {
+                final_state.spins[i] = lattice.spins[i];
+            }
+            
+            // Relax strain at fixed final spins (find equilibrium without bias)
+            cout << "[Rank " << rank << "] Relaxing strain for final state..." << endl;
+            auto [final_Eg1, final_Eg2] = lattice.relax_strain_at_fixed_spins(final_state.spins);
+            final_state.strain = StrainEg(final_Eg1, final_Eg2);
+        }
+        
+        // Update lattice strain to match final_state
+        for (size_t b = 0; b < 3; ++b) {
+            lattice.strain.epsilon_xx[b] = final_state.strain.Eg1;
+            lattice.strain.epsilon_yy[b] = -final_state.strain.Eg1;
+            lattice.strain.epsilon_xy[b] = final_state.strain.Eg2;
+        }
+        
+        // Analyze final state
+        auto final_cv = lattice.compute_collective_variables();
+        cout << "[Rank " << rank << "] Final state:" << endl;
+        cout << "  m_3Q       = " << final_cv.m_3Q << endl;
+        cout << "  m_zigzag   = " << final_cv.m_zigzag << endl;
+        cout << "  f_Eg_amp   = " << final_cv.f_Eg_amplitude << endl;
+        cout << "  ε_Eg       = (" << final_state.strain.Eg1 << ", " << final_state.strain.Eg2 << ")" << endl;
+        
+        lattice.save_spin_strain_config(trial_dir + "/zigzag_state.txt");
+        
+        // ================================================================
+        // STEP 3: Set up GNEB optimizer with strain
+        // ================================================================
+        cout << "[Rank " << rank << "] Setting up GNEB with strain optimizer..." << endl;
+        
+        // Energy function: E(spins, strain)
+        auto energy_func = [&lattice](const SpinStrainConfig& cfg) -> double {
+            return lattice.energy_for_gneb_with_strain(
+                cfg.spins, cfg.strain.Eg1, cfg.strain.Eg2);
+        };
+        
+        // Gradient function: (∂E/∂S, ∂E/∂ε)
+        auto gradient_func = [&lattice](const SpinStrainConfig& cfg) -> SpinStrainGradient {
+            auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
+                cfg.spins, cfg.strain.Eg1, cfg.strain.Eg2);
+            
+            SpinStrainGradient grad(cfg.spins.size());
+            grad.d_spins = grad_spins;
+            grad.d_strain = StrainEg(dE_dEg1, dE_dEg2);
+            return grad;
+        };
+        
+        GNEBStrainOptimizer gneb(energy_func, gradient_func, n_sites);
+        
+        // GNEB parameters from config
+        GNEBStrainParams gneb_params;
+        gneb_params.n_images = config.gneb_n_images;
+        gneb_params.spring_constant = config.gneb_spring_constant;
+        gneb_params.max_iterations = config.gneb_max_iterations;
+        gneb_params.force_tolerance = config.gneb_force_tolerance;
+        gneb_params.climbing_image = config.gneb_use_climbing_image;
+        gneb_params.weight_strain = 1.0;  // Equal weight for strain and spins
+        gneb_params.max_strain_amplitude = 10.0;  // Safety limit
+        gneb_params.verbosity = (rank == 0) ? 2 : 0;
+        
+        // ================================================================
+        // STEP 4: Find MEP in combined (spin, strain) space
+        // ================================================================
+        cout << "[Rank " << rank << "] Finding minimum energy path in (spin, strain) space..." << endl;
+        
+        auto mep_result = gneb.find_mep(initial_state, final_state, gneb_params);
+        
+        cout << "[Rank " << rank << "] MEP converged in " << mep_result.iterations_used << " iterations" << endl;
+        cout << "  Barrier height: " << mep_result.barrier << endl;
+        cout << "  Saddle image:   " << mep_result.saddle_index << endl;
+        cout << "  Saddle strain:  ε_Eg = (" << mep_result.saddle_strain.Eg1 
+             << ", " << mep_result.saddle_strain.Eg2 << ")" << endl;
+        cout << "  Max strain amp: " << mep_result.max_strain_amplitude << endl;
+        cout << "  Final max force:" << mep_result.max_force << endl;
+        
+        // ================================================================
+        // STEP 5: Save MEP with strain information
+        // ================================================================
+        {
+            ofstream mep_file(trial_dir + "/mep_with_strain.txt");
+            mep_file << "# Minimum energy path in (spin, strain) space\n";
+            mep_file << "# Strain coordinates: ε_Eg1 = (ε_xx - ε_yy)/2, ε_Eg2 = ε_xy\n";
+            mep_file << "# image  reaction_coord  energy  strain_Eg1  strain_Eg2  strain_amp  m_3Q  m_zigzag  f_Eg_amp\n";
+            
+            for (size_t i = 0; i < mep_result.energies.size(); ++i) {
+                // Set lattice to this configuration to compute CVs
+                for (size_t j = 0; j < n_sites; ++j) {
+                    lattice.spins[j] = mep_result.images[i].spins[j];
+                }
+                auto cv = lattice.compute_collective_variables();
+                
+                const auto& img = mep_result.images[i];
+                mep_file << i << "  " << mep_result.arc_lengths[i] 
+                         << "  " << mep_result.energies[i]
+                         << "  " << img.strain.Eg1 
+                         << "  " << img.strain.Eg2
+                         << "  " << img.strain.amplitude()
+                         << "  " << cv.m_3Q << "  " << cv.m_zigzag 
+                         << "  " << cv.f_Eg_amplitude << "\n";
+            }
+        }
+        
+        // ================================================================
+        // STEP 6: Save summary
+        // ================================================================
+        {
+            ofstream summary(trial_dir + "/barrier_summary.txt");
+            summary << "# Kinetic Barrier Analysis Summary (GNEB with Strain)\n";
+            summary << "# Trial: " << trial << "\n";
+            summary << "# Configuration space: (spins, ε_Eg1, ε_Eg2)\n";
+            summary << "#\n";
+            summary << "barrier = " << mep_result.barrier << "\n";
+            summary << "gneb_iterations = " << mep_result.iterations_used << "\n";
+            summary << "gneb_converged = " << (mep_result.converged ? "true" : "false") << "\n";
+            summary << "saddle_image = " << mep_result.saddle_index << "\n";
+            summary << "max_force = " << mep_result.max_force << "\n";
+            summary << "#\n";
+            summary << "# Strain at key points:\n";
+            summary << "initial_strain_Eg1 = " << mep_result.initial_strain.Eg1 << "\n";
+            summary << "initial_strain_Eg2 = " << mep_result.initial_strain.Eg2 << "\n";
+            summary << "saddle_strain_Eg1 = " << mep_result.saddle_strain.Eg1 << "\n";
+            summary << "saddle_strain_Eg2 = " << mep_result.saddle_strain.Eg2 << "\n";
+            summary << "final_strain_Eg1 = " << mep_result.final_strain.Eg1 << "\n";
+            summary << "final_strain_Eg2 = " << mep_result.final_strain.Eg2 << "\n";
+            summary << "max_strain_amplitude = " << mep_result.max_strain_amplitude << "\n";
+            summary << "#\n";
+            summary << "# Initial (triple-Q) state:\n";
+            summary << "initial_m_3Q = " << initial_cv.m_3Q << "\n";
+            summary << "initial_m_zigzag = " << initial_cv.m_zigzag << "\n";
+            summary << "initial_f_Eg_amp = " << initial_cv.f_Eg_amplitude << "\n";
+            summary << "#\n";
+            summary << "# Final (zigzag) state:\n";
+            summary << "final_m_3Q = " << final_cv.m_3Q << "\n";
+            summary << "final_m_zigzag = " << final_cv.m_zigzag << "\n";
+            summary << "final_f_Eg_amp = " << final_cv.f_Eg_amplitude << "\n";
+        }
+        
+        // Save MEP images if requested
+        if (config.gneb_save_path_evolution) {
+            gneb.save_path(trial_dir + "/gneb", "mep");
+            
+            // Also save in our custom format with more info
+            for (size_t img = 0; img < mep_result.images.size(); ++img) {
+                string img_file = trial_dir + "/gneb/image_" + to_string(img) + ".txt";
+                ofstream out(img_file);
+                out << "# MEP image " << img << "\n";
+                out << "# strain_Eg1 = " << mep_result.images[img].strain.Eg1 << "\n";
+                out << "# strain_Eg2 = " << mep_result.images[img].strain.Eg2 << "\n";
+                out << "# energy = " << mep_result.energies[img] << "\n";
+                out << "# site  Sx  Sy  Sz\n";
+                for (size_t i = 0; i < n_sites; ++i) {
+                    out << i << "  " << mep_result.images[img].spins[i].x() 
+                        << "  " << mep_result.images[img].spins[i].y()
+                        << "  " << mep_result.images[img].spins[i].z() << "\n";
+                }
+            }
+        }
+        
+        cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
+        cout << "  Output saved to: " << trial_dir << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) {
+        cout << "\n" << string(70, '=') << endl;
+        cout << "Kinetic barrier analysis with strain completed (" << config.num_trials << " trials)" << endl;
+        cout << string(70, '=') << endl;
+    }
+}
+
+/**
  * Run pump-probe for StrainPhononLattice (strain-driven spin dynamics)
  * 
  * This simulates a THz/acoustic pump-probe experiment on the magnetoelastic system:
@@ -1060,18 +1465,15 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
             if (rank == 0) {
                 cout << "Equilibrating spin subsystem via simulated annealing..." << endl;
             }
-            lattice.anneal(config.T_start, config.T_end, config.annealing_steps, config.overrelaxation_rate);
-            
-            // T=0 deterministic sweeps to align spins with local field
-            // This eliminates precession by ensuring S × H_eff = 0
-            if (config.T_zero && config.n_deterministics > 0) {
-                if (rank == 0) {
-                    cout << "Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
-                }
-                lattice.deterministic_sweep(config.n_deterministics);
-            }
+            lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
+                           config.cooling_rate, config.overrelaxation_rate,
+                           config.gaussian_move, trial_dir,
+                           config.T_zero, config.n_deterministics);
         } else {
-            lattice.load_spin_config(config.initial_spin_config);
+            // Load combined spin+strain config (same format as GNEB endpoints)
+            cout << "[Rank " << rank << "] Loading initial spin+strain config from: " 
+                 << config.initial_spin_config << endl;
+            lattice.load_spin_strain_config(config.initial_spin_config);
         }
         
         // Relax strain to equilibrium given the spin configuration
@@ -1080,7 +1482,8 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         }
         lattice.relax_strain();
         
-        // Save initial configuration
+        // Save initial configuration (combined spin+strain format)
+        lattice.save_spin_strain_config(trial_dir + "/initial_spin_strain.txt");
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
         lattice.save_strain_state(trial_dir + "/initial_strain.txt");
         
@@ -1094,7 +1497,8 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
                               config.md_save_interval, trial_dir);
         
-        // Save final configuration
+        // Save final configuration (combined spin+strain format)
+        lattice.save_spin_strain_config(trial_dir + "/final_spin_strain.txt");
         lattice.save_spin_config(trial_dir + "/final_spins.txt");
         lattice.save_strain_state(trial_dir + "/final_strain.txt");
         
@@ -1105,6 +1509,135 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
     
     if (rank == 0) {
         cout << "StrainPhononLattice pump-probe completed (" << config.num_trials << " trials)." << endl;
+    }
+}
+
+/**
+ * Run parallel tempering for StrainPhononLattice
+ * Uses MPI for replica exchange between temperatures
+ */
+void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size, MPI_Comm comm = MPI_COMM_WORLD) {
+    if (rank == 0) {
+        cout << "Running parallel tempering on StrainPhononLattice with " << size << " replicas..." << endl;
+        cout << "Number of trials: " << config.num_trials << endl;
+    }
+    
+    // Generate temperature ladder
+    vector<double> temps(size);
+    
+    if (config.pt_optimize_temperatures) {
+        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        if (rank == 0) {
+            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed)..." << endl;
+        }
+        
+        SPL_OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
+            config.T_end,    // Tmin (coldest)
+            config.T_start,  // Tmax (hottest)
+            config.pt_optimization_warmup,
+            config.pt_optimization_sweeps,
+            config.pt_optimization_iterations,
+            config.gaussian_move,
+            config.overrelaxation_rate,
+            config.pt_target_acceptance,
+            0.05,  // convergence tolerance
+            comm
+        );
+        temps = opt_result.temperatures;
+        
+        // Save optimized temperature grid info to file (rank 0 only)
+        if (rank == 0 && !config.output_dir.empty()) {
+            filesystem::create_directories(config.output_dir);
+            ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
+            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
+            opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
+            opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
+            opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
+            opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
+            opt_file << "#\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            for (int i = 0; i < size; ++i) {
+                opt_file << i << "  " << scientific << setprecision(12) << temps[i];
+                if (i < size - 1) {
+                    opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
+                             << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                }
+                opt_file << "\n";
+            }
+            opt_file.close();
+        }
+    } else {
+        // Use geometric (logarithmic) temperature spacing
+        if (rank == 0) {
+            cout << "Using geometric temperature grid..." << endl;
+            temps = StrainPhononLattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
+        }
+        // Broadcast temperatures from rank 0 to all ranks
+        MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
+    }
+    
+    // Re-initialize spins after temperature optimization
+    lattice.init_random();
+    MPI_Barrier(comm);
+    
+    for (int trial = 0; trial < config.num_trials; ++trial) {
+        string trial_dir = config.output_dir + "/sample_" + to_string(trial);
+        if (rank == 0) {
+            filesystem::create_directories(trial_dir);
+        }
+        MPI_Barrier(comm);  // Ensure directory is created before others proceed
+        
+        if (rank == 0 && config.num_trials > 1) {
+            cout << "\n=== Trial " << trial << " / " << config.num_trials << " ===" << endl;
+        }
+        
+        // Re-initialize spins for each trial (except first)
+        if (trial > 0) {
+            lattice.init_random();
+        }
+        
+        lattice.parallel_tempering(
+            temps,
+            config.annealing_steps,
+            config.annealing_steps,
+            config.overrelaxation_rate,
+            config.pt_exchange_frequency,
+            config.probe_rate,
+            trial_dir,
+            config.ranks_to_write,
+            config.gaussian_move,
+            comm,
+            true  // verbose: save spin configurations
+        );
+        
+        // T=0 deterministic quench for coldest replica (rank 0)
+        if (config.T_zero && rank == 0 && config.n_deterministics > 0) {
+            cout << "Rank 0: Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < config.n_deterministics; ++sweep) {
+                lattice.deterministic_sweep(1);
+                lattice.relax_strain(false);  // Relax strain after each deterministic sweep
+                if (sweep % 100 == 0 || sweep == config.n_deterministics - 1) {
+                    cout << "Deterministic sweep " << sweep << "/" << config.n_deterministics 
+                         << ", E/N = " << lattice.spin_energy() / lattice.lattice_size << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << lattice.spin_energy() / lattice.lattice_size << endl;
+            // Save the T=0 quenched configuration
+            lattice.save_spin_config(trial_dir + "/rank_0/spins_T0_quench.txt");
+        }
+        MPI_Barrier(comm);
+        
+        if (rank == 0) {
+            cout << "Trial " << trial << " completed." << endl;
+        }
+    }
+    
+    // Synchronize all ranks
+    MPI_Barrier(comm);
+    
+    if (rank == 0) {
+        cout << "StrainPhononLattice parallel tempering completed (" << config.num_trials << " trials)." << endl;
     }
 }
 
@@ -1545,11 +2078,65 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
     
     // Generate temperature ladder
     vector<double> temps(size);
-    for (int i = 0; i < size; ++i) {
-        double log_T = log10(config.T_start) + 
-                      (log10(config.T_end) - log10(config.T_start)) * i / (size - 1);
-        temps[i] = pow(10, log_T);
+    
+    if (config.pt_optimize_temperatures) {
+        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        // All ranks participate - much faster than single-rank optimization
+        if (rank == 0) {
+            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed) for MixedLattice..." << endl;
+        }
+        
+        OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
+            config.T_end,    // Tmin (coldest)
+            config.T_start,  // Tmax (hottest)
+            config.pt_optimization_warmup,
+            config.pt_optimization_sweeps,
+            config.pt_optimization_iterations,
+            config.gaussian_move,
+            config.overrelaxation_rate,
+            config.pt_target_acceptance,
+            0.05,  // convergence tolerance
+            comm
+        );
+        temps = opt_result.temperatures;
+        
+        // Save optimized temperature grid info to file (rank 0 only)
+        if (rank == 0 && !config.output_dir.empty()) {
+            filesystem::create_directories(config.output_dir);
+            ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
+            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
+            opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
+            opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
+            opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
+            opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
+            opt_file << "#\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            for (int i = 0; i < size; ++i) {
+                opt_file << i << "  " << scientific << setprecision(12) << temps[i];
+                if (i < size - 1) {
+                    opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
+                             << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                }
+                opt_file << "\n";
+            }
+            opt_file.close();
+        }
+    } else {
+        // Use geometric (logarithmic) temperature spacing
+        if (rank == 0) {
+            cout << "Using geometric temperature grid..." << endl;
+            temps = Lattice::generate_geometric_temperature_ladder(config.T_end, config.T_start, size);
+        }
+        // Broadcast temperatures from rank 0 to all ranks
+        MPI_Bcast(temps.data(), size, MPI_DOUBLE, 0, comm);
     }
+    
+    // Re-initialize spins after temperature optimization (or geometric grid setup)
+    // This ensures each rank starts with fresh random spins - the optimization
+    // phase leaves spins in a "mixed" state from many replica exchanges
+    lattice.init_random();
+    MPI_Barrier(comm);
     
     for (int trial = 0; trial < config.num_trials; ++trial) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -1580,6 +2167,23 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             true,  // use_interleaved
             comm
         );
+        
+        // T=0 deterministic quench for coldest replica (rank 0)
+        if (config.T_zero && rank == 0 && config.n_deterministics > 0) {
+            size_t total_sites = lattice.lattice_size_SU2 + lattice.lattice_size_SU3;
+            cout << "Rank 0: Performing " << config.n_deterministics << " deterministic sweeps at T=0..." << endl;
+            for (size_t sweep = 0; sweep < config.n_deterministics; ++sweep) {
+                lattice.deterministic_sweep();
+                if (sweep % 100 == 0 || sweep == config.n_deterministics - 1) {
+                    cout << "Deterministic sweep " << sweep << "/" << config.n_deterministics 
+                         << ", E/N = " << lattice.total_energy() / total_sites << endl;
+                }
+            }
+            cout << "Deterministic sweeps completed. Final energy: " << lattice.total_energy() / total_sites << endl;
+            // Save the T=0 quenched configuration
+            lattice.save_spin_config_to_dir(trial_dir + "/rank_0", "spins_T0_quench");
+        }
+        MPI_Barrier(comm);
         
         if (rank == 0) {
             cout << "Trial " << trial << " completed." << endl;
@@ -2592,6 +3196,39 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 
                 // Run PT with proper sub-communicator rank/size
                 run_parallel_tempering_mixed(mixed_lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
+            } else if (sweep_config.system == SystemType::NCTO_STRAIN) {
+                // StrainPhononLattice magnetoelastic system
+                StrainPhononLattice strain_lattice(sweep_config.lattice_size[0],
+                                                   sweep_config.lattice_size[1],
+                                                   sweep_config.lattice_size[2],
+                                                   sweep_config.spin_length);
+                
+                // Build parameters from config
+                MagnetoelasticParams me_params;
+                ElasticParams el_params;
+                StrainDriveParams dr_params;
+                build_strain_params(sweep_config, me_params, el_params, dr_params);
+                
+                // Set parameters
+                strain_lattice.set_parameters(me_params, el_params, dr_params);
+                strain_lattice.alpha_gilbert = sweep_config.get_param("alpha_gilbert", 0.0);
+                
+                // Set magnetic field
+                Eigen::Vector3d B;
+                B << sweep_config.field_strength * sweep_config.field_direction[0],
+                     sweep_config.field_strength * sweep_config.field_direction[1],
+                     sweep_config.field_strength * sweep_config.field_direction[2];
+                strain_lattice.set_uniform_field(B);
+                
+                // Initialize spins
+                if (!sweep_config.initial_spin_config.empty()) {
+                    strain_lattice.load_spin_config(sweep_config.initial_spin_config);
+                } else {
+                    strain_lattice.init_random();
+                }
+                
+                // Run PT with proper sub-communicator rank/size
+                run_parallel_tempering_strain(strain_lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
             } else {
                 // Standard lattice systems
                 UnitCell* uc_ptr = nullptr;
@@ -2626,6 +3263,7 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                               sweep_config.lattice_size[1], 
                               sweep_config.lattice_size[2],
                               sweep_config.use_twist_boundary);
+                lattice.lattice_type = system_type_to_string(sweep_config.system);
                 
                 // Initialize spins
                 if (sweep_config.use_ferromagnetic_init) {
@@ -2898,6 +3536,7 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                           sweep_config.lattice_size[1], 
                           sweep_config.lattice_size[2],
                           sweep_config.use_twist_boundary);
+            lattice.lattice_type = system_type_to_string(sweep_config.system);
             
             // Initialize spins
             if (sweep_config.use_ferromagnetic_init) {
@@ -3124,11 +3763,17 @@ int main(int argc, char** argv) {
                 case SimulationType::SIMULATED_ANNEALING:
                     run_simulated_annealing_strain(strain_lattice, config, rank, size);
                     break;
+                case SimulationType::PARALLEL_TEMPERING:
+                    run_parallel_tempering_strain(strain_lattice, config, rank, size, MPI_COMM_WORLD);
+                    break;
                 case SimulationType::MOLECULAR_DYNAMICS:
                     run_molecular_dynamics_strain(strain_lattice, config, rank, size);
                     break;
                 case SimulationType::PUMP_PROBE:
                     run_pump_probe_strain(strain_lattice, config, rank, size);
+                    break;
+                case SimulationType::KINETIC_BARRIER_ANALYSIS:
+                    run_kinetic_barrier_analysis_strain(strain_lattice, config, rank, size);
                     break;
                 case SimulationType::PARAMETER_SWEEP:
                     run_parameter_sweep(config, rank, size);
@@ -3136,7 +3781,7 @@ int main(int argc, char** argv) {
                 default:
                     if (rank == 0) {
                         cerr << "Simulation type not supported for StrainPhononLattice. "
-                             << "Supported: SA, MD, pump_probe, parameter_sweep" << endl;
+                             << "Supported: SA, PT, MD, pump_probe, kinetic_barrier, parameter_sweep" << endl;
                     }
                     break;
             }
@@ -3242,6 +3887,7 @@ int main(int argc, char** argv) {
                           config.lattice_size[1],
                           config.lattice_size[2],
                           config.spin_length);
+            lattice.lattice_type = system_type_to_string(config.system);
             
             // Initialize spins
             if (config.use_ferromagnetic_init) {

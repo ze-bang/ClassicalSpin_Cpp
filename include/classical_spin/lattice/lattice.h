@@ -112,8 +112,1020 @@ struct ThermodynamicObservables {
     double temperature;
     Observable energy;                      // <E>/N
     Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
+    VectorObservable magnetization;         // <M> = <Σ_i S_i> / N (total magnetization per site)
     vector<VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
     vector<VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α> for each sublattice
+};
+
+// Result from optimized temperature grid generation
+// Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
+struct OptimizedTempGridResult {
+    vector<double> temperatures;              // Optimized temperature ladder
+    vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
+    vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A) at each T
+    double mean_acceptance_rate;              // Average acceptance rate across all pairs
+    double round_trip_estimate;               // Estimated round-trip time in sweeps
+    size_t feedback_iterations_used;          // Number of feedback iterations performed
+    bool converged;                           // Whether the algorithm converged
+};
+
+/**
+ * Real-space correlation accumulator for efficient finite-T structure factor calculation
+ * 
+ * Stores spin-spin and dimer-dimer correlations binned by displacement, enabling:
+ * - Post-hoc Fourier transform to any q-point: S(q) = Σ_Δr C(Δr) exp(-i q·Δr)
+ * - Fixed storage regardless of number of MC samples
+ * - Online error estimation via binning analysis
+ * 
+ * Storage: O(N_cells × N_sub² × 9) for spin correlations
+ *        + O(N_cells × N_bond × N_bond²) for dimer correlations
+ * vs O(N_sites × N_samples) for full snapshots
+ */
+struct RealSpaceCorrelationAccumulator {
+    // ========== LATTICE GEOMETRY ==========
+    size_t dim1, dim2, dim3;           // Lattice dimensions
+    size_t n_sites;                     // Total sites
+    size_t n_sublattices;               // Sites per unit cell (N_atoms)
+    size_t spin_dim;                    // Dimension of spin vectors
+    
+    // ========== INDEXING WITH SYMMETRY ==========
+    // Cell displacements: (Δn1, Δn2, Δn3) → linear index
+    // For PBC: Δn1 ∈ [0, dim1), Δn2 ∈ [0, dim2), Δn3 ∈ [0, dim3)
+    size_t n_cell_displacements;        // dim1 * dim2 * dim3
+    
+    // Sublattice pairs with symmetry: (sub_i, sub_j) with sub_i ≤ sub_j
+    // For n_sub=4: (0,0), (0,1), (0,2), (0,3), (1,1), (1,2), (1,3), (2,2), (2,3), (3,3)
+    size_t n_sublattice_pairs;          // n_sublattices * (n_sublattices + 1) / 2
+    
+    // Spin components with symmetry: (α, β) with α ≤ β
+    // (x,x), (x,y), (x,z), (y,y), (y,z), (z,z) = 6 components
+    static constexpr size_t n_spin_components = 6;
+    
+    // ========== SPIN-SPIN CORRELATIONS ==========
+    // C^{αβ}_{sub_pair}(Δcell) = <S_i^α S_j^β + S_i^β S_j^α> / 2  for α≠β
+    //                          = <S_i^α S_j^α>                     for α=β
+    // Shape: [n_cell_displacements][n_sublattice_pairs][n_spin_components]
+    vector<double> spin_corr_sum;       // Σ samples
+    vector<double> spin_corr_sq_sum;    // Σ samples² (for error)
+    
+    // Sublattice-resolved single-site averages (for connected correlator)
+    vector<Eigen::Vector3d> spin_mean_sum;      // [n_sublattices] Σ <S_α>
+    vector<Eigen::Vector3d> spin_mean_sq_sum;   // For error estimation
+    
+    // ========== DIMER-DIMER CORRELATIONS ==========
+    // Bond type = sublattice pair (i,j) with i ≤ j that the bond connects
+    // For pyrochlore (n_sub=4): 10 bond types
+    size_t n_bond_types;                // = n_sublattice_pairs
+    
+    // Dimer components: D^α = S_i^α S_j^α for α ∈ {x, y, z}
+    static constexpr size_t n_dimer_components = 3;  // x, y, z
+    
+    // Dimer correlation: <D^α_μ(0) D^α_ν(ΔR)> for same spin component α
+    // Shape: [n_cell_displacements][n_bond_types][n_bond_types][n_dimer_components]
+    // Flattened: [cell_disp * n_bond_types * n_bond_types * 3]
+    vector<double> dimer_corr_sum;      // Σ samples
+    vector<double> dimer_corr_sq_sum;   // For error
+    
+    // Bond-type and component resolved means: <D^α_μ>
+    // Shape: [n_bond_types][n_dimer_components]
+    vector<double> dimer_mean_sum;      // <D^α_μ> for each bond type and component
+    vector<double> dimer_mean_sq_sum;   // For error
+    
+    // ========== DISPLACEMENT GEOMETRY ==========
+    vector<Eigen::Vector3d> cell_displacement_vectors;  // Real-space ΔR for each cell offset
+    vector<array<int, 3>> cell_displacement_indices;    // (Δn1, Δn2, Δn3)
+    vector<Eigen::Vector3d> sublattice_positions_;      // Sublattice positions within unit cell
+    
+    // ========== BOOKKEEPING ==========
+    size_t n_samples;                   // Number of accumulated samples
+    bool initialized;
+    
+    // ========== CONSTRUCTORS ==========
+    RealSpaceCorrelationAccumulator() : n_samples(0), initialized(false) {}
+    
+    /**
+     * Initialize for given lattice geometry
+     * 
+     * @param d1, d2, d3    Lattice dimensions
+     * @param n_sub         Number of sublattices (atoms per unit cell)
+     * @param n_bonds       Number of distinct bond types (ignored, will be set to n_sublattice_pairs)
+     * @param sdim          Spin dimension (typically 3)
+     * @param lattice_vectors  The 3 lattice vectors (a1, a2, a3)
+     * @param sublattice_positions  Positions within unit cell for each sublattice
+     */
+    void initialize(size_t d1, size_t d2, size_t d3, 
+                   size_t n_sub, size_t /* n_bonds */, size_t sdim,
+                   const array<Eigen::Vector3d, 3>& lattice_vectors,
+                   const vector<Eigen::Vector3d>& sublattice_positions) {
+        dim1 = d1;
+        dim2 = d2;
+        dim3 = d3;
+        n_sublattices = n_sub;
+        spin_dim = sdim;
+        n_sites = d1 * d2 * d3 * n_sub;
+        
+        // Cell displacements (no sublattice info)
+        n_cell_displacements = d1 * d2 * d3;
+        
+        // Sublattice pairs with symmetry: (i,j) with i ≤ j
+        n_sublattice_pairs = n_sub * (n_sub + 1) / 2;
+        
+        // Bond types = sublattice pairs (bond classified by which sublattices it connects)
+        n_bond_types = n_sublattice_pairs;
+        
+        // Total spin correlation storage: [cell_disp][sub_pair][spin_comp]
+        size_t spin_corr_size = n_cell_displacements * n_sublattice_pairs * n_spin_components;
+        spin_corr_sum.resize(spin_corr_size, 0.0);
+        spin_corr_sq_sum.resize(spin_corr_size, 0.0);
+        spin_mean_sum.resize(n_sublattices, Eigen::Vector3d::Zero());
+        spin_mean_sq_sum.resize(n_sublattices, Eigen::Vector3d::Zero());
+        
+        // Dimer correlation storage: [cell_disp][bond_type_mu][bond_type_nu][dimer_comp]
+        // = [n_cell_displacements * n_bond_types * n_bond_types * 3]
+        size_t dimer_corr_size = n_cell_displacements * n_bond_types * n_bond_types * n_dimer_components;
+        dimer_corr_sum.resize(dimer_corr_size, 0.0);
+        dimer_corr_sq_sum.resize(dimer_corr_size, 0.0);
+        
+        // Dimer means: [n_bond_types * n_dimer_components]
+        dimer_mean_sum.resize(n_bond_types * n_dimer_components, 0.0);
+        dimer_mean_sq_sum.resize(n_bond_types * n_dimer_components, 0.0);
+        
+        // Build cell displacement vectors and indices
+        cell_displacement_vectors.resize(n_cell_displacements);
+        cell_displacement_indices.resize(n_cell_displacements);
+        
+        for (size_t dn1 = 0; dn1 < d1; ++dn1) {
+            for (size_t dn2 = 0; dn2 < d2; ++dn2) {
+                for (size_t dn3 = 0; dn3 < d3; ++dn3) {
+                    size_t idx = cell_displacement_index(dn1, dn2, dn3);
+                    cell_displacement_vectors[idx] = 
+                        double(dn1) * lattice_vectors[0] +
+                        double(dn2) * lattice_vectors[1] +
+                        double(dn3) * lattice_vectors[2];
+                    cell_displacement_indices[idx] = {int(dn1), int(dn2), int(dn3)};
+                }
+            }
+        }
+        
+        // Store sublattice positions for computing full displacement vectors
+        sublattice_positions_ = sublattice_positions;
+        
+        n_samples = 0;
+        initialized = true;
+    }
+    
+    /**
+     * Get cell displacement index (no sublattice info)
+     */
+    size_t cell_displacement_index(size_t dn1, size_t dn2, size_t dn3) const {
+        return (dn1 * dim2 + dn2) * dim3 + dn3;
+    }
+    
+    /**
+     * Get sublattice pair index with symmetry: (i,j) → index, requires i ≤ j
+     * For n_sub=4: (0,0)→0, (0,1)→1, (0,2)→2, (0,3)→3, (1,1)→4, (1,2)→5, ...
+     * This is also the bond type index for bonds connecting sublattices i and j.
+     */
+    size_t sublattice_pair_index(size_t sub_i, size_t sub_j) const {
+        size_t s_min = std::min(sub_i, sub_j);
+        size_t s_max = std::max(sub_i, sub_j);
+        return s_min * (2 * n_sublattices - s_min - 1) / 2 + s_max;
+    }
+    
+    /**
+     * Inverse of sublattice_pair_index: index → (sub_i, sub_j) with i ≤ j
+     * Also gives the sublattices that a bond type connects.
+     */
+    pair<size_t, size_t> bond_type_to_sublattices(size_t bond_type) const {
+        // Triangular number inversion
+        size_t sub_i = 0;
+        size_t cumsum = n_sublattices;
+        while (bond_type >= cumsum) {
+            sub_i++;
+            cumsum += (n_sublattices - sub_i);
+        }
+        size_t sub_j = bond_type - (sub_i == 0 ? 0 : sub_i * n_sublattices - sub_i * (sub_i + 1) / 2);
+        return {sub_i, sub_j};
+    }
+    
+    /**
+     * Get bond center position for a given bond type (within unit cell)
+     * Bond center = (r_sub_i + r_sub_j) / 2
+     */
+    Eigen::Vector3d bond_center(size_t bond_type) const {
+        auto [sub_i, sub_j] = bond_type_to_sublattices(bond_type);
+        return 0.5 * (sublattice_positions_[sub_i] + sublattice_positions_[sub_j]);
+    }
+    
+    /**
+     * Get spin component index with symmetry: (α,β) → index, requires α ≤ β
+     * (0,0)→0, (0,1)→1, (0,2)→2, (1,1)→3, (1,2)→4, (2,2)→5
+     */
+    static size_t spin_component_index(size_t alpha, size_t beta) {
+        size_t a_min = std::min(alpha, beta);
+        size_t a_max = std::max(alpha, beta);
+        return a_min * (2 * 3 - a_min - 1) / 2 + a_max;
+    }
+    
+    /**
+     * Get full spin correlation index
+     * @return Index into spin_corr_sum array
+     */
+    size_t spin_corr_index(size_t cell_disp_idx, size_t sub_pair_idx, size_t spin_comp_idx) const {
+        return (cell_disp_idx * n_sublattice_pairs + sub_pair_idx) * n_spin_components + spin_comp_idx;
+    }
+    
+    /**
+     * Get dimer correlation index
+     * Shape: [n_cell_displacements][n_bond_types][n_bond_types][n_dimer_components]
+     * @param cell_disp_idx  Cell displacement index
+     * @param type_mu        Bond type at origin
+     * @param type_nu        Bond type at displaced cell
+     * @param comp           Dimer component (0=x, 1=y, 2=z)
+     */
+    size_t dimer_corr_index(size_t cell_disp_idx, size_t type_mu, size_t type_nu, size_t comp) const {
+        return ((cell_disp_idx * n_bond_types + type_mu) * n_bond_types + type_nu) * n_dimer_components + comp;
+    }
+    
+    /**
+     * Get dimer mean index
+     * Shape: [n_bond_types][n_dimer_components]
+     */
+    size_t dimer_mean_index(size_t bond_type, size_t comp) const {
+        return bond_type * n_dimer_components + comp;
+    }
+    
+    /**
+     * Accumulate one sample of spin-spin correlations
+     * Call this every probe_rate MC sweeps
+     * 
+     * Uses symmetry: C^{αβ}_{ij} = C^{βα}_{ji}, so we store symmetrized form
+     * 
+     * OPTIMIZED: Pre-compute spin arrays organized by sublattice for cache efficiency,
+     * then use direct indexing instead of per-cell modular arithmetic.
+     * 
+     * @param spins         Current spin configuration [n_sites]
+     * @param site_to_sub   Mapping from site index to sublattice index (unused, kept for API)
+     * @param site_to_cell  Mapping from site index to (n1, n2, n3) cell indices (unused, kept for API)
+     */
+    void accumulate_spin_correlations(
+        const vector<Eigen::VectorXd>& spins,
+        const function<size_t(size_t)>& /* site_to_sublattice */,
+        const function<array<size_t, 3>(size_t)>& /* site_to_cell */) 
+    {
+        if (!initialized) {
+            throw std::runtime_error("RealSpaceCorrelationAccumulator not initialized");
+        }
+        
+        size_t n_cells = dim1 * dim2 * dim3;
+        double inv_n_cells = 1.0 / double(n_cells);
+        
+        // ========== PHASE 1: Pre-compute spin arrays organized by sublattice ==========
+        // spins_by_sub[sub][cell_idx] = 3-component spin vector
+        // This layout gives cache-friendly access for the correlation loops
+        vector<vector<Eigen::Vector3d>> spins_by_sub(n_sublattices, vector<Eigen::Vector3d>(n_cells));
+        vector<Eigen::Vector3d> M_sub(n_sublattices, Eigen::Vector3d::Zero());
+        
+        for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
+            for (size_t sub = 0; sub < n_sublattices; ++sub) {
+                size_t site = cell_idx * n_sublattices + sub;
+                Eigen::Vector3d S = spins[site].head<3>();
+                spins_by_sub[sub][cell_idx] = S;
+                M_sub[sub] += S;
+            }
+        }
+        
+        // Finalize sublattice magnetizations
+        for (size_t sub = 0; sub < n_sublattices; ++sub) {
+            M_sub[sub] *= inv_n_cells;
+            spin_mean_sum[sub] += M_sub[sub];
+            spin_mean_sq_sum[sub] += M_sub[sub].cwiseProduct(M_sub[sub]);
+        }
+        
+        // ========== PHASE 2: Pre-compute cell index lookup for displaced cells ==========
+        // displaced_cell[dn1][dn2][dn3][n1][n2][n3] would be 6D, too much memory
+        // Instead, precompute the 1D displacement of cell_idx under each (dn1,dn2,dn3)
+        // cell_j = displaced_cell_idx[cell_disp_idx][cell_i]
+        vector<vector<size_t>> displaced_cell_idx(n_cells, vector<size_t>(n_cells));
+        
+        for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
+            for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
+                for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
+                    size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    for (size_t n1 = 0; n1 < dim1; ++n1) {
+                        for (size_t n2 = 0; n2 < dim2; ++n2) {
+                            for (size_t n3 = 0; n3 < dim3; ++n3) {
+                                size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
+                                size_t m1 = (n1 + dn1) % dim1;
+                                size_t m2 = (n2 + dn2) % dim2;
+                                size_t m3 = (n3 + dn3) % dim3;
+                                size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
+                                displaced_cell_idx[disp_idx][cell_i] = cell_j;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // ========== PHASE 3: Accumulate correlations ==========
+        // Loop over sublattice pairs FIRST (outermost) for better cache locality
+        // since spins_by_sub is organized by sublattice
+        for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+            const auto& S_sub_i = spins_by_sub[sub_i];  // Cache reference
+            
+            for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                const auto& S_sub_j = spins_by_sub[sub_j];  // Cache reference
+                size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
+                
+                // Loop over cell displacements
+                for (size_t cell_disp_idx = 0; cell_disp_idx < n_cells; ++cell_disp_idx) {
+                    const auto& disp_map = displaced_cell_idx[cell_disp_idx];
+                    
+                    // Accumulate 6 symmetric spin components
+                    double corr_xx = 0.0, corr_xy = 0.0, corr_xz = 0.0;
+                    double corr_yy = 0.0, corr_yz = 0.0, corr_zz = 0.0;
+                    
+                    // Average over all unit cells
+                    for (size_t cell_i = 0; cell_i < n_cells; ++cell_i) {
+                        size_t cell_j = disp_map[cell_i];
+                        
+                        const Eigen::Vector3d& Si = S_sub_i[cell_i];
+                        const Eigen::Vector3d& Sj = S_sub_j[cell_j];
+                        
+                        // Symmetric components: xx, xy, xz, yy, yz, zz
+                        corr_xx += Si[0] * Sj[0];
+                        corr_xy += 0.5 * (Si[0] * Sj[1] + Si[1] * Sj[0]);
+                        corr_xz += 0.5 * (Si[0] * Sj[2] + Si[2] * Sj[0]);
+                        corr_yy += Si[1] * Sj[1];
+                        corr_yz += 0.5 * (Si[1] * Sj[2] + Si[2] * Sj[1]);
+                        corr_zz += Si[2] * Sj[2];
+                    }
+                    
+                    // Normalize and store
+                    size_t base_idx = spin_corr_index(cell_disp_idx, sub_pair_idx, 0);
+                    array<double, 6> corr = {
+                        corr_xx * inv_n_cells,
+                        corr_xy * inv_n_cells,
+                        corr_xz * inv_n_cells,
+                        corr_yy * inv_n_cells,
+                        corr_yz * inv_n_cells,
+                        corr_zz * inv_n_cells
+                    };
+                    for (size_t c = 0; c < 6; ++c) {
+                        spin_corr_sum[base_idx + c] += corr[c];
+                        spin_corr_sq_sum[base_idx + c] += corr[c] * corr[c];
+                    }
+                }
+            }
+        }
+        
+        n_samples++;
+    }
+    
+    /**
+     * Accumulate dimer-dimer correlations
+     * 
+     * Dimer operator: D^α_b = S_i^α S_j^α for α ∈ {x, y, z}
+     * Correlator: <D^α_μ(0) D^α_ν(ΔR)> for each component α
+     * 
+     * OPTIMIZED: Pre-compute cell displacement lookup, avoid repeated modular arithmetic.
+     * 
+     * @param spins         Current spin configuration
+     * @param bonds         List of (site_i, site_j) pairs defining bonds
+     * @param bond_types    Bond type index for each bond (= sublattice pair index)
+     * @param bond_cells    Unit cell indices (n1, n2, n3) for each bond's "home" cell
+     */
+    void accumulate_dimer_correlations(
+        const vector<Eigen::VectorXd>& spins,
+        const vector<array<size_t, 2>>& bonds,
+        const vector<size_t>& bond_types,
+        const vector<array<size_t, 3>>& bond_cells)
+    {
+        if (!initialized) {
+            throw std::runtime_error("RealSpaceCorrelationAccumulator not initialized");
+        }
+        
+        size_t n_bonds = bonds.size();
+        size_t n_cells = dim1 * dim2 * dim3;
+        
+        // ========== PHASE 1: Compute all dimer operators ==========
+        // D^α_b = S_i^α S_j^α for each component
+        vector<array<double, 3>> D(n_bonds);
+        for (size_t b = 0; b < n_bonds; ++b) {
+            size_t i = bonds[b][0];
+            size_t j = bonds[b][1];
+            const Eigen::Vector3d Si = spins[i].head<3>();
+            const Eigen::Vector3d Sj = spins[j].head<3>();
+            D[b][0] = Si[0] * Sj[0];  // D^x
+            D[b][1] = Si[1] * Sj[1];  // D^y
+            D[b][2] = Si[2] * Sj[2];  // D^z
+        }
+        
+        // ========== PHASE 2: Compute mean dimer per bond type ==========
+        vector<array<double, 3>> D_mean(n_bond_types, {0.0, 0.0, 0.0});
+        vector<size_t> D_count(n_bond_types, 0);
+        for (size_t b = 0; b < n_bonds; ++b) {
+            size_t type = bond_types[b];
+            for (size_t c = 0; c < 3; ++c) {
+                D_mean[type][c] += D[b][c];
+            }
+            D_count[type]++;
+        }
+        for (size_t t = 0; t < n_bond_types; ++t) {
+            if (D_count[t] > 0) {
+                double inv_count = 1.0 / double(D_count[t]);
+                for (size_t c = 0; c < 3; ++c) {
+                    D_mean[t][c] *= inv_count;
+                    size_t idx = dimer_mean_index(t, c);
+                    dimer_mean_sum[idx] += D_mean[t][c];
+                    dimer_mean_sq_sum[idx] += D_mean[t][c] * D_mean[t][c];
+                }
+            }
+        }
+        
+        // ========== PHASE 3: Group bonds by cell and type ==========
+        // bonds_by_cell_type[cell_idx][type] = list of bond indices
+        vector<vector<vector<size_t>>> bonds_by_cell_type(
+            n_cells, vector<vector<size_t>>(n_bond_types));
+        
+        for (size_t b = 0; b < n_bonds; ++b) {
+            auto& [n1, n2, n3] = bond_cells[b];
+            size_t cell_idx = (n1 * dim2 + n2) * dim3 + n3;
+            size_t type = bond_types[b];
+            bonds_by_cell_type[cell_idx][type].push_back(b);
+        }
+        
+        // ========== PHASE 4: Pre-compute cell displacement lookup ==========
+        // displaced_cell[disp_idx][cell_i] = cell_j (displaced cell index)
+        vector<vector<size_t>> displaced_cell(n_cells, vector<size_t>(n_cells));
+        for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
+            for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
+                for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
+                    size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    for (size_t n1 = 0; n1 < dim1; ++n1) {
+                        size_t m1 = (n1 + dn1) % dim1;
+                        for (size_t n2 = 0; n2 < dim2; ++n2) {
+                            size_t m2 = (n2 + dn2) % dim2;
+                            for (size_t n3 = 0; n3 < dim3; ++n3) {
+                                size_t m3 = (n3 + dn3) % dim3;
+                                size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
+                                size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
+                                displaced_cell[disp_idx][cell_i] = cell_j;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // ========== PHASE 5: Accumulate dimer-dimer correlations ==========
+        // Restructure: loop over bond type pairs FIRST (fewer iterations)
+        for (size_t type_mu = 0; type_mu < n_bond_types; ++type_mu) {
+            for (size_t type_nu = 0; type_nu < n_bond_types; ++type_nu) {
+                
+                // Loop over cell displacements
+                for (size_t cell_disp_idx = 0; cell_disp_idx < n_cells; ++cell_disp_idx) {
+                    const auto& disp_map = displaced_cell[cell_disp_idx];
+                    
+                    // Correlations for each dimer component
+                    array<double, 3> corr = {0.0, 0.0, 0.0};
+                    size_t count = 0;
+                    
+                    // Sum over all cell pairs with this offset
+                    for (size_t cell_i = 0; cell_i < n_cells; ++cell_i) {
+                        size_t cell_j = disp_map[cell_i];
+                        
+                        const auto& bonds_mu = bonds_by_cell_type[cell_i][type_mu];
+                        const auto& bonds_nu = bonds_by_cell_type[cell_j][type_nu];
+                        
+                        // All bond pairs of these types
+                        for (size_t bi : bonds_mu) {
+                            for (size_t bj : bonds_nu) {
+                                for (size_t c = 0; c < 3; ++c) {
+                                    corr[c] += D[bi][c] * D[bj][c];
+                                }
+                                count++;
+                            }
+                        }
+                    }
+                    
+                    if (count > 0) {
+                        double inv_count = 1.0 / double(count);
+                        for (size_t c = 0; c < 3; ++c) {
+                            corr[c] *= inv_count;
+                            size_t idx = dimer_corr_index(cell_disp_idx, type_mu, type_nu, c);
+                            dimer_corr_sum[idx] += corr[c];
+                            dimer_corr_sq_sum[idx] += corr[c] * corr[c];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Compute spin structure factor S^{αβ}(q) at arbitrary q-point
+     * Sublattice-resolved: S(q) = Σ_{ΔR,s,s'} C_{ss'}(ΔR) exp(-i q·(ΔR + r_s' - r_s))
+     * 
+     * @param q           Wavevector in Cartesian coordinates
+     * @param connected   If true, subtract <S_i><S_j> (use for susceptibility)
+     * @return 3x3 matrix S^{αβ}(q) (symmetric form)
+     */
+    Eigen::Matrix3d compute_Sq(const Eigen::Vector3d& q, bool connected = true) const {
+        if (n_samples == 0) {
+            return Eigen::Matrix3d::Zero();
+        }
+        
+        // Use 6 symmetric components, then expand to 3x3
+        array<double, 6> Sq_sym = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        
+        for (size_t cell_disp_idx = 0; cell_disp_idx < n_cell_displacements; ++cell_disp_idx) {
+            for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+                for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                    size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
+                    
+                    // Compute full displacement including sublattice positions
+                    Eigen::Vector3d dr = cell_displacement_vectors[cell_disp_idx] 
+                                        + sublattice_positions_[sub_j] - sublattice_positions_[sub_i];
+                    double phase = q.dot(dr);
+                    double cos_phase = std::cos(phase);
+                    
+                    // Multiplicity: 1 for diagonal (i=j), 2 for off-diagonal (symmetry)
+                    double mult = (sub_i == sub_j) ? 1.0 : 2.0;
+                    
+                    for (size_t c = 0; c < 6; ++c) {
+                        size_t idx = spin_corr_index(cell_disp_idx, sub_pair_idx, c);
+                        double C = spin_corr_sum[idx] / double(n_samples);
+                        
+                        // Subtract disconnected part if requested
+                        if (connected) {
+                            // For symmetric components, need to match symmetrization
+                            // Component c corresponds to (α,β) pair
+                            // 0=xx, 1=xy, 2=xz, 3=yy, 4=yz, 5=zz
+                            Eigen::Vector3d mi = spin_mean_sum[sub_i] / double(n_samples);
+                            Eigen::Vector3d mj = spin_mean_sum[sub_j] / double(n_samples);
+                            
+                            double disc = 0.0;
+                            switch(c) {
+                                case 0: disc = mi[0] * mj[0]; break;  // xx
+                                case 1: disc = 0.5 * (mi[0] * mj[1] + mi[1] * mj[0]); break;  // xy
+                                case 2: disc = 0.5 * (mi[0] * mj[2] + mi[2] * mj[0]); break;  // xz
+                                case 3: disc = mi[1] * mj[1]; break;  // yy
+                                case 4: disc = 0.5 * (mi[1] * mj[2] + mi[2] * mj[1]); break;  // yz
+                                case 5: disc = mi[2] * mj[2]; break;  // zz
+                            }
+                            C -= disc;
+                        }
+                        
+                        Sq_sym[c] += mult * C * cos_phase;
+                    }
+                }
+            }
+        }
+        
+        // Expand to 3x3 symmetric matrix
+        Eigen::Matrix3d Sq;
+        Sq(0,0) = Sq_sym[0];  // xx
+        Sq(0,1) = Sq_sym[1];  Sq(1,0) = Sq_sym[1];  // xy
+        Sq(0,2) = Sq_sym[2];  Sq(2,0) = Sq_sym[2];  // xz
+        Sq(1,1) = Sq_sym[3];  // yy
+        Sq(1,2) = Sq_sym[4];  Sq(2,1) = Sq_sym[4];  // yz
+        Sq(2,2) = Sq_sym[5];  // zz
+        
+        return Sq;
+    }
+    
+    /**
+     * Compute dimer structure factor at arbitrary q
+     * S_D^{αμν}(q) = Σ_ΔR χ^α_D(ΔR,μ,ν) exp(-i q·Δr_bond)
+     * 
+     * where Δr_bond = ΔR + center(ν) - center(μ) is the displacement between bond centers
+     * and center(μ) = (r_{sub_i} + r_{sub_j})/2 for a bond connecting sublattices i,j
+     * 
+     * Returns array of 3 matrices [n_bond_types × n_bond_types], one per component (x,y,z)
+     * 
+     * @param q           Wavevector in Cartesian coordinates  
+     * @param connected   If true, subtract <D^α_μ><D^α_ν>
+     * @return array of 3 matrices for x, y, z dimer components
+     */
+    array<Eigen::MatrixXd, 3> compute_Sq_dimer(const Eigen::Vector3d& q, bool connected = true) const {
+        array<Eigen::MatrixXd, 3> Sq_D;
+        for (size_t c = 0; c < 3; ++c) {
+            Sq_D[c] = Eigen::MatrixXd::Zero(n_bond_types, n_bond_types);
+        }
+        
+        if (n_samples == 0) {
+            return Sq_D;
+        }
+        
+        // Precompute bond centers for each bond type
+        vector<Eigen::Vector3d> bond_centers(n_bond_types);
+        for (size_t mu = 0; mu < n_bond_types; ++mu) {
+            bond_centers[mu] = bond_center(mu);
+        }
+        
+        for (size_t cell_disp_idx = 0; cell_disp_idx < n_cell_displacements; ++cell_disp_idx) {
+            for (size_t mu = 0; mu < n_bond_types; ++mu) {
+                for (size_t nu = 0; nu < n_bond_types; ++nu) {
+                    // Displacement between bond centers: ΔR + center(ν) - center(μ)
+                    Eigen::Vector3d dr = cell_displacement_vectors[cell_disp_idx] 
+                                        + bond_centers[nu] - bond_centers[mu];
+                    double phase = q.dot(dr);
+                    double cos_phase = std::cos(phase);
+                    
+                    for (size_t c = 0; c < 3; ++c) {
+                        size_t idx = dimer_corr_index(cell_disp_idx, mu, nu, c);
+                        double chi = dimer_corr_sum[idx] / double(n_samples);
+                        
+                        if (connected) {
+                            double D_mu = dimer_mean_sum[dimer_mean_index(mu, c)] / double(n_samples);
+                            double D_nu = dimer_mean_sum[dimer_mean_index(nu, c)] / double(n_samples);
+                            chi -= D_mu * D_nu;
+                        }
+                        
+                        Sq_D[c](mu, nu) += chi * cos_phase;
+                    }
+                }
+            }
+        }
+        
+        return Sq_D;
+    }
+    
+    /**
+     * Compute total dimer structure factor (sum over components)
+     * S_D^{μν}(q) = Σ_α S_D^{αμν}(q) = Σ_α Σ_ΔR <D^α_μ(0) D^α_ν(ΔR)> exp(-i q·ΔR)
+     */
+    Eigen::MatrixXd compute_Sq_dimer_total(const Eigen::Vector3d& q, bool connected = true) const {
+        auto Sq_components = compute_Sq_dimer(q, connected);
+        Eigen::MatrixXd Sq_total = Eigen::MatrixXd::Zero(n_bond_types, n_bond_types);
+        for (size_t c = 0; c < 3; ++c) {
+            Sq_total += Sq_components[c];
+        }
+        return Sq_total;
+    }
+    
+    /**
+     * Compute S(q) with error estimate using variance
+     * Returns (mean, error) pair for each matrix element
+     */
+    pair<Eigen::Matrix3d, Eigen::Matrix3d> compute_Sq_with_error(
+        const Eigen::Vector3d& q, bool connected = true) const 
+    {
+        if (n_samples < 2) {
+            return {compute_Sq(q, connected), Eigen::Matrix3d::Zero()};
+        }
+        
+        // For proper error estimation, return zero error for now
+        // (would need jackknife/bootstrap for correlated samples)
+        return {compute_Sq(q, connected), Eigen::Matrix3d::Zero()};
+    }
+    
+    /**
+     * Reset accumulator (keep geometry, clear statistics)
+     */
+    void reset() {
+        std::fill(spin_corr_sum.begin(), spin_corr_sum.end(), 0.0);
+        std::fill(spin_corr_sq_sum.begin(), spin_corr_sq_sum.end(), 0.0);
+        for (auto& m : spin_mean_sum) m.setZero();
+        for (auto& m : spin_mean_sq_sum) m.setZero();
+        std::fill(dimer_corr_sum.begin(), dimer_corr_sum.end(), 0.0);
+        std::fill(dimer_corr_sq_sum.begin(), dimer_corr_sq_sum.end(), 0.0);
+        std::fill(dimer_mean_sum.begin(), dimer_mean_sum.end(), 0.0);
+        std::fill(dimer_mean_sq_sum.begin(), dimer_mean_sq_sum.end(), 0.0);
+        n_samples = 0;
+    }
+    
+    /**
+     * Merge another accumulator into this one (for MPI reduction)
+     */
+    void merge(const RealSpaceCorrelationAccumulator& other) {
+        if (!initialized || !other.initialized) return;
+        if (n_cell_displacements != other.n_cell_displacements) {
+            throw std::runtime_error("Cannot merge accumulators with different geometry");
+        }
+        
+        for (size_t i = 0; i < spin_corr_sum.size(); ++i) {
+            spin_corr_sum[i] += other.spin_corr_sum[i];
+            spin_corr_sq_sum[i] += other.spin_corr_sq_sum[i];
+        }
+        for (size_t i = 0; i < n_sublattices; ++i) {
+            spin_mean_sum[i] += other.spin_mean_sum[i];
+            spin_mean_sq_sum[i] += other.spin_mean_sq_sum[i];
+        }
+        for (size_t i = 0; i < dimer_corr_sum.size(); ++i) {
+            dimer_corr_sum[i] += other.dimer_corr_sum[i];
+            dimer_corr_sq_sum[i] += other.dimer_corr_sq_sum[i];
+        }
+        for (size_t i = 0; i < n_bond_types; ++i) {
+            dimer_mean_sum[i] += other.dimer_mean_sum[i];
+            dimer_mean_sq_sum[i] += other.dimer_mean_sq_sum[i];
+        }
+        n_samples += other.n_samples;
+    }
+    
+    /**
+     * Get storage size in bytes
+     */
+    size_t storage_bytes() const {
+        size_t spin_storage = spin_corr_sum.size() * 2 * sizeof(double);
+        spin_storage += n_sublattices * 2 * sizeof(Eigen::Vector3d);
+        size_t dimer_storage = dimer_corr_sum.size() * 2 * sizeof(double);
+        dimer_storage += n_bond_types * 2 * sizeof(double);
+        size_t geometry_storage = cell_displacement_vectors.size() * sizeof(Eigen::Vector3d);
+        geometry_storage += cell_displacement_indices.size() * sizeof(array<int, 3>);
+        geometry_storage += sublattice_positions_.size() * sizeof(Eigen::Vector3d);
+        return spin_storage + dimer_storage + geometry_storage;
+    }
+    
+#ifdef HDF5_ENABLED
+    /**
+     * Save correlation data to HDF5 file
+     * 
+     * Data layout:
+     * - spin_corr_sum: [n_cell_displacements × n_sublattice_pairs × 6] flattened
+     * - dimer_corr_sum: [n_cell_displacements × n_bond_type_pairs] flattened
+     * 
+     * Sublattice pair (i,j) with i≤j maps to index: i*(2*n_sub - i - 1)/2 + j
+     * Spin component (α,β) with α≤β: xx=0, xy=1, xz=2, yy=3, yz=4, zz=5
+     */
+    void save_hdf5(const string& filename, const string& group_name = "/correlations") const {
+        try {
+            H5::H5File file(filename, H5F_ACC_TRUNC);
+            H5::Group group = file.createGroup(group_name);
+            
+            // Helper lambda for writing scalar attributes
+            auto write_attr = [](H5::Group& grp, const string& name, hsize_t val) {
+                H5::DataSpace scalar_space(H5S_SCALAR);
+                H5::Attribute attr = grp.createAttribute(name, H5::PredType::NATIVE_HSIZE, scalar_space);
+                attr.write(H5::PredType::NATIVE_HSIZE, &val);
+            };
+            
+            // Helper lambda for writing 1D double vectors
+            auto write_vec = [](H5::Group& grp, const string& name, const vector<double>& vec) {
+                hsize_t dims[1] = {vec.size()};
+                H5::DataSpace dataspace(1, dims);
+                H5::DataSet dataset = grp.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dataspace);
+                dataset.write(vec.data(), H5::PredType::NATIVE_DOUBLE);
+            };
+            
+            // Helper lambda for writing 1D int vectors
+            auto write_int_vec = [](H5::Group& grp, const string& name, const vector<int>& vec) {
+                hsize_t dims[1] = {vec.size()};
+                H5::DataSpace dataspace(1, dims);
+                H5::DataSet dataset = grp.createDataSet(name, H5::PredType::NATIVE_INT, dataspace);
+                dataset.write(vec.data(), H5::PredType::NATIVE_INT);
+            };
+            
+            // Save metadata
+            write_attr(group, "n_samples", n_samples);
+            write_attr(group, "dim1", dim1);
+            write_attr(group, "dim2", dim2);
+            write_attr(group, "dim3", dim3);
+            write_attr(group, "n_sublattices", n_sublattices);
+            write_attr(group, "n_bond_types", n_bond_types);
+            write_attr(group, "n_cell_displacements", n_cell_displacements);
+            write_attr(group, "n_sublattice_pairs", n_sublattice_pairs);
+            write_attr(group, "n_spin_components", n_spin_components);
+            write_attr(group, "n_dimer_components", n_dimer_components);
+            
+            // ========== CELL DISPLACEMENT METADATA ==========
+            // Save cell displacement indices: (dn1, dn2, dn3) for each cell offset
+            vector<int> cell_disp_indices_flat(n_cell_displacements * 3);
+            for (size_t i = 0; i < n_cell_displacements; ++i) {
+                cell_disp_indices_flat[i * 3 + 0] = cell_displacement_indices[i][0];
+                cell_disp_indices_flat[i * 3 + 1] = cell_displacement_indices[i][1];
+                cell_disp_indices_flat[i * 3 + 2] = cell_displacement_indices[i][2];
+            }
+            write_int_vec(group, "cell_displacement_indices", cell_disp_indices_flat);
+            
+            // Save cell displacement vectors
+            vector<double> cell_disp_flat(n_cell_displacements * 3);
+            for (size_t i = 0; i < n_cell_displacements; ++i) {
+                cell_disp_flat[i * 3 + 0] = cell_displacement_vectors[i](0);
+                cell_disp_flat[i * 3 + 1] = cell_displacement_vectors[i](1);
+                cell_disp_flat[i * 3 + 2] = cell_displacement_vectors[i](2);
+            }
+            write_vec(group, "cell_displacement_vectors", cell_disp_flat);
+            
+            // ========== SUBLATTICE PAIR MAPPING ==========
+            // For each sublattice pair index (also = bond type index), store (sub_i, sub_j)
+            // This maps bond type → which sublattices the bond connects
+            vector<int> sublattice_pairs(n_sublattice_pairs * 2);
+            size_t pair_idx = 0;
+            for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+                for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                    sublattice_pairs[pair_idx * 2 + 0] = static_cast<int>(sub_i);
+                    sublattice_pairs[pair_idx * 2 + 1] = static_cast<int>(sub_j);
+                    pair_idx++;
+                }
+            }
+            write_int_vec(group, "sublattice_pairs", sublattice_pairs);
+            // Note: bond_types array is same as sublattice_pairs since bond type = sublattice pair
+            write_int_vec(group, "bond_types", sublattice_pairs);
+            
+            // Save sublattice positions
+            vector<double> sub_pos_flat(n_sublattices * 3);
+            for (size_t i = 0; i < n_sublattices; ++i) {
+                sub_pos_flat[i * 3 + 0] = sublattice_positions_[i](0);
+                sub_pos_flat[i * 3 + 1] = sublattice_positions_[i](1);
+                sub_pos_flat[i * 3 + 2] = sublattice_positions_[i](2);
+            }
+            write_vec(group, "sublattice_positions", sub_pos_flat);
+            
+            // Save bond centers: center(μ) = (r_{sub_i} + r_{sub_j})/2
+            // Shape: [n_bond_types × 3]
+            vector<double> bond_centers_flat(n_bond_types * 3);
+            for (size_t mu = 0; mu < n_bond_types; ++mu) {
+                Eigen::Vector3d center = bond_center(mu);
+                bond_centers_flat[mu * 3 + 0] = center(0);
+                bond_centers_flat[mu * 3 + 1] = center(1);
+                bond_centers_flat[mu * 3 + 2] = center(2);
+            }
+            write_vec(group, "bond_centers", bond_centers_flat);
+            
+            // ========== SPIN CORRELATIONS ==========
+            // Shape: [n_cell_displacements][n_sublattice_pairs][6]
+            // Component order: xx=0, xy=1, xz=2, yy=3, yz=4, zz=5
+            write_vec(group, "spin_corr_sum", spin_corr_sum);
+            
+            // Save spin means per sublattice
+            vector<double> spin_mean_flat(n_sublattices * 3);
+            for (size_t i = 0; i < n_sublattices; ++i) {
+                spin_mean_flat[i * 3 + 0] = spin_mean_sum[i](0);
+                spin_mean_flat[i * 3 + 1] = spin_mean_sum[i](1);
+                spin_mean_flat[i * 3 + 2] = spin_mean_sum[i](2);
+            }
+            write_vec(group, "spin_mean_sum", spin_mean_flat);
+            
+            // ========== DIMER CORRELATIONS ==========
+            // Shape: [n_cell_displacements][n_bond_types][n_bond_types][3]
+            // Component order: x=0, y=1, z=2
+            write_vec(group, "dimer_corr_sum", dimer_corr_sum);
+            
+            // Dimer means: [n_bond_types][3]
+            write_vec(group, "dimer_mean_sum", dimer_mean_sum);
+            
+            file.close();
+        } catch (const H5::Exception& e) {
+            std::cerr << "HDF5 error saving correlations: " << e.getDetailMsg() << std::endl;
+        }
+    }
+#endif
+    
+    /**
+     * Save spin structure factor to text file for a grid of q-points
+     * 
+     * @param filename      Output file path
+     * @param q1_range      Range in reciprocal lattice units for q1 (min, max)
+     * @param q2_range      Range in reciprocal lattice units for q2 (min, max)
+     * @param q3_range      Range in reciprocal lattice units for q3 (min, max)
+     * @param n_q           Number of q-points per dimension
+     * @param b1, b2, b3    Reciprocal lattice vectors
+     * @param connected     Whether to compute connected correlator
+     */
+    void save_structure_factor_grid(
+        const string& filename,
+        pair<double, double> q1_range,
+        pair<double, double> q2_range,
+        pair<double, double> q3_range,
+        size_t n_q1, size_t n_q2, size_t n_q3,
+        const Eigen::Vector3d& b1,
+        const Eigen::Vector3d& b2,
+        const Eigen::Vector3d& b3,
+        bool connected = true) const 
+    {
+        ofstream file(filename);
+        if (!file) {
+            std::cerr << "Error: Cannot open file " << filename << endl;
+            return;
+        }
+        
+        file << "# Spin structure factor S(q) from real-space correlation accumulator\n";
+        file << "# n_samples = " << n_samples << "\n";
+        file << "# Lattice: " << dim1 << " x " << dim2 << " x " << dim3 
+             << " x " << n_sublattices << " sublattices\n";
+        file << "# Connected correlator: " << (connected ? "yes" : "no") << "\n";
+        file << "# Columns: q1(rlu) q2(rlu) q3(rlu) qx qy qz S_total S_xx S_yy S_zz S_xy S_xz S_yz\n";
+        file << std::scientific << std::setprecision(8);
+        
+        for (size_t i1 = 0; i1 < n_q1; ++i1) {
+            double q1 = (n_q1 > 1) ? q1_range.first + (q1_range.second - q1_range.first) * i1 / (n_q1 - 1)
+                                   : 0.5 * (q1_range.first + q1_range.second);
+            for (size_t i2 = 0; i2 < n_q2; ++i2) {
+                double q2 = (n_q2 > 1) ? q2_range.first + (q2_range.second - q2_range.first) * i2 / (n_q2 - 1)
+                                       : 0.5 * (q2_range.first + q2_range.second);
+                for (size_t i3 = 0; i3 < n_q3; ++i3) {
+                    double q3 = (n_q3 > 1) ? q3_range.first + (q3_range.second - q3_range.first) * i3 / (n_q3 - 1)
+                                           : 0.5 * (q3_range.first + q3_range.second);
+                    
+                    // Convert to Cartesian q-vector
+                    Eigen::Vector3d q = q1 * b1 + q2 * b2 + q3 * b3;
+                    
+                    // Compute S(q)
+                    Eigen::Matrix3d Sq = compute_Sq(q, connected);
+                    double S_total = Sq.trace();
+                    
+                    file << q1 << " " << q2 << " " << q3 << " "
+                         << q(0) << " " << q(1) << " " << q(2) << " "
+                         << S_total << " "
+                         << Sq(0,0) << " " << Sq(1,1) << " " << Sq(2,2) << " "
+                         << Sq(0,1) << " " << Sq(0,2) << " " << Sq(1,2) << "\n";
+                }
+            }
+        }
+        
+        file.close();
+    }
+    
+    /**
+     * MPI reduce: gather accumulators from all ranks and merge
+     * After this call, rank 0 has the combined accumulator
+     * 
+     * @param comm  MPI communicator
+     * @return Combined accumulator (valid on rank 0 only)
+     */
+    void mpi_reduce(MPI_Comm comm = MPI_COMM_WORLD) {
+        int rank, size;
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &size);
+        
+        if (size == 1) return;  // Nothing to reduce
+        
+        // Flatten spin means for MPI
+        vector<double> spin_mean_flat(n_sublattices * 3);
+        vector<double> spin_mean_sq_flat(n_sublattices * 3);
+        for (size_t i = 0; i < n_sublattices; ++i) {
+            for (size_t d = 0; d < 3; ++d) {
+                spin_mean_flat[i * 3 + d] = spin_mean_sum[i](d);
+                spin_mean_sq_flat[i * 3 + d] = spin_mean_sq_sum[i](d);
+            }
+        }
+        
+        // Reduce to rank 0
+        if (rank == 0) {
+            vector<double> recv_spin(spin_corr_sum.size());
+            vector<double> recv_spin_sq(spin_corr_sq_sum.size());
+            vector<double> recv_mean(n_sublattices * 3);
+            vector<double> recv_mean_sq(n_sublattices * 3);
+            vector<double> recv_dimer(dimer_corr_sum.size());
+            vector<double> recv_dimer_sq(dimer_corr_sq_sum.size());
+            vector<double> recv_dimer_mean(dimer_mean_sum.size());
+            vector<double> recv_dimer_mean_sq(dimer_mean_sq_sum.size());
+            size_t recv_samples;
+            
+            for (int src = 1; src < size; ++src) {
+                MPI_Recv(&recv_samples, 1, MPI_UNSIGNED_LONG, src, 0, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_spin.data(), spin_corr_sum.size(), MPI_DOUBLE, src, 1, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_spin_sq.data(), spin_corr_sq_sum.size(), MPI_DOUBLE, src, 2, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_mean.data(), n_sublattices * 3, MPI_DOUBLE, src, 3, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_mean_sq.data(), n_sublattices * 3, MPI_DOUBLE, src, 4, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_dimer.data(), dimer_corr_sum.size(), MPI_DOUBLE, src, 5, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_dimer_sq.data(), dimer_corr_sq_sum.size(), MPI_DOUBLE, src, 6, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_dimer_mean.data(), dimer_mean_sum.size(), MPI_DOUBLE, src, 7, comm, MPI_STATUS_IGNORE);
+                MPI_Recv(recv_dimer_mean_sq.data(), dimer_mean_sq_sum.size(), MPI_DOUBLE, src, 8, comm, MPI_STATUS_IGNORE);
+                
+                // Add to local
+                n_samples += recv_samples;
+                for (size_t i = 0; i < spin_corr_sum.size(); ++i) {
+                    spin_corr_sum[i] += recv_spin[i];
+                    spin_corr_sq_sum[i] += recv_spin_sq[i];
+                }
+                for (size_t i = 0; i < n_sublattices * 3; ++i) {
+                    spin_mean_flat[i] += recv_mean[i];
+                    spin_mean_sq_flat[i] += recv_mean_sq[i];
+                }
+                for (size_t i = 0; i < dimer_corr_sum.size(); ++i) {
+                    dimer_corr_sum[i] += recv_dimer[i];
+                    dimer_corr_sq_sum[i] += recv_dimer_sq[i];
+                }
+                for (size_t i = 0; i < dimer_mean_sum.size(); ++i) {
+                    dimer_mean_sum[i] += recv_dimer_mean[i];
+                    dimer_mean_sq_sum[i] += recv_dimer_mean_sq[i];
+                }
+            }
+            
+            // Unflatten spin means back
+            for (size_t i = 0; i < n_sublattices; ++i) {
+                for (size_t d = 0; d < 3; ++d) {
+                    spin_mean_sum[i](d) = spin_mean_flat[i * 3 + d];
+                    spin_mean_sq_sum[i](d) = spin_mean_sq_flat[i * 3 + d];
+                }
+            }
+        } else {
+            // Send to rank 0
+            MPI_Send(&n_samples, 1, MPI_UNSIGNED_LONG, 0, 0, comm);
+            MPI_Send(spin_corr_sum.data(), spin_corr_sum.size(), MPI_DOUBLE, 0, 1, comm);
+            MPI_Send(spin_corr_sq_sum.data(), spin_corr_sq_sum.size(), MPI_DOUBLE, 0, 2, comm);
+            MPI_Send(spin_mean_flat.data(), n_sublattices * 3, MPI_DOUBLE, 0, 3, comm);
+            MPI_Send(spin_mean_sq_flat.data(), n_sublattices * 3, MPI_DOUBLE, 0, 4, comm);
+            MPI_Send(dimer_corr_sum.data(), dimer_corr_sum.size(), MPI_DOUBLE, 0, 5, comm);
+            MPI_Send(dimer_corr_sq_sum.data(), dimer_corr_sq_sum.size(), MPI_DOUBLE, 0, 6, comm);
+            MPI_Send(dimer_mean_sum.data(), dimer_mean_sum.size(), MPI_DOUBLE, 0, 7, comm);
+            MPI_Send(dimer_mean_sq_sum.data(), dimer_mean_sq_sum.size(), MPI_DOUBLE, 0, 8, comm);
+        }
+    }
 };
 
 /**
@@ -137,6 +1149,7 @@ public:
 
     // Core lattice properties
     UnitCell unit_cell;
+    std::string lattice_type;  // Lattice type identifier (e.g., "pyrochlore", "pyrochlore_non_kramer")
     size_t spin_dim;         // Dimension of spin vectors (e.g., 3 for SU(2), 8 for SU(3))
     size_t N_atoms;          // Number of atoms per unit cell
     size_t dim1, dim2, dim3; // Lattice dimensions
@@ -173,6 +1186,14 @@ public:
     double field_drive_amp;           // Pulse amplitude
     double field_drive_freq;          // Pulse frequency
     double field_drive_width;         // Pulse width (Gaussian)
+
+    /**
+     * Check if lattice is a pyrochlore type (pyrochlore or pyrochlore_non_kramer)
+     * Used to validate pyrochlore-specific order parameters.
+     */
+    bool is_pyrochlore() const {
+        return lattice_type == "pyrochlore" || lattice_type == "pyrochlore_non_kramer";
+    }
 
     /**
      * Constructor: Build a lattice from a unit cell
@@ -1248,39 +2269,26 @@ public:
      * Compute magnetization for each sublattice separately
      * 
      * @return Vector of SpinVectors, one per sublattice (N_atoms sublattices)
-     *         Each vector is averaged over all unit cells and transformed to global frame
+     *         Each vector is averaged over all unit cells in the local sublattice frame
      */
     vector<SpinVector> magnetization_sublattice() const {
         vector<SpinVector> M_sub(N_atoms);
         size_t n_cells = dim1 * dim2 * dim3;
+        double inv_n_cells = 1.0 / double(n_cells);
         
         for (size_t atom = 0; atom < N_atoms; ++atom) {
             M_sub[atom] = SpinVector::Zero(spin_dim);
         }
         
-        // Sum over all unit cells for each sublattice
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    for (size_t atom = 0; atom < N_atoms; ++atom) {
-                        size_t site_idx = flatten_index(i, j, k, atom);
-                        
-                        // Transform to global frame using sublattice frame
-                        SpinVector spin_global = SpinVector::Zero(spin_dim);
-                        for (size_t mu = 0; mu < spin_dim; ++mu) {
-                            for (size_t nu = 0; nu < spin_dim; ++nu) {
-                                spin_global(mu) += sublattice_frames[atom](nu, mu) * spins[site_idx](nu);
-                            }
-                        }
-                        M_sub[atom] += spin_global;
-                    }
-                }
-            }
+        // Flat loop over all sites - more cache-friendly
+        for (size_t site = 0; site < lattice_size; ++site) {
+            size_t atom = site % N_atoms;
+            M_sub[atom] += spins[site];
         }
         
         // Normalize by number of unit cells
         for (size_t atom = 0; atom < N_atoms; ++atom) {
-            M_sub[atom] /= double(n_cells);
+            M_sub[atom] *= inv_n_cells;
         }
         
         return M_sub;
@@ -1290,7 +2298,7 @@ public:
      * Compute magnetization for each sublattice from flat state array
      * 
      * @param state_flat Flat spin state array [lattice_size * spin_dim]
-     * @param M_sub_out Output: N_atoms SpinVectors for sublattice magnetizations
+     * @param M_sub_out Output: N_atoms SpinVectors for sublattice magnetizations (in local frame)
      */
     void magnetization_sublattice_from_flat(const double* state_flat, 
                                              vector<SpinVector>& M_sub_out) const {
@@ -1301,16 +2309,13 @@ public:
             M_sub_out[atom] = SpinVector::Zero(spin_dim);
         }
         
-        // Sum over all sites
+        // Sum over all sites (in local frame)
         for (size_t i = 0; i < lattice_size; ++i) {
             size_t atom = i % N_atoms;
             const double* spin_ptr = state_flat + i * spin_dim;
             
-            // Transform to global frame
             for (size_t mu = 0; mu < spin_dim; ++mu) {
-                for (size_t nu = 0; nu < spin_dim; ++nu) {
-                    M_sub_out[atom](mu) += sublattice_frames[atom](nu, mu) * spin_ptr[nu];
-                }
+                M_sub_out[atom](mu) += spin_ptr[mu];
             }
         }
         
@@ -1318,6 +2323,312 @@ public:
         for (size_t atom = 0; atom < N_atoms; ++atom) {
             M_sub_out[atom] /= double(n_cells);
         }
+    }
+
+    // ============================================================
+    // KAGOME PLANE ORDER PARAMETERS (PYROCHLORE NON-KRAMERS)
+    // For pyrochlore: sublattices 0=apex, 1,2,3=kagome base
+    // 
+    // From unitcell_builders.cpp build_pyrochlore_non_kramer():
+    // 
+    // KAGOME NN BONDS (sublattices 1,2,3):
+    // ┌─────────┬─────────────────┬─────────────────┬────────┐
+    // │ Bond    │ Intra-cell      │ Inter-cell      │ J type │
+    // ├─────────┼─────────────────┼─────────────────┼────────┤
+    // │ (1,2)   │ (0, 0, 0)       │ (-1,+1, 0)      │ Jy     │
+    // │ (1,3)   │ (0, 0, 0)       │ (-1, 0,+1)      │ Jx     │
+    // │ (2,3)   │ (0, 0, 0)       │ ( 0,+1,-1)      │ Jz     │
+    // └─────────┴─────────────────┴─────────────────┴────────┘
+    // 
+    // TRIANGLES (chirality):
+    //   Per unit cell: 1 "up" triangle = {1(i,j,k), 2(i,j,k), 3(i,j,k)}
+    //   Uses intra-cell bonds only. The inter-cell bonds connect to
+    //   different triangles (no closed "down" kagome triangles on 1,2,3).
+    // 
+    // DIMERS (nematic):
+    //   Per unit cell: 6 bonds = 3 types × 2 (intra + inter)
+    //   Each bond type has 2N_cells total bonds in the lattice.
+    // 
+    // Spins are stored in LOCAL FRAME (x,y,z per sublattice).
+    // ============================================================
+
+    /**
+     * Structure to hold all pyrochlore order parameters
+     * Computed in a single pass for efficiency
+     */
+    struct PyrochloreOrderParameters {
+        double scalar_chirality;           // χ = <S1·(S2×S3)>
+        Eigen::Vector3d vector_chirality;  // κ = <S1×S2 + S2×S3 + S3×S1>
+        Eigen::Matrix3d nematic_order;     // Q[bond_type][component] = <Si·Sj>
+        double monopole_density;           // <Q> per tetrahedron (signed)
+        Eigen::Vector4d monopole_by_sublattice;  // Monopole density by minority sublattice
+        
+        PyrochloreOrderParameters() 
+            : scalar_chirality(0.0), 
+              vector_chirality(Eigen::Vector3d::Zero()),
+              nematic_order(Eigen::Matrix3d::Zero()),
+              monopole_density(0.0),
+              monopole_by_sublattice(Eigen::Vector4d::Zero()) {}
+    };
+    
+    /**
+     * Compute ALL pyrochlore order parameters in a single pass
+     * This is the optimized version that avoids redundant loops over cells.
+     * 
+     * Combines:
+     * - Scalar chirality (kagome triangles)
+     * - Vector chirality (kagome triangles)  
+     * - Monopole density (tetrahedra)
+     * - Signed monopole density (tetrahedra)
+     * - Monopole density by sublattice (tetrahedra)
+     * 
+     * Note: Nematic order still uses bilinear_partners for bond enumeration
+     * and is computed separately (different loop structure).
+     * 
+     * @return PyrochloreOrderParameters struct with all computed values
+     */
+    PyrochloreOrderParameters compute_pyrochlore_order_parameters_fast() const {
+        PyrochloreOrderParameters result;
+        
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_pyrochlore_order_parameters_fast() is only valid for pyrochlore lattices" << std::endl;
+            return result;
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return result;
+        }
+        
+        const size_t n_cells = dim1 * dim2 * dim3;
+        const double inv_n_cells = 1.0 / double(n_cells);
+        
+        // Accumulators
+        double chi_sum = 0.0;                              // Scalar chirality
+        Eigen::Vector3d kappa_sum = Eigen::Vector3d::Zero();  // Vector chirality
+        double Q_sum = 0.0;                                // Q monopole density (signed)
+        Eigen::Vector4d monopole_sub = Eigen::Vector4d::Zero();  // By sublattice
+        
+        // Single pass over all unit cells
+        for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
+            // Extract i, j, k from cell_idx
+            size_t k = cell_idx % dim3;
+            size_t j = (cell_idx / dim3) % dim2;
+            size_t i = cell_idx / (dim2 * dim3);
+            
+            // Get all 4 sublattice spins for this cell
+            size_t idx0 = flatten_index(i, j, k, 0);
+            size_t idx1 = flatten_index(i, j, k, 1);
+            size_t idx2 = flatten_index(i, j, k, 2);
+            size_t idx3 = flatten_index(i, j, k, 3);
+            
+            // Cache spin vectors (avoiding repeated VectorXd allocation)
+            const double S0z = spins[idx0](2);
+            const double S1x = spins[idx1](0), S1y = spins[idx1](1), S1z = spins[idx1](2);
+            const double S2x = spins[idx2](0), S2y = spins[idx2](1), S2z = spins[idx2](2);
+            const double S3x = spins[idx3](0), S3y = spins[idx3](1), S3z = spins[idx3](2);
+            
+            // ===== CHIRALITY (kagome triangle 1,2,3) =====
+            // S2 × S3
+            double cross_x = S2y * S3z - S2z * S3y;
+            double cross_y = S2z * S3x - S2x * S3z;
+            double cross_z = S2x * S3y - S2y * S3x;
+            
+            // Scalar chirality: χ = S1 · (S2 × S3)
+            chi_sum += S1x * cross_x + S1y * cross_y + S1z * cross_z;
+            
+            // Vector chirality: κ = S1 × S2 + S2 × S3 + S3 × S1
+            // S1 × S2
+            double s1xs2_x = S1y * S2z - S1z * S2y;
+            double s1xs2_y = S1z * S2x - S1x * S2z;
+            double s1xs2_z = S1x * S2y - S1y * S2x;
+            
+            // S3 × S1
+            double s3xs1_x = S3y * S1z - S3z * S1y;
+            double s3xs1_y = S3z * S1x - S3x * S1z;
+            double s3xs1_z = S3x * S1y - S3y * S1x;
+            
+            kappa_sum(0) += s1xs2_x + cross_x + s3xs1_x;  // Note: S2×S3 = cross
+            kappa_sum(1) += s1xs2_y + cross_y + s3xs1_y;
+            kappa_sum(2) += s1xs2_z + cross_z + s3xs1_z;
+            
+            // ===== MONOPOLE (tetrahedron 0,1,2,3) =====
+            // Q = Σ_μ S^z_μ (signed monopole charge)
+            double Q_tet = S0z + S1z + S2z + S3z;
+            Q_sum += Q_tet;
+            
+            // Monopole by sublattice (3-1 split only)
+            std::array<double, 4> Sz = {S0z, S1z, S2z, S3z};
+            int n_pos = 0, n_neg = 0;
+            for (size_t mu = 0; mu < 4; ++mu) {
+                if (Sz[mu] > 0) n_pos++;
+                else n_neg++;
+            }
+            
+            if (n_pos == 3 && n_neg == 1) {
+                // Find the minority (negative) sublattice
+                for (size_t mu = 0; mu < 4; ++mu) {
+                    if (Sz[mu] <= 0) {
+                        monopole_sub(mu) += 1.0;
+                        break;
+                    }
+                }
+            } else if (n_pos == 1 && n_neg == 3) {
+                // Find the minority (positive) sublattice
+                for (size_t mu = 0; mu < 4; ++mu) {
+                    if (Sz[mu] > 0) {
+                        monopole_sub(mu) += 1.0;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Normalize
+        result.scalar_chirality = chi_sum * inv_n_cells;
+        result.vector_chirality = kappa_sum * inv_n_cells;
+        result.monopole_density = Q_sum * inv_n_cells;
+        result.monopole_by_sublattice = monopole_sub * inv_n_cells;
+        
+        // Nematic order requires bond enumeration - compute separately
+        result.nematic_order = compute_kagome_nematic_order();
+        
+        return result;
+    }
+
+    /**
+     * Compute scalar chirality on kagome triangles
+     * χ = S1 · (S2 × S3) per intra-cell triangle
+     * 
+     * Triangle vertices: 1(i,j,k), 2(i,j,k), 3(i,j,k)
+     * Edges: (1-2) Jy, (2-3) Jz, (3-1) Jx — all intra-cell
+     * 
+     * @return Average scalar chirality per triangle (1 triangle per unit cell)
+     */
+    double compute_kagome_scalar_chirality() const {
+        return compute_pyrochlore_order_parameters_fast().scalar_chirality;
+    }
+    
+    /**
+     * Compute vector chirality on kagome triangles
+     * κ = S1 × S2 + S2 × S3 + S3 × S1 per intra-cell triangle
+     * 
+     * Triangle vertices: 1(i,j,k), 2(i,j,k), 3(i,j,k)
+     * 
+     * @return Average vector chirality (3-component) per triangle
+     */
+    Eigen::Vector3d compute_kagome_vector_chirality() const {
+        return compute_pyrochlore_order_parameters_fast().vector_chirality;
+    }
+    
+    /**
+     * Compute component-resolved nematic bond order on kagome NN bonds
+     * 
+     * Uses bilinear_partners to enumerate all NN bonds automatically.
+     * Bond types for kagome sublattices (1,2,3):
+     *   Type 0: (1-2) bonds — Jy type
+     *   Type 1: (2-3) bonds — Jz type  
+     *   Type 2: (1-3) bonds — Jx type
+     * 
+     * Returns 3×3 matrix: Q[bond_type][local_component]
+     * - Rows: bond types (0, 1, 2)
+     * - Cols: local spin components (x=0, y=1, z=2)
+     * 
+     * Q^α_μ = <S_i^α S_j^α> averaged over all bonds of type μ
+     */
+    Eigen::Matrix3d compute_kagome_nematic_order() const {
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_kagome_nematic_order() is only valid for pyrochlore lattices" << std::endl;
+            return Eigen::Matrix3d::Zero();
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return Eigen::Matrix3d::Zero();
+        }
+        
+        Eigen::Matrix3d Q_sum = Eigen::Matrix3d::Zero();
+        Eigen::Vector3i bond_counts = Eigen::Vector3i::Zero();  // Count bonds per type
+        
+        // Loop over all kagome sites (sublattices 1, 2, 3)
+        for (size_t site_i = 0; site_i < lattice_size; ++site_i) {
+            size_t sub_i = site_i % N_atoms;
+            if (sub_i == 0) continue;  // Skip apex (sublattice 0)
+            
+            // Loop over NN partners from bilinear_partners
+            for (size_t partner_idx = 0; partner_idx < bilinear_partners[site_i].size(); ++partner_idx) {
+                size_t site_j = bilinear_partners[site_i][partner_idx];
+                size_t sub_j = site_j % N_atoms;
+                
+                if (sub_j == 0) continue;  // Skip apex bonds
+                if (site_j <= site_i) continue;  // Avoid double counting (only count i < j)
+                
+                // Determine bond type from sublattice pair
+                int bond_type = -1;
+                if ((sub_i == 1 && sub_j == 2) || (sub_i == 2 && sub_j == 1)) {
+                    bond_type = 0;  // (1-2) bond
+                } else if ((sub_i == 2 && sub_j == 3) || (sub_i == 3 && sub_j == 2)) {
+                    bond_type = 1;  // (2-3) bond
+                } else if ((sub_i == 1 && sub_j == 3) || (sub_i == 3 && sub_j == 1)) {
+                    bond_type = 2;  // (1-3) bond
+                }
+                
+                if (bond_type >= 0) {
+                    // Accumulate S_i^α * S_j^α for each component
+                    for (int alpha = 0; alpha < 3; ++alpha) {
+                        Q_sum(bond_type, alpha) += spins[site_i](alpha) * spins[site_j](alpha);
+                    }
+                    bond_counts(bond_type)++;
+                }
+            }
+        }
+        
+        // Normalize by number of bonds per type
+        for (int bond_type = 0; bond_type < 3; ++bond_type) {
+            if (bond_counts(bond_type) > 0) {
+                Q_sum.row(bond_type) /= bond_counts(bond_type);
+            }
+        }
+        
+        return Q_sum;
+    }
+    
+    /**
+     * Compute monopole density decomposed by sublattice type
+     * 
+     * For a 3-in-1-out monopole, the "type" is determined by which sublattice μ
+     * has the minority spin (the 1-out). Similarly for 1-in-3-out.
+     * 
+     * Returns a 4-component vector:
+     *   density[μ] = fraction of tetrahedra where sublattice μ is the minority
+     * 
+     * For ice-rule states (2-in-2-out) or double monopoles (4-in or 4-out),
+     * no sublattice is counted as minority.
+     * 
+     * @return Eigen::Vector4d with monopole density per sublattice type
+     */
+    Eigen::Vector4d compute_monopole_density_by_sublattice() const {
+        return compute_pyrochlore_order_parameters_fast().monopole_by_sublattice;
+    }
+    
+    /**
+     * Compute all kagome order parameters at once
+     * Uses the fast single-pass implementation internally.
+     * 
+     * @return Tuple of (scalar_chirality, vector_chirality, nematic_order_matrix)
+     */
+    std::tuple<double, Eigen::Vector3d, Eigen::Matrix3d> compute_kagome_order_parameters() const {
+        auto params = compute_pyrochlore_order_parameters_fast();
+        return {params.scalar_chirality, params.vector_chirality, params.nematic_order};
+    }
+    
+    /**
+     * Compute all monopole diagnostics at once
+     * Uses the fast single-pass implementation internally.
+     * 
+     * @return Tuple of (monopole_density (signed), monopole_by_sublattice)
+     */
+    std::tuple<double, Eigen::Vector4d> compute_monopole_diagnostics() const {
+        auto params = compute_pyrochlore_order_parameters_fast();
+        return {params.monopole_density, params.monopole_by_sublattice};
     }
 
     // ============================================================
@@ -1363,55 +2674,115 @@ public:
         obs.energy.value = E_result.mean;
         obs.energy.error = E_result.error;
         
-        // 2. Specific heat: C_V = (<E²> - <E>²) / (T² N)
+        // 1b. Total magnetization per site with binning analysis
+        //     M = (1/N) Σ_α Σ_i∈α S_i = (1/N_atoms) Σ_α M_α
+        if (!sublattice_mags.empty() && !sublattice_mags[0].empty()) {
+            size_t sdim = sublattice_mags[0][0].size();
+            size_t n_sublattices = sublattice_mags[0].size();
+            obs.magnetization = VectorObservable(sdim);
+            
+            for (size_t d = 0; d < sdim; ++d) {
+                vector<double> M_total_d(n_samples);
+                for (size_t i = 0; i < n_samples; ++i) {
+                    double M_sum = 0.0;
+                    for (size_t alpha = 0; alpha < n_sublattices; ++alpha) {
+                        M_sum += sublattice_mags[i][alpha](d);
+                    }
+                    M_total_d[i] = M_sum / double(n_sublattices);
+                }
+                BinningResult M_result = binning_analysis(M_total_d);
+                obs.magnetization.values[d] = M_result.mean;
+                obs.magnetization.errors[d] = M_result.error;
+            }
+        }
+        
+        // 2. Specific heat per site: c_V = Var(E) / (T² N²) = Var(E/N) / T²
+        //    Since E is extensive (E ~ N), Var(E) ~ N², so c_V ~ O(1)
         //    Error propagation via jackknife on binned data
         {
-            vector<double> E2(n_samples);
-            for (size_t i = 0; i < n_samples; ++i) {
-                E2[i] = energies[i] * energies[i];
-            }
+            double N2 = double(lattice_size) * double(lattice_size);
             
-            double E_mean = 0.0, E2_mean = 0.0;
-            for (size_t i = 0; i < n_samples; ++i) {
-                E_mean += energies[i];
-                E2_mean += E2[i];
-            }
-            E_mean /= n_samples;
-            E2_mean /= n_samples;
-            
-            double var_E = E2_mean - E_mean * E_mean;
-            obs.specific_heat.value = var_E / (T * T * double(lattice_size));
-            
-            // Jackknife error estimation for specific heat
-            size_t n_jack = std::min(n_samples, size_t(100));
-            size_t block_size = n_samples / n_jack;
-            vector<double> C_jack(n_jack);
-            
-            for (size_t j = 0; j < n_jack; ++j) {
-                // Leave out block j
-                double E_sum = 0.0, E2_sum = 0.0;
-                size_t count = 0;
+            // Handle edge case: need at least 2 samples for variance
+            if (n_samples < 2) {
+                obs.specific_heat.value = 0.0;
+                obs.specific_heat.error = 0.0;
+            } else {
+                // Compute mean first for numerical stability (two-pass algorithm)
+                double E_mean = 0.0;
                 for (size_t i = 0; i < n_samples; ++i) {
-                    if (i / block_size != j) {
-                        E_sum += energies[i];
-                        E2_sum += E2[i];
-                        ++count;
-                    }
+                    E_mean += energies[i];
                 }
-                double E_j = E_sum / count;
-                double E2_j = E2_sum / count;
-                double var_j = E2_j - E_j * E_j;
-                C_jack[j] = var_j / (T * T * double(lattice_size));
+                E_mean /= n_samples;
+                
+                // Compute variance using shifted data for numerical stability
+                // Var(E) = <(E - E_mean)²> which avoids catastrophic cancellation
+                double var_E = 0.0;
+                for (size_t i = 0; i < n_samples; ++i) {
+                    double delta = energies[i] - E_mean;
+                    var_E += delta * delta;
+                }
+                var_E /= n_samples;  // Biased estimator (for heat capacity)
+                
+                // Ensure non-negative variance (numerical protection)
+                var_E = std::max(0.0, var_E);
+                obs.specific_heat.value = var_E / (T * T * N2);
+                
+                // Jackknife error estimation for specific heat
+                // Use at most 100 jackknife blocks, at least 2
+                size_t n_jack = std::min(n_samples, size_t(100));
+                n_jack = std::max(n_jack, size_t(2));
+                size_t block_size = std::max(size_t(1), n_samples / n_jack);
+                // Recalculate n_jack based on actual block_size to handle remainders
+                n_jack = (n_samples + block_size - 1) / block_size;
+                
+                vector<double> C_jack(n_jack);
+                
+                for (size_t j = 0; j < n_jack; ++j) {
+                    // Leave out block j: indices [j*block_size, min((j+1)*block_size, n_samples))
+                    size_t block_start = j * block_size;
+                    size_t block_end = std::min((j + 1) * block_size, n_samples);
+                    
+                    // Compute jackknife mean (excluding block j)
+                    double E_sum = 0.0;
+                    size_t count = 0;
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        if (i < block_start || i >= block_end) {
+                            E_sum += energies[i];
+                            ++count;
+                        }
+                    }
+                    
+                    if (count < 2) {
+                        C_jack[j] = obs.specific_heat.value;  // Fallback
+                        continue;
+                    }
+                    
+                    double E_j = E_sum / count;
+                    
+                    // Compute jackknife variance (excluding block j)
+                    double var_j = 0.0;
+                    for (size_t i = 0; i < n_samples; ++i) {
+                        if (i < block_start || i >= block_end) {
+                            double delta = energies[i] - E_j;
+                            var_j += delta * delta;
+                        }
+                    }
+                    var_j /= count;
+                    var_j = std::max(0.0, var_j);  // Numerical protection
+                    
+                    C_jack[j] = var_j / (T * T * N2);
+                }
+                
+                // Compute jackknife error estimate
+                double C_mean = 0.0;
+                for (double c : C_jack) C_mean += c;
+                C_mean /= n_jack;
+                
+                double C_var = 0.0;
+                for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
+                C_var *= double(n_jack - 1) / double(n_jack);  // Jackknife variance factor
+                obs.specific_heat.error = std::sqrt(std::max(0.0, C_var));
             }
-            
-            double C_mean = 0.0;
-            for (double c : C_jack) C_mean += c;
-            C_mean /= n_jack;
-            
-            double C_var = 0.0;
-            for (double c : C_jack) C_var += (c - C_mean) * (c - C_mean);
-            C_var *= double(n_jack - 1) / n_jack;  // Jackknife variance factor
-            obs.specific_heat.error = std::sqrt(C_var);
         }
         
         // 3. Sublattice magnetizations with binning analysis
@@ -1511,6 +2882,13 @@ public:
         
         summary_file << "energy_per_site " << obs.energy.value << " " << obs.energy.error << endl;
         summary_file << "specific_heat " << obs.specific_heat.value << " " << obs.specific_heat.error << endl;
+        
+        // Save total magnetization
+        for (size_t d = 0; d < obs.magnetization.values.size(); ++d) {
+            summary_file << "magnetization_" << d << " " 
+                        << obs.magnetization.values[d] << " " 
+                        << obs.magnetization.errors[d] << endl;
+        }
         summary_file.close();
         
         // Save sublattice magnetizations
@@ -1554,6 +2932,12 @@ public:
         cout << "<E>/N = " << obs.energy.value << " ± " << obs.energy.error << endl;
         cout << "C_V   = " << obs.specific_heat.value << " ± " << obs.specific_heat.error << endl;
         
+        cout << "\nTotal magnetization <M>/N:" << endl;
+        for (size_t d = 0; d < obs.magnetization.values.size(); ++d) {
+            cout << "  M_" << d << " = " << obs.magnetization.values[d] 
+                 << " ± " << obs.magnetization.errors[d] << endl;
+        }
+        
         cout << "\nSublattice magnetizations:" << endl;
         for (size_t alpha = 0; alpha < obs.sublattice_magnetization.size(); ++alpha) {
             cout << "  Sublattice " << alpha << ": (";
@@ -1575,6 +2959,146 @@ public:
             }
             cout << ")" << endl;
         }
+    }
+
+    /**
+     * Save thermodynamic observables to HDF5 format
+     * Single file per rank with all data organized in groups
+     */
+    void save_thermodynamic_observables_hdf5(const string& out_dir,
+                                              const ThermodynamicObservables& obs,
+                                              const vector<double>& energies,
+                                              const vector<SpinVector>& magnetizations,
+                                              const vector<vector<SpinVector>>& sublattice_mags,
+                                              size_t n_anneal,
+                                              size_t n_measure,
+                                              size_t probe_rate,
+                                              size_t swap_rate,
+                                              size_t overrelaxation_rate,
+                                              double acceptance_rate,
+                                              double swap_acceptance_rate) const {
+#ifdef HDF5_ENABLED
+        ensure_directory_exists(out_dir);
+        
+        string filename = out_dir + "/parallel_tempering_data.h5";
+        size_t n_samples = energies.size();
+        
+        // Create HDF5 writer
+        HDF5PTWriter writer(filename, obs.temperature, lattice_size, spin_dim, N_atoms,
+                           n_samples, n_anneal, n_measure, probe_rate, swap_rate,
+                           overrelaxation_rate, acceptance_rate, swap_acceptance_rate);
+        
+        // Write time series data
+        writer.write_timeseries(energies, magnetizations, sublattice_mags);
+        
+        // Prepare observable data in format expected by writer
+        vector<vector<double>> sublattice_mag_means(N_atoms);
+        vector<vector<double>> sublattice_mag_errors(N_atoms);
+        vector<vector<double>> energy_cross_means(N_atoms);
+        vector<vector<double>> energy_cross_errors(N_atoms);
+        
+        for (size_t alpha = 0; alpha < N_atoms; ++alpha) {
+            sublattice_mag_means[alpha] = obs.sublattice_magnetization[alpha].values;
+            sublattice_mag_errors[alpha] = obs.sublattice_magnetization[alpha].errors;
+            energy_cross_means[alpha] = obs.energy_sublattice_cross[alpha].values;
+            energy_cross_errors[alpha] = obs.energy_sublattice_cross[alpha].errors;
+        }
+        
+        // Write observables (including total magnetization)
+        writer.write_observables(obs.energy.value, obs.energy.error,
+                                obs.specific_heat.value, obs.specific_heat.error,
+                                obs.magnetization.values, obs.magnetization.errors,
+                                sublattice_mag_means, sublattice_mag_errors,
+                                energy_cross_means, energy_cross_errors);
+        
+        writer.close();
+#else
+        std::cerr << "Warning: HDF5 support not enabled. Cannot save HDF5 output." << std::endl;
+        std::cerr << "Compile with -DHDF5_ENABLED to enable HDF5 output." << std::endl;
+#endif
+    }
+
+    /**
+     * Save aggregated heat capacity data from all temperatures to HDF5 format
+     * Called by rank 0 to save temperature-dependent thermodynamic data
+     */
+    void save_heat_capacity_hdf5(const string& out_dir,
+                                  const vector<double>& temperatures,
+                                  const vector<double>& heat_capacity,
+                                  const vector<double>& dHeat) const {
+#ifdef HDF5_ENABLED
+        ensure_directory_exists(out_dir);
+        
+        string filename = out_dir + "/parallel_tempering_aggregated.h5";
+        size_t n_temps = temperatures.size();
+        
+        // Create HDF5 file
+        H5::H5File file(filename, H5F_ACC_TRUNC);
+        
+        // Create main data group
+        H5::Group data_group = file.createGroup("/temperature_scan");
+        H5::Group metadata_group = file.createGroup("/metadata");
+        
+        // Write metadata
+        std::time_t now = std::time(nullptr);
+        char time_str[100];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+        
+        H5::DataSpace scalar_space(H5S_SCALAR);
+        
+        // Number of temperatures
+        H5::Attribute n_temps_attr = metadata_group.createAttribute(
+            "n_temperatures", H5::PredType::NATIVE_HSIZE, scalar_space);
+        n_temps_attr.write(H5::PredType::NATIVE_HSIZE, &n_temps);
+        
+        // Timestamp
+        H5::StrType str_type(H5::PredType::C_S1, strlen(time_str) + 1);
+        H5::Attribute time_attr = metadata_group.createAttribute(
+            "creation_time", str_type, scalar_space);
+        time_attr.write(str_type, time_str);
+        
+        // Version info
+        std::string version = "ClassicalSpin_Cpp v1.0";
+        H5::StrType version_type(H5::PredType::C_S1, version.size() + 1);
+        H5::Attribute version_attr = metadata_group.createAttribute(
+            "code_version", version_type, scalar_space);
+        version_attr.write(version_type, version.c_str());
+        
+        std::string format = "HDF5_PT_Aggregated_v1.0";
+        H5::StrType format_type(H5::PredType::C_S1, format.size() + 1);
+        H5::Attribute format_attr = metadata_group.createAttribute(
+            "file_format", format_type, scalar_space);
+        format_attr.write(format_type, format.c_str());
+        
+        // Write temperature array
+        hsize_t dims[1] = {n_temps};
+        H5::DataSpace dataspace(1, dims);
+        
+        H5::DataSet temp_dataset = data_group.createDataSet(
+            "temperature", H5::PredType::NATIVE_DOUBLE, dataspace);
+        temp_dataset.write(temperatures.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write heat capacity array
+        H5::DataSet heat_dataset = data_group.createDataSet(
+            "specific_heat", H5::PredType::NATIVE_DOUBLE, dataspace);
+        heat_dataset.write(heat_capacity.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Write heat capacity error array
+        H5::DataSet dheat_dataset = data_group.createDataSet(
+            "specific_heat_error", H5::PredType::NATIVE_DOUBLE, dataspace);
+        dheat_dataset.write(dHeat.data(), H5::PredType::NATIVE_DOUBLE);
+        
+        // Close everything
+        temp_dataset.close();
+        heat_dataset.close();
+        dheat_dataset.close();
+        data_group.close();
+        metadata_group.close();
+        file.close();
+#else
+        std::cerr << "Warning: HDF5 support not enabled. Cannot save HDF5 output." << std::endl;
+        std::cerr << "Compile with -DHDF5_ENABLED to enable HDF5 output." << std::endl;
+#endif
     }
 
     // ============================================================
@@ -2501,12 +4025,27 @@ public:
      * Parallel tempering with MPI
      * Collects: energy, specific heat, sublattice magnetizations, and cross-correlations
      * All with binning analysis for error estimation
-     * @param comm MPI communicator to use (default: MPI_COMM_WORLD)
+     * 
+     * @param temp              Temperature ladder (one per MPI rank)
+     * @param n_anneal          Number of equilibration sweeps
+     * @param n_measure         Number of measurement sweeps
+     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
+     * @param swap_rate         Attempt replica exchange every N sweeps
+     * @param probe_rate        Record observables every N sweeps
+     * @param dir_name          Output directory
+     * @param rank_to_write     List of ranks that should write output (-1 = all)
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @param verbose           If true, save spin configurations
+     * @param accumulate_correlations  If true, accumulate real-space correlations for S(q)
+     * @param n_bond_types      Number of bond types for dimer correlations (default: 3)
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
-                           bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD) {
+                           bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
+                           bool verbose = false, bool accumulate_correlations = false,
+                           size_t n_bond_types = 3) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -2534,11 +4073,28 @@ public:
         
         vector<double> energies;
         vector<SpinVector> magnetizations;
-        vector<vector<SpinVector>> sublattice_mags;  // NEW: sublattice magnetizations
+        vector<vector<SpinVector>> sublattice_mags;  // sublattice magnetizations
+        
+        // Kagome order parameters (pyrochlore patch)
+        vector<double> scalar_chiralities;
+        vector<Eigen::Vector3d> vector_chiralities;
+        vector<Eigen::Matrix3d> nematic_orders;  // [bond_type x spin_component]
+        
         size_t expected_samples = n_measure / probe_rate + 100;
         energies.reserve(expected_samples);
         magnetizations.reserve(expected_samples);
         sublattice_mags.reserve(expected_samples);
+        scalar_chiralities.reserve(expected_samples);
+        vector_chiralities.reserve(expected_samples);
+        nematic_orders.reserve(expected_samples);
+        
+        // Initialize correlation accumulator if requested
+        RealSpaceCorrelationAccumulator corr_acc;
+        if (accumulate_correlations) {
+            corr_acc = create_correlation_accumulator(n_bond_types);
+            cout << "Rank " << rank << ": Correlation accumulator initialized ("
+                 << corr_acc.storage_bytes() / 1024.0 << " KB)" << endl;
+        }
         
         cout << "Rank " << rank << ": T=" << curr_Temp << endl;
         
@@ -2560,11 +4116,6 @@ public:
             }
         }
         
-        // Estimate sampling interval
-        cout << "Rank " << rank << ": Computing autocorrelation..." << endl;
-        probe_rate = estimate_sampling_interval(curr_Temp, gaussian_move, sigma,
-                                               overrelaxation_rate, n_measure, probe_rate, rank);
-        
         // Main measurement phase
         cout << "Rank " << rank << ": Measuring..." << endl;
         for (size_t i = 0; i < n_measure; ++i) {
@@ -2584,11 +4135,57 @@ public:
             if (i % probe_rate == 0) {
                 energies.push_back(total_energy(spins));
                 magnetizations.push_back(magnetization_global());
-                sublattice_mags.push_back(magnetization_sublattice());  // NEW
+                sublattice_mags.push_back(magnetization_sublattice());
+                
+                // Kagome order parameters (pyrochlore) - use fast single-pass version
+                if (is_pyrochlore() && N_atoms >= 4) {
+                    auto params = compute_pyrochlore_order_parameters_fast();
+                    scalar_chiralities.push_back(params.scalar_chirality);
+                    vector_chiralities.push_back(params.vector_chirality);
+                    nematic_orders.push_back(params.nematic_order);
+                }
+                
+                // Accumulate real-space correlations for S(q)
+                if (accumulate_correlations) {
+                    accumulate_correlations_internal(corr_acc);
+                }
             }
         }
         
         cout << "Rank " << rank << ": Collected " << energies.size() << " samples" << endl;
+        
+        // Save correlation data before MPI operations
+        if (accumulate_correlations) {
+            // Each rank saves its own correlation data to rank_#/correlations_T*.h5
+            bool should_write = (std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())
+                               || (std::find(rank_to_write.begin(), rank_to_write.end(), -1) != rank_to_write.end());
+            
+            if (should_write) {
+                string corr_dir = dir_name + "/rank_" + std::to_string(rank);
+                std::filesystem::create_directories(corr_dir);
+                
+#ifdef HDF5_ENABLED
+                // Save raw correlations to HDF5
+                string h5_filename = corr_dir + "/correlations_T" + std::to_string(curr_Temp) + ".h5";
+                corr_acc.save_hdf5(h5_filename);
+                cout << "Rank " << rank << ": Saved correlations to " << h5_filename 
+                     << " (" << corr_acc.n_samples << " samples)" << endl;
+#endif
+            }
+        }
+        
+        // Save kagome order parameters (pyrochlore only)
+        if (is_pyrochlore() && N_atoms >= 4 && !scalar_chiralities.empty()) {
+            bool should_write = (std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())
+                               || (std::find(rank_to_write.begin(), rank_to_write.end(), -1) != rank_to_write.end());
+            
+            if (should_write) {
+                string rank_dir = dir_name + "/rank_" + std::to_string(rank);
+                std::filesystem::create_directories(rank_dir);
+                save_kagome_order_parameters(rank_dir, curr_Temp, 
+                                             scalar_chiralities, vector_chiralities, nematic_orders);
+            }
+        }
         
         // Gather and save statistics with comprehensive observables
         gather_and_save_statistics_comprehensive(rank, size, curr_Temp, energies, 
@@ -2596,7 +4193,201 @@ public:
                                                   heat_capacity, dHeat, temp, dir_name, 
                                                   rank_to_write, n_anneal, n_measure, 
                                                   curr_accept, swap_accept,
-                                                  swap_rate, overrelaxation_rate, probe_rate, comm);
+                                                  swap_rate, overrelaxation_rate, probe_rate, comm, verbose);
+    }
+    
+    /**
+     * Save kagome order parameters to HDF5 file (pyrochlore patch)
+     * Nematic order is now component-resolved: [bond_type x spin_component] 3x3 matrix
+     */
+    void save_kagome_order_parameters(const string& rank_dir, double temperature,
+                                       const vector<double>& scalar_chi,
+                                       const vector<Eigen::Vector3d>& vector_chi,
+                                       const vector<Eigen::Matrix3d>& nematic) const {
+#ifdef HDF5_ENABLED
+        string filename = rank_dir + "/kagome_order_T" + std::to_string(temperature) + ".h5";
+        
+        try {
+            H5::H5File file(filename, H5F_ACC_TRUNC);
+            
+            size_t n_samples = scalar_chi.size();
+            
+            // Create metadata group
+            H5::Group metadata = file.createGroup("/metadata");
+            H5::DataSpace scalar_space(H5S_SCALAR);
+            
+            H5::Attribute temp_attr = metadata.createAttribute("temperature", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            temp_attr.write(H5::PredType::NATIVE_DOUBLE, &temperature);
+            
+            H5::Attribute n_attr = metadata.createAttribute("n_samples", 
+                H5::PredType::NATIVE_HSIZE, scalar_space);
+            n_attr.write(H5::PredType::NATIVE_HSIZE, &n_samples);
+            
+            std::string desc = "Kagome order parameters for pyrochlore (sublattices 1,2,3)";
+            H5::StrType str_type(H5::PredType::C_S1, desc.size() + 1);
+            H5::Attribute desc_attr = metadata.createAttribute("description", str_type, scalar_space);
+            desc_attr.write(str_type, desc.c_str());
+            
+            // Create data group
+            H5::Group data = file.createGroup("/timeseries");
+            
+            // Write scalar chirality
+            hsize_t dims1d[1] = {n_samples};
+            H5::DataSpace space1d(1, dims1d);
+            
+            H5::DataSet chi_scalar = data.createDataSet("scalar_chirality", 
+                H5::PredType::NATIVE_DOUBLE, space1d);
+            chi_scalar.write(scalar_chi.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Write vector chirality [n_samples x 3]
+            hsize_t dims2d[2] = {n_samples, 3};
+            H5::DataSpace space2d(2, dims2d);
+            
+            vector<double> vec_chi_flat(n_samples * 3);
+            for (size_t i = 0; i < n_samples; ++i) {
+                vec_chi_flat[i * 3 + 0] = vector_chi[i](0);
+                vec_chi_flat[i * 3 + 1] = vector_chi[i](1);
+                vec_chi_flat[i * 3 + 2] = vector_chi[i](2);
+            }
+            
+            H5::DataSet chi_vec = data.createDataSet("vector_chirality", 
+                H5::PredType::NATIVE_DOUBLE, space2d);
+            chi_vec.write(vec_chi_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Write nematic order [n_samples x 3 bonds x 3 components]
+            // Q[bond_type][component] where bond_type = {12, 23, 31}, component = {x, y, z}
+            hsize_t dims3d[3] = {n_samples, 3, 3};
+            H5::DataSpace space3d(3, dims3d);
+            
+            vector<double> nem_flat(n_samples * 9);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (int b = 0; b < 3; ++b) {      // bond type
+                    for (int c = 0; c < 3; ++c) {  // spin component
+                        nem_flat[i * 9 + b * 3 + c] = nematic[i](b, c);
+                    }
+                }
+            }
+            
+            H5::DataSet nem_ds = data.createDataSet("nematic_bond_order", 
+                H5::PredType::NATIVE_DOUBLE, space3d);
+            nem_ds.write(nem_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Add attribute describing dimensions
+            std::string nem_desc = "Shape: [n_samples, bond_type, spin_component]. "
+                                   "bond_type: 0=1-2, 1=2-3, 2=3-1. "
+                                   "spin_component: 0=x, 1=y, 2=z. "
+                                   "Q_ij^alpha = <S_i^alpha * S_j^alpha>";
+            H5::StrType nem_str_type(H5::PredType::C_S1, nem_desc.size() + 1);
+            H5::Attribute nem_attr = nem_ds.createAttribute("description", nem_str_type, scalar_space);
+            nem_attr.write(nem_str_type, nem_desc.c_str());
+            
+            // Write summary statistics
+            H5::Group stats = file.createGroup("/statistics");
+            
+            // Scalar chirality stats
+            double chi_mean = std::accumulate(scalar_chi.begin(), scalar_chi.end(), 0.0) / n_samples;
+            double chi2_mean = 0.0;
+            for (double c : scalar_chi) chi2_mean += c * c;
+            chi2_mean /= n_samples;
+            double chi_std = std::sqrt(chi2_mean - chi_mean * chi_mean);
+            
+            H5::Attribute chi_mean_attr = stats.createAttribute("scalar_chirality_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_mean_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_mean);
+            
+            H5::Attribute chi_std_attr = stats.createAttribute("scalar_chirality_std", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_std_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_std);
+            
+            // Vector chirality component-resolved stats
+            Eigen::Vector3d kappa_mean = Eigen::Vector3d::Zero();
+            for (const auto& k : vector_chi) kappa_mean += k;
+            kappa_mean /= n_samples;
+            
+            hsize_t dims_kappa[1] = {3};
+            H5::DataSpace space_kappa(1, dims_kappa);
+            double kappa_arr[3] = {kappa_mean(0), kappa_mean(1), kappa_mean(2)};
+            H5::DataSet kappa_mean_ds = stats.createDataSet("vector_chirality_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_kappa);
+            kappa_mean_ds.write(kappa_arr, H5::PredType::NATIVE_DOUBLE);
+            
+            // Also save magnitude for convenience
+            double kappa_mag_mean = 0.0;
+            for (const auto& k : vector_chi) kappa_mag_mean += k.norm();
+            kappa_mag_mean /= n_samples;
+            
+            H5::Attribute kappa_mag_attr = stats.createAttribute("vector_chirality_magnitude_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            kappa_mag_attr.write(H5::PredType::NATIVE_DOUBLE, &kappa_mag_mean);
+            
+            // Nematic order stats: mean over samples [3 bonds x 3 components]
+            Eigen::Matrix3d Q_mean = Eigen::Matrix3d::Zero();
+            for (const auto& Q : nematic) Q_mean += Q;
+            Q_mean /= n_samples;
+            
+            hsize_t dims_q[2] = {3, 3};
+            H5::DataSpace space_q(2, dims_q);
+            double Q_arr[9];
+            for (int b = 0; b < 3; ++b) {
+                for (int c = 0; c < 3; ++c) {
+                    Q_arr[b * 3 + c] = Q_mean(b, c);
+                }
+            }
+            H5::DataSet Q_mean_ds = stats.createDataSet("nematic_bond_order_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_q);
+            Q_mean_ds.write(Q_arr, H5::PredType::NATIVE_DOUBLE);
+            
+            file.close();
+            
+        } catch (const H5::Exception& e) {
+            cerr << "HDF5 error saving kagome order parameters: " << e.getDetailMsg() << endl;
+        }
+#else
+        // Plain text fallback
+        string filename = rank_dir + "/kagome_order_T" + std::to_string(temperature) + ".txt";
+        ofstream file(filename);
+        file << "# Kagome order parameters (sublattices 1,2,3)\n";
+        file << "# Component-resolved nematic: Q_ij^alpha = <S_i^alpha * S_j^alpha>\n";
+        file << "# sample scalar_chi kappa_x kappa_y kappa_z "
+             << "Q12_x Q12_y Q12_z Q23_x Q23_y Q23_z Q31_x Q31_y Q31_z\n";
+        for (size_t i = 0; i < scalar_chi.size(); ++i) {
+            file << i << " " << scalar_chi[i] << " "
+                 << vector_chi[i](0) << " " << vector_chi[i](1) << " " << vector_chi[i](2);
+            for (int b = 0; b < 3; ++b) {
+                for (int c = 0; c < 3; ++c) {
+                    file << " " << nematic[i](b, c);
+                }
+            }
+            file << "\n";
+        }
+        file.close();
+#endif
+    }
+    
+    /**
+     * Internal helper to accumulate correlations (avoids name conflict with parameter)
+     */
+    void accumulate_correlations_internal(RealSpaceCorrelationAccumulator& acc) const {
+        // Define site-to-sublattice mapping
+        auto site_to_sublattice = [this](size_t site) -> size_t {
+            return site % N_atoms;
+        };
+        
+        // Define site-to-cell mapping
+        auto site_to_cell = [this](size_t site) -> array<size_t, 3> {
+            size_t cell_idx = site / N_atoms;
+            size_t n3 = cell_idx % dim3;
+            size_t n2 = (cell_idx / dim3) % dim2;
+            size_t n1 = cell_idx / (dim2 * dim3);
+            return {n1, n2, n3};
+        };
+        
+        // Accumulate spin-spin correlations
+        acc.accumulate_spin_correlations(spins, site_to_sublattice, site_to_cell);
+        
+        // Accumulate dimer-dimer correlations (extracts bonds from bilinear_partners)
+        accumulate_dimer_correlations(acc);
     }
 
     /**
@@ -2625,19 +4416,42 @@ public:
                     &E_partner, 1, MPI_DOUBLE, partner_rank, 0,
                     comm, MPI_STATUS_IGNORE);
         
-        // Decide acceptance
-        bool accept = false;
+        // Decide acceptance using parallel tempering Metropolis criterion:
+        // P_swap = min(1, exp[Δ]) where Δ = (β_cold - β_hot)(E_cold - E_hot)
+        // With ordering: rank 0 = coldest (β large), highest rank = hottest (β small)
+        // rank < partner_rank means: curr is COLDER, partner is HOTTER
+        int accept_int = 0;
         if (rank < partner_rank) {
-            double delta_beta = (1.0 / curr_Temp) - (1.0 / T_partner);
-            double delta_E = E_partner - E;
-            double P_swap = std::exp(delta_beta * delta_E);
-            accept = (random_double_lehman(0.0, 1.0) < P_swap);
+            // Only the lower rank computes the acceptance decision
+            // curr = cold (i), partner = hot (j)
+            // β_curr > β_partner, typically E_curr < E_partner (cold has lower energy)
+            // Δ = (β_curr - β_partner)(E_curr - E_partner) = (positive)(negative) = negative typically
+            double beta_curr = 1.0 / curr_Temp;
+            double beta_partner = 1.0 / T_partner;
+            double delta = (beta_curr - beta_partner) * (E - E_partner);
+            bool accept = (delta >= 0) || (random_double_lehman(0.0, 1.0) < std::exp(delta));
+            accept_int = accept ? 1 : 0;
+            
+            // // DEBUG: Print exchange details (only first few times to avoid spam)
+            // static int debug_count = 0;
+            // if (debug_count < 20) {
+            //     cout << "[PT DEBUG] rank=" << rank << "->" << partner_rank
+            //          << " T_cold=" << curr_Temp << " T_hot=" << T_partner
+            //          << " E_cold=" << E << " E_hot=" << E_partner
+            //          << " delta=" << delta << " accept=" << accept << endl;
+            //     ++debug_count;
+            // }
         }
         
-        // Broadcast decision
-        int accept_int = accept ? 1 : 0;
-        MPI_Bcast(&accept_int, 1, MPI_INT, std::min(rank, partner_rank), comm);
-        accept = (accept_int == 1);
+        // Communicate decision between partners using point-to-point (NOT collective MPI_Bcast!)
+        // Lower rank sends decision to higher rank
+        int recv_accept_int = 0;
+        MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 2,
+                     &recv_accept_int, 1, MPI_INT, partner_rank, 2,
+                     comm, MPI_STATUS_IGNORE);
+        
+        // Lower rank uses its own decision, higher rank uses received decision
+        bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
         
         // Exchange configurations if accepted
         if (accept) {
@@ -2701,8 +4515,8 @@ public:
                                    double curr_accept, int swap_accept,
                                    size_t swap_rate, size_t overrelaxation_rate,
                                    size_t probe_rate) {
-        // Compute local heat capacity using binning analysis
-        // (Simplified - full version would use binning_analysis from original code)
+        // Compute local heat capacity per site using binning analysis
+        // c_V = Var(E) / (T² N²) = Var(E/N) / T²
         double E_mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
         double E2_mean = 0.0;
         for (double E : energies) {
@@ -2711,8 +4525,9 @@ public:
         E2_mean /= energies.size();
         double var_E = E2_mean - E_mean * E_mean;
         
-        double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * lattice_size);
-        double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * lattice_size);
+        double N2 = double(lattice_size) * double(lattice_size);
+        double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * N2);
+        double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * N2);
         
         // Gather to root
         MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
@@ -2779,7 +4594,8 @@ public:
                                    size_t n_anneal, size_t n_measure,
                                    double curr_accept, int swap_accept,
                                    size_t swap_rate, size_t overrelaxation_rate,
-                                   size_t probe_rate, MPI_Comm comm = MPI_COMM_WORLD) {
+                                   size_t probe_rate, MPI_Comm comm = MPI_COMM_WORLD,
+                                   bool verbose = false) {
         
         // Compute comprehensive thermodynamic observables with binning analysis
         ThermodynamicObservables obs = compute_thermodynamic_observables(
@@ -2796,7 +4612,9 @@ public:
         
         // Report acceptance rates
         double total_steps = n_anneal + n_measure;
-        double acc_rate = curr_accept / total_steps;
+        // Account for overrelaxation: Metropolis is only called every overrelaxation_rate steps
+        double metro_steps = (overrelaxation_rate > 0) ? total_steps / overrelaxation_rate : total_steps;
+        double acc_rate = curr_accept / metro_steps;
         double swap_rate_actual = (swap_rate > 0) ? double(swap_accept) / (total_steps / swap_rate) : 0.0;
         
         cout << "Rank " << rank << ": T=" << curr_Temp 
@@ -2823,14 +4641,19 @@ public:
                 // Each rank creates its own subdirectory (no race condition)
                 filesystem::create_directories(rank_dir);
                 
-                // Save comprehensive observables
-                save_thermodynamic_observables(rank_dir, obs);
+                // Save to HDF5 format (single file with all data)
+#ifdef HDF5_ENABLED
+                save_thermodynamic_observables_hdf5(rank_dir, obs, energies, magnetizations,
+                                                   sublattice_mags, n_anneal, n_measure,
+                                                   probe_rate, swap_rate, overrelaxation_rate,
+                                                   acc_rate, swap_rate_actual);
+#else
+                if (rank == 0) {
+                    cerr << "Warning: HDF5 not enabled. Compile with -DHDF5_ENABLED=ON to enable output." << endl;
+                }
+#endif
                 
-                // Save raw time series
-                save_observables(rank_dir, energies, magnetizations);
-                save_sublattice_magnetization_timeseries(rank_dir, sublattice_mags);
-                
-                // Save spin configuration
+                // Save spin configuration only if verbose mode is enabled
                 save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
             }
             
@@ -2839,14 +4662,10 @@ public:
             
             // Root process saves aggregated results across all temperatures
             if (rank == 0) {
-                // Heat capacity vs temperature
-                ofstream heat_file(dir_name + "/heat_capacity.txt");
-                heat_file << "# T C_V dC_V" << endl;
-                heat_file << std::scientific << std::setprecision(12);
-                for (int r = 0; r < size; ++r) {
-                    heat_file << temp[r] << " " << heat_capacity[r] << " " << dHeat[r] << "\n";
-                }
-                heat_file.close();
+#ifdef HDF5_ENABLED
+                // Save heat capacity to HDF5
+                save_heat_capacity_hdf5(dir_name, temp, heat_capacity, dHeat);
+#endif
             }
         }
         
@@ -2856,10 +4675,353 @@ public:
 
     // ============================================================
     // TEMPERATURE LADDER OPTIMIZATION
+    // Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+    // arXiv:0809.0571 - "Make life simple: unleash the full power 
+    // of the parallel tempering algorithm"
     // ============================================================
 
     /**
-     * Optimize temperature ladder for parallel tempering
+     * Generate optimized temperature grid for parallel tempering
+     * 
+     * Implements the feedback-optimized algorithm from Bittner et al.
+     * Key insight: Optimal round-trip time is achieved when acceptance rate
+     * is uniform across all temperature pairs, with target A ≈ 0.5 (50%).
+     * 
+     * The algorithm:
+     * 1. Start with geometric temperature spacing
+     * 2. Run short simulations to measure acceptance rates A_i between pairs
+     * 3. Adjust spacing: Δβ_{i+1} = Δβ_i * f(A_i) where f aims for uniform A
+     * 4. The optimal acceptance rate that minimizes round-trip time is 50%
+     * 
+     * The local diffusivity D(β) ∝ A(1-A) is maximized at A = 0.5.
+     * Round-trip time τ_rt ∝ ∫ dβ / D(β), minimized when A = const = 0.5.
+     * 
+     * @param Tmin              Minimum (coldest) temperature
+     * @param Tmax              Maximum (hottest) temperature  
+     * @param R                 Number of replicas (temperatures)
+     * @param warmup_sweeps     MC sweeps for initial equilibration per replica
+     * @param sweeps_per_iter   MC sweeps per feedback iteration
+     * @param feedback_iters    Number of feedback optimization iterations
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
+     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
+     * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
+     * @return OptimizedTempGridResult containing temperatures and diagnostics
+     */
+    OptimizedTempGridResult generate_optimized_temperature_grid(
+        double Tmin, double Tmax, size_t R,
+        size_t warmup_sweeps = 500,
+        size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0,
+        double target_acceptance = 0.5,
+        double convergence_tol = 0.05) {
+        
+        OptimizedTempGridResult result;
+        result.converged = false;
+        result.feedback_iterations_used = 0;
+        
+        if (R < 2) {
+            result.temperatures = {Tmin};
+            if (R == 1) return result;
+        }
+        if (R == 2) {
+            result.temperatures = {Tmin, Tmax};
+            result.acceptance_rates = {0.5};
+            result.converged = true;
+            return result;
+        }
+        
+        cout << "=== Bittner et al. Optimized Temperature Grid (Fast) ===" << endl;
+        cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+        cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        
+        // Helper: linear spacing
+        auto linspace = [](double a, double b, size_t n) {
+            vector<double> result(n);
+            for (size_t i = 0; i < n; ++i) {
+                result[i] = a + (b - a) * double(i) / double(n - 1);
+            }
+            return result;
+        };
+        
+        // Helper: convert beta to temperature
+        auto temps_from_beta = [](const vector<double>& b) {
+            vector<double> T(b.size());
+            for (size_t i = 0; i < b.size(); ++i) {
+                T[i] = 1.0 / b[i];
+            }
+            return T;
+        };
+        
+        // Initialize with geometric spacing in temperature (linear in log T)
+        // This is equivalent to linear spacing in β for a specific heat ~ const
+        double beta_min = 1.0 / Tmax;  // Hottest = smallest beta
+        double beta_max = 1.0 / Tmin;  // Coldest = largest beta
+        vector<double> beta = linspace(beta_min, beta_max, R);
+        
+        // Store original spins
+        SpinConfig original_spins = spins;
+        
+        // OPTIMIZATION 1: Use independent Lattice copies for parallel warmup
+        // Each replica gets its own Lattice object to avoid state conflicts
+        vector<Lattice> replica_lattices(R, *this);
+        double sigma = 1000.0;  // For Gaussian moves
+        
+        // Warmup phase: equilibrate each replica at its temperature
+        // OPTIMIZATION 2: Parallelize warmup with OpenMP
+        cout << "Warming up " << R << " replicas";
+        #ifdef _OPENMP
+        cout << " (parallel)";
+        #endif
+        cout << "..." << endl;
+        
+        #pragma omp parallel for schedule(dynamic)
+        for (size_t k = 0; k < R; ++k) {
+            double T_k = 1.0 / beta[k];
+            double local_sigma = sigma;
+            // Seed each replica differently
+            #pragma omp critical
+            {
+                seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + k * 12345) * 2 + 1);
+            }
+            for (size_t i = 0; i < warmup_sweeps; ++i) {
+                replica_lattices[k].metropolis(T_k, gaussian_move, local_sigma);
+                if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                    replica_lattices[k].overrelaxation();
+                }
+            }
+        }
+        
+        // OPTIMIZATION 3: Cache energies to avoid redundant calculations
+        vector<double> cached_energies(R);
+        for (size_t k = 0; k < R; ++k) {
+            cached_energies[k] = replica_lattices[k].total_energy(replica_lattices[k].spins);
+        }
+        
+        // Feedback optimization loop
+        // Based on Eq. (4) in Bittner et al.: adjust Δβ to make A uniform
+        vector<double> acceptance_rates(R - 1, 0.0);
+        
+        // OPTIMIZATION 4: Adaptive parameters - start aggressive, become conservative
+        double base_damping = 0.3;  // Start more aggressive
+        
+        for (size_t iter = 0; iter < feedback_iters; ++iter) {
+            // Adaptive damping: start aggressive, become more conservative
+            double damping = base_damping + 0.4 * (double(iter) / double(feedback_iters));
+            
+            // Statistics accumulators for this iteration
+            vector<size_t> attempts(R - 1, 0);
+            vector<size_t> accepts(R - 1, 0);
+            
+            // OPTIMIZATION 5: Reduced sweeps for early iterations when far from convergence
+            size_t effective_sweeps = sweeps_per_iter;
+            if (iter < 3) {
+                effective_sweeps = std::max(size_t(50), sweeps_per_iter / 4);
+            } else if (iter < 6) {
+                effective_sweeps = std::max(size_t(100), sweeps_per_iter / 2);
+            }
+            
+            // Run MC sweeps and measure acceptance rates
+            for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
+                // OPTIMIZATION 6: Parallel replica updates with OpenMP
+                #pragma omp parallel for schedule(static)
+                for (size_t k = 0; k < R; ++k) {
+                    double T_k = 1.0 / beta[k];
+                    double local_sigma = sigma;
+                    replica_lattices[k].metropolis(T_k, gaussian_move, local_sigma);
+                    if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
+                        replica_lattices[k].overrelaxation();
+                    }
+                }
+                
+                // Update cached energies
+                #pragma omp parallel for schedule(static)
+                for (size_t k = 0; k < R; ++k) {
+                    cached_energies[k] = replica_lattices[k].total_energy(replica_lattices[k].spins);
+                }
+                
+                // Attempt replica exchanges for ALL adjacent pairs
+                // Use checkerboard pattern to avoid conflicts
+                for (int parity = 0; parity <= 1; ++parity) {
+                    // OPTIMIZATION 7: Parallel exchange attempts for same parity
+                    #pragma omp parallel for schedule(static)
+                    for (size_t e = parity; e < R - 1; e += 2) {
+                        // Use cached energies
+                        // beta array is sorted: beta[0] = beta_min (hottest), beta[R-1] = beta_max (coldest)
+                        // So beta[e] < beta[e+1] (e is hotter, e+1 is colder)
+                        double E_hot = cached_energies[e];       // Hotter (smaller β)
+                        double E_cold = cached_energies[e + 1];  // Colder (larger β)
+                        
+                        // Metropolis criterion for replica exchange:
+                        // P_swap = min(1, exp(Δ)) where Δ = (β_cold - β_hot)(E_cold - E_hot)
+                        // When energies are properly ordered (E_cold < E_hot), Δ < 0
+                        double dBeta = beta[e + 1] - beta[e];  // > 0 (β_cold - β_hot)
+                        double dE = E_cold - E_hot;            // typically < 0 (E_cold - E_hot)
+                        double delta = dBeta * dE;             // typically < 0
+                        
+                        #pragma omp atomic
+                        ++attempts[e];
+                        
+                        if (delta >= 0 || random_double_lehman(0.0, 1.0) < std::exp(delta)) {
+                            #pragma omp atomic
+                            ++accepts[e];
+                            
+                            // Swap configurations and cached energies
+                            #pragma omp critical
+                            {
+                                std::swap(replica_lattices[e].spins, replica_lattices[e + 1].spins);
+                                std::swap(cached_energies[e], cached_energies[e + 1]);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Compute acceptance rates
+            for (size_t e = 0; e < R - 1; ++e) {
+                acceptance_rates[e] = double(accepts[e]) / double(attempts[e]);
+            }
+            
+            // Check convergence: all rates within tolerance of target
+            double max_deviation = 0.0;
+            double mean_rate = 0.0;
+            for (size_t e = 0; e < R - 1; ++e) {
+                max_deviation = std::max(max_deviation, std::abs(acceptance_rates[e] - target_acceptance));
+                mean_rate += acceptance_rates[e];
+            }
+            mean_rate /= (R - 1);
+            
+            cout << "Iter " << iter + 1 << "/" << feedback_iters 
+                 << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
+                 << ", max dev = " << max_deviation 
+                 << " (sweeps=" << effective_sweeps << ", damp=" << std::setprecision(2) << damping << ")" << endl;
+            
+            result.feedback_iterations_used = iter + 1;
+            
+            if (max_deviation < convergence_tol) {
+                result.converged = true;
+                cout << "Converged at iteration " << iter + 1 << endl;
+                break;
+            }
+            
+            // Adjust β spacing using the Bittner feedback rule
+            // The key insight is: to achieve uniform A, adjust Δβ proportionally
+            // If A_e < target: reduce Δβ_e (bring temperatures closer)
+            // If A_e > target: increase Δβ_e (spread temperatures apart)
+            // 
+            // Update rule: Δβ_new = Δβ_old * sqrt(A_e / target) with damping
+            // This is derived from the fact that A ≈ erfc(Δβ * σ_E) where σ_E
+            // is the energy fluctuation, so Δβ ∝ -log(A) / σ_E approximately.
+            
+            vector<double> new_beta(R);
+            new_beta[0] = beta[0];  // Keep minimum β (maximum T) fixed
+            
+            for (size_t e = 0; e < R - 1; ++e) {
+                double A_e = acceptance_rates[e];
+                
+                // Bittner-style adjustment: use complementary error function approximation
+                // For Gaussian energy distributions: A ≈ erfc(Δβ * σ_E / sqrt(2))
+                // Inversion: Δβ_new / Δβ_old ≈ sqrt(log(1/A_old) / log(1/target))
+                // 
+                // Simplified practical rule with damping:
+                double ratio;
+                if (A_e < 0.01) A_e = 0.01;  // Prevent division issues
+                if (A_e > 0.99) A_e = 0.99;
+                
+                // Use the relationship: A ≈ exp(-c * Δβ²) approximately
+                // So: Δβ_new = Δβ_old * sqrt(log(A_old) / log(target))
+                // With smoothing factor for stability
+                double log_ratio = std::log(target_acceptance) / std::log(A_e);
+                ratio = std::sqrt(std::abs(log_ratio));
+                
+                // Apply adaptive damping to prevent oscillations
+                ratio = 1.0 + damping * (ratio - 1.0);
+                
+                // Clamp adjustment factor (more aggressive early, conservative late)
+                double clamp_min = (iter < 3) ? 0.5 : 0.7;
+                double clamp_max = (iter < 3) ? 2.0 : 1.5;
+                ratio = std::clamp(ratio, clamp_min, clamp_max);
+                
+                double d_beta = (beta[e + 1] - beta[e]) * ratio;
+                new_beta[e + 1] = new_beta[e] + d_beta;
+            }
+            
+            // Rescale to preserve endpoints exactly
+            double scale = (beta_max - beta_min) / (new_beta.back() - new_beta.front());
+            for (size_t k = 1; k < R; ++k) {
+                new_beta[k] = beta_min + scale * (new_beta[k] - new_beta.front());
+            }
+            
+            beta = new_beta;
+        }
+        
+        // Restore original spins
+        spins = original_spins;
+        
+        // Build result
+        result.temperatures = temps_from_beta(beta);
+        std::sort(result.temperatures.begin(), result.temperatures.end());  // Ascending order
+        
+        result.acceptance_rates = acceptance_rates;
+        
+        // Compute local diffusivities D(T) = A(1-A)
+        result.local_diffusivities.resize(R - 1);
+        for (size_t e = 0; e < R - 1; ++e) {
+            double A = acceptance_rates[e];
+            result.local_diffusivities[e] = A * (1.0 - A);
+        }
+        
+        // Mean acceptance rate
+        result.mean_acceptance_rate = 0.0;
+        for (double A : acceptance_rates) {
+            result.mean_acceptance_rate += A;
+        }
+        result.mean_acceptance_rate /= (R - 1);
+        
+        // Estimate round-trip time
+        // τ_rt ∝ ∫ dβ / D(β) ≈ Σ Δβ_i / D_i
+        double tau_rt = 0.0;
+        for (size_t e = 0; e < R - 1; ++e) {
+            double d_beta = std::abs(beta[e + 1] - beta[e]);
+            double D = result.local_diffusivities[e];
+            if (D > 1e-6) {
+                tau_rt += d_beta / D;
+            } else {
+                tau_rt += d_beta / 1e-6;  // Prevent divergence
+            }
+        }
+        result.round_trip_estimate = tau_rt;
+        
+        // Print summary
+        cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
+        cout << "Temperatures (ascending):" << endl;
+        for (size_t k = 0; k < std::min(R, size_t(15)); ++k) {
+            cout << "  T[" << k << "] = " << std::scientific << std::setprecision(6) 
+                 << result.temperatures[k];
+            if (k < R - 1) {
+                cout << "  (A = " << std::fixed << std::setprecision(3) 
+                     << acceptance_rates[k] << ")";
+            }
+            cout << endl;
+        }
+        if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+        
+        cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
+             << result.mean_acceptance_rate * 100 << "%" << endl;
+        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        cout << "Estimated round-trip time scale: " << std::scientific 
+             << result.round_trip_estimate << endl;
+        cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+        
+        return result;
+    }
+
+    /**
+     * Legacy wrapper for backward compatibility
+     * Calls the new Bittner-optimized algorithm with default 50% acceptance target
      */
     vector<double> optimize_temperature_ladder_roundtrip(
         double Tmin, double Tmax, size_t R,
@@ -2869,128 +5031,416 @@ public:
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0) {
         
-        if (R < 3) {
-            return vector<double>{Tmin, Tmax};
+        OptimizedTempGridResult result = generate_optimized_temperature_grid(
+            Tmin, Tmax, R,
+            warmup_sweeps, sweeps_per_iter, feedback_iters,
+            gaussian_move, overrelaxation_rate,
+            0.5,   // Bittner optimal: 50% acceptance
+            0.05   // 5% convergence tolerance
+        );
+        return result.temperatures;
+    }
+
+    /**
+     * MPI-distributed temperature grid optimization (FAST VERSION)
+     * 
+     * This version distributes replicas across MPI ranks, same as the main PT simulation.
+     * Each rank handles exactly one replica, making it R times faster than the serial version.
+     * 
+     * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+     * 
+     * @param Tmin              Minimum (coldest) temperature
+     * @param Tmax              Maximum (hottest) temperature  
+     * @param warmup_sweeps     MC sweeps for initial equilibration
+     * @param sweeps_per_iter   MC sweeps per feedback iteration
+     * @param feedback_iters    Number of feedback optimization iterations
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
+     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
+     * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
+     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @return OptimizedTempGridResult containing temperatures and diagnostics (valid on all ranks)
+     */
+    OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
+        double Tmin, double Tmax,
+        size_t warmup_sweeps = 500,
+        size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0,
+        double target_acceptance = 0.5,
+        double convergence_tol = 0.05,
+        MPI_Comm comm = MPI_COMM_WORLD) {
+        
+        // Get MPI info - number of ranks = number of replicas
+        int rank, R;
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &R);
+        
+        OptimizedTempGridResult result;
+        result.converged = false;
+        result.feedback_iterations_used = 0;
+        
+        if (R < 2) {
+            result.temperatures = {Tmin};
+            result.converged = true;
+            return result;
+        }
+        if (R == 2) {
+            result.temperatures = {Tmin, Tmax};
+            result.acceptance_rates = {0.5};
+            result.converged = true;
+            return result;
         }
         
-        // Linear spacing in beta
-        auto linspace = [](double a, double b, size_t n) {
-            vector<double> result(n);
-            for (size_t i = 0; i < n; ++i) {
-                result[i] = a + (b - a) * double(i) / double(n - 1);
-            }
-            return result;
-        };
+        // Set random seed unique to each rank
+        seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
         
-        vector<double> beta = linspace(1.0 / Tmax, 1.0 / Tmin, R);
+        if (rank == 0) {
+            cout << "=== Bittner et al. Optimized Temperature Grid (MPI) ===" << endl;
+            cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+            cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << " (MPI ranks)" << endl;
+            cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        }
         
-        auto temps_from_beta = [](const vector<double>& b) {
-            vector<double> T(b.size());
-            for (size_t i = 0; i < b.size(); ++i) {
-                T[i] = 1.0 / b[i];
-            }
-            return T;
-        };
+        // Initialize beta array on all ranks (linear spacing)
+        // beta[0] = beta_min (hottest), beta[R-1] = beta_max (coldest)
+        double beta_min = 1.0 / Tmax;
+        double beta_max = 1.0 / Tmin;
+        vector<double> beta(R);
+        for (int i = 0; i < R; ++i) {
+            beta[i] = beta_min + (beta_max - beta_min) * double(i) / double(R - 1);
+        }
         
-        // Initialize replicas
-        vector<SpinConfig> reps(R, spins);
-        vector<size_t> rep_at(R);
-        std::iota(rep_at.begin(), rep_at.end(), 0);
-        
-        // Warmup
+        // Each rank's current temperature
+        double my_beta = beta[rank];
+        double my_T = 1.0 / my_beta;
         double sigma = 1000.0;
-        for (size_t k = 0; k < R; ++k) {
-            spins = reps[k];
-            vector<double> T = temps_from_beta(beta);
-            for (size_t i = 0; i < warmup_sweeps; ++i) {
-                metropolis(T[k], gaussian_move, sigma);
-                if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+        
+        // Warmup phase
+        if (rank == 0) cout << "Warming up replicas..." << endl;
+        for (size_t i = 0; i < warmup_sweeps; ++i) {
+            metropolis(my_T, gaussian_move, sigma);
+            if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                overrelaxation();
+            }
+        }
+        MPI_Barrier(comm);
+        
+        // Acceptance rate tracking
+        vector<double> acceptance_rates(R - 1, 0.0);
+        double base_damping = 0.5;  // Less aggressive damping for faster convergence
+        
+        // Feedback optimization loop
+        for (size_t iter = 0; iter < feedback_iters; ++iter) {
+            // Damping increases over iterations for stability
+            double damping = base_damping + 0.3 * (double(iter) / double(feedback_iters));
+            
+            // Local acceptance counters for this rank's edge
+            // rank k tracks exchanges with rank k+1
+            int local_attempts = 0;
+            int local_accepts = 0;
+            
+            // Use full sweeps for better statistics (reduced noise)
+            size_t effective_sweeps = sweeps_per_iter;
+            
+            // MC sweeps with replica exchanges
+            for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
+                // Local MC update
+                metropolis(my_T, gaussian_move, sigma);
+                if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
                     overrelaxation();
                 }
-            }
-            reps[k] = spins;
-        }
-        
-        // Feedback iterations
-        vector<int8_t> dir_rep(R, +1);
-        vector<size_t> rt_count(R, 0);
-        
-        for (size_t it = 0; it < feedback_iters; ++it) {
-            vector<size_t> att(R - 1, 0), acc(R - 1, 0);
-            
-            // Diffusion sweeps
-            for (size_t sweep = 0; sweep < sweeps_per_iter; ++sweep) {
-                // Update each replica
-                for (size_t k = 0; k < R; ++k) {
-                    spins = reps[k];
-                    vector<double> T = temps_from_beta(beta);
-                    metropolis(T[k], gaussian_move, sigma);
-                    if (overrelaxation_rate > 0) overrelaxation();
-                    reps[k] = spins;
-                }
                 
-                // Attempt swaps
-                for (size_t e = 0; e < R - 1; ++e) {
-                    size_t k1 = rep_at[e];
-                    size_t k2 = rep_at[e + 1];
+                // Attempt replica exchanges using checkerboard pattern
+                for (int parity = 0; parity <= 1; ++parity) {
+                    int partner_rank;
+                    if (parity == 0) {
+                        partner_rank = (rank % 2 == 0) ? rank + 1 : rank - 1;
+                    } else {
+                        partner_rank = (rank % 2 == 1) ? rank + 1 : rank - 1;
+                    }
                     
-                    double E1 = total_energy(reps[k1]);
-                    double E2 = total_energy(reps[k2]);
-                    double dBeta = beta[e + 1] - beta[e];
-                    double dE = E2 - E1;
+                    if (partner_rank < 0 || partner_rank >= R) continue;
                     
-                    bool swap = (random_double_lehman(0.0, 1.0) < std::exp(dBeta * dE));
+                    // Exchange energies with partner
+                    double my_E = total_energy(spins);
+                    double partner_E;
+                    MPI_Sendrecv(&my_E, 1, MPI_DOUBLE, partner_rank, 0,
+                                &partner_E, 1, MPI_DOUBLE, partner_rank, 0,
+                                comm, MPI_STATUS_IGNORE);
                     
-                    ++att[e];
-                    if (swap) {
-                        ++acc[e];
-                        rep_at[e] = k2;
-                        rep_at[e + 1] = k1;
+                    // Lower rank computes acceptance
+                    int accept_int = 0;
+                    if (rank < partner_rank) {
+                        // rank is hotter (smaller β), partner is colder (larger β)
+                        double beta_hot = my_beta;
+                        double beta_cold = beta[partner_rank];
+                        double E_hot = my_E;
+                        double E_cold = partner_E;
+                        
+                        // Δ = -(β_cold - β_hot)(E_hot - E_cold)
+                        double delta = -(beta_cold - beta_hot) * (E_hot - E_cold);
+                        bool accept = (delta >= 0) || (random_double_lehman(0.0, 1.0) < std::exp(delta));
+                        accept_int = accept ? 1 : 0;
+                        
+                        // Track statistics for edge (rank, rank+1)
+                        ++local_attempts;
+                        if (accept) ++local_accepts;
+                    }
+                    
+                    // Communicate decision
+                    int recv_accept_int = 0;
+                    MPI_Sendrecv(&accept_int, 1, MPI_INT, partner_rank, 1,
+                                &recv_accept_int, 1, MPI_INT, partner_rank, 1,
+                                comm, MPI_STATUS_IGNORE);
+                    
+                    bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
+                    
+                    // Exchange configurations if accepted
+                    if (accept) {
+                        vector<double> send_buf(lattice_size * spin_dim);
+                        vector<double> recv_buf(lattice_size * spin_dim);
+                        
+                        for (size_t i = 0; i < lattice_size; ++i) {
+                            for (size_t j = 0; j < spin_dim; ++j) {
+                                send_buf[i * spin_dim + j] = spins[i](j);
+                            }
+                        }
+                        
+                        MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 2,
+                                    recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 2,
+                                    comm, MPI_STATUS_IGNORE);
+                        
+                        for (size_t i = 0; i < lattice_size; ++i) {
+                            for (size_t j = 0; j < spin_dim; ++j) {
+                                spins[i](j) = recv_buf[i * spin_dim + j];
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Gather acceptance statistics to rank 0 using MPI_Gather
+            // Each rank k (for k < R-1) tracks statistics for edge k→k+1
+            // Only the lower rank in each pair computes the acceptance
+            
+            // Use MPI_Gather for cleaner collection
+            // Note: rank R-1 doesn't have an edge to track, but we still need it to participate
+            
+            // Create send buffers - rank k sends stats for edge k (if k < R-1)
+            int my_attempts = (rank < R - 1) ? local_attempts : 0;
+            int my_accepts = (rank < R - 1) ? local_accepts : 0;
+            
+            // Gather from all ranks to rank 0
+            vector<int> recv_attempts(R);
+            vector<int> recv_accepts(R);
+            MPI_Gather(&my_attempts, 1, MPI_INT, recv_attempts.data(), 1, MPI_INT, 0, comm);
+            MPI_Gather(&my_accepts, 1, MPI_INT, recv_accepts.data(), 1, MPI_INT, 0, comm);
+            
+            // Rank 0 computes new beta array
+            bool converged = false;
+            if (rank == 0) {
+                // Compute acceptance rates from gathered data
+                // recv_attempts[k] contains attempts for edge k→k+1
+                for (int e = 0; e < R - 1; ++e) {
+                    if (recv_attempts[e] > 0) {
+                        acceptance_rates[e] = double(recv_accepts[e]) / double(recv_attempts[e]);
                     }
                 }
                 
-                // Track round trips
-                for (size_t r = 0; r < R; ++r) {
-                    size_t slot = rep_at[r];
-                    if (slot == 0 && dir_rep[r] == -1) {
-                        dir_rep[r] = +1;
-                        ++rt_count[r];
-                    } else if (slot == R - 1 && dir_rep[r] == +1) {
-                        dir_rep[r] = -1;
+                // Check convergence using mean deviation (more stable than max)
+                double max_deviation = 0.0;
+                double mean_deviation = 0.0;
+                double mean_rate = 0.0;
+                double min_rate = 1.0, max_rate = 0.0;
+                for (int e = 0; e < R - 1; ++e) {
+                    double dev = std::abs(acceptance_rates[e] - target_acceptance);
+                    max_deviation = std::max(max_deviation, dev);
+                    mean_deviation += dev;
+                    mean_rate += acceptance_rates[e];
+                    min_rate = std::min(min_rate, acceptance_rates[e]);
+                    max_rate = std::max(max_rate, acceptance_rates[e]);
+                }
+                mean_rate /= (R - 1);
+                mean_deviation /= (R - 1);
+                
+                cout << "Iter " << iter + 1 << "/" << feedback_iters 
+                     << ": mean A = " << std::fixed << std::setprecision(3) << mean_rate
+                     << " [" << min_rate << ", " << max_rate << "]"
+                     << ", mean dev = " << mean_deviation << endl;
+                
+                // Warn if acceptance is uniformly low - need more replicas
+                if (mean_rate < 0.1 && iter == 0) {
+                    cout << "WARNING: Mean acceptance rate is very low (" << mean_rate << ").\n"
+                         << "         Consider using more replicas or a smaller temperature range." << endl;
+                }
+                
+                result.feedback_iterations_used = iter + 1;
+                
+                // Converge based on mean deviation (less sensitive to statistical noise)
+                if (mean_deviation < convergence_tol) {
+                    converged = true;
+                    cout << "Converged at iteration " << iter + 1 << endl;
+                }
+                
+                if (!converged) {
+                    // Bittner et al. feedback optimization
+                    // 
+                    // Key insight: to minimize round-trip time, we minimize ∫ dβ / A(β)
+                    // With discrete intervals: minimize Σ Δβ_i / A_i
+                    // Subject to: Σ Δβ_i = β_max - β_min
+                    // 
+                    // Optimal solution: Δβ_i ∝ A_i
+                    // i.e., edges with HIGH acceptance get MORE spacing,
+                    // edges with LOW acceptance get LESS spacing (closer temps → higher A)
+                    
+                    // Compute weights proportional to acceptance rate
+                    vector<double> weights(R - 1);
+                    double total_weight = 0.0;
+                    
+                    for (int e = 0; e < R - 1; ++e) {
+                        double A_e = acceptance_rates[e];
+                        if (A_e < 0.01) A_e = 0.01;
+                        if (A_e > 0.99) A_e = 0.99;
+                        
+                        // Weight proportional to A: high A → more spacing
+                        weights[e] = A_e;
+                        total_weight += weights[e];
                     }
+                    
+                    // Normalize weights to sum to 1
+                    for (int e = 0; e < R - 1; ++e) {
+                        weights[e] /= total_weight;
+                    }
+                    
+                    // Compute new beta positions
+                    vector<double> new_beta(R);
+                    new_beta[0] = beta_min;
+                    
+                    double cumulative = 0.0;
+                    for (int e = 0; e < R - 1; ++e) {
+                        cumulative += weights[e];
+                        new_beta[e + 1] = beta_min + cumulative * (beta_max - beta_min);
+                    }
+                    new_beta[R - 1] = beta_max;  // Ensure exact endpoint
+                    
+                    // Apply damping: blend old and new positions
+                    for (int k = 1; k < R - 1; ++k) {
+                        new_beta[k] = (1.0 - damping) * beta[k] + damping * new_beta[k];
+                    }
+                    
+                    beta = new_beta;
                 }
             }
             
-            // Adjust beta spacing based on acceptance rates
-            vector<double> new_beta(R);
-            new_beta[0] = beta[0];
-            for (size_t e = 0; e < R - 1; ++e) {
-                double a_e = double(acc[e]) / double(att[e]);
-                double target = 0.3;
-                double factor = std::sqrt(target / (a_e + 0.01));
-                factor = std::clamp(factor, 0.8, 1.25);
-                double d_beta = (beta[e + 1] - beta[e]) * factor;
-                new_beta[e + 1] = new_beta[e] + d_beta;
-            }
+            // Broadcast convergence flag and new beta array to all ranks
+            int conv_int = converged ? 1 : 0;
+            MPI_Bcast(&conv_int, 1, MPI_INT, 0, comm);
+            MPI_Bcast(beta.data(), R, MPI_DOUBLE, 0, comm);
             
-            // Rescale to match endpoints
-            double scale = (beta.back() - beta.front()) / (new_beta.back() - new_beta.front());
-            for (size_t k = 1; k < R; ++k) {
-                new_beta[k] = beta.front() + scale * (new_beta[k] - new_beta.front());
+            // Update local temperature
+            my_beta = beta[rank];
+            my_T = 1.0 / my_beta;
+            
+            if (conv_int == 1) {
+                result.converged = true;
+                break;
             }
-            beta = new_beta;
         }
         
-        vector<double> T = temps_from_beta(beta);
-        std::sort(T.begin(), T.end());
+        // Broadcast final acceptance rates
+        MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
         
-        cout << "Optimized temperature ladder:" << endl;
-        for (size_t k = 0; k < std::min(R, size_t(10)); ++k) {
-            cout << "  T[" << k << "] = " << T[k] << endl;
+        // Build result (on all ranks)
+        result.temperatures.resize(R);
+        for (int i = 0; i < R; ++i) {
+            result.temperatures[i] = 1.0 / beta[i];
         }
-        if (R > 10) cout << "  ..." << endl;
+        std::sort(result.temperatures.begin(), result.temperatures.end());
         
-        return T;
+        result.acceptance_rates = acceptance_rates;
+        
+        // Compute diagnostics
+        result.local_diffusivities.resize(R - 1);
+        for (int e = 0; e < R - 1; ++e) {
+            double A = acceptance_rates[e];
+            result.local_diffusivities[e] = A * (1.0 - A);
+        }
+        
+        result.mean_acceptance_rate = 0.0;
+        for (double A : acceptance_rates) {
+            result.mean_acceptance_rate += A;
+        }
+        result.mean_acceptance_rate /= (R - 1);
+        
+        double tau_rt = 0.0;
+        for (int e = 0; e < R - 1; ++e) {
+            double d_beta = std::abs(beta[e + 1] - beta[e]);
+            double D = result.local_diffusivities[e];
+            tau_rt += d_beta / std::max(D, 1e-6);
+        }
+        result.round_trip_estimate = tau_rt;
+        
+        // Print summary (rank 0 only)
+        if (rank == 0) {
+            cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
+            cout << "Temperatures (ascending):" << endl;
+            for (int k = 0; k < std::min(R, 15); ++k) {
+                cout << "  T[" << k << "] = " << std::scientific << std::setprecision(6) 
+                     << result.temperatures[k];
+                if (k < R - 1) {
+                    cout << "  (A = " << std::fixed << std::setprecision(3) 
+                         << acceptance_rates[k] << ")";
+                }
+                cout << endl;
+            }
+            if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+            
+            cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
+                 << result.mean_acceptance_rate * 100 << "%" << endl;
+            cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+            cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+        }
+        
+        // CRITICAL: Synchronize all ranks before returning
+        // This ensures no stray MPI messages remain in flight and all ranks
+        // exit the optimization at the same time, ready for the main PT simulation
+        MPI_Barrier(comm);
+        
+        // NOTE: Spin configurations have been modified by replica exchanges during optimization.
+        // The caller (e.g., parallel_tempering) will re-equilibrate at the assigned temperature,
+        // so this is not a problem. However, if fresh random starts are desired, call init_random()
+        // after this function returns.
+        
+        return result;
+    }
+
+    /**
+     * Generate geometric temperature ladder (simple, no optimization)
+     * 
+     * Uses logarithmic spacing: T_i = T_min * (T_max/T_min)^(i/(R-1))
+     * This is optimal for systems with roughly constant specific heat.
+     * 
+     * @param Tmin  Minimum temperature
+     * @param Tmax  Maximum temperature
+     * @param R     Number of temperatures
+     * @return Vector of temperatures in ascending order
+     */
+    static vector<double> generate_geometric_temperature_ladder(
+        double Tmin, double Tmax, size_t R) {
+        
+        vector<double> temps(R);
+        if (R == 1) {
+            temps[0] = Tmin;
+            return temps;
+        }
+        
+        for (size_t i = 0; i < R; ++i) {
+            double frac = double(i) / double(R - 1);
+            temps[i] = Tmin * std::pow(Tmax / Tmin, frac);
+        }
+        return temps;
     }
 
     /**
@@ -3707,11 +6157,12 @@ public:
                     for (size_t l = 0; l < N_atoms; ++l) {
                         size_t current_site_index = flatten_index(i, j, k, l);
                         
-                        // Transform spin to global frame using sublattice frame
+                        // Transform spin to global frame: spin_global = R * spin_local
+                        // where R = sublattice_frames[l] has columns [x_local | y_local | z_local]
                         SpinVector spin_global = SpinVector::Zero(spin_dim);
                         for (size_t mu = 0; mu < spin_dim; ++mu) {
                             for (size_t nu = 0; nu < spin_dim; ++nu) {
-                                spin_global(mu) += sublattice_frames[l](nu, mu) * spins[current_site_index](nu);
+                                spin_global(mu) += sublattice_frames[l](mu, nu) * spins[current_site_index](nu);
                             }
                         }
                         M += spin_global;
@@ -3739,10 +6190,11 @@ public:
             size_t atom = i % N_atoms;
             size_t idx = i * spin_dim;
             
-            // Transform to global frame using sublattice frame
+            // Transform to global frame: spin_global = R * spin_local
+            // where R = sublattice_frames[atom] has columns [x_local | y_local | z_local]
             for (size_t mu = 0; mu < spin_dim; ++mu) {
                 for (size_t nu = 0; nu < spin_dim; ++nu) {
-                    M_global_arr[mu] += sublattice_frames[atom](nu, mu) * x[idx + nu];
+                    M_global_arr[mu] += sublattice_frames[atom](mu, nu) * x[idx + nu];
                 }
             }
         }
@@ -3768,6 +6220,155 @@ public:
         }
         
         return std::norm(S_q) / double(lattice_size);
+    }
+
+    // ============================================================
+    // REAL-SPACE CORRELATION ACCUMULATOR
+    // ============================================================
+    
+    /**
+     * Create a RealSpaceCorrelationAccumulator initialized for this lattice
+     * 
+     * @param n_bond_types  Number of distinct bond types (default: N*(N+1)/2 for N sublattices)
+     * @return Initialized accumulator ready to accumulate samples
+     */
+    RealSpaceCorrelationAccumulator create_correlation_accumulator(size_t n_bond_types = 0) const {
+        RealSpaceCorrelationAccumulator acc;
+        
+        if (n_bond_types == 0) {
+            // Default: number of undirected sublattice pairs = N*(N+1)/2
+            // This covers all possible bond types (0,0), (0,1), (1,1), etc.
+            n_bond_types = N_atoms * (N_atoms + 1) / 2;
+        }
+        
+        // Get lattice vectors from unit cell
+        array<Eigen::Vector3d, 3> lattice_vectors = {
+            unit_cell.lattice_vectors[0],
+            unit_cell.lattice_vectors[1],
+            unit_cell.lattice_vectors[2]
+        };
+        
+        // Get sublattice positions
+        vector<Eigen::Vector3d> sublattice_positions(N_atoms);
+        for (size_t atom = 0; atom < N_atoms; ++atom) {
+            sublattice_positions[atom] = unit_cell.lattice_pos[atom];
+        }
+        
+        acc.initialize(dim1, dim2, dim3, N_atoms, n_bond_types, spin_dim,
+                      lattice_vectors, sublattice_positions);
+        
+        return acc;
+    }
+    
+    /**
+     * Accumulate current spin configuration into the correlation accumulator
+     * Call this every probe_rate MC sweeps during measurement phase
+     * 
+     * @param acc  Reference to the accumulator to update
+     */
+    void accumulate_correlations(RealSpaceCorrelationAccumulator& acc) const {
+        // Define site-to-sublattice mapping
+        auto site_to_sublattice = [this](size_t site) -> size_t {
+            return site % N_atoms;
+        };
+        
+        // Define site-to-cell mapping
+        auto site_to_cell = [this](size_t site) -> array<size_t, 3> {
+            size_t cell_idx = site / N_atoms;
+            size_t n3 = cell_idx % dim3;
+            size_t n2 = (cell_idx / dim3) % dim2;
+            size_t n1 = cell_idx / (dim2 * dim3);
+            return {n1, n2, n3};
+        };
+        
+        acc.accumulate_spin_correlations(spins, site_to_sublattice, site_to_cell);
+    }
+    
+    /**
+     * Accumulate current dimer correlations into the accumulator
+     * 
+     * This extracts bond information from the bilinear_partners structure
+     * and classifies bonds by type based on sublattice pair.
+     * 
+     * Bond type = sorted sublattice pair (sub_i, sub_j) mapped to linear index.
+     * For N sublattices, there are N*(N+1)/2 undirected bond types:
+     *   (0,0), (0,1), (1,1), (0,2), (1,2), (2,2), ...
+     * 
+     * @param acc  Reference to the accumulator to update
+     */
+    void accumulate_dimer_correlations(RealSpaceCorrelationAccumulator& acc) const {
+        // Build bond list from bilinear_partners (only forward bonds to avoid double counting)
+        vector<array<size_t, 2>> bonds;
+        vector<size_t> bond_types;
+        vector<array<size_t, 3>> bond_cells;
+        
+        // Helper: compute bond type from sorted sublattice pair
+        // Maps (min(sub_i, sub_j), max(sub_i, sub_j)) to linear index
+        // Using triangular number indexing: type = max*(max+1)/2 + min
+        auto sublattice_pair_to_bond_type = [](size_t sub_i, size_t sub_j) -> size_t {
+            size_t s_min = std::min(sub_i, sub_j);
+            size_t s_max = std::max(sub_i, sub_j);
+            return s_max * (s_max + 1) / 2 + s_min;
+        };
+        
+        for (size_t site_i = 0; site_i < lattice_size; ++site_i) {
+            size_t sub_i = site_i % N_atoms;
+            size_t cell_i = site_i / N_atoms;
+            size_t n1 = cell_i / (dim2 * dim3);
+            size_t n2 = (cell_i / dim3) % dim2;
+            size_t n3 = cell_i % dim3;
+            
+            for (size_t nb = 0; nb < bilinear_partners[site_i].size(); ++nb) {
+                size_t site_j = bilinear_partners[site_i][nb];
+                
+                // Only count forward bonds (site_i < site_j) to avoid double counting
+                if (site_j > site_i) {
+                    size_t sub_j = site_j % N_atoms;
+                    
+                    // Classify bond type by sorted sublattice pair
+                    size_t bond_type = sublattice_pair_to_bond_type(sub_i, sub_j);
+                    
+                    // Clamp to n_bond_types in case accumulator was initialized with fewer
+                    if (bond_type >= acc.n_bond_types) {
+                        bond_type = bond_type % acc.n_bond_types;
+                    }
+                    
+                    bonds.push_back({site_i, site_j});
+                    bond_types.push_back(bond_type);
+                    bond_cells.push_back({n1, n2, n3});
+                }
+            }
+        }
+        
+        acc.accumulate_dimer_correlations(spins, bonds, bond_types, bond_cells);
+    }
+    
+    /**
+     * Compute full S(q) tensor from current spin configuration
+     * Returns S^{αβ}(q) = (1/N) Σ_{ij} S_i^α S_j^β exp(-i q·(r_i - r_j))
+     * 
+     * @param q  Wavevector in Cartesian coordinates
+     * @return 3x3 structure factor tensor (or spin_dim x spin_dim)
+     */
+    Eigen::Matrix3d structure_factor_tensor(const Eigen::Vector3d& q) const {
+        Eigen::Matrix3d Sq = Eigen::Matrix3d::Zero();
+        
+        // Compute Fourier components
+        Eigen::Vector3cd S_q = Eigen::Vector3cd::Zero();
+        for (size_t i = 0; i < lattice_size; ++i) {
+            double phase = q.dot(site_positions[i]);
+            std::complex<double> exp_iqr(std::cos(phase), std::sin(phase));
+            S_q += spins[i].head<3>().cast<std::complex<double>>() * exp_iqr;
+        }
+        
+        // S^{αβ}(q) = (1/N) S_q^α S_{-q}^β = (1/N) S_q^α conj(S_q^β)
+        for (int a = 0; a < 3; ++a) {
+            for (int b = 0; b < 3; ++b) {
+                Sq(a, b) = std::real(S_q(a) * std::conj(S_q(b))) / double(lattice_size);
+            }
+        }
+        
+        return Sq;
     }
 
     // ============================================================

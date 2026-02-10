@@ -158,6 +158,28 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pt_ranks_per_point") {
                 config.pt_ranks_per_point = stoi(value);
             }
+            else if (key == "pt_accumulate_correlations") {
+                config.pt_accumulate_correlations = parse_bool(value);
+            }
+            else if (key == "pt_n_bond_types") {
+                config.pt_n_bond_types = stoull(value);
+            }
+            // Optimized temperature grid parameters (Bittner et al.)
+            else if (key == "pt_optimize_temperatures") {
+                config.pt_optimize_temperatures = parse_bool(value);
+            }
+            else if (key == "pt_target_acceptance") {
+                config.pt_target_acceptance = stod(value);
+            }
+            else if (key == "pt_optimization_warmup") {
+                config.pt_optimization_warmup = stoull(value);
+            }
+            else if (key == "pt_optimization_sweeps") {
+                config.pt_optimization_sweeps = stoull(value);
+            }
+            else if (key == "pt_optimization_iterations") {
+                config.pt_optimization_iterations = stoull(value);
+            }
             else if (key == "pump_amplitude") {
                 config.pump_amplitude = stod(value);
             }
@@ -285,6 +307,40 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "use_mpi") {
                 config.use_mpi = parse_bool(value);
             }
+            // GNEB kinetic barrier analysis parameters
+            else if (key == "gneb_n_images") {
+                config.gneb_n_images = stoull(value);
+            }
+            else if (key == "gneb_spring_constant") {
+                config.gneb_spring_constant = stod(value);
+            }
+            else if (key == "gneb_max_iterations") {
+                config.gneb_max_iterations = stoull(value);
+            }
+            else if (key == "gneb_force_tolerance") {
+                config.gneb_force_tolerance = stod(value);
+            }
+            else if (key == "gneb_use_climbing_image") {
+                config.gneb_use_climbing_image = parse_bool(value);
+            }
+            else if (key == "gneb_climbing_threshold") {
+                config.gneb_climbing_threshold = stod(value);
+            }
+            else if (key == "gneb_analysis_steps") {
+                config.gneb_analysis_steps = stoull(value);
+            }
+            else if (key == "gneb_phonon_amplitude_max") {
+                config.gneb_phonon_amplitude_max = stod(value);
+            }
+            else if (key == "gneb_save_path_evolution") {
+                config.gneb_save_path_evolution = parse_bool(value);
+            }
+            else if (key == "gneb_initial_state_file") {
+                config.gneb_initial_state_file = value;
+            }
+            else if (key == "gneb_final_state_file") {
+                config.gneb_final_state_file = value;
+            }
             else {
                 // Treat as Hamiltonian parameter
                 config.hamiltonian_params[key] = stod(value);
@@ -337,6 +393,7 @@ void SpinConfig::to_file(const string& filename) const {
         case SimulationType::PUMP_PROBE: file << "pump_probe"; break;
         case SimulationType::TWOD_COHERENT_SPECTROSCOPY: file << "2dcs"; break;
         case SimulationType::PARAMETER_SWEEP: file << "parameter_sweep"; break;
+        case SimulationType::KINETIC_BARRIER_ANALYSIS: file << "kinetic_barrier"; break;
         case SimulationType::CUSTOM: file << "custom"; break;
     }
     file << "\n";
@@ -355,6 +412,17 @@ void SpinConfig::to_file(const string& filename) const {
     file << "md_timestep = " << md_timestep << "\n";
     file << "md_integrator = " << md_integrator << "\n";
     file << "use_gpu = " << (use_gpu ? "true" : "false") << "\n\n";
+    
+    file << "# Parallel Tempering Parameters\n";
+    file << "pt_exchange_frequency = " << pt_exchange_frequency << "\n";
+    file << "overrelaxation_rate = " << overrelaxation_rate << "\n";
+    file << "probe_rate = " << probe_rate << "\n";
+    file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+    file << "pt_optimize_temperatures = " << (pt_optimize_temperatures ? "true" : "false") << "\n";
+    file << "pt_target_acceptance = " << pt_target_acceptance << "\n";
+    file << "pt_optimization_warmup = " << pt_optimization_warmup << "\n";
+    file << "pt_optimization_sweeps = " << pt_optimization_sweeps << "\n";
+    file << "pt_optimization_iterations = " << pt_optimization_iterations << "\n\n";
     
     file << "# Parameter Sweep Parameters\n";
     file << "sweep_parameter = " << sweep_parameter << "\n";
@@ -445,6 +513,7 @@ void SpinConfig::print() const {
         case SimulationType::PUMP_PROBE: cout << "Pump-Probe"; break;
         case SimulationType::TWOD_COHERENT_SPECTROSCOPY: cout << "2DCS Spectroscopy"; break;
         case SimulationType::PARAMETER_SWEEP: cout << "Parameter Sweep"; break;
+        case SimulationType::KINETIC_BARRIER_ANALYSIS: cout << "Kinetic Barrier (GNEB)"; break;
         case SimulationType::CUSTOM: cout << "Custom"; break;
     }
     cout << "\n";
@@ -453,6 +522,21 @@ void SpinConfig::print() const {
     cout << "Temperature: " << T_start << " -> " << T_end << "\n";
     cout << "Field: " << field_strength << " along [" 
          << field_direction[0] << "," << field_direction[1] << "," << field_direction[2] << "]\n";
+    
+    // Parallel tempering specific output
+    if (simulation == SimulationType::PARALLEL_TEMPERING) {
+        cout << "\nParallel Tempering Settings:\n";
+        cout << "  Exchange frequency: " << pt_exchange_frequency << "\n";
+        cout << "  Overrelaxation rate: " << overrelaxation_rate << "\n";
+        cout << "  Probe rate: " << probe_rate << "\n";
+        cout << "  Optimize temperatures: " << (pt_optimize_temperatures ? "yes (Bittner et al.)" : "no (geometric)") << "\n";
+        if (pt_optimize_temperatures) {
+            cout << "  Target acceptance rate: " << pt_target_acceptance * 100 << "%\n";
+            cout << "  Optimization warmup: " << pt_optimization_warmup << " sweeps\n";
+            cout << "  Optimization sweeps: " << pt_optimization_sweeps << " per iteration\n";
+            cout << "  Optimization iterations: " << pt_optimization_iterations << "\n";
+        }
+    }
     
     if (!hamiltonian_params.empty()) {
         cout << "\nHamiltonian Parameters:\n";

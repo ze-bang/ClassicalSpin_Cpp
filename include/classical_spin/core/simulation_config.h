@@ -99,6 +99,8 @@ struct SimulationConfig {
     size_t pt_probe_rate = 2000;
     bool pt_boundary_update = false;
     vector<int> pt_ranks_to_write = {0};
+    bool pt_accumulate_correlations = false;  // Accumulate real-space correlations for S(q)
+    size_t pt_n_bond_types = 3;               // Number of bond types for dimer correlations
     
     // ============================================================
     // PUMP-PROBE PARAMETERS
@@ -371,6 +373,8 @@ inline SimulationConfig SimulationConfig::from_file(const string& filename) {
             else if (key == "pt_probe_rate") config.pt_probe_rate = std::stoul(value);
             else if (key == "pt_boundary_update") config.pt_boundary_update = parse_bool(value);
             else if (key == "pt_ranks_to_write") config.pt_ranks_to_write = parse_int_list(value);
+            else if (key == "pt_accumulate_correlations") config.pt_accumulate_correlations = parse_bool(value);
+            else if (key == "pt_n_bond_types") config.pt_n_bond_types = std::stoul(value);
             
             // Pump-Probe
             else if (key == "pulse_amplitude") config.pulse_amplitude = std::stod(value);

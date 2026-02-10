@@ -1,0 +1,41 @@
+# Non-Kramers Pyrochlore Simulated Annealing Configuration
+# Exchange: Jpm, Jzz, Jpmpm (angle-dependent exchange in local frame)
+
+# System specification
+system = pyrochlore_non_kramer
+lattice_size = 4,4,4
+spin_length = 0.5
+
+# Simulation settings
+simulation_mode = parallel_tempering
+num_trials = 1
+output_dir = output_non_kramer
+
+# Temperature schedule
+T_start = 5.0
+T_end = 0.001
+cooling_rate = 0.9
+annealing_steps = 100000
+
+# Exchange parameters (in local basis)
+# J(theta) = [[-2*Jpm + 2*Jpmpm*cos(theta), -2*Jpmpm*sin(theta), 0],
+#             [-2*Jpmpm*sin(theta), -2*Jpm - 2*Jpmpm*cos(theta), 0],
+#             [0, 0, Jzz]]
+Jpm = 0.0
+Jzz = 1.0
+Jpmpm = 0.0
+
+# Non-Kramers field response parameters
+# field_local = {delta1*hx*hz + delta2*(hy^2 - hx^2), delta1*hy*hz + 2*delta2*hx*hy, hz}
+delta1 = 0.000
+delta2 = -0.0000
+
+# Magnetic field
+field_strength = 8.0
+field_direction = 1,1,1
+
+# MC parameters
+gaussian_move = false
+
+ranks_to_write = ALL
+

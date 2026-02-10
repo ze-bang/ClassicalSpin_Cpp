@@ -37,6 +37,7 @@ enum class SimulationType {
     PUMP_PROBE,
     TWOD_COHERENT_SPECTROSCOPY,  // 2DCS / pump-probe spectroscopy
     PARAMETER_SWEEP,             // Sweep over any Hamiltonian parameter
+    KINETIC_BARRIER_ANALYSIS,    // GNEB-based kinetic barrier evolution during phonon driving
     CUSTOM
 };
 
@@ -100,6 +101,15 @@ struct SpinConfig {
     size_t probe_rate = 2000;
     vector<int> ranks_to_write = {0};
     int pt_ranks_per_point = 0;  // Number of MPI ranks per sweep point for parallel tempering (0 = auto)
+    bool pt_accumulate_correlations = false;  // Accumulate real-space correlations for S(q)
+    size_t pt_n_bond_types = 3;               // Number of bond types for dimer correlations
+    
+    // Optimized temperature grid parameters (Bittner et al., Phys. Rev. Lett. 101, 130603 (2008))
+    bool pt_optimize_temperatures = true;          // Use feedback-optimized temperature grid
+    double pt_target_acceptance = 0.5;             // Target acceptance rate (0.5 = optimal per Bittner)
+    size_t pt_optimization_warmup = 500;           // Warmup sweeps for temperature optimization
+    size_t pt_optimization_sweeps = 500;           // Sweeps per feedback iteration
+    size_t pt_optimization_iterations = 20;        // Number of feedback iterations
     
     // Pump-probe parameters (SU2 / default)
     double pump_amplitude = 1.0;
@@ -139,6 +149,19 @@ struct SpinConfig {
     vector<double> sweep_steps;        // Step sizes for each parameter
     
     SimulationType sweep_base_simulation = SimulationType::SIMULATED_ANNEALING;  // Simulation to run at each sweep point
+    
+    // GNEB kinetic barrier analysis parameters
+    size_t gneb_n_images = 16;              // Number of images on the MEP
+    double gneb_spring_constant = 1.0;      // Spring constant for NEB
+    size_t gneb_max_iterations = 1000;      // Maximum GNEB iterations
+    double gneb_force_tolerance = 1e-4;     // Convergence tolerance on force
+    bool gneb_use_climbing_image = true;    // Use climbing image NEB
+    double gneb_climbing_threshold = 0.1;   // When to switch to climbing image
+    size_t gneb_analysis_steps = 100;       // Number of time steps for barrier evolution analysis
+    double gneb_phonon_amplitude_max = 1.0; // Maximum phonon amplitude for sweep
+    bool gneb_save_path_evolution = true;   // Save MEP at each time step
+    string gneb_initial_state_file = "";    // Path to initial state config (if empty, will anneal)
+    string gneb_final_state_file = "";      // Path to final state config (if empty, will anneal)
     
     // Field parameters
     double field_strength = 0.0;
@@ -203,6 +226,25 @@ inline SystemType parse_system(const string& str) {
     throw runtime_error("Unknown system type: " + str);
 }
 
+/**
+ * Convert SystemType enum to string (inverse of parse_system)
+ */
+inline string system_type_to_string(SystemType sys) {
+    switch (sys) {
+        case SystemType::HONEYCOMB_BCAO: return "honeycomb_bcao";
+        case SystemType::HONEYCOMB_KITAEV: return "honeycomb_kitaev";
+        case SystemType::PYROCHLORE: return "pyrochlore";
+        case SystemType::PYROCHLORE_NON_KRAMER: return "pyrochlore_non_kramer";
+        case SystemType::TMFEO3: return "tmfeo3";
+        case SystemType::TMFEO3_FE: return "tmfeo3_fe";
+        case SystemType::TMFEO3_TM: return "tmfeo3_tm";
+        case SystemType::NCTO: return "ncto";
+        case SystemType::NCTO_STRAIN: return "ncto_strain";
+        case SystemType::CUSTOM: return "custom";
+        default: return "unknown";
+    }
+}
+
 inline SimulationType parse_simulation(const string& str) {
     string s = trim(str);
     if (s == "simulated_annealing" || s == "SA" || s == "annealing") return SimulationType::SIMULATED_ANNEALING;
@@ -211,6 +253,7 @@ inline SimulationType parse_simulation(const string& str) {
     if (s == "pump_probe" || s == "PUMP_PROBE" || s == "pump-probe") return SimulationType::PUMP_PROBE;
     if (s == "2dcs" || s == "2DCS" || s == "spectroscopy" || s == "pump_probe_spectroscopy") return SimulationType::TWOD_COHERENT_SPECTROSCOPY;
     if (s == "parameter_sweep" || s == "PARAMETER_SWEEP" || s == "sweep") return SimulationType::PARAMETER_SWEEP;
+    if (s == "kinetic_barrier" || s == "KINETIC_BARRIER" || s == "gneb" || s == "GNEB" || s == "barrier_analysis") return SimulationType::KINETIC_BARRIER_ANALYSIS;
     if (s == "custom" || s == "CUSTOM") return SimulationType::CUSTOM;
     throw runtime_error("Unknown simulation type: " + str);
 }

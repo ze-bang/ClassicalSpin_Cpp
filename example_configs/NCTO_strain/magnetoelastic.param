@@ -25,13 +25,13 @@
 system = NCTO_STRAIN
 
 # Lattice dimensions (honeycomb, 2D)
-lattice_size = 8,8,1
+lattice_size = 24,24,1
 
 # Simulation type: SA, MD
-simulation_mode = molecular_dynamics
+simulation_mode = simulated_annealing
 
 # Output directory
-output_dir = NCTO_strain_output
+output_dir = NCTO_strain_SA
 
 # Number of trials (samples)
 num_trials = 1
@@ -42,14 +42,14 @@ num_trials = 1
 # Kitaev-Heisenberg-Gamma-Gamma' model
 # H_spin = Σ [J S_i·S_j + K S_i^γ S_j^γ + Γ(S_i^α S_j^β + S_i^β S_j^α) + Γ'(...)]
 
-J = -1.0                 # Heisenberg coupling (meV)
-K = -6.0                 # Kitaev coupling (meV, ferromagnetic)
-Gamma = 8.0              # Gamma coupling (meV)
-Gammap = -4.0            # Gamma' coupling (meV)
-J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
-J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
-J3 = 0.0                 # Third-neighbor Heisenberg (meV)
-J7 = 0.0                 # Six-spin ring exchange (meV)
+J = -1                  # Heisenberg coupling (-1/5 meV)
+K = -6                # Kitaev coupling (-2/3 meV, ferromagnetic)
+Gamma = 8               # Gamma coupling (meV)
+Gammap = -4             # Gamma' coupling (-1/2 meV)
+J2_A = -0.0              # 2nd NN Heisenberg (sublattice A, -1/4 meV)
+J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, 1/4 meV)
+J3 = -0.2                 # Third-neighbor Heisenberg (-1/5 meV)
+J7 = -2         # Six-spin ring exchange (meV) - SWEPT
 
 # Time-dependent J7 modulation via E1 phonon drive
 # J7(t) = J7 * (1 - γ*f(t)*λ_Eg/4)^4 * (1 + γ*f(t)*λ_Eg/2)^2
@@ -71,8 +71,8 @@ alpha_gilbert = 0.01
 # λ_{A1g} couples strain A1g mode (ε_xx + ε_yy) to spin A1g basis functions
 # λ_{Eg} couples strain Eg modes (ε_xx - ε_yy, 2ε_xy) to spin Eg basis functions
 
-lambda_A1g = 0.5         # A1g channel magnetoelastic coupling
-lambda_Eg = 0.3          # Eg channel magnetoelastic coupling
+lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
+lambda_Eg = 0.0          # Eg channel magnetoelastic coupling
 
 # ============================================
 # ELASTIC PARAMETERS
@@ -127,26 +127,12 @@ drive_strength_Eg1 = 0.0   # Drive Eg,1 (ε_xx - ε_yy)
 drive_strength_Eg2 = 0.0   # Drive Eg,2 (2ε_xy)
 
 # ============================================
-# MOLECULAR DYNAMICS PARAMETERS
-# ============================================
-dt = 0.01                 # Time step
-t_final = 100.0           # Total simulation time
-md_output_every = 100     # Output every N steps
-
-# ============================================
 # SIMULATED ANNEALING PARAMETERS
 # ============================================
 # Used if simulation_mode = simulated_annealing
-T_start = 15.0            # Starting temperature
-T_end = 0.001             # Final temperature
+T_start = 25.0            # Starting temperature
+T_end = 0.01             # Final temperature
 annealing_steps = 10000   # Number of temperature steps
-overrelaxation_rate = 10  # MC sweeps per temperature step
-cooling_rate = 0.99       # Exponential cooling factor
-
-# ============================================
-# INITIALIZATION
-# ============================================
-# Options: random (default), or load from file
-# initial_spin_config = path/to/spins.txt
-use_ferromagnetic_init = false
-ferromagnetic_direction = 0,0,1
+overrelaxation_rate = 1  # MC sweeps per temperature step
+cooling_rate = 0.9       # Exponential cooling factor
+T_zero = true
