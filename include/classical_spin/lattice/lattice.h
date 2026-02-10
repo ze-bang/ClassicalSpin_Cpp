@@ -4079,6 +4079,8 @@ public:
         vector<double> scalar_chiralities;
         vector<Eigen::Vector3d> vector_chiralities;
         vector<Eigen::Matrix3d> nematic_orders;  // [bond_type x spin_component]
+        vector<double> monopole_densities;
+        vector<Eigen::Vector4d> monopole_by_sublattices;
         
         size_t expected_samples = n_measure / probe_rate + 100;
         energies.reserve(expected_samples);
@@ -4087,6 +4089,8 @@ public:
         scalar_chiralities.reserve(expected_samples);
         vector_chiralities.reserve(expected_samples);
         nematic_orders.reserve(expected_samples);
+        monopole_densities.reserve(expected_samples);
+        monopole_by_sublattices.reserve(expected_samples);
         
         // Initialize correlation accumulator if requested
         RealSpaceCorrelationAccumulator corr_acc;
@@ -4143,6 +4147,8 @@ public:
                     scalar_chiralities.push_back(params.scalar_chirality);
                     vector_chiralities.push_back(params.vector_chirality);
                     nematic_orders.push_back(params.nematic_order);
+                    monopole_densities.push_back(params.monopole_density);
+                    monopole_by_sublattices.push_back(params.monopole_by_sublattice);
                 }
                 
                 // Accumulate real-space correlations for S(q)
@@ -4183,7 +4189,8 @@ public:
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
                 std::filesystem::create_directories(rank_dir);
                 save_kagome_order_parameters(rank_dir, curr_Temp, 
-                                             scalar_chiralities, vector_chiralities, nematic_orders);
+                                             scalar_chiralities, vector_chiralities, nematic_orders,
+                                             monopole_densities, monopole_by_sublattices);
             }
         }
         
@@ -4199,11 +4206,14 @@ public:
     /**
      * Save kagome order parameters to HDF5 file (pyrochlore patch)
      * Nematic order is now component-resolved: [bond_type x spin_component] 3x3 matrix
+     * Includes monopole density (signed) and monopole by sublattice
      */
     void save_kagome_order_parameters(const string& rank_dir, double temperature,
                                        const vector<double>& scalar_chi,
                                        const vector<Eigen::Vector3d>& vector_chi,
-                                       const vector<Eigen::Matrix3d>& nematic) const {
+                                       const vector<Eigen::Matrix3d>& nematic,
+                                       const vector<double>& monopole,
+                                       const vector<Eigen::Vector4d>& monopole_sub) const {
 #ifdef HDF5_ENABLED
         string filename = rank_dir + "/kagome_order_T" + std::to_string(temperature) + ".h5";
         
@@ -4282,16 +4292,51 @@ public:
             H5::Attribute nem_attr = nem_ds.createAttribute("description", nem_str_type, scalar_space);
             nem_attr.write(nem_str_type, nem_desc.c_str());
             
+            // Write monopole density (signed) [n_samples]
+            H5::DataSet mono_ds = data.createDataSet("monopole_density", 
+                H5::PredType::NATIVE_DOUBLE, space1d);
+            mono_ds.write(monopole.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            std::string mono_desc = "Signed monopole density: sum of S_0 . (S_1 x S_2 + S_2 x S_3 + S_3 x S_1) "
+                                    "over all tetrahedra, normalized by N_cells. "
+                                    "Positive = 'in' monopole, negative = 'out' monopole.";
+            H5::StrType mono_str_type(H5::PredType::C_S1, mono_desc.size() + 1);
+            H5::Attribute mono_attr = mono_ds.createAttribute("description", mono_str_type, scalar_space);
+            mono_attr.write(mono_str_type, mono_desc.c_str());
+            
+            // Write monopole by sublattice [n_samples x 4]
+            hsize_t dims_mono_sub[2] = {n_samples, 4};
+            H5::DataSpace space_mono_sub(2, dims_mono_sub);
+            
+            vector<double> mono_sub_flat(n_samples * 4);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (int s = 0; s < 4; ++s) {
+                    mono_sub_flat[i * 4 + s] = monopole_sub[i](s);
+                }
+            }
+            
+            H5::DataSet mono_sub_ds = data.createDataSet("monopole_by_sublattice", 
+                H5::PredType::NATIVE_DOUBLE, space_mono_sub);
+            mono_sub_ds.write(mono_sub_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            std::string mono_sub_desc = "Shape: [n_samples, sublattice]. "
+                                        "Sublattice 0=apex, 1,2,3=kagome. "
+                                        "Sum of apex contribution for each tetrahedron type.";
+            H5::StrType mono_sub_str_type(H5::PredType::C_S1, mono_sub_desc.size() + 1);
+            H5::Attribute mono_sub_attr = mono_sub_ds.createAttribute("description", mono_sub_str_type, scalar_space);
+            mono_sub_attr.write(mono_sub_str_type, mono_sub_desc.c_str());
+            
             // Write summary statistics
             H5::Group stats = file.createGroup("/statistics");
             
-            // Scalar chirality stats
+            // Scalar chirality stats - save as datasets for easier access
             double chi_mean = std::accumulate(scalar_chi.begin(), scalar_chi.end(), 0.0) / n_samples;
             double chi2_mean = 0.0;
             for (double c : scalar_chi) chi2_mean += c * c;
             chi2_mean /= n_samples;
-            double chi_std = std::sqrt(chi2_mean - chi_mean * chi_mean);
+            double chi_std = std::sqrt(std::max(0.0, chi2_mean - chi_mean * chi_mean));
             
+            // Save as both attributes (backward compat) and datasets
             H5::Attribute chi_mean_attr = stats.createAttribute("scalar_chirality_mean", 
                 H5::PredType::NATIVE_DOUBLE, scalar_space);
             chi_mean_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_mean);
@@ -4299,6 +4344,11 @@ public:
             H5::Attribute chi_std_attr = stats.createAttribute("scalar_chirality_std", 
                 H5::PredType::NATIVE_DOUBLE, scalar_space);
             chi_std_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_std);
+            
+            // Also save chi^2 mean for susceptibility: chi_susc = (<chi^2> - <chi>^2) / T
+            H5::Attribute chi2_attr = stats.createAttribute("scalar_chirality_squared_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi2_attr.write(H5::PredType::NATIVE_DOUBLE, &chi2_mean);
             
             // Vector chirality component-resolved stats
             Eigen::Vector3d kappa_mean = Eigen::Vector3d::Zero();
@@ -4338,6 +4388,34 @@ public:
                 H5::PredType::NATIVE_DOUBLE, space_q);
             Q_mean_ds.write(Q_arr, H5::PredType::NATIVE_DOUBLE);
             
+            // Monopole density stats
+            double mono_mean = std::accumulate(monopole.begin(), monopole.end(), 0.0) / n_samples;
+            double mono2_mean = 0.0;
+            for (double m : monopole) mono2_mean += m * m;
+            mono2_mean /= n_samples;
+            double mono_std = std::sqrt(std::max(0.0, mono2_mean - mono_mean * mono_mean));
+            
+            H5::Attribute mono_mean_attr = stats.createAttribute("monopole_density_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            mono_mean_attr.write(H5::PredType::NATIVE_DOUBLE, &mono_mean);
+            
+            H5::Attribute mono_std_attr = stats.createAttribute("monopole_density_std", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            mono_std_attr.write(H5::PredType::NATIVE_DOUBLE, &mono_std);
+            
+            // Monopole by sublattice mean
+            Eigen::Vector4d mono_sub_mean = Eigen::Vector4d::Zero();
+            for (const auto& ms : monopole_sub) mono_sub_mean += ms;
+            mono_sub_mean /= n_samples;
+            
+            hsize_t dims_mono_stats[1] = {4};
+            H5::DataSpace space_mono_stats(1, dims_mono_stats);
+            double mono_sub_arr[4] = {mono_sub_mean(0), mono_sub_mean(1), 
+                                       mono_sub_mean(2), mono_sub_mean(3)};
+            H5::DataSet mono_sub_mean_ds = stats.createDataSet("monopole_by_sublattice_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_mono_stats);
+            mono_sub_mean_ds.write(mono_sub_arr, H5::PredType::NATIVE_DOUBLE);
+            
             file.close();
             
         } catch (const H5::Exception& e) {
@@ -4350,7 +4428,8 @@ public:
         file << "# Kagome order parameters (sublattices 1,2,3)\n";
         file << "# Component-resolved nematic: Q_ij^alpha = <S_i^alpha * S_j^alpha>\n";
         file << "# sample scalar_chi kappa_x kappa_y kappa_z "
-             << "Q12_x Q12_y Q12_z Q23_x Q23_y Q23_z Q31_x Q31_y Q31_z\n";
+             << "Q12_x Q12_y Q12_z Q23_x Q23_y Q23_z Q31_x Q31_y Q31_z "
+             << "monopole mono_sub0 mono_sub1 mono_sub2 mono_sub3\n";
         for (size_t i = 0; i < scalar_chi.size(); ++i) {
             file << i << " " << scalar_chi[i] << " "
                  << vector_chi[i](0) << " " << vector_chi[i](1) << " " << vector_chi[i](2);
@@ -4358,6 +4437,10 @@ public:
                 for (int c = 0; c < 3; ++c) {
                     file << " " << nematic[i](b, c);
                 }
+            }
+            file << " " << monopole[i];
+            for (int s = 0; s < 4; ++s) {
+                file << " " << monopole_sub[i](s);
             }
             file << "\n";
         }
