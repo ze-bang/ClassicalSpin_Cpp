@@ -2274,26 +2274,21 @@ public:
     vector<SpinVector> magnetization_sublattice() const {
         vector<SpinVector> M_sub(N_atoms);
         size_t n_cells = dim1 * dim2 * dim3;
+        double inv_n_cells = 1.0 / double(n_cells);
         
         for (size_t atom = 0; atom < N_atoms; ++atom) {
             M_sub[atom] = SpinVector::Zero(spin_dim);
         }
         
-        // Sum over all unit cells for each sublattice (in local frame)
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    for (size_t atom = 0; atom < N_atoms; ++atom) {
-                        size_t site_idx = flatten_index(i, j, k, atom);
-                        M_sub[atom] += spins[site_idx];
-                    }
-                }
-            }
+        // Flat loop over all sites - more cache-friendly
+        for (size_t site = 0; site < lattice_size; ++site) {
+            size_t atom = site % N_atoms;
+            M_sub[atom] += spins[site];
         }
         
         // Normalize by number of unit cells
         for (size_t atom = 0; atom < N_atoms; ++atom) {
-            M_sub[atom] /= double(n_cells);
+            M_sub[atom] *= inv_n_cells;
         }
         
         return M_sub;
@@ -2510,36 +2505,7 @@ public:
      * @return Average scalar chirality per triangle (1 triangle per unit cell)
      */
     double compute_kagome_scalar_chirality() const {
-        // Only valid for pyrochlore lattices
-        if (!is_pyrochlore()) {
-            std::cerr << "Warning: compute_kagome_scalar_chirality() is only valid for pyrochlore lattices" << std::endl;
-            return 0.0;
-        }
-        if (N_atoms < 4 || spin_dim < 3) {
-            return 0.0;  // Not applicable
-        }
-        
-        double chi_sum = 0.0;
-        size_t n_cells = dim1 * dim2 * dim3;
-        
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    // Intra-cell triangle: 1(i,j,k), 2(i,j,k), 3(i,j,k)
-                    size_t idx1 = flatten_index(i, j, k, 1);
-                    size_t idx2 = flatten_index(i, j, k, 2);
-                    size_t idx3 = flatten_index(i, j, k, 3);
-                    
-                    Eigen::Vector3d S1(spins[idx1](0), spins[idx1](1), spins[idx1](2));
-                    Eigen::Vector3d S2(spins[idx2](0), spins[idx2](1), spins[idx2](2));
-                    Eigen::Vector3d S3(spins[idx3](0), spins[idx3](1), spins[idx3](2));
-                    
-                    chi_sum += S1.dot(S2.cross(S3));
-                }
-            }
-        }
-        
-        return chi_sum / n_cells;
+        return compute_pyrochlore_order_parameters_fast().scalar_chirality;
     }
     
     /**
@@ -2551,36 +2517,7 @@ public:
      * @return Average vector chirality (3-component) per triangle
      */
     Eigen::Vector3d compute_kagome_vector_chirality() const {
-        // Only valid for pyrochlore lattices
-        if (!is_pyrochlore()) {
-            std::cerr << "Warning: compute_kagome_vector_chirality() is only valid for pyrochlore lattices" << std::endl;
-            return Eigen::Vector3d::Zero();
-        }
-        if (N_atoms < 4 || spin_dim < 3) {
-            return Eigen::Vector3d::Zero();
-        }
-        
-        Eigen::Vector3d kappa_sum = Eigen::Vector3d::Zero();
-        size_t n_cells = dim1 * dim2 * dim3;
-        
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    size_t idx1 = flatten_index(i, j, k, 1);
-                    size_t idx2 = flatten_index(i, j, k, 2);
-                    size_t idx3 = flatten_index(i, j, k, 3);
-                    
-                    Eigen::Vector3d S1(spins[idx1](0), spins[idx1](1), spins[idx1](2));
-                    Eigen::Vector3d S2(spins[idx2](0), spins[idx2](1), spins[idx2](2));
-                    Eigen::Vector3d S3(spins[idx3](0), spins[idx3](1), spins[idx3](2));
-                    
-                    // κ = S1 × S2 + S2 × S3 + S3 × S1
-                    kappa_sum += S1.cross(S2) + S2.cross(S3) + S3.cross(S1);
-                }
-            }
-        }
-        
-        return kappa_sum / n_cells;
+        return compute_pyrochlore_order_parameters_fast().vector_chirality;
     }
     
     /**
@@ -2669,59 +2606,7 @@ public:
      * @return Eigen::Vector4d with monopole density per sublattice type
      */
     Eigen::Vector4d compute_monopole_density_by_sublattice() const {
-        // Only valid for pyrochlore lattices
-        if (!is_pyrochlore()) {
-            std::cerr << "Warning: compute_monopole_density_by_sublattice() is only valid for pyrochlore lattices" << std::endl;
-            return Eigen::Vector4d::Zero();
-        }
-        if (N_atoms < 4 || spin_dim < 3) {
-            return Eigen::Vector4d::Zero();
-        }
-        
-        Eigen::Vector4d density = Eigen::Vector4d::Zero();
-        size_t n_cells = dim1 * dim2 * dim3;
-        
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    // Get S^z for each sublattice
-                    std::array<double, 4> Sz;
-                    for (size_t mu = 0; mu < 4; ++mu) {
-                        size_t idx = flatten_index(i, j, k, mu);
-                        Sz[mu] = spins[idx](2);
-                    }
-                    
-                    // Count positive and negative S^z
-                    int n_pos = 0, n_neg = 0;
-                    for (size_t mu = 0; mu < 4; ++mu) {
-                        if (Sz[mu] > 0) n_pos++;
-                        else n_neg++;
-                    }
-                    
-                    // Check for 3-1 split (monopole)
-                    if (n_pos == 3 && n_neg == 1) {
-                        // Find the minority (negative) sublattice
-                        for (size_t mu = 0; mu < 4; ++mu) {
-                            if (Sz[mu] <= 0) {
-                                density(mu) += 1.0;
-                                break;
-                            }
-                        }
-                    } else if (n_pos == 1 && n_neg == 3) {
-                        // Find the minority (positive) sublattice
-                        for (size_t mu = 0; mu < 4; ++mu) {
-                            if (Sz[mu] > 0) {
-                                density(mu) += 1.0;
-                                break;
-                            }
-                        }
-                    }
-                    // 2-2 split or 4-0 split: no minority, don't count
-                }
-            }
-        }
-        
-        return density / n_cells;
+        return compute_pyrochlore_order_parameters_fast().monopole_by_sublattice;
     }
     
     /**
