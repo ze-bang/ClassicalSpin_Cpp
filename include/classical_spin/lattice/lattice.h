@@ -361,85 +361,120 @@ struct RealSpaceCorrelationAccumulator {
      * 
      * Uses symmetry: C^{αβ}_{ij} = C^{βα}_{ji}, so we store symmetrized form
      * 
+     * OPTIMIZED: Pre-compute spin arrays organized by sublattice for cache efficiency,
+     * then use direct indexing instead of per-cell modular arithmetic.
+     * 
      * @param spins         Current spin configuration [n_sites]
-     * @param site_to_sub   Mapping from site index to sublattice index
-     * @param site_to_cell  Mapping from site index to (n1, n2, n3) cell indices
+     * @param site_to_sub   Mapping from site index to sublattice index (unused, kept for API)
+     * @param site_to_cell  Mapping from site index to (n1, n2, n3) cell indices (unused, kept for API)
      */
     void accumulate_spin_correlations(
         const vector<Eigen::VectorXd>& spins,
-        const function<size_t(size_t)>& site_to_sublattice,
-        const function<array<size_t, 3>(size_t)>& site_to_cell) 
+        const function<size_t(size_t)>& /* site_to_sublattice */,
+        const function<array<size_t, 3>(size_t)>& /* site_to_cell */) 
     {
         if (!initialized) {
             throw std::runtime_error("RealSpaceCorrelationAccumulator not initialized");
         }
         
         size_t n_cells = dim1 * dim2 * dim3;
+        double inv_n_cells = 1.0 / double(n_cells);
         
-        // Compute sublattice magnetizations for this sample
+        // ========== PHASE 1: Pre-compute spin arrays organized by sublattice ==========
+        // spins_by_sub[sub][cell_idx] = 3-component spin vector
+        // This layout gives cache-friendly access for the correlation loops
+        vector<vector<Eigen::Vector3d>> spins_by_sub(n_sublattices, vector<Eigen::Vector3d>(n_cells));
         vector<Eigen::Vector3d> M_sub(n_sublattices, Eigen::Vector3d::Zero());
-        for (size_t site = 0; site < n_sites; ++site) {
-            size_t sub = site_to_sublattice(site);
-            M_sub[sub] += spins[site].head<3>();
+        
+        for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
+            for (size_t sub = 0; sub < n_sublattices; ++sub) {
+                size_t site = cell_idx * n_sublattices + sub;
+                Eigen::Vector3d S = spins[site].head<3>();
+                spins_by_sub[sub][cell_idx] = S;
+                M_sub[sub] += S;
+            }
         }
+        
+        // Finalize sublattice magnetizations
         for (size_t sub = 0; sub < n_sublattices; ++sub) {
-            M_sub[sub] /= double(n_cells);
+            M_sub[sub] *= inv_n_cells;
             spin_mean_sum[sub] += M_sub[sub];
             spin_mean_sq_sum[sub] += M_sub[sub].cwiseProduct(M_sub[sub]);
         }
         
-        // Accumulate correlations for each (cell_displacement, sublattice_pair, spin_component)
-        // Loop over cell displacements
+        // ========== PHASE 2: Pre-compute cell index lookup for displaced cells ==========
+        // displaced_cell[dn1][dn2][dn3][n1][n2][n3] would be 6D, too much memory
+        // Instead, precompute the 1D displacement of cell_idx under each (dn1,dn2,dn3)
+        // cell_j = displaced_cell_idx[cell_disp_idx][cell_i]
+        vector<vector<size_t>> displaced_cell_idx(n_cells, vector<size_t>(n_cells));
+        
         for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
             for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
                 for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
-                    size_t cell_disp_idx = cell_displacement_index(dn1, dn2, dn3);
-                    
-                    // Loop over sublattice pairs with symmetry (sub_i ≤ sub_j)
-                    for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
-                        for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
-                            size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
-                            
-                            // Accumulate 6 symmetric spin components
-                            array<double, 6> corr_components = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-                            
-                            // Average over all unit cells
-                            for (size_t n1 = 0; n1 < dim1; ++n1) {
-                                for (size_t n2 = 0; n2 < dim2; ++n2) {
-                                    for (size_t n3 = 0; n3 < dim3; ++n3) {
-                                        // Site i at (n1, n2, n3, sub_i)
-                                        size_t site_i = ((n1 * dim2 + n2) * dim3 + n3) * n_sublattices + sub_i;
-                                        
-                                        // Site j at ((n1+dn1)%dim1, (n2+dn2)%dim2, (n3+dn3)%dim3, sub_j)
-                                        size_t m1 = (n1 + dn1) % dim1;
-                                        size_t m2 = (n2 + dn2) % dim2;
-                                        size_t m3 = (n3 + dn3) % dim3;
-                                        size_t site_j = ((m1 * dim2 + m2) * dim3 + m3) * n_sublattices + sub_j;
-                                        
-                                        Eigen::Vector3d Si = spins[site_i].head<3>();
-                                        Eigen::Vector3d Sj = spins[site_j].head<3>();
-                                        
-                                        // Symmetric components: xx, xy, xz, yy, yz, zz
-                                        // For off-diagonal: symmetrize (S_i^α S_j^β + S_i^β S_j^α)/2
-                                        corr_components[0] += Si[0] * Sj[0];  // xx
-                                        corr_components[1] += 0.5 * (Si[0] * Sj[1] + Si[1] * Sj[0]);  // xy
-                                        corr_components[2] += 0.5 * (Si[0] * Sj[2] + Si[2] * Sj[0]);  // xz
-                                        corr_components[3] += Si[1] * Sj[1];  // yy
-                                        corr_components[4] += 0.5 * (Si[1] * Sj[2] + Si[2] * Sj[1]);  // yz
-                                        corr_components[5] += Si[2] * Sj[2];  // zz
-                                    }
-                                }
-                            }
-                            
-                            // Normalize by number of cells
-                            double inv_n_cells = 1.0 / double(n_cells);
-                            for (size_t c = 0; c < 6; ++c) {
-                                corr_components[c] *= inv_n_cells;
-                                size_t idx = spin_corr_index(cell_disp_idx, sub_pair_idx, c);
-                                spin_corr_sum[idx] += corr_components[c];
-                                spin_corr_sq_sum[idx] += corr_components[c] * corr_components[c];
+                    size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    for (size_t n1 = 0; n1 < dim1; ++n1) {
+                        for (size_t n2 = 0; n2 < dim2; ++n2) {
+                            for (size_t n3 = 0; n3 < dim3; ++n3) {
+                                size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
+                                size_t m1 = (n1 + dn1) % dim1;
+                                size_t m2 = (n2 + dn2) % dim2;
+                                size_t m3 = (n3 + dn3) % dim3;
+                                size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
+                                displaced_cell_idx[disp_idx][cell_i] = cell_j;
                             }
                         }
+                    }
+                }
+            }
+        }
+        
+        // ========== PHASE 3: Accumulate correlations ==========
+        // Loop over sublattice pairs FIRST (outermost) for better cache locality
+        // since spins_by_sub is organized by sublattice
+        for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
+            const auto& S_sub_i = spins_by_sub[sub_i];  // Cache reference
+            
+            for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
+                const auto& S_sub_j = spins_by_sub[sub_j];  // Cache reference
+                size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
+                
+                // Loop over cell displacements
+                for (size_t cell_disp_idx = 0; cell_disp_idx < n_cells; ++cell_disp_idx) {
+                    const auto& disp_map = displaced_cell_idx[cell_disp_idx];
+                    
+                    // Accumulate 6 symmetric spin components
+                    double corr_xx = 0.0, corr_xy = 0.0, corr_xz = 0.0;
+                    double corr_yy = 0.0, corr_yz = 0.0, corr_zz = 0.0;
+                    
+                    // Average over all unit cells
+                    for (size_t cell_i = 0; cell_i < n_cells; ++cell_i) {
+                        size_t cell_j = disp_map[cell_i];
+                        
+                        const Eigen::Vector3d& Si = S_sub_i[cell_i];
+                        const Eigen::Vector3d& Sj = S_sub_j[cell_j];
+                        
+                        // Symmetric components: xx, xy, xz, yy, yz, zz
+                        corr_xx += Si[0] * Sj[0];
+                        corr_xy += 0.5 * (Si[0] * Sj[1] + Si[1] * Sj[0]);
+                        corr_xz += 0.5 * (Si[0] * Sj[2] + Si[2] * Sj[0]);
+                        corr_yy += Si[1] * Sj[1];
+                        corr_yz += 0.5 * (Si[1] * Sj[2] + Si[2] * Sj[1]);
+                        corr_zz += Si[2] * Sj[2];
+                    }
+                    
+                    // Normalize and store
+                    size_t base_idx = spin_corr_index(cell_disp_idx, sub_pair_idx, 0);
+                    array<double, 6> corr = {
+                        corr_xx * inv_n_cells,
+                        corr_xy * inv_n_cells,
+                        corr_xz * inv_n_cells,
+                        corr_yy * inv_n_cells,
+                        corr_yz * inv_n_cells,
+                        corr_zz * inv_n_cells
+                    };
+                    for (size_t c = 0; c < 6; ++c) {
+                        spin_corr_sum[base_idx + c] += corr[c];
+                        spin_corr_sq_sum[base_idx + c] += corr[c] * corr[c];
                     }
                 }
             }
@@ -453,6 +488,8 @@ struct RealSpaceCorrelationAccumulator {
      * 
      * Dimer operator: D^α_b = S_i^α S_j^α for α ∈ {x, y, z}
      * Correlator: <D^α_μ(0) D^α_ν(ΔR)> for each component α
+     * 
+     * OPTIMIZED: Pre-compute cell displacement lookup, avoid repeated modular arithmetic.
      * 
      * @param spins         Current spin configuration
      * @param bonds         List of (site_i, site_j) pairs defining bonds
@@ -472,21 +509,20 @@ struct RealSpaceCorrelationAccumulator {
         size_t n_bonds = bonds.size();
         size_t n_cells = dim1 * dim2 * dim3;
         
-        // Compute all dimer operators D^α_b = S_i^α S_j^α for each component
-        // Shape: [n_bonds][3]
+        // ========== PHASE 1: Compute all dimer operators ==========
+        // D^α_b = S_i^α S_j^α for each component
         vector<array<double, 3>> D(n_bonds);
         for (size_t b = 0; b < n_bonds; ++b) {
             size_t i = bonds[b][0];
             size_t j = bonds[b][1];
-            Eigen::Vector3d Si = spins[i].head<3>();
-            Eigen::Vector3d Sj = spins[j].head<3>();
+            const Eigen::Vector3d Si = spins[i].head<3>();
+            const Eigen::Vector3d Sj = spins[j].head<3>();
             D[b][0] = Si[0] * Sj[0];  // D^x
             D[b][1] = Si[1] * Sj[1];  // D^y
             D[b][2] = Si[2] * Sj[2];  // D^z
         }
         
-        // Compute mean dimer per bond type and component
-        // Shape: [n_bond_types][3]
+        // ========== PHASE 2: Compute mean dimer per bond type ==========
         vector<array<double, 3>> D_mean(n_bond_types, {0.0, 0.0, 0.0});
         vector<size_t> D_count(n_bond_types, 0);
         for (size_t b = 0; b < n_bonds; ++b) {
@@ -498,8 +534,9 @@ struct RealSpaceCorrelationAccumulator {
         }
         for (size_t t = 0; t < n_bond_types; ++t) {
             if (D_count[t] > 0) {
+                double inv_count = 1.0 / double(D_count[t]);
                 for (size_t c = 0; c < 3; ++c) {
-                    D_mean[t][c] /= double(D_count[t]);
+                    D_mean[t][c] *= inv_count;
                     size_t idx = dimer_mean_index(t, c);
                     dimer_mean_sum[idx] += D_mean[t][c];
                     dimer_mean_sq_sum[idx] += D_mean[t][c] * D_mean[t][c];
@@ -507,8 +544,8 @@ struct RealSpaceCorrelationAccumulator {
             }
         }
         
-        // Group bonds by cell and type for efficient pairing
-        // Structure: bonds_by_cell_type[cell_idx][type] = list of bond indices
+        // ========== PHASE 3: Group bonds by cell and type ==========
+        // bonds_by_cell_type[cell_idx][type] = list of bond indices
         vector<vector<vector<size_t>>> bonds_by_cell_type(
             n_cells, vector<vector<size_t>>(n_bond_types));
         
@@ -519,50 +556,67 @@ struct RealSpaceCorrelationAccumulator {
             bonds_by_cell_type[cell_idx][type].push_back(b);
         }
         
-        // Accumulate dimer-dimer correlations for each cell offset, bond type pair, and component
+        // ========== PHASE 4: Pre-compute cell displacement lookup ==========
+        // displaced_cell[disp_idx][cell_i] = cell_j (displaced cell index)
+        vector<vector<size_t>> displaced_cell(n_cells, vector<size_t>(n_cells));
         for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
             for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
                 for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
-                    size_t cell_disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    for (size_t n1 = 0; n1 < dim1; ++n1) {
+                        size_t m1 = (n1 + dn1) % dim1;
+                        for (size_t n2 = 0; n2 < dim2; ++n2) {
+                            size_t m2 = (n2 + dn2) % dim2;
+                            for (size_t n3 = 0; n3 < dim3; ++n3) {
+                                size_t m3 = (n3 + dn3) % dim3;
+                                size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
+                                size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
+                                displaced_cell[disp_idx][cell_i] = cell_j;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // ========== PHASE 5: Accumulate dimer-dimer correlations ==========
+        // Restructure: loop over bond type pairs FIRST (fewer iterations)
+        for (size_t type_mu = 0; type_mu < n_bond_types; ++type_mu) {
+            for (size_t type_nu = 0; type_nu < n_bond_types; ++type_nu) {
+                
+                // Loop over cell displacements
+                for (size_t cell_disp_idx = 0; cell_disp_idx < n_cells; ++cell_disp_idx) {
+                    const auto& disp_map = displaced_cell[cell_disp_idx];
                     
-                    for (size_t type_mu = 0; type_mu < n_bond_types; ++type_mu) {
-                        for (size_t type_nu = 0; type_nu < n_bond_types; ++type_nu) {
-                            // Correlations for each dimer component
-                            array<double, 3> corr = {0.0, 0.0, 0.0};
-                            size_t count = 0;
-                            
-                            // Sum over all cell pairs with this offset
-                            for (size_t n1 = 0; n1 < dim1; ++n1) {
-                                for (size_t n2 = 0; n2 < dim2; ++n2) {
-                                    for (size_t n3 = 0; n3 < dim3; ++n3) {
-                                        size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
-                                        size_t m1 = (n1 + dn1) % dim1;
-                                        size_t m2 = (n2 + dn2) % dim2;
-                                        size_t m3 = (n3 + dn3) % dim3;
-                                        size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
-                                        
-                                        // All bond pairs of these types
-                                        for (size_t bi : bonds_by_cell_type[cell_i][type_mu]) {
-                                            for (size_t bj : bonds_by_cell_type[cell_j][type_nu]) {
-                                                for (size_t c = 0; c < 3; ++c) {
-                                                    corr[c] += D[bi][c] * D[bj][c];
-                                                }
-                                                count++;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            if (count > 0) {
-                                double inv_count = 1.0 / double(count);
+                    // Correlations for each dimer component
+                    array<double, 3> corr = {0.0, 0.0, 0.0};
+                    size_t count = 0;
+                    
+                    // Sum over all cell pairs with this offset
+                    for (size_t cell_i = 0; cell_i < n_cells; ++cell_i) {
+                        size_t cell_j = disp_map[cell_i];
+                        
+                        const auto& bonds_mu = bonds_by_cell_type[cell_i][type_mu];
+                        const auto& bonds_nu = bonds_by_cell_type[cell_j][type_nu];
+                        
+                        // All bond pairs of these types
+                        for (size_t bi : bonds_mu) {
+                            for (size_t bj : bonds_nu) {
                                 for (size_t c = 0; c < 3; ++c) {
-                                    corr[c] *= inv_count;
-                                    size_t idx = dimer_corr_index(cell_disp_idx, type_mu, type_nu, c);
-                                    dimer_corr_sum[idx] += corr[c];
-                                    dimer_corr_sq_sum[idx] += corr[c] * corr[c];
+                                    corr[c] += D[bi][c] * D[bj][c];
                                 }
+                                count++;
                             }
+                        }
+                    }
+                    
+                    if (count > 0) {
+                        double inv_count = 1.0 / double(count);
+                        for (size_t c = 0; c < 3; ++c) {
+                            corr[c] *= inv_count;
+                            size_t idx = dimer_corr_index(cell_disp_idx, type_mu, type_nu, c);
+                            dimer_corr_sum[idx] += corr[c];
+                            dimer_corr_sq_sum[idx] += corr[c] * corr[c];
                         }
                     }
                 }
@@ -2304,6 +2358,149 @@ public:
     // ============================================================
 
     /**
+     * Structure to hold all pyrochlore order parameters
+     * Computed in a single pass for efficiency
+     */
+    struct PyrochloreOrderParameters {
+        double scalar_chirality;           // χ = <S1·(S2×S3)>
+        Eigen::Vector3d vector_chirality;  // κ = <S1×S2 + S2×S3 + S3×S1>
+        Eigen::Matrix3d nematic_order;     // Q[bond_type][component] = <Si·Sj>
+        double monopole_density;           // <Q> per tetrahedron (signed)
+        Eigen::Vector4d monopole_by_sublattice;  // Monopole density by minority sublattice
+        
+        PyrochloreOrderParameters() 
+            : scalar_chirality(0.0), 
+              vector_chirality(Eigen::Vector3d::Zero()),
+              nematic_order(Eigen::Matrix3d::Zero()),
+              monopole_density(0.0),
+              monopole_by_sublattice(Eigen::Vector4d::Zero()) {}
+    };
+    
+    /**
+     * Compute ALL pyrochlore order parameters in a single pass
+     * This is the optimized version that avoids redundant loops over cells.
+     * 
+     * Combines:
+     * - Scalar chirality (kagome triangles)
+     * - Vector chirality (kagome triangles)  
+     * - Monopole density (tetrahedra)
+     * - Signed monopole density (tetrahedra)
+     * - Monopole density by sublattice (tetrahedra)
+     * 
+     * Note: Nematic order still uses bilinear_partners for bond enumeration
+     * and is computed separately (different loop structure).
+     * 
+     * @return PyrochloreOrderParameters struct with all computed values
+     */
+    PyrochloreOrderParameters compute_pyrochlore_order_parameters_fast() const {
+        PyrochloreOrderParameters result;
+        
+        // Only valid for pyrochlore lattices
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_pyrochlore_order_parameters_fast() is only valid for pyrochlore lattices" << std::endl;
+            return result;
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return result;
+        }
+        
+        const size_t n_cells = dim1 * dim2 * dim3;
+        const double inv_n_cells = 1.0 / double(n_cells);
+        
+        // Accumulators
+        double chi_sum = 0.0;                              // Scalar chirality
+        Eigen::Vector3d kappa_sum = Eigen::Vector3d::Zero();  // Vector chirality
+        double Q_sum = 0.0;                                // Q monopole density (signed)
+        Eigen::Vector4d monopole_sub = Eigen::Vector4d::Zero();  // By sublattice
+        
+        // Single pass over all unit cells
+        for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
+            // Extract i, j, k from cell_idx
+            size_t k = cell_idx % dim3;
+            size_t j = (cell_idx / dim3) % dim2;
+            size_t i = cell_idx / (dim2 * dim3);
+            
+            // Get all 4 sublattice spins for this cell
+            size_t idx0 = flatten_index(i, j, k, 0);
+            size_t idx1 = flatten_index(i, j, k, 1);
+            size_t idx2 = flatten_index(i, j, k, 2);
+            size_t idx3 = flatten_index(i, j, k, 3);
+            
+            // Cache spin vectors (avoiding repeated VectorXd allocation)
+            const double S0z = spins[idx0](2);
+            const double S1x = spins[idx1](0), S1y = spins[idx1](1), S1z = spins[idx1](2);
+            const double S2x = spins[idx2](0), S2y = spins[idx2](1), S2z = spins[idx2](2);
+            const double S3x = spins[idx3](0), S3y = spins[idx3](1), S3z = spins[idx3](2);
+            
+            // ===== CHIRALITY (kagome triangle 1,2,3) =====
+            // S2 × S3
+            double cross_x = S2y * S3z - S2z * S3y;
+            double cross_y = S2z * S3x - S2x * S3z;
+            double cross_z = S2x * S3y - S2y * S3x;
+            
+            // Scalar chirality: χ = S1 · (S2 × S3)
+            chi_sum += S1x * cross_x + S1y * cross_y + S1z * cross_z;
+            
+            // Vector chirality: κ = S1 × S2 + S2 × S3 + S3 × S1
+            // S1 × S2
+            double s1xs2_x = S1y * S2z - S1z * S2y;
+            double s1xs2_y = S1z * S2x - S1x * S2z;
+            double s1xs2_z = S1x * S2y - S1y * S2x;
+            
+            // S3 × S1
+            double s3xs1_x = S3y * S1z - S3z * S1y;
+            double s3xs1_y = S3z * S1x - S3x * S1z;
+            double s3xs1_z = S3x * S1y - S3y * S1x;
+            
+            kappa_sum(0) += s1xs2_x + cross_x + s3xs1_x;  // Note: S2×S3 = cross
+            kappa_sum(1) += s1xs2_y + cross_y + s3xs1_y;
+            kappa_sum(2) += s1xs2_z + cross_z + s3xs1_z;
+            
+            // ===== MONOPOLE (tetrahedron 0,1,2,3) =====
+            // Q = Σ_μ S^z_μ (signed monopole charge)
+            double Q_tet = S0z + S1z + S2z + S3z;
+            Q_sum += Q_tet;
+            
+            // Monopole by sublattice (3-1 split only)
+            std::array<double, 4> Sz = {S0z, S1z, S2z, S3z};
+            int n_pos = 0, n_neg = 0;
+            for (size_t mu = 0; mu < 4; ++mu) {
+                if (Sz[mu] > 0) n_pos++;
+                else n_neg++;
+            }
+            
+            if (n_pos == 3 && n_neg == 1) {
+                // Find the minority (negative) sublattice
+                for (size_t mu = 0; mu < 4; ++mu) {
+                    if (Sz[mu] <= 0) {
+                        monopole_sub(mu) += 1.0;
+                        break;
+                    }
+                }
+            } else if (n_pos == 1 && n_neg == 3) {
+                // Find the minority (positive) sublattice
+                for (size_t mu = 0; mu < 4; ++mu) {
+                    if (Sz[mu] > 0) {
+                        monopole_sub(mu) += 1.0;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Normalize
+        result.scalar_chirality = chi_sum * inv_n_cells;
+        result.vector_chirality = kappa_sum * inv_n_cells;
+        result.monopole_density = Q_sum * inv_n_cells;
+        result.monopole_by_sublattice = monopole_sub * inv_n_cells;
+        
+        // Nematic order requires bond enumeration - compute separately
+        result.nematic_order = compute_kagome_nematic_order();
+        
+        return result;
+    }
+
+    /**
      * Compute scalar chirality on kagome triangles
      * χ = S1 · (S2 × S3) per intra-cell triangle
      * 
@@ -2458,80 +2655,6 @@ public:
     }
     
     /**
-     * Compute monopole density for pyrochlore (non-Kramers)
-     * 
-     * Monopole charge per tetrahedron: Q = Σ_μ S^z_μ where μ ∈ {0,1,2,3}
-     * In the local frame, S^z is the Ising-like component along local [111].
-     * 
-     * For ice rules: Q = 0 (2-in-2-out)
-     * Monopole: Q = ±2 (3-in-1-out or 1-in-3-out)
-     * Double monopole: Q = ±4 (all-in or all-out)
-     * 
-     * @return Average monopole density |Q| per tetrahedron
-     */
-    double compute_monopole_density() const {
-        // Only valid for pyrochlore lattices
-        if (!is_pyrochlore()) {
-            std::cerr << "Warning: compute_monopole_density() is only valid for pyrochlore lattices" << std::endl;
-            return 0.0;
-        }
-        if (N_atoms < 4 || spin_dim < 3) {
-            return 0.0;
-        }
-        
-        double Q_sum = 0.0;
-        size_t n_cells = dim1 * dim2 * dim3;
-        
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    // Sum S^z over all 4 sublattices in this tetrahedron
-                    double Q_tet = 0.0;
-                    for (size_t mu = 0; mu < N_atoms; ++mu) {
-                        size_t idx = flatten_index(i, j, k, mu);
-                        Q_tet += spins[idx](2);  // z-component in local frame
-                    }
-                    Q_sum += std::abs(Q_tet);
-                }
-            }
-        }
-        
-        return Q_sum / n_cells;
-    }
-    
-    /**
-     * Compute signed monopole density (net charge)
-     * 
-     * @return Average signed monopole charge Q per tetrahedron
-     */
-    double compute_monopole_density_signed() const {
-        // Only valid for pyrochlore lattices
-        if (!is_pyrochlore()) {
-            std::cerr << "Warning: compute_monopole_density_signed() is only valid for pyrochlore lattices" << std::endl;
-            return 0.0;
-        }
-        if (N_atoms < 4 || spin_dim < 3) {
-            return 0.0;
-        }
-        
-        double Q_sum = 0.0;
-        size_t n_cells = dim1 * dim2 * dim3;
-        
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    for (size_t mu = 0; mu < N_atoms; ++mu) {
-                        size_t idx = flatten_index(i, j, k, mu);
-                        Q_sum += spins[idx](2);
-                    }
-                }
-            }
-        }
-        
-        return Q_sum / n_cells;
-    }
-    
-    /**
      * Compute monopole density decomposed by sublattice type
      * 
      * For a 3-in-1-out monopole, the "type" is determined by which sublattice μ
@@ -2603,13 +2726,24 @@ public:
     
     /**
      * Compute all kagome order parameters at once
+     * Uses the fast single-pass implementation internally.
      * 
      * @return Tuple of (scalar_chirality, vector_chirality, nematic_order_matrix)
      */
     std::tuple<double, Eigen::Vector3d, Eigen::Matrix3d> compute_kagome_order_parameters() const {
-        return {compute_kagome_scalar_chirality(), 
-                compute_kagome_vector_chirality(),
-                compute_kagome_nematic_order()};
+        auto params = compute_pyrochlore_order_parameters_fast();
+        return {params.scalar_chirality, params.vector_chirality, params.nematic_order};
+    }
+    
+    /**
+     * Compute all monopole diagnostics at once
+     * Uses the fast single-pass implementation internally.
+     * 
+     * @return Tuple of (monopole_density (signed), monopole_by_sublattice)
+     */
+    std::tuple<double, Eigen::Vector4d> compute_monopole_diagnostics() const {
+        auto params = compute_pyrochlore_order_parameters_fast();
+        return {params.monopole_density, params.monopole_by_sublattice};
     }
 
     // ============================================================
@@ -4118,11 +4252,12 @@ public:
                 magnetizations.push_back(magnetization_global());
                 sublattice_mags.push_back(magnetization_sublattice());
                 
-                // Kagome order parameters (pyrochlore patch)
-                if (N_atoms >= 4) {
-                    scalar_chiralities.push_back(compute_kagome_scalar_chirality());
-                    vector_chiralities.push_back(compute_kagome_vector_chirality());
-                    nematic_orders.push_back(compute_kagome_nematic_order());
+                // Kagome order parameters (pyrochlore) - use fast single-pass version
+                if (is_pyrochlore() && N_atoms >= 4) {
+                    auto params = compute_pyrochlore_order_parameters_fast();
+                    scalar_chiralities.push_back(params.scalar_chirality);
+                    vector_chiralities.push_back(params.vector_chirality);
+                    nematic_orders.push_back(params.nematic_order);
                 }
                 
                 // Accumulate real-space correlations for S(q)
@@ -4154,8 +4289,8 @@ public:
             }
         }
         
-        // Save kagome order parameters (pyrochlore patch)
-        if (N_atoms >= 4 && !scalar_chiralities.empty()) {
+        // Save kagome order parameters (pyrochlore only)
+        if (is_pyrochlore() && N_atoms >= 4 && !scalar_chiralities.empty()) {
             bool should_write = (std::find(rank_to_write.begin(), rank_to_write.end(), rank) != rank_to_write.end())
                                || (std::find(rank_to_write.begin(), rank_to_write.end(), -1) != rank_to_write.end());
             
