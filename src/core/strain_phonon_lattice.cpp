@@ -3950,12 +3950,10 @@ void StrainPhononLattice::gather_and_save_statistics_comprehensive(int rank, int
 #endif
             
             // Save spin configuration only if verbose mode is enabled
-            if (verbose) {
-                save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
-                save_spin_strain_config(rank_dir + "/spin_strain_config.txt");  // Combined for GNEB
-                save_strain_state(rank_dir + "/strain.txt");
-                save_positions(rank_dir + "/positions.txt");
-            }
+            save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
+            save_spin_strain_config(rank_dir + "/spin_strain_config.txt");  // Combined for GNEB
+            save_strain_state(rank_dir + "/strain.txt");
+            save_positions(rank_dir + "/positions.txt");
         }
         
         MPI_Barrier(comm);
