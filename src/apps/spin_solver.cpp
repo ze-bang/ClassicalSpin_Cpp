@@ -1090,24 +1090,25 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
 }
 
 /**
- * Run kinetic barrier analysis for StrainPhononLattice using GNEB with strain
+ * Run kinetic barrier analysis for StrainPhononLattice using spin-only GNEB
+ * with adiabatic strain relaxation
  * 
- * This finds the minimum energy path in the COMBINED (spin, strain) configuration
- * space. The strain is a dynamical degree of freedom that relaxes along with
- * spins to find the TRUE transition pathway including lattice distortion.
+ * This finds the minimum energy path in SPIN-ONLY configuration space,
+ * with strain adiabatically relaxed at each image. This is the appropriate
+ * approach when phonons relax faster than spin dynamics (typical case).
  * 
  * Key physics:
- * - Configuration space is (S_1, ..., S_N, ε_Eg1, ε_Eg2)
- * - Spins live on S^2 (geodesic manifold), strain is Euclidean
- * - The MEP shows how the lattice distorts during the magnetic transition
- * - No external parameter sweep needed - strain follows the optimal path
+ * - Configuration space is (S_1, ..., S_N) with geodesic constraints |S_i| = 1
+ * - At each GNEB image, strain is relaxed to equilibrium: ε = ε^eq({S})
+ * - Energy is the adiabatic potential: E_eff({S}) = min_ε [E_spin + E_elastic + E_ME]
+ * - This gives the true MEP on the adiabatic potential energy surface
  */
 void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "\n" << string(70, '=') << endl;
-        cout << "KINETIC BARRIER ANALYSIS (GNEB with STRAIN)" << endl;
+        cout << "KINETIC BARRIER ANALYSIS (GNEB with ADIABATIC STRAIN)" << endl;
         cout << string(70, '=') << endl;
-        cout << "Configuration space: (spins, ε_Eg1, ε_Eg2)" << endl;
+        cout << "Configuration space: spins only (strain relaxed adiabatically)" << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
         cout << "\nGNEB parameters:" << endl;
@@ -1116,9 +1117,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         cout << "  Max iterations:   " << config.gneb_max_iterations << endl;
         cout << "  Force tolerance:  " << config.gneb_force_tolerance << endl;
         cout << "  Climbing image:   " << (config.gneb_use_climbing_image ? "yes" : "no") << endl;
-        cout << "  Strain weight:    1.0 (equal to spin weight)" << endl;
         cout << "\nMagnetoelastic coupling:" << endl;
         cout << "  lambda_Eg: " << lattice.magnetoelastic_params.lambda_Eg << endl;
+        cout << "  Strain relaxation: adiabatic (fast phonon limit)" << endl;
         cout << string(70, '-') << endl;
     }
     
@@ -1138,7 +1139,8 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         // ================================================================
         // STEP 1: Get initial spin state and relax strain
         // ================================================================
-        SpinStrainConfig initial_state(n_sites);
+        GNEBSpinConfig initial_spins(n_sites);
+        StrainEg initial_strain;
         
         if (!config.gneb_initial_state_file.empty()) {
             // Load combined (spins, strain) from file
@@ -1146,17 +1148,13 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             lattice.load_spin_strain_config(config.gneb_initial_state_file);
             cout << "  File: " << config.gneb_initial_state_file << endl;
             
-            // Extract to SpinStrainConfig
+            // Extract spins
             for (size_t i = 0; i < n_sites; ++i) {
-                initial_state.spins[i] = lattice.spins[i];
+                initial_spins[i] = lattice.spins[i];
             }
-            // Get Eg strain from lattice (averaging over bond types)
-            double Eg1 = 0.0, Eg2 = 0.0;
-            for (size_t b = 0; b < 3; ++b) {
-                Eg1 += (lattice.strain.epsilon_xx[b] - lattice.strain.epsilon_yy[b]) / 2.0;
-                Eg2 += lattice.strain.epsilon_xy[b];
-            }
-            initial_state.strain = StrainEg(Eg1 / 3.0, Eg2 / 3.0);
+            // Relax strain to equilibrium for these spins
+            auto [init_Eg1, init_Eg2] = lattice.relax_strain_at_fixed_spins(initial_spins);
+            initial_strain = StrainEg(init_Eg1, init_Eg2);
         } else {
             // Find via annealing (strain is relaxed during annealing)
             cout << "[Rank " << rank << "] Finding initial (triple-Q) ground state..." << endl;
@@ -1176,36 +1174,40 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             
             // Extract spin configuration
             for (size_t i = 0; i < n_sites; ++i) {
-                initial_state.spins[i] = lattice.spins[i];
+                initial_spins[i] = lattice.spins[i];
             }
             
             // Relax strain at fixed initial spins to find equilibrium strain
             cout << "[Rank " << rank << "] Relaxing strain for initial state..." << endl;
-            auto [init_Eg1, init_Eg2] = lattice.relax_strain_at_fixed_spins(initial_state.spins);
-            initial_state.strain = StrainEg(init_Eg1, init_Eg2);
+            auto [init_Eg1, init_Eg2] = lattice.relax_strain_at_fixed_spins(initial_spins);
+            initial_strain = StrainEg(init_Eg1, init_Eg2);
         }
         
         // Update lattice strain to match initial_state
         for (size_t b = 0; b < 3; ++b) {
-            lattice.strain.epsilon_xx[b] = initial_state.strain.Eg1;
-            lattice.strain.epsilon_yy[b] = -initial_state.strain.Eg1;
-            lattice.strain.epsilon_xy[b] = initial_state.strain.Eg2;
+            lattice.strain.epsilon_xx[b] = initial_strain.Eg1;
+            lattice.strain.epsilon_yy[b] = -initial_strain.Eg1;
+            lattice.strain.epsilon_xy[b] = initial_strain.Eg2;
         }
         
         // Analyze initial state
+        for (size_t i = 0; i < n_sites; ++i) {
+            lattice.spins[i] = initial_spins[i];
+        }
         auto initial_cv = lattice.compute_collective_variables();
         cout << "[Rank " << rank << "] Initial state:" << endl;
         cout << "  m_3Q       = " << initial_cv.m_3Q << endl;
         cout << "  m_zigzag   = " << initial_cv.m_zigzag << endl;
         cout << "  f_Eg_amp   = " << initial_cv.f_Eg_amplitude << endl;
-        cout << "  ε_Eg       = (" << initial_state.strain.Eg1 << ", " << initial_state.strain.Eg2 << ")" << endl;
+        cout << "  ε_Eg       = (" << initial_strain.Eg1 << ", " << initial_strain.Eg2 << ")" << endl;
         
         lattice.save_spin_strain_config(trial_dir + "/triple_q_state.txt");
         
         // ================================================================
         // STEP 2: Get final spin state and relax strain
         // ================================================================
-        SpinStrainConfig final_state(n_sites);
+        GNEBSpinConfig final_spins(n_sites);
+        StrainEg final_strain;
         
         if (!config.gneb_final_state_file.empty()) {
             // Load combined (spins, strain) from file
@@ -1213,17 +1215,13 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             lattice.load_spin_strain_config(config.gneb_final_state_file);
             cout << "  File: " << config.gneb_final_state_file << endl;
             
-            // Extract to SpinStrainConfig
+            // Extract spins
             for (size_t i = 0; i < n_sites; ++i) {
-                final_state.spins[i] = lattice.spins[i];
+                final_spins[i] = lattice.spins[i];
             }
-            // Get Eg strain from lattice (averaging over bond types)
-            double Eg1 = 0.0, Eg2 = 0.0;
-            for (size_t b = 0; b < 3; ++b) {
-                Eg1 += (lattice.strain.epsilon_xx[b] - lattice.strain.epsilon_yy[b]) / 2.0;
-                Eg2 += lattice.strain.epsilon_xy[b];
-            }
-            final_state.strain = StrainEg(Eg1 / 3.0, Eg2 / 3.0);
+            // Relax strain to equilibrium for these spins
+            auto [final_Eg1, final_Eg2] = lattice.relax_strain_at_fixed_spins(final_spins);
+            final_strain = StrainEg(final_Eg1, final_Eg2);
         } else {
             // Find via annealing with bias strain
             cout << "[Rank " << rank << "] Finding zigzag state with applied strain..." << endl;
@@ -1244,7 +1242,7 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             
             // Extract spin configuration - strain will be relaxed below
             for (size_t i = 0; i < n_sites; ++i) {
-                final_state.spins[i] = lattice.spins[i];
+                final_spins[i] = lattice.spins[i];
             }
             
             // Relax strain at fixed final spins (find equilibrium without bias)

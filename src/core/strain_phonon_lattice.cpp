@@ -1139,80 +1139,6 @@ double StrainPhononLattice::site_ring_exchange_energy(const SpinVector& spin_her
 // SPIN BASIS FUNCTIONS FOR D3d IRREPS
 // ============================================================
 
-double StrainPhononLattice::f_K_A1g() const {
-    // f_K^{A1g} = Σ_<ij>_γ S_i^γ S_j^γ
-    // Sum of Kitaev terms over all NN bonds
-    double f = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int bond_type = nn_bond_types[i][n];
-                
-                // Kitaev term: S_i^γ S_j^γ where γ = bond type
-                f += Si(bond_type) * Sj(bond_type);
-            }
-        }
-    }
-    
-    return f;
-}
-
-double StrainPhononLattice::f_J_A1g() const {
-    // f_J^{A1g} = Σ_r (S^x_r S^x_{M_{y,z}} + S^y_r S^y_{M_{x,z}} + S^z_r S^z_{M_{x,y}})
-    // where M_{y,z} means y and z bonds (not x), etc.
-    // On each bond type γ, we sum the spin components α ≠ γ: S^α_i S^α_j
-    double f = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];  // bond type (0=x, 1=y, 2=z)
-                
-                // Sum over components α ≠ γ
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                f += Si(alpha) * Sj(alpha) + Si(beta) * Sj(beta);
-            }
-        }
-    }
-    
-    return f;
-}
-
-double StrainPhononLattice::f_Gamma_A1g() const {
-    // f_Γ^{A1g} = Σ_<ij>_γ (S_i^α S_j^β + S_i^β S_j^α) where (α,β) ≠ γ
-    double f = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                
-                // Get α, β ≠ γ
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                
-                f += Si(alpha) * Sj(beta) + Si(beta) * Sj(alpha);
-            }
-        }
-    }
-    
-    return f;
-}
-
 double StrainPhononLattice::f_K_Eg1() const {
     // f_K^{Eg,1} = S^x_r S^x_{M_x} + S^y_r S^y_{M_y} - 2 S^z_r S^z_{M_z}
     // This is the Eg,1 basis for Kitaev terms under D3d
@@ -1555,61 +1481,6 @@ double StrainPhononLattice::dH_deps_xy(size_t bond_type) const {
 // ============================================================
 // DERIVATIVE OF SPIN BASIS FUNCTIONS W.R.T. SPINS
 // ============================================================
-
-SpinVector StrainPhononLattice::df_K_A1g_dS(size_t site) const {
-    // ∂f_K^{A1g}/∂S_site = Σ_n S_n^γ δ_γ,bond_type(site,n)
-    // where n runs over neighbors of site
-    SpinVector df = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        df(gamma) += spins[j](gamma);
-    }
-    
-    return df;
-}
-
-SpinVector StrainPhononLattice::df_J_A1g_dS(size_t site) const {
-    // ∂f_J^{A1g}/∂S_site for f_J^{A1g} = Σ (S^α_i S^α_j) where α ≠ γ (bond type)
-    // On a γ-bond connecting site to neighbor j:
-    //   contribution to derivative is S_j^α in component α, and S_j^β in component β
-    //   where α, β ≠ γ
-    SpinVector df = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        // ∂/∂S^α_i (S^α_i S^α_j) = S^α_j
-        // ∂/∂S^β_i (S^β_i S^β_j) = S^β_j
-        df(alpha) += spins[j](alpha);
-        df(beta) += spins[j](beta);
-    }
-    
-    return df;
-}
-
-SpinVector StrainPhononLattice::df_Gamma_A1g_dS(size_t site) const {
-    // ∂f_Γ^{A1g}/∂S_site for Γ term: S_i^α S_j^β + S_i^β S_j^α
-    SpinVector df = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        // ∂/∂S_i^α (S_i^α S_j^β) = S_j^β
-        // ∂/∂S_i^β (S_i^β S_j^α) = S_j^α
-        df(alpha) += spins[j](beta);
-        df(beta) += spins[j](alpha);
-    }
-    
-    return df;
-}
 
 SpinVector StrainPhononLattice::df_K_Eg1_dS(size_t site) const {
     // ∂f_K^{Eg,1}/∂S_site where f_K^{Eg,1} = f_x + f_y - 2*f_z
@@ -2848,27 +2719,24 @@ void StrainPhononLattice::integrate_adaptive(double dt_init, double t_start, dou
 
 void StrainPhononLattice::relax_strain(bool verbose) {
     // Relax strain to equilibrium given current spin configuration.
+    // We ignore A1g channel - only Eg magnetoelastic coupling is active.
     // 
-    // The total Hamiltonian (elastic + magnetoelastic) is:
+    // The total Hamiltonian (elastic + Eg magnetoelastic) is:
     // H = (1/2)[C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²] 
-    //   + λ_A1g (ε_xx + ε_yy) f_A1g + λ_Eg [(ε_xx - ε_yy) f_Eg1 + 2ε_xy f_Eg2]
+    //   + λ_Eg [(ε_xx - ε_yy) f_Eg1 + 2ε_xy f_Eg2]
     //
     // Setting ∂H/∂ε = 0:
-    // C11 ε_xx + C12 ε_yy = -λ_A1g f_A1g - λ_Eg f_Eg1
-    // C12 ε_xx + C11 ε_yy = -λ_A1g f_A1g + λ_Eg f_Eg1
-    // 4C44 ε_xy = -2λ_Eg f_Eg2
+    // C11 ε_xx + C12 ε_yy + λ_Eg f_Eg1 = 0
+    // C12 ε_xx + C11 ε_yy - λ_Eg f_Eg1 = 0
+    // 4C44 ε_xy + 2λ_Eg f_Eg2 = 0
     //
-    // Solving for ε_xx, ε_yy:
     // From the first two equations (2x2 linear system):
-    // [C11  C12] [ε_xx]   [-λ_A1g f_A1g - λ_Eg f_Eg1]
-    // [C12  C11] [ε_yy] = [-λ_A1g f_A1g + λ_Eg f_Eg1]
+    // [C11  C12] [ε_xx]   [-λ_Eg f_Eg1]
+    // [C12  C11] [ε_yy] = [+λ_Eg f_Eg1]
     //
     // Using Cramer's rule with det = C11² - C12²:
-    // ε_xx = [(-λ_A1g f_A1g - λ_Eg f_Eg1) C11 - (-λ_A1g f_A1g + λ_Eg f_Eg1) C12] / det
-    //      = [-λ_A1g f_A1g (C11 - C12) - λ_Eg f_Eg1 (C11 + C12)] / det
-    //
-    // ε_yy = [C11 (-λ_A1g f_A1g + λ_Eg f_Eg1) - C12 (-λ_A1g f_A1g - λ_Eg f_Eg1)] / det
-    //      = [-λ_A1g f_A1g (C11 - C12) + λ_Eg f_Eg1 (C11 + C12)] / det
+    // ε_xx = [-λ_Eg f_Eg1 * C11 - λ_Eg f_Eg1 * C12] / det = -λ_Eg f_Eg1 (C11 + C12) / det
+    // ε_yy = [C11 * λ_Eg f_Eg1 + C12 * λ_Eg f_Eg1] / det = +λ_Eg f_Eg1 (C11 + C12) / det
     //
     // ε_xy = -λ_Eg f_Eg2 / (2C44)
     
@@ -2876,7 +2744,6 @@ void StrainPhononLattice::relax_strain(bool verbose) {
     double C12 = elastic_params.C12;
     double C44 = elastic_params.C44;
     
-    double lambda_A1g = magnetoelastic_params.lambda_A1g;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
     // Determinant of the 2x2 elastic matrix for ε_xx, ε_yy
@@ -2888,22 +2755,22 @@ void StrainPhononLattice::relax_strain(bool verbose) {
         return;
     }
     
-    // Compute spin basis function factors
+    // Compute Eg spin basis function factors (includes Kitaev, Heisenberg, Gamma, Gamma' terms)
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
     
-    double A1g_spin_factor = (J + K) * f_K_A1g() + J * f_J_A1g() + Gamma * f_Gamma_A1g();
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2();
+    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
+    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
     
-    // RHS of the linear system
-    double b_xx = -lambda_A1g * A1g_spin_factor - lambda_Eg * Eg1_spin_factor;
-    double b_yy = -lambda_A1g * A1g_spin_factor + lambda_Eg * Eg1_spin_factor;
-    
-    // Solve for equilibrium strain (same for all bond types in this approximation)
-    double eps_xx_eq = (b_xx * C11 - b_yy * C12) / det;
-    double eps_yy_eq = (-b_xx * C12 + b_yy * C11) / det;
+    // Solve for equilibrium strain (Eg-only, same for all bond types)
+    // ε_xx = -λ_Eg f_Eg1 (C11 + C12) / det
+    // ε_yy = +λ_Eg f_Eg1 (C11 + C12) / det
+    double eps_xx_eq = -lambda_Eg * Eg1_spin_factor * (C11 + C12) / det;
+    double eps_yy_eq = +lambda_Eg * Eg1_spin_factor * (C11 + C12) / det;
     double eps_xy_eq = -lambda_Eg * Eg2_spin_factor / (2.0 * C44);
     
     // Set all bond types to equilibrium values
@@ -3062,9 +2929,6 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
         cout << "T=0 mode enabled: will perform " << n_deterministics << " deterministic sweeps at T=0" << endl;
     }
     
-    // Relax strain at the start to get initial magnetoelastic field
-    relax_strain(false);
-    
     // How often to re-relax strain during MC sweeps
     const size_t strain_relax_interval = 1;  // Every sweep
     
@@ -3081,11 +2945,6 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
                 }
             } else {
                 acc_sum += mc_sweep(T, gaussian_move, sigma);
-            }
-            
-            // Periodically relax strain to maintain adiabatic equilibrium
-            if ((s + 1) % strain_relax_interval == 0) {
-                relax_strain(false);
             }
         }
         
@@ -3116,18 +2975,6 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
         ++temp_step;
     }
     
-    // Additional sweeps at T_end for equilibration
-    cout << "Equilibrating at T=" << T_end << "..." << endl;
-    double final_acc_sum = 0.0;
-    for (size_t s = 0; s < n_sweeps; ++s) {
-        final_acc_sum += mc_sweep(T_end, gaussian_move, sigma);
-        relax_strain(false);
-    }
-    double final_acceptance = final_acc_sum / double(n_sweeps);
-    double final_E = spin_energy() / lattice_size;
-    cout << "Final T=" << T_end << ", E/N=" << final_E 
-         << ", acc=" << std::fixed << std::setprecision(3) << final_acceptance << endl;
-    
     // Final strain relaxation (verbose)
     relax_strain(true);
     
@@ -3139,16 +2986,7 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     // T=0 deterministic sweeps if requested
     if (T_zero && n_deterministics > 0) {
         cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
-        for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
-            deterministic_sweep(1);
-            relax_strain(false);  // Relax strain after each deterministic sweep
-            
-            if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
-                double E = spin_energy() / lattice_size;
-                cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
-                     << ", E/N=" << E << endl;
-            }
-        }
+        deterministic_sweep(n_deterministics);
         relax_strain(true);  // Final verbose strain relaxation
         cout << "Deterministic sweeps completed. Final energy: " << spin_energy() / lattice_size << endl;
         
@@ -3166,6 +3004,35 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
         save_spin_strain_config(out_dir + "/spin_strain_config.txt");  // Combined for GNEB
         save_positions(out_dir + "/positions.txt");
     }
+    
+    // Output final energies and C3 order breaking parameters
+    cout << "\n========== Final State Summary ==========" << endl;
+    cout << "Energies:" << endl;
+    cout << "  Spin energy:           " << std::scientific << spin_energy() << endl;
+    cout << "  Strain elastic energy: " << std::scientific << strain_energy() << endl;
+    cout << "  Magnetoelastic energy: " << std::scientific << magnetoelastic_energy() << endl;
+    cout << "  Ring exchange energy:  " << std::scientific << ring_exchange_energy() << endl;
+    double total_E = spin_energy() + strain_energy() + magnetoelastic_energy() + ring_exchange_energy();
+    cout << "  Total energy:          " << std::scientific << total_E << endl;
+    
+    cout << "\nC3 Order Breaking Parameters (D3d Irrep Spin Basis Functions):" << endl;
+    cout << "  Eg channel:" << endl;
+    cout << "    f_K^{Eg,1}    = " << std::scientific << f_K_Eg1() << endl;
+    cout << "    f_K^{Eg,2}    = " << std::scientific << f_K_Eg2() << endl;
+    cout << "    f_J^{Eg,1}    = " << std::scientific << f_J_Eg1() << endl;
+    cout << "    f_J^{Eg,2}    = " << std::scientific << f_J_Eg2() << endl;
+    cout << "    f_Γ^{Eg,1}    = " << std::scientific << f_Gamma_Eg1() << endl;
+    cout << "    f_Γ^{Eg,2}    = " << std::scientific << f_Gamma_Eg2() << endl;
+    cout << "    f_Γ'^{Eg,1}   = " << std::scientific << f_Gammap_Eg1() << endl;
+    cout << "    f_Γ'^{Eg,2}   = " << std::scientific << f_Gammap_Eg2() << endl;
+    
+    cout << "\nStrain state:" << endl;
+    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+        cout << "  Bond " << b << ": ε_xx=" << std::scientific << strain.epsilon_xx[b]
+             << ", ε_yy=" << strain.epsilon_yy[b]
+             << ", ε_xy=" << strain.epsilon_xy[b] << endl;
+    }
+    cout << "==========================================" << endl;
     
     cout << "Annealing complete!" << endl;
 }
