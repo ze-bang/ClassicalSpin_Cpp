@@ -28,7 +28,7 @@ lattice_size = 12,12,1
 simulation_mode = SA
 
 # Output directory
-output_dir = NCTO_triple_q_janssen_zigzag
+output_dir = NCTO_triple_q_janssen
 
 # Number of trials (run multiple to check for domain formation)
 num_trials = 1
@@ -52,7 +52,7 @@ J3 = 0.0
 
 # Six-spin ring exchange (CRITICAL for triple-Q selection)
 # J7 < 0 selects triple-Q over single-Q zigzag
-J7 = -0.5                 # Try range: -0.5 to -3.0
+J7 = -0.1                 # Try range: -0.5 to -3.0
 
 # External magnetic field (zero for ground state search)
 field_strength = 0.0
@@ -65,25 +65,13 @@ omega_E = 5.0
 gamma_E = 0.1
 lambda_E = 0.0
 
-omega_A = 2.5
-gamma_A = 0.05
-lambda_A = 0.0
-
-g3 = 0.0
-
-# ============================================
-# SPIN-PHONON COUPLING (disabled for pure spin SA)
-# ============================================
-lambda_xy = 0.0
-lambda_R = 0.0
-
 # ============================================
 # SIMULATED ANNEALING PARAMETERS
 # ============================================
 # Triple-Q is fragile - use aggressive annealing protocol
 
 T_start = 25.0            # Start high (well above Tc ~ 5-10 meV)
-T_end = 1e-5              # Go very low to resolve ground state
+T_end = 1e-3              # Go very low to resolve ground state
 annealing_steps = 50000  # Long annealing for convergence
 cooling_rate = 0.9     # Very slow geometric cooling
 overrelaxation_rate = 0  # Microcanonical moves to escape local minima

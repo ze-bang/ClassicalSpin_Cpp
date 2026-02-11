@@ -35,6 +35,8 @@
 #include <iomanip>
 #include <memory>
 #include <filesystem>
+#include <algorithm>
+#include <numeric>
 #include <mpi.h>
 
 #ifdef HDF5_ENABLED
@@ -2800,6 +2802,45 @@ void StrainPhononLattice::relax_strain(bool verbose) {
         std::cout << "  ε_xy = " << eps_xy_eq << std::endl;
         std::cout << "  A1g = " << eps_xx_eq + eps_yy_eq << std::endl;
         std::cout << "  Eg1 = " << eps_xx_eq - eps_yy_eq << std::endl;
+        
+        // Diagnostic: print the ∂H/∂ε = 0 analysis
+        std::cout << "  --- ∂H/∂ε = 0 diagnostic ---" << std::endl;
+        
+        // Individual Eg spin basis functions
+        double fK1 = f_K_Eg1(), fK2 = f_K_Eg2();
+        double fJ1 = f_J_Eg1(), fJ2 = f_J_Eg2();
+        double fG1 = f_Gamma_Eg1(), fG2 = f_Gamma_Eg2();
+        double fGp1 = f_Gammap_Eg1(), fGp2 = f_Gammap_Eg2();
+        
+        std::cout << "  Spin basis functions (Eg irrep):" << std::endl;
+        std::cout << "    f_K^{Eg,1}  = " << fK1 << ",  f_K^{Eg,2}  = " << fK2 << std::endl;
+        std::cout << "    f_J^{Eg,1}  = " << fJ1 << ",  f_J^{Eg,2}  = " << fJ2 << std::endl;
+        std::cout << "    f_Γ^{Eg,1}  = " << fG1 << ",  f_Γ^{Eg,2}  = " << fG2 << std::endl;
+        std::cout << "    f_Γ'^{Eg,1} = " << fGp1 << ", f_Γ'^{Eg,2} = " << fGp2 << std::endl;
+        
+        std::cout << "  Composite Eg spin factors:" << std::endl;
+        std::cout << "    Σ_Eg1 = (J+K)f_K1 + J·f_J1 + Γ·f_Γ1 + Γ'·f_Γ'1 = " << Eg1_spin_factor << std::endl;
+        std::cout << "    Σ_Eg2 = (J+K)f_K2 + J·f_J2 + Γ·f_Γ2 + Γ'·f_Γ'2 = " << Eg2_spin_factor << std::endl;
+        
+        // Show the ∂H/∂ε = 0 equations and their solutions
+        std::cout << "  Stationarity conditions ∂H/∂ε = 0:" << std::endl;
+        std::cout << "    C11·ε_xx + C12·ε_yy + λ_Eg·Σ_Eg1 = 0" << std::endl;
+        std::cout << "    C12·ε_xx + C11·ε_yy - λ_Eg·Σ_Eg1 = 0" << std::endl;
+        std::cout << "    4·C44·ε_xy + 2·λ_Eg·Σ_Eg2 = 0" << std::endl;
+        std::cout << "  Solution (det = C11²-C12² = " << det << "):" << std::endl;
+        std::cout << "    ε_xx* = -λ_Eg·Σ_Eg1·(C11+C12)/det = " << eps_xx_eq << std::endl;
+        std::cout << "    ε_yy* = +λ_Eg·Σ_Eg1·(C11+C12)/det = " << eps_yy_eq << std::endl;
+        std::cout << "    ε_xy* = -λ_Eg·Σ_Eg2/(2·C44)       = " << eps_xy_eq << std::endl;
+        
+        // Verify: evaluate ∂H/∂ε at the solved equilibrium
+        double residual_xx = C11 * eps_xx_eq + C12 * eps_yy_eq + lambda_Eg * Eg1_spin_factor;
+        double residual_yy = C12 * eps_xx_eq + C11 * eps_yy_eq - lambda_Eg * Eg1_spin_factor;
+        double residual_xy = 4.0 * C44 * eps_xy_eq + 2.0 * lambda_Eg * Eg2_spin_factor;
+        std::cout << "  Verification (∂H/∂ε at ε*):" << std::endl;
+        std::cout << "    ∂H/∂ε_xx = " << residual_xx << std::endl;
+        std::cout << "    ∂H/∂ε_yy = " << residual_yy << std::endl;
+        std::cout << "    ∂H/∂ε_xy = " << residual_xy << std::endl;
+        std::cout << "  ---------------------------------" << std::endl;
     }
 }
 
@@ -3044,14 +3085,22 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
 void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
     // Deterministic update: align each spin parallel to its local field.
     // This ensures S × H_eff = 0, eliminating precession in dynamics.
-    // Uses random site selection within each sweep for better convergence.
+    // Uses sequential site visits so every site is updated exactly once per sweep.
     
-    std::uniform_int_distribution<size_t> site_dist(0, lattice_size - 1);
+    // Create a shuffled index array for each sweep (visits each site exactly once)
+    std::vector<size_t> site_order(lattice_size);
+    std::iota(site_order.begin(), site_order.end(), 0);
+    
+    const double torque_tol = 1e-14;  // Convergence threshold
+    double max_torque = 0.0;
+    double mean_torque = 0.0;
     
     for (size_t sweep = 0; sweep < num_sweeps; ++sweep) {
-        size_t count = 0;
-        while (count < lattice_size) {
-            size_t i = site_dist(rng);
+        // Shuffle site order each sweep to avoid systematic bias
+        std::shuffle(site_order.begin(), site_order.end(), rng);
+        
+        for (size_t idx = 0; idx < lattice_size; ++idx) {
+            size_t i = site_order[idx];
             
             // Get local field (includes exchange, magnetoelastic, ring exchange)
             Eigen::Vector3d local_field = get_local_field(i);
@@ -3059,24 +3108,102 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
             
             if (norm < 1e-15) {
                 // Field is essentially zero, skip this site
-                count++;
                 continue;
             }
             
             // Align spin PARALLEL to local field (minimizes energy)
             // H_eff = -∂H/∂Si, so Si should point along H_eff to minimize E = -Si·H_eff
             spins[i] = local_field / norm * spin_length;
-            count++;
         }
         
         // Re-relax strain after each sweep to maintain adiabatic equilibrium
         relax_strain(false);
+        
+        // Check convergence periodically (every 100 sweeps or at end)
+        if ((sweep + 1) % 100 == 0 || sweep == num_sweeps - 1) {
+            max_torque = 0.0;
+            mean_torque = 0.0;
+            size_t worst_site = 0;
+            for (size_t i = 0; i < lattice_size; ++i) {
+                Eigen::Vector3d H = get_local_field(i);
+                Eigen::Vector3d S_i(spins[i](0), spins[i](1), spins[i](2));
+                Eigen::Vector3d torque = S_i.cross(H);
+                double torque_mag = torque.norm();
+                if (torque_mag > max_torque) {
+                    max_torque = torque_mag;
+                    worst_site = i;
+                }
+                mean_torque += torque_mag;
+            }
+            mean_torque /= lattice_size;
+            
+            cout << "  Sweep " << (sweep + 1) << "/" << num_sweeps 
+                 << ": max_torque = " << scientific << setprecision(3) << max_torque
+                 << " (site " << worst_site << ")"
+                 << ", mean_torque = " << mean_torque 
+                 << ", E/N = " << fixed << setprecision(6) << spin_energy() / lattice_size
+                 << endl;
+            
+            if (max_torque < torque_tol) {
+                cout << "  Converged after " << (sweep + 1) << " sweeps!" << endl;
+                break;
+            }
+        }
     }
     
     // Final strain relaxation
     relax_strain(true);
     
+    // Final detailed torque diagnostic
+    max_torque = 0.0;
+    mean_torque = 0.0;
+    size_t worst_site = 0;
+    Eigen::Vector3d worst_torque_vec = Eigen::Vector3d::Zero();
+    Eigen::Vector3d worst_H = Eigen::Vector3d::Zero();
+    Eigen::Vector3d worst_S = Eigen::Vector3d::Zero();
+    
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H = get_local_field(i);
+        Eigen::Vector3d S_i(spins[i](0), spins[i](1), spins[i](2));
+        Eigen::Vector3d torque = S_i.cross(H);
+        double torque_mag = torque.norm();
+        if (torque_mag > max_torque) {
+            max_torque = torque_mag;
+            worst_site = i;
+            worst_torque_vec = torque;
+            worst_H = H;
+            worst_S = S_i;
+        }
+        mean_torque += torque_mag;
+    }
+    mean_torque /= lattice_size;
+    
     cout << "Completed " << num_sweeps << " deterministic sweeps" << endl;
+    cout << "  Residual torque: max = " << scientific << setprecision(3) << max_torque 
+         << ", mean = " << mean_torque << endl;
+    
+    if (max_torque > 1e-12) {
+        cout << "  Worst site " << worst_site << ":" << endl;
+        cout << "    S  = (" << fixed << setprecision(8) << worst_S(0) << ", " << worst_S(1) << ", " << worst_S(2) << ")" << endl;
+        cout << "    H  = (" << worst_H(0) << ", " << worst_H(1) << ", " << worst_H(2) << ")" << endl;
+        cout << "    τ  = (" << scientific << setprecision(3) << worst_torque_vec(0) << ", " << worst_torque_vec(1) << ", " << worst_torque_vec(2) << ")" << endl;
+        cout << "    |S| = " << worst_S.norm() << ", |H| = " << worst_H.norm() << endl;
+        cout << "    S·H/|S||H| = " << fixed << setprecision(12) << worst_S.dot(worst_H) / (worst_S.norm() * worst_H.norm()) << endl;
+        
+        // Check: re-align this site and see if torque drops
+        Eigen::Vector3d H_fresh = get_local_field(worst_site);
+        spins[worst_site] = H_fresh / H_fresh.norm() * spin_length;
+        Eigen::Vector3d H_after = get_local_field(worst_site);
+        Eigen::Vector3d S_after(spins[worst_site](0), spins[worst_site](1), spins[worst_site](2));
+        Eigen::Vector3d torque_after = S_after.cross(H_after);
+        cout << "    After re-align: |τ| = " << scientific << setprecision(3) << torque_after.norm() << endl;
+        cout << "    H changed? |ΔH| = " << (H_after - H_fresh).norm() << endl;
+    }
+    
+    if (max_torque > 0.01) {
+        cout << "  WARNING: Large residual torque detected! Spins not fully equilibrated." << endl;
+        cout << "           Consider increasing n_deterministics or adding Gilbert damping." << endl;
+    }
 }
 
 // ============================================================

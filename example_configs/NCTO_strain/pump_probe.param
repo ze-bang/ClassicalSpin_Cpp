@@ -46,7 +46,7 @@ Gammap = -4.0            # Gamma' coupling (meV)
 J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # Third-neighbor Heisenberg (meV)
-J7 = -0.5          # Six-spin ring exchange (meV)
+J7 = -0.3          # Six-spin ring exchange (meV)
 
 # Time-dependent J7 modulation via Eg strain deviation
 # J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
@@ -72,7 +72,7 @@ alpha_gilbert = 0.00
 # are small (|ε| << 1). With the spin exchange parameters (K=-6, Γ=8), 
 # setting λ ~ 0.01 typically gives |ε| ~ O(1-10).
 lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
-lambda_Eg = 0.01         # Eg channel magnetoelastic coupling (reduced for stability)
+lambda_Eg = 0.3         # Eg channel magnetoelastic coupling (reduced for stability)
 
 # ============================================
 # ELASTIC PARAMETERS
