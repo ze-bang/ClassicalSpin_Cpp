@@ -1062,6 +1062,21 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
         cout << "MPI ranks: " << size << endl;
     }
     
+    // Check for Langevin mode
+    double langevin_T = config.get_param("langevin_temperature", 0.0);
+    bool use_langevin = (langevin_T > 0.0);
+    if (use_langevin) {
+        lattice.langevin_temperature = langevin_T;
+        if (lattice.alpha_gilbert <= 0.0) {
+            // Langevin requires damping; use default if not set
+            lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.01);
+        }
+        if (rank == 0) {
+            cout << "Langevin dynamics enabled: k_B T = " << langevin_T
+                 << ", α = " << lattice.alpha_gilbert << endl;
+        }
+    }
+    
     // Distribute trials across MPI ranks
     for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -1072,8 +1087,13 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
             lattice.init_random();
         }
         
-        lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
-                              config.md_save_interval, trial_dir);
+        if (use_langevin) {
+            lattice.integrate_langevin(config.md_timestep, config.md_time_start, config.md_time_end,
+                                       config.md_save_interval, trial_dir);
+        } else {
+            lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
+                                  config.md_save_interval, trial_dir);
+        }
         
         // Save final configuration
         lattice.save_spin_config(trial_dir + "/spins_final.txt");
@@ -1120,6 +1140,13 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         cout << "\nMagnetoelastic coupling:" << endl;
         cout << "  lambda_Eg: " << lattice.magnetoelastic_params.lambda_Eg << endl;
         cout << "  Strain relaxation: adiabatic (fast phonon limit)" << endl;
+        if (config.gneb_strain_sweep) {
+            cout << "\nStrain sweep: ENABLED" << endl;
+            cout << "  N strain steps:   " << config.gneb_n_strain_steps << endl;
+            cout << "  Strain max:       " << (config.gneb_strain_max < 0 ? "auto (from zigzag)" : to_string(config.gneb_strain_max)) << endl;
+            cout << "  Strain direction: " << config.gneb_strain_direction << " rad" << endl;
+            cout << "  Zigzag domain:    " << config.gneb_zigzag_domain << endl;
+        }
         cout << string(70, '-') << endl;
     }
     
@@ -1272,150 +1299,271 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         lattice.save_spin_strain_config(trial_dir + "/zigzag_state.txt");
         
         // ================================================================
-        // STEP 3: Set up SPIN-ONLY GNEB with adiabatic strain relaxation
+        // STEP 3: Determine strain sweep range
         // ================================================================
-        cout << "[Rank " << rank << "] Setting up spin-only GNEB with adiabatic strain..." << endl;
+        // The zigzag equilibrium strain sets the natural scale for the sweep.
+        // At ε_ext = 0, the barrier is the unbiased triple-Q → zigzag barrier.
+        // At ε_ext = ε_zigzag^eq, the zigzag is maximally stabilized.
         
-        // Store equilibrium strains for each image (computed during energy/gradient evaluation)
-        vector<StrainEg> image_strains;
+        double strain_sweep_max = 0.0;
+        double strain_dir_Eg1 = 1.0;  // Unit vector for strain direction
+        double strain_dir_Eg2 = 0.0;
+        size_t n_strain_pts = 1;      // Default: single point (no sweep)
         
-        // Energy function: E_eff(spins) = E(spins, ε^eq(spins))
-        // where ε^eq is the strain that minimizes energy at fixed spins
-        auto energy_func = [&lattice](const GNEBSpinConfig& spins) -> double {
-            // Relax strain to equilibrium for these spins
-            auto [Eg1_eq, Eg2_eq] = lattice.relax_strain_at_fixed_spins(spins);
-            // Compute energy with equilibrium strain
-            return lattice.energy_for_gneb_with_strain(spins, Eg1_eq, Eg2_eq);
-        };
-        
-        // Gradient function: ∂E_eff/∂S evaluated with adiabatic strain
-        // This is the spin gradient only (strain is not a GNEB coordinate)
-        auto gradient_func = [&lattice](const GNEBSpinConfig& spins) -> GNEBSpinConfig {
-            // Relax strain to equilibrium for these spins
-            auto [Eg1_eq, Eg2_eq] = lattice.relax_strain_at_fixed_spins(spins);
-            // Compute gradient of total energy including magnetoelastic coupling
-            auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
-                spins, Eg1_eq, Eg2_eq);
-            return grad_spins;  // Return only spin gradient for GNEB
-        };
-        
-        GNEBOptimizer gneb(energy_func, gradient_func, n_sites);
-        
-        // GNEB parameters from config
-        GNEBParams gneb_params;
-        gneb_params.n_images = config.gneb_n_images;
-        gneb_params.spring_constant = config.gneb_spring_constant;
-        gneb_params.max_iterations = config.gneb_max_iterations;
-        gneb_params.force_tolerance = config.gneb_force_tolerance;
-        gneb_params.climbing_image = config.gneb_use_climbing_image;
-        gneb_params.verbosity = (rank == 0) ? 2 : 0;
-        
-        // ================================================================
-        // STEP 4: Find MEP in spin-only space (adiabatic strain)
-        // ================================================================
-        cout << "[Rank " << rank << "] Finding minimum energy path in spin space..." << endl;
-        cout << "[Rank " << rank << "] (Strain relaxes adiabatically at each image)" << endl;
-        
-        auto mep_result = gneb.find_mep(initial_spins, final_spins, gneb_params);
-        
-        cout << "[Rank " << rank << "] MEP converged in " << mep_result.iterations_used << " iterations" << endl;
-        cout << "  Barrier height: " << mep_result.barrier << endl;
-        cout << "  Saddle image:   " << mep_result.saddle_index << endl;
-        cout << "  Final max force:" << mep_result.max_force << endl;
-        
-        // Compute adiabatic strain at each image along MEP
-        vector<StrainEg> mep_strains(mep_result.images.size());
-        double max_strain_amplitude = 0.0;
-        for (size_t i = 0; i < mep_result.images.size(); ++i) {
-            auto [Eg1_eq, Eg2_eq] = lattice.relax_strain_at_fixed_spins(mep_result.images[i]);
-            mep_strains[i] = StrainEg(Eg1_eq, Eg2_eq);
-            max_strain_amplitude = max(max_strain_amplitude, mep_strains[i].amplitude());
-        }
-        
-        cout << "  Saddle strain:  ε_Eg = (" << mep_strains[mep_result.saddle_index].Eg1 
-             << ", " << mep_strains[mep_result.saddle_index].Eg2 << ")" << endl;
-        cout << "  Max strain amp: " << max_strain_amplitude << endl;
-        
-        // ================================================================
-        // STEP 5: Save MEP with adiabatic strain information
-        // ================================================================
-        {
-            ofstream mep_file(trial_dir + "/mep_with_strain.txt");
-            mep_file << "# Minimum energy path with adiabatic strain relaxation\n";
-            mep_file << "# Configuration space: spins only (strain relaxed adiabatically)\n";
-            mep_file << "# Strain coordinates: ε_Eg1 = (ε_xx - ε_yy)/2, ε_Eg2 = ε_xy\n";
-            mep_file << "# image  reaction_coord  energy  strain_Eg1  strain_Eg2  strain_amp  m_3Q  m_zigzag  f_Eg_amp\n";
-            
-            for (size_t i = 0; i < mep_result.energies.size(); ++i) {
-                // Set lattice to this configuration to compute CVs
-                for (size_t j = 0; j < n_sites; ++j) {
-                    lattice.spins[j] = mep_result.images[i][j];
-                }
-                auto cv = lattice.compute_collective_variables();
+        if (config.gneb_strain_sweep) {
+            // Determine max strain from zigzag equilibrium if not specified
+            if (config.gneb_strain_max < 0) {
+                // Use the zigzag equilibrium strain amplitude
+                strain_sweep_max = final_strain.amplitude();
+                cout << "[Rank " << rank << "] Auto strain max from zigzag: " << strain_sweep_max << endl;
                 
-                mep_file << i << "  " << mep_result.arc_lengths[i] 
-                         << "  " << mep_result.energies[i]
-                         << "  " << mep_strains[i].Eg1 
-                         << "  " << mep_strains[i].Eg2
-                         << "  " << mep_strains[i].amplitude()
-                         << "  " << cv.m_3Q << "  " << cv.m_zigzag 
-                         << "  " << cv.f_Eg_amplitude << "\n";
-            }
-        }
-        
-        // ================================================================
-        // STEP 6: Save summary
-        // ================================================================
-        {
-            ofstream summary(trial_dir + "/barrier_summary.txt");
-            summary << "# Kinetic Barrier Analysis Summary (Spin-only GNEB + Adiabatic Strain)\n";
-            summary << "# Trial: " << trial << "\n";
-            summary << "# Configuration space: spins only (strain relaxed adiabatically)\n";
-            summary << "#\n";
-            summary << "barrier = " << mep_result.barrier << "\n";
-            summary << "gneb_iterations = " << mep_result.iterations_used << "\n";
-            summary << "gneb_converged = " << (mep_result.converged ? "true" : "false") << "\n";
-            summary << "saddle_image = " << mep_result.saddle_index << "\n";
-            summary << "max_force = " << mep_result.max_force << "\n";
-            summary << "#\n";
-            summary << "# Adiabatic strain at key points:\n";
-            summary << "initial_strain_Eg1 = " << mep_strains[0].Eg1 << "\n";
-            summary << "initial_strain_Eg2 = " << mep_strains[0].Eg2 << "\n";
-            summary << "saddle_strain_Eg1 = " << mep_strains[mep_result.saddle_index].Eg1 << "\n";
-            summary << "saddle_strain_Eg2 = " << mep_strains[mep_result.saddle_index].Eg2 << "\n";
-            summary << "final_strain_Eg1 = " << mep_strains.back().Eg1 << "\n";
-            summary << "final_strain_Eg2 = " << mep_strains.back().Eg2 << "\n";
-            summary << "max_strain_amplitude = " << max_strain_amplitude << "\n";
-            summary << "#\n";
-            summary << "# Initial (triple-Q) state:\n";
-            summary << "initial_m_3Q = " << initial_cv.m_3Q << "\n";
-            summary << "initial_m_zigzag = " << initial_cv.m_zigzag << "\n";
-            summary << "initial_f_Eg_amp = " << initial_cv.f_Eg_amplitude << "\n";
-            summary << "#\n";
-            summary << "# Final (zigzag) state:\n";
-            summary << "final_m_3Q = " << final_cv.m_3Q << "\n";
-            summary << "final_m_zigzag = " << final_cv.m_zigzag << "\n";
-            summary << "final_f_Eg_amp = " << final_cv.f_Eg_amplitude << "\n";
-        }
-        
-        // Save MEP images if requested
-        if (config.gneb_save_path_evolution) {
-            gneb.save_path(trial_dir + "/gneb", "mep");
-            
-            // Also save in our custom format with adiabatic strain info
-            for (size_t img = 0; img < mep_result.images.size(); ++img) {
-                string img_file = trial_dir + "/gneb/image_" + to_string(img) + ".txt";
-                ofstream out(img_file);
-                out << "# MEP image " << img << " (spin-only GNEB + adiabatic strain)\n";
-                out << "# adiabatic_strain_Eg1 = " << mep_strains[img].Eg1 << "\n";
-                out << "# adiabatic_strain_Eg2 = " << mep_strains[img].Eg2 << "\n";
-                out << "# energy = " << mep_result.energies[img] << "\n";
-                out << "# site  Sx  Sy  Sz\n";
-                for (size_t i = 0; i < n_sites; ++i) {
-                    out << i << "  " << mep_result.images[img][i].x() 
-                        << "  " << mep_result.images[img][i].y()
-                        << "  " << mep_result.images[img][i].z() << "\n";
+                // Use the direction of the zigzag equilibrium strain
+                if (strain_sweep_max > 1e-10) {
+                    strain_dir_Eg1 = final_strain.Eg1 / strain_sweep_max;
+                    strain_dir_Eg2 = final_strain.Eg2 / strain_sweep_max;
                 }
+            } else {
+                strain_sweep_max = config.gneb_strain_max;
+                // Use specified direction angle: Eg1 = cos(θ), Eg2 = sin(θ)
+                strain_dir_Eg1 = std::cos(config.gneb_strain_direction);
+                strain_dir_Eg2 = std::sin(config.gneb_strain_direction);
+            }
+            n_strain_pts = config.gneb_n_strain_steps + 1;  // Include 0
+            
+            cout << "[Rank " << rank << "] Strain sweep: " << n_strain_pts << " points from 0 to " 
+                 << strain_sweep_max << endl;
+            cout << "  Direction: (" << strain_dir_Eg1 << ", " << strain_dir_Eg2 << ")" << endl;
+        }
+        
+        // Storage for barrier vs strain results
+        vector<double> sweep_strains(n_strain_pts);
+        vector<double> sweep_barriers(n_strain_pts);
+        vector<double> sweep_E_initial(n_strain_pts);
+        vector<double> sweep_E_final(n_strain_pts);
+        vector<double> sweep_E_saddle(n_strain_pts);
+        vector<size_t> sweep_saddle_idx(n_strain_pts);
+        vector<bool>   sweep_converged(n_strain_pts);
+        
+        // ================================================================
+        // STEP 4: GNEB loop (single point or strain sweep)
+        // ================================================================
+        for (size_t s_idx = 0; s_idx < n_strain_pts; ++s_idx) {
+            // External strain amplitude for this sweep point
+            double ext_amp = (n_strain_pts > 1) ? 
+                strain_sweep_max * static_cast<double>(s_idx) / static_cast<double>(n_strain_pts - 1) : 0.0;
+            double ext_Eg1 = ext_amp * strain_dir_Eg1;
+            double ext_Eg2 = ext_amp * strain_dir_Eg2;
+            sweep_strains[s_idx] = ext_amp;
+            
+            if (config.gneb_strain_sweep) {
+                cout << "\n[Rank " << rank << "] --- Strain point " << s_idx 
+                     << "/" << (n_strain_pts-1) << ": ε_ext = " << ext_amp 
+                     << " (" << ext_Eg1 << ", " << ext_Eg2 << ") ---" << endl;
+            }
+            
+            // Energy function: E_eff(spins) = E(spins, ε_ext + ε_int^eq(spins))
+            auto energy_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> double {
+                // Relax internal strain around the external offset
+                auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(spins, ext_Eg1, ext_Eg2);
+                // Total strain = external + internal
+                double total_Eg1 = ext_Eg1 + int_Eg1;
+                double total_Eg2 = ext_Eg2 + int_Eg2;
+                return lattice.energy_for_gneb_with_strain(spins, total_Eg1, total_Eg2);
+            };
+            
+            // Gradient function: ∂E_eff/∂S with adiabatic strain at external offset
+            auto gradient_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> GNEBSpinConfig {
+                auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(spins, ext_Eg1, ext_Eg2);
+                double total_Eg1 = ext_Eg1 + int_Eg1;
+                double total_Eg2 = ext_Eg2 + int_Eg2;
+                auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
+                    spins, total_Eg1, total_Eg2);
+                return grad_spins;
+            };
+            
+            GNEBOptimizer gneb(energy_func, gradient_func, n_sites);
+            
+            // GNEB parameters from config
+            GNEBParams gneb_params;
+            gneb_params.n_images = config.gneb_n_images;
+            gneb_params.spring_constant = config.gneb_spring_constant;
+            gneb_params.max_iterations = config.gneb_max_iterations;
+            gneb_params.force_tolerance = config.gneb_force_tolerance;
+            gneb_params.climbing_image = config.gneb_use_climbing_image;
+            gneb_params.verbosity = (rank == 0 && !config.gneb_strain_sweep) ? 2 : 
+                                    (rank == 0 ? 1 : 0);
+            
+            // Find MEP
+            cout << "[Rank " << rank << "] Finding MEP..." << endl;
+            auto mep_result = gneb.find_mep(initial_spins, final_spins, gneb_params);
+            
+            cout << "[Rank " << rank << "] MEP: iter=" << mep_result.iterations_used 
+                 << " barrier=" << mep_result.barrier 
+                 << " saddle=" << mep_result.saddle_index 
+                 << " converged=" << (mep_result.converged ? "yes" : "no") << endl;
+            
+            sweep_barriers[s_idx] = mep_result.barrier;
+            sweep_E_initial[s_idx] = mep_result.energies.front();
+            sweep_E_final[s_idx] = mep_result.energies.back();
+            sweep_E_saddle[s_idx] = mep_result.energies[mep_result.saddle_index];
+            sweep_saddle_idx[s_idx] = mep_result.saddle_index;
+            sweep_converged[s_idx] = mep_result.converged;
+            
+            // Compute adiabatic strain at each image along MEP
+            vector<StrainEg> mep_strains(mep_result.images.size());
+            double max_strain_amplitude = 0.0;
+            for (size_t i = 0; i < mep_result.images.size(); ++i) {
+                auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(
+                    mep_result.images[i], ext_Eg1, ext_Eg2);
+                // Store total strain
+                mep_strains[i] = StrainEg(ext_Eg1 + int_Eg1, ext_Eg2 + int_Eg2);
+                max_strain_amplitude = max(max_strain_amplitude, mep_strains[i].amplitude());
+            }
+            
+            // Save MEP for this strain point
+            string strain_label = config.gneb_strain_sweep ? 
+                "/strain_" + to_string(s_idx) : "";
+            string mep_dir = trial_dir + strain_label;
+            if (config.gneb_strain_sweep) {
+                filesystem::create_directories(mep_dir);
+            }
+            
+            // Save MEP with strain info
+            {
+                ofstream mep_file(mep_dir + "/mep_with_strain.txt");
+                mep_file << "# Minimum energy path with adiabatic strain relaxation\n";
+                mep_file << "# External strain: ε_Eg1 = " << ext_Eg1 << ", ε_Eg2 = " << ext_Eg2 << "\n";
+                mep_file << "# External strain amplitude: " << ext_amp << "\n";
+                mep_file << "# image  reaction_coord  energy  strain_Eg1  strain_Eg2  strain_amp  m_3Q  m_zigzag  f_Eg_amp\n";
+                
+                for (size_t i = 0; i < mep_result.energies.size(); ++i) {
+                    for (size_t j = 0; j < n_sites; ++j) {
+                        lattice.spins[j] = mep_result.images[i][j];
+                    }
+                    auto cv = lattice.compute_collective_variables();
+                    
+                    mep_file << i << "  " << mep_result.arc_lengths[i] 
+                             << "  " << mep_result.energies[i]
+                             << "  " << mep_strains[i].Eg1 
+                             << "  " << mep_strains[i].Eg2
+                             << "  " << mep_strains[i].amplitude()
+                             << "  " << cv.m_3Q << "  " << cv.m_zigzag 
+                             << "  " << cv.f_Eg_amplitude << "\n";
+                }
+            }
+            
+            // Save per-strain summary
+            {
+                ofstream summary(mep_dir + "/barrier_summary.txt");
+                summary << "# Kinetic Barrier Summary (Spin-only GNEB + Adiabatic Strain)\n";
+                summary << "# Trial: " << trial << "\n";
+                summary << "# External strain: ε_Eg1 = " << ext_Eg1 << ", ε_Eg2 = " << ext_Eg2 << "\n";
+                summary << "# External strain amplitude: " << ext_amp << "\n";
+                summary << "#\n";
+                summary << "barrier = " << mep_result.barrier << "\n";
+                summary << "gneb_iterations = " << mep_result.iterations_used << "\n";
+                summary << "gneb_converged = " << (mep_result.converged ? "true" : "false") << "\n";
+                summary << "saddle_image = " << mep_result.saddle_index << "\n";
+                summary << "max_force = " << mep_result.max_force << "\n";
+                summary << "#\n";
+                summary << "external_strain_Eg1 = " << ext_Eg1 << "\n";
+                summary << "external_strain_Eg2 = " << ext_Eg2 << "\n";
+                summary << "external_strain_amplitude = " << ext_amp << "\n";
+                summary << "#\n";
+                summary << "# Adiabatic (total) strain at key points:\n";
+                summary << "initial_strain_Eg1 = " << mep_strains[0].Eg1 << "\n";
+                summary << "initial_strain_Eg2 = " << mep_strains[0].Eg2 << "\n";
+                summary << "saddle_strain_Eg1 = " << mep_strains[mep_result.saddle_index].Eg1 << "\n";
+                summary << "saddle_strain_Eg2 = " << mep_strains[mep_result.saddle_index].Eg2 << "\n";
+                summary << "final_strain_Eg1 = " << mep_strains.back().Eg1 << "\n";
+                summary << "final_strain_Eg2 = " << mep_strains.back().Eg2 << "\n";
+                summary << "max_strain_amplitude = " << max_strain_amplitude << "\n";
+                summary << "#\n";
+                summary << "# Initial (triple-Q) energy: " << mep_result.energies.front() << "\n";
+                summary << "# Saddle energy: " << mep_result.energies[mep_result.saddle_index] << "\n";
+                summary << "# Final (zigzag) energy: " << mep_result.energies.back() << "\n";
+            }
+            
+            // Save MEP images if requested (only for non-sweep or if sweep evolution saving is on)
+            if (config.gneb_save_path_evolution && (!config.gneb_strain_sweep || s_idx == 0 || s_idx == n_strain_pts-1)) {
+                string gneb_dir = mep_dir + "/gneb";
+                filesystem::create_directories(gneb_dir);
+                gneb.save_path(gneb_dir, "mep");
+                
+                for (size_t img = 0; img < mep_result.images.size(); ++img) {
+                    string img_file = gneb_dir + "/image_" + to_string(img) + ".txt";
+                    ofstream out(img_file);
+                    out << "# MEP image " << img << " (spin-only GNEB + adiabatic strain)\n";
+                    out << "# external_strain_Eg1 = " << ext_Eg1 << "\n";
+                    out << "# external_strain_Eg2 = " << ext_Eg2 << "\n";
+                    out << "# total_strain_Eg1 = " << mep_strains[img].Eg1 << "\n";
+                    out << "# total_strain_Eg2 = " << mep_strains[img].Eg2 << "\n";
+                    out << "# energy = " << mep_result.energies[img] << "\n";
+                    out << "# site  Sx  Sy  Sz\n";
+                    for (size_t i = 0; i < n_sites; ++i) {
+                        out << i << "  " << mep_result.images[img][i].x() 
+                            << "  " << mep_result.images[img][i].y()
+                            << "  " << mep_result.images[img][i].z() << "\n";
+                    }
+                }
+            }
+        }  // End strain sweep loop
+        
+        // ================================================================
+        // STEP 5: Save strain sweep summary (barrier vs strain)
+        // ================================================================
+        if (config.gneb_strain_sweep) {
+            ofstream sweep_file(trial_dir + "/barrier_vs_strain.txt");
+            sweep_file << "# Kinetic barrier vs external strain\n";
+            sweep_file << "# Triple-Q → Zigzag transition\n";
+            sweep_file << "# Strain direction: (" << strain_dir_Eg1 << ", " << strain_dir_Eg2 << ")\n";
+            sweep_file << "# Zigzag equilibrium strain: (" << final_strain.Eg1 << ", " << final_strain.Eg2 
+                       << ") amplitude=" << final_strain.amplitude() << "\n";
+            sweep_file << "# strain_amplitude  barrier  E_initial  E_saddle  E_final  saddle_idx  converged\n";
+            
+            for (size_t s_idx = 0; s_idx < n_strain_pts; ++s_idx) {
+                sweep_file << sweep_strains[s_idx] << "  " 
+                           << sweep_barriers[s_idx] << "  "
+                           << sweep_E_initial[s_idx] << "  "
+                           << sweep_E_saddle[s_idx] << "  "
+                           << sweep_E_final[s_idx] << "  "
+                           << sweep_saddle_idx[s_idx] << "  "
+                           << (sweep_converged[s_idx] ? 1 : 0) << "\n";
+            }
+            sweep_file.close();
+            
+            cout << "\n[Rank " << rank << "] === Barrier vs Strain Summary ===" << endl;
+            cout << "  Strain        Barrier       ΔE(3Q-ZZ)     Converged" << endl;
+            for (size_t s_idx = 0; s_idx < n_strain_pts; ++s_idx) {
+                double dE = sweep_E_final[s_idx] - sweep_E_initial[s_idx];
+                cout << "  " << sweep_strains[s_idx] 
+                     << "        " << sweep_barriers[s_idx]
+                     << "        " << dE
+                     << "        " << (sweep_converged[s_idx] ? "yes" : "no") << endl;
+            }
+            
+            // Find spinodal point (where barrier vanishes)
+            double spinodal_strain = -1.0;
+            for (size_t s_idx = 1; s_idx < n_strain_pts; ++s_idx) {
+                if (sweep_barriers[s_idx] <= 0.0 && sweep_barriers[s_idx-1] > 0.0) {
+                    // Linear interpolation
+                    double f = sweep_barriers[s_idx-1] / (sweep_barriers[s_idx-1] - sweep_barriers[s_idx]);
+                    spinodal_strain = sweep_strains[s_idx-1] + f * (sweep_strains[s_idx] - sweep_strains[s_idx-1]);
+                    break;
+                }
+            }
+            
+            if (spinodal_strain > 0) {
+                cout << "  Spinodal strain (barrier=0): ε_c ≈ " << spinodal_strain << endl;
+                
+                ofstream spinodal_file(trial_dir + "/spinodal.txt");
+                spinodal_file << "# Spinodal strain where kinetic barrier vanishes\n";
+                spinodal_file << "spinodal_strain = " << spinodal_strain << "\n";
+                spinodal_file << "strain_direction = " << config.gneb_strain_direction << "\n";
+                spinodal_file << "strain_dir_Eg1 = " << strain_dir_Eg1 << "\n";
+                spinodal_file << "strain_dir_Eg2 = " << strain_dir_Eg2 << "\n";
+            } else {
+                cout << "  Barrier remains positive across entire strain range." << endl;
             }
         }
         
@@ -1510,8 +1658,21 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
             cout << "  Timestep: " << config.md_timestep << endl;
         }
         
-        lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
-                              config.md_save_interval, trial_dir);
+        // Check for Langevin mode
+        double langevin_T_pp = config.get_param("langevin_temperature", 0.0);
+        if (langevin_T_pp > 0.0) {
+            lattice.langevin_temperature = langevin_T_pp;
+            if (lattice.alpha_gilbert <= 0.0)
+                lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.01);
+            if (rank == 0)
+                cout << "  Langevin dynamics: k_B T = " << langevin_T_pp
+                     << ", α = " << lattice.alpha_gilbert << endl;
+            lattice.integrate_langevin(config.md_timestep, config.md_time_start, config.md_time_end,
+                                       config.md_save_interval, trial_dir);
+        } else {
+            lattice.integrate_rk4(config.md_timestep, config.md_time_start, config.md_time_end, 
+                                  config.md_save_interval, trial_dir);
+        }
         
         // Save final configuration (combined spin+strain format)
         lattice.save_spin_strain_config(trial_dir + "/final_spin_strain.txt");
@@ -3461,6 +3622,9 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                     break;
                 case SimulationType::PUMP_PROBE:
                     run_pump_probe_strain(strain_lattice, sweep_config, 0, 1);
+                    break;
+                case SimulationType::KINETIC_BARRIER_ANALYSIS:
+                    run_kinetic_barrier_analysis_strain(strain_lattice, sweep_config, 0, 1);
                     break;
                 default:
                     cerr << "[Rank " << rank << "] Error: Unsupported base simulation for parameter sweep with StrainPhononLattice" << endl;

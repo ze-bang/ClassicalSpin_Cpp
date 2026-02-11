@@ -2092,13 +2092,15 @@ public:
             return result;
         }
         
+        size_t N = energies.size();
+        
         // Calculate mean and variance
-        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
+        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
         double variance = 0.0;
         for (double e : energies) {
             variance += (e - mean) * (e - mean);
         }
-        variance /= energies.size();
+        variance /= N;
         
         if (variance < 1e-20) {
             result.tau_int = 1.0;
@@ -2107,27 +2109,47 @@ public:
         }
         
         // Compute autocorrelation function
-        size_t max_lag = std::min(energies.size() / 4, size_t(1000));
+        size_t max_lag = std::min(N / 4, size_t(1000));
         result.correlation_function.resize(max_lag);
         
         for (size_t lag = 0; lag < max_lag; ++lag) {
             double corr = 0.0;
-            size_t count = energies.size() - lag;
+            size_t count = N - lag;
             for (size_t i = 0; i < count; ++i) {
                 corr += (energies[i] - mean) * (energies[i + lag] - mean);
             }
             result.correlation_function[lag] = corr / (count * variance);
         }
         
-        // Calculate integrated autocorrelation time
+        // Calculate integrated autocorrelation time using Sokal's self-consistent
+        // window method: sum until lag >= C * tau_int (C ~ 6 is standard).
+        // This avoids the bias from a hard cutoff and adapts to slow decorrelation.
+        // Reference: A.D. Sokal, "Monte Carlo Methods in Statistical Mechanics"
+        //            Lecture Notes, Cours de Troisième Cycle de la Physique en Suisse Romande (1989)
+        constexpr double sokal_C = 6.0;
         result.tau_int = 0.5;
         for (size_t lag = 1; lag < max_lag; ++lag) {
-            if (result.correlation_function[lag] < 0.1) break; // Stop when decorrelated
+            // Also stop if ACF goes negative (noise-dominated regime)
+            if (result.correlation_function[lag] < 0.0) break;
             result.tau_int += result.correlation_function[lag];
+            // Sokal self-consistent window: stop when lag >= C * tau_int
+            if (static_cast<double>(lag) >= sokal_C * result.tau_int) break;
         }
         
-        // Determine sampling interval
-        result.sampling_interval = std::max(size_t(2 * result.tau_int * base_interval), size_t(100));
+        // Warn if tau_int is large relative to time series length
+        // Reliable estimation requires N >> 2*tau_int; if not, tau_int may be underestimated
+        if (2.0 * result.tau_int > 0.1 * N) {
+            cout << "[WARNING] Autocorrelation time τ_int=" << result.tau_int 
+                 << " samples is large relative to time series length N=" << N
+                 << ". Estimate may be unreliable — consider longer preliminary runs." << endl;
+        }
+        
+        // Determine sampling interval in MC sweeps:
+        // Each sample in the time series is separated by base_interval sweeps,
+        // so tau_int (in sample units) corresponds to tau_int * base_interval sweeps.
+        // We require at least 2*tau_int spacing for approximately independent samples.
+        size_t tau_int_sweeps = static_cast<size_t>(std::ceil(result.tau_int)) * base_interval;
+        result.sampling_interval = std::max(size_t(2) * tau_int_sweeps, size_t(100));
         
         return result;
     }
@@ -4121,6 +4143,52 @@ public:
         }
         
         // Main measurement phase
+        // First: estimate autocorrelation to validate probe_rate
+        {
+            size_t pilot_samples = std::min(size_t(5000), n_measure / 5);
+            size_t pilot_interval = std::max(size_t(1), std::min(probe_rate, size_t(10)));
+            vector<double> pilot_energies;
+            pilot_energies.reserve(pilot_samples / pilot_interval + 1);
+            for (size_t i = 0; i < pilot_samples; ++i) {
+                if (overrelaxation_rate > 0) {
+                    overrelaxation();
+                    if (i % overrelaxation_rate == 0) {
+                        metropolis(curr_Temp, gaussian_move, sigma);
+                    }
+                } else {
+                    metropolis(curr_Temp, gaussian_move, sigma);
+                }
+                if (swap_rate > 0 && i % swap_rate == 0) {
+                    attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+                }
+                if (i % pilot_interval == 0) {
+                    pilot_energies.push_back(total_energy(spins));
+                }
+            }
+            AutocorrelationResult pilot_acf = compute_autocorrelation(pilot_energies, pilot_interval);
+            size_t tau_int_sweeps = static_cast<size_t>(std::ceil(pilot_acf.tau_int)) * pilot_interval;
+            size_t min_probe_rate = 2 * tau_int_sweeps;
+            size_t n_indep = (probe_rate >= min_probe_rate) ? (n_measure / probe_rate) : (n_measure / min_probe_rate);
+            
+            cout << "Rank " << rank << ": τ_int=" << pilot_acf.tau_int 
+                 << " samples (=" << tau_int_sweeps << " sweeps)"
+                 << ", recommended probe_rate ≥ " << min_probe_rate << " sweeps" << endl;
+            
+            if (probe_rate < min_probe_rate) {
+                cout << "[WARNING] Rank " << rank << ": probe_rate=" << probe_rate
+                     << " < 2·τ_int=" << min_probe_rate 
+                     << " sweeps. Samples will be correlated! "
+                     << "Effective independent samples ≈ " << n_indep 
+                     << " (vs " << n_measure / probe_rate << " total samples). "
+                     << "Consider increasing probe_rate to " << min_probe_rate << "." << endl;
+            } else {
+                cout << "Rank " << rank << ": probe_rate=" << probe_rate 
+                     << " ≥ 2·τ_int=" << min_probe_rate 
+                     << " — samples are approximately independent ("
+                     << n_measure / probe_rate << " samples)." << endl;
+            }
+        }
+        
         cout << "Rank " << rank << ": Measuring..." << endl;
         for (size_t i = 0; i < n_measure; ++i) {
             if (overrelaxation_rate > 0) {

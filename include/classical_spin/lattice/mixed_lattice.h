@@ -1869,7 +1869,7 @@ public:
         double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
         
         // Compute autocorrelation function
-        size_t max_lag = std::min(N / 4, size_t(100));
+        size_t max_lag = std::min(N / 4, size_t(1000));
         result.correlation_function.resize(max_lag);
         
         double var = 0.0;
@@ -1877,6 +1877,13 @@ public:
             var += (energies[i] - mean) * (energies[i] - mean);
         }
         var /= N;
+        
+        if (var < 1e-20) {
+            result.tau_int = 1.0;
+            result.sampling_interval = base_interval;
+            result.correlation_function = {1.0};
+            return result;
+        }
         
         for (size_t lag = 0; lag < max_lag; ++lag) {
             double corr = 0.0;
@@ -1887,14 +1894,26 @@ public:
             result.correlation_function[lag] = corr / var;
         }
         
-        // Compute integrated autocorrelation time
+        // Compute integrated autocorrelation time using Sokal's self-consistent
+        // window: sum until lag >= C * tau_int (C ~ 6 standard).
+        constexpr double sokal_C = 6.0;
         result.tau_int = 0.5;
         for (size_t lag = 1; lag < max_lag; ++lag) {
-            if (result.correlation_function[lag] < 0.1) break;
+            if (result.correlation_function[lag] < 0.0) break;
             result.tau_int += result.correlation_function[lag];
+            if (static_cast<double>(lag) >= sokal_C * result.tau_int) break;
         }
         
-        result.sampling_interval = static_cast<size_t>(std::max(1.0, 2.0 * result.tau_int)) * base_interval;
+        // Warn if tau_int is large relative to time series length
+        if (2.0 * result.tau_int > 0.1 * N) {
+            cout << "[WARNING] Autocorrelation time τ_int=" << result.tau_int 
+                 << " samples is large relative to time series length N=" << N
+                 << ". Estimate may be unreliable — consider longer preliminary runs." << endl;
+        }
+        
+        // sampling_interval in MC sweeps: 2 * ceil(tau_int) * base_interval
+        size_t tau_int_sweeps = static_cast<size_t>(std::ceil(result.tau_int)) * base_interval;
+        result.sampling_interval = std::max(size_t(2) * tau_int_sweeps, size_t(100));
         
         return result;
     }
@@ -3548,6 +3567,64 @@ public:
         }
         
         // Main measurement phase
+        // First: estimate autocorrelation to validate probe_rate
+        {
+            size_t pilot_samples = std::min(size_t(5000), n_measure / 5);
+            size_t pilot_interval = std::max(size_t(1), std::min(probe_rate, size_t(10)));
+            vector<double> pilot_energies;
+            pilot_energies.reserve(pilot_samples / pilot_interval + 1);
+            for (size_t i = 0; i < pilot_samples; ++i) {
+                if (overrelaxation_rate > 0) {
+                    if (do_interleaved) {
+                        overrelaxation_interleaved();
+                    } else {
+                        overrelaxation();
+                    }
+                    if (i % overrelaxation_rate == 0) {
+                        if (do_interleaved) {
+                            metropolis_interleaved(curr_Temp, gaussian_move, sigma);
+                        } else {
+                            metropolis(curr_Temp, gaussian_move, sigma);
+                        }
+                    }
+                } else {
+                    if (do_interleaved) {
+                        metropolis_interleaved(curr_Temp, gaussian_move, sigma);
+                    } else {
+                        metropolis(curr_Temp, gaussian_move, sigma);
+                    }
+                }
+                if (swap_rate > 0 && i % swap_rate == 0) {
+                    attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+                }
+                if (i % pilot_interval == 0) {
+                    pilot_energies.push_back(total_energy());
+                }
+            }
+            AutocorrelationResult pilot_acf = compute_autocorrelation(pilot_energies, pilot_interval);
+            size_t tau_int_sweeps = static_cast<size_t>(std::ceil(pilot_acf.tau_int)) * pilot_interval;
+            size_t min_probe_rate = 2 * tau_int_sweeps;
+            size_t n_indep = (probe_rate >= min_probe_rate) ? (n_measure / probe_rate) : (n_measure / min_probe_rate);
+            
+            cout << "Rank " << rank << ": τ_int=" << pilot_acf.tau_int 
+                 << " samples (=" << tau_int_sweeps << " sweeps)"
+                 << ", recommended probe_rate ≥ " << min_probe_rate << " sweeps" << endl;
+            
+            if (probe_rate < min_probe_rate) {
+                cout << "[WARNING] Rank " << rank << ": probe_rate=" << probe_rate
+                     << " < 2·τ_int=" << min_probe_rate 
+                     << " sweeps. Samples will be correlated! "
+                     << "Effective independent samples ≈ " << n_indep 
+                     << " (vs " << n_measure / probe_rate << " total samples). "
+                     << "Consider increasing probe_rate to " << min_probe_rate << "." << endl;
+            } else {
+                cout << "Rank " << rank << ": probe_rate=" << probe_rate 
+                     << " ≥ 2·τ_int=" << min_probe_rate 
+                     << " — samples are approximately independent ("
+                     << n_measure / probe_rate << " samples)." << endl;
+            }
+        }
+        
         cout << "Rank " << rank << ": Measuring..." << endl;
         for (size_t i = 0; i < n_measure; ++i) {
             if (overrelaxation_rate > 0) {

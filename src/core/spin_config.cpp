@@ -341,6 +341,22 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "gneb_final_state_file") {
                 config.gneb_final_state_file = value;
             }
+            // GNEB strain sweep parameters
+            else if (key == "gneb_strain_sweep") {
+                config.gneb_strain_sweep = parse_bool(value);
+            }
+            else if (key == "gneb_n_strain_steps") {
+                config.gneb_n_strain_steps = stoull(value);
+            }
+            else if (key == "gneb_strain_max") {
+                config.gneb_strain_max = stod(value);
+            }
+            else if (key == "gneb_strain_direction") {
+                config.gneb_strain_direction = stod(value);
+            }
+            else if (key == "gneb_zigzag_domain") {
+                config.gneb_zigzag_domain = stoi(value);
+            }
             else {
                 // Treat as Hamiltonian parameter
                 config.hamiltonian_params[key] = stod(value);

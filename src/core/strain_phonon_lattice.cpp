@@ -2719,6 +2719,418 @@ void StrainPhononLattice::integrate_adaptive(double dt_init, double t_start, dou
     // ... (implementation similar to PhononLattice)
 }
 
+// ============================================================
+// LANGEVIN DYNAMICS  (stochastic Heun integrator)
+// ============================================================
+
+void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t_final,
+                                             size_t output_every,
+                                             const string& output_dir) {
+    // ----------------------------------------------------------
+    // Validate inputs
+    // ----------------------------------------------------------
+    if (alpha_gilbert <= 0.0) {
+        cerr << "WARNING: alpha_gilbert = " << alpha_gilbert
+             << " ≤ 0 — Langevin dynamics requires positive damping for thermalization.\n"
+             << "         Setting alpha_gilbert = 0.01 as fallback." << endl;
+        alpha_gilbert = 0.01;
+    }
+    if (langevin_temperature < 0.0) {
+        cerr << "ERROR: langevin_temperature < 0 — nonsensical. Aborting." << endl;
+        return;
+    }
+
+    std::filesystem::create_directories(output_dir);
+
+    cout << "Running StrainPhononLattice Langevin dynamics: t=" << t_start
+         << " → " << t_final << endl;
+    cout << "Integration method: stochastic Heun (predictor-corrector)" << endl;
+    cout << "Step size: " << dt << endl;
+    cout << "Temperature (k_B T): " << langevin_temperature << endl;
+    cout << "Gilbert damping α: " << alpha_gilbert << endl;
+    cout << "Save every " << output_every << " steps" << endl;
+
+    // ----------------------------------------------------------
+    // Noise amplitude prefactors
+    //   Spin noise:   σ_spin  = sqrt(2 α k_B T / (|S| dt))
+    //                 (each Cartesian component gets N(0, σ_spin) per step)
+    //   Strain noise: σ_strain = sqrt(2 γ k_B T / dt)
+    //                 (one random force per strain velocity DOF per step)
+    // ----------------------------------------------------------
+    const double kBT = langevin_temperature;
+    const double spin_noise_sigma =
+        (kBT > 0.0) ? std::sqrt(2.0 * alpha_gilbert * kBT / (spin_length * dt)) : 0.0;
+
+    const double strain_noise_sigma_A1g =
+        (kBT > 0.0) ? std::sqrt(2.0 * elastic_params.gamma_A1g * kBT / dt) : 0.0;
+    const double strain_noise_sigma_Eg =
+        (kBT > 0.0) ? std::sqrt(2.0 * elastic_params.gamma_Eg * kBT / dt) : 0.0;
+
+    // ----------------------------------------------------------
+    // Trajectory storage (same as integrate_rk4)
+    // ----------------------------------------------------------
+    vector<double> times;
+    vector<Eigen::Vector3d> M_traj, M_stag_traj;
+    vector<double> energy_traj;
+    vector<double> eps_xx_0_traj, eps_xx_1_traj, eps_xx_2_traj;
+    vector<double> eps_yy_0_traj, eps_yy_1_traj, eps_yy_2_traj;
+    vector<double> eps_xy_0_traj, eps_xy_1_traj, eps_xy_2_traj;
+    vector<double> V_xx_0_traj, V_xx_1_traj, V_xx_2_traj;
+    vector<double> V_yy_0_traj, V_yy_1_traj, V_yy_2_traj;
+    vector<double> V_xy_0_traj, V_xy_1_traj, V_xy_2_traj;
+    vector<double> eps_A1g_traj, eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj;
+    vector<vector<double>> spin_traj;
+
+    double t = t_start;
+    size_t step = 0;
+    size_t save_count = 0;
+
+    // ----------------------------------------------------------
+    // Helper lambdas for one-site spin RHS
+    // ----------------------------------------------------------
+    // deterministic + noise part of LLG for a single spin
+    auto spin_rhs = [&](const Eigen::Vector3d& S, const Eigen::Vector3d& H_eff,
+                        const Eigen::Vector3d& xi) -> Eigen::Vector3d {
+        Eigen::Vector3d H_total = H_eff + xi;
+        Eigen::Vector3d dSdt = S.cross(H_total);
+        dSdt -= (alpha_gilbert / spin_length) * S.cross(S.cross(H_total));
+        return dSdt;
+    };
+
+    // ----------------------------------------------------------
+    // Helper: compute full RHS vector for spins + strain,
+    //   given the SAME noise realization (ξ for spins, η for strain).
+    //   Operates on the member arrays spins[] and strain directly.
+    // ----------------------------------------------------------
+    // Noise vectors (allocated once, reused every step)
+    vector<Eigen::Vector3d> xi_noise(lattice_size);       // spin noise per site
+    vector<double> eta_xx(StrainState::N_BONDS, 0.0);     // strain noise
+    vector<double> eta_yy(StrainState::N_BONDS, 0.0);
+    vector<double> eta_xy(StrainState::N_BONDS, 0.0);
+
+    // RHS buffers
+    vector<Eigen::Vector3d> spin_deriv(lattice_size);     // dS/dt per site
+    StrainState strain_deriv;                              // dε/dt
+
+    auto compute_full_rhs = [&](double time,
+                                vector<Eigen::Vector3d>& out_spin_deriv,
+                                StrainState& out_strain_deriv) {
+        current_time = time;
+
+        // -- magnetoelastic strain derivatives --
+        double dH_deps_xx_arr[StrainState::N_BONDS];
+        double dH_deps_yy_arr[StrainState::N_BONDS];
+        double dH_deps_xy_arr[StrainState::N_BONDS];
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            dH_deps_xx_arr[b] = dH_deps_xx(b);
+            dH_deps_yy_arr[b] = dH_deps_yy(b);
+            dH_deps_xy_arr[b] = dH_deps_xy(b);
+        }
+
+        // J7-ring exchange strain force
+        double dJ7_deps_xx[StrainState::N_BONDS];
+        double dJ7_deps_yy[StrainState::N_BONDS];
+        double dJ7_deps_xy[StrainState::N_BONDS];
+        get_dJ7_deps(dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy);
+        double E_ring = get_ring_exchange_normalized();
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            dH_deps_xx_arr[b] += dJ7_deps_xx[b] * E_ring;
+            dH_deps_yy_arr[b] += dJ7_deps_yy[b] * E_ring;
+            dH_deps_xy_arr[b] += dJ7_deps_xy[b] * E_ring;
+        }
+
+        // -- Strain EOM (deterministic part from strain_derivatives) --
+        strain_derivatives(strain, time, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr,
+                           out_strain_deriv);
+
+        // Add thermal noise to strain velocity derivatives: η / M
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            out_strain_deriv.V_xx[b] += eta_xx[b] / elastic_params.M;
+            out_strain_deriv.V_yy[b] += eta_yy[b] / elastic_params.M;
+            out_strain_deriv.V_xy[b] += eta_xy[b] / elastic_params.M;
+        }
+
+        // -- Spin sLLG --
+        for (size_t i = 0; i < lattice_size; ++i) {
+            SpinVector H = get_local_field(i, time);
+            out_spin_deriv[i] = spin_rhs(spins[i], H, xi_noise[i]);
+        }
+    };
+
+    // ----------------------------------------------------------
+    // Main integration loop — stochastic Heun
+    // ----------------------------------------------------------
+    // Saved copies for predictor-corrector
+    vector<Eigen::Vector3d> spins_saved(lattice_size);
+    StrainState strain_saved;
+    vector<Eigen::Vector3d> spin_deriv_pred(lattice_size);
+    StrainState strain_deriv_pred;
+
+    while (t < t_final) {
+        // ---- record observables ----
+        if (step % output_every == 0) {
+            Eigen::Vector3d M = total_magnetization();
+            Eigen::Vector3d M_stag = staggered_magnetization();
+            double E = total_energy();
+            double eA1g = A1g_amplitude();
+            double eEg1 = Eg1_amplitude();
+            double eEg2 = Eg2_amplitude();
+            double J7e = get_effective_J7(t);
+
+            times.push_back(t);
+            M_traj.push_back(M);
+            M_stag_traj.push_back(M_stag);
+            energy_traj.push_back(E);
+            eps_A1g_traj.push_back(eA1g);
+            eps_Eg1_traj.push_back(eEg1);
+            eps_Eg2_traj.push_back(eEg2);
+            J7_eff_traj.push_back(J7e);
+
+            eps_xx_0_traj.push_back(strain.epsilon_xx[0]);
+            eps_xx_1_traj.push_back(strain.epsilon_xx[1]);
+            eps_xx_2_traj.push_back(strain.epsilon_xx[2]);
+            eps_yy_0_traj.push_back(strain.epsilon_yy[0]);
+            eps_yy_1_traj.push_back(strain.epsilon_yy[1]);
+            eps_yy_2_traj.push_back(strain.epsilon_yy[2]);
+            eps_xy_0_traj.push_back(strain.epsilon_xy[0]);
+            eps_xy_1_traj.push_back(strain.epsilon_xy[1]);
+            eps_xy_2_traj.push_back(strain.epsilon_xy[2]);
+            V_xx_0_traj.push_back(strain.V_xx[0]);
+            V_xx_1_traj.push_back(strain.V_xx[1]);
+            V_xx_2_traj.push_back(strain.V_xx[2]);
+            V_yy_0_traj.push_back(strain.V_yy[0]);
+            V_yy_1_traj.push_back(strain.V_yy[1]);
+            V_yy_2_traj.push_back(strain.V_yy[2]);
+            V_xy_0_traj.push_back(strain.V_xy[0]);
+            V_xy_1_traj.push_back(strain.V_xy[1]);
+            V_xy_2_traj.push_back(strain.V_xy[2]);
+
+            vector<double> snap(lattice_size * 3);
+            for (size_t i = 0; i < lattice_size; ++i) {
+                snap[i*3+0] = spins[i](0);
+                snap[i*3+1] = spins[i](1);
+                snap[i*3+2] = spins[i](2);
+            }
+            spin_traj.push_back(std::move(snap));
+
+            if (step % (output_every * 10) == 0) {
+                cout << "t = " << t << ", E = " << E
+                     << ", |M| = " << M.norm()
+                     << ", |M_stag| = " << M_stag.norm()
+                     << ", ε_A1g = " << eA1g
+                     << ", |ε_Eg| = " << std::sqrt(eEg1*eEg1 + eEg2*eEg2) << endl;
+            }
+            save_count++;
+        }
+
+        // ======================================================
+        // 1. Draw noise (held constant across predictor & corrector)
+        // ======================================================
+        for (size_t i = 0; i < lattice_size; ++i) {
+            xi_noise[i] = Eigen::Vector3d(normal_dist(rng), normal_dist(rng), normal_dist(rng))
+                          * spin_noise_sigma;
+        }
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            // ε_xx and ε_yy have mixed A1g/Eg character → average damping
+            double sigma_mixed = 0.5 * (strain_noise_sigma_A1g + strain_noise_sigma_Eg);
+            eta_xx[b] = normal_dist(rng) * sigma_mixed;
+            eta_yy[b] = normal_dist(rng) * sigma_mixed;
+            eta_xy[b] = normal_dist(rng) * strain_noise_sigma_Eg;  // pure Eg
+        }
+
+        // ======================================================
+        // 2. Save current state
+        // ======================================================
+        for (size_t i = 0; i < lattice_size; ++i) spins_saved[i] = spins[i];
+        strain_saved = strain;
+
+        // ======================================================
+        // 3. Predictor: evaluate RHS at current state
+        // ======================================================
+        compute_full_rhs(t, spin_deriv, strain_deriv);
+
+        // Euler step → predicted state
+        for (size_t i = 0; i < lattice_size; ++i) {
+            spins[i] = spins_saved[i] + dt * spin_deriv[i];
+            spins[i] = spins[i].normalized() * spin_length;
+        }
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = strain_saved.epsilon_xx[b] + dt * strain_deriv.epsilon_xx[b];
+            strain.epsilon_yy[b] = strain_saved.epsilon_yy[b] + dt * strain_deriv.epsilon_yy[b];
+            strain.epsilon_xy[b] = strain_saved.epsilon_xy[b] + dt * strain_deriv.epsilon_xy[b];
+            strain.V_xx[b] = strain_saved.V_xx[b] + dt * strain_deriv.V_xx[b];
+            strain.V_yy[b] = strain_saved.V_yy[b] + dt * strain_deriv.V_yy[b];
+            strain.V_xy[b] = strain_saved.V_xy[b] + dt * strain_deriv.V_xy[b];
+        }
+
+        // ======================================================
+        // 4. Corrector: evaluate RHS at predicted state (same noise)
+        // ======================================================
+        compute_full_rhs(t + dt, spin_deriv_pred, strain_deriv_pred);
+
+        // ======================================================
+        // 5. Heun update: average predictor & corrector
+        // ======================================================
+        for (size_t i = 0; i < lattice_size; ++i) {
+            spins[i] = spins_saved[i]
+                + 0.5 * dt * (spin_deriv[i] + spin_deriv_pred[i]);
+            spins[i] = spins[i].normalized() * spin_length;
+        }
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = strain_saved.epsilon_xx[b]
+                + 0.5 * dt * (strain_deriv.epsilon_xx[b] + strain_deriv_pred.epsilon_xx[b]);
+            strain.epsilon_yy[b] = strain_saved.epsilon_yy[b]
+                + 0.5 * dt * (strain_deriv.epsilon_yy[b] + strain_deriv_pred.epsilon_yy[b]);
+            strain.epsilon_xy[b] = strain_saved.epsilon_xy[b]
+                + 0.5 * dt * (strain_deriv.epsilon_xy[b] + strain_deriv_pred.epsilon_xy[b]);
+            strain.V_xx[b] = strain_saved.V_xx[b]
+                + 0.5 * dt * (strain_deriv.V_xx[b] + strain_deriv_pred.V_xx[b]);
+            strain.V_yy[b] = strain_saved.V_yy[b]
+                + 0.5 * dt * (strain_deriv.V_yy[b] + strain_deriv_pred.V_yy[b]);
+            strain.V_xy[b] = strain_saved.V_xy[b]
+                + 0.5 * dt * (strain_deriv.V_xy[b] + strain_deriv_pred.V_xy[b]);
+        }
+
+        t += dt;
+        ++step;
+    }
+
+    // ----------------------------------------------------------
+    // Save output (text)
+    // ----------------------------------------------------------
+    save_trajectory_txt(output_dir, times, M_traj, M_stag_traj, energy_traj,
+                        eps_A1g_traj, eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj);
+
+    {
+        ofstream strain_file(output_dir + "/strain_per_bond_trajectory.txt");
+        strain_file << "# t eps_xx_0 eps_xx_1 eps_xx_2 eps_yy_0 eps_yy_1 eps_yy_2 "
+                    << "eps_xy_0 eps_xy_1 eps_xy_2 V_xx_0 V_xx_1 V_xx_2 "
+                    << "V_yy_0 V_yy_1 V_yy_2 V_xy_0 V_xy_1 V_xy_2\n";
+        strain_file << std::scientific << std::setprecision(12);
+        for (size_t i = 0; i < times.size(); ++i) {
+            strain_file << times[i] << " "
+                        << eps_xx_0_traj[i] << " " << eps_xx_1_traj[i] << " " << eps_xx_2_traj[i] << " "
+                        << eps_yy_0_traj[i] << " " << eps_yy_1_traj[i] << " " << eps_yy_2_traj[i] << " "
+                        << eps_xy_0_traj[i] << " " << eps_xy_1_traj[i] << " " << eps_xy_2_traj[i] << " "
+                        << V_xx_0_traj[i] << " " << V_xx_1_traj[i] << " " << V_xx_2_traj[i] << " "
+                        << V_yy_0_traj[i] << " " << V_yy_1_traj[i] << " " << V_yy_2_traj[i] << " "
+                        << V_xy_0_traj[i] << " " << V_xy_1_traj[i] << " " << V_xy_2_traj[i] << "\n";
+        }
+        strain_file.close();
+        cout << "  strain_per_bond_trajectory.txt: " << times.size() << " timesteps" << endl;
+    }
+
+#ifdef HDF5_ENABLED
+    {
+        string hdf5_file = output_dir + "/trajectory.h5";
+        cout << "Writing Langevin HDF5 trajectory to: " << hdf5_file << endl;
+
+        H5::H5File h5file(hdf5_file, H5F_ACC_TRUNC);
+        H5::Group traj_group = h5file.createGroup("/trajectory");
+
+        hsize_t n_times = times.size();
+        H5::DataSpace times_space(1, &n_times);
+        H5::DataSet times_ds = traj_group.createDataSet("times", H5::PredType::NATIVE_DOUBLE, times_space);
+        times_ds.write(times.data(), H5::PredType::NATIVE_DOUBLE);
+
+        hsize_t mag_dims[2] = {n_times, 3};
+        H5::DataSpace mag_space(2, mag_dims);
+        vector<double> mag_flat(n_times * 3);
+        for (size_t i = 0; i < n_times; ++i) {
+            mag_flat[i*3+0] = M_traj[i](0);
+            mag_flat[i*3+1] = M_traj[i](1);
+            mag_flat[i*3+2] = M_traj[i](2);
+        }
+        traj_group.createDataSet("magnetization_local", H5::PredType::NATIVE_DOUBLE, mag_space)
+            .write(mag_flat.data(), H5::PredType::NATIVE_DOUBLE);
+
+        vector<double> mag_stag_flat(n_times * 3);
+        for (size_t i = 0; i < n_times; ++i) {
+            mag_stag_flat[i*3+0] = M_stag_traj[i](0);
+            mag_stag_flat[i*3+1] = M_stag_traj[i](1);
+            mag_stag_flat[i*3+2] = M_stag_traj[i](2);
+        }
+        traj_group.createDataSet("magnetization_antiferro", H5::PredType::NATIVE_DOUBLE, mag_space)
+            .write(mag_stag_flat.data(), H5::PredType::NATIVE_DOUBLE);
+
+        hsize_t spin_dims[3] = {n_times, lattice_size, 3};
+        H5::DataSpace spin_space(3, spin_dims);
+        vector<double> spin_flat(n_times * lattice_size * 3);
+        for (size_t t_idx = 0; t_idx < n_times; ++t_idx) {
+            for (size_t i = 0; i < lattice_size; ++i) {
+                spin_flat[t_idx * lattice_size * 3 + i*3+0] = spin_traj[t_idx][i*3+0];
+                spin_flat[t_idx * lattice_size * 3 + i*3+1] = spin_traj[t_idx][i*3+1];
+                spin_flat[t_idx * lattice_size * 3 + i*3+2] = spin_traj[t_idx][i*3+2];
+            }
+        }
+        traj_group.createDataSet("spins", H5::PredType::NATIVE_DOUBLE, spin_space)
+            .write(spin_flat.data(), H5::PredType::NATIVE_DOUBLE);
+        traj_group.close();
+
+        H5::Group strain_group = h5file.createGroup("/strain_trajectory");
+        H5::DataSpace scalar_traj_space(1, &n_times);
+        auto write_ds = [&](const string& name, const vector<double>& data) {
+            strain_group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, scalar_traj_space)
+                .write(data.data(), H5::PredType::NATIVE_DOUBLE);
+        };
+        write_ds("eps_xx_0", eps_xx_0_traj); write_ds("eps_xx_1", eps_xx_1_traj); write_ds("eps_xx_2", eps_xx_2_traj);
+        write_ds("eps_yy_0", eps_yy_0_traj); write_ds("eps_yy_1", eps_yy_1_traj); write_ds("eps_yy_2", eps_yy_2_traj);
+        write_ds("eps_xy_0", eps_xy_0_traj); write_ds("eps_xy_1", eps_xy_1_traj); write_ds("eps_xy_2", eps_xy_2_traj);
+        write_ds("V_xx_0", V_xx_0_traj); write_ds("V_xx_1", V_xx_1_traj); write_ds("V_xx_2", V_xx_2_traj);
+        write_ds("V_yy_0", V_yy_0_traj); write_ds("V_yy_1", V_yy_1_traj); write_ds("V_yy_2", V_yy_2_traj);
+        write_ds("V_xy_0", V_xy_0_traj); write_ds("V_xy_1", V_xy_1_traj); write_ds("V_xy_2", V_xy_2_traj);
+        write_ds("eps_A1g", eps_A1g_traj); write_ds("eps_Eg1", eps_Eg1_traj); write_ds("eps_Eg2", eps_Eg2_traj);
+        write_ds("J7_eff", J7_eff_traj); write_ds("energy", energy_traj);
+        strain_group.close();
+
+        H5::Group meta_group = h5file.createGroup("/metadata");
+        H5::DataSpace scalar_space(H5S_SCALAR);
+        auto write_attr_d = [&](const string& n, double v) {
+            meta_group.createAttribute(n, H5::PredType::NATIVE_DOUBLE, scalar_space)
+                .write(H5::PredType::NATIVE_DOUBLE, &v);
+        };
+        auto write_attr_i = [&](const string& n, int v) {
+            meta_group.createAttribute(n, H5::PredType::NATIVE_INT, scalar_space)
+                .write(H5::PredType::NATIVE_INT, &v);
+        };
+        write_attr_i("dim1", dim1); write_attr_i("dim2", dim2); write_attr_i("dim3", dim3);
+        write_attr_i("lattice_size", lattice_size);
+        write_attr_d("spin_length", spin_length);
+        write_attr_d("dt", dt); write_attr_d("t_start", t_start); write_attr_d("t_final", t_final);
+        write_attr_i("save_interval", output_every);
+        write_attr_d("C11", elastic_params.C11); write_attr_d("C12", elastic_params.C12);
+        write_attr_d("C44", elastic_params.C44); write_attr_d("M", elastic_params.M);
+        write_attr_d("gamma_A1g", elastic_params.gamma_A1g); write_attr_d("gamma_Eg", elastic_params.gamma_Eg);
+        write_attr_d("lambda_A1g", magnetoelastic_params.lambda_A1g);
+        write_attr_d("lambda_Eg", magnetoelastic_params.lambda_Eg);
+        write_attr_d("J", magnetoelastic_params.J); write_attr_d("K", magnetoelastic_params.K);
+        write_attr_d("Gamma", magnetoelastic_params.Gamma); write_attr_d("Gammap", magnetoelastic_params.Gammap);
+        write_attr_d("J7", magnetoelastic_params.J7); write_attr_d("gamma_J7", magnetoelastic_params.gamma_J7);
+        write_attr_d("alpha_gilbert", alpha_gilbert);
+        write_attr_d("langevin_temperature", langevin_temperature);
+
+        // Write positions
+        hsize_t pos_dims[2] = {lattice_size, 3};
+        H5::DataSpace pos_space(2, pos_dims);
+        vector<double> pos_flat(lattice_size * 3);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            pos_flat[i*3+0] = site_positions[i](0);
+            pos_flat[i*3+1] = site_positions[i](1);
+            pos_flat[i*3+2] = site_positions[i](2);
+        }
+        meta_group.createDataSet("positions", H5::PredType::NATIVE_DOUBLE, H5::DataSpace(2, pos_dims))
+            .write(pos_flat.data(), H5::PredType::NATIVE_DOUBLE);
+
+        meta_group.close();
+        h5file.close();
+        cout << "HDF5 Langevin trajectory saved with " << save_count << " snapshots" << endl;
+    }
+#endif
+
+    cout << "Langevin integration complete! Saved " << times.size()
+         << " snapshots to " << output_dir << endl;
+}
+
 void StrainPhononLattice::relax_strain(bool verbose) {
     // Relax strain to equilibrium given current spin configuration.
     // We ignore A1g channel - only Eg magnetoelastic coupling is active.
@@ -3027,7 +3439,7 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     // T=0 deterministic sweeps if requested
     if (T_zero && n_deterministics > 0) {
         cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
-        deterministic_sweep(n_deterministics);
+        deterministic_sweep(n_deterministics, out_dir);
         relax_strain(true);  // Final verbose strain relaxation
         cout << "Deterministic sweeps completed. Final energy: " << spin_energy() / lattice_size << endl;
         
@@ -3082,7 +3494,7 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     cout << "Annealing complete!" << endl;
 }
 
-void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
+void StrainPhononLattice::deterministic_sweep(size_t num_sweeps, const string& output_dir) {
     // Deterministic update: align each spin parallel to its local field.
     // This ensures S × H_eff = 0, eliminating precession in dynamics.
     // Uses sequential site visits so every site is updated exactly once per sweep.
@@ -3094,6 +3506,14 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
     const double torque_tol = 1e-14;  // Convergence threshold
     double max_torque = 0.0;
     double mean_torque = 0.0;
+    
+    // Track convergence history for file output
+    std::vector<size_t> sweep_history;
+    std::vector<double> max_torque_history;
+    std::vector<double> mean_torque_history;
+    std::vector<double> energy_history;
+    std::vector<size_t> worst_site_history;
+    size_t converged_sweep = num_sweeps;
     
     for (size_t sweep = 0; sweep < num_sweeps; ++sweep) {
         // Shuffle site order each sweep to avoid systematic bias
@@ -3137,6 +3557,13 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
             }
             mean_torque /= lattice_size;
             
+            // Record history
+            sweep_history.push_back(sweep + 1);
+            max_torque_history.push_back(max_torque);
+            mean_torque_history.push_back(mean_torque);
+            energy_history.push_back(spin_energy() / lattice_size);
+            worst_site_history.push_back(worst_site);
+            
             cout << "  Sweep " << (sweep + 1) << "/" << num_sweeps 
                  << ": max_torque = " << scientific << setprecision(3) << max_torque
                  << " (site " << worst_site << ")"
@@ -3146,6 +3573,7 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
             
             if (max_torque < torque_tol) {
                 cout << "  Converged after " << (sweep + 1) << " sweeps!" << endl;
+                converged_sweep = sweep + 1;
                 break;
             }
         }
@@ -3203,6 +3631,43 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps) {
     if (max_torque > 0.01) {
         cout << "  WARNING: Large residual torque detected! Spins not fully equilibrated." << endl;
         cout << "           Consider increasing n_deterministics or adding Gilbert damping." << endl;
+    }
+    
+    // Save diagnostics to file if output directory is specified
+    if (!output_dir.empty()) {
+        std::filesystem::create_directories(output_dir);
+        string filename = output_dir + "/deterministic_sweep_diagnostics.txt";
+        ofstream diag_file(filename);
+        if (diag_file.is_open()) {
+            diag_file << "# Deterministic Sweep Convergence Diagnostics\n";
+            diag_file << "# Lattice size: " << dim1 << " x " << dim2 << " x " << dim3 << " (" << lattice_size << " sites)\n";
+            diag_file << "# Tolerance: " << scientific << setprecision(3) << torque_tol << "\n";
+            diag_file << "# Converged: " << (max_torque < torque_tol ? "yes" : "no") << "\n";
+            diag_file << "# Converged at sweep: " << converged_sweep << "\n";
+            diag_file << "#\n";
+            diag_file << "# sweep  max_torque  mean_torque  energy_per_spin  worst_site\n";
+            for (size_t k = 0; k < sweep_history.size(); ++k) {
+                diag_file << fixed << setprecision(0) << sweep_history[k] << "  "
+                          << scientific << setprecision(6) << max_torque_history[k] << "  "
+                          << mean_torque_history[k] << "  "
+                          << fixed << setprecision(8) << energy_history[k] << "  "
+                          << worst_site_history[k] << "\n";
+            }
+            diag_file << "#\n";
+            diag_file << "# Final state:\n";
+            diag_file << "#   max_torque = " << scientific << setprecision(6) << max_torque << "\n";
+            diag_file << "#   mean_torque = " << mean_torque << "\n";
+            if (max_torque > 1e-12) {
+                diag_file << "#   worst_site = " << worst_site << "\n";
+                diag_file << "#   S = (" << fixed << setprecision(8) << worst_S(0) << ", " << worst_S(1) << ", " << worst_S(2) << ")\n";
+                diag_file << "#   H = (" << worst_H(0) << ", " << worst_H(1) << ", " << worst_H(2) << ")\n";
+                diag_file << "#   tau = (" << scientific << setprecision(6) << worst_torque_vec(0) << ", " << worst_torque_vec(1) << ", " << worst_torque_vec(2) << ")\n";
+                diag_file << "#   |S| = " << worst_S.norm() << ", |H| = " << worst_H.norm() << "\n";
+                diag_file << "#   S.H/(|S||H|) = " << fixed << setprecision(12) << worst_S.dot(worst_H) / (worst_S.norm() * worst_H.norm()) << "\n";
+            }
+            diag_file.close();
+            cout << "  Diagnostics saved to: " << filename << endl;
+        }
     }
 }
 
@@ -3546,6 +4011,54 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
     }
     
     // Main measurement phase
+    // First: estimate autocorrelation to validate probe_rate
+    {
+        size_t pilot_samples = std::min(size_t(5000), n_measure / 5);
+        size_t pilot_interval = std::max(size_t(1), std::min(probe_rate, size_t(10)));
+        vector<double> pilot_energies;
+        pilot_energies.reserve(pilot_samples / pilot_interval + 1);
+        for (size_t i = 0; i < pilot_samples; ++i) {
+            if (overrelaxation_rate > 0) {
+                overrelaxation();
+                if (i % overrelaxation_rate == 0) {
+                    mc_sweep(curr_Temp, gaussian_move, sigma);
+                }
+            } else {
+                mc_sweep(curr_Temp, gaussian_move, sigma);
+            }
+            if (swap_rate > 0 && i % swap_rate == 0) {
+                attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+            }
+            if (i % pilot_interval == 0) {
+                pilot_energies.push_back(total_energy());
+            }
+        }
+        double pilot_tau_int = 1.0;
+        size_t pilot_sampling_interval = 100;
+        estimate_autocorrelation_time(pilot_energies, pilot_interval, pilot_tau_int, pilot_sampling_interval);
+        size_t tau_int_sweeps = static_cast<size_t>(std::ceil(pilot_tau_int)) * pilot_interval;
+        size_t min_probe_rate = 2 * tau_int_sweeps;
+        size_t n_indep = (probe_rate >= min_probe_rate) ? (n_measure / probe_rate) : (n_measure / min_probe_rate);
+        
+        cout << "Rank " << rank << ": τ_int=" << pilot_tau_int 
+             << " samples (=" << tau_int_sweeps << " sweeps)"
+             << ", recommended probe_rate ≥ " << min_probe_rate << " sweeps" << endl;
+        
+        if (probe_rate < min_probe_rate) {
+            cout << "[WARNING] Rank " << rank << ": probe_rate=" << probe_rate
+                 << " < 2·τ_int=" << min_probe_rate 
+                 << " sweeps. Samples will be correlated! "
+                 << "Effective independent samples ≈ " << n_indep 
+                 << " (vs " << n_measure / probe_rate << " total samples). "
+                 << "Consider increasing probe_rate to " << min_probe_rate << "." << endl;
+        } else {
+            cout << "Rank " << rank << ": probe_rate=" << probe_rate 
+                 << " ≥ 2·τ_int=" << min_probe_rate 
+                 << " — samples are approximately independent ("
+                 << n_measure / probe_rate << " samples)." << endl;
+        }
+    }
+    
     cout << "Rank " << rank << ": Measuring..." << endl;
     for (size_t i = 0; i < n_measure; ++i) {
         if (overrelaxation_rate > 0) {
@@ -3705,6 +4218,62 @@ SpinVector StrainPhononLattice::magnetization_global() const {
     }
     
     return M / double(lattice_size);
+}
+
+void StrainPhononLattice::estimate_autocorrelation_time(const vector<double>& energies,
+                                                         size_t base_interval,
+                                                         double& tau_int_out,
+                                                         size_t& sampling_interval_out) {
+    size_t N = energies.size();
+    if (N < 10) {
+        tau_int_out = 1.0;
+        sampling_interval_out = base_interval;
+        return;
+    }
+    
+    // Compute mean and variance
+    double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
+    double variance = 0.0;
+    for (double e : energies) {
+        variance += (e - mean) * (e - mean);
+    }
+    variance /= N;
+    
+    if (variance < 1e-20) {
+        tau_int_out = 1.0;
+        sampling_interval_out = base_interval;
+        return;
+    }
+    
+    // Compute normalized autocorrelation function
+    size_t max_lag = std::min(N / 4, size_t(1000));
+    
+    // Integrated autocorrelation time using Sokal's self-consistent window:
+    // sum until lag >= C * tau_int (C ~ 6)
+    constexpr double sokal_C = 6.0;
+    tau_int_out = 0.5;
+    for (size_t lag = 1; lag < max_lag; ++lag) {
+        double corr = 0.0;
+        size_t count = N - lag;
+        for (size_t i = 0; i < count; ++i) {
+            corr += (energies[i] - mean) * (energies[i + lag] - mean);
+        }
+        double rho = corr / (count * variance);
+        if (rho < 0.0) break;  // Stop when ACF goes negative (noise-dominated)
+        tau_int_out += rho;
+        if (static_cast<double>(lag) >= sokal_C * tau_int_out) break;
+    }
+    
+    // Warn if tau_int is large relative to time series length
+    if (2.0 * tau_int_out > 0.1 * N) {
+        std::cout << "[WARNING] Autocorrelation time τ_int=" << tau_int_out 
+                  << " samples is large relative to time series length N=" << N
+                  << ". Estimate may be unreliable — consider longer preliminary runs." << std::endl;
+    }
+    
+    // sampling_interval in MC sweeps: 2 * ceil(tau_int) * base_interval
+    size_t tau_int_sweeps = static_cast<size_t>(std::ceil(tau_int_out)) * base_interval;
+    sampling_interval_out = std::max(size_t(2) * tau_int_sweeps, size_t(100));
 }
 
 SPL_BinningResult StrainPhononLattice::binning_analysis(const vector<double>& data) {
@@ -4817,6 +5386,77 @@ std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
     }
     
     return {Eg1, Eg2};
+}
+
+// ============================================================
+// GNEB WITH EXTERNAL STRAIN: Fixed external + relaxable internal strain
+// ============================================================
+
+double StrainPhononLattice::energy_for_gneb_with_external_strain(
+    const vector<Eigen::Vector3d>& spins_in,
+    double internal_Eg1, double internal_Eg2,
+    double external_Eg1, double external_Eg2) const {
+    
+    // Total strain = external + internal
+    double total_Eg1 = external_Eg1 + internal_Eg1;
+    double total_Eg2 = external_Eg2 + internal_Eg2;
+    
+    return energy_for_gneb_with_strain(spins_in, total_Eg1, total_Eg2);
+}
+
+std::tuple<vector<Eigen::Vector3d>, double, double>
+StrainPhononLattice::gradient_for_gneb_with_external_strain(
+    const vector<Eigen::Vector3d>& spins_in,
+    double internal_Eg1, double internal_Eg2,
+    double external_Eg1, double external_Eg2) const {
+    
+    // Total strain = external + internal
+    double total_Eg1 = external_Eg1 + internal_Eg1;
+    double total_Eg2 = external_Eg2 + internal_Eg2;
+    
+    // Gradients w.r.t. total strain are the same as w.r.t. internal strain
+    // since ∂E/∂ε_int = ∂E/∂ε_total * ∂ε_total/∂ε_int = ∂E/∂ε_total
+    return gradient_for_gneb_with_strain(spins_in, total_Eg1, total_Eg2);
+}
+
+std::pair<double, double> StrainPhononLattice::relax_strain_with_external(
+    const vector<Eigen::Vector3d>& spins_in,
+    double external_Eg1, double external_Eg2,
+    size_t max_iter,
+    double tolerance) const {
+    
+    // Start internal strain from zero
+    double int_Eg1 = 0.0;
+    double int_Eg2 = 0.0;
+    
+    // Steepest descent with adaptive step size
+    double step = 0.01;
+    
+    for (size_t iter = 0; iter < max_iter; ++iter) {
+        // Gradient w.r.t. internal strain at total strain = external + internal
+        double total_Eg1 = external_Eg1 + int_Eg1;
+        double total_Eg2 = external_Eg2 + int_Eg2;
+        
+        auto [grad_spins, dE_dEg1, dE_dEg2] = gradient_for_gneb_with_strain(
+            spins_in, total_Eg1, total_Eg2);
+        (void)grad_spins;
+        
+        double force_norm = std::sqrt(dE_dEg1 * dE_dEg1 + dE_dEg2 * dE_dEg2);
+        
+        if (force_norm < tolerance) {
+            break;
+        }
+        
+        // Update internal strain (gradient descent)
+        int_Eg1 -= step * dE_dEg1;
+        int_Eg2 -= step * dE_dEg2;
+        
+        if (iter > 0 && iter % 100 == 0) {
+            step *= 0.9;
+        }
+    }
+    
+    return {int_Eg1, int_Eg2};
 }
 
 void StrainPhononLattice::init_zigzag_pattern(int direction) {

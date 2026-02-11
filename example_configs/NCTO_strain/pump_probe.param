@@ -22,13 +22,13 @@
 system = NCTO_STRAIN
 
 # Lattice dimensions (honeycomb, 2D)
-lattice_size = 8,8,1
+lattice_size = 6,6,1
 
 # Simulation type
 simulation_mode = pump_probe
 
 # Output directory
-output_dir = NCTO_strain_pump_probe
+output_dir = NCTO_strain_pump_probe_switching
 
 # Number of trials
 num_trials = 1
@@ -46,19 +46,19 @@ Gammap = -4.0            # Gamma' coupling (meV)
 J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # Third-neighbor Heisenberg (meV)
-J7 = -0.3          # Six-spin ring exchange (meV)
+J7 = -0.1               # Six-spin ring exchange (meV) - small to allow switching
 
 # Time-dependent J7 modulation via Eg strain deviation
 # J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
 # where |δε_Eg| is the Eg strain deviation from equilibrium
-gamma_J7 = 0.0           # γ scaling factor (0 = no time dependence)
+gamma_J7 = 0.05           # γ scaling factor (0 = no time dependence)
 
 # External magnetic field
 field_strength = 0.0
 field_direction = 0,0,1
 
 # Gilbert damping for spin dynamics
-alpha_gilbert = 0.00
+alpha_gilbert = 0.0     # Small damping to allow relaxation into metastable state
 
 # ============================================
 # MAGNETOELASTIC COUPLING PARAMETERS
@@ -72,7 +72,7 @@ alpha_gilbert = 0.00
 # are small (|ε| << 1). With the spin exchange parameters (K=-6, Γ=8), 
 # setting λ ~ 0.01 typically gives |ε| ~ O(1-10).
 lambda_A1g = 0.0         # A1g channel magnetoelastic coupling
-lambda_Eg = 0.3         # Eg channel magnetoelastic coupling (reduced for stability)
+lambda_Eg = 0.05          # Eg channel magnetoelastic coupling (strong for switching)
 
 # ============================================
 # ELASTIC PARAMETERS
@@ -90,7 +90,7 @@ strain_mass = 1.0
 
 # Damping coefficients (mode-specific)
 gamma_A1g = 0.0          # A1g mode damping
-gamma_Eg = 0.0           # Eg mode damping
+gamma_Eg = 0.0           # Eg mode damping (allows strain to relax after pulse)
 
 # Quartic anharmonicity (optional)
 lambda_A1g_quartic = 0.0 # A1g quartic stabilization
@@ -107,10 +107,10 @@ drive_strength_Eg1 = 1.0  # Drive Eg1 (ε_xx - ε_yy shear) mode
 drive_strength_Eg2 = 1.0  # Drive Eg2 (2ε_xy shear) mode
 
 # Pump pulse (acoustic driving)
-pump_amplitude = 5.0     # Drive amplitude
-pump_frequency = 8.0     # Drive frequency (should match characteristic strain frequency)
-pump_time = 0.0          # Pulse center time
-pump_width = 1.0         # Gaussian width (FWHM ~ 2.35 * width)
+pump_amplitude = 10.0    # Drive amplitude (strong pulse to exceed critical strain ~3%)
+pump_frequency = 4.0     # Drive frequency (should match characteristic strain frequency)
+pump_time = 10.0         # Pulse center time (after equilibration)
+pump_width = 5.0         # Gaussian width (FWHM ~ 2.35 * width) - longer pulse
 pump_phase = 0.0         # Carrier-envelope phase
 
 # Probe pulse (optional second pulse)
@@ -127,7 +127,7 @@ probe_phase = 0.0
 # Time integration
 # NOTE: Timestep should be small enough for numerical stability.
 # For the coupled spin-strain system, dt ~ 0.01-0.02 is typically safe.
-md_time_start = -30.0
+md_time_start = -2.0
 md_time_end = 100.0      # Reduced for testing
 md_timestep = 0.01       # Small timestep for stability
 md_save_interval = 10    # Save every 10 steps (t=0.1 intervals)
@@ -138,9 +138,7 @@ md_integrator = rkf54
 # ============================================
 
 # Temperature sweep (simulated annealing)
-adiabatic_phonons = true
 relax_phonons = true
-phonon_only_relax = false
 T_start = 20.0
 T_end = 0.001
 T_zero = true
@@ -158,7 +156,7 @@ use_twist_boundary = false
 # If specified, loads both spins and strain from file
 # If empty, starts from random configuration with simulated annealing
 # Example: NCTO_triple_q_janssen/sample_0/spin_strain_config.txt
-initial_spin_config = 
+initial_spin_config = NCTO_triple_q_janssen/sample_0/spin_strain_config.txt 
 
 # Alternative: start from random configuration (default)
 # use_ferromagnetic_init = false

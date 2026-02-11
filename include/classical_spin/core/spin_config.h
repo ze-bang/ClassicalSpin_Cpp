@@ -163,6 +163,13 @@ struct SpinConfig {
     string gneb_initial_state_file = "";    // Path to initial state config (if empty, will anneal)
     string gneb_final_state_file = "";      // Path to final state config (if empty, will anneal)
     
+    // GNEB strain sweep parameters
+    bool gneb_strain_sweep = false;         // Enable barrier vs external strain sweep
+    size_t gneb_n_strain_steps = 20;        // Number of strain steps in sweep
+    double gneb_strain_max = -1.0;          // Max external strain amplitude (-1 = auto from zigzag relaxation)
+    double gneb_strain_direction = 0.0;     // Angle of Eg strain in radians (0 = Eg1 only, π/6 = 30°, etc.)
+    int gneb_zigzag_domain = 2;             // Zigzag domain for bias: 0=x, 1=y, 2=z
+    
     // Field parameters
     double field_strength = 0.0;
     vector<double> field_direction = {0, 1, 0};  // Field direction (dimension inferred from lattice)

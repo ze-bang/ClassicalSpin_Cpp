@@ -1026,35 +1026,53 @@ class lattice
     AutocorrelationResult compute_autocorrelation(const vector<double>& energies, size_t base_interval = 10) {
         AutocorrelationResult result;
         
+        size_t N = energies.size();
+        if (N < 10) {
+            result.tau_int = 1.0;
+            result.sampling_interval = base_interval;
+            return result;
+        }
+        
         // Calculate mean and variance
-        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
+        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
         double variance = 0;
         for (double e : energies) {
             variance += (e - mean) * (e - mean);
         }
-        variance /= energies.size();
+        variance /= N;
+        
+        if (variance < 1e-20) {
+            result.tau_int = 1.0;
+            result.sampling_interval = base_interval;
+            return result;
+        }
         
         // Compute autocorrelation function
-        size_t max_lag = energies.size() / 4;
+        size_t max_lag = std::min(N / 4, size_t(1000));
         result.correlation_function.resize(max_lag);
         
         for (size_t lag = 0; lag < max_lag; ++lag) {
             double sum = 0;
-            for (size_t i = 0; i < energies.size() - lag; ++i) {
+            size_t count = N - lag;
+            for (size_t i = 0; i < count; ++i) {
                 sum += (energies[i] - mean) * (energies[i+lag] - mean);
             }
-            result.correlation_function[lag] = sum / ((energies.size() - lag) * variance);
+            result.correlation_function[lag] = sum / (count * variance);
         }
         
-        // Calculate integrated autocorrelation time
+        // Calculate integrated autocorrelation time using Sokal's self-consistent
+        // window: sum until lag >= C * tau_int (C ~ 6)
+        constexpr double sokal_C = 6.0;
         result.tau_int = 0.5;
         for (size_t lag = 1; lag < max_lag; ++lag) {
-            if (result.correlation_function[lag] < 0.05) break;  // Cutoff when correlation is small
+            if (result.correlation_function[lag] < 0.0) break;
             result.tau_int += result.correlation_function[lag];
+            if (static_cast<double>(lag) >= sokal_C * result.tau_int) break;
         }
         
         // Determine sampling interval (at least 2*tau_int sweeps)
-        result.sampling_interval = max(size_t(2 * result.tau_int * base_interval), size_t(100));
+        size_t tau_int_sweeps = static_cast<size_t>(std::ceil(result.tau_int)) * base_interval;
+        result.sampling_interval = max(size_t(2) * tau_int_sweeps, size_t(100));
         
         return result;
     }

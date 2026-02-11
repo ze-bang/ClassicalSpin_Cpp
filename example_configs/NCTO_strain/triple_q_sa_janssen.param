@@ -22,7 +22,7 @@
 system = NCTO_STRAIN
 
 # Lattice dimensions (must be multiple of 2 for triple-Q magnetic unit cell)
-lattice_size = 12,12,1
+lattice_size = 6,6,1
 
 # Simulation type
 simulation_mode = SA
@@ -52,7 +52,7 @@ J3 = 0.0
 
 # Six-spin ring exchange (CRITICAL for triple-Q selection)
 # J7 < 0 selects triple-Q over single-Q zigzag
-J7 = -0.1                 # Try range: -0.5 to -3.0
+J7 = -0.01                 # Try range: -0.5 to -3.0
 
 # External magnetic field (zero for ground state search)
 field_strength = 0.0

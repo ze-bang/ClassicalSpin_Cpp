@@ -452,6 +452,10 @@ public:
     // LLG damping
     double alpha_gilbert = 0.0;
     
+    // Langevin temperature for stochastic dynamics (k_B T)
+    // Set > 0 to enable thermal fluctuations in integrate_langevin
+    double langevin_temperature = 0.0;
+    
     // ODE state size
     size_t state_size;
     
@@ -747,6 +751,43 @@ public:
                            const string& output_dir = "output");
     
     /**
+     * Stochastic Langevin dynamics using the Heun (improved Euler) scheme.
+     *
+     * Spins obey the stochastic LLG (sLLG) equation:
+     *   dS/dt = S × (H_eff + ξ) − (α/|S|) S × [S × (H_eff + ξ)]
+     * with white-noise field ξ satisfying the fluctuation-dissipation relation:
+     *   <ξ_i^a(t) ξ_j^b(t')> = (2 α k_B T / |S|) δ_{ij} δ_{ab} δ(t−t')
+     * 
+     * Strain DOF obey the Langevin equation:
+     *   M d²ε/dt² = −∂H/∂ε − γ dε/dt + η(t)
+     * with thermal noise η satisfying:
+     *   <η(t) η(t')> = 2 γ k_B T δ(t−t')
+     *
+     * The stochastic Heun method (second-order predictor-corrector) is used
+     * to correctly handle the multiplicative noise in the spin equation.
+     *
+     * At each step:
+     *   1. Draw noise vectors ξ, η once (held constant over the step)
+     *   2. Predictor: compute deterministic + noise RHS at current state
+     *   3. Euler predict: x̃ = x + dt * f(x, ξ)
+     *   4. Corrector: recompute RHS at predicted state with SAME noise
+     *   5. Heun update: x_{n+1} = x + (dt/2) [f(x, ξ) + f(x̃, ξ)]
+     *   6. Re-normalize spins to preserve |S| = spin_length
+     *
+     * Requires alpha_gilbert > 0 (damping is essential for proper thermalization).
+     * langevin_temperature sets k_B T.
+     *
+     * @param dt            Integration timestep
+     * @param t_start       Start time
+     * @param t_final       End time
+     * @param output_every  Save observables every N steps
+     * @param output_dir    Directory for output files
+     */
+    void integrate_langevin(double dt, double t_start, double t_final,
+                           size_t output_every = 100,
+                           const string& output_dir = "output");
+    
+    /**
      * Relax strain to equilibrium given current spin configuration.
      * 
      * This finds the strain state that minimizes the total energy 
@@ -807,8 +848,9 @@ public:
      * Should be called after annealing to get a true energy minimum.
      * 
      * @param num_sweeps Number of full sweeps over all sites
+     * @param output_dir Optional directory to save torque convergence diagnostics
      */
-    void deterministic_sweep(size_t num_sweeps);
+    void deterministic_sweep(size_t num_sweeps, const std::string& output_dir = "");
     
     /**
      * Over-relaxation sweep (microcanonical, zero acceptance rate)
@@ -938,6 +980,20 @@ public:
      * @return BinningResult containing mean, error, and binning information
      */
     static SPL_BinningResult binning_analysis(const vector<double>& data);
+    
+    /**
+     * Estimate integrated autocorrelation time from an energy time series.
+     * Uses Sokal's self-consistent window method for robust estimation.
+     * 
+     * @param energies       Energy time series (samples separated by base_interval sweeps)
+     * @param base_interval  MC sweeps between consecutive samples
+     * @param tau_int_out    Output: integrated autocorrelation time (in sample units)
+     * @param sampling_interval_out  Output: recommended sampling interval (in MC sweeps, ≥ 2·τ_int)
+     */
+    static void estimate_autocorrelation_time(const vector<double>& energies,
+                                               size_t base_interval,
+                                               double& tau_int_out,
+                                               size_t& sampling_interval_out);
     
     /**
      * Compute comprehensive thermodynamic observables with binning error analysis
@@ -1125,6 +1181,50 @@ public:
         double tolerance = 1e-6) const;
     
     /**
+     * Compute energy with an external (fixed) strain offset plus internal Eg strain
+     * Total strain = external + internal: ε_total = ε_ext + ε_int
+     * Used for computing kinetic barriers at fixed applied strain.
+     * 
+     * @param spins          Spin configuration
+     * @param internal_Eg1   Internal (relaxable) Eg1 strain
+     * @param internal_Eg2   Internal (relaxable) Eg2 strain
+     * @param external_Eg1   External (fixed) Eg1 strain offset
+     * @param external_Eg2   External (fixed) Eg2 strain offset
+     * @return Total energy at the combined strain
+     */
+    double energy_for_gneb_with_external_strain(
+        const vector<Eigen::Vector3d>& spins,
+        double internal_Eg1, double internal_Eg2,
+        double external_Eg1, double external_Eg2) const;
+    
+    /**
+     * Compute gradients with external strain offset
+     * Returns (∂E/∂S_i, ∂E/∂ε_int_Eg1, ∂E/∂ε_int_Eg2)
+     * The gradients are w.r.t. internal strain (external is fixed).
+     */
+    std::tuple<vector<Eigen::Vector3d>, double, double>
+    gradient_for_gneb_with_external_strain(
+        const vector<Eigen::Vector3d>& spins,
+        double internal_Eg1, double internal_Eg2,
+        double external_Eg1, double external_Eg2) const;
+    
+    /**
+     * Relax internal strain at fixed spins with an external strain offset
+     * Finds ε_int* = argmin_{ε_int} E(spins, ε_ext + ε_int)
+     * 
+     * @param spins         Fixed spin configuration
+     * @param external_Eg1  External Eg1 strain (fixed)
+     * @param external_Eg2  External Eg2 strain (fixed)
+     * @return Pair of (ε_int_Eg1*, ε_int_Eg2*) for internal strain at equilibrium
+     *         Total strain = external + internal
+     */
+    std::pair<double, double> relax_strain_with_external(
+        const vector<Eigen::Vector3d>& spins,
+        double external_Eg1, double external_Eg2,
+        size_t max_iter = 1000,
+        double tolerance = 1e-6) const;
+    
+    /**
      * Initialize spins to a zigzag pattern
      * @param direction  Zigzag direction: 0=x-bond, 1=y-bond, 2=z-bond
      */
@@ -1190,6 +1290,7 @@ private:
     // Random number generation
     std::mt19937 rng;
     std::uniform_real_distribution<double> uniform_dist;
+    std::normal_distribution<double> normal_dist{0.0, 1.0};
 };
 
 #endif // STRAIN_PHONON_LATTICE_H
