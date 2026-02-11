@@ -382,6 +382,9 @@ endfunction()
 # Main spin solver executable
 add_optimized_executable(spin_solver src/apps/spin_solver.cpp)
 
+# Test: zigzag (C3-breaking) → finite strain
+add_optimized_executable(test_zigzag_strain src/apps/test_zigzag_strain.cpp)
+
 
 # ============================================================================
 # BUILD CONFIGURATION
