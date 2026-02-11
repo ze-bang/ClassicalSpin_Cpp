@@ -3008,12 +3008,16 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     // Output final energies and C3 order breaking parameters
     cout << "\n========== Final State Summary ==========" << endl;
     cout << "Energies:" << endl;
-    cout << "  Spin energy:           " << std::scientific << spin_energy() << endl;
-    cout << "  Strain elastic energy: " << std::scientific << strain_energy() << endl;
-    cout << "  Magnetoelastic energy: " << std::scientific << magnetoelastic_energy() << endl;
-    cout << "  Ring exchange energy:  " << std::scientific << ring_exchange_energy() << endl;
-    double total_E = spin_energy() + strain_energy() + magnetoelastic_energy() + ring_exchange_energy();
-    cout << "  Total energy:          " << std::scientific << total_E << endl;
+    double E_spin = spin_energy();  // This already includes ring exchange
+    double E_strain = strain_energy();
+    double E_magnetoelastic = magnetoelastic_energy();
+    double E_ring = ring_exchange_energy();  // For display only
+    cout << "  Spin energy (incl. ring): " << std::scientific << E_spin << endl;
+    cout << "  Strain elastic energy:    " << std::scientific << E_strain << endl;
+    cout << "  Magnetoelastic energy:    " << std::scientific << E_magnetoelastic << endl;
+    cout << "  (Ring exchange contrib):  " << std::scientific << E_ring << endl;
+    double total_E = E_spin + E_strain + E_magnetoelastic;  // Don't add ring again!
+    cout << "  Total energy:             " << std::scientific << total_E << endl;
     
     cout << "\nC3 Order Breaking Parameters (D3d Irrep Spin Basis Functions):" << endl;
     cout << "  Eg channel:" << endl;

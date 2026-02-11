@@ -46,7 +46,7 @@ Gammap = -4.0            # Gamma' coupling (meV)
 J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # Third-neighbor Heisenberg (meV)
-J7 = -2          # Six-spin ring exchange (meV)
+J7 = -0.5          # Six-spin ring exchange (meV)
 
 # Time-dependent J7 modulation via Eg strain deviation
 # J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
