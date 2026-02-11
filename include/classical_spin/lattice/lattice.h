@@ -118,11 +118,17 @@ struct ThermodynamicObservables {
 };
 
 // Result from optimized temperature grid generation
-// Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
+// Based on:
+//   Katzgraber et al., J. Stat. Mech. P03018 (2006) [arXiv:cond-mat/0602085]
+//     - Feedback-optimized temperature placement (Δβ_i ∝ 1/f_i where f is current fraction)
+//   Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
+//     - Temperature-dependent sweep schedule (n_sweeps_i ∝ τ_int(T_i))
 struct OptimizedTempGridResult {
     vector<double> temperatures;              // Optimized temperature ladder
     vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
     vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A) at each T
+    vector<double> autocorrelation_times;     // Measured τ_int(T) at each temperature
+    vector<size_t> sweeps_per_temp;           // Bittner: n_sweeps(T_i) ∝ τ_int(T_i) between exchanges
     double mean_acceptance_rate;              // Average acceptance rate across all pairs
     double round_trip_estimate;               // Estimated round-trip time in sweeps
     size_t feedback_iterations_used;          // Number of feedback iterations performed
@@ -4052,7 +4058,7 @@ public:
      * @param n_anneal          Number of equilibration sweeps
      * @param n_measure         Number of measurement sweeps
      * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
-     * @param swap_rate         Attempt replica exchange every N sweeps
+     * @param swap_rate         Attempt replica exchange every N sweeps (used when sweeps_per_temp is empty)
      * @param probe_rate        Record observables every N sweeps
      * @param dir_name          Output directory
      * @param rank_to_write     List of ranks that should write output (-1 = all)
@@ -4061,13 +4067,18 @@ public:
      * @param verbose           If true, save spin configurations
      * @param accumulate_correlations  If true, accumulate real-space correlations for S(q)
      * @param n_bond_types      Number of bond types for dimer correlations (default: 3)
+     * @param sweeps_per_temp   Bittner adaptive sweep schedule: sweeps between exchanges per temperature.
+     *                          If non-empty, overrides swap_rate. Each rank does sweeps_per_temp[rank] MC
+     *                          sweeps between exchange attempts, adapting to local autocorrelation time.
+     *                          Computed by generate_optimized_temperature_grid[_mpi].
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
                            bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
                            bool verbose = false, bool accumulate_correlations = false,
-                           size_t n_bond_types = 3) {
+                           size_t n_bond_types = 3,
+                           const vector<size_t>& sweeps_per_temp = {}) {
         // Initialize MPI
         int initialized;
         MPI_Initialized(&initialized);
@@ -4086,6 +4097,25 @@ public:
         double sigma = 1000.0;
         int swap_accept = 0;
         double curr_accept = 0;
+        
+        // Determine exchange frequency: Bittner adaptive or fixed
+        // When using adaptive sweeps, the exchange frequency is set to the maximum
+        // sweeps_per_temp across all replicas, ensuring all replicas are decorrelated
+        // before exchanges (especially at bottleneck temperatures near phase transitions).
+        bool use_adaptive_sweeps = !sweeps_per_temp.empty() && sweeps_per_temp.size() >= static_cast<size_t>(size);
+        size_t effective_swap_rate = swap_rate;
+        if (use_adaptive_sweeps) {
+            // Use the max sweep count as the global exchange interval
+            // This ensures the slowest-decorrelating replica is adequately sampled
+            effective_swap_rate = *std::max_element(sweeps_per_temp.begin(), sweeps_per_temp.end());
+            if (rank == 0) {
+                cout << "Using Bittner adaptive sweep schedule:" << endl;
+                cout << "  Exchange frequency set to max(sweeps_per_temp) = " << effective_swap_rate << endl;
+                cout << "  (was swap_rate = " << swap_rate << ")" << endl;
+                size_t min_spt = *std::min_element(sweeps_per_temp.begin(), sweeps_per_temp.end());
+                cout << "  Sweep range: [" << min_spt << ", " << effective_swap_rate << "]" << endl;
+            }
+        }
         
         vector<double> heat_capacity, dHeat;
         if (rank == 0) {
@@ -4136,9 +4166,9 @@ public:
                 curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
             }
             
-            // Attempt replica exchange
-            if (swap_rate > 0 && i % swap_rate == 0) {
-                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+            // Attempt replica exchange (use adaptive or fixed rate)
+            if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
             }
         }
         
@@ -4158,8 +4188,8 @@ public:
                 } else {
                     metropolis(curr_Temp, gaussian_move, sigma);
                 }
-                if (swap_rate > 0 && i % swap_rate == 0) {
-                    attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+                if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
+                    attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
                 }
                 if (i % pilot_interval == 0) {
                     pilot_energies.push_back(total_energy(spins));
@@ -4200,8 +4230,8 @@ public:
                 curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
             }
             
-            if (swap_rate > 0 && i % swap_rate == 0) {
-                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+            if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
+                swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
             }
             
             if (i % probe_rate == 0) {
@@ -4826,26 +4856,34 @@ public:
 
     // ============================================================
     // TEMPERATURE LADDER OPTIMIZATION
-    // Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
-    // arXiv:0809.0571 - "Make life simple: unleash the full power 
-    // of the parallel tempering algorithm"
+    // Based on:
+    //   Katzgraber et al., J. Stat. Mech. P03018 (2006) [arXiv:cond-mat/0602085]
+    //     - Feedback-optimized temperature placement (Δβ_i ∝ 1/f_i)
+    //   Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
+    //     - Temperature-dependent sweep schedule (n_sweeps_i ∝ τ_int(T_i))
     // ============================================================
 
     /**
      * Generate optimized temperature grid for parallel tempering
      * 
-     * Implements the feedback-optimized algorithm from Bittner et al.
-     * Key insight: Optimal round-trip time is achieved when acceptance rate
-     * is uniform across all temperature pairs, with target A ≈ 0.5 (50%).
+     * Combines two key algorithms:
      * 
-     * The algorithm:
-     * 1. Start with geometric temperature spacing
-     * 2. Run short simulations to measure acceptance rates A_i between pairs
-     * 3. Adjust spacing: Δβ_{i+1} = Δβ_i * f(A_i) where f aims for uniform A
-     * 4. The optimal acceptance rate that minimizes round-trip time is 50%
+     * 1. Katzgraber et al. (2006) feedback-optimized temperature placement:
+     *    - Measure the "current fraction" f_i at each edge (fraction of replicas
+     *      that make full round trips passing through edge i).
+     *    - In practice, f_i ∝ A_i (acceptance rate at edge i) for uniform swap rates.
+     *    - The feedback rule adjusts Δβ_i ∝ A_i: edges with HIGH acceptance get
+     *      MORE β-spacing, edges with LOW acceptance get LESS spacing (denser temps).
+     *    - This concentrates temperatures at bottlenecks (e.g., phase transitions).
+     *    - Minimizes round-trip time τ_rt = (Σ_i 1/f_i)².
      * 
-     * The local diffusivity D(β) ∝ A(1-A) is maximized at A = 0.5.
-     * Round-trip time τ_rt ∝ ∫ dβ / D(β), minimized when A = const = 0.5.
+     * 2. Bittner et al. (2008) temperature-dependent sweep schedule:
+     *    - After optimizing the temperature grid, measure the canonical
+     *      autocorrelation time τ_int(T) at each temperature.
+     *    - Set the number of MC sweeps between exchange attempts proportional
+     *      to τ_int(T_i): n_sweeps_i = n_base × τ_int(T_i) / min(τ_int).
+     *    - This ensures each replica is decorrelated before attempting an exchange,
+     *      dramatically reducing round-trip time at critical temperatures.
      * 
      * @param Tmin              Minimum (coldest) temperature
      * @param Tmax              Maximum (hottest) temperature  
@@ -4855,9 +4893,9 @@ public:
      * @param feedback_iters    Number of feedback optimization iterations
      * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
      * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
-     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
+     * @param target_acceptance Target acceptance rate (default: 0.5 per Katzgraber)
      * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
-     * @return OptimizedTempGridResult containing temperatures and diagnostics
+     * @return OptimizedTempGridResult containing temperatures, sweep schedule, diagnostics
      */
     OptimizedTempGridResult generate_optimized_temperature_grid(
         double Tmin, double Tmax, size_t R,
@@ -4884,19 +4922,11 @@ public:
             return result;
         }
         
-        cout << "=== Bittner et al. Optimized Temperature Grid (Fast) ===" << endl;
-        cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+        cout << "=== Feedback-Optimized Temperature Grid ===" << endl;
+        cout << "References:" << endl;
+        cout << "  Katzgraber et al., J. Stat. Mech. P03018 (2006) - temperature placement" << endl;
+        cout << "  Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) - adaptive sweeps" << endl;
         cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << endl;
-        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
-        
-        // Helper: linear spacing
-        auto linspace = [](double a, double b, size_t n) {
-            vector<double> result(n);
-            for (size_t i = 0; i < n; ++i) {
-                result[i] = a + (b - a) * double(i) / double(n - 1);
-            }
-            return result;
-        };
         
         // Helper: convert beta to temperature
         auto temps_from_beta = [](const vector<double>& b) {
@@ -4907,22 +4937,22 @@ public:
             return T;
         };
         
-        // Initialize with geometric spacing in temperature (linear in log T)
-        // This is equivalent to linear spacing in β for a specific heat ~ const
+        // Initialize with linear spacing in β
         double beta_min = 1.0 / Tmax;  // Hottest = smallest beta
         double beta_max = 1.0 / Tmin;  // Coldest = largest beta
-        vector<double> beta = linspace(beta_min, beta_max, R);
+        vector<double> beta(R);
+        for (size_t i = 0; i < R; ++i) {
+            beta[i] = beta_min + (beta_max - beta_min) * double(i) / double(R - 1);
+        }
         
         // Store original spins
         SpinConfig original_spins = spins;
         
-        // OPTIMIZATION 1: Use independent Lattice copies for parallel warmup
-        // Each replica gets its own Lattice object to avoid state conflicts
+        // Use independent Lattice copies for parallel warmup
         vector<Lattice> replica_lattices(R, *this);
         double sigma = 1000.0;  // For Gaussian moves
         
         // Warmup phase: equilibrate each replica at its temperature
-        // OPTIMIZATION 2: Parallelize warmup with OpenMP
         cout << "Warming up " << R << " replicas";
         #ifdef _OPENMP
         cout << " (parallel)";
@@ -4933,7 +4963,6 @@ public:
         for (size_t k = 0; k < R; ++k) {
             double T_k = 1.0 / beta[k];
             double local_sigma = sigma;
-            // Seed each replica differently
             #pragma omp critical
             {
                 seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + k * 12345) * 2 + 1);
@@ -4946,28 +4975,29 @@ public:
             }
         }
         
-        // OPTIMIZATION 3: Cache energies to avoid redundant calculations
+        // Cache energies
         vector<double> cached_energies(R);
         for (size_t k = 0; k < R; ++k) {
             cached_energies[k] = replica_lattices[k].total_energy(replica_lattices[k].spins);
         }
         
-        // Feedback optimization loop
-        // Based on Eq. (4) in Bittner et al.: adjust Δβ to make A uniform
+        // ================================================================
+        // PHASE 1: Katzgraber feedback-optimized temperature placement
+        // Feedback rule: Δβ_i(new) ∝ A_i (acceptance rate at edge i)
+        // This concentrates temperatures where acceptance is low (bottlenecks)
+        // and spreads them where acceptance is high (easy regions).
+        // ================================================================
         vector<double> acceptance_rates(R - 1, 0.0);
-        
-        // OPTIMIZATION 4: Adaptive parameters - start aggressive, become conservative
-        double base_damping = 0.3;  // Start more aggressive
+        double base_damping = 0.5;
         
         for (size_t iter = 0; iter < feedback_iters; ++iter) {
-            // Adaptive damping: start aggressive, become more conservative
-            double damping = base_damping + 0.4 * (double(iter) / double(feedback_iters));
+            // Damping increases over iterations for stability
+            double damping = base_damping + 0.3 * (double(iter) / double(feedback_iters));
             
-            // Statistics accumulators for this iteration
             vector<size_t> attempts(R - 1, 0);
             vector<size_t> accepts(R - 1, 0);
             
-            // OPTIMIZATION 5: Reduced sweeps for early iterations when far from convergence
+            // Reduced sweeps for early iterations when far from convergence
             size_t effective_sweeps = sweeps_per_iter;
             if (iter < 3) {
                 effective_sweeps = std::max(size_t(50), sweeps_per_iter / 4);
@@ -4977,7 +5007,6 @@ public:
             
             // Run MC sweeps and measure acceptance rates
             for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
-                // OPTIMIZATION 6: Parallel replica updates with OpenMP
                 #pragma omp parallel for schedule(static)
                 for (size_t k = 0; k < R; ++k) {
                     double T_k = 1.0 / beta[k];
@@ -4988,30 +5017,20 @@ public:
                     }
                 }
                 
-                // Update cached energies
                 #pragma omp parallel for schedule(static)
                 for (size_t k = 0; k < R; ++k) {
                     cached_energies[k] = replica_lattices[k].total_energy(replica_lattices[k].spins);
                 }
                 
-                // Attempt replica exchanges for ALL adjacent pairs
-                // Use checkerboard pattern to avoid conflicts
+                // Attempt replica exchanges (checkerboard pattern)
                 for (int parity = 0; parity <= 1; ++parity) {
-                    // OPTIMIZATION 7: Parallel exchange attempts for same parity
                     #pragma omp parallel for schedule(static)
                     for (size_t e = parity; e < R - 1; e += 2) {
-                        // Use cached energies
-                        // beta array is sorted: beta[0] = beta_min (hottest), beta[R-1] = beta_max (coldest)
-                        // So beta[e] < beta[e+1] (e is hotter, e+1 is colder)
-                        double E_hot = cached_energies[e];       // Hotter (smaller β)
-                        double E_cold = cached_energies[e + 1];  // Colder (larger β)
-                        
-                        // Metropolis criterion for replica exchange:
-                        // P_swap = min(1, exp(Δ)) where Δ = (β_cold - β_hot)(E_cold - E_hot)
-                        // When energies are properly ordered (E_cold < E_hot), Δ < 0
-                        double dBeta = beta[e + 1] - beta[e];  // > 0 (β_cold - β_hot)
-                        double dE = E_cold - E_hot;            // typically < 0 (E_cold - E_hot)
-                        double delta = dBeta * dE;             // typically < 0
+                        double E_hot = cached_energies[e];
+                        double E_cold = cached_energies[e + 1];
+                        double dBeta = beta[e + 1] - beta[e];
+                        double dE = E_cold - E_hot;
+                        double delta = dBeta * dE;
                         
                         #pragma omp atomic
                         ++attempts[e];
@@ -5020,7 +5039,6 @@ public:
                             #pragma omp atomic
                             ++accepts[e];
                             
-                            // Swap configurations and cached energies
                             #pragma omp critical
                             {
                                 std::swap(replica_lattices[e].spins, replica_lattices[e + 1].spins);
@@ -5036,7 +5054,7 @@ public:
                 acceptance_rates[e] = double(accepts[e]) / double(attempts[e]);
             }
             
-            // Check convergence: all rates within tolerance of target
+            // Check convergence
             double max_deviation = 0.0;
             double mean_rate = 0.0;
             for (size_t e = 0; e < R - 1; ++e) {
@@ -5058,56 +5076,94 @@ public:
                 break;
             }
             
-            // Adjust β spacing using the Bittner feedback rule
-            // The key insight is: to achieve uniform A, adjust Δβ proportionally
-            // If A_e < target: reduce Δβ_e (bring temperatures closer)
-            // If A_e > target: increase Δβ_e (spread temperatures apart)
-            // 
-            // Update rule: Δβ_new = Δβ_old * sqrt(A_e / target) with damping
-            // This is derived from the fact that A ≈ erfc(Δβ * σ_E) where σ_E
-            // is the energy fluctuation, so Δβ ∝ -log(A) / σ_E approximately.
+            // Katzgraber et al. feedback rule:
+            // The optimal temperature set minimizes the round-trip time τ_rt = (Σ 1/f_i)².
+            // The current fraction f_i at edge i is proportional to the acceptance rate A_i
+            // times the local β-spacing. To minimize τ_rt, we need Δβ_i ∝ A_i:
+            //   - Low A_i (bottleneck) → small Δβ_i (dense temperatures)
+            //   - High A_i (easy region) → large Δβ_i (sparse temperatures)
             
-            vector<double> new_beta(R);
-            new_beta[0] = beta[0];  // Keep minimum β (maximum T) fixed
+            vector<double> weights(R - 1);
+            double total_weight = 0.0;
             
             for (size_t e = 0; e < R - 1; ++e) {
-                double A_e = acceptance_rates[e];
-                
-                // Bittner-style adjustment: use complementary error function approximation
-                // For Gaussian energy distributions: A ≈ erfc(Δβ * σ_E / sqrt(2))
-                // Inversion: Δβ_new / Δβ_old ≈ sqrt(log(1/A_old) / log(1/target))
-                // 
-                // Simplified practical rule with damping:
-                double ratio;
-                if (A_e < 0.01) A_e = 0.01;  // Prevent division issues
-                if (A_e > 0.99) A_e = 0.99;
-                
-                // Use the relationship: A ≈ exp(-c * Δβ²) approximately
-                // So: Δβ_new = Δβ_old * sqrt(log(A_old) / log(target))
-                // With smoothing factor for stability
-                double log_ratio = std::log(target_acceptance) / std::log(A_e);
-                ratio = std::sqrt(std::abs(log_ratio));
-                
-                // Apply adaptive damping to prevent oscillations
-                ratio = 1.0 + damping * (ratio - 1.0);
-                
-                // Clamp adjustment factor (more aggressive early, conservative late)
-                double clamp_min = (iter < 3) ? 0.5 : 0.7;
-                double clamp_max = (iter < 3) ? 2.0 : 1.5;
-                ratio = std::clamp(ratio, clamp_min, clamp_max);
-                
-                double d_beta = (beta[e + 1] - beta[e]) * ratio;
-                new_beta[e + 1] = new_beta[e] + d_beta;
+                double A_e = std::clamp(acceptance_rates[e], 0.01, 0.99);
+                weights[e] = A_e;
+                total_weight += weights[e];
             }
             
-            // Rescale to preserve endpoints exactly
-            double scale = (beta_max - beta_min) / (new_beta.back() - new_beta.front());
-            for (size_t k = 1; k < R; ++k) {
-                new_beta[k] = beta_min + scale * (new_beta[k] - new_beta.front());
+            // Normalize weights to sum to 1
+            for (size_t e = 0; e < R - 1; ++e) {
+                weights[e] /= total_weight;
+            }
+            
+            // Compute new beta positions from cumulative weights
+            vector<double> new_beta(R);
+            new_beta[0] = beta_min;
+            double cumulative = 0.0;
+            for (size_t e = 0; e < R - 1; ++e) {
+                cumulative += weights[e];
+                new_beta[e + 1] = beta_min + cumulative * (beta_max - beta_min);
+            }
+            new_beta[R - 1] = beta_max;  // Ensure exact endpoint
+            
+            // Apply damping: blend old and new positions
+            for (size_t k = 1; k < R - 1; ++k) {
+                new_beta[k] = (1.0 - damping) * beta[k] + damping * new_beta[k];
             }
             
             beta = new_beta;
         }
+        
+        // ================================================================
+        // PHASE 2: Bittner et al. adaptive sweep schedule
+        // Measure τ_int(T) at each temperature and set n_sweeps ∝ τ_int(T)
+        // ================================================================
+        cout << "\nMeasuring autocorrelation times for adaptive sweep schedule..." << endl;
+        
+        // Collect energy time series at each temperature to estimate τ_int
+        size_t tau_samples = std::max(size_t(500), sweeps_per_iter);
+        vector<double> tau_int_values(R, 1.0);
+        
+        #pragma omp parallel for schedule(dynamic)
+        for (size_t k = 0; k < R; ++k) {
+            double T_k = 1.0 / beta[k];
+            double local_sigma = sigma;
+            vector<double> energy_series;
+            energy_series.reserve(tau_samples);
+            
+            for (size_t i = 0; i < tau_samples; ++i) {
+                replica_lattices[k].metropolis(T_k, gaussian_move, local_sigma);
+                if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                    replica_lattices[k].overrelaxation();
+                }
+                energy_series.push_back(
+                    replica_lattices[k].total_energy(replica_lattices[k].spins));
+            }
+            
+            // Compute autocorrelation time using Sokal's self-consistent window
+            AutocorrelationResult acf = compute_autocorrelation(energy_series, 1);
+            tau_int_values[k] = std::max(1.0, acf.tau_int);
+        }
+        
+        // Compute sweep schedule: n_sweeps_i = n_base × τ_int(T_i) / min(τ_int)
+        double tau_min = *std::min_element(tau_int_values.begin(), tau_int_values.end());
+        size_t n_base = 10;  // Minimum sweeps between exchanges
+        
+        result.autocorrelation_times = tau_int_values;
+        result.sweeps_per_temp.resize(R);
+        for (size_t k = 0; k < R; ++k) {
+            result.sweeps_per_temp[k] = std::max(size_t(1), 
+                static_cast<size_t>(std::ceil(n_base * tau_int_values[k] / tau_min)));
+        }
+        
+        cout << "Autocorrelation times and sweep schedule:" << endl;
+        for (size_t k = 0; k < std::min(R, size_t(15)); ++k) {
+            cout << "  T[" << k << "] = " << std::scientific << std::setprecision(4) 
+                 << 1.0 / beta[k] << "  τ_int = " << std::fixed << std::setprecision(1)
+                 << tau_int_values[k] << "  n_sweeps = " << result.sweeps_per_temp[k] << endl;
+        }
+        if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
         
         // Restore original spins
         spins = original_spins;
@@ -5118,7 +5174,7 @@ public:
         
         result.acceptance_rates = acceptance_rates;
         
-        // Compute local diffusivities D(T) = A(1-A)
+        // Compute local diffusivities D_i = A_i(1 - A_i)
         result.local_diffusivities.resize(R - 1);
         for (size_t e = 0; e < R - 1; ++e) {
             double A = acceptance_rates[e];
@@ -5132,19 +5188,27 @@ public:
         }
         result.mean_acceptance_rate /= (R - 1);
         
-        // Estimate round-trip time
-        // τ_rt ∝ ∫ dβ / D(β) ≈ Σ Δβ_i / D_i
-        double tau_rt = 0.0;
+        // Estimate round-trip time using Katzgraber formula:
+        // τ_rt ∝ (Σ_i 1/f_i)² where f_i is the current fraction at edge i
+        // f_i ∝ A_i × Δβ_i / Σ_j(A_j × Δβ_j) (normalized current)
+        // With Bittner adaptive sweeps factored in: each edge contributes
+        // n_sweeps_avg(edge) / f_i to the round-trip time
+        double sum_inv_f = 0.0;
+        double total_current = 0.0;
         for (size_t e = 0; e < R - 1; ++e) {
             double d_beta = std::abs(beta[e + 1] - beta[e]);
-            double D = result.local_diffusivities[e];
-            if (D > 1e-6) {
-                tau_rt += d_beta / D;
-            } else {
-                tau_rt += d_beta / 1e-6;  // Prevent divergence
-            }
+            double A = std::max(acceptance_rates[e], 1e-6);
+            total_current += A * d_beta;
         }
-        result.round_trip_estimate = tau_rt;
+        for (size_t e = 0; e < R - 1; ++e) {
+            double d_beta = std::abs(beta[e + 1] - beta[e]);
+            double A = std::max(acceptance_rates[e], 1e-6);
+            double f_i = A * d_beta / total_current;
+            // Weight by average sweeps at this edge (Bittner factor)
+            double n_avg = 0.5 * (result.sweeps_per_temp[e] + result.sweeps_per_temp[e + 1]);
+            sum_inv_f += n_avg / f_i;
+        }
+        result.round_trip_estimate = sum_inv_f;
         
         // Print summary
         cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
@@ -5162,7 +5226,6 @@ public:
         
         cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
              << result.mean_acceptance_rate * 100 << "%" << endl;
-        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
         cout << "Estimated round-trip time scale: " << std::scientific 
              << result.round_trip_estimate << endl;
         cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
@@ -5172,7 +5235,7 @@ public:
 
     /**
      * Legacy wrapper for backward compatibility
-     * Calls the new Bittner-optimized algorithm with default 50% acceptance target
+     * Calls the Katzgraber/Bittner-optimized algorithm with default 50% acceptance target
      */
     vector<double> optimize_temperature_ladder_roundtrip(
         double Tmin, double Tmax, size_t R,
@@ -5186,19 +5249,21 @@ public:
             Tmin, Tmax, R,
             warmup_sweeps, sweeps_per_iter, feedback_iters,
             gaussian_move, overrelaxation_rate,
-            0.5,   // Bittner optimal: 50% acceptance
+            0.5,   // Katzgraber optimal for uniform acceptance
             0.05   // 5% convergence tolerance
         );
         return result.temperatures;
     }
 
     /**
-     * MPI-distributed temperature grid optimization (FAST VERSION)
+     * MPI-distributed temperature grid optimization
      * 
      * This version distributes replicas across MPI ranks, same as the main PT simulation.
      * Each rank handles exactly one replica, making it R times faster than the serial version.
      * 
-     * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+     * Combines:
+     *   Katzgraber et al. (2006) - feedback-optimized temperature placement (Δβ_i ∝ A_i)
+     *   Bittner et al. (2008) - temperature-dependent sweep schedule (n_i ∝ τ_int(T_i))
      * 
      * @param Tmin              Minimum (coldest) temperature
      * @param Tmax              Maximum (hottest) temperature  
@@ -5207,10 +5272,10 @@ public:
      * @param feedback_iters    Number of feedback optimization iterations
      * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
      * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
-     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
+     * @param target_acceptance Target acceptance rate (default: 0.5)
      * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
      * @param comm              MPI communicator (default: MPI_COMM_WORLD)
-     * @return OptimizedTempGridResult containing temperatures and diagnostics (valid on all ranks)
+     * @return OptimizedTempGridResult with temperatures, sweep schedule, diagnostics
      */
     OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
         double Tmin, double Tmax,
@@ -5248,10 +5313,11 @@ public:
         seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
         
         if (rank == 0) {
-            cout << "=== Bittner et al. Optimized Temperature Grid (MPI) ===" << endl;
-            cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+            cout << "=== Feedback-Optimized Temperature Grid (MPI) ===" << endl;
+            cout << "References:" << endl;
+            cout << "  Katzgraber et al., J. Stat. Mech. P03018 (2006) - temperature placement" << endl;
+            cout << "  Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) - adaptive sweeps" << endl;
             cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << " (MPI ranks)" << endl;
-            cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
         }
         
         // Initialize beta array on all ranks (linear spacing)
@@ -5436,15 +5502,13 @@ public:
                 }
                 
                 if (!converged) {
-                    // Bittner et al. feedback optimization
+                    // Katzgraber et al. feedback-optimized temperature placement:
                     // 
-                    // Key insight: to minimize round-trip time, we minimize ∫ dβ / A(β)
-                    // With discrete intervals: minimize Σ Δβ_i / A_i
-                    // Subject to: Σ Δβ_i = β_max - β_min
-                    // 
+                    // Minimize round-trip time τ_rt = (Σ_i 1/f_i)² where f_i is the
+                    // current fraction at edge i, proportional to A_i × Δβ_i.
                     // Optimal solution: Δβ_i ∝ A_i
-                    // i.e., edges with HIGH acceptance get MORE spacing,
-                    // edges with LOW acceptance get LESS spacing (closer temps → higher A)
+                    //   - Low A_i (bottleneck) → small Δβ_i (dense temperatures)  
+                    //   - High A_i (easy region) → large Δβ_i (sparse temperatures)
                     
                     // Compute weights proportional to acceptance rate
                     vector<double> weights(R - 1);
@@ -5503,6 +5567,57 @@ public:
         // Broadcast final acceptance rates
         MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
         
+        // ================================================================
+        // PHASE 2: Bittner et al. adaptive sweep schedule
+        // Each rank measures τ_int(T) at its temperature, then we gather
+        // to build the temperature-dependent sweep schedule.
+        // ================================================================
+        if (rank == 0) {
+            cout << "\nMeasuring autocorrelation times for adaptive sweep schedule..." << endl;
+        }
+        
+        // Collect energy time series at this rank's temperature
+        size_t tau_samples = std::max(size_t(500), sweeps_per_iter);
+        vector<double> energy_series;
+        energy_series.reserve(tau_samples);
+        
+        for (size_t i = 0; i < tau_samples; ++i) {
+            metropolis(my_T, gaussian_move, sigma);
+            if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                overrelaxation();
+            }
+            energy_series.push_back(total_energy(spins));
+        }
+        
+        // Compute local autocorrelation time
+        AutocorrelationResult acf = compute_autocorrelation(energy_series, 1);
+        double my_tau_int = std::max(1.0, acf.tau_int);
+        
+        // Gather τ_int from all ranks
+        vector<double> all_tau_int(R);
+        MPI_Allgather(&my_tau_int, 1, MPI_DOUBLE, all_tau_int.data(), 1, MPI_DOUBLE, comm);
+        
+        // Compute sweep schedule: n_sweeps_i = n_base × τ_int(T_i) / min(τ_int)
+        double tau_min_val = *std::min_element(all_tau_int.begin(), all_tau_int.end());
+        size_t n_base = 10;  // Minimum sweeps between exchanges
+        
+        result.autocorrelation_times = all_tau_int;
+        result.sweeps_per_temp.resize(R);
+        for (int k = 0; k < R; ++k) {
+            result.sweeps_per_temp[k] = std::max(size_t(1),
+                static_cast<size_t>(std::ceil(n_base * all_tau_int[k] / tau_min_val)));
+        }
+        
+        if (rank == 0) {
+            cout << "Autocorrelation times and sweep schedule:" << endl;
+            for (int k = 0; k < std::min(R, 15); ++k) {
+                cout << "  T[" << k << "] = " << std::scientific << std::setprecision(4) 
+                     << 1.0 / beta[k] << "  τ_int = " << std::fixed << std::setprecision(1)
+                     << all_tau_int[k] << "  n_sweeps = " << result.sweeps_per_temp[k] << endl;
+            }
+            if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+        }
+        
         // Build result (on all ranks)
         result.temperatures.resize(R);
         for (int i = 0; i < R; ++i) {
@@ -5525,13 +5640,23 @@ public:
         }
         result.mean_acceptance_rate /= (R - 1);
         
-        double tau_rt = 0.0;
+        // Compute round-trip time using Katzgraber formula with Bittner sweeps:
+        // τ_rt ∝ Σ_i n_avg_i / f_i where f_i ∝ A_i × Δβ_i (current fraction)
+        double sum_inv_f = 0.0;
+        double total_current = 0.0;
         for (int e = 0; e < R - 1; ++e) {
             double d_beta = std::abs(beta[e + 1] - beta[e]);
-            double D = result.local_diffusivities[e];
-            tau_rt += d_beta / std::max(D, 1e-6);
+            double A = std::max(acceptance_rates[e], 1e-6);
+            total_current += A * d_beta;
         }
-        result.round_trip_estimate = tau_rt;
+        for (int e = 0; e < R - 1; ++e) {
+            double d_beta = std::abs(beta[e + 1] - beta[e]);
+            double A = std::max(acceptance_rates[e], 1e-6);
+            double f_i = A * d_beta / total_current;
+            double n_avg = 0.5 * (result.sweeps_per_temp[e] + result.sweeps_per_temp[e + 1]);
+            sum_inv_f += n_avg / f_i;
+        }
+        result.round_trip_estimate = sum_inv_f;
         
         // Print summary (rank 0 only)
         if (rank == 0) {
@@ -5550,7 +5675,8 @@ public:
             
             cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
                  << result.mean_acceptance_rate * 100 << "%" << endl;
-            cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+            cout << "Estimated round-trip time scale: " << std::scientific 
+                 << result.round_trip_estimate << endl;
             cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
         }
         

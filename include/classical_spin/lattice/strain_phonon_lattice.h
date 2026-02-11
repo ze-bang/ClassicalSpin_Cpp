@@ -383,12 +383,16 @@ struct SPL_ThermodynamicObservables {
 
 /**
  * Result from optimized temperature grid generation
- * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+ * Based on:
+ *   Katzgraber et al., J. Stat. Mech. P03018 (2006) [arXiv:cond-mat/0602085]
+ *   Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
  */
 struct SPL_OptimizedTempGridResult {
     vector<double> temperatures;              // Optimized temperature ladder
     vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
     vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A) at each T
+    vector<double> autocorrelation_times;     // Measured τ_int(T) at each temperature
+    vector<size_t> sweeps_per_temp;           // Bittner: n_sweeps(T_i) ∝ τ_int(T_i) between exchanges
     double mean_acceptance_rate;              // Average acceptance rate across all pairs
     double round_trip_estimate;               // Estimated round-trip time in sweeps
     size_t feedback_iterations_used;          // Number of feedback iterations performed
@@ -879,12 +883,14 @@ public:
      * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
      * @param comm              MPI communicator (default: MPI_COMM_WORLD)
      * @param verbose           If true, save spin configurations
+     * @param sweeps_per_temp   Bittner adaptive sweep schedule: if non-empty, overrides swap_rate
+     *                          with max(sweeps_per_temp) to ensure all replicas decorrelate.
      */
     void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
                            bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
-                           bool verbose = false);
+                           bool verbose = false, const vector<size_t>& sweeps_per_temp = {});
     
     /**
      * Attempt replica exchange between neighboring temperatures

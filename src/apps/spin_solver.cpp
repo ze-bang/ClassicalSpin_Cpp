@@ -93,12 +93,14 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
     
     // Generate temperature ladder
     vector<double> temps(size);
+    vector<size_t> sweeps_per_temp;  // Bittner adaptive sweep schedule (empty = use fixed swap_rate)
     
     if (config.pt_optimize_temperatures) {
-        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
-        // All ranks participate - much faster than single-rank optimization
+        // Use MPI-distributed feedback-optimized temperature grid
+        // Phase 1: Katzgraber et al. feedback for uniform acceptance rates
+        // Phase 2: Bittner et al. adaptive sweep schedule for minimal round-trip time
         if (rank == 0) {
-            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed)..." << endl;
+            cout << "Generating optimized temperature grid (Katzgraber+Bittner, MPI-distributed)..." << endl;
         }
         
         OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
@@ -114,24 +116,36 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             comm
         );
         temps = opt_result.temperatures;
+        sweeps_per_temp = opt_result.sweeps_per_temp;
         
         // Save optimized temperature grid info to file (rank 0 only)
         if (rank == 0 && !config.output_dir.empty()) {
             filesystem::create_directories(config.output_dir);
             ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
-            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Optimized temperature grid\n";
+            opt_file << "# References: Katzgraber et al., PRE 73, 056702 (2006)\n";
+            opt_file << "#             Bittner et al., PRL 101, 130603 (2008)\n";
             opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
             opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
             opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
             opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
             opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
             opt_file << "#\n";
-            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity  tau_int  n_sweeps\n";
             for (int i = 0; i < size; ++i) {
                 opt_file << i << "  " << scientific << setprecision(12) << temps[i];
                 if (i < size - 1) {
                     opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
                              << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                } else {
+                    opt_file << "  " << fixed << setprecision(4) << 0.0
+                             << "  " << scientific << setprecision(6) << 0.0;
+                }
+                if (!opt_result.autocorrelation_times.empty()) {
+                    opt_file << "  " << fixed << setprecision(2) << opt_result.autocorrelation_times[i];
+                }
+                if (!opt_result.sweeps_per_temp.empty()) {
+                    opt_file << "  " << opt_result.sweeps_per_temp[i];
                 }
                 opt_file << "\n";
             }
@@ -182,7 +196,8 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             comm,
             false,  // verbose
             config.pt_accumulate_correlations,
-            config.pt_n_bond_types
+            config.pt_n_bond_types,
+            sweeps_per_temp  // Bittner adaptive sweep schedule
         );
         
         // T=0 deterministic quench for coldest replica (rank 0)
@@ -1701,11 +1716,12 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
     
     // Generate temperature ladder
     vector<double> temps(size);
+    vector<size_t> sweeps_per_temp;  // Bittner adaptive sweep schedule
     
     if (config.pt_optimize_temperatures) {
-        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
+        // Use MPI-distributed feedback-optimized temperature grid
         if (rank == 0) {
-            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed)..." << endl;
+            cout << "Generating optimized temperature grid (Katzgraber+Bittner, MPI-distributed)..." << endl;
         }
         
         SPL_OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
@@ -1721,24 +1737,36 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
             comm
         );
         temps = opt_result.temperatures;
+        sweeps_per_temp = opt_result.sweeps_per_temp;
         
         // Save optimized temperature grid info to file (rank 0 only)
         if (rank == 0 && !config.output_dir.empty()) {
             filesystem::create_directories(config.output_dir);
             ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
-            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Optimized temperature grid\n";
+            opt_file << "# References: Katzgraber et al., PRE 73, 056702 (2006)\n";
+            opt_file << "#             Bittner et al., PRL 101, 130603 (2008)\n";
             opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
             opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
             opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
             opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
             opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
             opt_file << "#\n";
-            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity  tau_int  n_sweeps\n";
             for (int i = 0; i < size; ++i) {
                 opt_file << i << "  " << scientific << setprecision(12) << temps[i];
                 if (i < size - 1) {
                     opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
                              << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                } else {
+                    opt_file << "  " << fixed << setprecision(4) << 0.0
+                             << "  " << scientific << setprecision(6) << 0.0;
+                }
+                if (!opt_result.autocorrelation_times.empty()) {
+                    opt_file << "  " << fixed << setprecision(2) << opt_result.autocorrelation_times[i];
+                }
+                if (!opt_result.sweeps_per_temp.empty()) {
+                    opt_file << "  " << opt_result.sweeps_per_temp[i];
                 }
                 opt_file << "\n";
             }
@@ -1785,7 +1813,8 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
             config.ranks_to_write,
             config.gaussian_move,
             comm,
-            true  // verbose: save spin configurations
+            true,  // verbose: save spin configurations
+            sweeps_per_temp  // Bittner adaptive sweep schedule
         );
         
         // T=0 deterministic quench for coldest replica (rank 0)
@@ -2255,12 +2284,12 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
     
     // Generate temperature ladder
     vector<double> temps(size);
+    vector<size_t> sweeps_per_temp;  // Bittner adaptive sweep schedule
     
     if (config.pt_optimize_temperatures) {
-        // Use MPI-distributed feedback-optimized temperature grid (Bittner et al.)
-        // All ranks participate - much faster than single-rank optimization
+        // Use MPI-distributed feedback-optimized temperature grid
         if (rank == 0) {
-            cout << "Generating optimized temperature grid (Bittner et al., MPI-distributed) for MixedLattice..." << endl;
+            cout << "Generating optimized temperature grid (Katzgraber+Bittner, MPI-distributed) for MixedLattice..." << endl;
         }
         
         OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
@@ -2276,24 +2305,36 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             comm
         );
         temps = opt_result.temperatures;
+        sweeps_per_temp = opt_result.sweeps_per_temp;
         
         // Save optimized temperature grid info to file (rank 0 only)
         if (rank == 0 && !config.output_dir.empty()) {
             filesystem::create_directories(config.output_dir);
             ofstream opt_file(config.output_dir + "/optimized_temperatures.txt");
-            opt_file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
+            opt_file << "# Optimized temperature grid\n";
+            opt_file << "# References: Katzgraber et al., PRE 73, 056702 (2006)\n";
+            opt_file << "#             Bittner et al., PRL 101, 130603 (2008)\n";
             opt_file << "# Target acceptance rate: " << config.pt_target_acceptance << "\n";
             opt_file << "# Mean acceptance rate: " << opt_result.mean_acceptance_rate << "\n";
             opt_file << "# Converged: " << (opt_result.converged ? "yes" : "no") << "\n";
             opt_file << "# Feedback iterations: " << opt_result.feedback_iterations_used << "\n";
             opt_file << "# Round-trip estimate: " << opt_result.round_trip_estimate << "\n";
             opt_file << "#\n";
-            opt_file << "# rank  temperature  acceptance_rate  diffusivity\n";
+            opt_file << "# rank  temperature  acceptance_rate  diffusivity  tau_int  n_sweeps\n";
             for (int i = 0; i < size; ++i) {
                 opt_file << i << "  " << scientific << setprecision(12) << temps[i];
                 if (i < size - 1) {
                     opt_file << "  " << fixed << setprecision(4) << opt_result.acceptance_rates[i]
                              << "  " << scientific << setprecision(6) << opt_result.local_diffusivities[i];
+                } else {
+                    opt_file << "  " << fixed << setprecision(4) << 0.0
+                             << "  " << scientific << setprecision(6) << 0.0;
+                }
+                if (!opt_result.autocorrelation_times.empty()) {
+                    opt_file << "  " << fixed << setprecision(2) << opt_result.autocorrelation_times[i];
+                }
+                if (!opt_result.sweeps_per_temp.empty()) {
+                    opt_file << "  " << opt_result.sweeps_per_temp[i];
                 }
                 opt_file << "\n";
             }
@@ -2342,7 +2383,9 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             config.ranks_to_write,
             config.gaussian_move,
             true,  // use_interleaved
-            comm
+            comm,
+            false,  // verbose
+            sweeps_per_temp  // Bittner adaptive sweep schedule
         );
         
         // T=0 deterministic quench for coldest replica (rank 0)

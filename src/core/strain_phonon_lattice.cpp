@@ -3955,7 +3955,7 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
                        size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                        string dir_name, const vector<int>& rank_to_write,
                        bool gaussian_move, MPI_Comm comm,
-                       bool verbose) {
+                       bool verbose, const vector<size_t>& sweeps_per_temp) {
     // Initialize MPI
     int initialized;
     MPI_Initialized(&initialized);
@@ -3975,6 +3975,17 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
     double sigma = 1000.0;
     int swap_accept = 0;
     double curr_accept = 0;
+    
+    // Determine exchange frequency: Bittner adaptive or fixed
+    bool use_adaptive_sweeps = !sweeps_per_temp.empty() && sweeps_per_temp.size() >= static_cast<size_t>(size);
+    size_t effective_swap_rate = swap_rate;
+    if (use_adaptive_sweeps) {
+        effective_swap_rate = *std::max_element(sweeps_per_temp.begin(), sweeps_per_temp.end());
+        if (rank == 0) {
+            cout << "Using Bittner adaptive sweep schedule:" << endl;
+            cout << "  Exchange frequency set to max(sweeps_per_temp) = " << effective_swap_rate << endl;
+        }
+    }
     
     vector<double> heat_capacity, dHeat;
     if (rank == 0) {
@@ -4004,9 +4015,9 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
             curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
         }
         
-        // Attempt replica exchange
-        if (swap_rate > 0 && i % swap_rate == 0) {
-            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+        // Attempt replica exchange (use adaptive or fixed rate)
+        if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
+            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
         }
     }
     
@@ -4026,8 +4037,8 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
             } else {
                 mc_sweep(curr_Temp, gaussian_move, sigma);
             }
-            if (swap_rate > 0 && i % swap_rate == 0) {
-                attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+            if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
+                attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
             }
             if (i % pilot_interval == 0) {
                 pilot_energies.push_back(total_energy());
@@ -4070,8 +4081,8 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
             curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
         }
         
-        if (swap_rate > 0 && i % swap_rate == 0) {
-            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / swap_rate, comm);
+        if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
+            swap_accept += attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
         }
         
         if (i % probe_rate == 0) {
@@ -4705,8 +4716,9 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
     rng.seed(static_cast<unsigned int>(seed + rank * 12345));
     
     if (rank == 0) {
-        cout << "=== Bittner et al. Optimized Temperature Grid (MPI) ===" << endl;
-        cout << "Reference: Phys. Rev. Lett. 101, 130603 (2008)" << endl;
+        cout << "=== Feedback-Optimized Temperature Grid (StrainPhononLattice MPI) ===" << endl;
+        cout << "References: Katzgraber et al. PRE 73, 056702 (2006)" << endl;
+        cout << "            Bittner et al. PRL 101, 130603 (2008)" << endl;
         cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << " (MPI ranks)" << endl;
         cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
     }
@@ -4911,7 +4923,57 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
     // Broadcast final acceptance rates
     MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
     
-    // Build result
+    // ================================================================
+    // PHASE 2: Bittner et al. adaptive sweep schedule
+    // Each rank measures tau_int(T) at its temperature, then we gather
+    // to build the temperature-dependent sweep schedule.
+    // ================================================================
+    if (rank == 0) {
+        cout << "\nMeasuring autocorrelation times for adaptive sweep schedule..." << endl;
+    }
+    
+    size_t tau_samples = std::max(size_t(500), sweeps_per_iter);
+    vector<double> energy_series;
+    energy_series.reserve(tau_samples);
+    
+    for (size_t i = 0; i < tau_samples; ++i) {
+        mc_sweep(my_T, gaussian_move, sigma);
+        if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+            overrelaxation();
+        }
+        energy_series.push_back(total_energy());
+    }
+    
+    // Use StrainPhononLattice's autocorrelation estimator
+    double my_tau_int = 1.0;
+    size_t dummy_interval;
+    estimate_autocorrelation_time(energy_series, 1, my_tau_int, dummy_interval);
+    my_tau_int = std::max(1.0, my_tau_int);
+    
+    vector<double> all_tau_int(R);
+    MPI_Allgather(&my_tau_int, 1, MPI_DOUBLE, all_tau_int.data(), 1, MPI_DOUBLE, comm);
+    
+    double tau_min_val = *std::min_element(all_tau_int.begin(), all_tau_int.end());
+    size_t n_base = 10;
+    
+    result.autocorrelation_times = all_tau_int;
+    result.sweeps_per_temp.resize(R);
+    for (int k = 0; k < R; ++k) {
+        result.sweeps_per_temp[k] = std::max(size_t(1),
+            static_cast<size_t>(std::ceil(n_base * all_tau_int[k] / tau_min_val)));
+    }
+    
+    if (rank == 0) {
+        cout << "Autocorrelation times and sweep schedule:" << endl;
+        for (int k = 0; k < std::min(R, 15); ++k) {
+            cout << "  T[" << k << "] = " << std::scientific << std::setprecision(4) 
+                 << 1.0 / beta[k] << "  tau_int = " << std::fixed << std::setprecision(1)
+                 << all_tau_int[k] << "  n_sweeps = " << result.sweeps_per_temp[k] << endl;
+        }
+        if (R > 15) cout << "  ... (" << R - 15 << " more)" << endl;
+    }
+    
+    // Build result (on all ranks)
     result.temperatures.resize(R);
     for (int i = 0; i < R; ++i) {
         result.temperatures[i] = 1.0 / beta[i];
@@ -4933,13 +4995,23 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
     }
     result.mean_acceptance_rate /= (R - 1);
     
-    double tau_rt = 0.0;
+    // Compute round-trip time with Bittner sweep weighting:
+    // tau_rt ~ sum_i n_avg_i / f_i  where f_i = A_i * d_beta_i / sum(A_j * d_beta_j)
+    double sum_inv_f = 0.0;
+    double total_current = 0.0;
     for (int e = 0; e < R - 1; ++e) {
         double d_beta = std::abs(beta[e + 1] - beta[e]);
-        double D = result.local_diffusivities[e];
-        tau_rt += d_beta / std::max(D, 1e-6);
+        double A = std::max(acceptance_rates[e], 1e-6);
+        total_current += A * d_beta;
     }
-    result.round_trip_estimate = tau_rt;
+    for (int e = 0; e < R - 1; ++e) {
+        double d_beta = std::abs(beta[e + 1] - beta[e]);
+        double A = std::max(acceptance_rates[e], 1e-6);
+        double f_i = A * d_beta / total_current;
+        double n_avg = 0.5 * (result.sweeps_per_temp[e] + result.sweeps_per_temp[e + 1]);
+        sum_inv_f += n_avg / f_i;
+    }
+    result.round_trip_estimate = sum_inv_f;
     
     if (rank == 0) {
         cout << "\n=== Optimized Temperature Grid Summary ===" << endl;
@@ -4957,7 +5029,8 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
         
         cout << "\nMean acceptance rate: " << std::fixed << std::setprecision(3) 
              << result.mean_acceptance_rate * 100 << "%" << endl;
-        cout << "Target acceptance rate: " << target_acceptance * 100 << "%" << endl;
+        cout << "Estimated round-trip time scale: " << std::scientific 
+             << result.round_trip_estimate << endl;
         cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
     }
     
