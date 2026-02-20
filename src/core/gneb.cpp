@@ -210,6 +210,184 @@ GNEBResult GNEBOptimizer::find_mep(const GNEBSpinConfig& initial, const GNEBSpin
     return result;
 }
 
+GNEBResult GNEBOptimizer::find_mep_from_path(const vector<GNEBSpinConfig>& initial_path,
+                                              const GNEBParams& params) {
+    // This is essentially the same as find_mep, but starts from a given path
+    // instead of geodesic interpolation
+    
+    if (initial_path.size() < 3) {
+        throw std::runtime_error("Initial path must have at least 3 images");
+    }
+    
+    size_t n_images_in = initial_path.size();
+    
+    if (params.verbosity >= 1) {
+        cout << "================================================" << endl;
+        cout << "GNEB: Refining path from initial guess" << endl;
+        cout << "================================================" << endl;
+        cout << "Number of images: " << n_images_in << endl;
+        cout << "Spring constant: " << params.spring_constant << endl;
+        cout << "Climbing image: " << (params.climbing_image ? "enabled" : "disabled") << endl;
+        cout << "Optimizer: " << (params.use_fire ? "FIRE" : "Steepest descent") << endl;
+        cout << "Force tolerance: " << params.force_tolerance << endl;
+        cout << "Max iterations: " << params.max_iterations << endl;
+        cout << endl;
+    }
+    
+    // Copy initial path (don't geodesic interpolate)
+    images = initial_path;
+    
+    // Compute initial energies
+    energies.resize(n_images_in);
+    for (size_t i = 0; i < n_images_in; ++i) {
+        energies[i] = compute_energy(images[i]);
+    }
+    
+    if (params.verbosity >= 1) {
+        cout << "Initial path energies:" << endl;
+        cout << "  E_initial = " << energies.front() << endl;
+        cout << "  E_final = " << energies.back() << endl;
+        double E_max = *std::max_element(energies.begin(), energies.end());
+        cout << "  E_max (initial) = " << E_max << endl;
+        cout << endl;
+    }
+    
+    // Initialize tangent vectors
+    current_tangents.resize(n_images_in);
+    
+    // Initialize FIRE state if using FIRE
+    if (params.use_fire) {
+        velocities.resize(n_images_in);
+        for (size_t i = 0; i < n_images_in; ++i) {
+            velocities[i].resize(n_sites, Eigen::Vector3d::Zero());
+        }
+        fire_dt = params.step_size;
+        fire_alpha = params.fire_alpha_start;
+        fire_n_positive = 0;
+    }
+    
+    // Main optimization loop
+    GNEBResult result;
+    result.converged = false;
+    result.iterations_used = 0;
+    
+    vector<GNEBSpinConfig> forces(n_images_in);
+    for (size_t i = 0; i < n_images_in; ++i) {
+        forces[i].resize(n_sites, Eigen::Vector3d::Zero());
+    }
+    
+    for (size_t iter = 0; iter < params.max_iterations; ++iter) {
+        // Compute tangent vectors
+        compute_tangents();
+        
+        // Check if we should enable climbing image
+        bool use_climbing = params.climbing_image && (iter >= params.climbing_start);
+        
+        // Compute NEB forces for all interior images
+        double max_force = 0.0;
+        
+        for (size_t i = 1; i < n_images_in - 1; ++i) {
+            forces[i] = compute_neb_force(i);
+            
+            // For climbing image, modify the force
+            if (use_climbing && i == find_climbing_image()) {
+                // Climbing image: invert force along tangent
+                GNEBSpinConfig grad = compute_gradient(images[i]);
+                grad = project_to_tangent_space(grad, images[i]);
+                
+                double grad_dot_tau = 0.0;
+                for (size_t s = 0; s < n_sites; ++s) {
+                    grad_dot_tau += grad[s].dot(current_tangents[i][s]);
+                }
+                
+                for (size_t s = 0; s < n_sites; ++s) {
+                    // F_CI = -grad + 2*(grad·τ)τ (climb uphill along τ)
+                    forces[i][s] = -grad[s] + 2.0 * grad_dot_tau * current_tangents[i][s];
+                }
+            }
+            
+            // Compute max force for convergence check
+            for (size_t s = 0; s < n_sites; ++s) {
+                max_force = std::max(max_force, forces[i][s].norm());
+            }
+        }
+        
+        result.max_force = max_force;
+        
+        // Check convergence
+        if (max_force < params.force_tolerance) {
+            result.converged = true;
+            result.iterations_used = iter;
+            if (params.verbosity >= 1) {
+                cout << "GNEB converged at iteration " << iter << " (max_force = " << max_force << ")" << endl;
+            }
+            break;
+        }
+        
+        // Print progress
+        if (params.verbosity >= 2 && iter % 50 == 0) {
+            size_t ci = find_climbing_image();
+            cout << "Iter " << iter << ": max_force = " << max_force 
+                 << ", barrier = " << (energies[ci] - energies[0])
+                 << ", climbing = " << (use_climbing ? "on" : "off") << endl;
+        }
+        
+        // Take optimization step
+        if (params.use_fire) {
+            fire_step(forces, use_climbing);
+        } else {
+            steepest_descent_step(forces, params.step_size, use_climbing);
+        }
+        
+        // Update energies
+        for (size_t i = 1; i < n_images_in - 1; ++i) {
+            energies[i] = compute_energy(images[i]);
+        }
+        
+        result.iterations_used = iter;
+    }
+    
+    if (!result.converged && params.verbosity >= 1) {
+        cout << "Warning: GNEB did not converge within " << params.max_iterations 
+             << " iterations" << endl;
+    }
+    
+    // Compute final results
+    compute_tangents();
+    
+    result.images = images;
+    result.energies = energies;
+    result.tangents = current_tangents;
+    result.arc_lengths = compute_arc_lengths();
+    result.saddle_index = find_climbing_image();
+    result.barrier = energies[result.saddle_index] - energies[0];
+    result.delta_E = energies.back() - energies.front();
+    result.max_force = 0.0;
+    
+    for (size_t i = 1; i < n_images_in - 1; ++i) {
+        GNEBSpinConfig grad = compute_gradient(images[i]);
+        grad = project_to_tangent_space(grad, images[i]);
+        for (size_t s = 0; s < n_sites; ++s) {
+            result.max_force = std::max(result.max_force, grad[s].norm());
+        }
+    }
+    
+    if (params.verbosity >= 1) {
+        cout << endl;
+        cout << "================================================" << endl;
+        cout << "GNEB Results:" << endl;
+        cout << "================================================" << endl;
+        cout << "Converged: " << (result.converged ? "yes" : "no") << endl;
+        cout << "Iterations: " << result.iterations_used << endl;
+        cout << "Max force: " << result.max_force << endl;
+        cout << "Saddle image index: " << result.saddle_index << endl;
+        cout << "Energy barrier: " << result.barrier << endl;
+        cout << "ΔE (final - initial): " << result.delta_E << endl;
+    }
+    
+    return result;
+}
+
 vector<GNEBSpinConfig> GNEBOptimizer::geodesic_interpolation(const GNEBSpinConfig& initial,
                                                           const GNEBSpinConfig& final,
                                                           size_t n_images) const {

@@ -798,7 +798,14 @@ double StrainPhononLattice::ring_exchange_energy() const {
     //                       -(S_i·S_l)(S_j·S_m)(S_k·S_n)
     //                       + cyclic permutations of (i,j,k,l,m,n)]
     
-    double J7 = magnetoelastic_params.J7;
+    // Use strain-dependent J7 if gamma_J7 is nonzero
+    // This makes the static energy consistent with the dynamics
+    double J7;
+    if (std::abs(magnetoelastic_params.gamma_J7) > 1e-12) {
+        J7 = get_effective_J7(0.0);  // t=0 is unused; uses current strain state
+    } else {
+        J7 = magnetoelastic_params.J7;
+    }
     if (std::abs(J7) < 1e-12 || hexagons.empty()) {
         return 0.0;
     }
@@ -1068,7 +1075,12 @@ double StrainPhononLattice::site_ring_exchange_energy(const SpinVector& spin_her
     // H_7 = (J_7/6) Σ_{hex} Σ_{cyclic perms} [terms]
     // Each hexagon is counted once, but we sum over all hexagons containing this site
     
-    double J7 = magnetoelastic_params.J7;
+    double J7;
+    if (std::abs(magnetoelastic_params.gamma_J7) > 1e-12) {
+        J7 = get_effective_J7(0.0);
+    } else {
+        J7 = magnetoelastic_params.J7;
+    }
     if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
         return 0.0;
     }
@@ -1774,7 +1786,12 @@ SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site) const {
     // with respect to S_p. The derivative of d_ab w.r.t. S_p is S_b if a=p, or S_a if b=p, else 0.
     
     Eigen::Vector3d H = Eigen::Vector3d::Zero();
-    const double J7 = magnetoelastic_params.J7;
+    double J7;
+    if (std::abs(magnetoelastic_params.gamma_J7) > 1e-12) {
+        J7 = get_effective_J7(0.0);
+    } else {
+        J7 = magnetoelastic_params.J7;
+    }
     
     if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
         return H;
@@ -5651,13 +5668,15 @@ StrainPhononLattice::CollectiveVars StrainPhononLattice::compute_collective_vari
     cv.m_zigzag = std::max({structure_factor(M1), structure_factor(M2), structure_factor(M3)});
     
     // Eg symmetry breaking: |f_Eg| = sqrt(f_Eg1² + f_Eg2²)
-    // where f_Eg = (J+K)f_K_Eg + J f_J_Eg + Γ f_Γ_Eg
+    // where f_Eg = (J+K)f_K_Eg + J f_J_Eg + Γ f_Γ_Eg + Γ' f_Γ'_Eg
+    // This must match magnetoelastic_energy() formula exactly!
     double J = magnetoelastic_params.J;
     double K = magnetoelastic_params.K;
     double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
     
-    double fEg1 = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1();
-    double fEg2 = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2();
+    double fEg1 = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
+    double fEg2 = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
     
     cv.f_Eg_amplitude = std::sqrt(fEg1 * fEg1 + fEg2 * fEg2);
     

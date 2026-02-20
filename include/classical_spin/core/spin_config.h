@@ -169,6 +169,7 @@ struct SpinConfig {
     double gneb_strain_max = -1.0;          // Max external strain amplitude (-1 = auto from zigzag relaxation)
     double gneb_strain_direction = 0.0;     // Angle of Eg strain in radians (0 = Eg1 only, π/6 = 30°, etc.)
     int gneb_zigzag_domain = 2;             // Zigzag domain for bias: 0=x, 1=y, 2=z
+    bool gneb_fixed_strain = true;          // Use fixed strain (true) vs adiabatic relaxation (false)
     
     // Field parameters
     double field_strength = 0.0;

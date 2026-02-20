@@ -2381,22 +2381,69 @@ public:
     // ============================================================
 
     /**
+     * Pyrochlore local frame: columns of R_sub give x_hat, y_hat, z_hat in global coords.
+     * S_global = S_local_x * x_hat[sub] + S_local_y * y_hat[sub] + S_local_z * z_hat[sub]
+     *
+     * x_hat[4][3], y_hat[4][3], z_hat[4][3]  (sublattice, global xyz)
+     */
+    struct PyrochloreLocalFrame {
+        // z_hat = local Ising axis
+        static constexpr double z_hat[4][3] = {
+            { 1.0/sqrt(3.0),  1.0/sqrt(3.0),  1.0/sqrt(3.0)},
+            { 1.0/sqrt(3.0), -1.0/sqrt(3.0), -1.0/sqrt(3.0)},
+            {-1.0/sqrt(3.0),  1.0/sqrt(3.0), -1.0/sqrt(3.0)},
+            {-1.0/sqrt(3.0), -1.0/sqrt(3.0),  1.0/sqrt(3.0)}
+        };
+        // y_hat
+        static constexpr double y_hat[4][3] = {
+            { 0.0,            -1.0/sqrt(2.0),  1.0/sqrt(2.0)},
+            { 0.0,             1.0/sqrt(2.0), -1.0/sqrt(2.0)},
+            { 0.0,            -1.0/sqrt(2.0), -1.0/sqrt(2.0)},
+            { 0.0,             1.0/sqrt(2.0),  1.0/sqrt(2.0)}
+        };
+        // x_hat
+        static constexpr double x_hat[4][3] = {
+            {-2.0/sqrt(6.0),  1.0/sqrt(6.0),  1.0/sqrt(6.0)},
+            {-2.0/sqrt(6.0), -1.0/sqrt(6.0), -1.0/sqrt(6.0)},
+            { 2.0/sqrt(6.0),  1.0/sqrt(6.0), -1.0/sqrt(6.0)},
+            { 2.0/sqrt(6.0), -1.0/sqrt(6.0),  1.0/sqrt(6.0)}
+        };
+
+        /** Transform a local-frame spin (Sx,Sy,Sz) on sublattice sub to global frame */
+        static void to_global(int sub, double Sx_l, double Sy_l, double Sz_l,
+                              double& Sx_g, double& Sy_g, double& Sz_g) {
+            Sx_g = Sx_l * x_hat[sub][0] + Sy_l * y_hat[sub][0] + Sz_l * z_hat[sub][0];
+            Sy_g = Sx_l * x_hat[sub][1] + Sy_l * y_hat[sub][1] + Sz_l * z_hat[sub][1];
+            Sz_g = Sx_l * x_hat[sub][2] + Sy_l * y_hat[sub][2] + Sz_l * z_hat[sub][2];
+        }
+    };
+
+    /**
      * Structure to hold all pyrochlore order parameters
      * Computed in a single pass for efficiency
      */
     struct PyrochloreOrderParameters {
-        double scalar_chirality;           // χ = <S1·(S2×S3)>
-        Eigen::Vector3d vector_chirality;  // κ = <S1×S2 + S2×S3 + S3×S1>
-        Eigen::Matrix3d nematic_order;     // Q[bond_type][component] = <Si·Sj>
+        // --- Local-frame order parameters ---
+        double scalar_chirality;           // χ = <S1·(S2×S3)>  (local frame)
+        Eigen::Vector3d vector_chirality;  // κ = <S1×S2 + S2×S3 + S3×S1>  (local frame)
+        Eigen::Matrix3d nematic_order;     // Q[bond_type][component] = <Si·Sj>  (local frame)
         double monopole_density;           // <Q> per tetrahedron (signed)
         Eigen::Vector4d monopole_by_sublattice;  // Monopole density by minority sublattice
+
+        // --- Global-frame order parameters ---
+        double scalar_chirality_global;          // χ_global = <S1_g·(S2_g×S3_g)>
+        Eigen::Vector3d vector_chirality_global;  // κ_global (3-component, global xyz)
+        Eigen::Matrix3d nematic_order_global;     // Q_global[bond_type][global_component]
         
         PyrochloreOrderParameters() 
             : scalar_chirality(0.0), 
               vector_chirality(Eigen::Vector3d::Zero()),
               nematic_order(Eigen::Matrix3d::Zero()),
               monopole_density(0.0),
-              monopole_by_sublattice(Eigen::Vector4d::Zero()) {}
+              monopole_by_sublattice(Eigen::Vector4d::Zero()),
+              scalar_chirality_global(0.0),
+              vector_chirality_global(Eigen::Vector3d::Zero()),
+              nematic_order_global(Eigen::Matrix3d::Zero()) {}
     };
     
     /**
@@ -2430,11 +2477,15 @@ public:
         const size_t n_cells = dim1 * dim2 * dim3;
         const double inv_n_cells = 1.0 / double(n_cells);
         
-        // Accumulators
+        // Accumulators — local frame
         double chi_sum = 0.0;                              // Scalar chirality
         Eigen::Vector3d kappa_sum = Eigen::Vector3d::Zero();  // Vector chirality
         double Q_sum = 0.0;                                // Q monopole density (signed)
         Eigen::Vector4d monopole_sub = Eigen::Vector4d::Zero();  // By sublattice
+
+        // Accumulators — global frame
+        double chi_sum_g = 0.0;
+        Eigen::Vector3d kappa_sum_g = Eigen::Vector3d::Zero();
         
         // Single pass over all unit cells
         for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
@@ -2455,7 +2506,7 @@ public:
             const double S2x = spins[idx2](0), S2y = spins[idx2](1), S2z = spins[idx2](2);
             const double S3x = spins[idx3](0), S3y = spins[idx3](1), S3z = spins[idx3](2);
             
-            // ===== CHIRALITY (kagome triangle 1,2,3) =====
+            // ===== CHIRALITY in LOCAL FRAME (kagome triangle 1,2,3) =====
             // S2 × S3
             double cross_x = S2y * S3z - S2z * S3y;
             double cross_y = S2z * S3x - S2x * S3z;
@@ -2478,6 +2529,34 @@ public:
             kappa_sum(0) += s1xs2_x + cross_x + s3xs1_x;  // Note: S2×S3 = cross
             kappa_sum(1) += s1xs2_y + cross_y + s3xs1_y;
             kappa_sum(2) += s1xs2_z + cross_z + s3xs1_z;
+
+            // ===== CHIRALITY in GLOBAL FRAME =====
+            // Transform sublattice spins 1,2,3 to global frame
+            double G1x, G1y, G1z, G2x, G2y, G2z, G3x, G3y, G3z;
+            PyrochloreLocalFrame::to_global(1, S1x, S1y, S1z, G1x, G1y, G1z);
+            PyrochloreLocalFrame::to_global(2, S2x, S2y, S2z, G2x, G2y, G2z);
+            PyrochloreLocalFrame::to_global(3, S3x, S3y, S3z, G3x, G3y, G3z);
+
+            // G2 × G3
+            double gcross_x = G2y * G3z - G2z * G3y;
+            double gcross_y = G2z * G3x - G2x * G3z;
+            double gcross_z = G2x * G3y - G2y * G3x;
+
+            // Scalar chirality: χ_g = G1 · (G2 × G3)
+            chi_sum_g += G1x * gcross_x + G1y * gcross_y + G1z * gcross_z;
+
+            // Vector chirality: κ_g = G1×G2 + G2×G3 + G3×G1
+            double g1xg2_x = G1y * G2z - G1z * G2y;
+            double g1xg2_y = G1z * G2x - G1x * G2z;
+            double g1xg2_z = G1x * G2y - G1y * G2x;
+
+            double g3xg1_x = G3y * G1z - G3z * G1y;
+            double g3xg1_y = G3z * G1x - G3x * G1z;
+            double g3xg1_z = G3x * G1y - G3y * G1x;
+
+            kappa_sum_g(0) += g1xg2_x + gcross_x + g3xg1_x;
+            kappa_sum_g(1) += g1xg2_y + gcross_y + g3xg1_y;
+            kappa_sum_g(2) += g1xg2_z + gcross_z + g3xg1_z;
             
             // ===== MONOPOLE (tetrahedron 0,1,2,3) =====
             // Q = Σ_μ S^z_μ (signed monopole charge)
@@ -2516,9 +2595,13 @@ public:
         result.vector_chirality = kappa_sum * inv_n_cells;
         result.monopole_density = Q_sum * inv_n_cells;
         result.monopole_by_sublattice = monopole_sub * inv_n_cells;
+
+        result.scalar_chirality_global = chi_sum_g * inv_n_cells;
+        result.vector_chirality_global = kappa_sum_g * inv_n_cells;
         
         // Nematic order requires bond enumeration - compute separately
         result.nematic_order = compute_kagome_nematic_order();
+        result.nematic_order_global = compute_kagome_nematic_order_global();
         
         return result;
     }
@@ -2610,6 +2693,78 @@ public:
         }
         
         // Normalize by number of bonds per type
+        for (int bond_type = 0; bond_type < 3; ++bond_type) {
+            if (bond_counts(bond_type) > 0) {
+                Q_sum.row(bond_type) /= bond_counts(bond_type);
+            }
+        }
+        
+        return Q_sum;
+    }
+
+    /**
+     * Compute component-resolved nematic bond order on kagome NN bonds
+     * in the GLOBAL Cartesian frame.
+     * 
+     * Each local-frame spin is transformed to the global frame using the
+     * pyrochlore local frame (x_hat, y_hat, z_hat per sublattice) before
+     * computing the product S_i^α_global * S_j^α_global.
+     * 
+     * Returns 3×3 matrix: Q_global[bond_type][global_component]
+     * - Rows: bond types (0=1-2, 1=2-3, 2=1-3)
+     * - Cols: global Cartesian components (X=0, Y=1, Z=2)
+     */
+    Eigen::Matrix3d compute_kagome_nematic_order_global() const {
+        if (!is_pyrochlore()) {
+            std::cerr << "Warning: compute_kagome_nematic_order_global() is only valid for pyrochlore lattices" << std::endl;
+            return Eigen::Matrix3d::Zero();
+        }
+        if (N_atoms < 4 || spin_dim < 3) {
+            return Eigen::Matrix3d::Zero();
+        }
+        
+        Eigen::Matrix3d Q_sum = Eigen::Matrix3d::Zero();
+        Eigen::Vector3i bond_counts = Eigen::Vector3i::Zero();
+        
+        for (size_t site_i = 0; site_i < lattice_size; ++site_i) {
+            size_t sub_i = site_i % N_atoms;
+            if (sub_i == 0) continue;
+            
+            for (size_t partner_idx = 0; partner_idx < bilinear_partners[site_i].size(); ++partner_idx) {
+                size_t site_j = bilinear_partners[site_i][partner_idx];
+                size_t sub_j = site_j % N_atoms;
+                
+                if (sub_j == 0) continue;
+                if (site_j <= site_i) continue;
+                
+                int bond_type = -1;
+                if ((sub_i == 1 && sub_j == 2) || (sub_i == 2 && sub_j == 1)) {
+                    bond_type = 0;
+                } else if ((sub_i == 2 && sub_j == 3) || (sub_i == 3 && sub_j == 2)) {
+                    bond_type = 1;
+                } else if ((sub_i == 1 && sub_j == 3) || (sub_i == 3 && sub_j == 1)) {
+                    bond_type = 2;
+                }
+                
+                if (bond_type >= 0) {
+                    // Transform both spins to global frame
+                    double Gi_x, Gi_y, Gi_z, Gj_x, Gj_y, Gj_z;
+                    PyrochloreLocalFrame::to_global(static_cast<int>(sub_i),
+                        spins[site_i](0), spins[site_i](1), spins[site_i](2),
+                        Gi_x, Gi_y, Gi_z);
+                    PyrochloreLocalFrame::to_global(static_cast<int>(sub_j),
+                        spins[site_j](0), spins[site_j](1), spins[site_j](2),
+                        Gj_x, Gj_y, Gj_z);
+                    
+                    // Accumulate Si_global^α * Sj_global^α
+                    Q_sum(bond_type, 0) += Gi_x * Gj_x;
+                    Q_sum(bond_type, 1) += Gi_y * Gj_y;
+                    Q_sum(bond_type, 2) += Gi_z * Gj_z;
+                    bond_counts(bond_type)++;
+                }
+            }
+        }
+        
         for (int bond_type = 0; bond_type < 3; ++bond_type) {
             if (bond_counts(bond_type) > 0) {
                 Q_sum.row(bond_type) /= bond_counts(bond_type);
@@ -4133,6 +4288,11 @@ public:
         vector<Eigen::Matrix3d> nematic_orders;  // [bond_type x spin_component]
         vector<double> monopole_densities;
         vector<Eigen::Vector4d> monopole_by_sublattices;
+
+        // Global-frame order parameters
+        vector<double> scalar_chiralities_global;
+        vector<Eigen::Vector3d> vector_chiralities_global;
+        vector<Eigen::Matrix3d> nematic_orders_global;  // [bond_type x global_component]
         
         size_t expected_samples = n_measure / probe_rate + 100;
         energies.reserve(expected_samples);
@@ -4143,6 +4303,9 @@ public:
         nematic_orders.reserve(expected_samples);
         monopole_densities.reserve(expected_samples);
         monopole_by_sublattices.reserve(expected_samples);
+        scalar_chiralities_global.reserve(expected_samples);
+        vector_chiralities_global.reserve(expected_samples);
+        nematic_orders_global.reserve(expected_samples);
         
         // Initialize correlation accumulator if requested
         RealSpaceCorrelationAccumulator corr_acc;
@@ -4247,6 +4410,9 @@ public:
                     nematic_orders.push_back(params.nematic_order);
                     monopole_densities.push_back(params.monopole_density);
                     monopole_by_sublattices.push_back(params.monopole_by_sublattice);
+                    scalar_chiralities_global.push_back(params.scalar_chirality_global);
+                    vector_chiralities_global.push_back(params.vector_chirality_global);
+                    nematic_orders_global.push_back(params.nematic_order_global);
                 }
                 
                 // Accumulate real-space correlations for S(q)
@@ -4288,7 +4454,9 @@ public:
                 std::filesystem::create_directories(rank_dir);
                 save_kagome_order_parameters(rank_dir, curr_Temp, 
                                              scalar_chiralities, vector_chiralities, nematic_orders,
-                                             monopole_densities, monopole_by_sublattices);
+                                             monopole_densities, monopole_by_sublattices,
+                                             scalar_chiralities_global, vector_chiralities_global,
+                                             nematic_orders_global);
             }
         }
         
@@ -4305,13 +4473,17 @@ public:
      * Save kagome order parameters to HDF5 file (pyrochlore patch)
      * Nematic order is now component-resolved: [bond_type x spin_component] 3x3 matrix
      * Includes monopole density (signed) and monopole by sublattice
+     * Includes global-frame chirality and nematic order parameters
      */
     void save_kagome_order_parameters(const string& rank_dir, double temperature,
                                        const vector<double>& scalar_chi,
                                        const vector<Eigen::Vector3d>& vector_chi,
                                        const vector<Eigen::Matrix3d>& nematic,
                                        const vector<double>& monopole,
-                                       const vector<Eigen::Vector4d>& monopole_sub) const {
+                                       const vector<Eigen::Vector4d>& monopole_sub,
+                                       const vector<double>& scalar_chi_global,
+                                       const vector<Eigen::Vector3d>& vector_chi_global,
+                                       const vector<Eigen::Matrix3d>& nematic_global) const {
 #ifdef HDF5_ENABLED
         string filename = rank_dir + "/kagome_order_T" + std::to_string(temperature) + ".h5";
         
@@ -4424,6 +4596,45 @@ public:
             H5::Attribute mono_sub_attr = mono_sub_ds.createAttribute("description", mono_sub_str_type, scalar_space);
             mono_sub_attr.write(mono_sub_str_type, mono_sub_desc.c_str());
             
+            // ===== GLOBAL-FRAME TIMESERIES =====
+            
+            // Write global scalar chirality [n_samples]
+            H5::DataSet chi_scalar_g = data.createDataSet("scalar_chirality_global", 
+                H5::PredType::NATIVE_DOUBLE, space1d);
+            chi_scalar_g.write(scalar_chi_global.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Write global vector chirality [n_samples x 3]
+            vector<double> vec_chi_g_flat(n_samples * 3);
+            for (size_t i = 0; i < n_samples; ++i) {
+                vec_chi_g_flat[i * 3 + 0] = vector_chi_global[i](0);
+                vec_chi_g_flat[i * 3 + 1] = vector_chi_global[i](1);
+                vec_chi_g_flat[i * 3 + 2] = vector_chi_global[i](2);
+            }
+            H5::DataSet chi_vec_g = data.createDataSet("vector_chirality_global", 
+                H5::PredType::NATIVE_DOUBLE, space2d);
+            chi_vec_g.write(vec_chi_g_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            // Write global nematic order [n_samples x 3 bonds x 3 global components]
+            vector<double> nem_g_flat(n_samples * 9);
+            for (size_t i = 0; i < n_samples; ++i) {
+                for (int b = 0; b < 3; ++b) {
+                    for (int c = 0; c < 3; ++c) {
+                        nem_g_flat[i * 9 + b * 3 + c] = nematic_global[i](b, c);
+                    }
+                }
+            }
+            H5::DataSet nem_g_ds = data.createDataSet("nematic_bond_order_global", 
+                H5::PredType::NATIVE_DOUBLE, space3d);
+            nem_g_ds.write(nem_g_flat.data(), H5::PredType::NATIVE_DOUBLE);
+            
+            std::string nem_g_desc = "Shape: [n_samples, bond_type, global_component]. "
+                                     "bond_type: 0=1-2, 1=2-3, 2=3-1. "
+                                     "global_component: 0=X, 1=Y, 2=Z (global Cartesian). "
+                                     "Q_ij^alpha = <S_i^alpha_global * S_j^alpha_global>";
+            H5::StrType nem_g_str_type(H5::PredType::C_S1, nem_g_desc.size() + 1);
+            H5::Attribute nem_g_attr = nem_g_ds.createAttribute("description", nem_g_str_type, scalar_space);
+            nem_g_attr.write(nem_g_str_type, nem_g_desc.c_str());
+            
             // Write summary statistics
             H5::Group stats = file.createGroup("/statistics");
             
@@ -4514,6 +4725,60 @@ public:
                 H5::PredType::NATIVE_DOUBLE, space_mono_stats);
             mono_sub_mean_ds.write(mono_sub_arr, H5::PredType::NATIVE_DOUBLE);
             
+            // ===== GLOBAL-FRAME STATISTICS =====
+            
+            // Scalar chirality global stats
+            double chi_g_mean = std::accumulate(scalar_chi_global.begin(), scalar_chi_global.end(), 0.0) / n_samples;
+            double chi_g2_mean = 0.0;
+            for (double c : scalar_chi_global) chi_g2_mean += c * c;
+            chi_g2_mean /= n_samples;
+            double chi_g_std = std::sqrt(std::max(0.0, chi_g2_mean - chi_g_mean * chi_g_mean));
+            
+            H5::Attribute chi_g_mean_attr = stats.createAttribute("scalar_chirality_global_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_g_mean_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_g_mean);
+            
+            H5::Attribute chi_g_std_attr = stats.createAttribute("scalar_chirality_global_std", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_g_std_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_g_std);
+            
+            H5::Attribute chi_g2_attr = stats.createAttribute("scalar_chirality_global_squared_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            chi_g2_attr.write(H5::PredType::NATIVE_DOUBLE, &chi_g2_mean);
+            
+            // Vector chirality global stats
+            Eigen::Vector3d kappa_g_mean = Eigen::Vector3d::Zero();
+            for (const auto& k : vector_chi_global) kappa_g_mean += k;
+            kappa_g_mean /= n_samples;
+            
+            double kappa_g_arr[3] = {kappa_g_mean(0), kappa_g_mean(1), kappa_g_mean(2)};
+            H5::DataSet kappa_g_mean_ds = stats.createDataSet("vector_chirality_global_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_kappa);
+            kappa_g_mean_ds.write(kappa_g_arr, H5::PredType::NATIVE_DOUBLE);
+            
+            double kappa_g_mag_mean = 0.0;
+            for (const auto& k : vector_chi_global) kappa_g_mag_mean += k.norm();
+            kappa_g_mag_mean /= n_samples;
+            
+            H5::Attribute kappa_g_mag_attr = stats.createAttribute("vector_chirality_global_magnitude_mean", 
+                H5::PredType::NATIVE_DOUBLE, scalar_space);
+            kappa_g_mag_attr.write(H5::PredType::NATIVE_DOUBLE, &kappa_g_mag_mean);
+            
+            // Nematic global stats: mean [3 bonds x 3 global components]
+            Eigen::Matrix3d Q_g_mean = Eigen::Matrix3d::Zero();
+            for (const auto& Q : nematic_global) Q_g_mean += Q;
+            Q_g_mean /= n_samples;
+            
+            double Q_g_arr[9];
+            for (int b = 0; b < 3; ++b) {
+                for (int c = 0; c < 3; ++c) {
+                    Q_g_arr[b * 3 + c] = Q_g_mean(b, c);
+                }
+            }
+            H5::DataSet Q_g_mean_ds = stats.createDataSet("nematic_bond_order_global_mean", 
+                H5::PredType::NATIVE_DOUBLE, space_q);
+            Q_g_mean_ds.write(Q_g_arr, H5::PredType::NATIVE_DOUBLE);
+            
             file.close();
             
         } catch (const H5::Exception& e) {
@@ -4525,9 +4790,12 @@ public:
         ofstream file(filename);
         file << "# Kagome order parameters (sublattices 1,2,3)\n";
         file << "# Component-resolved nematic: Q_ij^alpha = <S_i^alpha * S_j^alpha>\n";
+        file << "# Local-frame and global-frame order parameters\n";
         file << "# sample scalar_chi kappa_x kappa_y kappa_z "
              << "Q12_x Q12_y Q12_z Q23_x Q23_y Q23_z Q31_x Q31_y Q31_z "
-             << "monopole mono_sub0 mono_sub1 mono_sub2 mono_sub3\n";
+             << "monopole mono_sub0 mono_sub1 mono_sub2 mono_sub3 "
+             << "scalar_chi_g kappa_gx kappa_gy kappa_gz "
+             << "Q12_gX Q12_gY Q12_gZ Q23_gX Q23_gY Q23_gZ Q31_gX Q31_gY Q31_gZ\n";
         for (size_t i = 0; i < scalar_chi.size(); ++i) {
             file << i << " " << scalar_chi[i] << " "
                  << vector_chi[i](0) << " " << vector_chi[i](1) << " " << vector_chi[i](2);
@@ -4539,6 +4807,14 @@ public:
             file << " " << monopole[i];
             for (int s = 0; s < 4; ++s) {
                 file << " " << monopole_sub[i](s);
+            }
+            // Global-frame quantities
+            file << " " << scalar_chi_global[i] << " "
+                 << vector_chi_global[i](0) << " " << vector_chi_global[i](1) << " " << vector_chi_global[i](2);
+            for (int b = 0; b < 3; ++b) {
+                for (int c = 0; c < 3; ++c) {
+                    file << " " << nematic_global[i](b, c);
+                }
             }
             file << "\n";
         }

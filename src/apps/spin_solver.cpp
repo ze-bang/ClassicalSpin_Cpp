@@ -1141,9 +1141,19 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
 void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "\n" << string(70, '=') << endl;
-        cout << "KINETIC BARRIER ANALYSIS (GNEB with ADIABATIC STRAIN)" << endl;
+        if (config.gneb_fixed_strain) {
+            cout << "KINETIC BARRIER ANALYSIS (GNEB with FIXED STRAIN)" << endl;
+        } else {
+            cout << "KINETIC BARRIER ANALYSIS (GNEB with ADIABATIC STRAIN)" << endl;
+        }
         cout << string(70, '=') << endl;
-        cout << "Configuration space: spins only (strain relaxed adiabatically)" << endl;
+        if (config.gneb_fixed_strain) {
+            cout << "Configuration space: spins only (strain fixed externally)" << endl;
+            cout << "  -> Appropriate for driven phonon experiments" << endl;
+        } else {
+            cout << "Configuration space: spins only (strain relaxed adiabatically)" << endl;
+            cout << "  -> Appropriate for quasi-static strain" << endl;
+        }
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
         cout << "\nGNEB parameters:" << endl;
@@ -1154,7 +1164,7 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         cout << "  Climbing image:   " << (config.gneb_use_climbing_image ? "yes" : "no") << endl;
         cout << "\nMagnetoelastic coupling:" << endl;
         cout << "  lambda_Eg: " << lattice.magnetoelastic_params.lambda_Eg << endl;
-        cout << "  Strain relaxation: adiabatic (fast phonon limit)" << endl;
+        cout << "  Strain mode: " << (config.gneb_fixed_strain ? "FIXED" : "adiabatic") << endl;
         if (config.gneb_strain_sweep) {
             cout << "\nStrain sweep: ENABLED" << endl;
             cout << "  N strain steps:   " << config.gneb_n_strain_steps << endl;
@@ -1359,6 +1369,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         vector<size_t> sweep_saddle_idx(n_strain_pts);
         vector<bool>   sweep_converged(n_strain_pts);
         
+        // Store converged path to use as initial guess for next strain point
+        vector<GNEBSpinConfig> previous_path;
+        
         // ================================================================
         // STEP 4: GNEB loop (single point or strain sweep)
         // ================================================================
@@ -1376,25 +1389,102 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                      << " (" << ext_Eg1 << ", " << ext_Eg2 << ") ---" << endl;
             }
             
-            // Energy function: E_eff(spins) = E(spins, ε_ext + ε_int^eq(spins))
-            auto energy_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> double {
-                // Relax internal strain around the external offset
-                auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(spins, ext_Eg1, ext_Eg2);
-                // Total strain = external + internal
-                double total_Eg1 = ext_Eg1 + int_Eg1;
-                double total_Eg2 = ext_Eg2 + int_Eg2;
-                return lattice.energy_for_gneb_with_strain(spins, total_Eg1, total_Eg2);
-            };
+            // DEBUG: Print energy decomposition for initial and final states
+            if (s_idx == 0 || s_idx == n_strain_pts - 1) {
+                cout << "[DEBUG] Energy decomposition at ε = " << ext_amp << ":" << endl;
+                
+                // For initial state
+                for (size_t i = 0; i < n_sites; ++i) lattice.spins[i] = initial_spins[i];
+                for (size_t b = 0; b < 3; ++b) {
+                    lattice.strain.epsilon_xx[b] = ext_Eg1;
+                    lattice.strain.epsilon_yy[b] = -ext_Eg1;
+                    lattice.strain.epsilon_xy[b] = ext_Eg2;
+                }
+                double E_spin_init = lattice.spin_energy();
+                double E_strain_init = lattice.strain_energy();
+                double E_me_init = lattice.magnetoelastic_energy();
+                double E_gneb_init = lattice.energy_for_gneb_with_strain(initial_spins, ext_Eg1, ext_Eg2);
+                
+                // Also print the spin bilinears
+                double fK_Eg1 = lattice.f_K_Eg1();
+                double fJ_Eg1 = lattice.f_J_Eg1();
+                double fG_Eg1 = lattice.f_Gamma_Eg1();
+                double fGp_Eg1 = lattice.f_Gammap_Eg1();
+                double J = lattice.magnetoelastic_params.J;
+                double K = lattice.magnetoelastic_params.K;
+                double Gamma = lattice.magnetoelastic_params.Gamma;
+                double Gammap = lattice.magnetoelastic_params.Gammap;
+                double lambda_Eg = lattice.magnetoelastic_params.lambda_Eg;
+                double Sigma_Eg1 = (J+K)*fK_Eg1 + J*fJ_Eg1 + Gamma*fG_Eg1 + Gammap*fGp_Eg1;
+                
+                cout << "  Initial (triple-Q):" << endl;
+                cout << "    spin_energy = " << E_spin_init << endl;
+                cout << "    strain_energy = " << E_strain_init << endl;
+                cout << "    magnetoelastic_energy = " << E_me_init << endl;
+                cout << "    energy_for_gneb = " << E_gneb_init << endl;
+                cout << "    --- Spin bilinears ---" << endl;
+                cout << "    f_K_Eg1 = " << fK_Eg1 << ", f_J_Eg1 = " << fJ_Eg1 << endl;
+                cout << "    f_Gamma_Eg1 = " << fG_Eg1 << ", f_Gammap_Eg1 = " << fGp_Eg1 << endl;
+                cout << "    Sigma_Eg1 = (J+K)*fK + J*fJ + Γ*fΓ + Γ'*fΓ' = " << Sigma_Eg1 << endl;
+                cout << "    J=" << J << ", K=" << K << ", Γ=" << Gamma << ", Γ'=" << Gammap << ", λ_Eg=" << lambda_Eg << endl;
+                
+                // For final state
+                for (size_t i = 0; i < n_sites; ++i) lattice.spins[i] = final_spins[i];
+                double E_spin_fin = lattice.spin_energy();
+                double E_me_fin = lattice.magnetoelastic_energy();
+                double E_gneb_fin = lattice.energy_for_gneb_with_strain(final_spins, ext_Eg1, ext_Eg2);
+                double fK_Eg1_f = lattice.f_K_Eg1();
+                double fJ_Eg1_f = lattice.f_J_Eg1();
+                double fG_Eg1_f = lattice.f_Gamma_Eg1();
+                double fGp_Eg1_f = lattice.f_Gammap_Eg1();
+                double Sigma_Eg1_f = (J+K)*fK_Eg1_f + J*fJ_Eg1_f + Gamma*fG_Eg1_f + Gammap*fGp_Eg1_f;
+                
+                cout << "  Final (zigzag):" << endl;
+                cout << "    spin_energy = " << E_spin_fin << endl;
+                cout << "    magnetoelastic_energy = " << E_me_fin << endl;
+                cout << "    energy_for_gneb = " << E_gneb_fin << endl;
+                cout << "    --- Spin bilinears ---" << endl;
+                cout << "    f_K_Eg1 = " << fK_Eg1_f << ", f_J_Eg1 = " << fJ_Eg1_f << endl;
+                cout << "    f_Gamma_Eg1 = " << fG_Eg1_f << ", f_Gammap_Eg1 = " << fGp_Eg1_f << endl;
+                cout << "    Sigma_Eg1 = " << Sigma_Eg1_f << endl;
+                cout << "  Delta_Sigma_Eg1 = " << (Sigma_Eg1_f - Sigma_Eg1) << endl;
+            }
             
-            // Gradient function: ∂E_eff/∂S with adiabatic strain at external offset
-            auto gradient_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> GNEBSpinConfig {
-                auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(spins, ext_Eg1, ext_Eg2);
-                double total_Eg1 = ext_Eg1 + int_Eg1;
-                double total_Eg2 = ext_Eg2 + int_Eg2;
-                auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
-                    spins, total_Eg1, total_Eg2);
-                return grad_spins;
-            };
+            // Energy and gradient functions depend on strain mode
+            std::function<double(const GNEBSpinConfig&)> energy_func;
+            std::function<GNEBSpinConfig(const GNEBSpinConfig&)> gradient_func;
+            
+            if (config.gneb_fixed_strain) {
+                // FIXED STRAIN MODE: strain = ext_strain (no relaxation)
+                // This is appropriate for driven phonon experiments
+                energy_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> double {
+                    return lattice.energy_for_gneb_with_strain(spins, ext_Eg1, ext_Eg2);
+                };
+                
+                gradient_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> GNEBSpinConfig {
+                    auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
+                        spins, ext_Eg1, ext_Eg2);
+                    return grad_spins;
+                };
+            } else {
+                // ADIABATIC MODE: strain relaxes to equilibrium at each spin config
+                // E_eff(spins) = E(spins, ε_ext + ε_int^eq(spins))
+                energy_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> double {
+                    auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(spins, ext_Eg1, ext_Eg2);
+                    double total_Eg1 = ext_Eg1 + int_Eg1;
+                    double total_Eg2 = ext_Eg2 + int_Eg2;
+                    return lattice.energy_for_gneb_with_strain(spins, total_Eg1, total_Eg2);
+                };
+                
+                gradient_func = [&lattice, ext_Eg1, ext_Eg2](const GNEBSpinConfig& spins) -> GNEBSpinConfig {
+                    auto [int_Eg1, int_Eg2] = lattice.relax_strain_with_external(spins, ext_Eg1, ext_Eg2);
+                    double total_Eg1 = ext_Eg1 + int_Eg1;
+                    double total_Eg2 = ext_Eg2 + int_Eg2;
+                    auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
+                        spins, total_Eg1, total_Eg2);
+                    return grad_spins;
+                };
+            }
             
             GNEBOptimizer gneb(energy_func, gradient_func, n_sites);
             
@@ -1408,9 +1498,20 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             gneb_params.verbosity = (rank == 0 && !config.gneb_strain_sweep) ? 2 : 
                                     (rank == 0 ? 1 : 0);
             
-            // Find MEP
-            cout << "[Rank " << rank << "] Finding MEP..." << endl;
-            auto mep_result = gneb.find_mep(initial_spins, final_spins, gneb_params);
+            // Find MEP - use previous path as initial guess if available
+            GNEBResult mep_result;
+            if (previous_path.empty()) {
+                // First strain point: start from geodesic interpolation
+                cout << "[Rank " << rank << "] Finding MEP (from geodesic interpolation)..." << endl;
+                mep_result = gneb.find_mep(initial_spins, final_spins, gneb_params);
+            } else {
+                // Subsequent strain points: use previous converged path as initial guess
+                cout << "[Rank " << rank << "] Refining MEP (using previous path as initial guess)..." << endl;
+                mep_result = gneb.find_mep_from_path(previous_path, gneb_params);
+            }
+            
+            // Store converged path for next strain point
+            previous_path = mep_result.images;
             
             cout << "[Rank " << rank << "] MEP: iter=" << mep_result.iterations_used 
                  << " barrier=" << mep_result.barrier 

@@ -357,6 +357,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "gneb_zigzag_domain") {
                 config.gneb_zigzag_domain = stoi(value);
             }
+            else if (key == "gneb_fixed_strain") {
+                config.gneb_fixed_strain = parse_bool(value);
+            }
             else {
                 // Treat as Hamiltonian parameter
                 config.hamiltonian_params[key] = stod(value);

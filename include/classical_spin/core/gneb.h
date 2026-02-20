@@ -150,6 +150,19 @@ public:
                        const GNEBParams& params = GNEBParams());
     
     /**
+     * Find the minimum energy path starting from an initial path guess
+     * 
+     * Use this when you have a good initial guess (e.g., converged path at
+     * a nearby parameter value). The endpoints will be kept fixed.
+     * 
+     * @param initial_path  Initial guess for the path (vector of images)
+     * @param params        GNEB optimization parameters
+     * @return GNEBResult containing the MEP and diagnostics
+     */
+    GNEBResult find_mep_from_path(const vector<GNEBSpinConfig>& initial_path,
+                                   const GNEBParams& params = GNEBParams());
+    
+    /**
      * Generate initial path by geodesic interpolation
      * 
      * For each spin, interpolate along the great circle on S^2:
