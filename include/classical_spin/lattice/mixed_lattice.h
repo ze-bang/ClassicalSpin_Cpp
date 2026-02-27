@@ -5740,8 +5740,6 @@ public:
         
         // Step 3: Delay time scan
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
-        const bool scheduler_writer_only = (mpi_size > 1);
-        const int worker_count = scheduler_writer_only ? (mpi_size - 1) : 1;
         cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
         
         // Store trajectories
@@ -5876,6 +5874,8 @@ public:
         std::filesystem::create_directories(dir_name);
         
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+        const bool scheduler_writer_only = (mpi_size > 1);
+        const int worker_count = scheduler_writer_only ? (mpi_size - 1) : 1;
         
         if (rank == 0) {
             cout << "\n==========================================" << endl;
