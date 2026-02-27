@@ -191,6 +191,13 @@ struct GNEBStrainParams {
     // Maximum allowed strain amplitude (for safety)
     double max_strain_amplitude = 10.0;
     
+    // Path redistribution interval (0 = disabled)
+    size_t redistribution_freq = 0;
+    
+    // Born-Oppenheimer strain: relax strain to equilibrium at each step
+    // Eliminates strain soft modes, strain follows spins adiabatically
+    bool adiabatic_strain = false;
+    
     // FIRE optimization
     bool use_fire = true;
     double fire_dtmax = 0.5;
@@ -216,6 +223,7 @@ class GNEBStrainOptimizer {
 public:
     using EnergyFunc = std::function<double(const SpinStrainConfig&)>;
     using GradientFunc = std::function<SpinStrainGradient(const SpinStrainConfig&)>;
+    using RelaxStrainFunc = std::function<StrainEg(const SpinStrainConfig&)>;
     
     /**
      * @brief Constructor
@@ -225,6 +233,13 @@ public:
      */
     GNEBStrainOptimizer(EnergyFunc energy_func, GradientFunc gradient_func, size_t n_sites)
         : compute_energy(energy_func), compute_gradient(gradient_func), n_sites(n_sites) {}
+    
+    /**
+     * @brief Set strain relaxation function for Born-Oppenheimer mode
+     * When set and adiabatic_strain=true, strain at each image is relaxed
+     * to its equilibrium for the current spin configuration at each step.
+     */
+    void set_strain_relaxation(RelaxStrainFunc func) { relax_strain_func = func; }
     
     /**
      * @brief Find minimum energy path between two configurations
@@ -237,6 +252,20 @@ public:
     GNEBStrainResult find_mep(const SpinStrainConfig& initial, 
                                const SpinStrainConfig& final,
                                const GNEBStrainParams& params = GNEBStrainParams());
+    
+    /**
+     * @brief Find MEP starting from a pre-built initial path
+     * 
+     * Use this when you have physically meaningful intermediate configurations
+     * (e.g., from parameter scans) that provide a better starting point than
+     * geodesic interpolation.
+     * 
+     * @param initial_path  Pre-built path (will be used directly, endpoints fixed)
+     * @param params        GNEB optimization parameters
+     * @return GNEBStrainResult containing MEP and diagnostics
+     */
+    GNEBStrainResult find_mep_from_path(const vector<SpinStrainConfig>& initial_path,
+                                         const GNEBStrainParams& params = GNEBStrainParams());
     
     /**
      * @brief Generate initial path by interpolation
@@ -271,8 +300,10 @@ public:
 private:
     EnergyFunc compute_energy;
     GradientFunc compute_gradient;
+    RelaxStrainFunc relax_strain_func;  // Optional: Born-Oppenheimer strain relaxation
     size_t n_sites;
     double weight_strain = 1.0;  // Will be set from params
+    bool adiabatic_strain_mode = false;  // BO strain: GNEB operates in spin-only space
     
     // Current optimization state
     vector<SpinStrainConfig> images;
@@ -323,6 +354,13 @@ private:
      * @brief Find highest energy interior image
      */
     size_t find_climbing_image() const;
+    
+    /**
+     * @brief Redistribute images to equal arc-length spacing
+     * Uses SLERP for spins and linear interpolation for strain.
+     * Preserves endpoints. Resets FIRE velocities after redistribution.
+     */
+    void redistribute_images();
     
     /**
      * @brief FIRE optimization step

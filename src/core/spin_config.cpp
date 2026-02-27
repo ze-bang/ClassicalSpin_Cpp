@@ -320,6 +320,21 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "gneb_force_tolerance") {
                 config.gneb_force_tolerance = stod(value);
             }
+            else if (key == "gneb_step_size") {
+                config.gneb_step_size = stod(value);
+            }
+            else if (key == "gneb_fire_dtmax") {
+                config.gneb_fire_dtmax = stod(value);
+            }
+            else if (key == "gneb_max_strain_amplitude") {
+                config.gneb_max_strain_amplitude = stod(value);
+            }
+            else if (key == "gneb_climbing_start") {
+                config.gneb_climbing_start = stoul(value);
+            }
+            else if (key == "gneb_redistribution_freq") {
+                config.gneb_redistribution_freq = stoul(value);
+            }
             else if (key == "gneb_use_climbing_image") {
                 config.gneb_use_climbing_image = parse_bool(value);
             }
@@ -359,6 +374,36 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             }
             else if (key == "gneb_fixed_strain") {
                 config.gneb_fixed_strain = parse_bool(value);
+            }
+            else if (key == "gneb_dynamic_strain") {
+                config.gneb_dynamic_strain = parse_bool(value);
+            }
+            else if (key == "gneb_adiabatic_strain") {
+                config.gneb_adiabatic_strain = parse_bool(value);
+            }
+            else if (key == "gneb_pin_Eg2_zero") {
+                config.gneb_pin_Eg2_zero = parse_bool(value);
+            }
+            else if (key == "gneb_weight_strain") {
+                config.gneb_weight_strain = stod(value);
+            }
+            else if (key == "gneb_initial_path_dir") {
+                config.gneb_initial_path_dir = value;
+            }
+            else if (key == "fix_strain") {
+                config.fix_strain = (value == "true" || value == "1");
+            }
+            else if (key == "external_strain_Eg1") {
+                config.external_strain_Eg1 = stod(value);
+            }
+            else if (key == "external_strain_Eg2") {
+                config.external_strain_Eg2 = stod(value);
+            }
+            else if (key == "drive_F_Eg1") {
+                config.drive_F_Eg1 = stod(value);
+            }
+            else if (key == "drive_F_Eg2") {
+                config.drive_F_Eg2 = stod(value);
             }
             else {
                 // Treat as Hamiltonian parameter

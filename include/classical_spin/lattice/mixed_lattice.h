@@ -5740,6 +5740,8 @@ public:
         
         // Step 3: Delay time scan
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+        const bool scheduler_writer_only = (mpi_size > 1);
+        const int worker_count = scheduler_writer_only ? (mpi_size - 1) : 1;
         cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
         
         // Store trajectories
@@ -5886,7 +5888,12 @@ public:
                  << ", freq=" << pulse_freq_SU3 << endl;
             cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
             cout << "Total delay points: " << tau_steps << endl;
-            cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            if (scheduler_writer_only) {
+                cout << "Rank 0 role: scheduler/writer only" << endl;
+                cout << "Tau points per worker rank: ~" << (tau_steps + worker_count - 1) / worker_count << endl;
+            } else {
+                cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            }
             if (use_gpu) {
                 cout << "GPU acceleration: ENABLED (each rank uses assigned GPU)" << endl;
             }
@@ -5928,10 +5935,13 @@ public:
         
         typedef vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> TrajectoryType;
         
-        auto M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
-                                   pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                   pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                   T_start, T_end, T_step, method, use_gpu);
+        TrajectoryType M0_trajectory;
+        if (rank == 0) {
+            M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
+                                               pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                               pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                               T_start, T_end, T_step, method, use_gpu);
+        }
         
         // Restore ground state
         spins_SU2 = ground_state_SU2;
@@ -5944,9 +5954,16 @@ public:
         
         vector<int> my_tau_indices;
         vector<double> my_tau_values;
-        for (int i = rank; i < tau_steps; i += mpi_size) {
-            my_tau_indices.push_back(i);
-            my_tau_values.push_back(tau_start + i * tau_step);
+        if (!scheduler_writer_only) {
+            for (int i = rank; i < tau_steps; i += mpi_size) {
+                my_tau_indices.push_back(i);
+                my_tau_values.push_back(tau_start + i * tau_step);
+            }
+        } else if (rank > 0) {
+            for (int i = rank - 1; i < tau_steps; i += worker_count) {
+                my_tau_indices.push_back(i);
+                my_tau_values.push_back(tau_start + i * tau_step);
+            }
         }
         
         // Local trajectories
@@ -5994,7 +6011,14 @@ public:
         }
         
         // Compute sizes for serialization
-        size_t time_points = M0_trajectory.size();
+        unsigned long long time_points_ull = 0;
+        if (rank == 0) {
+            time_points_ull = static_cast<unsigned long long>(M0_trajectory.size());
+        } else if (!local_M1_trajectories.empty()) {
+            time_points_ull = static_cast<unsigned long long>(local_M1_trajectories.front().size());
+        }
+        MPI_Bcast(&time_points_ull, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+        size_t time_points = static_cast<size_t>(time_points_ull);
         // Data per point: time + 3 SU2 vectors + 3 SU3 vectors
         size_t data_per_point = 1 + 3 * spin_dim_SU2 + 3 * spin_dim_SU3;
         size_t traj_size = time_points * data_per_point;
@@ -6201,7 +6225,7 @@ public:
         int received_count = 0;
         
         for (int tau_idx = 0; tau_idx < tau_steps; ++tau_idx) {
-            int owner_rank = tau_idx % mpi_size;
+            int owner_rank = scheduler_writer_only ? (1 + (tau_idx % worker_count)) : 0;
             
             if (owner_rank == 0) continue;  // Already written above
             

@@ -427,6 +427,22 @@ public:
     // Strain state
     StrainState strain;
     StrainState strain_equilibrium;  // Equilibrium strain (set by relax_strain)
+    bool fix_strain_ = false;       // If true, relax_strain() is a no-op
+    double drive_F_Eg1_ = 0.0;     // Static drive force along Eg1: H_drive = -Σ_b F1*Q_Eg1(b)
+    double drive_F_Eg2_ = 0.0;     // Static drive force along Eg2: H_drive = -Σ_b F2*Q_Eg2(b)
+    
+    /**
+     * Set uniform Eg strain on all bond types.
+     * @param Eg1  Eg1 component: ε_xx = Eg1, ε_yy = -Eg1
+     * @param Eg2  Eg2 component: ε_xy = Eg2
+     */
+    void set_strain_Eg(double Eg1, double Eg2) {
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = Eg1;
+            strain.epsilon_yy[b] = -Eg1;
+            strain.epsilon_xy[b] = Eg2;
+        }
+    }
     
     // NN interactions
     vector<vector<SpinMatrix>> nn_interaction;
@@ -561,12 +577,23 @@ public:
     double strain_energy() const;
     double magnetoelastic_energy() const;
     
+    double drive_energy() const {
+        if (std::abs(drive_F_Eg1_) < 1e-15 && std::abs(drive_F_Eg2_) < 1e-15) return 0.0;
+        double E = 0.0;
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            double Eg1_b = (strain.epsilon_xx[b] - strain.epsilon_yy[b]) / 2.0;
+            double Eg2_b = strain.epsilon_xy[b];
+            E -= drive_F_Eg1_ * Eg1_b + drive_F_Eg2_ * Eg2_b;
+        }
+        return E;
+    }
+    
     double total_energy() const {
-        return spin_energy() + strain_energy() + magnetoelastic_energy();
+        return spin_energy() + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
     double total_energy(double t) const {
-        return spin_energy(t) + strain_energy() + magnetoelastic_energy();
+        return spin_energy(t) + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
     double energy_density() const {
@@ -1184,6 +1211,16 @@ public:
     std::pair<double, double> relax_strain_at_fixed_spins(
         const vector<Eigen::Vector3d>& spins,
         size_t max_iter = 1000,
+        double tolerance = 1e-6) const;
+    
+    /**
+     * Relax strain at fixed spins with warm-start from initial guess.
+     * Uses L-BFGS-like conjugate gradient for fast convergence.
+     */
+    std::pair<double, double> relax_strain_at_fixed_spins(
+        const vector<Eigen::Vector3d>& spins,
+        double init_Eg1, double init_Eg2,
+        size_t max_iter = 200,
         double tolerance = 1e-6) const;
     
     /**

@@ -3149,6 +3149,16 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
 }
 
 void StrainPhononLattice::relax_strain(bool verbose) {
+    // If strain is pinned (Born-Oppenheimer scan), skip relaxation
+    if (fix_strain_) {
+        if (verbose) {
+            cout << "Strain relaxation SKIPPED (fix_strain = true)" << endl;
+            cout << "  Current Eg1 = " << strain.epsilon_xx[0] 
+                 << ", Eg2 = " << strain.epsilon_xy[0] << endl;
+        }
+        return;
+    }
+    
     // Relax strain to equilibrium given current spin configuration.
     // We ignore A1g channel - only Eg magnetoelastic coupling is active.
     // 
@@ -3198,11 +3208,17 @@ void StrainPhononLattice::relax_strain(bool verbose) {
                            + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
     
     // Solve for equilibrium strain (Eg-only, same for all bond types)
-    // ε_xx = -λ_Eg f_Eg1 (C11 + C12) / det
-    // ε_yy = +λ_Eg f_Eg1 (C11 + C12) / det
-    double eps_xx_eq = -lambda_Eg * Eg1_spin_factor * (C11 + C12) / det;
-    double eps_yy_eq = +lambda_Eg * Eg1_spin_factor * (C11 + C12) / det;
-    double eps_xy_eq = -lambda_Eg * Eg2_spin_factor / (2.0 * C44);
+    // With drive H_drive = -Σ_b [F1*(ε_xx-ε_yy)/2 + F2*ε_xy]:
+    //   ∂E/∂ε_xx = C11 ε_xx + C12 ε_yy + λ_Eg Σ_Eg1 - F1/2 = 0
+    //   ∂E/∂ε_yy = C12 ε_xx + C11 ε_yy - λ_Eg Σ_Eg1 + F1/2 = 0
+    //   ∂E/∂ε_xy = 4C44 ε_xy + 2λ_Eg Σ_Eg2 - F2 = 0
+    // Solution (traceless: ε_yy = -ε_xx):
+    //   ε_xx = (F1/2 - λ_Eg Σ_Eg1)(C11+C12) / det
+    //   ε_yy = -ε_xx
+    //   ε_xy = (F2 - 2λ_Eg Σ_Eg2) / (4C44)
+    double eps_xx_eq = (drive_F_Eg1_ / 2.0 - lambda_Eg * Eg1_spin_factor) * (C11 + C12) / det;
+    double eps_yy_eq = -eps_xx_eq;
+    double eps_xy_eq = (drive_F_Eg2_ - 2.0 * lambda_Eg * Eg2_spin_factor) / (4.0 * C44);
     
     // Set all bond types to equilibrium values
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
@@ -3482,12 +3498,18 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
     double E_strain = strain_energy();
     double E_magnetoelastic = magnetoelastic_energy();
     double E_ring = ring_exchange_energy();  // For display only
+    double E_drive = drive_energy();
+    cout << std::setprecision(10);
     cout << "  Spin energy (incl. ring): " << std::scientific << E_spin << endl;
     cout << "  Strain elastic energy:    " << std::scientific << E_strain << endl;
     cout << "  Magnetoelastic energy:    " << std::scientific << E_magnetoelastic << endl;
     cout << "  (Ring exchange contrib):  " << std::scientific << E_ring << endl;
-    double total_E = E_spin + E_strain + E_magnetoelastic;  // Don't add ring again!
+    if (std::abs(drive_F_Eg1_) > 1e-15 || std::abs(drive_F_Eg2_) > 1e-15) {
+        cout << "  Drive energy:             " << std::scientific << E_drive << endl;
+    }
+    double total_E = E_spin + E_strain + E_magnetoelastic + E_drive;
     cout << "  Total energy:             " << std::scientific << total_E << endl;
+    cout << "  Total energy/site:        " << std::scientific << total_E / lattice_size << endl;
     
     cout << "\nC3 Order Breaking Parameters (D3d Irrep Spin Basis Functions):" << endl;
     cout << "  Eg channel:" << endl;
@@ -3778,13 +3800,32 @@ void StrainPhononLattice::load_spin_strain_config(const string& filename) {
     }
     
     // Parse spin data starting from current position
-    // First spin is in 'line'
+    // Support both 3-column (Sx Sy Sz) and 4-column (index Sx Sy Sz) formats
+    // Detect format from first non-comment line
     std::istringstream first_iss(line);
-    first_iss >> spins[0](0) >> spins[0](1) >> spins[0](2);
+    std::vector<double> values;
+    double val;
+    while (first_iss >> val) {
+        values.push_back(val);
+    }
+    
+    bool has_index = (values.size() >= 4);
+    if (has_index) {
+        // 4+ columns: skip first (site index), use next 3
+        spins[0] = Eigen::Vector3d(values[1], values[2], values[3]);
+    } else if (values.size() >= 3) {
+        // 3 columns: Sx Sy Sz directly
+        spins[0] = Eigen::Vector3d(values[0], values[1], values[2]);
+    }
     
     // Read remaining spins
     for (size_t i = 1; i < lattice_size; ++i) {
-        file >> spins[i](0) >> spins[i](1) >> spins[i](2);
+        if (has_index) {
+            int idx;
+            file >> idx >> spins[i](0) >> spins[i](1) >> spins[i](2);
+        } else {
+            file >> spins[i](0) >> spins[i](1) >> spins[i](2);
+        }
     }
 }
 
@@ -5445,37 +5486,57 @@ StrainPhononLattice::gradient_for_gneb_with_strain(
 
 std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
     const vector<Eigen::Vector3d>& spins_in,
-    size_t max_iter,
-    double tolerance) const {
+    size_t /*max_iter*/,
+    double /*tolerance*/) const {
     
-    // Start from zero strain
-    double Eg1 = 0.0;
-    double Eg2 = 0.0;
+    // Analytic solution: energy is exactly quadratic in strain, so
+    // ∂E/∂ε = 0 is a linear system with a closed-form solution.
+    // This is the same formula as relax_strain(), but operates on
+    // externally-provided spins rather than the lattice's internal state.
     
-    // Steepest descent with adaptive step size
-    double step = 0.01;
-    
-    for (size_t iter = 0; iter < max_iter; ++iter) {
-        auto [grad_spins, dE_dEg1, dE_dEg2] = gradient_for_gneb_with_strain(spins_in, Eg1, Eg2);
-        (void)grad_spins;  // Not needed for strain relaxation
-        
-        double force_norm = std::sqrt(dE_dEg1 * dE_dEg1 + dE_dEg2 * dE_dEg2);
-        
-        if (force_norm < tolerance) {
-            break;
-        }
-        
-        // Update strain (gradient descent)
-        Eg1 -= step * dE_dEg1;
-        Eg2 -= step * dE_dEg2;
-        
-        // Adaptive step size (simple backtracking would be better)
-        if (iter > 0 && iter % 100 == 0) {
-            step *= 0.9;
-        }
+    // Temporarily load input spins to evaluate spin basis functions
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    SpinConfig original_spins = self->spins;
+    for (size_t i = 0; i < lattice_size; ++i) {
+        self->spins[i] = spins_in[i];
     }
     
+    double C11 = elastic_params.C11;
+    double C12 = elastic_params.C12;
+    double C44 = elastic_params.C44;
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    double det = C11 * C11 - C12 * C12;
+    
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
+    
+    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1()
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
+    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2()
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    
+    // Restore original spins
+    self->spins = original_spins;
+    
+    // Analytic equilibrium: ε_xx = (F1/2 - λ_Eg Σ_Eg1)(C11+C12) / det
+    //                       ε_xy = (F2 - 2λ_Eg Σ_Eg2) / (4C44)
+    double Eg1 = (drive_F_Eg1_ / 2.0 - lambda_Eg * Eg1_spin_factor) * (C11 + C12) / det;
+    double Eg2 = (drive_F_Eg2_ - 2.0 * lambda_Eg * Eg2_spin_factor) / (4.0 * C44);
+    
     return {Eg1, Eg2};
+}
+
+std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
+    const vector<Eigen::Vector3d>& spins_in,
+    double /*init_Eg1*/, double /*init_Eg2*/,
+    size_t /*max_iter*/,
+    double /*tolerance*/) const {
+    
+    // Analytic solution — initial guess is irrelevant since the energy is
+    // exactly quadratic in strain. The closed-form minimum is exact.
+    return relax_strain_at_fixed_spins(spins_in);
 }
 
 // ============================================================
@@ -5512,41 +5573,14 @@ StrainPhononLattice::gradient_for_gneb_with_external_strain(
 std::pair<double, double> StrainPhononLattice::relax_strain_with_external(
     const vector<Eigen::Vector3d>& spins_in,
     double external_Eg1, double external_Eg2,
-    size_t max_iter,
-    double tolerance) const {
+    size_t /*max_iter*/,
+    double /*tolerance*/) const {
     
-    // Start internal strain from zero
-    double int_Eg1 = 0.0;
-    double int_Eg2 = 0.0;
+    // Analytic solution: total equilibrium strain is determined by spins + drive.
+    // Internal strain = total equilibrium - external.
+    auto [total_Eg1, total_Eg2] = relax_strain_at_fixed_spins(spins_in);
     
-    // Steepest descent with adaptive step size
-    double step = 0.01;
-    
-    for (size_t iter = 0; iter < max_iter; ++iter) {
-        // Gradient w.r.t. internal strain at total strain = external + internal
-        double total_Eg1 = external_Eg1 + int_Eg1;
-        double total_Eg2 = external_Eg2 + int_Eg2;
-        
-        auto [grad_spins, dE_dEg1, dE_dEg2] = gradient_for_gneb_with_strain(
-            spins_in, total_Eg1, total_Eg2);
-        (void)grad_spins;
-        
-        double force_norm = std::sqrt(dE_dEg1 * dE_dEg1 + dE_dEg2 * dE_dEg2);
-        
-        if (force_norm < tolerance) {
-            break;
-        }
-        
-        // Update internal strain (gradient descent)
-        int_Eg1 -= step * dE_dEg1;
-        int_Eg2 -= step * dE_dEg2;
-        
-        if (iter > 0 && iter % 100 == 0) {
-            step *= 0.9;
-        }
-    }
-    
-    return {int_Eg1, int_Eg2};
+    return {total_Eg1 - external_Eg1, total_Eg2 - external_Eg2};
 }
 
 void StrainPhononLattice::init_zigzag_pattern(int direction) {
