@@ -15,14 +15,18 @@ struct Bilinear {
     SpinMatrix interaction;  // N×N matrix
     size_t partner;
     Vector3i offset;  // Offset in lattice coordinates
+    int bond_type;  // Bond type metadata (-1 = unspecified, 0/1/2 = x/y/z for Kitaev, etc.)
     
-    Bilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()) {}
+    Bilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()), bond_type(-1) {}
     
     Bilinear(const SpinMatrix& J, size_t p) 
-        : interaction(J), partner(p), offset(Vector3i::Zero()) {}
+        : interaction(J), partner(p), offset(Vector3i::Zero()), bond_type(-1) {}
     
     Bilinear(const SpinMatrix& J, size_t p, const Vector3i& o)
-        : interaction(J), partner(p), offset(o) {}
+        : interaction(J), partner(p), offset(o), bond_type(-1) {}
+    
+    Bilinear(const SpinMatrix& J, size_t p, const Vector3i& o, int bt)
+        : interaction(J), partner(p), offset(o), bond_type(bt) {}
 };
 
 // Trilinear interaction structure (replaces template version)
@@ -141,6 +145,15 @@ public:
             throw invalid_argument("Bilinear matrix dimension mismatch");
         }
         bilinear_interaction.insert(make_pair(source, Bilinear(J, partner, offset)));
+    }
+    
+    void set_bilinear_interaction(const SpinMatrix& J, size_t source, 
+                                  size_t partner, const Vector3i& offset,
+                                  int bond_type) {
+        if (J.rows() != N || J.cols() != N) {
+            throw invalid_argument("Bilinear matrix dimension mismatch");
+        }
+        bilinear_interaction.insert(make_pair(source, Bilinear(J, partner, offset, bond_type)));
     }
     
     void set_trilinear_interaction(const SpinTensor3& K, size_t source,

@@ -49,8 +49,8 @@ namespace odeint = boost::numeric::odeint;
 // CONSTRUCTOR
 // ============================================================
 
-StrainPhononLattice::StrainPhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
-    : dim1(d1), dim2(d2), dim3(d3), spin_length(spin_l)
+StrainPhononLattice::StrainPhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3, float spin_l)
+    : unit_cell(uc), N_atoms(uc.N_atoms), dim1(d1), dim2(d2), dim3(d3), spin_length(spin_l)
 {
     lattice_size = N_atoms * dim1 * dim2 * dim3;
     state_size = spin_dim * lattice_size + StrainState::N_DOF;
@@ -69,10 +69,11 @@ StrainPhononLattice::StrainPhononLattice(size_t d1, size_t d2, size_t d3, float 
     j3_partners.resize(lattice_size);
     site_hexagons.resize(lattice_size);
     
-    // Initialize Kitaev local frame (same for both sublattices)
-    SpinMatrix R = MagnetoelasticParams::get_kitaev_rotation();
-    sublattice_frames[0] = R;
-    sublattice_frames[1] = R;
+    // Extract sublattice frames from UnitCell
+    sublattice_frames.resize(N_atoms);
+    for (size_t a = 0; a < N_atoms; ++a) {
+        sublattice_frames[a] = uc.sublattice_frames[a];
+    }
     
     // Initialize random number generator
     auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
@@ -85,199 +86,81 @@ StrainPhononLattice::StrainPhononLattice(size_t d1, size_t d2, size_t d3, float 
     cout << "Strain DOF: " << StrainState::N_DOF << " (ε_xx, ε_yy, ε_xy, V_xx, V_yy, V_xy) × 3 bonds" << endl;
     cout << "Total ODE state size: " << state_size << endl;
     
-    // Build lattice
-    build_honeycomb();
+    // Build lattice positions and interactions from UnitCell
+    const auto& a1 = uc.lattice_vectors[0];
+    const auto& a2 = uc.lattice_vectors[1];
+    const auto& a3 = uc.lattice_vectors[2];
+    
+    // Build site positions and fields
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t a = 0; a < N_atoms; ++a) {
+                    size_t site = flatten_index(i, j, k, a);
+                    site_positions[site] = uc.lattice_pos[a] + double(i)*a1 + double(j)*a2 + double(k)*a3;
+                    
+                    // Set field from UnitCell (field is VectorXd, extract 3D)
+                    field[site] = uc.field[a].head<3>();
+                }
+            }
+        }
+    }
+    
+    // Build interactions from UnitCell bilinear interactions
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t a = 0; a < N_atoms; ++a) {
+                    size_t site = flatten_index(i, j, k, a);
+                    
+                    auto range = uc.bilinear_interaction.equal_range(a);
+                    for (auto it = range.first; it != range.second; ++it) {
+                        const auto& bi = it->second;
+                        
+                        int pi = static_cast<int>(i) + bi.offset[0];
+                        int pj = static_cast<int>(j) + bi.offset[1];
+                        int pk = static_cast<int>(k) + bi.offset[2];
+                        size_t partner = flatten_periodic(pi, pj, pk, bi.partner);
+                        
+                        if (bi.bond_type >= 0) {
+                            // NN interaction with bond type
+                            nn_interaction[site].push_back(bi.interaction);
+                            nn_partners[site].push_back(partner);
+                            nn_bond_types[site].push_back(bi.bond_type);
+                            
+                            nn_interaction[partner].push_back(bi.interaction.transpose());
+                            nn_partners[partner].push_back(site);
+                            nn_bond_types[partner].push_back(bi.bond_type);
+                        } else {
+                            // J2 or J3 (classify by sublattice)
+                            if (a == static_cast<size_t>(bi.partner)) {
+                                // Same sublattice -> J2
+                                if (partner > site) {
+                                    j2_interaction[site].push_back(bi.interaction);
+                                    j2_partners[site].push_back(partner);
+                                    j2_interaction[partner].push_back(bi.interaction.transpose());
+                                    j2_partners[partner].push_back(site);
+                                }
+                            } else {
+                                // Different sublattice -> J3
+                                if (partner > site) {
+                                    j3_interaction[site].push_back(bi.interaction);
+                                    j3_partners[site].push_back(partner);
+                                    j3_interaction[partner].push_back(bi.interaction.transpose());
+                                    j3_partners[partner].push_back(site);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     // Initialize random spins
     init_random();
     
     cout << "StrainPhononLattice initialization complete!" << endl;
-}
-
-// ============================================================
-// HONEYCOMB LATTICE CONSTRUCTION
-// ============================================================
-
-void StrainPhononLattice::build_honeycomb() {
-    // Honeycomb lattice vectors (matching PhononLattice exactly)
-    Eigen::Vector3d a1(1.0, 0.0, 0.0);
-    Eigen::Vector3d a2(0.5, std::sqrt(3.0)/2.0, 0.0);
-    Eigen::Vector3d a3(0.0, 0.0, 1.0);
-    
-    // Sublattice positions within unit cell
-    Eigen::Vector3d pos0(0.0, 0.0, 0.0);
-    Eigen::Vector3d pos1(0.0, 1.0/std::sqrt(3.0), 0.0);
-    
-    // Build lattice sites
-    size_t site_idx = 0;
-    for (size_t i = 0; i < dim1; ++i) {
-        for (size_t j = 0; j < dim2; ++j) {
-            for (size_t k = 0; k < dim3; ++k) {
-                // Sublattice A
-                site_positions[site_idx] = pos0 + double(i)*a1 + double(j)*a2 + double(k)*a3;
-                field[site_idx] = Eigen::Vector3d::Zero();
-                ++site_idx;
-                
-                // Sublattice B
-                site_positions[site_idx] = pos1 + double(i)*a1 + double(j)*a2 + double(k)*a3;
-                field[site_idx] = Eigen::Vector3d::Zero();
-                ++site_idx;
-            }
-        }
-    }
-    
-    // Build NN connectivity (3 NN per site on honeycomb)
-    // Matching PhononLattice bond assignment exactly:
-    //   - z-bond (type 2): A(i,j,k) → B(i,j,k)     [same unit cell]
-    //   - x-bond (type 0): A(i,j,k) → B(i,j-1,k)   [offset (0,-1,0)]
-    //   - y-bond (type 1): A(i,j,k) → B(i+1,j-1,k) [offset (1,-1,0)]
-    SpinMatrix Jx = magnetoelastic_params.get_Jx();
-    SpinMatrix Jy = magnetoelastic_params.get_Jy();
-    SpinMatrix Jz = magnetoelastic_params.get_Jz();
-    
-    for (size_t i = 0; i < dim1; ++i) {
-        for (size_t j = 0; j < dim2; ++j) {
-            for (size_t k = 0; k < dim3; ++k) {
-                size_t site0 = flatten_index(i, j, k, 0);  // Sublattice A
-                size_t site1 = flatten_index(i, j, k, 1);  // Sublattice B
-                
-                // x-bond (use Jx matrix)
-                size_t partner_x = flatten_periodic(i, j-1, k, 1);
-                nn_interaction[site0].push_back(Jx);
-                nn_partners[site0].push_back(partner_x);
-                nn_bond_types[site0].push_back(0);
-                // Reverse bond (MUST use transpose for anisotropic exchange!)
-                nn_interaction[partner_x].push_back(Jx.transpose());
-                nn_partners[partner_x].push_back(site0);
-                nn_bond_types[partner_x].push_back(0);
-                
-                // y-bond (use Jy matrix)
-                size_t partner_y = flatten_periodic(i+1, j-1, k, 1);
-                nn_interaction[site0].push_back(Jy);
-                nn_partners[site0].push_back(partner_y);
-                nn_bond_types[site0].push_back(1);
-                // Reverse bond
-                nn_interaction[partner_y].push_back(Jy.transpose());
-                nn_partners[partner_y].push_back(site0);
-                nn_bond_types[partner_y].push_back(1);
-                
-                // z-bond (use Jz matrix, same unit cell)
-                nn_interaction[site0].push_back(Jz);
-                nn_partners[site0].push_back(site1);
-                nn_bond_types[site0].push_back(2);
-                // Reverse bond
-                nn_interaction[site1].push_back(Jz.transpose());
-                nn_partners[site1].push_back(site0);
-                nn_bond_types[site1].push_back(2);
-                
-                // 2nd NN interactions (isotropic Heisenberg, sublattice-dependent)
-                // 2nd NN offsets: (±1, 0), (0, ±1), (±1, ∓1) in lattice coordinates
-                if (std::abs(magnetoelastic_params.J2_A) > 1e-12 || std::abs(magnetoelastic_params.J2_B) > 1e-12) {
-                    SpinMatrix J2_A_mat = magnetoelastic_params.get_J2_A_matrix();
-                    SpinMatrix J2_B_mat = magnetoelastic_params.get_J2_B_matrix();
-                    
-                    vector<std::tuple<int,int,int>> j2_offsets = {
-                        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {1, -1, 0}, {-1, 1, 0}
-                    };
-                    
-                    // 2nd NN for sublattice A (site0) with coupling J2_A
-                    for (const auto& [di, dj, dk] : j2_offsets) {
-                        size_t partner_j2 = flatten_periodic(i+di, j+dj, k+dk, 0);
-                        if (partner_j2 > site0) {
-                            j2_interaction[site0].push_back(J2_A_mat);
-                            j2_partners[site0].push_back(partner_j2);
-                            j2_interaction[partner_j2].push_back(J2_A_mat.transpose());
-                            j2_partners[partner_j2].push_back(site0);
-                        }
-                    }
-                    
-                    // 2nd NN for sublattice B (site1) with coupling J2_B
-                    for (const auto& [di, dj, dk] : j2_offsets) {
-                        size_t partner_j2 = flatten_periodic(i+di, j+dj, k+dk, 1);
-                        if (partner_j2 > site1) {
-                            j2_interaction[site1].push_back(J2_B_mat);
-                            j2_partners[site1].push_back(partner_j2);
-                            j2_interaction[partner_j2].push_back(J2_B_mat.transpose());
-                            j2_partners[partner_j2].push_back(site1);
-                        }
-                    }
-                }
-                
-                // 3rd NN interactions (isotropic Heisenberg J3)
-                // 3rd NN connect OPPOSITE sublattices (A↔B)
-                if (std::abs(magnetoelastic_params.J3) > 1e-12) {
-                    SpinMatrix J3_mat = magnetoelastic_params.get_J3_matrix();
-                    
-                    // 3rd NN from sublattice A (site0) to sublattice B
-                    vector<std::tuple<int,int,int>> j3_A_to_B_offsets = {
-                        {1, -2, 0}, {-1, 0, 0}, {1, 0, 0}
-                    };
-                    
-                    for (const auto& [di, dj, dk] : j3_A_to_B_offsets) {
-                        size_t partner_j3 = flatten_periodic(i+di, j+dj, k+dk, 1);
-                        if (partner_j3 > site0) {
-                            j3_interaction[site0].push_back(J3_mat);
-                            j3_partners[site0].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
-                            j3_partners[partner_j3].push_back(site0);
-                        }
-                    }
-                    
-                    // 3rd NN from sublattice B (site1) to sublattice A
-                    vector<std::tuple<int,int,int>> j3_B_to_A_offsets = {
-                        {-1, 2, 0}, {-1, 0, 0}, {1, 0, 0}
-                    };
-                    
-                    for (const auto& [di, dj, dk] : j3_B_to_A_offsets) {
-                        size_t partner_j3 = flatten_periodic(i+di, j+dj, k+dk, 0);
-                        if (partner_j3 > site1) {
-                            j3_interaction[site1].push_back(J3_mat);
-                            j3_partners[site1].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
-                            j3_partners[partner_j3].push_back(site1);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Build hexagonal plaquettes for ring exchange (if J7 is non-zero)
-    if (std::abs(magnetoelastic_params.J7) > 1e-12) {
-        // Matching PhononLattice hexagon definition (actual code, not comments):
-        //   0: A(i,j,k)      - central A site
-        //   1: B(i,j,k)      - z-bond neighbor (same unit cell)
-        //   2: A(i,j+1,k)    - next unit cell in j direction
-        //   3: B(i+1,j,k)    - B site in (i+1,j,k) unit cell
-        //   4: A(i+1,j,k)    - A site in (i+1,j,k) unit cell
-        //   5: B(i+1,j-1,k)  - B site in (i+1,j-1,k) unit cell
-        for (size_t i = 0; i < dim1; ++i) {
-            for (size_t j = 0; j < dim2; ++j) {
-                for (size_t k = 0; k < dim3; ++k) {
-                    std::array<size_t, 6> hex;
-                    hex[0] = flatten_index(i, j, k, 0);           // A(i,j,k)
-                    hex[1] = flatten_index(i, j, k, 1);           // B(i,j,k)
-                    hex[2] = flatten_periodic(i, j+1, k, 0);      // A(i,j+1,k)
-                    hex[3] = flatten_periodic(i+1, j, k, 1);      // B(i+1,j,k)
-                    hex[4] = flatten_periodic(i+1, j, k, 0);      // A(i+1,j,k)
-                    hex[5] = flatten_periodic(i+1, j-1, k, 1);    // B(i+1,j-1,k)
-                    
-                    size_t hex_idx = hexagons.size();
-                    hexagons.push_back(hex);
-                    
-                    // Register this hexagon for each site
-                    for (size_t pos = 0; pos < 6; ++pos) {
-                        site_hexagons[hex[pos]].push_back({hex_idx, pos});
-                    }
-                }
-            }
-        }
-    }
-    
-    cout << "Built honeycomb lattice with " << lattice_size << " sites" << endl;
-    if (!hexagons.empty()) {
-        cout << "Built " << hexagons.size() << " hexagonal plaquettes for ring exchange" << endl;
-    }
 }
 
 // ============================================================
@@ -291,133 +174,11 @@ void StrainPhononLattice::set_parameters(const MagnetoelasticParams& me_params,
     elastic_params = el_params;
     drive_params = dr_params;
     
-    // Clear existing interactions (matching PhononLattice approach)
+    // Clear hexagons (interactions are already built from UnitCell in constructor)
     for (size_t i = 0; i < lattice_size; ++i) {
-        nn_interaction[i].clear();
-        nn_partners[i].clear();
-        nn_bond_types[i].clear();
-        j2_interaction[i].clear();
-        j2_partners[i].clear();
-        j3_interaction[i].clear();
-        j3_partners[i].clear();
         site_hexagons[i].clear();
     }
     hexagons.clear();
-    
-    // Build bond-dependent Kitaev-Heisenberg-Γ-Γ' exchange matrices
-    SpinMatrix Jx = magnetoelastic_params.get_Jx();
-    SpinMatrix Jy = magnetoelastic_params.get_Jy();
-    SpinMatrix Jz = magnetoelastic_params.get_Jz();
-    SpinMatrix J2_A_mat = magnetoelastic_params.get_J2_A_matrix();
-    SpinMatrix J2_B_mat = magnetoelastic_params.get_J2_B_matrix();
-    SpinMatrix J3_mat = magnetoelastic_params.get_J3_matrix();
-    
-    // Build NN interactions on honeycomb (matching PhononLattice exactly)
-    // NN bonds (Kitaev bond types):
-    //   - z-bond (type 2): A(i,j,k) → B(i,j,k)     [same unit cell]
-    //   - x-bond (type 0): A(i,j,k) → B(i,j-1,k)   [offset (0,-1,0)]
-    //   - y-bond (type 1): A(i,j,k) → B(i+1,j-1,k) [offset (1,-1,0)]
-    
-    for (size_t i = 0; i < dim1; ++i) {
-        for (size_t j = 0; j < dim2; ++j) {
-            for (size_t k = 0; k < dim3; ++k) {
-                size_t site0 = flatten_index(i, j, k, 0);  // Sublattice A
-                size_t site1 = flatten_index(i, j, k, 1);  // Sublattice B
-                
-                // x-bond (use Jx matrix)
-                size_t partner_x = flatten_periodic(i, j-1, k, 1);
-                nn_interaction[site0].push_back(Jx);
-                nn_partners[site0].push_back(partner_x);
-                nn_bond_types[site0].push_back(0);
-                // Reverse bond (MUST use transpose for anisotropic exchange!)
-                nn_interaction[partner_x].push_back(Jx.transpose());
-                nn_partners[partner_x].push_back(site0);
-                nn_bond_types[partner_x].push_back(0);
-                
-                // y-bond (use Jy matrix)
-                size_t partner_y = flatten_periodic(i+1, j-1, k, 1);
-                nn_interaction[site0].push_back(Jy);
-                nn_partners[site0].push_back(partner_y);
-                nn_bond_types[site0].push_back(1);
-                // Reverse bond
-                nn_interaction[partner_y].push_back(Jy.transpose());
-                nn_partners[partner_y].push_back(site0);
-                nn_bond_types[partner_y].push_back(1);
-                
-                // z-bond (use Jz matrix, same unit cell)
-                nn_interaction[site0].push_back(Jz);
-                nn_partners[site0].push_back(site1);
-                nn_bond_types[site0].push_back(2);
-                // Reverse bond
-                nn_interaction[site1].push_back(Jz.transpose());
-                nn_partners[site1].push_back(site0);
-                nn_bond_types[site1].push_back(2);
-                
-                // 2nd NN interactions (isotropic Heisenberg, sublattice-dependent)
-                // 2nd NN connect same sublattice (A-A, B-B)
-                if (std::abs(magnetoelastic_params.J2_A) > 1e-12 || std::abs(magnetoelastic_params.J2_B) > 1e-12) {
-                    vector<std::tuple<int,int,int>> j2_offsets = {
-                        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {1, -1, 0}, {-1, 1, 0}
-                    };
-                    
-                    // 2nd NN for sublattice A with J2_A
-                    for (const auto& [di, dj, dk] : j2_offsets) {
-                        size_t partner_j2 = flatten_periodic(i+di, j+dj, k+dk, 0);
-                        if (partner_j2 > site0) {
-                            j2_interaction[site0].push_back(J2_A_mat);
-                            j2_partners[site0].push_back(partner_j2);
-                            j2_interaction[partner_j2].push_back(J2_A_mat.transpose());
-                            j2_partners[partner_j2].push_back(site0);
-                        }
-                    }
-                    
-                    // 2nd NN for sublattice B with J2_B
-                    for (const auto& [di, dj, dk] : j2_offsets) {
-                        size_t partner_j2 = flatten_periodic(i+di, j+dj, k+dk, 1);
-                        if (partner_j2 > site1) {
-                            j2_interaction[site1].push_back(J2_B_mat);
-                            j2_partners[site1].push_back(partner_j2);
-                            j2_interaction[partner_j2].push_back(J2_B_mat.transpose());
-                            j2_partners[partner_j2].push_back(site1);
-                        }
-                    }
-                }
-                
-                // 3rd NN interactions (A↔B across longer distance)
-                if (std::abs(magnetoelastic_params.J3) > 1e-12) {
-                    // 3rd NN from sublattice A (site0) to sublattice B
-                    vector<std::tuple<int,int,int>> j3_A_to_B_offsets = {
-                        {1, -2, 0}, {-1, 0, 0}, {1, 0, 0}
-                    };
-                    
-                    for (const auto& [di, dj, dk] : j3_A_to_B_offsets) {
-                        size_t partner_j3 = flatten_periodic(i+di, j+dj, k+dk, 1);
-                        if (partner_j3 > site0) {
-                            j3_interaction[site0].push_back(J3_mat);
-                            j3_partners[site0].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
-                            j3_partners[partner_j3].push_back(site0);
-                        }
-                    }
-                    
-                    // 3rd NN from sublattice B (site1) to sublattice A
-                    vector<std::tuple<int,int,int>> j3_B_to_A_offsets = {
-                        {-1, 2, 0}, {-1, 0, 0}, {1, 0, 0}
-                    };
-                    
-                    for (const auto& [di, dj, dk] : j3_B_to_A_offsets) {
-                        size_t partner_j3 = flatten_periodic(i+di, j+dj, k+dk, 0);
-                        if (partner_j3 > site1) {
-                            j3_interaction[site1].push_back(J3_mat);
-                            j3_partners[site1].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
-                            j3_partners[partner_j3].push_back(site1);
-                        }
-                    }
-                }
-            }
-        }
-    }
     
     // Build hexagonal plaquettes for ring exchange (matching PhononLattice exactly)
     if (std::abs(magnetoelastic_params.J7) > 1e-12) {
@@ -2456,8 +2217,8 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
     while (t < t_final) {
         if (step % output_every == 0) {
             // Compute observables
-            Eigen::Vector3d M = total_magnetization();
-            Eigen::Vector3d M_stag = staggered_magnetization();
+            Eigen::Vector3d M = magnetization_local();
+            Eigen::Vector3d M_stag = magnetization_local_antiferro();
             double E = total_energy();
             double eps_A1g = A1g_amplitude();
             double eps_Eg1 = Eg1_amplitude();
@@ -2886,8 +2647,8 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     while (t < t_final) {
         // ---- record observables ----
         if (step % output_every == 0) {
-            Eigen::Vector3d M = total_magnetization();
-            Eigen::Vector3d M_stag = staggered_magnetization();
+            Eigen::Vector3d M = magnetization_local();
+            Eigen::Vector3d M_stag = magnetization_local_antiferro();
             double E = total_energy();
             double eA1g = A1g_amplitude();
             double eEg1 = Eg1_amplitude();
@@ -3881,7 +3642,7 @@ void StrainPhononLattice::save_spin_config_global(const string& filename) const 
 // OBSERVABLES
 // ============================================================
 
-Eigen::Vector3d StrainPhononLattice::total_magnetization() const {
+Eigen::Vector3d StrainPhononLattice::magnetization_local() const {
     Eigen::Vector3d M = Eigen::Vector3d::Zero();
     for (size_t i = 0; i < lattice_size; ++i) {
         M += spins[i];
@@ -3889,10 +3650,10 @@ Eigen::Vector3d StrainPhononLattice::total_magnetization() const {
     return M / lattice_size;
 }
 
-Eigen::Vector3d StrainPhononLattice::staggered_magnetization() const {
+Eigen::Vector3d StrainPhononLattice::magnetization_local_antiferro() const {
     Eigen::Vector3d M_stag = Eigen::Vector3d::Zero();
     for (size_t i = 0; i < lattice_size; ++i) {
-        // Sublattice alternation for honeycomb: sites 0,2,4,... are A, 1,3,5,... are B
+        // Sublattice alternation: sites with atom index 0 are A, others are B
         double sign = (i % N_atoms == 0) ? 1.0 : -1.0;
         M_stag += sign * spins[i];
     }
@@ -3928,7 +3689,7 @@ double StrainPhononLattice::Eg2_amplitude() const {
 
 double StrainPhononLattice::order_parameter() const {
     if (!has_ordering_pattern || ordering_pattern.size() != lattice_size) {
-        return total_magnetization().norm();
+        return magnetization_local().norm();
     }
     
     double op = 0.0;

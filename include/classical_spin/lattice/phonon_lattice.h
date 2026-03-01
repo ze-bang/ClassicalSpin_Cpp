@@ -61,6 +61,7 @@
 #define PHONON_LATTICE_H
 
 #include "unitcell.h"
+#include "unitcell_builders.h"
 #include "simple_linear_alg.h"
 #include <vector>
 #include <array>
@@ -558,10 +559,13 @@ public:
     
     // Lattice properties
     static constexpr size_t spin_dim = 3;    // 3D classical spins
-    static constexpr size_t N_atoms = 2;     // 2 atoms per honeycomb unit cell
+    size_t N_atoms;                          // Atoms per unit cell (from UnitCell)
     size_t dim1, dim2, dim3;                 // Lattice dimensions
     size_t lattice_size;                     // Total spin sites
     float spin_length = 1.0;                 // Spin magnitude
+    
+    // Unit cell (stored for reference)
+    UnitCell unit_cell;
     
     // Spin configuration
     SpinConfig spins;
@@ -607,7 +611,7 @@ public:
     // Sublattice local frames for global-to-local spin transformations
     // For Kitaev honeycomb, transforms from local Kitaev basis to global cubic frame
     // sublattice_frames[atom] is a 3x3 rotation matrix: S_global = R * S_local
-    std::array<SpinMatrix, N_atoms> sublattice_frames;
+    vector<SpinMatrix> sublattice_frames;
     
     // Custom ordering vector (set from initial spin configuration)
     // Used to compute order parameter along the ground state ordering direction
@@ -615,18 +619,19 @@ public:
     bool has_ordering_pattern = false;
     
     /**
-     * Constructor
+     * Constructor: Build from a UnitCell (consistent with Lattice interface)
+     * 
+     * @param uc        Unit cell defining lattice structure (positions, interactions, bond types)
+     * @param d1        Lattice size in first dimension
+     * @param d2        Lattice size in second dimension
+     * @param d3        Lattice size in third dimension
+     * @param spin_l    Magnitude of spin vectors
      */
-    PhononLattice(size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
+    PhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
     
     // ============================================================
     // LATTICE CONSTRUCTION
     // ============================================================
-    
-    /**
-     * Build honeycomb lattice structure
-     */
-    void build_honeycomb();
     
     /**
      * Flatten multi-index to linear site index
@@ -714,6 +719,13 @@ public:
         for (size_t i = 0; i < lattice_size; ++i) {
             field[i] = B;
         }
+    }
+    
+    /**
+     * Set external field for a specific site (consistent with Lattice)
+     */
+    void set_uniform_field(const Eigen::Vector3d& B) {
+        set_field(B);
     }
     
     // ============================================================
@@ -1006,13 +1018,13 @@ public:
     }
     
     // ============================================================
-    // STATE CONVERSION
+    // STATE CONVERSION (consistent with Lattice: spins_to_state / state_to_spins)
     // ============================================================
     
     /**
      * Pack current state to flat ODE state vector
      */
-    ODEState to_state() const {
+    ODEState spins_to_state() const {
         ODEState state(state_size);
         size_t idx = 0;
         for (size_t i = 0; i < lattice_size; ++i) {
@@ -1027,7 +1039,7 @@ public:
     /**
      * Unpack flat ODE state to internal variables
      */
-    void from_state(const ODEState& state) {
+    void state_to_spins(const ODEState& state) {
         size_t idx = 0;
         for (size_t i = 0; i < lattice_size; ++i) {
             for (size_t d = 0; d < spin_dim; ++d) {
@@ -1039,14 +1051,18 @@ public:
         phonons.from_array(&state[idx]);
     }
     
+    // Legacy aliases for backward compatibility
+    ODEState to_state() const { return spins_to_state(); }
+    void from_state(const ODEState& state) { state_to_spins(state); }
+    
     // ============================================================
     // OBSERVABLES
     // ============================================================
     
     /**
-     * Total magnetization (per spin)
+     * Total magnetization per spin (consistent with Lattice: magnetization_local)
      */
-    Eigen::Vector3d magnetization() const {
+    Eigen::Vector3d magnetization_local() const {
         Eigen::Vector3d M = Eigen::Vector3d::Zero();
         for (const auto& s : spins) {
             M += s;
@@ -1055,16 +1071,20 @@ public:
     }
     
     /**
-     * Staggered magnetization
+     * Staggered magnetization (consistent with Lattice: magnetization_local_antiferro)
      */
-    Eigen::Vector3d staggered_magnetization() const {
+    Eigen::Vector3d magnetization_local_antiferro() const {
         Eigen::Vector3d M = Eigen::Vector3d::Zero();
         for (size_t i = 0; i < lattice_size; ++i) {
-            double sign = (i % 2 == 0) ? 1.0 : -1.0;
+            double sign = (i % N_atoms == 0) ? 1.0 : -1.0;
             M += sign * spins[i];
         }
         return M / lattice_size;
     }
+    
+    // Legacy aliases
+    Eigen::Vector3d magnetization() const { return magnetization_local(); }
+    Eigen::Vector3d staggered_magnetization() const { return magnetization_local_antiferro(); }
     
     /**
      * Global magnetization (transformed from local Kitaev frame to global cubic frame)
@@ -1230,17 +1250,23 @@ public:
     // ============================================================
     
     /**
-     * Single Metropolis sweep over all spins
+     * Single Metropolis sweep over all spins (consistent with Lattice: metropolis)
      * @param T  Temperature
-     * @return Number of accepted moves
+     * @return Acceptance rate (0.0 to 1.0)
      */
-    size_t metropolis_sweep(double T);
+    double metropolis(double T);
+    
+    // Legacy alias
+    size_t metropolis_sweep(double T) {
+        double rate = metropolis(T);
+        return static_cast<size_t>(rate * lattice_size);
+    }
     
     /**
-     * Single overrelaxation sweep over all spins
+     * Single overrelaxation sweep over all spins (consistent with Lattice: overrelaxation)
      * Reflects each spin about its local field (energy-conserving)
      */
-    void overrelaxation_sweep();
+    void overrelaxation();
     
     /**
      * Simulated annealing for spin subsystem
@@ -1437,8 +1463,8 @@ public:
              << ", Vx=" << phonons.V_x_E2 << ", Vy=" << phonons.V_y_E2 << endl;
         cout << "A1: Q=" << phonons.Q_A1 << ", V=" << phonons.V_A1 << endl;
         cout << "E1 amplitude: " << E1_amplitude() << ", E2 amplitude: " << E2_amplitude() << endl;
-        cout << "Magnetization: " << magnetization().transpose() << endl;
-        cout << "Staggered M: " << staggered_magnetization().transpose() << endl;
+        cout << "Magnetization: " << magnetization_local().transpose() << endl;
+        cout << "Staggered M: " << magnetization_local_antiferro().transpose() << endl;
         cout << "Energy: " << energy_density() << " per site" << endl;
         cout << "===========================" << endl;
     }

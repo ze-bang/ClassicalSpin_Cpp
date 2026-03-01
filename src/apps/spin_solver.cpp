@@ -3735,7 +3735,9 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 run_parallel_tempering_mixed(mixed_lattice, sweep_config, sweep_rank, sweep_size, sweep_comm);
             } else if (sweep_config.system == SystemType::NCTO_STRAIN) {
                 // StrainPhononLattice magnetoelastic system
-                StrainPhononLattice strain_lattice(sweep_config.lattice_size[0],
+                UnitCell strain_uc = build_strain_honeycomb(sweep_config);
+                StrainPhononLattice strain_lattice(strain_uc,
+                                                   sweep_config.lattice_size[0],
                                                    sweep_config.lattice_size[1],
                                                    sweep_config.lattice_size[2],
                                                    sweep_config.spin_length);
@@ -3886,7 +3888,9 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
         // Build unit cell with updated parameters
         if (sweep_config.system == SystemType::NCTO) {
             // PhononLattice spin-phonon coupled system (honeycomb)
-            PhononLattice phonon_lattice(sweep_config.lattice_size[0],
+            UnitCell phonon_uc = build_phonon_honeycomb(sweep_config);
+            PhononLattice phonon_lattice(phonon_uc,
+                                         sweep_config.lattice_size[0],
                                          sweep_config.lattice_size[1],
                                          sweep_config.lattice_size[2],
                                          sweep_config.spin_length);
@@ -3943,7 +3947,9 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
             }
         } else if (sweep_config.system == SystemType::NCTO_STRAIN) {
             // StrainPhononLattice magnetoelastic (spin-strain) coupled system (honeycomb)
-            StrainPhononLattice strain_lattice(sweep_config.lattice_size[0],
+            UnitCell strain_uc = build_strain_honeycomb(sweep_config);
+            StrainPhononLattice strain_lattice(strain_uc,
+                                               sweep_config.lattice_size[0],
                                                sweep_config.lattice_size[1],
                                                sweep_config.lattice_size[2],
                                                sweep_config.spin_length);
@@ -4196,7 +4202,9 @@ int main(int argc, char** argv) {
                 cout << "\nBuilding PhononLattice spin-phonon lattice..." << endl;
             }
             
-            PhononLattice phonon_lattice(config.lattice_size[0],
+            UnitCell phonon_uc = build_phonon_honeycomb(config);
+            PhononLattice phonon_lattice(phonon_uc,
+                                         config.lattice_size[0],
                                          config.lattice_size[1],
                                          config.lattice_size[2],
                                          config.spin_length);
@@ -4267,7 +4275,9 @@ int main(int argc, char** argv) {
                 cout << "\nBuilding StrainPhononLattice magnetoelastic lattice..." << endl;
             }
             
-            StrainPhononLattice strain_lattice(config.lattice_size[0],
+            UnitCell strain_uc = build_strain_honeycomb(config);
+            StrainPhononLattice strain_lattice(strain_uc,
+                                               config.lattice_size[0],
                                                config.lattice_size[1],
                                                config.lattice_size[2],
                                                config.spin_length);

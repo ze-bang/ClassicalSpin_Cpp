@@ -36,6 +36,7 @@
 #define STRAIN_PHONON_LATTICE_H
 
 #include "unitcell.h"
+#include "unitcell_builders.h"
 #include "simple_linear_alg.h"
 #include "classical_spin/core/spin_config.h"  // For should_rank_write
 #include <vector>
@@ -415,10 +416,13 @@ public:
     
     // Lattice properties
     static constexpr size_t spin_dim = 3;
-    static constexpr size_t N_atoms = 2;  // Honeycomb unit cell
+    size_t N_atoms;  // Atoms per unit cell (from UnitCell)
     size_t dim1, dim2, dim3;
     size_t lattice_size;
     float spin_length = 1.0;
+    
+    // UnitCell
+    UnitCell unit_cell;
     
     // Spin configuration
     SpinConfig spins;
@@ -480,22 +484,20 @@ public:
     size_t state_size;
     
     // Sublattice local frames
-    std::array<SpinMatrix, N_atoms> sublattice_frames;
+    vector<SpinMatrix> sublattice_frames;
     
     // Custom ordering vector
     SpinConfig ordering_pattern;
     bool has_ordering_pattern = false;
     
     /**
-     * Constructor
+     * Constructor: takes a UnitCell (built by e.g. build_strain_honeycomb)
      */
-    StrainPhononLattice(size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
+    StrainPhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
     
     // ============================================================
     // LATTICE CONSTRUCTION
     // ============================================================
-    
-    void build_honeycomb();
     
     size_t flatten_index(size_t i, size_t j, size_t k, size_t atom) const {
         // MUST match phonon_lattice.h: ((i * dim2 + j) * dim3 + k) * N_atoms + atom
@@ -1098,8 +1100,12 @@ public:
     // OBSERVABLES
     // ============================================================
     
-    Eigen::Vector3d total_magnetization() const;
-    Eigen::Vector3d staggered_magnetization() const;
+    Eigen::Vector3d magnetization_local() const;
+    Eigen::Vector3d magnetization_local_antiferro() const;
+    
+    // Legacy aliases
+    Eigen::Vector3d total_magnetization() const { return magnetization_local(); }
+    Eigen::Vector3d staggered_magnetization() const { return magnetization_local_antiferro(); }
     double order_parameter() const;
     
     // Strain mode amplitudes (averaged over bond types)
