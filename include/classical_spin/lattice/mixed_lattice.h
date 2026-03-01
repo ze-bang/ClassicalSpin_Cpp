@@ -3,6 +3,8 @@
 
 #include "unitcell.h"
 #include "simple_linear_alg.h"
+#include "classical_spin/core/spin_config.h"  // For should_rank_write
+#include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include <vector>
 #include <functional>
 #include <random>
@@ -68,53 +70,35 @@ using std::ifstream;
 using std::function;
 using std::array;
 
-// ============================================================
-// BINNING ANALYSIS STRUCTURES FOR MIXED LATTICE
-// ============================================================
+// Common MC structs (from mc_common.h)
+using mc::BinningResult;
+using mc::Observable;
+using mc::VectorObservable;
+using mc::AutocorrelationResult;
 
-// Binning analysis result for error estimation
-struct MixedBinningResult {
-    double mean;
-    double error;
-    double tau_int;  // Integrated autocorrelation time estimate from binning
-    size_t optimal_bin_level;
-    vector<double> errors_by_level;  // Errors at each binning level
-};
-
-// Observable with uncertainty (mean ± error)
-struct MixedObservable {
-    double value;
-    double error;
-    
-    MixedObservable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
-};
-
-// Vector observable with uncertainty for each component
-struct MixedVectorObservable {
-    vector<double> values;
-    vector<double> errors;
-    
-    MixedVectorObservable() = default;
-    MixedVectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
-};
+// Legacy type aliases for backward compatibility
+using MixedBinningResult = mc::BinningResult;
+using MixedObservable = mc::Observable;
+using MixedVectorObservable = mc::VectorObservable;
 
 // Complete set of thermodynamic observables for mixed lattice with uncertainties
+// (Extended version with SU2/SU3 split — MixedLattice-specific)
 struct MixedThermodynamicObservables {
     double temperature;
     
     // Energy observables
-    MixedObservable energy_total;         // <E>/N_total
-    MixedObservable energy_SU2;           // <E_SU2>/N_SU2
-    MixedObservable energy_SU3;           // <E_SU3>/N_SU3
-    MixedObservable specific_heat;        // C_V = (<E²> - <E>²) / (T² N)
+    Observable energy_total;         // <E>/N_total
+    Observable energy_SU2;           // <E_SU2>/N_SU2
+    Observable energy_SU3;           // <E_SU3>/N_SU3
+    Observable specific_heat;        // C_V = (<E²> - <E>²) / (T² N)
     
     // SU(2) sublattice observables
-    vector<MixedVectorObservable> sublattice_magnetization_SU2;  // <S_α> for each SU(2) sublattice
-    vector<MixedVectorObservable> energy_sublattice_cross_SU2;   // <E * S_α> - <E><S_α>
+    vector<VectorObservable> sublattice_magnetization_SU2;  // <S_α> for each SU(2) sublattice
+    vector<VectorObservable> energy_sublattice_cross_SU2;   // <E * S_α> - <E><S_α>
     
     // SU(3) sublattice observables
-    vector<MixedVectorObservable> sublattice_magnetization_SU3;  // <S_α> for each SU(3) sublattice
-    vector<MixedVectorObservable> energy_sublattice_cross_SU3;   // <E * S_α> - <E><S_α>
+    vector<VectorObservable> sublattice_magnetization_SU3;  // <S_α> for each SU(3) sublattice
+    vector<VectorObservable> energy_sublattice_cross_SU3;   // <E * S_α> - <E><S_α>
 };
 
 /**
@@ -1850,198 +1834,24 @@ public:
         save_autocorrelation_results(out_dir, acf);
     }
 
-    /**
-     * Compute autocorrelation for mixed lattice
-     */
+    /** Compute autocorrelation — delegates to mc::compute_autocorrelation */
     AutocorrelationResult compute_autocorrelation(const vector<double>& energies, 
                                                    size_t base_interval = 10) {
-        AutocorrelationResult result;
-        
-        size_t N = energies.size();
-        if (N < 10) {
-            result.tau_int = 1.0;
-            result.sampling_interval = base_interval;
-            result.correlation_function = {1.0};
-            return result;
-        }
-        
-        // Compute mean
-        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
-        
-        // Compute autocorrelation function
-        size_t max_lag = std::min(N / 4, size_t(1000));
-        result.correlation_function.resize(max_lag);
-        
-        double var = 0.0;
-        for (size_t i = 0; i < N; ++i) {
-            var += (energies[i] - mean) * (energies[i] - mean);
-        }
-        var /= N;
-        
-        if (var < 1e-20) {
-            result.tau_int = 1.0;
-            result.sampling_interval = base_interval;
-            result.correlation_function = {1.0};
-            return result;
-        }
-        
-        for (size_t lag = 0; lag < max_lag; ++lag) {
-            double corr = 0.0;
-            for (size_t i = 0; i < N - lag; ++i) {
-                corr += (energies[i] - mean) * (energies[i + lag] - mean);
-            }
-            corr /= (N - lag);
-            result.correlation_function[lag] = corr / var;
-        }
-        
-        // Compute integrated autocorrelation time using Sokal's self-consistent
-        // window: sum until lag >= C * tau_int (C ~ 6 standard).
-        constexpr double sokal_C = 6.0;
-        result.tau_int = 0.5;
-        for (size_t lag = 1; lag < max_lag; ++lag) {
-            if (result.correlation_function[lag] < 0.0) break;
-            result.tau_int += result.correlation_function[lag];
-            if (static_cast<double>(lag) >= sokal_C * result.tau_int) break;
-        }
-        
-        // Warn if tau_int is large relative to time series length
-        if (2.0 * result.tau_int > 0.1 * N) {
-            cout << "[WARNING] Autocorrelation time τ_int=" << result.tau_int 
-                 << " samples is large relative to time series length N=" << N
-                 << ". Estimate may be unreliable — consider longer preliminary runs." << endl;
-        }
-        
-        // sampling_interval in MC sweeps: 2 * ceil(tau_int) * base_interval
-        size_t tau_int_sweeps = static_cast<size_t>(std::ceil(result.tau_int)) * base_interval;
-        result.sampling_interval = std::max(size_t(2) * tau_int_sweeps, size_t(100));
-        
-        return result;
+        return mc::compute_autocorrelation(energies, base_interval);
     }
 
     // ============================================================
-    // BINNING ANALYSIS FOR ERROR ESTIMATION
+    // BINNING ANALYSIS (delegated to mc::* functions)
     // ============================================================
 
-    /**
-     * Binning analysis for error estimation of a scalar observable
-     * 
-     * Performs recursive blocking to estimate statistical error with autocorrelation.
-     * The error plateaus when bin size exceeds the correlation length.
-     * 
-     * @param data Vector of observable measurements
-     * @return MixedBinningResult containing mean, error, and binning information
-     */
-    static MixedBinningResult binning_analysis(const vector<double>& data) {
-        MixedBinningResult result;
-        
-        if (data.empty()) {
-            result.mean = 0.0;
-            result.error = 0.0;
-            result.tau_int = 1.0;
-            result.optimal_bin_level = 0;
-            return result;
-        }
-        
-        size_t n = data.size();
-        
-        // Compute mean
-        result.mean = std::accumulate(data.begin(), data.end(), 0.0) / double(n);
-        
-        if (n < 4) {
-            // Too few samples for meaningful analysis
-            double var = 0.0;
-            for (double x : data) var += (x - result.mean) * (x - result.mean);
-            result.error = std::sqrt(var / (n * (n - 1)));
-            result.tau_int = 1.0;
-            result.optimal_bin_level = 0;
-            return result;
-        }
-        
-        // Recursive blocking: progressively halve the data by averaging pairs
-        vector<double> binned_data = data;
-        size_t level = 0;
-        size_t max_levels = static_cast<size_t>(std::log2(n)) - 1;
-        
-        result.errors_by_level.reserve(max_levels);
-        
-        while (binned_data.size() >= 4) {
-            size_t m = binned_data.size();
-            
-            // Compute variance at this level
-            double sum = 0.0, sum2 = 0.0;
-            for (double x : binned_data) {
-                sum += x;
-                sum2 += x * x;
-            }
-            double mean_level = sum / m;
-            double var_level = (sum2 / m - mean_level * mean_level);
-            double error_level = std::sqrt(var_level / (m - 1));
-            
-            result.errors_by_level.push_back(error_level);
-            
-            // Block the data: average consecutive pairs
-            vector<double> new_binned;
-            new_binned.reserve(m / 2);
-            for (size_t i = 0; i + 1 < m; i += 2) {
-                new_binned.push_back(0.5 * (binned_data[i] + binned_data[i + 1]));
-            }
-            binned_data = std::move(new_binned);
-            ++level;
-        }
-        
-        // Find optimal level where error has plateaued
-        result.optimal_bin_level = 0;
-        if (result.errors_by_level.size() > 2) {
-            double max_error = 0.0;
-            for (size_t l = 0; l < result.errors_by_level.size(); ++l) {
-                if (result.errors_by_level[l] > max_error) {
-                    max_error = result.errors_by_level[l];
-                    result.optimal_bin_level = l;
-                }
-            }
-        }
-        
-        // Use error from optimal level
-        if (!result.errors_by_level.empty()) {
-            size_t use_level = std::min(result.optimal_bin_level + 1, result.errors_by_level.size() - 1);
-            result.error = result.errors_by_level[use_level];
-            
-            // Estimate tau_int from ratio of blocked variance to naive variance
-            if (result.errors_by_level[0] > 1e-20) {
-                double ratio = result.error / result.errors_by_level[0];
-                result.tau_int = 0.5 * ratio * ratio;
-            } else {
-                result.tau_int = 1.0;
-            }
-        } else {
-            result.error = 0.0;
-            result.tau_int = 1.0;
-        }
-        
-        return result;
+    /** Binning analysis — delegates to mc::binning_analysis */
+    static BinningResult binning_analysis(const vector<double>& data) {
+        return mc::binning_analysis(data);
     }
 
-    /**
-     * Binning analysis for vector observable (component-wise)
-     * 
-     * @param data Vector of SpinVector measurements
-     * @return Vector of MixedBinningResult, one per component
-     */
-    static vector<MixedBinningResult> binning_analysis_vector(const vector<SpinVector>& data) {
-        if (data.empty()) return {};
-        
-        size_t dim = data[0].size();
-        vector<MixedBinningResult> results(dim);
-        
-        for (size_t d = 0; d < dim; ++d) {
-            vector<double> component(data.size());
-            for (size_t i = 0; i < data.size(); ++i) {
-                component[i] = data[i](d);
-            }
-            results[d] = binning_analysis(component);
-        }
-        
-        return results;
+    /** Component-wise binning analysis for vector observable — delegates to mc::binning_analysis_vector */
+    static vector<BinningResult> binning_analysis_vector(const vector<SpinVector>& data) {
+        return mc::binning_analysis_vector<SpinVector>(data);
     }
 
     // ============================================================

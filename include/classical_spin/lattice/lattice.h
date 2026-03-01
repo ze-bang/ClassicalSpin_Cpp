@@ -4,6 +4,7 @@
 #include "unitcell.h"
 #include "simple_linear_alg.h"
 #include "hdf5_io.h"
+#include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include <vector>
 #include <functional>
 #include <random>
@@ -63,14 +64,15 @@ using std::ifstream;
 using std::function;
 using std::array;
 
-// Helper struct for autocorrelation analysis
-struct AutocorrelationResult {
-    double tau_int;
-    size_t sampling_interval;
-    vector<double> correlation_function;
-};
+// Common MC structs (from mc_common.h)
+using mc::AutocorrelationResult;
+using mc::BinningResult;
+using mc::Observable;
+using mc::VectorObservable;
+using mc::ThermodynamicObservables;
+using mc::OptimizedTempGridResult;
 
-// Simulated annealing parameters
+// Simulated annealing parameters (Lattice-specific)
 struct SAParams {
     double T_start = 1.0;
     double T_end = 1e-3;
@@ -79,60 +81,6 @@ struct SAParams {
     vector<double> probe_T;
     vector<double> probe_acc;
     vector<double> probe_tau;
-};
-
-// Binning analysis result for error estimation
-struct BinningResult {
-    double mean;
-    double error;
-    double tau_int;  // Integrated autocorrelation time estimate from binning
-    size_t optimal_bin_level;
-    vector<double> errors_by_level;  // Errors at each binning level
-};
-
-// Observable with uncertainty (mean ± error)
-struct Observable {
-    double value;
-    double error;
-    
-    Observable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
-};
-
-// Vector observable with uncertainty for each component
-struct VectorObservable {
-    vector<double> values;
-    vector<double> errors;
-    
-    VectorObservable() = default;
-    VectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
-};
-
-// Complete set of thermodynamic observables with uncertainties
-struct ThermodynamicObservables {
-    double temperature;
-    Observable energy;                      // <E>/N
-    Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
-    VectorObservable magnetization;         // <M> = <Σ_i S_i> / N (total magnetization per site)
-    vector<VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
-    vector<VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α> for each sublattice
-};
-
-// Result from optimized temperature grid generation
-// Based on:
-//   Katzgraber et al., J. Stat. Mech. P03018 (2006) [arXiv:cond-mat/0602085]
-//     - Feedback-optimized temperature placement (Δβ_i ∝ 1/f_i where f is current fraction)
-//   Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
-//     - Temperature-dependent sweep schedule (n_sweeps_i ∝ τ_int(T_i))
-struct OptimizedTempGridResult {
-    vector<double> temperatures;              // Optimized temperature ladder
-    vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
-    vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A) at each T
-    vector<double> autocorrelation_times;     // Measured τ_int(T) at each temperature
-    vector<size_t> sweeps_per_temp;           // Bittner: n_sweeps(T_i) ∝ τ_int(T_i) between exchanges
-    double mean_acceptance_rate;              // Average acceptance rate across all pairs
-    double round_trip_estimate;               // Estimated round-trip time in sweeps
-    size_t feedback_iterations_used;          // Number of feedback iterations performed
-    bool converged;                           // Whether the algorithm converged
 };
 
 /**
@@ -1752,6 +1700,13 @@ public:
         }
         
         return E;
+    }
+
+    /**
+     * Total energy of current spin configuration (no-arg wrapper)
+     */
+    double total_energy() const {
+        return total_energy(spins);
     }
 
     /**
