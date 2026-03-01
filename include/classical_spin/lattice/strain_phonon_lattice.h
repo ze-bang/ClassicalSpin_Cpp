@@ -848,12 +848,24 @@ public:
      * @param sigma        Width of Gaussian perturbation (only used if gaussian_move=true)
      * @return Acceptance rate (0.0 to 1.0)
      */
-    double mc_sweep(double temperature, bool gaussian_move = false, double sigma = 60.0);
+    double metropolis(double temperature, bool gaussian_move = false, double sigma = 60.0);
+    
+    /** @brief Legacy alias for metropolis() */
+    inline double mc_sweep(double temperature, bool gaussian_move = false, double sigma = 60.0) {
+        return metropolis(temperature, gaussian_move, sigma);
+    }
     
     /**
      * Gaussian move around current spin
      */
     SpinVector gaussian_spin_move(const SpinVector& current_spin, double sigma);
+    
+    /**
+     * Greedy quench: deterministic sweep until energy converges
+     * @param rel_tol    Relative energy tolerance for convergence
+     * @param max_sweeps Maximum number of sweeps
+     */
+    void greedy_quench(double rel_tol = 1e-12, size_t max_sweeps = 10000);
     
     /**
      * Simulated annealing with progress reporting
@@ -867,13 +879,25 @@ public:
      * @param T_zero            If true, perform deterministic sweeps at end
      * @param n_deterministics  Number of deterministic sweeps at T=0
      */
-    void anneal(double T_start, double T_end, size_t n_sweeps,
+    void simulated_annealing(double T_start, double T_end, size_t n_sweeps,
                 double cooling_rate = 0.9,
                 size_t overrelaxation_rate = 0,
                 bool gaussian_move = false,
                 const string& out_dir = "",
                 bool T_zero = false,
                 size_t n_deterministics = 1000);
+    
+    /** @brief Legacy alias for simulated_annealing() */
+    inline void anneal(double T_start, double T_end, size_t n_sweeps,
+                double cooling_rate = 0.9,
+                size_t overrelaxation_rate = 0,
+                bool gaussian_move = false,
+                const string& out_dir = "",
+                bool T_zero = false,
+                size_t n_deterministics = 1000) {
+        simulated_annealing(T_start, T_end, n_sweeps, cooling_rate, overrelaxation_rate,
+                           gaussian_move, out_dir, T_zero, n_deterministics);
+    }
     
     /**
      * Deterministic sweep: align each spin parallel to its local field.

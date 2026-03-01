@@ -74,6 +74,7 @@
 #include <iomanip>
 #include <complex>
 #include <cmath>
+#include <ctime>
 #include <numeric>
 #include <algorithm>
 #include <filesystem>
@@ -92,6 +93,7 @@
 #ifdef HDF5_ENABLED
 #include "classical_spin/io/hdf5_io.h"
 #endif
+#include "classical_spin/core/spin_config.h"  // For should_rank_write
 
 using std::vector;
 using std::string;
@@ -543,6 +545,70 @@ struct DriveParams {
     }
 };
 
+// ============================================================
+// RESULT STRUCTS FOR DIAGNOSTICS (PL_ prefix to avoid conflicts)
+// ============================================================
+
+/**
+ * Binning analysis result for error estimation
+ */
+struct PL_BinningResult {
+    double mean;
+    double error;
+    double tau_int;  // Integrated autocorrelation time estimate
+    size_t optimal_bin_level;
+    vector<double> errors_by_level;
+};
+
+/**
+ * Observable with uncertainty (mean ± error)
+ */
+struct PL_Observable {
+    double value;
+    double error;
+    PL_Observable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
+};
+
+/**
+ * Vector observable with uncertainty for each component
+ */
+struct PL_VectorObservable {
+    vector<double> values;
+    vector<double> errors;
+    PL_VectorObservable() = default;
+    PL_VectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
+};
+
+/**
+ * Complete set of thermodynamic observables with uncertainties
+ */
+struct PL_ThermodynamicObservables {
+    double temperature;
+    PL_Observable energy;                      // <E>/N
+    PL_Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
+    PL_VectorObservable magnetization;         // Total magnetization <M>
+    vector<PL_VectorObservable> sublattice_magnetization;  // <S_α> per sublattice
+    vector<PL_VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α>
+};
+
+/**
+ * Result from optimized temperature grid generation
+ * Based on:
+ *   Katzgraber et al., J. Stat. Mech. P03018 (2006)
+ *   Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
+ */
+struct PL_OptimizedTempGridResult {
+    vector<double> temperatures;              // Optimized temperature ladder
+    vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
+    vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A)
+    vector<double> autocorrelation_times;     // Measured τ_int(T) at each temperature
+    vector<size_t> sweeps_per_temp;           // Bittner: n_sweeps(T_i) ∝ τ_int(T_i)
+    double mean_acceptance_rate;
+    double round_trip_estimate;
+    size_t feedback_iterations_used;
+    bool converged;
+};
+
 /**
  * PhononLattice: Honeycomb lattice with spin-phonon coupling
  * 
@@ -736,14 +802,32 @@ public:
      * Generate random spin on 2-sphere
      */
     SpinVector gen_random_spin() {
+        return gen_random_spin(spin_length);
+    }
+    
+    /**
+     * Generate random spin on 2-sphere with specified magnitude
+     */
+    SpinVector gen_random_spin(float spin_l) {
         SpinVector spin(3);
-        double z = random_double_lehman(-1.0, 1.0);
-        double phi = random_double_lehman(0.0, 2.0 * M_PI);
+        double z = uniform_dist(rng) * 2.0 - 1.0;
+        double phi = uniform_dist(rng) * 2.0 * M_PI;
         double r = std::sqrt(1.0 - z*z);
         spin(0) = r * std::cos(phi);
         spin(1) = r * std::sin(phi);
         spin(2) = z;
-        return spin * spin_length;
+        return spin * spin_l;
+    }
+    
+    /**
+     * Gaussian move around current spin (small-angle perturbation)
+     */
+    SpinVector gaussian_spin_move(const SpinVector& current_spin, double sigma) {
+        SpinVector perturbation = gen_random_spin(1.0) * sigma;
+        SpinVector new_spin = current_spin + perturbation;
+        double norm = new_spin.norm();
+        if (norm < 1e-10) return current_spin;
+        return new_spin * (spin_length / norm);
     }
     
     /**
@@ -773,10 +857,33 @@ public:
     void init_neel(const Eigen::Vector3d& direction) {
         Eigen::Vector3d dir = direction.normalized() * spin_length;
         for (size_t i = 0; i < lattice_size; ++i) {
-            double sign = (i % 2 == 0) ? 1.0 : -1.0;
+            double sign = (i % N_atoms == 0) ? 1.0 : -1.0;
             spins[i] = sign * dir;
         }
         phonons = PhononState();
+    }
+    
+    /**
+     * Set a specific spin (consistent with Lattice)
+     */
+    void set_spin(size_t site_index, const SpinVector& spin_in) {
+        spins[site_index] = spin_in;
+    }
+    
+    /**
+     * Get a specific spin (consistent with Lattice)
+     */
+    const SpinVector& get_spin(size_t site_index) const {
+        return spins[site_index];
+    }
+    
+    /**
+     * Print lattice info (consistent with Lattice)
+     */
+    void print_info() const {
+        cout << "PhononLattice: " << dim1 << "x" << dim2 << "x" << dim3
+             << ", N_atoms=" << N_atoms << ", lattice_size=" << lattice_size
+             << ", spin_dim=" << spin_dim << ", spin_length=" << spin_length << endl;
     }
     
     // ============================================================
@@ -1246,15 +1353,17 @@ public:
                            string method = "dopri5");
     
     // ============================================================
-    // MONTE CARLO METHODS
+    // MONTE CARLO METHODS (consistent with Lattice / StrainPhononLattice)
     // ============================================================
     
     /**
-     * Single Metropolis sweep over all spins (consistent with Lattice: metropolis)
-     * @param T  Temperature
+     * Single Metropolis sweep over all spins
+     * @param T             Temperature
+     * @param gaussian_move If true, use Gaussian perturbation; if false, propose random spin
+     * @param sigma         Width of Gaussian perturbation (only used if gaussian_move=true)
      * @return Acceptance rate (0.0 to 1.0)
      */
-    double metropolis(double T);
+    double metropolis(double T, bool gaussian_move = false, double sigma = 60.0);
     
     // Legacy alias
     size_t metropolis_sweep(double T) {
@@ -1267,6 +1376,13 @@ public:
      * Reflects each spin about its local field (energy-conserving)
      */
     void overrelaxation();
+    
+    /**
+     * Greedy quench: T=0 deterministic alignment with convergence check (consistent with Lattice)
+     * @param rel_tol    Relative energy convergence tolerance
+     * @param max_sweeps Maximum number of sweeps
+     */
+    void greedy_quench(double rel_tol = 1e-12, size_t max_sweeps = 10000);
     
     /**
      * Simulated annealing for spin subsystem
@@ -1282,6 +1398,7 @@ public:
      * @param n_deterministics     Number of deterministic sweeps at T=0
      * @param adiabatic_phonons    If true, relax phonons to equilibrium at each temperature step
      *                             (Born-Oppenheimer approximation for phonons)
+     * @param gaussian_move        If true, use Gaussian moves instead of uniform random
      */
     void simulated_annealing(double T_start, double T_end, size_t n_steps,
                             size_t overrelax_rate = 0,
@@ -1290,7 +1407,8 @@ public:
                             bool save_observables = true,
                             bool T_zero = false,
                             size_t n_deterministics = 1000,
-                            bool adiabatic_phonons = false);
+                            bool adiabatic_phonons = false,
+                            bool gaussian_move = false);
     
     /**
      * Deterministic T=0 sweep: align each spin with its local field
@@ -1453,6 +1571,7 @@ public:
     
     void save_spin_config(const string& filename) const;
     void load_spin_config(const string& filename);
+    void read_spins_from_file(const string& filename) { load_spin_config(filename); }
     void save_positions(const string& filename) const;
     
     void print_state() const {
@@ -1468,6 +1587,188 @@ public:
         cout << "Energy: " << energy_density() << " per site" << endl;
         cout << "===========================" << endl;
     }
+    
+    // ============================================================
+    // OBSERVABLES — SUBLATTICE & STRUCTURE FACTOR
+    // ============================================================
+    
+    /**
+     * Compute magnetization for each sublattice separately (consistent with Lattice)
+     * @return Vector of SpinVectors, one per sublattice (N_atoms sublattices)
+     */
+    vector<SpinVector> magnetization_sublattice() const {
+        vector<SpinVector> M(N_atoms, SpinVector::Zero(spin_dim));
+        vector<size_t> counts(N_atoms, 0);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            size_t atom = i % N_atoms;
+            M[atom] += sublattice_frames[atom] * spins[i];
+            counts[atom]++;
+        }
+        for (size_t a = 0; a < N_atoms; ++a) {
+            if (counts[a] > 0) M[a] /= counts[a];
+        }
+        return M;
+    }
+    
+    /**
+     * Compute static spin structure factor S(q) = |Σ_i S_i exp(-i q·r_i)|² / N
+     * (consistent with Lattice)
+     */
+    double structure_factor(const Eigen::Vector3d& q) const {
+        std::complex<double> Sq_x(0, 0), Sq_y(0, 0), Sq_z(0, 0);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            double phase = q.dot(site_positions[i]);
+            std::complex<double> exp_factor(std::cos(phase), -std::sin(phase));
+            Sq_x += spins[i](0) * exp_factor;
+            Sq_y += spins[i](1) * exp_factor;
+            Sq_z += spins[i](2) * exp_factor;
+        }
+        return (std::norm(Sq_x) + std::norm(Sq_y) + std::norm(Sq_z)) / lattice_size;
+    }
+    
+    /**
+     * Measure observables: returns (total_energy, sublattice_magnetizations)
+     * (consistent with Lattice)
+     */
+    std::pair<double, vector<SpinVector>> measure_observables() const {
+        return {total_energy(), magnetization_sublattice()};
+    }
+    
+    // ============================================================
+    // PARALLEL TEMPERING (consistent with Lattice / StrainPhononLattice)
+    // ============================================================
+    
+    /**
+     * Parallel tempering with MPI
+     * Collects: energy, specific heat, sublattice magnetizations,
+     * and cross-correlations — all with binning analysis for error estimation
+     * 
+     * @param temp              Temperature ladder (one per MPI rank)
+     * @param n_anneal          Number of equilibration sweeps
+     * @param n_measure         Number of measurement sweeps
+     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
+     * @param swap_rate         Attempt replica exchange every N sweeps
+     * @param probe_rate        Record observables every N sweeps
+     * @param dir_name          Output directory
+     * @param rank_to_write     List of ranks that should write output (-1 = all)
+     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
+     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @param verbose           If true, save spin configurations
+     * @param sweeps_per_temp   Bittner adaptive sweep schedule: if non-empty, overrides swap_rate
+     */
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+                           size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                           string dir_name, const vector<int>& rank_to_write,
+                           bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
+                           bool verbose = false, const vector<size_t>& sweeps_per_temp = {});
+    
+    /**
+     * Attempt replica exchange between neighboring temperatures
+     * Uses checkerboard pattern for non-blocking exchanges
+     */
+    int attempt_replica_exchange(int rank, int size, const vector<double>& temp,
+                                double curr_Temp, size_t swap_parity,
+                                MPI_Comm comm = MPI_COMM_WORLD);
+    
+    /**
+     * Gather and save comprehensive statistics with binning analysis
+     */
+    void gather_and_save_statistics_comprehensive(int rank, int size, double curr_Temp,
+                                   const vector<double>& energies,
+                                   const vector<SpinVector>& magnetizations,
+                                   const vector<vector<SpinVector>>& sublattice_mags,
+                                   vector<double>& heat_capacity, vector<double>& dHeat,
+                                   const vector<double>& temp, const string& dir_name,
+                                   const vector<int>& rank_to_write,
+                                   size_t n_anneal, size_t n_measure,
+                                   double curr_accept, int swap_accept,
+                                   size_t swap_rate, size_t overrelaxation_rate,
+                                   size_t probe_rate, MPI_Comm comm = MPI_COMM_WORLD,
+                                   bool verbose = false);
+    
+    // ============================================================
+    // TEMPERATURE LADDER OPTIMIZATION
+    // ============================================================
+    
+    /**
+     * Generate optimized temperature grid for parallel tempering
+     * MPI-distributed version using Bittner feedback optimization
+     */
+    PL_OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
+        double Tmin, double Tmax,
+        size_t warmup_sweeps = 500,
+        size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20,
+        bool gaussian_move = false,
+        size_t overrelaxation_rate = 0,
+        double target_acceptance = 0.5,
+        double convergence_tol = 0.05,
+        MPI_Comm comm = MPI_COMM_WORLD);
+    
+    /**
+     * Generate geometric temperature ladder (simple, no optimization)
+     * Uses logarithmic spacing: T_i = T_min * (T_max/T_min)^(i/(R-1))
+     */
+    static vector<double> generate_geometric_temperature_ladder(
+        double Tmin, double Tmax, size_t R);
+    
+    // ============================================================
+    // STATISTICAL ANALYSIS (consistent with Lattice / StrainPhononLattice)
+    // ============================================================
+    
+    /**
+     * Binning analysis for error estimation of a scalar observable
+     */
+    static PL_BinningResult binning_analysis(const vector<double>& data);
+    
+    /**
+     * Estimate integrated autocorrelation time from an energy time series.
+     * Uses Sokal's self-consistent window method.
+     */
+    static void estimate_autocorrelation_time(const vector<double>& energies,
+                                               size_t base_interval,
+                                               double& tau_int_out,
+                                               size_t& sampling_interval_out);
+    
+    /**
+     * Compute comprehensive thermodynamic observables with binning error analysis
+     */
+    PL_ThermodynamicObservables compute_thermodynamic_observables(
+        const vector<double>& energies,
+        const vector<vector<SpinVector>>& sublattice_mags,
+        double temperature) const;
+    
+#ifdef HDF5_ENABLED
+    /**
+     * Save thermodynamic observables to HDF5 format
+     */
+    void save_thermodynamic_observables_hdf5(const string& out_dir,
+                                              const PL_ThermodynamicObservables& obs,
+                                              const vector<double>& energies,
+                                              const vector<SpinVector>& magnetizations,
+                                              const vector<vector<SpinVector>>& sublattice_mags,
+                                              size_t n_anneal,
+                                              size_t n_measure,
+                                              size_t probe_rate,
+                                              size_t swap_rate,
+                                              size_t overrelaxation_rate,
+                                              double acceptance_rate,
+                                              double swap_acceptance_rate) const;
+    
+    /**
+     * Save aggregated heat capacity data from all temperatures to HDF5 format
+     */
+    void save_heat_capacity_hdf5(const string& out_dir,
+                                  const vector<double>& temperatures,
+                                  const vector<double>& heat_capacity,
+                                  const vector<double>& dHeat) const;
+#endif
+    
+private:
+    // RNG members for reproducible per-rank seeding (needed for parallel tempering)
+    std::mt19937 rng;
+    std::uniform_real_distribution<double> uniform_dist{0.0, 1.0};
+    std::normal_distribution<double> normal_dist{0.0, 1.0};
 };
 
 #endif // PHONON_LATTICE_H

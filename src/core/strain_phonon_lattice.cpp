@@ -3080,7 +3080,7 @@ SpinVector StrainPhononLattice::gaussian_spin_move(const SpinVector& current_spi
     return new_spin * (spin_length / norm);
 }
 
-double StrainPhononLattice::mc_sweep(double temperature, bool gaussian_move, double sigma) {
+double StrainPhononLattice::metropolis(double temperature, bool gaussian_move, double sigma) {
     if (temperature <= 0) return 0.0;
     
     const double beta = 1.0 / temperature;
@@ -3148,7 +3148,33 @@ void StrainPhononLattice::overrelaxation() {
     }
 }
 
-void StrainPhononLattice::anneal(double T_start, double T_end, 
+void StrainPhononLattice::greedy_quench(double rel_tol, size_t max_sweeps) {
+    double E_prev = total_energy();
+    
+    for (size_t sweep = 0; sweep < max_sweeps; ++sweep) {
+        // Deterministic: align each spin to local field
+        for (size_t i = 0; i < lattice_size; ++i) {
+            Eigen::Vector3d H = get_local_field(i);
+            double norm = H.norm();
+            if (norm > 1e-10) {
+                spins[i] = H * (spin_length / norm);
+            }
+        }
+        
+        double E_curr = total_energy();
+        double dE = std::abs(E_curr - E_prev);
+        if (E_prev != 0.0 && dE / std::abs(E_prev) < rel_tol) {
+            cout << "Greedy quench converged at sweep " << sweep + 1 
+                 << ", E/N = " << E_curr / lattice_size << endl;
+            return;
+        }
+        E_prev = E_curr;
+    }
+    cout << "Greedy quench reached max sweeps (" << max_sweeps 
+         << "), E/N = " << E_prev / lattice_size << endl;
+}
+
+void StrainPhononLattice::simulated_annealing(double T_start, double T_end, 
                                  size_t n_sweeps,
                                  double cooling_rate,
                                  size_t overrelaxation_rate,
@@ -3188,10 +3214,10 @@ void StrainPhononLattice::anneal(double T_start, double T_end,
             if (overrelaxation_rate > 0) {
                 overrelaxation();
                 if (s % overrelaxation_rate == 0) {
-                    acc_sum += mc_sweep(T, gaussian_move, sigma);
+                    acc_sum += metropolis(T, gaussian_move, sigma);
                 }
             } else {
-                acc_sum += mc_sweep(T, gaussian_move, sigma);
+                acc_sum += metropolis(T, gaussian_move, sigma);
             }
         }
         
@@ -3828,10 +3854,10 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
         if (overrelaxation_rate > 0) {
             overrelaxation();
             if (i % overrelaxation_rate == 0) {
-                curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
             }
         } else {
-            curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+            curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
         }
         
         // Attempt replica exchange (use adaptive or fixed rate)
@@ -3851,10 +3877,10 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
             if (overrelaxation_rate > 0) {
                 overrelaxation();
                 if (i % overrelaxation_rate == 0) {
-                    mc_sweep(curr_Temp, gaussian_move, sigma);
+                    metropolis(curr_Temp, gaussian_move, sigma);
                 }
             } else {
-                mc_sweep(curr_Temp, gaussian_move, sigma);
+                metropolis(curr_Temp, gaussian_move, sigma);
             }
             if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
                 attempt_replica_exchange(rank, size, temp, curr_Temp, i / effective_swap_rate, comm);
@@ -3894,10 +3920,10 @@ void StrainPhononLattice::parallel_tempering(vector<double> temp, size_t n_annea
         if (overrelaxation_rate > 0) {
             overrelaxation();
             if (i % overrelaxation_rate == 0) {
-                curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+                curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
             }
         } else {
-            curr_accept += mc_sweep(curr_Temp, gaussian_move, sigma);
+            curr_accept += metropolis(curr_Temp, gaussian_move, sigma);
         }
         
         if (effective_swap_rate > 0 && i % effective_swap_rate == 0) {
@@ -4557,7 +4583,7 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
     // Warmup phase
     if (rank == 0) cout << "Warming up replicas..." << endl;
     for (size_t i = 0; i < warmup_sweeps; ++i) {
-        mc_sweep(my_T, gaussian_move, sigma);
+        metropolis(my_T, gaussian_move, sigma);
         if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
             overrelaxation();
         }
@@ -4579,7 +4605,7 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
         
         // MC sweeps with replica exchanges
         for (size_t sweep = 0; sweep < effective_sweeps; ++sweep) {
-            mc_sweep(my_T, gaussian_move, sigma);
+            metropolis(my_T, gaussian_move, sigma);
             if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
                 overrelaxation();
             }
@@ -4756,7 +4782,7 @@ SPL_OptimizedTempGridResult StrainPhononLattice::generate_optimized_temperature_
     energy_series.reserve(tau_samples);
     
     for (size_t i = 0; i < tau_samples; ++i) {
-        mc_sweep(my_T, gaussian_move, sigma);
+        metropolis(my_T, gaussian_move, sigma);
         if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
             overrelaxation();
         }
