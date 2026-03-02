@@ -389,6 +389,20 @@ public:
     double drive_F_Eg1_ = 0.0;     // Static drive force along Eg1: H_drive = -Σ_b F1*Q_Eg1(b)
     double drive_F_Eg2_ = 0.0;     // Static drive force along Eg2: H_drive = -Σ_b F2*Q_Eg2(b)
     
+    // ============================================================
+    // EXTRA DOF INTERFACE (for mc::attempt_replica_exchange)
+    // Ensures strain state is exchanged together with spins in PT
+    // ============================================================
+    
+    /** Number of extra (non-spin) degrees of freedom to exchange in PT */
+    size_t extra_dof_size() const { return StrainState::N_DOF; }
+    
+    /** Pack strain state into flat array for MPI exchange */
+    void pack_extra_dof(double* buf) const { strain.to_array(buf); }
+    
+    /** Unpack strain state from flat array after MPI exchange */
+    void unpack_extra_dof(const double* buf) { strain.from_array(buf); }
+    
     /**
      * Set uniform Eg strain on all bond types.
      * @param Eg1  Eg1 component: ε_xx = Eg1, ε_yy = -Eg1
@@ -878,7 +892,9 @@ public:
     
     /**
      * Parallel tempering with MPI — delegates to mc::parallel_tempering
-     * SPL version also saves strain state via extra_save callback
+     * SPL version also saves strain state via extra_save callback.
+     * Strain is relaxed before PT begins and saved after measurements.
+     * During PT, strain is exchanged with spins via extra_dof interface.
      */
     inline void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
@@ -887,7 +903,13 @@ public:
                            bool verbose = false, const vector<size_t>& sweeps_per_temp = {}) {
         int rank; MPI_Comm_rank(comm, &rank);
         rng.seed(std::chrono::high_resolution_clock::now().time_since_epoch().count() + rank * 12345);
+        
+        // Relax strain to equilibrium before starting PT
+        relax_strain(rank == 0);
+        
         auto extra_save = [this](const string& dir, double) {
+            // Relax strain to match final spin configuration, then save
+            relax_strain(false);
             save_strain_state(dir + "/strain_state.txt");
         };
         mc::parallel_tempering(*this, temp, n_anneal, n_measure, overrelaxation_rate,

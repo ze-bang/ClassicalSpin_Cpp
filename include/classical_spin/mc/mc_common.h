@@ -469,9 +469,28 @@ inline void greedy_quench(L& lat, double rel_tol = 1e-12,
          << "), E/N = " << E_prev / lat.lattice_size << endl;
 }
 
+// ============================================================
+// SFINAE trait: detect if lattice L has extra DOF to exchange
+// (e.g., strain fields in StrainPhononLattice)
+// Required methods: extra_dof_size(), pack_extra_dof(double*), unpack_extra_dof(const double*)
+// ============================================================
+template<typename T, typename = void>
+struct has_extra_dof : std::false_type {};
+
+template<typename T>
+struct has_extra_dof<T, std::void_t<
+    decltype(std::declval<const T&>().extra_dof_size()),
+    decltype(std::declval<const T&>().pack_extra_dof(std::declval<double*>())),
+    decltype(std::declval<T&>().unpack_extra_dof(std::declval<const double*>()))
+>> : std::true_type {};
+
 /**
  * Attempt replica exchange between neighbouring replicas.
  * Returns 1 if accepted, 0 otherwise.
+ *
+ * If L provides extra_dof_size() / pack_extra_dof() / unpack_extra_dof(),
+ * the extra degrees of freedom (e.g. strain state) are exchanged together
+ * with the spin configuration, preserving detailed balance.
  */
 template<typename L>
 inline int attempt_replica_exchange(
@@ -501,6 +520,7 @@ inline int attempt_replica_exchange(
     bool accepted = (rank < partner) ? (accept_int == 1) : (recv_accept == 1);
 
     if (accepted) {
+        // Exchange spin configurations
         size_t buf_len = lat.lattice_size * lat.spin_dim;
         vector<double> sendbuf(buf_len), recvbuf(buf_len);
         for (size_t i = 0; i < lat.lattice_size; ++i)
@@ -512,6 +532,19 @@ inline int attempt_replica_exchange(
         for (size_t i = 0; i < lat.lattice_size; ++i)
             for (size_t j = 0; j < lat.spin_dim; ++j)
                 lat.spins[i](j) = recvbuf[i * lat.spin_dim + j];
+
+        // Exchange extra DOF (e.g. strain state) if the lattice provides them
+        if constexpr (has_extra_dof<L>::value) {
+            size_t extra_n = lat.extra_dof_size();
+            if (extra_n > 0) {
+                vector<double> extra_send(extra_n), extra_recv(extra_n);
+                lat.pack_extra_dof(extra_send.data());
+                MPI_Sendrecv(extra_send.data(), extra_n, MPI_DOUBLE, partner, 3,
+                             extra_recv.data(), extra_n, MPI_DOUBLE, partner, 3,
+                             comm, MPI_STATUS_IGNORE);
+                lat.unpack_extra_dof(extra_recv.data());
+            }
+        }
     }
     return accepted ? 1 : 0;
 }
@@ -846,6 +879,19 @@ inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
                     for (size_t i = 0; i < lat.lattice_size; ++i)
                         for (size_t j = 0; j < lat.spin_dim; ++j)
                             lat.spins[i](j) = rb[i * lat.spin_dim + j];
+
+                    // Exchange extra DOF (e.g. strain) if available
+                    if constexpr (has_extra_dof<L>::value) {
+                        size_t extra_n = lat.extra_dof_size();
+                        if (extra_n > 0) {
+                            vector<double> es(extra_n), er(extra_n);
+                            lat.pack_extra_dof(es.data());
+                            MPI_Sendrecv(es.data(), extra_n, MPI_DOUBLE, partner, 3,
+                                         er.data(), extra_n, MPI_DOUBLE, partner, 3,
+                                         comm, MPI_STATUS_IGNORE);
+                            lat.unpack_extra_dof(er.data());
+                        }
+                    }
                 }
             }
         }
