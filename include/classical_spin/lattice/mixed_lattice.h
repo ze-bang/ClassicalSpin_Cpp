@@ -3049,9 +3049,10 @@ public:
         size_t feedback_iters = 20,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0,
-        double target_acceptance = 0.5,
+        double target_acceptance = 0.45,
         double convergence_tol = 0.05,
-        MPI_Comm comm = MPI_COMM_WORLD) {
+        MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
         
         int rank, R;
         MPI_Comm_rank(comm, &rank);
@@ -3072,7 +3073,9 @@ public:
             result.converged = true;
             return result;
         }
-        
+        // MixedLattice has a different interface (SU2+SU3, no single spins/lattice_size),
+        // so we always use the inlined Katzgraber feedback; gradient optimizer not applied here.
+        (void)use_gradient;
         seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
         
         if (rank == 0) {

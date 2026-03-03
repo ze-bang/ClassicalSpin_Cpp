@@ -167,11 +167,15 @@ save_observables = true
 
 ### Optimized Parallel Tempering
 
-The code implements the feedback-optimized temperature grid algorithm from [Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)](https://arxiv.org/abs/0809.0571). This automatically generates optimal temperature spacing to:
+Temperature ladder optimization uses a **gradient-based** method by default (industry standard):
 
-- Achieve **uniform 50% acceptance rate** across all temperature pairs
-- **Minimize round-trip time** in temperature space (maximizes diffusivity)
-- Adapt to system-specific energy landscape
+- **Default: gradient-based optimizer** [Miyata et al., arXiv:2601.13542 (2024)]  
+  Minimizes the *variance* of acceptance rates between adjacent replicas using a reparameterization that strictly preserves monotonic temperature ordering. This typically reduces round-trip time vs geometric spacing and avoids the constraint violations of older schemes.
+
+- **Optional: Katzgraber + Bittner** [Katzgraber et al. J. Stat. Mech. P03018 (2006); Bittner et al. PRL 101, 130603 (2008)]  
+  Feedback rule Δβ ∝ acceptance rate; plus Bittner adaptive sweep schedule. Use `pt_temperature_optimizer = katzgraber` to select.
+
+- **Target acceptance** default is **0.45** [Denschlag et al. 2009], which maximizes round-trip rate in temperature space.
 
 Configuration options:
 
@@ -179,18 +183,21 @@ Configuration options:
 # Enable optimized temperature grid (default: true)
 pt_optimize_temperatures = true
 
-# Target acceptance rate (0.5 = optimal per Bittner et al.)
-pt_target_acceptance = 0.5
+# Algorithm: "gradient" (default) or "katzgraber"
+pt_temperature_optimizer = gradient
+
+# Target acceptance rate (0.45 maximizes round-trip rate)
+pt_target_acceptance = 0.45
 
 # Optimization parameters
 pt_optimization_warmup = 500      # Warmup sweeps per replica
 pt_optimization_sweeps = 500      # MC sweeps per feedback iteration
-pt_optimization_iterations = 20    # Number of feedback iterations
+pt_optimization_iterations = 20   # Feedback/gradient iterations
 ```
 
 The algorithm outputs diagnostic information including:
 - Final acceptance rates for each temperature pair
-- Local diffusivities D(T) = A(1-A)
+- Local diffusivities D(T) = A(1−A)
 - Estimated round-trip time
 - Convergence status
 

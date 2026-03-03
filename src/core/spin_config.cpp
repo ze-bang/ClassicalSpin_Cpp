@@ -171,6 +171,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pt_target_acceptance") {
                 config.pt_target_acceptance = stod(value);
             }
+            else if (key == "pt_temperature_optimizer") {
+                config.pt_temperature_optimizer = value;
+            }
             else if (key == "pt_optimization_warmup") {
                 config.pt_optimization_warmup = stoull(value);
             }
@@ -484,6 +487,7 @@ void SpinConfig::to_file(const string& filename) const {
     file << "# Optimized temperature grid (Bittner et al., Phys. Rev. Lett. 101, 130603)\n";
     file << "pt_optimize_temperatures = " << (pt_optimize_temperatures ? "true" : "false") << "\n";
     file << "pt_target_acceptance = " << pt_target_acceptance << "\n";
+    file << "pt_temperature_optimizer = " << pt_temperature_optimizer << "\n";
     file << "pt_optimization_warmup = " << pt_optimization_warmup << "\n";
     file << "pt_optimization_sweeps = " << pt_optimization_sweeps << "\n";
     file << "pt_optimization_iterations = " << pt_optimization_iterations << "\n\n";
@@ -596,6 +600,7 @@ void SpinConfig::print() const {
         cout << "  Optimize temperatures: " << (pt_optimize_temperatures ? "yes (Bittner et al.)" : "no (geometric)") << "\n";
         if (pt_optimize_temperatures) {
             cout << "  Target acceptance rate: " << pt_target_acceptance * 100 << "%\n";
+            cout << "  Temperature optimizer: " << pt_temperature_optimizer << "\n";
             cout << "  Optimization warmup: " << pt_optimization_warmup << " sweeps\n";
             cout << "  Optimization sweeps: " << pt_optimization_sweeps << " per iteration\n";
             cout << "  Optimization iterations: " << pt_optimization_iterations << "\n";

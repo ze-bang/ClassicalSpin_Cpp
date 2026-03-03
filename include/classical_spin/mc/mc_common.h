@@ -780,7 +780,304 @@ inline void parallel_tempering(
 }
 
 /**
+ * Gradient-based temperature grid optimization (Miyata et al., 2024).
+ * Minimizes variance of acceptance rates with reparameterization L_k = log(Δβ_k)
+ * so that β ordering is strictly preserved. Uses score-function gradient estimation.
+ * Ref: Miyata et al., "Refined Gradient-Based Temperature Optimization for the
+ * Replica-Exchange Monte-Carlo Method" (arXiv:2601.13542).
+ */
+template<typename Lat>
+inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi_gradient(
+    Lat& lat, double Tmin, double Tmax,
+    size_t warmup_sweeps   = 500,
+    size_t sweeps_per_iter = 500,
+    size_t gradient_iters  = 50,
+    bool   gaussian_move   = false,
+    size_t overrelaxation_rate = 0,
+    double learning_rate   = 0.1,
+    double convergence_tol = 1e-4,
+    MPI_Comm comm = MPI_COMM_WORLD) {
+
+    int rank, R;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &R);
+
+    OptimizedTempGridResult result;
+    if (R < 2)  { result.temperatures = {Tmin}; result.converged = true; return result; }
+    if (R == 2) { result.temperatures = {Tmin, Tmax};
+                  result.acceptance_rates = {0.5}; result.converged = true; return result; }
+
+    std::mt19937 exchange_rng(
+        static_cast<unsigned>(
+            std::chrono::high_resolution_clock::now().time_since_epoch().count()
+            + rank * 12345));
+
+    if (rank == 0) {
+        cout << "=== Gradient-based Temperature Grid (MPI) ===" << endl;
+        cout << "Ref: Miyata et al., arXiv:2601.13542 (2024)" << endl;
+        cout << "T_min = " << Tmin << ", T_max = " << Tmax << ", R = " << R << endl;
+    }
+
+    double beta_min = 1.0 / Tmax, beta_max = 1.0 / Tmin;
+    double beta_range = beta_max - beta_min;
+
+    // Softmax parameterization: log_delta[0..R-2], Δβ_k = beta_range * exp(log_delta_k) / sum(exp(log_delta))
+    // Ensures monotonicity and positive intervals (Miyata et al. reparameterization).
+    vector<double> log_delta(R - 1, 0.0);  // uniform spacing initially
+    vector<double> beta(R);
+
+    auto L_to_beta = [&]() {
+        double sum_exp = 0;
+        for (size_t k = 0; k < R - 1; ++k) sum_exp += std::exp(log_delta[k]);
+        double scale = beta_range / (sum_exp + 1e-20);
+        beta[0] = beta_min;
+        for (size_t k = 0; k < R - 1; ++k) {
+            beta[k + 1] = beta[k] + scale * std::exp(log_delta[k]);
+        }
+        beta[R - 1] = beta_max;
+    };
+    L_to_beta();
+
+    double my_beta = beta[rank], my_T = 1.0 / my_beta;
+    double sigma = 1000.0;
+
+    if (rank == 0) cout << "Warming up replicas..." << endl;
+    for (size_t i = 0; i < warmup_sweeps; ++i) {
+        lat.metropolis(my_T, gaussian_move, sigma);
+        if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) lat.overrelaxation();
+    }
+    MPI_Barrier(comm);
+
+    vector<double> acceptance_rates(R - 1, 0.0);
+
+    for (size_t iter = 0; iter < gradient_iters; ++iter) {
+        double sum_energy = 0.0;
+        size_t n_steps = 0;
+        int attempts_low = 0, accepts_low = 0;
+        double sum_E_accept_low = 0.0;
+        int attempts_high = 0, accepts_high = 0;
+        double sum_E_accept_high = 0.0;
+
+        for (size_t sw = 0; sw < sweeps_per_iter; ++sw) {
+            lat.metropolis(my_T, gaussian_move, sigma);
+            if (overrelaxation_rate > 0 && sw % overrelaxation_rate == 0)
+                lat.overrelaxation();
+            double E = lat.total_energy();
+            sum_energy += E;
+            ++n_steps;
+
+            for (int parity = 0; parity <= 1; ++parity) {
+                int partner = (parity == 0)
+                    ? (rank % 2 == 0 ? rank + 1 : rank - 1)
+                    : (rank % 2 == 1 ? rank + 1 : rank - 1);
+                if (partner < 0 || partner >= R) continue;
+
+                double partner_E;
+                MPI_Sendrecv(&E, 1, MPI_DOUBLE, partner, 0,
+                             &partner_E, 1, MPI_DOUBLE, partner, 0,
+                             comm, MPI_STATUS_IGNORE);
+
+                int acc = 0;
+                std::uniform_real_distribution<double> uni(0.0, 1.0);
+                if (rank < partner) {
+                    double delta = -(beta[partner] - my_beta) * (E - partner_E);
+                    acc = (delta >= 0 || uni(exchange_rng) < std::exp(delta)) ? 1 : 0;
+                    ++attempts_high;
+                    if (acc) { accepts_high++; sum_E_accept_high += E; }
+                } else {
+                    double delta = -(my_beta - beta[partner]) * (partner_E - E);
+                    acc = (delta >= 0 || uni(exchange_rng) < std::exp(delta)) ? 1 : 0;
+                    ++attempts_low;
+                    if (acc) { accepts_low++; sum_E_accept_low += E; }
+                }
+                int racc = 0;
+                MPI_Sendrecv(&acc, 1, MPI_INT, partner, 1,
+                             &racc, 1, MPI_INT, partner, 1, comm, MPI_STATUS_IGNORE);
+                bool accepted = (rank < partner) ? (acc == 1) : (racc == 1);
+                if (accepted) {
+                    size_t bl = lat.lattice_size * lat.spin_dim;
+                    vector<double> sb(bl), rb(bl);
+                    for (size_t i = 0; i < lat.lattice_size; ++i)
+                        for (size_t j = 0; j < lat.spin_dim; ++j)
+                            sb[i * lat.spin_dim + j] = lat.spins[i](j);
+                    MPI_Sendrecv(sb.data(), bl, MPI_DOUBLE, partner, 2,
+                                 rb.data(), bl, MPI_DOUBLE, partner, 2,
+                                 comm, MPI_STATUS_IGNORE);
+                    for (size_t i = 0; i < lat.lattice_size; ++i)
+                        for (size_t j = 0; j < lat.spin_dim; ++j)
+                            lat.spins[i](j) = rb[i * lat.spin_dim + j];
+                    if constexpr (has_extra_dof<Lat>::value) {
+                        size_t extra_n = lat.extra_dof_size();
+                        if (extra_n > 0) {
+                            vector<double> es(extra_n), er(extra_n);
+                            lat.pack_extra_dof(es.data());
+                            MPI_Sendrecv(es.data(), extra_n, MPI_DOUBLE, partner, 3,
+                                         er.data(), extra_n, MPI_DOUBLE, partner, 3,
+                                         comm, MPI_STATUS_IGNORE);
+                            lat.unpack_extra_dof(er.data());
+                        }
+                    }
+                }
+            }
+        }
+
+        double mean_energy_j = (n_steps > 0) ? (sum_energy / n_steps) : 0.0;
+        vector<double> recv_mean_energy(R);
+        vector<int> recv_attempts_low(R), recv_accepts_low(R);
+        vector<int> recv_attempts_high(R), recv_accepts_high(R);
+        vector<double> recv_sum_E_low(R), recv_sum_E_high(R);
+        MPI_Gather(&mean_energy_j, 1, MPI_DOUBLE, recv_mean_energy.data(), 1, MPI_DOUBLE, 0, comm);
+        MPI_Gather(&attempts_low, 1, MPI_INT, recv_attempts_low.data(), 1, MPI_INT, 0, comm);
+        MPI_Gather(&accepts_low, 1, MPI_INT, recv_accepts_low.data(), 1, MPI_INT, 0, comm);
+        MPI_Gather(&attempts_high, 1, MPI_INT, recv_attempts_high.data(), 1, MPI_INT, 0, comm);
+        MPI_Gather(&accepts_high, 1, MPI_INT, recv_accepts_high.data(), 1, MPI_INT, 0, comm);
+        MPI_Gather(&sum_E_accept_low, 1, MPI_DOUBLE, recv_sum_E_low.data(), 1, MPI_DOUBLE, 0, comm);
+        MPI_Gather(&sum_E_accept_high, 1, MPI_DOUBLE, recv_sum_E_high.data(), 1, MPI_DOUBLE, 0, comm);
+
+        bool converged = false;
+        if (rank == 0) {
+            vector<double> E_A(R - 1), E_HA_hot(R - 1), E_HA_cold(R - 1);
+            vector<double> H_mean(R);
+            for (int j = 0; j < R; ++j) H_mean[j] = recv_mean_energy[j];
+            for (int e = 0; e < R - 1; ++e) {
+                int att = recv_attempts_high[e];
+                E_A[e] = (att > 0) ? (double(recv_accepts_high[e]) / att) : 0.5;
+                E_HA_hot[e] = (att > 0 && recv_accepts_high[e] > 0)
+                    ? (recv_sum_E_high[e] / recv_accepts_high[e]) : H_mean[e];
+                int att_c = recv_attempts_low[e + 1];
+                E_HA_cold[e] = (att_c > 0 && recv_accepts_low[e + 1] > 0)
+                    ? (recv_sum_E_low[e + 1] / recv_accepts_low[e + 1]) : H_mean[e + 1];
+            }
+            double A_bar = 0;
+            for (int e = 0; e < R - 1; ++e) A_bar += E_A[e];
+            A_bar /= (R - 1);
+
+            double loss = 0;
+            for (int e = 0; e < R - 1; ++e) loss += (E_A[e] - A_bar) * (E_A[e] - A_bar);
+            loss /= (R - 1);
+            acceptance_rates.assign(E_A.begin(), E_A.end());
+
+            vector<double> df_dbeta(R, 0.0);
+            for (int j = 1; j < R - 1; ++j) {
+                double t1 = (E_A[j - 1] - A_bar) * (H_mean[j] * E_A[j - 1] - E_HA_cold[j - 1]);
+                double t2 = (E_A[j] - A_bar) * (H_mean[j] * E_A[j] - E_HA_hot[j]);
+                df_dbeta[j] = (2.0 / (R - 1)) * (t1 + t2);
+            }
+            df_dbeta[0] = (2.0 / (R - 1)) * (E_A[0] - A_bar) * (H_mean[0] * E_A[0] - E_HA_hot[0]);
+            df_dbeta[R - 1] = (2.0 / (R - 1)) * (E_A[R - 2] - A_bar) * (H_mean[R - 1] * E_A[R - 2] - E_HA_cold[R - 2]);
+
+            double sum_exp = 0;
+            for (size_t k = 0; k < R - 1; ++k) sum_exp += std::exp(log_delta[k]);
+            double S = sum_exp + 1e-20;
+            vector<double> dbeta_dL(R - 1);
+            for (size_t k = 0; k < R - 1; ++k)
+                dbeta_dL[k] = beta_range * std::exp(log_delta[k]) / S;
+
+            vector<double> grad_L(R - 1, 0.0);
+            for (size_t k = 0; k < R - 1; ++k) {
+                for (int j = 1; j < R; ++j) {
+                    double dbeta_j_dLk = 0;
+                    if (k < j) {
+                        double del = (beta[j] - beta_min) / (beta_range + 1e-20);
+                        dbeta_j_dLk = dbeta_dL[k] * (1.0 - del);
+                    } else {
+                        double del = (beta[j] - beta_min) / (beta_range + 1e-20);
+                        dbeta_j_dLk = -dbeta_dL[k] * del;
+                    }
+                    grad_L[k] += df_dbeta[j] * dbeta_j_dLk;
+                }
+            }
+
+            double lr = learning_rate * (1.0 - 0.8 * double(iter) / gradient_iters);
+            for (size_t k = 0; k < R - 1; ++k) {
+                log_delta[k] -= lr * grad_L[k];
+                log_delta[k] = std::max(-10.0, std::min(10.0, log_delta[k]));
+            }
+
+            cout << "Iter " << iter + 1 << "/" << gradient_iters
+                 << ": loss = " << std::scientific << loss
+                 << ", mean A = " << std::fixed << std::setprecision(3) << A_bar << endl;
+            result.feedback_iterations_used = iter + 1;
+            if (loss < convergence_tol) {
+                converged = true;
+                cout << "Converged at iteration " << iter + 1 << endl;
+            }
+        }
+
+        int ci = converged ? 1 : 0;
+        MPI_Bcast(&ci, 1, MPI_INT, 0, comm);
+        MPI_Bcast(log_delta.data(), static_cast<int>(R - 1), MPI_DOUBLE, 0, comm);
+        L_to_beta();  // all ranks compute beta from log_delta
+        my_beta = beta[rank];
+        my_T = 1.0 / my_beta;
+        if (ci) { result.converged = true; break; }
+    }
+
+    MPI_Bcast(acceptance_rates.data(), R - 1, MPI_DOUBLE, 0, comm);
+
+    if (rank == 0) cout << "\nMeasuring τ for adaptive sweep schedule..." << endl;
+    size_t tau_n = std::max(size_t(500), sweeps_per_iter);
+    vector<double> eseries;
+    eseries.reserve(tau_n);
+    for (size_t i = 0; i < tau_n; ++i) {
+        lat.metropolis(my_T, gaussian_move, sigma);
+        if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) lat.overrelaxation();
+        eseries.push_back(lat.total_energy());
+    }
+    double my_tau = 1.0; size_t dummy;
+    estimate_autocorrelation_time(eseries, 1, my_tau, dummy);
+    my_tau = std::max(1.0, my_tau);
+
+    vector<double> all_tau(R);
+    MPI_Allgather(&my_tau, 1, MPI_DOUBLE, all_tau.data(), 1, MPI_DOUBLE, comm);
+    double tau_min_v = *std::min_element(all_tau.begin(), all_tau.end());
+    size_t n_base = 10;
+    result.autocorrelation_times = all_tau;
+    result.sweeps_per_temp.resize(R);
+    for (int k = 0; k < R; ++k)
+        result.sweeps_per_temp[k] = std::max(size_t(1),
+            static_cast<size_t>(std::ceil(n_base * all_tau[k] / tau_min_v)));
+
+    result.temperatures.resize(R);
+    for (int i = 0; i < R; ++i) result.temperatures[i] = 1.0 / beta[i];
+    std::sort(result.temperatures.begin(), result.temperatures.end());
+    result.acceptance_rates = acceptance_rates;
+    result.local_diffusivities.resize(R - 1);
+    for (int e = 0; e < R - 1; ++e) {
+        double A = acceptance_rates[e];
+        result.local_diffusivities[e] = A * (1.0 - A);
+    }
+    result.mean_acceptance_rate = 0;
+    for (double A : acceptance_rates) result.mean_acceptance_rate += A;
+    result.mean_acceptance_rate /= (R - 1);
+    double sum_inv_f = 0, total_current = 0;
+    for (int e = 0; e < R - 1; ++e) {
+        double db = std::abs(beta[e + 1] - beta[e]);
+        total_current += std::max(acceptance_rates[e], 1e-6) * db;
+    }
+    for (int e = 0; e < R - 1; ++e) {
+        double db = std::abs(beta[e + 1] - beta[e]);
+        double A = std::max(acceptance_rates[e], 1e-6);
+        double f_i = A * db / total_current;
+        double n_avg = 0.5 * (result.sweeps_per_temp[e] + result.sweeps_per_temp[e + 1]);
+        sum_inv_f += n_avg / f_i;
+    }
+    result.round_trip_estimate = sum_inv_f;
+
+    if (rank == 0) {
+        cout << "\n=== Gradient-Optimised Temperature Grid Summary ===" << endl;
+        cout << "Mean acceptance: " << std::fixed << std::setprecision(3)
+             << result.mean_acceptance_rate * 100 << "%" << endl;
+        cout << "Est round-trip: " << std::scientific << result.round_trip_estimate << endl;
+        cout << "Converged: " << (result.converged ? "YES" : "NO") << endl;
+    }
+    MPI_Barrier(comm);
+    return result;
+}
+
+/**
  * Feedback-optimised temperature grid (Katzgraber + Bittner adaptive).
+ * Set use_gradient=true (default) for gradient-based optimization (Miyata et al. 2024).
  */
 template<typename L>
 inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
@@ -792,7 +1089,18 @@ inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
     size_t overrelaxation_rate = 0,
     double target_acceptance   = 0.5,
     double convergence_tol     = 0.05,
-    MPI_Comm comm = MPI_COMM_WORLD) {
+    MPI_Comm comm = MPI_COMM_WORLD,
+    bool use_gradient = true) {
+
+    if (use_gradient) {
+        return generate_optimized_temperature_grid_mpi_gradient<L>(
+            lat, Tmin, Tmax,
+            warmup_sweeps, sweeps_per_iter,
+            std::max(feedback_iters, size_t(50)),
+            gaussian_move, overrelaxation_rate,
+            0.15,   // learning_rate
+            convergence_tol, comm);
+    }
 
     int rank, R;
     MPI_Comm_rank(comm, &rank);

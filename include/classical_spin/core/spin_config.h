@@ -104,9 +104,10 @@ struct SpinConfig {
     bool pt_accumulate_correlations = false;  // Accumulate real-space correlations for S(q)
     size_t pt_n_bond_types = 3;               // Number of bond types for dimer correlations
     
-    // Optimized temperature grid parameters (Bittner et al., Phys. Rev. Lett. 101, 130603 (2008))
+    // Optimized temperature grid parameters
     bool pt_optimize_temperatures = true;          // Use feedback-optimized temperature grid
-    double pt_target_acceptance = 0.5;             // Target acceptance rate (0.5 = optimal per Bittner)
+    string pt_temperature_optimizer = "gradient";  // "gradient" (Miyata et al. 2024) or "katzgraber" (Katzgraber+Bittner)
+    double pt_target_acceptance = 0.45;            // Target acceptance (0.45 maximizes round-trip rate, Denschlag et al. 2009)
     size_t pt_optimization_warmup = 500;           // Warmup sweeps for temperature optimization
     size_t pt_optimization_sweeps = 500;           // Sweeps per feedback iteration
     size_t pt_optimization_iterations = 20;        // Number of feedback iterations

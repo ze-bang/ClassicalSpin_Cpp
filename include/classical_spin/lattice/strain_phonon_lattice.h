@@ -927,14 +927,15 @@ public:
         size_t feedback_iters = 20,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0,
-        double target_acceptance = 0.5,
+        double target_acceptance = 0.45,
         double convergence_tol = 0.05,
-        MPI_Comm comm = MPI_COMM_WORLD) {
+        MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
         int rank; MPI_Comm_rank(comm, &rank);
         rng.seed(std::chrono::high_resolution_clock::now().time_since_epoch().count() + rank * 12345);
         return mc::generate_optimized_temperature_grid_mpi(*this, Tmin, Tmax,
             warmup_sweeps, sweeps_per_iter, feedback_iters, gaussian_move,
-            overrelaxation_rate, target_acceptance, convergence_tol, comm);
+            overrelaxation_rate, target_acceptance, convergence_tol, comm, use_gradient);
     }
     
     /** Generate geometric temperature ladder */

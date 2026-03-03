@@ -5503,9 +5503,10 @@ public:
      * @param feedback_iters    Number of feedback optimization iterations
      * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
      * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
-     * @param target_acceptance Target acceptance rate (default: 0.5)
+     * @param target_acceptance Target acceptance rate (default: 0.45, Denschlag et al. 2009)
      * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
      * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @param use_gradient      If true, use gradient-based optimizer (Miyata et al. 2024); else Katzgraber
      * @return OptimizedTempGridResult with temperatures, sweep schedule, diagnostics
      */
     OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
@@ -5515,9 +5516,10 @@ public:
         size_t feedback_iters = 20,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0,
-        double target_acceptance = 0.5,
+        double target_acceptance = 0.45,
         double convergence_tol = 0.05,
-        MPI_Comm comm = MPI_COMM_WORLD) {
+        MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
         
         // Get MPI info - number of ranks = number of replicas
         int rank, R;
@@ -5538,6 +5540,12 @@ public:
             result.acceptance_rates = {0.5};
             result.converged = true;
             return result;
+        }
+        
+        if (use_gradient) {
+            return mc::generate_optimized_temperature_grid_mpi(*this, Tmin, Tmax,
+                warmup_sweeps, sweeps_per_iter, feedback_iters, gaussian_move,
+                overrelaxation_rate, target_acceptance, convergence_tol, comm, true);
         }
         
         // Set random seed unique to each rank

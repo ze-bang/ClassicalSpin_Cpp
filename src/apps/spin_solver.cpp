@@ -100,9 +100,12 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
         // Phase 1: Katzgraber et al. feedback for uniform acceptance rates
         // Phase 2: Bittner et al. adaptive sweep schedule for minimal round-trip time
         if (rank == 0) {
-            cout << "Generating optimized temperature grid (Katzgraber+Bittner, MPI-distributed)..." << endl;
+            bool use_grad = (config.pt_temperature_optimizer == "gradient");
+            cout << "Generating optimized temperature grid ("
+                 << (use_grad ? "gradient-based, Miyata et al. 2024" : "Katzgraber+Bittner")
+                 << ", MPI-distributed)..." << endl;
         }
-        
+        bool use_gradient = (config.pt_temperature_optimizer == "gradient");
         OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
             config.T_end,    // Tmin (coldest)
             config.T_start,  // Tmax (hottest)
@@ -113,7 +116,8 @@ void run_parallel_tempering(Lattice& lattice, const SpinConfig& config, int rank
             config.overrelaxation_rate,
             config.pt_target_acceptance,
             0.05,  // convergence tolerance
-            comm
+            comm,
+            use_gradient
         );
         temps = opt_result.temperatures;
         sweeps_per_temp = opt_result.sweeps_per_temp;
@@ -2038,9 +2042,12 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
     if (config.pt_optimize_temperatures) {
         // Use MPI-distributed feedback-optimized temperature grid
         if (rank == 0) {
-            cout << "Generating optimized temperature grid (Katzgraber+Bittner, MPI-distributed)..." << endl;
+            bool use_grad_spl = (config.pt_temperature_optimizer == "gradient");
+            cout << "Generating optimized temperature grid ("
+                 << (use_grad_spl ? "gradient-based, Miyata et al. 2024" : "Katzgraber+Bittner")
+                 << ", MPI-distributed) for StrainPhononLattice..." << endl;
         }
-        
+        bool use_gradient_spl = (config.pt_temperature_optimizer == "gradient");
         SPL_OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
             config.T_end,    // Tmin (coldest)
             config.T_start,  // Tmax (hottest)
@@ -2051,7 +2058,8 @@ void run_parallel_tempering_strain(StrainPhononLattice& lattice, const SpinConfi
             config.overrelaxation_rate,
             config.pt_target_acceptance,
             0.05,  // convergence tolerance
-            comm
+            comm,
+            use_gradient_spl
         );
         temps = opt_result.temperatures;
         sweeps_per_temp = opt_result.sweeps_per_temp;
@@ -2606,9 +2614,12 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
     if (config.pt_optimize_temperatures) {
         // Use MPI-distributed feedback-optimized temperature grid
         if (rank == 0) {
-            cout << "Generating optimized temperature grid (Katzgraber+Bittner, MPI-distributed) for MixedLattice..." << endl;
+            bool use_grad_mix = (config.pt_temperature_optimizer == "gradient");
+            cout << "Generating optimized temperature grid ("
+                 << (use_grad_mix ? "gradient-based, Miyata et al. 2024" : "Katzgraber+Bittner")
+                 << ", MPI-distributed) for MixedLattice..." << endl;
         }
-        
+        bool use_gradient_mix = (config.pt_temperature_optimizer == "gradient");
         OptimizedTempGridResult opt_result = lattice.generate_optimized_temperature_grid_mpi(
             config.T_end,    // Tmin (coldest)
             config.T_start,  // Tmax (hottest)
@@ -2619,7 +2630,8 @@ void run_parallel_tempering_mixed(MixedLattice& lattice, const SpinConfig& confi
             config.overrelaxation_rate,
             config.pt_target_acceptance,
             0.05,  // convergence tolerance
-            comm
+            comm,
+            use_gradient_mix
         );
         temps = opt_result.temperatures;
         sweeps_per_temp = opt_result.sweeps_per_temp;
