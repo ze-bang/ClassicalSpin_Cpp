@@ -51,9 +51,9 @@ struct Trilinear {
 
 // Mixed bilinear for different spin dimensions (e.g., SU2-SU3 coupling)
 struct MixedBilinear {
-    SpinMatrix interaction;  // N_SU3 × N_SU2 matrix
-    size_t partner;
-    Vector3i offset;
+    SpinMatrix interaction;  // N_SU2 × N_SU3 matrix (source dim × partner dim)
+    size_t partner;          // Partner sublattice index (in the SU3 lattice)
+    Vector3i offset;         // Cell offset from source to partner
     
     MixedBilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()) {}
     
@@ -216,7 +216,7 @@ public:
     UnitCell SU3_cell;
     
     multimap<int, MixedTrilinear> trilinear_SU2_SU3;
-    multimap<int, MixedBilinear> bilinear_SU2_SU3;
+    multimap<int, MixedBilinear> bilinear_SU2_SU3;  // key = SU2 sublattice, partner = SU3 sublattice
     
     MixedUnitCell(const UnitCell& su2, const UnitCell& su3)
         : SU2_cell(su2), SU3_cell(su3) {}
@@ -228,6 +228,8 @@ public:
             MixedTrilinear(K, partner1, partner2, offset1, offset2)));
     }
     
+    // source = SU2 sublattice index (key), partner = SU3 sublattice index
+    // J is N_SU2 × N_SU3 matrix, offset = cell displacement from source to partner
     void set_mixed_bilinear(const SpinMatrix& J, size_t source,
                            size_t partner, const Vector3i& offset) {
         bilinear_SU2_SU3.insert(make_pair(source,

@@ -540,55 +540,116 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     
     // Set Fe-Tm bilinear coupling (following exact pattern from legacy code)
     if (chi2x != 0.0 || chi2y != 0.0 || chi2z != 0.0 || chi5x != 0.0 || chi5y != 0.0 || chi5z != 0.0 || chi7x != 0.0 || chi7y != 0.0 || chi7z != 0.0) {
-        Eigen::MatrixXd chi = Eigen::MatrixXd::Zero(8, 3);
-        chi(1, 0) = chi2x; chi(1, 1) = chi2y; chi(1, 2) = chi2z;
-        chi(4, 0) = chi5x; chi(4, 1) = chi5y; chi(4, 2) = chi5z;
-        chi(6, 0) = chi7x; chi(6, 1) = chi7y; chi(6, 2) = chi7z;
+        // chi is N_SU2 × N_SU3 = 3×8: rows = spin component (x,y,z), cols = λ index
+        Eigen::MatrixXd chi = Eigen::MatrixXd::Zero(3, 8);
+        chi(0, 1) = chi2x; chi(1, 1) = chi2y; chi(2, 1) = chi2z;
+        chi(0, 4) = chi5x; chi(1, 4) = chi5y; chi(2, 4) = chi5z;
+        chi(0, 6) = chi7x; chi(1, 6) = chi7y; chi(2, 6) = chi7z;
         
-        Eigen::MatrixXd chi_inv = Eigen::MatrixXd::Zero(8, 3);
-        chi_inv(1, 0) = chi2x; chi_inv(1, 1) = chi2y; chi_inv(1, 2) = chi2z;
-        chi_inv(4, 0) = -chi5x; chi_inv(4, 1) = -chi5y; chi_inv(4, 2) = -chi5z;
-        chi_inv(6, 0) = -chi7x; chi_inv(6, 1) = -chi7y; chi_inv(6, 2) = -chi7z;
+        Eigen::MatrixXd chi_inv = Eigen::MatrixXd::Zero(3, 8);
+        chi_inv(0, 1) = chi2x; chi_inv(1, 1) = chi2y; chi_inv(2, 1) = chi2z;
+        chi_inv(0, 4) = -chi5x; chi_inv(1, 4) = -chi5y; chi_inv(2, 4) = -chi5z;
+        chi_inv(0, 6) = -chi7x; chi_inv(1, 6) = -chi7y; chi_inv(2, 6) = -chi7z;
         
-        // Fe site 0 - 8 nearest Tm neighbors
-        mixed_uc.set_mixed_bilinear(chi, 3, 0, Eigen::Vector3i(-1, 0, 0));
+        // Convention: set_mixed_bilinear(J, source=Fe_idx, partner=Tm_idx, offset)
+        //   offset = Tm_cell - Fe_cell (added to Fe cell to find partner Tm cell)
+        //
+        // Pbnm (No.62) generators acting on fractional coords:
+        //   S1: (x,y,z) -> (-x, -y, z+1/2)        [screw axis along c]
+        //   S2: (x,y,z) -> (x+1/2, -y+1/2, -z)    [screw axis along a]
+        //   I:  (x,y,z) -> (-x, -y, -z)            [inversion]
+        //
+        // Full D2h point group = {E, S1, S2, S1S2, I, S1I, S2I, S1S2I}
+        //   chi-preserving:  E, S1, S2, S1S2
+        //   chi-flipping:    I, S1I, S2I, S1S2I  (chi <-> chi_inv)
+        //
+        // Fe sublattices (Wyckoff 4b):
+        //   Fe0=(0, 1/2, 1/2),  Fe1=(1/2, 0, 1/2),  Fe2=(1/2, 0, 0),  Fe3=(0, 1/2, 0)
+        // Tm sublattices (Wyckoff 4c):
+        //   Tm0=(0.02111, 0.92839, 0.75),  Tm1=(0.52111, 0.57161, 0.25)
+        //   Tm2=(0.47889, 0.42839, 0.75),  Tm3=(0.97889, 0.07161, 0.25)
+        //
+        // 32 total NN bonds = 4 orbits x 8 bonds/orbit (verified by brute-force enumeration)
+
+        // =====================================================================
+        // Fe site 0 — 8 nearest Tm neighbors
+        // =====================================================================
+        // Orbit 1 (d=0.497): E  -> Fe0-Tm3@(-1,0,0)  chi
+        mixed_uc.set_mixed_bilinear(chi, 0, 3, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 1 (d=0.497): I  -> Fe0-Tm0@(0,0,0)   chi_inv
         mixed_uc.set_mixed_bilinear(chi_inv, 0, 0, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi, 2, 0, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 1, 0, Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi, 1, 0, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 2, 0, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 2 (d=0.545): E  -> Fe0-Tm2@(0,0,0)   chi
+        mixed_uc.set_mixed_bilinear(chi, 0, 2, Eigen::Vector3i(0, 0, 0));
+        // Orbit 2 (d=0.545): I  -> Fe0-Tm1@(-1,0,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 0, 1, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 3 (d=0.582): E  -> Fe0-Tm1@(0,0,0)   chi
+        mixed_uc.set_mixed_bilinear(chi, 0, 1, Eigen::Vector3i(0, 0, 0));
+        // Orbit 3 (d=0.582): I  -> Fe0-Tm2@(-1,0,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 0, 2, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 4 (d=0.624): E  -> Fe0-Tm0@(0,-1,0)  chi
         mixed_uc.set_mixed_bilinear(chi, 0, 0, Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 3, 0, Eigen::Vector3i(-1, 1, 0));
-        
-        // Fe site 1 - 8 nearest Tm neighbors
-        mixed_uc.set_mixed_bilinear(chi, 2, 1, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 1, 1, Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_bilinear(chi, 0, 1, Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 3, 1, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi, 0, 1, Eigen::Vector3i(1, -1, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 3, 1, Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi, 1, 1, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 2, 1, Eigen::Vector3i(0, -1, 0));
-        
-        // Fe site 2 - 8 nearest Tm neighbors
-        mixed_uc.set_mixed_bilinear(chi, 2, 2, Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_bilinear(chi_inv, 1, 2, Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_bilinear(chi, 0, 2, Eigen::Vector3i(0, -1, -1));
-        mixed_uc.set_mixed_bilinear(chi_inv, 3, 2, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi, 0, 2, Eigen::Vector3i(1, -1, -1));
-        mixed_uc.set_mixed_bilinear(chi_inv, 3, 2, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 4 (d=0.624): I  -> Fe0-Tm3@(-1,1,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 0, 3, Eigen::Vector3i(-1, 1, 0));
+
+        // =====================================================================
+        // Fe site 1 — 8 nearest Tm neighbors
+        // =====================================================================
+        // Orbit 1 (d=0.497): S2   -> Fe1-Tm2@(0,0,0)   chi
         mixed_uc.set_mixed_bilinear(chi, 1, 2, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 2, 2, Eigen::Vector3i(0, -1, -1));
-        
-        // Fe site 3 - 8 nearest Tm neighbors
-        mixed_uc.set_mixed_bilinear(chi, 3, 3, Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 0, 3, Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_bilinear(chi, 2, 3, Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_bilinear(chi_inv, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 1 (d=0.497): S2I  -> Fe1-Tm1@(0,-1,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 1, 1, Eigen::Vector3i(0, -1, 0));
+        // Orbit 2 (d=0.545): S2I  -> Fe1-Tm0@(0,-1,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 1, 0, Eigen::Vector3i(0, -1, 0));
+        // Orbit 2 (d=0.545): S2   -> Fe1-Tm3@(0,0,0)   chi
         mixed_uc.set_mixed_bilinear(chi, 1, 3, Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_bilinear(chi_inv, 2, 3, Eigen::Vector3i(-1, 0, -1));
-        mixed_uc.set_mixed_bilinear(chi, 0, 3, Eigen::Vector3i(0, -1, -1));
-        mixed_uc.set_mixed_bilinear(chi_inv, 3, 3, Eigen::Vector3i(-1, 1, 0));
+        // Orbit 3 (d=0.582): S2   -> Fe1-Tm0@(1,-1,0)  chi
+        mixed_uc.set_mixed_bilinear(chi, 1, 0, Eigen::Vector3i(1, -1, 0));
+        // Orbit 3 (d=0.582): S2I  -> Fe1-Tm3@(-1,0,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 4 (d=0.624): S2   -> Fe1-Tm1@(0,0,0)   chi
+        mixed_uc.set_mixed_bilinear(chi, 1, 1, Eigen::Vector3i(0, 0, 0));
+        // Orbit 4 (d=0.624): S2I  -> Fe1-Tm2@(0,-1,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 1, 2, Eigen::Vector3i(0, -1, 0));
+
+        // =====================================================================
+        // Fe site 2 — 8 nearest Tm neighbors
+        // =====================================================================
+        // Orbit 1 (d=0.497): S1S2I -> Fe2-Tm2@(0,0,-1)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 2, 2, Eigen::Vector3i(0, 0, -1));
+        // Orbit 1 (d=0.497): S1S2  -> Fe2-Tm1@(0,-1,0)  chi
+        mixed_uc.set_mixed_bilinear(chi, 2, 1, Eigen::Vector3i(0, -1, 0));
+        // Orbit 2 (d=0.545): S1S2  -> Fe2-Tm0@(0,-1,-1) chi
+        mixed_uc.set_mixed_bilinear(chi, 2, 0, Eigen::Vector3i(0, -1, -1));
+        // Orbit 2 (d=0.545): S1S2I -> Fe2-Tm3@(0,0,0)   chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 2, 3, Eigen::Vector3i(0, 0, 0));
+        // Orbit 3 (d=0.582): S1S2I -> Fe2-Tm0@(1,-1,-1) chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 2, 0, Eigen::Vector3i(1, -1, -1));
+        // Orbit 3 (d=0.582): S1S2  -> Fe2-Tm3@(-1,0,0)  chi
+        mixed_uc.set_mixed_bilinear(chi, 2, 3, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 4 (d=0.624): S1S2I -> Fe2-Tm1@(0,0,0)   chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 2, 1, Eigen::Vector3i(0, 0, 0));
+        // Orbit 4 (d=0.624): S1S2  -> Fe2-Tm2@(0,-1,-1) chi
+        mixed_uc.set_mixed_bilinear(chi, 2, 2, Eigen::Vector3i(0, -1, -1));
+
+        // =====================================================================
+        // Fe site 3 — 8 nearest Tm neighbors
+        // =====================================================================
+        // Orbit 1 (d=0.497): S1I -> Fe3-Tm3@(-1,0,0)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 3, 3, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 1 (d=0.497): S1  -> Fe3-Tm0@(0,0,-1)  chi
+        mixed_uc.set_mixed_bilinear(chi, 3, 0, Eigen::Vector3i(0, 0, -1));
+        // Orbit 2 (d=0.545): S1I -> Fe3-Tm2@(0,0,-1)  chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 3, 2, Eigen::Vector3i(0, 0, -1));
+        // Orbit 2 (d=0.545): S1  -> Fe3-Tm1@(-1,0,0)  chi
+        mixed_uc.set_mixed_bilinear(chi, 3, 1, Eigen::Vector3i(-1, 0, 0));
+        // Orbit 3 (d=0.582): S1I -> Fe3-Tm1@(0,0,0)   chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 3, 1, Eigen::Vector3i(0, 0, 0));
+        // Orbit 3 (d=0.582): S1  -> Fe3-Tm2@(-1,0,-1)  chi
+        mixed_uc.set_mixed_bilinear(chi, 3, 2, Eigen::Vector3i(-1, 0, -1));
+        // Orbit 4 (d=0.624): S1I -> Fe3-Tm0@(0,-1,-1) chi_inv
+        mixed_uc.set_mixed_bilinear(chi_inv, 3, 0, Eigen::Vector3i(0, -1, -1));
+        // Orbit 4 (d=0.624): S1  -> Fe3-Tm3@(-1,1,0)  chi
+        mixed_uc.set_mixed_bilinear(chi, 3, 3, Eigen::Vector3i(-1, 1, 0));
     }
     
     return mixed_uc;

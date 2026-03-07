@@ -608,14 +608,14 @@ public:
                             int pk = static_cast<int>(k) + bi.offset(2);
                             size_t partner_idx = flatten_index_periodic(pi, pj, pk, bi.partner, N_atoms_SU3);
                             
-                            // bi.interaction is N_SU3 x N_SU2 (8x3)
+                            // bi.interaction is N_SU2 x N_SU3 (3x8)
                             // For SU2 energy: S2.dot(J * S3), need J to be N_SU2 x N_SU3 (3x8)
-                            // For SU3 energy: S3.dot(J * S2), need J to be N_SU3 x N_SU2 (8x3)
-                            mixed_bilinear_interaction_SU2[site_idx].push_back(bi.interaction.transpose());
+                            // For SU3 energy: S3.dot(J^T * S2), need J^T to be N_SU3 x N_SU2 (8x3)
+                            mixed_bilinear_interaction_SU2[site_idx].push_back(bi.interaction);
                             mixed_bilinear_partners_SU2[site_idx].push_back(partner_idx);
                             
-                            // Add symmetric contribution to SU(3) side (no transpose needed)
-                            mixed_bilinear_interaction_SU3[partner_idx].push_back(bi.interaction);
+                            // Add transposed contribution to SU(3) side
+                            mixed_bilinear_interaction_SU3[partner_idx].push_back(bi.interaction.transpose());
                             mixed_bilinear_partners_SU3[partner_idx].push_back(site_idx);
                         }
                     }
@@ -6561,7 +6561,7 @@ private:
             for (size_t n = 0; n < max_mixed_bi_SU3; ++n) {
                 if (n < mixed_bilinear_partners_SU3[i].size()) {
                     flat_mixed_partners_SU2_from_SU3.push_back(mixed_bilinear_partners_SU3[i][n]);
-                    // mixed_bilinear_interaction_SU3[i][n] is 8x3 (spin_dim_SU3 x spin_dim_SU2)
+                    // mixed_bilinear_interaction_SU3[i][n] is 8x3 (spin_dim_SU3 x spin_dim_SU2) [transposed from storage]
                     for (size_t r = 0; r < spin_dim_SU3; ++r) {
                         for (size_t c = 0; c < spin_dim_SU2; ++c) {
                             flat_mixed_bilinear_SU3.push_back(mixed_bilinear_interaction_SU3[i][n](r, c));
