@@ -111,7 +111,7 @@ struct VectorObservable {
 struct ThermodynamicObservables {
     double temperature;
     Observable energy;                      // <E>/N
-    Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
+    Observable specific_heat;               // c_v = Var(E/N) / T² = Var(E) / (T² N²)  [per site]
     VectorObservable magnetization;         // <M> = <Σ_i S_i> / N (total magnetization per site)
     vector<VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
     vector<VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α> for each sublattice

@@ -42,7 +42,7 @@ num_trials = 1
 J = -1.0                 # Heisenberg coupling (meV)
 K = -6.0                 # Kitaev coupling (meV, ferromagnetic)
 Gamma = 8.0              # Gamma coupling (meV)
-Gammap = -4.0            # Gamma' coupling (meV)
+Gammap = -3.5            # Gamma' coupling (meV)
 J2_A = 0.0               # 2nd NN Heisenberg (sublattice A, meV)
 J2_B = 0.0               # 2nd NN Heisenberg (sublattice B, meV)
 J3 = 0.0                 # Third-neighbor Heisenberg (meV)
@@ -104,7 +104,7 @@ lambda_Eg_quartic = 0.0  # Eg quartic stabilization
 # These control the relative coupling of the drive to A1g vs Eg modes
 drive_strength_A1g = 0.0  # Drive A1g (breathing) mode
 drive_strength_Eg1 = 1.0  # Drive Eg1 (ε_xx - ε_yy shear) mode  
-drive_strength_Eg2 = 1.0  # Drive Eg2 (2ε_xy shear) mode
+drive_strength_Eg2 = 0.0  # Drive Eg2 (2ε_xy shear) mode
 
 # Pump pulse (acoustic driving)
 pump_amplitude = 10.0    # Drive amplitude (strong pulse to exceed critical strain ~3%)
