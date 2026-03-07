@@ -61,6 +61,7 @@
 #define PHONON_LATTICE_H
 
 #include "unitcell.h"
+#include "unitcell_builders.h"
 #include "simple_linear_alg.h"
 #include <vector>
 #include <array>
@@ -73,6 +74,7 @@
 #include <iomanip>
 #include <complex>
 #include <cmath>
+#include <ctime>
 #include <numeric>
 #include <algorithm>
 #include <filesystem>
@@ -91,6 +93,8 @@
 #ifdef HDF5_ENABLED
 #include "classical_spin/io/hdf5_io.h"
 #endif
+#include "classical_spin/core/spin_config.h"  // For should_rank_write
+#include "classical_spin/mc/mc_common.h"       // Common MC types and algorithms
 
 using std::vector;
 using std::string;
@@ -542,6 +546,23 @@ struct DriveParams {
     }
 };
 
+// ============================================================
+// MC types from common library (replaces PL_-prefixed structs)
+// ============================================================
+using mc::BinningResult;
+using mc::Observable;
+using mc::VectorObservable;
+using mc::ThermodynamicObservables;
+using mc::OptimizedTempGridResult;
+using mc::AutocorrelationResult;
+
+// Legacy aliases for backward compatibility
+using PL_BinningResult             = mc::BinningResult;
+using PL_Observable                = mc::Observable;
+using PL_VectorObservable          = mc::VectorObservable;
+using PL_ThermodynamicObservables  = mc::ThermodynamicObservables;
+using PL_OptimizedTempGridResult   = mc::OptimizedTempGridResult;
+
 /**
  * PhononLattice: Honeycomb lattice with spin-phonon coupling
  * 
@@ -558,10 +579,13 @@ public:
     
     // Lattice properties
     static constexpr size_t spin_dim = 3;    // 3D classical spins
-    static constexpr size_t N_atoms = 2;     // 2 atoms per honeycomb unit cell
+    size_t N_atoms;                          // Atoms per unit cell (from UnitCell)
     size_t dim1, dim2, dim3;                 // Lattice dimensions
     size_t lattice_size;                     // Total spin sites
     float spin_length = 1.0;                 // Spin magnitude
+    
+    // Unit cell (stored for reference)
+    UnitCell unit_cell;
     
     // Spin configuration
     SpinConfig spins;
@@ -607,7 +631,7 @@ public:
     // Sublattice local frames for global-to-local spin transformations
     // For Kitaev honeycomb, transforms from local Kitaev basis to global cubic frame
     // sublattice_frames[atom] is a 3x3 rotation matrix: S_global = R * S_local
-    std::array<SpinMatrix, N_atoms> sublattice_frames;
+    vector<SpinMatrix> sublattice_frames;
     
     // Custom ordering vector (set from initial spin configuration)
     // Used to compute order parameter along the ground state ordering direction
@@ -615,18 +639,19 @@ public:
     bool has_ordering_pattern = false;
     
     /**
-     * Constructor
+     * Constructor: Build from a UnitCell (consistent with Lattice interface)
+     * 
+     * @param uc        Unit cell defining lattice structure (positions, interactions, bond types)
+     * @param d1        Lattice size in first dimension
+     * @param d2        Lattice size in second dimension
+     * @param d3        Lattice size in third dimension
+     * @param spin_l    Magnitude of spin vectors
      */
-    PhononLattice(size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
+    PhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
     
     // ============================================================
     // LATTICE CONSTRUCTION
     // ============================================================
-    
-    /**
-     * Build honeycomb lattice structure
-     */
-    void build_honeycomb();
     
     /**
      * Flatten multi-index to linear site index
@@ -716,6 +741,13 @@ public:
         }
     }
     
+    /**
+     * Set external field for a specific site (consistent with Lattice)
+     */
+    void set_uniform_field(const Eigen::Vector3d& B) {
+        set_field(B);
+    }
+    
     // ============================================================
     // INITIALIZATION
     // ============================================================
@@ -724,14 +756,32 @@ public:
      * Generate random spin on 2-sphere
      */
     SpinVector gen_random_spin() {
+        return gen_random_spin(spin_length);
+    }
+    
+    /**
+     * Generate random spin on 2-sphere with specified magnitude
+     */
+    SpinVector gen_random_spin(float spin_l) {
         SpinVector spin(3);
-        double z = random_double_lehman(-1.0, 1.0);
-        double phi = random_double_lehman(0.0, 2.0 * M_PI);
+        double z = uniform_dist(rng) * 2.0 - 1.0;
+        double phi = uniform_dist(rng) * 2.0 * M_PI;
         double r = std::sqrt(1.0 - z*z);
         spin(0) = r * std::cos(phi);
         spin(1) = r * std::sin(phi);
         spin(2) = z;
-        return spin * spin_length;
+        return spin * spin_l;
+    }
+    
+    /**
+     * Gaussian move around current spin (small-angle perturbation)
+     */
+    SpinVector gaussian_spin_move(const SpinVector& current_spin, double sigma) {
+        SpinVector perturbation = gen_random_spin(1.0) * sigma;
+        SpinVector new_spin = current_spin + perturbation;
+        double norm = new_spin.norm();
+        if (norm < 1e-10) return current_spin;
+        return new_spin * (spin_length / norm);
     }
     
     /**
@@ -761,10 +811,33 @@ public:
     void init_neel(const Eigen::Vector3d& direction) {
         Eigen::Vector3d dir = direction.normalized() * spin_length;
         for (size_t i = 0; i < lattice_size; ++i) {
-            double sign = (i % 2 == 0) ? 1.0 : -1.0;
+            double sign = (i % N_atoms == 0) ? 1.0 : -1.0;
             spins[i] = sign * dir;
         }
         phonons = PhononState();
+    }
+    
+    /**
+     * Set a specific spin (consistent with Lattice)
+     */
+    void set_spin(size_t site_index, const SpinVector& spin_in) {
+        spins[site_index] = spin_in;
+    }
+    
+    /**
+     * Get a specific spin (consistent with Lattice)
+     */
+    const SpinVector& get_spin(size_t site_index) const {
+        return spins[site_index];
+    }
+    
+    /**
+     * Print lattice info (consistent with Lattice)
+     */
+    void print_info() const {
+        cout << "PhononLattice: " << dim1 << "x" << dim2 << "x" << dim3
+             << ", N_atoms=" << N_atoms << ", lattice_size=" << lattice_size
+             << ", spin_dim=" << spin_dim << ", spin_length=" << spin_length << endl;
     }
     
     // ============================================================
@@ -1006,13 +1079,13 @@ public:
     }
     
     // ============================================================
-    // STATE CONVERSION
+    // STATE CONVERSION (consistent with Lattice: spins_to_state / state_to_spins)
     // ============================================================
     
     /**
      * Pack current state to flat ODE state vector
      */
-    ODEState to_state() const {
+    ODEState spins_to_state() const {
         ODEState state(state_size);
         size_t idx = 0;
         for (size_t i = 0; i < lattice_size; ++i) {
@@ -1027,7 +1100,7 @@ public:
     /**
      * Unpack flat ODE state to internal variables
      */
-    void from_state(const ODEState& state) {
+    void state_to_spins(const ODEState& state) {
         size_t idx = 0;
         for (size_t i = 0; i < lattice_size; ++i) {
             for (size_t d = 0; d < spin_dim; ++d) {
@@ -1039,14 +1112,18 @@ public:
         phonons.from_array(&state[idx]);
     }
     
+    // Legacy aliases for backward compatibility
+    ODEState to_state() const { return spins_to_state(); }
+    void from_state(const ODEState& state) { state_to_spins(state); }
+    
     // ============================================================
     // OBSERVABLES
     // ============================================================
     
     /**
-     * Total magnetization (per spin)
+     * Total magnetization per spin (consistent with Lattice: magnetization_local)
      */
-    Eigen::Vector3d magnetization() const {
+    Eigen::Vector3d magnetization_local() const {
         Eigen::Vector3d M = Eigen::Vector3d::Zero();
         for (const auto& s : spins) {
             M += s;
@@ -1055,16 +1132,20 @@ public:
     }
     
     /**
-     * Staggered magnetization
+     * Staggered magnetization (consistent with Lattice: magnetization_local_antiferro)
      */
-    Eigen::Vector3d staggered_magnetization() const {
+    Eigen::Vector3d magnetization_local_antiferro() const {
         Eigen::Vector3d M = Eigen::Vector3d::Zero();
         for (size_t i = 0; i < lattice_size; ++i) {
-            double sign = (i % 2 == 0) ? 1.0 : -1.0;
+            double sign = (i % N_atoms == 0) ? 1.0 : -1.0;
             M += sign * spins[i];
         }
         return M / lattice_size;
     }
+    
+    // Legacy aliases
+    Eigen::Vector3d magnetization() const { return magnetization_local(); }
+    Eigen::Vector3d staggered_magnetization() const { return magnetization_local_antiferro(); }
     
     /**
      * Global magnetization (transformed from local Kitaev frame to global cubic frame)
@@ -1226,21 +1307,37 @@ public:
                            string method = "dopri5");
     
     // ============================================================
-    // MONTE CARLO METHODS
+    // MONTE CARLO METHODS (consistent with Lattice / StrainPhononLattice)
     // ============================================================
     
     /**
      * Single Metropolis sweep over all spins
-     * @param T  Temperature
-     * @return Number of accepted moves
+     * @param T             Temperature
+     * @param gaussian_move If true, use Gaussian perturbation; if false, propose random spin
+     * @param sigma         Width of Gaussian perturbation (only used if gaussian_move=true)
+     * @return Acceptance rate (0.0 to 1.0)
      */
-    size_t metropolis_sweep(double T);
+    double metropolis(double T, bool gaussian_move = false, double sigma = 60.0);
+    
+    // Legacy alias
+    size_t metropolis_sweep(double T) {
+        double rate = metropolis(T);
+        return static_cast<size_t>(rate * lattice_size);
+    }
     
     /**
-     * Single overrelaxation sweep over all spins
+     * Single overrelaxation sweep over all spins (consistent with Lattice: overrelaxation)
      * Reflects each spin about its local field (energy-conserving)
      */
-    void overrelaxation_sweep();
+    void overrelaxation();
+    
+    /**
+     * Greedy quench: T=0 deterministic alignment with convergence check
+     * Delegates to mc::greedy_quench template.
+     */
+    void greedy_quench(double rel_tol = 1e-12, size_t max_sweeps = 10000) {
+        mc::greedy_quench(*this, rel_tol, max_sweeps);
+    }
     
     /**
      * Simulated annealing for spin subsystem
@@ -1256,6 +1353,7 @@ public:
      * @param n_deterministics     Number of deterministic sweeps at T=0
      * @param adiabatic_phonons    If true, relax phonons to equilibrium at each temperature step
      *                             (Born-Oppenheimer approximation for phonons)
+     * @param gaussian_move        If true, use Gaussian moves instead of uniform random
      */
     void simulated_annealing(double T_start, double T_end, size_t n_steps,
                             size_t overrelax_rate = 0,
@@ -1264,7 +1362,8 @@ public:
                             bool save_observables = true,
                             bool T_zero = false,
                             size_t n_deterministics = 1000,
-                            bool adiabatic_phonons = false);
+                            bool adiabatic_phonons = false,
+                            bool gaussian_move = false);
     
     /**
      * Deterministic T=0 sweep: align each spin with its local field
@@ -1427,6 +1526,7 @@ public:
     
     void save_spin_config(const string& filename) const;
     void load_spin_config(const string& filename);
+    void read_spins_from_file(const string& filename) { load_spin_config(filename); }
     void save_positions(const string& filename) const;
     
     void print_state() const {
@@ -1437,11 +1537,129 @@ public:
              << ", Vx=" << phonons.V_x_E2 << ", Vy=" << phonons.V_y_E2 << endl;
         cout << "A1: Q=" << phonons.Q_A1 << ", V=" << phonons.V_A1 << endl;
         cout << "E1 amplitude: " << E1_amplitude() << ", E2 amplitude: " << E2_amplitude() << endl;
-        cout << "Magnetization: " << magnetization().transpose() << endl;
-        cout << "Staggered M: " << staggered_magnetization().transpose() << endl;
+        cout << "Magnetization: " << magnetization_local().transpose() << endl;
+        cout << "Staggered M: " << magnetization_local_antiferro().transpose() << endl;
         cout << "Energy: " << energy_density() << " per site" << endl;
         cout << "===========================" << endl;
     }
+    
+    // ============================================================
+    // OBSERVABLES — SUBLATTICE & STRUCTURE FACTOR
+    // ============================================================
+    
+    /**
+     * Compute magnetization for each sublattice separately (consistent with Lattice)
+     * @return Vector of SpinVectors, one per sublattice (N_atoms sublattices)
+     */
+    vector<SpinVector> magnetization_sublattice() const {
+        vector<SpinVector> M(N_atoms, SpinVector::Zero(spin_dim));
+        vector<size_t> counts(N_atoms, 0);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            size_t atom = i % N_atoms;
+            M[atom] += sublattice_frames[atom] * spins[i];
+            counts[atom]++;
+        }
+        for (size_t a = 0; a < N_atoms; ++a) {
+            if (counts[a] > 0) M[a] /= counts[a];
+        }
+        return M;
+    }
+    
+    /**
+     * Compute static spin structure factor S(q) = |Σ_i S_i exp(-i q·r_i)|² / N
+     * (consistent with Lattice)
+     */
+    double structure_factor(const Eigen::Vector3d& q) const {
+        std::complex<double> Sq_x(0, 0), Sq_y(0, 0), Sq_z(0, 0);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            double phase = q.dot(site_positions[i]);
+            std::complex<double> exp_factor(std::cos(phase), -std::sin(phase));
+            Sq_x += spins[i](0) * exp_factor;
+            Sq_y += spins[i](1) * exp_factor;
+            Sq_z += spins[i](2) * exp_factor;
+        }
+        return (std::norm(Sq_x) + std::norm(Sq_y) + std::norm(Sq_z)) / lattice_size;
+    }
+    
+    /**
+     * Measure observables: returns (total_energy, sublattice_magnetizations)
+     * (consistent with Lattice)
+     */
+    std::pair<double, vector<SpinVector>> measure_observables() const {
+        return {total_energy(), magnetization_sublattice()};
+    }
+    
+    // ============================================================
+    // PARALLEL TEMPERING (consistent with Lattice / StrainPhononLattice)
+    // ============================================================
+    
+    // ============================================================
+    // PARALLEL TEMPERING & DIAGNOSTICS — delegated to mc::
+    // ============================================================
+    
+    /** Parallel tempering with MPI (delegates to mc::parallel_tempering). */
+    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+                           size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
+                           string dir_name, const vector<int>& rank_to_write,
+                           bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
+                           bool verbose = false, const vector<size_t>& sweeps_per_temp = {}) {
+        // Seed lattice RNG per rank
+        int rank; MPI_Comm_rank(comm, &rank);
+        auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        rng.seed(static_cast<unsigned int>(seed + rank * 1000));
+        mc::parallel_tempering(*this, temp, n_anneal, n_measure,
+            overrelaxation_rate, swap_rate, probe_rate, dir_name, rank_to_write,
+            gaussian_move, comm, verbose, sweeps_per_temp);
+    }
+    
+    /** Generate optimized temperature grid (delegates to mc::). */
+    mc::OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
+        double Tmin, double Tmax,
+        size_t warmup_sweeps = 500, size_t sweeps_per_iter = 500,
+        size_t feedback_iters = 20, bool gaussian_move = false,
+        size_t overrelaxation_rate = 0, double target_acceptance = 0.45,
+        double convergence_tol = 0.05, MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
+        int rank; MPI_Comm_rank(comm, &rank);
+        auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        rng.seed(static_cast<unsigned int>(seed + rank * 12345));
+        return mc::generate_optimized_temperature_grid_mpi(*this, Tmin, Tmax,
+            warmup_sweeps, sweeps_per_iter, feedback_iters, gaussian_move,
+            overrelaxation_rate, target_acceptance, convergence_tol, comm, use_gradient);
+    }
+    
+    /** Geometric temperature ladder (delegates to mc::). */
+    static vector<double> generate_geometric_temperature_ladder(
+        double Tmin, double Tmax, size_t R) {
+        return mc::generate_geometric_temperature_ladder(Tmin, Tmax, R);
+    }
+    
+    /** Binning analysis (delegates to mc::). */
+    static mc::BinningResult binning_analysis(const vector<double>& data) {
+        return mc::binning_analysis(data);
+    }
+    
+    /** Autocorrelation estimation (delegates to mc::). */
+    static void estimate_autocorrelation_time(const vector<double>& energies,
+            size_t base_interval, double& tau_int_out, size_t& sampling_interval_out) {
+        mc::estimate_autocorrelation_time(energies, base_interval,
+                                          tau_int_out, sampling_interval_out);
+    }
+    
+    /** Thermodynamic observables (delegates to mc::). */
+    mc::ThermodynamicObservables compute_thermodynamic_observables(
+        const vector<double>& energies,
+        const vector<vector<SpinVector>>& sublattice_mags,
+        double temperature) const {
+        return mc::compute_thermodynamic_observables<SpinVector>(
+            energies, sublattice_mags, temperature, lattice_size);
+    }
+    
+private:
+    // RNG members for reproducible per-rank seeding (needed for parallel tempering)
+    std::mt19937 rng;
+    std::uniform_real_distribution<double> uniform_dist{0.0, 1.0};
+    std::normal_distribution<double> normal_dist{0.0, 1.0};
 };
 
 #endif // PHONON_LATTICE_H

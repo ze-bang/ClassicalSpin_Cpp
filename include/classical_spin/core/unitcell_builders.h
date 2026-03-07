@@ -32,4 +32,11 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config);
 // Build TmFeO3 Tm-only unit cell (SU3 only, no Fe atoms)
 UnitCell build_tmfeo3_tm(const SpinConfig& config);
 
+// Build honeycomb unit cell for phonon lattice (Kitaev-Heisenberg-Γ-Γ' with bond types)
+// Includes NN with bond_type metadata, J2 (sublattice-dependent), J3, and sublattice frames
+UnitCell build_phonon_honeycomb(const SpinConfig& config);
+
+// Build honeycomb unit cell for strain phonon lattice (same geometry, different param names)
+UnitCell build_strain_honeycomb(const SpinConfig& config);
+
 #endif // UNITCELL_BUILDERS_H

@@ -45,8 +45,8 @@ namespace odeint = boost::numeric::odeint;
 // CONSTRUCTOR
 // ============================================================
 
-PhononLattice::PhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
-    : dim1(d1), dim2(d2), dim3(d3), spin_length(spin_l)
+PhononLattice::PhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3, float spin_l)
+    : unit_cell(uc), N_atoms(uc.N_atoms), dim1(d1), dim2(d2), dim3(d3), spin_length(spin_l)
 {
     lattice_size = N_atoms * dim1 * dim2 * dim3;
     state_size = spin_dim * lattice_size + PhononState::N_DOF;
@@ -65,72 +65,107 @@ PhononLattice::PhononLattice(size_t d1, size_t d2, size_t d3, float spin_l)
     j3_partners.resize(lattice_size);
     site_hexagons.resize(lattice_size);
     
-    // Initialize Kitaev local frame for honeycomb lattice
-    // The Kitaev local frame transforms from local coordinates to the global cubic frame
-    // Local basis: x' = (1,1,-2)/√6, y' = (-1,1,0)/√2, z' = (1,1,1)/√3
-    // This is the same for both sublattices in the honeycomb lattice
-    // S_global = R * S_local where columns of R are the local basis vectors
-    SpinMatrix kitaev_frame(3, 3);
-    kitaev_frame << 1.0/std::sqrt(6.0), -1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
-                    1.0/std::sqrt(6.0),  1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
-                   -2.0/std::sqrt(6.0),  0.0,                1.0/std::sqrt(3.0);
-    
-    // Both sublattices use the same local frame
-    sublattice_frames[0] = kitaev_frame;
-    sublattice_frames[1] = kitaev_frame;
+    // Copy sublattice frames from UnitCell
+    sublattice_frames.resize(N_atoms);
+    for (size_t atom = 0; atom < N_atoms; ++atom) {
+        sublattice_frames[atom] = uc.sublattice_frames[atom];
+    }
     
     // Initialize RNG
-    seed_lehman(std::chrono::system_clock::now().time_since_epoch().count() * 2 + 1);
+    auto seed_val = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    rng.seed(static_cast<unsigned int>(seed_val));
+    seed_lehman(seed_val * 2 + 1);
     
     cout << "Initializing PhononLattice with dimensions: " 
          << dim1 << " x " << dim2 << " x " << dim3 << endl;
+    cout << "Atoms per unit cell: " << N_atoms << endl;
     cout << "Total spin sites: " << lattice_size << endl;
-    cout << "Phonon DOF: " << PhononState::N_DOF << " (Qx, Qy, Q_R, Vx, Vy, V_R)" << endl;
+    cout << "Phonon DOF: " << PhononState::N_DOF << " (per-bond-type E1, E2, A1)" << endl;
     cout << "Total ODE state size: " << state_size << endl;
-    cout << "Kitaev local frame initialized (same for both sublattices)" << endl;
     
-    // Build lattice
-    build_honeycomb();
+    // Build lattice site positions from UnitCell
+    size_t site_idx = 0;
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t atom = 0; atom < N_atoms; ++atom) {
+                    Eigen::Vector3d pos = uc.lattice_pos[atom];
+                    pos += double(i) * uc.lattice_vectors[0];
+                    pos += double(j) * uc.lattice_vectors[1];
+                    pos += double(k) * uc.lattice_vectors[2];
+                    site_positions[site_idx] = pos;
+                    
+                    // Copy field from unit cell
+                    field[site_idx] = uc.field[atom].head<3>();
+                    
+                    ++site_idx;
+                }
+            }
+        }
+    }
+    
+    // Build interaction topology from UnitCell
+    // Iterate over all bilinear interactions and classify by bond_type
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                for (size_t atom = 0; atom < N_atoms; ++atom) {
+                    size_t site = flatten_index(i, j, k, atom);
+                    
+                    auto range = uc.bilinear_interaction.equal_range(atom);
+                    for (auto it = range.first; it != range.second; ++it) {
+                        const auto& bi = it->second;
+                        
+                        // Compute partner site with periodic boundaries
+                        size_t partner = flatten_index_periodic(
+                            (int)i + bi.offset[0],
+                            (int)j + bi.offset[1],
+                            (int)k + bi.offset[2],
+                            bi.partner);
+                        
+                        if (bi.bond_type >= 0) {
+                            // NN interaction with bond_type info -> nn_interaction
+                            nn_interaction[site].push_back(bi.interaction);
+                            nn_partners[site].push_back(partner);
+                            nn_bond_types[site].push_back(bi.bond_type);
+                            
+                            // Reverse bond
+                            nn_interaction[partner].push_back(bi.interaction.transpose());
+                            nn_partners[partner].push_back(site);
+                            nn_bond_types[partner].push_back(bi.bond_type);
+                        } else {
+                            // J2/J3 interaction (no phonon coupling)
+                            // Use j2 for same-sublattice, j3 for different sublattice
+                            size_t partner_sub = bi.partner;
+                            if (atom == partner_sub) {
+                                // Same sublattice -> J2
+                                // Only add if partner > site to avoid double counting
+                                if (partner > site) {
+                                    j2_interaction[site].push_back(bi.interaction);
+                                    j2_partners[site].push_back(partner);
+                                    j2_interaction[partner].push_back(bi.interaction.transpose());
+                                    j2_partners[partner].push_back(site);
+                                }
+                            } else {
+                                // Different sublattice -> J3
+                                if (partner > site) {
+                                    j3_interaction[site].push_back(bi.interaction);
+                                    j3_partners[site].push_back(partner);
+                                    j3_interaction[partner].push_back(bi.interaction.transpose());
+                                    j3_partners[partner].push_back(site);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     // Initialize random spins
     init_random();
     
     cout << "PhononLattice initialization complete!" << endl;
-}
-
-// ============================================================
-// HONEYCOMB LATTICE CONSTRUCTION
-// ============================================================
-
-void PhononLattice::build_honeycomb() {
-    // Honeycomb lattice vectors
-    Eigen::Vector3d a1(1.0, 0.0, 0.0);
-    Eigen::Vector3d a2(0.5, std::sqrt(3.0)/2.0, 0.0);
-    Eigen::Vector3d a3(0.0, 0.0, 1.0);
-    
-    // Sublattice positions within unit cell
-    Eigen::Vector3d pos0(0.0, 0.0, 0.0);
-    Eigen::Vector3d pos1(0.0, 1.0/std::sqrt(3.0), 0.0);
-    
-    // Build lattice sites
-    size_t site_idx = 0;
-    for (size_t i = 0; i < dim1; ++i) {
-        for (size_t j = 0; j < dim2; ++j) {
-            for (size_t k = 0; k < dim3; ++k) {
-                // Sublattice A
-                site_positions[site_idx] = pos0 + double(i)*a1 + double(j)*a2 + double(k)*a3;
-                field[site_idx] = Eigen::Vector3d::Zero();
-                ++site_idx;
-                
-                // Sublattice B
-                site_positions[site_idx] = pos1 + double(i)*a1 + double(j)*a2 + double(k)*a3;
-                field[site_idx] = Eigen::Vector3d::Zero();
-                ++site_idx;
-            }
-        }
-    }
-    
-    cout << "Built honeycomb lattice with " << lattice_size << " sites" << endl;
 }
 
 // ============================================================
@@ -144,148 +179,11 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
     phonon_params = ph_params;
     drive_params = dr_params;
     
-    // Clear existing interactions
+    // Clear hexagons (interactions are already built from UnitCell in constructor)
     for (size_t i = 0; i < lattice_size; ++i) {
-        nn_interaction[i].clear();
-        nn_partners[i].clear();
-        nn_bond_types[i].clear();
-        j2_interaction[i].clear();
-        j2_partners[i].clear();
-        j3_interaction[i].clear();
-        j3_partners[i].clear();
         site_hexagons[i].clear();
     }
     hexagons.clear();
-    
-    // Build bond-dependent Kitaev-Heisenberg-Γ-Γ' exchange matrices
-    SpinMatrix Jx = sp_params.get_Jx();
-    SpinMatrix Jy = sp_params.get_Jy();
-    SpinMatrix Jz = sp_params.get_Jz();
-    SpinMatrix J2_A_mat = sp_params.get_J2_A_matrix();
-    SpinMatrix J2_B_mat = sp_params.get_J2_B_matrix();
-    SpinMatrix J3_mat = sp_params.get_J3_matrix();
-    
-    // Build NN interactions on honeycomb
-    // Honeycomb lattice structure:
-    //   - Lattice vectors: a1 = (1, 0, 0), a2 = (0.5, √3/2, 0)
-    //   - Sublattice A at (0, 0, 0), Sublattice B at (0, 1/√3, 0)
-    //   - NN distance: 1/√3 ≈ 0.577  (3 neighbors, A↔B)
-    //   - 2nd NN distance: 1.0        (6 neighbors, A↔A, B↔B)  
-    //   - 3rd NN distance: 2/√3 ≈ 1.155 (3 neighbors, A↔B)
-    //
-    // NN bonds (Kitaev bond types):
-    //   - z-bond (type 2): A(i,j,k) → B(i,j,k)     [same unit cell]
-    //   - x-bond (type 0): A(i,j,k) → B(i,j-1,k)   [offset (0,-1,0)]
-    //   - y-bond (type 1): A(i,j,k) → B(i+1,j-1,k) [offset (1,-1,0)]
-    
-    for (size_t i = 0; i < dim1; ++i) {
-        for (size_t j = 0; j < dim2; ++j) {
-            for (size_t k = 0; k < dim3; ++k) {
-                size_t site0 = flatten_index(i, j, k, 0);  // Sublattice A
-                size_t site1 = flatten_index(i, j, k, 1);  // Sublattice B
-                
-                // x-bond (use Jx matrix)
-                size_t partner_x = flatten_index_periodic(i, j-1, k, 1);
-                nn_interaction[site0].push_back(Jx);
-                nn_partners[site0].push_back(partner_x);
-                nn_bond_types[site0].push_back(0);
-                // Reverse bond
-                nn_interaction[partner_x].push_back(Jx.transpose());
-                nn_partners[partner_x].push_back(site0);
-                nn_bond_types[partner_x].push_back(0);
-                
-                // y-bond (use Jy matrix)
-                size_t partner_y = flatten_index_periodic(i+1, j-1, k, 1);
-                nn_interaction[site0].push_back(Jy);
-                nn_partners[site0].push_back(partner_y);
-                nn_bond_types[site0].push_back(1);
-                // Reverse bond
-                nn_interaction[partner_y].push_back(Jy.transpose());
-                nn_partners[partner_y].push_back(site0);
-                nn_bond_types[partner_y].push_back(1);
-                
-                // z-bond (use Jz matrix, same unit cell)
-                nn_interaction[site0].push_back(Jz);
-                nn_partners[site0].push_back(site1);
-                nn_bond_types[site0].push_back(2);
-                // Reverse bond
-                nn_interaction[site1].push_back(Jz.transpose());
-                nn_partners[site1].push_back(site0);
-                nn_bond_types[site1].push_back(2);
-                
-                // 2nd NN interactions (isotropic Heisenberg, sublattice-dependent)
-                // On honeycomb, 2nd NN connect same sublattice at distance sqrt(3)*a
-                // 2nd NN offsets: (±1, 0), (0, ±1), (±1, ∓1) in lattice coordinates
-                // These connect A-A and B-B sites with different couplings J2_A and J2_B
-                if (std::abs(sp_params.J2_A) > 1e-12 || std::abs(sp_params.J2_B) > 1e-12) {
-                    // 2nd NN offset vectors (same for both sublattices in lattice coords)
-                    vector<std::tuple<int,int,int>> j2_offsets = {
-                        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {1, -1, 0}, {-1, 1, 0}
-                    };
-                    
-                    // 2nd NN for sublattice A (site0) with coupling J2_A
-                    for (const auto& [di, dj, dk] : j2_offsets) {
-                        size_t partner_j2 = flatten_index_periodic(i+di, j+dj, k+dk, 0);
-                        // Only add if partner > site0 to avoid double counting
-                        if (partner_j2 > site0) {
-                            j2_interaction[site0].push_back(J2_A_mat);
-                            j2_partners[site0].push_back(partner_j2);
-                            j2_interaction[partner_j2].push_back(J2_A_mat.transpose());
-                            j2_partners[partner_j2].push_back(site0);
-                        }
-                    }
-                    
-                    // 2nd NN for sublattice B (site1) with coupling J2_B
-                    for (const auto& [di, dj, dk] : j2_offsets) {
-                        size_t partner_j2 = flatten_index_periodic(i+di, j+dj, k+dk, 1);
-                        if (partner_j2 > site1) {
-                            j2_interaction[site1].push_back(J2_B_mat);
-                            j2_partners[site1].push_back(partner_j2);
-                            j2_interaction[partner_j2].push_back(J2_B_mat.transpose());
-                            j2_partners[partner_j2].push_back(site1);
-                        }
-                    }
-                }
-                
-                // 3rd NN interactions (isotropic Heisenberg J3)
-                // On honeycomb, 3rd NN are at distance 2/sqrt(3), connecting OPPOSITE sublattices (A↔B)
-                // 3rd NN offsets from A(i,j,k,0) to B: (+1,-2,1), (-1,0,1), (+1,0,1)
-                // 3rd NN offsets from B(i,j,k,1) to A: (-1,+2,0), (-1,0,0), (+1,0,0)
-                if (std::abs(sp_params.J3) > 1e-12) {
-                    // 3rd NN from sublattice A (site0) to sublattice B
-                    vector<std::tuple<int,int,int>> j3_A_to_B_offsets = {
-                        {1, -2, 0}, {-1, 0, 0}, {1, 0, 0}
-                    };
-                    
-                    for (const auto& [di, dj, dk] : j3_A_to_B_offsets) {
-                        size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, 1);  // Connect to sublattice B
-                        // Only add if partner > site0 to avoid double counting
-                        if (partner_j3 > site0) {
-                            j3_interaction[site0].push_back(J3_mat);
-                            j3_partners[site0].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
-                            j3_partners[partner_j3].push_back(site0);
-                        }
-                    }
-                    
-                    // 3rd NN from sublattice B (site1) to sublattice A
-                    vector<std::tuple<int,int,int>> j3_B_to_A_offsets = {
-                        {-1, 2, 0}, {-1, 0, 0}, {1, 0, 0}
-                    };
-                    
-                    for (const auto& [di, dj, dk] : j3_B_to_A_offsets) {
-                        size_t partner_j3 = flatten_index_periodic(i+di, j+dj, k+dk, 0);  // Connect to sublattice A
-                        if (partner_j3 > site1) {
-                            j3_interaction[site1].push_back(J3_mat);
-                            j3_partners[site1].push_back(partner_j3);
-                            j3_interaction[partner_j3].push_back(J3_mat.transpose());
-                            j3_partners[partner_j3].push_back(site1);
-                        }
-                    }
-                }
-            }
-        }
-    }
     
     // Build hexagonal plaquettes for ring exchange
     // On honeycomb, each hexagon consists of alternating A and B sites
@@ -1661,7 +1559,7 @@ void PhononLattice::molecular_dynamics(
     cout << "Initial step size: " << dt_initial << endl;
     
     // Convert to flat state
-    ODEState state = to_state();
+    ODEState state = spins_to_state();
     
 #ifdef HDF5_ENABLED
     // Create HDF5 writer with comprehensive metadata (like Lattice class)
@@ -1759,7 +1657,7 @@ void PhononLattice::molecular_dynamics(
                 V_A1_0_traj.push_back(V_A1_0); V_A1_1_traj.push_back(V_A1_1); V_A1_2_traj.push_back(V_A1_2);
                 
                 // Compute energy for monitoring
-                const_cast<PhononLattice*>(this)->from_state(x);
+                const_cast<PhononLattice*>(this)->state_to_spins(x);
                 energy_traj.push_back(energy_density());
             }
 #endif
@@ -1795,7 +1693,7 @@ void PhononLattice::molecular_dynamics(
     integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
                         observer, method, true, abs_tol, rel_tol);
     
-    from_state(state);
+    state_to_spins(state);
     
 #ifdef HDF5_ENABLED
     // Write phonon trajectory data to HDF5 file
@@ -1902,24 +1800,38 @@ void PhononLattice::molecular_dynamics(
 // MONTE CARLO METHODS
 // ============================================================
 
-size_t PhononLattice::metropolis_sweep(double T) {
+double PhononLattice::metropolis(double T, bool gaussian_move, double sigma) {
+    if (T <= 0) return 0.0;
+    
+    const double beta = 1.0 / T;
     size_t accepted = 0;
     
-    for (size_t i = 0; i < lattice_size; ++i) {
+    std::uniform_int_distribution<size_t> site_dist(0, lattice_size - 1);
+    
+    for (size_t sweep_step = 0; sweep_step < lattice_size; ++sweep_step) {
+        size_t i = site_dist(rng);
+        
         Eigen::Vector3d old_spin = spins[i];
-        Eigen::Vector3d new_spin = gen_random_spin();
+        Eigen::Vector3d new_spin;
+        if (gaussian_move) {
+            new_spin = gaussian_spin_move(old_spin, sigma);
+        } else {
+            new_spin = gen_random_spin();
+        }
         
         double dE = site_energy_diff(new_spin, old_spin, i);
         
-        if (dE < 0 || random_double_lehman(0, 1) < std::exp(-dE / T)) {
+        double rand_val = uniform_dist(rng);
+        const bool accept = (dE < 0.0) || (rand_val < std::exp(-beta * dE));
+        if (accept) {
             spins[i] = new_spin;
             accepted++;
         }
     }
-    return accepted;
+    return static_cast<double>(accepted) / lattice_size;
 }
 
-void PhononLattice::overrelaxation_sweep() {
+void PhononLattice::overrelaxation() {
     for (size_t i = 0; i < lattice_size; ++i) {
         Eigen::Vector3d H = get_local_field(i);
         double norm = H.norm();
@@ -1941,7 +1853,7 @@ void PhononLattice::simulated_annealing(
     size_t overrelax_rate, double cooling_rate,
     string out_dir, bool save_observables,
     bool T_zero, size_t n_deterministics,
-    bool adiabatic_phonons) 
+    bool adiabatic_phonons, bool gaussian_move) 
 {
     cout << "Starting PhononLattice simulated annealing..." << endl;
     cout << "T: " << T_start << " → " << T_end << ", sweeps per temp: " << n_steps << endl;
@@ -1972,15 +1884,15 @@ void PhononLattice::simulated_annealing(
     size_t temp_step = 0;
     
     while (T > T_end) {
-        size_t accepted = 0;
+        double accepted_rate = 0;
         
         // Perform n_steps sweeps at this temperature
         for (size_t step = 0; step < n_steps; ++step) {
-            accepted += metropolis_sweep(T);
+            accepted_rate += metropolis(T, gaussian_move);
             
             // Overrelaxation
             if (overrelax_rate > 0 && step % overrelax_rate == 0) {
-                overrelaxation_sweep();
+                overrelaxation();
             }
         }
         
@@ -1990,13 +1902,13 @@ void PhononLattice::simulated_annealing(
         }
         
         // Calculate acceptance rate (only counts Metropolis moves, not overrelaxation)
-        double acceptance = double(accepted) / double(n_steps * lattice_size);
+        double acceptance = accepted_rate / double(n_steps);
         
         // Progress report every 10 temperature steps or near the end
         if (temp_step % 10 == 0 || T <= T_end * 1.5) {
             double E = energy_density();
-            Eigen::Vector3d M = magnetization();
-            Eigen::Vector3d M_stag = staggered_magnetization();
+            Eigen::Vector3d M = magnetization_local();
+            Eigen::Vector3d M_stag = magnetization_local_antiferro();
             cout << "T=" << std::scientific << std::setprecision(4) << T 
                  << ", E/N=" << std::fixed << std::setprecision(6) << E 
                  << ", acc=" << std::fixed << std::setprecision(4) << acceptance
@@ -2032,8 +1944,8 @@ void PhononLattice::simulated_annealing(
     
     // Final report
     double E_final = energy_density();
-    Eigen::Vector3d M_final = magnetization();
-    Eigen::Vector3d M_stag_final = staggered_magnetization();
+    Eigen::Vector3d M_final = magnetization_local();
+    Eigen::Vector3d M_stag_final = magnetization_local_antiferro();
     cout << "\n=== Simulated Annealing Complete ===" << endl;
     cout << "Temperature steps: " << temp_step << endl;
     cout << "Final energy density: " << E_final << endl;
@@ -2717,7 +2629,7 @@ void PhononLattice::pump_probe_spectroscopy(
     // Use current configuration as ground state
     cout << "\n[1/3] Using current configuration as ground state..." << endl;
     double E_ground = energy_density();
-    SpinVector M_ground = magnetization();
+    SpinVector M_ground = magnetization_local();
     SpinVector M_ground_global = magnetization_global();
     cout << "  Ground state: E/N = " << E_ground << ", |M| = " << M_ground.norm() << endl;
     cout << "  Global magnetization: " << M_ground_global.transpose() << endl;
@@ -3345,9 +3257,20 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
     phonons = ground_phonons;
 }
 
+// ============================================================
+// MC algorithms (greedy_quench, parallel_tempering, binning_analysis,
+// estimate_autocorrelation_time, compute_thermodynamic_observables,
+// generate_optimized_temperature_grid_mpi, generate_geometric_temperature_ladder,
+// attempt_replica_exchange, gather_and_save_statistics_comprehensive,
+// save_thermodynamic_observables_hdf5, save_heat_capacity_hdf5)
+// are now provided by mc::* template functions in mc_common.h
+// and called via inline wrappers in phonon_lattice.h.
+// ============================================================
+
 // Explicit template instantiation
 template void PhononLattice::integrate_ode_system(
     std::function<void(const PhononLattice::ODEState&, PhononLattice::ODEState&, double)>,
     PhononLattice::ODEState&, double, double, double,
     std::function<void(const PhononLattice::ODEState&, double)>,
     const std::string&, bool, double, double);
+

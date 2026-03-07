@@ -36,8 +36,10 @@
 #define STRAIN_PHONON_LATTICE_H
 
 #include "unitcell.h"
+#include "unitcell_builders.h"
 #include "simple_linear_alg.h"
 #include "classical_spin/core/spin_config.h"  // For should_rank_write
+#include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include <vector>
 #include <array>
 #include <functional>
@@ -337,67 +339,20 @@ struct StrainDriveParams {
 // HELPER STRUCTS FOR PARALLEL TEMPERING
 // ============================================================
 
-/**
- * Binning analysis result for error estimation
- */
-struct SPL_BinningResult {
-    double mean;
-    double error;
-    double tau_int;  // Integrated autocorrelation time estimate
-    size_t optimal_bin_level;
-    vector<double> errors_by_level;
-};
+// Common MC structs (from mc_common.h)
+using mc::BinningResult;
+using mc::Observable;
+using mc::VectorObservable;
+using mc::ThermodynamicObservables;
+using mc::OptimizedTempGridResult;
+using mc::AutocorrelationResult;
 
-/**
- * Observable with uncertainty (mean ± error)
- */
-struct SPL_Observable {
-    double value;
-    double error;
-    
-    SPL_Observable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
-};
-
-/**
- * Vector observable with uncertainty for each component
- */
-struct SPL_VectorObservable {
-    vector<double> values;
-    vector<double> errors;
-    
-    SPL_VectorObservable() = default;
-    SPL_VectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
-};
-
-/**
- * Complete set of thermodynamic observables with uncertainties
- */
-struct SPL_ThermodynamicObservables {
-    double temperature;
-    SPL_Observable energy;                      // <E>/N
-    SPL_Observable specific_heat;               // C_V = (<E²> - <E>²) / (T² N)
-    SPL_VectorObservable magnetization;         // Total magnetization <M>
-    vector<SPL_VectorObservable> sublattice_magnetization;  // <S_α> for each sublattice α
-    vector<SPL_VectorObservable> energy_sublattice_cross;   // <E * S_α> - <E><S_α>
-};
-
-/**
- * Result from optimized temperature grid generation
- * Based on:
- *   Katzgraber et al., J. Stat. Mech. P03018 (2006) [arXiv:cond-mat/0602085]
- *   Bittner et al., Phys. Rev. Lett. 101, 130603 (2008) [arXiv:0809.0571]
- */
-struct SPL_OptimizedTempGridResult {
-    vector<double> temperatures;              // Optimized temperature ladder
-    vector<double> acceptance_rates;          // Final acceptance rates between adjacent pairs
-    vector<double> local_diffusivities;       // Local diffusivity D(T) ∝ A(1-A) at each T
-    vector<double> autocorrelation_times;     // Measured τ_int(T) at each temperature
-    vector<size_t> sweeps_per_temp;           // Bittner: n_sweeps(T_i) ∝ τ_int(T_i) between exchanges
-    double mean_acceptance_rate;              // Average acceptance rate across all pairs
-    double round_trip_estimate;               // Estimated round-trip time in sweeps
-    size_t feedback_iterations_used;          // Number of feedback iterations performed
-    bool converged;                           // Whether the algorithm converged
-};
+// Legacy type aliases for backward compatibility
+using SPL_BinningResult = mc::BinningResult;
+using SPL_Observable = mc::Observable;
+using SPL_VectorObservable = mc::VectorObservable;
+using SPL_ThermodynamicObservables = mc::ThermodynamicObservables;
+using SPL_OptimizedTempGridResult = mc::OptimizedTempGridResult;
 
 /**
  * StrainPhononLattice: Honeycomb lattice with magnetoelastic (spin-strain) coupling
@@ -415,10 +370,13 @@ public:
     
     // Lattice properties
     static constexpr size_t spin_dim = 3;
-    static constexpr size_t N_atoms = 2;  // Honeycomb unit cell
+    size_t N_atoms;  // Atoms per unit cell (from UnitCell)
     size_t dim1, dim2, dim3;
     size_t lattice_size;
     float spin_length = 1.0;
+    
+    // UnitCell
+    UnitCell unit_cell;
     
     // Spin configuration
     SpinConfig spins;
@@ -427,6 +385,36 @@ public:
     // Strain state
     StrainState strain;
     StrainState strain_equilibrium;  // Equilibrium strain (set by relax_strain)
+    bool fix_strain_ = false;       // If true, relax_strain() is a no-op
+    double drive_F_Eg1_ = 0.0;     // Static drive force along Eg1: H_drive = -Σ_b F1*Q_Eg1(b)
+    double drive_F_Eg2_ = 0.0;     // Static drive force along Eg2: H_drive = -Σ_b F2*Q_Eg2(b)
+    
+    // ============================================================
+    // EXTRA DOF INTERFACE (for mc::attempt_replica_exchange)
+    // Ensures strain state is exchanged together with spins in PT
+    // ============================================================
+    
+    /** Number of extra (non-spin) degrees of freedom to exchange in PT */
+    size_t extra_dof_size() const { return StrainState::N_DOF; }
+    
+    /** Pack strain state into flat array for MPI exchange */
+    void pack_extra_dof(double* buf) const { strain.to_array(buf); }
+    
+    /** Unpack strain state from flat array after MPI exchange */
+    void unpack_extra_dof(const double* buf) { strain.from_array(buf); }
+    
+    /**
+     * Set uniform Eg strain on all bond types.
+     * @param Eg1  Eg1 component: ε_xx = Eg1, ε_yy = -Eg1
+     * @param Eg2  Eg2 component: ε_xy = Eg2
+     */
+    void set_strain_Eg(double Eg1, double Eg2) {
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = Eg1;
+            strain.epsilon_yy[b] = -Eg1;
+            strain.epsilon_xy[b] = Eg2;
+        }
+    }
     
     // NN interactions
     vector<vector<SpinMatrix>> nn_interaction;
@@ -464,22 +452,20 @@ public:
     size_t state_size;
     
     // Sublattice local frames
-    std::array<SpinMatrix, N_atoms> sublattice_frames;
+    vector<SpinMatrix> sublattice_frames;
     
     // Custom ordering vector
     SpinConfig ordering_pattern;
     bool has_ordering_pattern = false;
     
     /**
-     * Constructor
+     * Constructor: takes a UnitCell (built by e.g. build_strain_honeycomb)
      */
-    StrainPhononLattice(size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
+    StrainPhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3 = 1, float spin_l = 1.0);
     
     // ============================================================
     // LATTICE CONSTRUCTION
     // ============================================================
-    
-    void build_honeycomb();
     
     size_t flatten_index(size_t i, size_t j, size_t k, size_t atom) const {
         // MUST match phonon_lattice.h: ((i * dim2 + j) * dim3 + k) * N_atoms + atom
@@ -561,12 +547,23 @@ public:
     double strain_energy() const;
     double magnetoelastic_energy() const;
     
+    double drive_energy() const {
+        if (std::abs(drive_F_Eg1_) < 1e-15 && std::abs(drive_F_Eg2_) < 1e-15) return 0.0;
+        double E = 0.0;
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            double Eg1_b = (strain.epsilon_xx[b] - strain.epsilon_yy[b]) / 2.0;
+            double Eg2_b = strain.epsilon_xy[b];
+            E -= drive_F_Eg1_ * Eg1_b + drive_F_Eg2_ * Eg2_b;
+        }
+        return E;
+    }
+    
     double total_energy() const {
-        return spin_energy() + strain_energy() + magnetoelastic_energy();
+        return spin_energy() + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
     double total_energy(double t) const {
-        return spin_energy(t) + strain_energy() + magnetoelastic_energy();
+        return spin_energy(t) + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
     double energy_density() const {
@@ -819,12 +816,26 @@ public:
      * @param sigma        Width of Gaussian perturbation (only used if gaussian_move=true)
      * @return Acceptance rate (0.0 to 1.0)
      */
-    double mc_sweep(double temperature, bool gaussian_move = false, double sigma = 60.0);
+    double metropolis(double temperature, bool gaussian_move = false, double sigma = 60.0);
+    
+    /** @brief Legacy alias for metropolis() */
+    inline double mc_sweep(double temperature, bool gaussian_move = false, double sigma = 60.0) {
+        return metropolis(temperature, gaussian_move, sigma);
+    }
     
     /**
      * Gaussian move around current spin
      */
     SpinVector gaussian_spin_move(const SpinVector& current_spin, double sigma);
+    
+    /**
+     * Greedy quench: deterministic sweep until energy converges
+     * @param rel_tol    Relative energy tolerance for convergence
+     * @param max_sweeps Maximum number of sweeps
+     */
+    inline void greedy_quench(double rel_tol = 1e-12, size_t max_sweeps = 10000) {
+        mc::greedy_quench(*this, rel_tol, max_sweeps);
+    }
     
     /**
      * Simulated annealing with progress reporting
@@ -838,13 +849,25 @@ public:
      * @param T_zero            If true, perform deterministic sweeps at end
      * @param n_deterministics  Number of deterministic sweeps at T=0
      */
-    void anneal(double T_start, double T_end, size_t n_sweeps,
+    void simulated_annealing(double T_start, double T_end, size_t n_sweeps,
                 double cooling_rate = 0.9,
                 size_t overrelaxation_rate = 0,
                 bool gaussian_move = false,
                 const string& out_dir = "",
                 bool T_zero = false,
                 size_t n_deterministics = 1000);
+    
+    /** @brief Legacy alias for simulated_annealing() */
+    inline void anneal(double T_start, double T_end, size_t n_sweeps,
+                double cooling_rate = 0.9,
+                size_t overrelaxation_rate = 0,
+                bool gaussian_move = false,
+                const string& out_dir = "",
+                bool T_zero = false,
+                size_t n_deterministics = 1000) {
+        simulated_annealing(T_start, T_end, n_sweeps, cooling_rate, overrelaxation_rate,
+                           gaussian_move, out_dir, T_zero, n_deterministics);
+    }
     
     /**
      * Deterministic sweep: align each spin parallel to its local field.
@@ -864,106 +887,62 @@ public:
     void overrelaxation();
     
     // ============================================================
-    // PARALLEL TEMPERING
+    // PARALLEL TEMPERING (delegated to mc::* templates)
     // ============================================================
     
     /**
-     * Parallel tempering with MPI
-     * Collects: energy, specific heat, sublattice magnetizations, and cross-correlations
-     * All with binning analysis for error estimation
-     * 
-     * @param temp              Temperature ladder (one per MPI rank)
-     * @param n_anneal          Number of equilibration sweeps
-     * @param n_measure         Number of measurement sweeps
-     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
-     * @param swap_rate         Attempt replica exchange every N sweeps
-     * @param probe_rate        Record observables every N sweeps
-     * @param dir_name          Output directory
-     * @param rank_to_write     List of ranks that should write output (-1 = all)
-     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
-     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
-     * @param verbose           If true, save spin configurations
-     * @param sweeps_per_temp   Bittner adaptive sweep schedule: if non-empty, overrides swap_rate
-     *                          with max(sweeps_per_temp) to ensure all replicas decorrelate.
+     * Parallel tempering with MPI — delegates to mc::parallel_tempering
+     * SPL version also saves strain state via extra_save callback.
+     * Strain is relaxed before PT begins and saved after measurements.
+     * During PT, strain is exchanged with spins via extra_dof interface.
      */
-    void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
+    inline void parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
                            string dir_name, const vector<int>& rank_to_write,
                            bool gaussian_move = true, MPI_Comm comm = MPI_COMM_WORLD,
-                           bool verbose = false, const vector<size_t>& sweeps_per_temp = {});
+                           bool verbose = false, const vector<size_t>& sweeps_per_temp = {}) {
+        int rank; MPI_Comm_rank(comm, &rank);
+        rng.seed(std::chrono::high_resolution_clock::now().time_since_epoch().count() + rank * 12345);
+        
+        // Relax strain to equilibrium before starting PT
+        relax_strain(rank == 0);
+        
+        auto extra_save = [this](const string& dir, double) {
+            // Relax strain to match final spin configuration, then save
+            relax_strain(false);
+            save_strain_state(dir + "/strain_state.txt");
+        };
+        mc::parallel_tempering(*this, temp, n_anneal, n_measure, overrelaxation_rate,
+                               swap_rate, probe_rate, dir_name, rank_to_write,
+                               gaussian_move, comm, verbose, sweeps_per_temp, extra_save);
+    }
     
     /**
-     * Attempt replica exchange between neighboring temperatures
-     * Uses checkerboard pattern for non-blocking exchanges
-     * 
-     * @param rank          Current MPI rank
-     * @param size          Total number of MPI ranks
-     * @param temp          Temperature ladder
-     * @param curr_Temp     Current temperature for this rank
-     * @param swap_parity   Parity for checkerboard pattern (even/odd)
-     * @param comm          MPI communicator
-     * @return 1 if exchange was accepted, 0 otherwise
+     * Generate optimized temperature grid — delegates to mc::generate_optimized_temperature_grid_mpi
      */
-    int attempt_replica_exchange(int rank, int size, const vector<double>& temp,
-                                double curr_Temp, size_t swap_parity, 
-                                MPI_Comm comm = MPI_COMM_WORLD);
-    
-    /**
-     * Gather and save comprehensive statistics with binning analysis
-     */
-    void gather_and_save_statistics_comprehensive(int rank, int size, double curr_Temp,
-                                   const vector<double>& energies,
-                                   const vector<SpinVector>& magnetizations,
-                                   const vector<vector<SpinVector>>& sublattice_mags,
-                                   vector<double>& heat_capacity, vector<double>& dHeat,
-                                   const vector<double>& temp, const string& dir_name,
-                                   const vector<int>& rank_to_write,
-                                   size_t n_anneal, size_t n_measure,
-                                   double curr_accept, int swap_accept,
-                                   size_t swap_rate, size_t overrelaxation_rate,
-                                   size_t probe_rate, MPI_Comm comm = MPI_COMM_WORLD,
-                                   bool verbose = false);
-    
-    /**
-     * Generate optimized temperature grid for parallel tempering
-     * Based on Bittner et al., Phys. Rev. Lett. 101, 130603 (2008)
-     * 
-     * MPI-distributed version: each rank handles one replica
-     * 
-     * @param Tmin              Minimum (coldest) temperature
-     * @param Tmax              Maximum (hottest) temperature  
-     * @param warmup_sweeps     MC sweeps for initial equilibration
-     * @param sweeps_per_iter   MC sweeps per feedback iteration
-     * @param feedback_iters    Number of feedback optimization iterations
-     * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
-     * @param overrelaxation_rate Apply overrelaxation every N sweeps (0 = disabled)
-     * @param target_acceptance Target acceptance rate (default: 0.5 per Bittner)
-     * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
-     * @param comm              MPI communicator (default: MPI_COMM_WORLD)
-     * @return OptimizedTempGridResult containing temperatures and diagnostics
-     */
-    SPL_OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
+    inline mc::OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
         double Tmin, double Tmax,
         size_t warmup_sweeps = 500,
         size_t sweeps_per_iter = 500,
         size_t feedback_iters = 20,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0,
-        double target_acceptance = 0.5,
+        double target_acceptance = 0.45,
         double convergence_tol = 0.05,
-        MPI_Comm comm = MPI_COMM_WORLD);
+        MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
+        int rank; MPI_Comm_rank(comm, &rank);
+        rng.seed(std::chrono::high_resolution_clock::now().time_since_epoch().count() + rank * 12345);
+        return mc::generate_optimized_temperature_grid_mpi(*this, Tmin, Tmax,
+            warmup_sweeps, sweeps_per_iter, feedback_iters, gaussian_move,
+            overrelaxation_rate, target_acceptance, convergence_tol, comm, use_gradient);
+    }
     
-    /**
-     * Generate geometric temperature ladder (simple, no optimization)
-     * Uses logarithmic spacing: T_i = T_min * (T_max/T_min)^(i/(R-1))
-     * 
-     * @param Tmin  Minimum temperature
-     * @param Tmax  Maximum temperature
-     * @param R     Number of temperatures
-     * @return Vector of temperatures in ascending order
-     */
-    static vector<double> generate_geometric_temperature_ladder(
-        double Tmin, double Tmax, size_t R);
+    /** Generate geometric temperature ladder */
+    static inline vector<double> generate_geometric_temperature_ladder(
+        double Tmin, double Tmax, size_t R) {
+        return mc::generate_geometric_temperature_ladder(Tmin, Tmax, R);
+    }
     
     // ============================================================
     // HELPER METHODS FOR PARALLEL TEMPERING
@@ -980,60 +959,26 @@ public:
      */
     SpinVector magnetization_global() const;
     
-    /**
-     * Binning analysis for error estimation of a scalar observable
-     * @param data Vector of observable measurements
-     * @return BinningResult containing mean, error, and binning information
-     */
-    static SPL_BinningResult binning_analysis(const vector<double>& data);
+    /** Binning analysis — delegates to mc::binning_analysis */
+    static inline mc::BinningResult binning_analysis(const vector<double>& data) {
+        return mc::binning_analysis(data);
+    }
     
-    /**
-     * Estimate integrated autocorrelation time from an energy time series.
-     * Uses Sokal's self-consistent window method for robust estimation.
-     * 
-     * @param energies       Energy time series (samples separated by base_interval sweeps)
-     * @param base_interval  MC sweeps between consecutive samples
-     * @param tau_int_out    Output: integrated autocorrelation time (in sample units)
-     * @param sampling_interval_out  Output: recommended sampling interval (in MC sweeps, ≥ 2·τ_int)
-     */
-    static void estimate_autocorrelation_time(const vector<double>& energies,
+    /** Estimate autocorrelation time — delegates to mc::estimate_autocorrelation_time */
+    static inline void estimate_autocorrelation_time(const vector<double>& energies,
                                                size_t base_interval,
                                                double& tau_int_out,
-                                               size_t& sampling_interval_out);
+                                               size_t& sampling_interval_out) {
+        mc::estimate_autocorrelation_time(energies, base_interval, tau_int_out, sampling_interval_out);
+    }
     
-    /**
-     * Compute comprehensive thermodynamic observables with binning error analysis
-     */
-    SPL_ThermodynamicObservables compute_thermodynamic_observables(
+    /** Compute thermodynamic observables — delegates to mc::compute_thermodynamic_observables */
+    inline mc::ThermodynamicObservables compute_thermodynamic_observables(
         const vector<double>& energies,
         const vector<vector<SpinVector>>& sublattice_mags,
-        double temperature) const;
-    
-#ifdef HDF5_ENABLED
-    /**
-     * Save thermodynamic observables to HDF5 format
-     */
-    void save_thermodynamic_observables_hdf5(const string& out_dir,
-                                              const SPL_ThermodynamicObservables& obs,
-                                              const vector<double>& energies,
-                                              const vector<SpinVector>& magnetizations,
-                                              const vector<vector<SpinVector>>& sublattice_mags,
-                                              size_t n_anneal,
-                                              size_t n_measure,
-                                              size_t probe_rate,
-                                              size_t swap_rate,
-                                              size_t overrelaxation_rate,
-                                              double acceptance_rate,
-                                              double swap_acceptance_rate) const;
-    
-    /**
-     * Save aggregated heat capacity data from all temperatures to HDF5 format
-     */
-    void save_heat_capacity_hdf5(const string& out_dir,
-                                  const vector<double>& temperatures,
-                                  const vector<double>& heat_capacity,
-                                  const vector<double>& dHeat) const;
-#endif
+        double temperature) const {
+        return mc::compute_thermodynamic_observables<SpinVector>(energies, sublattice_mags, temperature, lattice_size);
+    }
     
     // ============================================================
     // I/O
@@ -1071,8 +1016,12 @@ public:
     // OBSERVABLES
     // ============================================================
     
-    Eigen::Vector3d total_magnetization() const;
-    Eigen::Vector3d staggered_magnetization() const;
+    Eigen::Vector3d magnetization_local() const;
+    Eigen::Vector3d magnetization_local_antiferro() const;
+    
+    // Legacy aliases
+    Eigen::Vector3d total_magnetization() const { return magnetization_local(); }
+    Eigen::Vector3d staggered_magnetization() const { return magnetization_local_antiferro(); }
     double order_parameter() const;
     
     // Strain mode amplitudes (averaged over bond types)
@@ -1184,6 +1133,16 @@ public:
     std::pair<double, double> relax_strain_at_fixed_spins(
         const vector<Eigen::Vector3d>& spins,
         size_t max_iter = 1000,
+        double tolerance = 1e-6) const;
+    
+    /**
+     * Relax strain at fixed spins with warm-start from initial guess.
+     * Uses L-BFGS-like conjugate gradient for fast convergence.
+     */
+    std::pair<double, double> relax_strain_at_fixed_spins(
+        const vector<Eigen::Vector3d>& spins,
+        double init_Eg1, double init_Eg2,
+        size_t max_iter = 200,
         double tolerance = 1e-6) const;
     
     /**

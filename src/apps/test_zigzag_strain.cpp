@@ -11,6 +11,8 @@
  */
 
 #include "classical_spin/lattice/strain_phonon_lattice.h"
+#include "classical_spin/core/unitcell_builders.h"
+#include "classical_spin/core/spin_config.h"
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -49,13 +51,27 @@ int main(int argc, char** argv) {
     StrainDriveParams dr;
     dr.E0_1 = 0; dr.E0_2 = 0;  // No drive
 
+    // Build SpinConfig for UnitCell builder
+    SpinConfig test_config;
+    test_config.set_param("J", me.J);
+    test_config.set_param("K", me.K);
+    test_config.set_param("Gamma", me.Gamma);
+    test_config.set_param("Gammap", me.Gammap);
+    test_config.set_param("J2_A", me.J2_A);
+    test_config.set_param("J2_B", me.J2_B);
+    test_config.set_param("J3", me.J3);
+    test_config.field_strength = 0.0;
+    
+    // Build UnitCell once (reused for all parts)
+    UnitCell uc = build_strain_honeycomb(test_config);
+
     // ---- Part 1: Triple-Q (C3-symmetric) → expect zero strain ----
     {
         std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
         std::cout << "  Part 1: Triple-Q state (C3-symmetric)\n";
         std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
 
-        StrainPhononLattice lattice(L, L, 1, spin_length);
+        StrainPhononLattice lattice(uc, L, L, 1, spin_length);
         lattice.set_parameters(me, el, dr);
         lattice.init_triple_q();
 
@@ -77,7 +93,7 @@ int main(int argc, char** argv) {
         std::cout << "  Part 2." << dir << ": " << names[dir] << " (C3-breaking)\n";
         std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
 
-        StrainPhononLattice lattice(L, L, 1, spin_length);
+        StrainPhononLattice lattice(uc, L, L, 1, spin_length);
         lattice.set_parameters(me, el, dr);
         lattice.init_zigzag_pattern(dir);
 
@@ -97,7 +113,7 @@ int main(int argc, char** argv) {
         std::cout << "  Part 3: SA-annealed ground state (should be C3-symmetric)\n";
         std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
 
-        StrainPhononLattice lattice(L, L, 1, spin_length);
+        StrainPhononLattice lattice(uc, L, L, 1, spin_length);
         lattice.set_parameters(me, el, dr);
         lattice.init_random();
 

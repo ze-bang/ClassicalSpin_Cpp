@@ -104,9 +104,10 @@ struct SpinConfig {
     bool pt_accumulate_correlations = false;  // Accumulate real-space correlations for S(q)
     size_t pt_n_bond_types = 3;               // Number of bond types for dimer correlations
     
-    // Optimized temperature grid parameters (Bittner et al., Phys. Rev. Lett. 101, 130603 (2008))
+    // Optimized temperature grid parameters
     bool pt_optimize_temperatures = true;          // Use feedback-optimized temperature grid
-    double pt_target_acceptance = 0.5;             // Target acceptance rate (0.5 = optimal per Bittner)
+    string pt_temperature_optimizer = "gradient";  // "gradient" (Miyata et al. 2024) or "katzgraber" (Katzgraber+Bittner)
+    double pt_target_acceptance = 0.45;            // Target acceptance (0.45 maximizes round-trip rate, Denschlag et al. 2009)
     size_t pt_optimization_warmup = 500;           // Warmup sweeps for temperature optimization
     size_t pt_optimization_sweeps = 500;           // Sweeps per feedback iteration
     size_t pt_optimization_iterations = 20;        // Number of feedback iterations
@@ -155,6 +156,11 @@ struct SpinConfig {
     double gneb_spring_constant = 1.0;      // Spring constant for NEB
     size_t gneb_max_iterations = 1000;      // Maximum GNEB iterations
     double gneb_force_tolerance = 1e-4;     // Convergence tolerance on force
+    double gneb_step_size = 0.01;            // FIRE initial dt / steepest descent step
+    double gneb_fire_dtmax = 0.5;            // FIRE maximum dt
+    double gneb_max_strain_amplitude = 10.0;  // Maximum allowed strain amplitude in GNEB
+    size_t gneb_climbing_start = 100;        // Iteration to enable climbing image
+    size_t gneb_redistribution_freq = 0;     // Path redistribution interval (0=disabled)
     bool gneb_use_climbing_image = true;    // Use climbing image NEB
     double gneb_climbing_threshold = 0.1;   // When to switch to climbing image
     size_t gneb_analysis_steps = 100;       // Number of time steps for barrier evolution analysis
@@ -170,6 +176,22 @@ struct SpinConfig {
     double gneb_strain_direction = 0.0;     // Angle of Eg strain in radians (0 = Eg1 only, π/6 = 30°, etc.)
     int gneb_zigzag_domain = 2;             // Zigzag domain for bias: 0=x, 1=y, 2=z
     bool gneb_fixed_strain = true;          // Use fixed strain (true) vs adiabatic relaxation (false)
+    bool gneb_dynamic_strain = false;       // Use GNEBStrainOptimizer: strain as dynamic GNEB DOF
+    bool gneb_adiabatic_strain = false;      // Born-Oppenheimer: relax strain at each GNEB step
+    bool gneb_pin_Eg2_zero = false;          // Pin ε_Eg2=0 in BO relaxation (constrain MEP to single C₃ channel)
+    double gneb_weight_strain = 1.0;        // Metric weight for strain vs spin distance in dynamic strain GNEB
+    string gneb_initial_path_dir = "";       // Directory with intermediate spin_strain_config files for initial path
+    
+    // Fixed-strain annealing parameters (Born-Oppenheimer scan)
+    bool fix_strain = false;                // If true, hold strain fixed during annealing (no relax_strain)
+    double external_strain_Eg1 = 0.0;       // Fixed Eg1 strain component: ε_xx = Eg1, ε_yy = -Eg1
+    double external_strain_Eg2 = 0.0;       // Fixed Eg2 strain component: ε_xy = Eg2
+    
+    // Static drive force on Eg phonon (for GNEB barrier calculations)
+    // H_drive = -Σ_b [F1 * Q_Eg1(b) + F2 * Q_Eg2(b)]
+    // where Q_Eg1 = (ε_xx - ε_yy)/2, Q_Eg2 = ε_xy
+    double drive_F_Eg1 = 0.0;              // Drive force along Eg1 (orthorhombic)
+    double drive_F_Eg2 = 0.0;              // Drive force along Eg2 (monoclinic)
     
     // Field parameters
     double field_strength = 0.0;

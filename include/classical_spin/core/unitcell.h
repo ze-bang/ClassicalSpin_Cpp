@@ -15,14 +15,18 @@ struct Bilinear {
     SpinMatrix interaction;  // N×N matrix
     size_t partner;
     Vector3i offset;  // Offset in lattice coordinates
+    int bond_type;  // Bond type metadata (-1 = unspecified, 0/1/2 = x/y/z for Kitaev, etc.)
     
-    Bilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()) {}
+    Bilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()), bond_type(-1) {}
     
     Bilinear(const SpinMatrix& J, size_t p) 
-        : interaction(J), partner(p), offset(Vector3i::Zero()) {}
+        : interaction(J), partner(p), offset(Vector3i::Zero()), bond_type(-1) {}
     
     Bilinear(const SpinMatrix& J, size_t p, const Vector3i& o)
-        : interaction(J), partner(p), offset(o) {}
+        : interaction(J), partner(p), offset(o), bond_type(-1) {}
+    
+    Bilinear(const SpinMatrix& J, size_t p, const Vector3i& o, int bt)
+        : interaction(J), partner(p), offset(o), bond_type(bt) {}
 };
 
 // Trilinear interaction structure (replaces template version)
@@ -47,9 +51,9 @@ struct Trilinear {
 
 // Mixed bilinear for different spin dimensions (e.g., SU2-SU3 coupling)
 struct MixedBilinear {
-    SpinMatrix interaction;  // N_SU3 × N_SU2 matrix
-    size_t partner;
-    Vector3i offset;
+    SpinMatrix interaction;  // N_SU2 × N_SU3 matrix (source dim × partner dim)
+    size_t partner;          // Partner sublattice index (in the SU3 lattice)
+    Vector3i offset;         // Cell offset from source to partner
     
     MixedBilinear() : partner(SIZE_MAX), offset(Vector3i::Zero()) {}
     
@@ -143,6 +147,15 @@ public:
         bilinear_interaction.insert(make_pair(source, Bilinear(J, partner, offset)));
     }
     
+    void set_bilinear_interaction(const SpinMatrix& J, size_t source, 
+                                  size_t partner, const Vector3i& offset,
+                                  int bond_type) {
+        if (J.rows() != N || J.cols() != N) {
+            throw invalid_argument("Bilinear matrix dimension mismatch");
+        }
+        bilinear_interaction.insert(make_pair(source, Bilinear(J, partner, offset, bond_type)));
+    }
+    
     void set_trilinear_interaction(const SpinTensor3& K, size_t source,
                                    size_t partner1, size_t partner2,
                                    const Vector3i& offset1, const Vector3i& offset2) {
@@ -203,7 +216,7 @@ public:
     UnitCell SU3_cell;
     
     multimap<int, MixedTrilinear> trilinear_SU2_SU3;
-    multimap<int, MixedBilinear> bilinear_SU2_SU3;
+    multimap<int, MixedBilinear> bilinear_SU2_SU3;  // key = SU2 sublattice, partner = SU3 sublattice
     
     MixedUnitCell(const UnitCell& su2, const UnitCell& su3)
         : SU2_cell(su2), SU3_cell(su3) {}
@@ -215,6 +228,8 @@ public:
             MixedTrilinear(K, partner1, partner2, offset1, offset2)));
     }
     
+    // source = SU2 sublattice index (key), partner = SU3 sublattice index
+    // J is N_SU2 × N_SU3 matrix, offset = cell displacement from source to partner
     void set_mixed_bilinear(const SpinMatrix& J, size_t source,
                            size_t partner, const Vector3i& offset) {
         bilinear_SU2_SU3.insert(make_pair(source,

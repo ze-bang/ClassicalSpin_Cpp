@@ -3,6 +3,8 @@
 
 #include "unitcell.h"
 #include "simple_linear_alg.h"
+#include "classical_spin/core/spin_config.h"  // For should_rank_write
+#include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include <vector>
 #include <functional>
 #include <random>
@@ -68,53 +70,35 @@ using std::ifstream;
 using std::function;
 using std::array;
 
-// ============================================================
-// BINNING ANALYSIS STRUCTURES FOR MIXED LATTICE
-// ============================================================
+// Common MC structs (from mc_common.h)
+using mc::BinningResult;
+using mc::Observable;
+using mc::VectorObservable;
+using mc::AutocorrelationResult;
 
-// Binning analysis result for error estimation
-struct MixedBinningResult {
-    double mean;
-    double error;
-    double tau_int;  // Integrated autocorrelation time estimate from binning
-    size_t optimal_bin_level;
-    vector<double> errors_by_level;  // Errors at each binning level
-};
-
-// Observable with uncertainty (mean ± error)
-struct MixedObservable {
-    double value;
-    double error;
-    
-    MixedObservable(double v = 0.0, double e = 0.0) : value(v), error(e) {}
-};
-
-// Vector observable with uncertainty for each component
-struct MixedVectorObservable {
-    vector<double> values;
-    vector<double> errors;
-    
-    MixedVectorObservable() = default;
-    MixedVectorObservable(size_t dim) : values(dim, 0.0), errors(dim, 0.0) {}
-};
+// Legacy type aliases for backward compatibility
+using MixedBinningResult = mc::BinningResult;
+using MixedObservable = mc::Observable;
+using MixedVectorObservable = mc::VectorObservable;
 
 // Complete set of thermodynamic observables for mixed lattice with uncertainties
+// (Extended version with SU2/SU3 split — MixedLattice-specific)
 struct MixedThermodynamicObservables {
     double temperature;
     
     // Energy observables
-    MixedObservable energy_total;         // <E>/N_total
-    MixedObservable energy_SU2;           // <E_SU2>/N_SU2
-    MixedObservable energy_SU3;           // <E_SU3>/N_SU3
-    MixedObservable specific_heat;        // C_V = (<E²> - <E>²) / (T² N)
+    Observable energy_total;         // <E>/N_total
+    Observable energy_SU2;           // <E_SU2>/N_SU2
+    Observable energy_SU3;           // <E_SU3>/N_SU3
+    Observable specific_heat;        // C_V = (<E²> - <E>²) / (T² N)
     
     // SU(2) sublattice observables
-    vector<MixedVectorObservable> sublattice_magnetization_SU2;  // <S_α> for each SU(2) sublattice
-    vector<MixedVectorObservable> energy_sublattice_cross_SU2;   // <E * S_α> - <E><S_α>
+    vector<VectorObservable> sublattice_magnetization_SU2;  // <S_α> for each SU(2) sublattice
+    vector<VectorObservable> energy_sublattice_cross_SU2;   // <E * S_α> - <E><S_α>
     
     // SU(3) sublattice observables
-    vector<MixedVectorObservable> sublattice_magnetization_SU3;  // <S_α> for each SU(3) sublattice
-    vector<MixedVectorObservable> energy_sublattice_cross_SU3;   // <E * S_α> - <E><S_α>
+    vector<VectorObservable> sublattice_magnetization_SU3;  // <S_α> for each SU(3) sublattice
+    vector<VectorObservable> energy_sublattice_cross_SU3;   // <E * S_α> - <E><S_α>
 };
 
 /**
@@ -624,14 +608,14 @@ public:
                             int pk = static_cast<int>(k) + bi.offset(2);
                             size_t partner_idx = flatten_index_periodic(pi, pj, pk, bi.partner, N_atoms_SU3);
                             
-                            // bi.interaction is N_SU3 x N_SU2 (8x3)
+                            // bi.interaction is N_SU2 x N_SU3 (3x8)
                             // For SU2 energy: S2.dot(J * S3), need J to be N_SU2 x N_SU3 (3x8)
-                            // For SU3 energy: S3.dot(J * S2), need J to be N_SU3 x N_SU2 (8x3)
-                            mixed_bilinear_interaction_SU2[site_idx].push_back(bi.interaction.transpose());
+                            // For SU3 energy: S3.dot(J^T * S2), need J^T to be N_SU3 x N_SU2 (8x3)
+                            mixed_bilinear_interaction_SU2[site_idx].push_back(bi.interaction);
                             mixed_bilinear_partners_SU2[site_idx].push_back(partner_idx);
                             
-                            // Add symmetric contribution to SU(3) side (no transpose needed)
-                            mixed_bilinear_interaction_SU3[partner_idx].push_back(bi.interaction);
+                            // Add transposed contribution to SU(3) side
+                            mixed_bilinear_interaction_SU3[partner_idx].push_back(bi.interaction.transpose());
                             mixed_bilinear_partners_SU3[partner_idx].push_back(site_idx);
                         }
                     }
@@ -1850,198 +1834,24 @@ public:
         save_autocorrelation_results(out_dir, acf);
     }
 
-    /**
-     * Compute autocorrelation for mixed lattice
-     */
+    /** Compute autocorrelation — delegates to mc::compute_autocorrelation */
     AutocorrelationResult compute_autocorrelation(const vector<double>& energies, 
                                                    size_t base_interval = 10) {
-        AutocorrelationResult result;
-        
-        size_t N = energies.size();
-        if (N < 10) {
-            result.tau_int = 1.0;
-            result.sampling_interval = base_interval;
-            result.correlation_function = {1.0};
-            return result;
-        }
-        
-        // Compute mean
-        double mean = std::accumulate(energies.begin(), energies.end(), 0.0) / N;
-        
-        // Compute autocorrelation function
-        size_t max_lag = std::min(N / 4, size_t(1000));
-        result.correlation_function.resize(max_lag);
-        
-        double var = 0.0;
-        for (size_t i = 0; i < N; ++i) {
-            var += (energies[i] - mean) * (energies[i] - mean);
-        }
-        var /= N;
-        
-        if (var < 1e-20) {
-            result.tau_int = 1.0;
-            result.sampling_interval = base_interval;
-            result.correlation_function = {1.0};
-            return result;
-        }
-        
-        for (size_t lag = 0; lag < max_lag; ++lag) {
-            double corr = 0.0;
-            for (size_t i = 0; i < N - lag; ++i) {
-                corr += (energies[i] - mean) * (energies[i + lag] - mean);
-            }
-            corr /= (N - lag);
-            result.correlation_function[lag] = corr / var;
-        }
-        
-        // Compute integrated autocorrelation time using Sokal's self-consistent
-        // window: sum until lag >= C * tau_int (C ~ 6 standard).
-        constexpr double sokal_C = 6.0;
-        result.tau_int = 0.5;
-        for (size_t lag = 1; lag < max_lag; ++lag) {
-            if (result.correlation_function[lag] < 0.0) break;
-            result.tau_int += result.correlation_function[lag];
-            if (static_cast<double>(lag) >= sokal_C * result.tau_int) break;
-        }
-        
-        // Warn if tau_int is large relative to time series length
-        if (2.0 * result.tau_int > 0.1 * N) {
-            cout << "[WARNING] Autocorrelation time τ_int=" << result.tau_int 
-                 << " samples is large relative to time series length N=" << N
-                 << ". Estimate may be unreliable — consider longer preliminary runs." << endl;
-        }
-        
-        // sampling_interval in MC sweeps: 2 * ceil(tau_int) * base_interval
-        size_t tau_int_sweeps = static_cast<size_t>(std::ceil(result.tau_int)) * base_interval;
-        result.sampling_interval = std::max(size_t(2) * tau_int_sweeps, size_t(100));
-        
-        return result;
+        return mc::compute_autocorrelation(energies, base_interval);
     }
 
     // ============================================================
-    // BINNING ANALYSIS FOR ERROR ESTIMATION
+    // BINNING ANALYSIS (delegated to mc::* functions)
     // ============================================================
 
-    /**
-     * Binning analysis for error estimation of a scalar observable
-     * 
-     * Performs recursive blocking to estimate statistical error with autocorrelation.
-     * The error plateaus when bin size exceeds the correlation length.
-     * 
-     * @param data Vector of observable measurements
-     * @return MixedBinningResult containing mean, error, and binning information
-     */
-    static MixedBinningResult binning_analysis(const vector<double>& data) {
-        MixedBinningResult result;
-        
-        if (data.empty()) {
-            result.mean = 0.0;
-            result.error = 0.0;
-            result.tau_int = 1.0;
-            result.optimal_bin_level = 0;
-            return result;
-        }
-        
-        size_t n = data.size();
-        
-        // Compute mean
-        result.mean = std::accumulate(data.begin(), data.end(), 0.0) / double(n);
-        
-        if (n < 4) {
-            // Too few samples for meaningful analysis
-            double var = 0.0;
-            for (double x : data) var += (x - result.mean) * (x - result.mean);
-            result.error = std::sqrt(var / (n * (n - 1)));
-            result.tau_int = 1.0;
-            result.optimal_bin_level = 0;
-            return result;
-        }
-        
-        // Recursive blocking: progressively halve the data by averaging pairs
-        vector<double> binned_data = data;
-        size_t level = 0;
-        size_t max_levels = static_cast<size_t>(std::log2(n)) - 1;
-        
-        result.errors_by_level.reserve(max_levels);
-        
-        while (binned_data.size() >= 4) {
-            size_t m = binned_data.size();
-            
-            // Compute variance at this level
-            double sum = 0.0, sum2 = 0.0;
-            for (double x : binned_data) {
-                sum += x;
-                sum2 += x * x;
-            }
-            double mean_level = sum / m;
-            double var_level = (sum2 / m - mean_level * mean_level);
-            double error_level = std::sqrt(var_level / (m - 1));
-            
-            result.errors_by_level.push_back(error_level);
-            
-            // Block the data: average consecutive pairs
-            vector<double> new_binned;
-            new_binned.reserve(m / 2);
-            for (size_t i = 0; i + 1 < m; i += 2) {
-                new_binned.push_back(0.5 * (binned_data[i] + binned_data[i + 1]));
-            }
-            binned_data = std::move(new_binned);
-            ++level;
-        }
-        
-        // Find optimal level where error has plateaued
-        result.optimal_bin_level = 0;
-        if (result.errors_by_level.size() > 2) {
-            double max_error = 0.0;
-            for (size_t l = 0; l < result.errors_by_level.size(); ++l) {
-                if (result.errors_by_level[l] > max_error) {
-                    max_error = result.errors_by_level[l];
-                    result.optimal_bin_level = l;
-                }
-            }
-        }
-        
-        // Use error from optimal level
-        if (!result.errors_by_level.empty()) {
-            size_t use_level = std::min(result.optimal_bin_level + 1, result.errors_by_level.size() - 1);
-            result.error = result.errors_by_level[use_level];
-            
-            // Estimate tau_int from ratio of blocked variance to naive variance
-            if (result.errors_by_level[0] > 1e-20) {
-                double ratio = result.error / result.errors_by_level[0];
-                result.tau_int = 0.5 * ratio * ratio;
-            } else {
-                result.tau_int = 1.0;
-            }
-        } else {
-            result.error = 0.0;
-            result.tau_int = 1.0;
-        }
-        
-        return result;
+    /** Binning analysis — delegates to mc::binning_analysis */
+    static BinningResult binning_analysis(const vector<double>& data) {
+        return mc::binning_analysis(data);
     }
 
-    /**
-     * Binning analysis for vector observable (component-wise)
-     * 
-     * @param data Vector of SpinVector measurements
-     * @return Vector of MixedBinningResult, one per component
-     */
-    static vector<MixedBinningResult> binning_analysis_vector(const vector<SpinVector>& data) {
-        if (data.empty()) return {};
-        
-        size_t dim = data[0].size();
-        vector<MixedBinningResult> results(dim);
-        
-        for (size_t d = 0; d < dim; ++d) {
-            vector<double> component(data.size());
-            for (size_t i = 0; i < data.size(); ++i) {
-                component[i] = data[i](d);
-            }
-            results[d] = binning_analysis(component);
-        }
-        
-        return results;
+    /** Component-wise binning analysis for vector observable — delegates to mc::binning_analysis_vector */
+    static vector<BinningResult> binning_analysis_vector(const vector<SpinVector>& data) {
+        return mc::binning_analysis_vector<SpinVector>(data);
     }
 
     // ============================================================
@@ -3239,9 +3049,10 @@ public:
         size_t feedback_iters = 20,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0,
-        double target_acceptance = 0.5,
+        double target_acceptance = 0.45,
         double convergence_tol = 0.05,
-        MPI_Comm comm = MPI_COMM_WORLD) {
+        MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
         
         int rank, R;
         MPI_Comm_rank(comm, &rank);
@@ -3262,7 +3073,9 @@ public:
             result.converged = true;
             return result;
         }
-        
+        // MixedLattice has a different interface (SU2+SU3, no single spins/lattice_size),
+        // so we always use the inlined Katzgraber feedback; gradient optimizer not applied here.
+        (void)use_gradient;
         seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
         
         if (rank == 0) {
@@ -5874,6 +5687,8 @@ public:
         std::filesystem::create_directories(dir_name);
         
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+        const bool scheduler_writer_only = (mpi_size > 1);
+        const int worker_count = scheduler_writer_only ? (mpi_size - 1) : 1;
         
         if (rank == 0) {
             cout << "\n==========================================" << endl;
@@ -5886,7 +5701,12 @@ public:
                  << ", freq=" << pulse_freq_SU3 << endl;
             cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
             cout << "Total delay points: " << tau_steps << endl;
-            cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            if (scheduler_writer_only) {
+                cout << "Rank 0 role: scheduler/writer only" << endl;
+                cout << "Tau points per worker rank: ~" << (tau_steps + worker_count - 1) / worker_count << endl;
+            } else {
+                cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            }
             if (use_gpu) {
                 cout << "GPU acceleration: ENABLED (each rank uses assigned GPU)" << endl;
             }
@@ -5928,10 +5748,13 @@ public:
         
         typedef vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> TrajectoryType;
         
-        auto M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
-                                   pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                   pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                   T_start, T_end, T_step, method, use_gpu);
+        TrajectoryType M0_trajectory;
+        if (rank == 0) {
+            M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
+                                               pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                               pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                               T_start, T_end, T_step, method, use_gpu);
+        }
         
         // Restore ground state
         spins_SU2 = ground_state_SU2;
@@ -5944,9 +5767,16 @@ public:
         
         vector<int> my_tau_indices;
         vector<double> my_tau_values;
-        for (int i = rank; i < tau_steps; i += mpi_size) {
-            my_tau_indices.push_back(i);
-            my_tau_values.push_back(tau_start + i * tau_step);
+        if (!scheduler_writer_only) {
+            for (int i = rank; i < tau_steps; i += mpi_size) {
+                my_tau_indices.push_back(i);
+                my_tau_values.push_back(tau_start + i * tau_step);
+            }
+        } else if (rank > 0) {
+            for (int i = rank - 1; i < tau_steps; i += worker_count) {
+                my_tau_indices.push_back(i);
+                my_tau_values.push_back(tau_start + i * tau_step);
+            }
         }
         
         // Local trajectories
@@ -5994,7 +5824,14 @@ public:
         }
         
         // Compute sizes for serialization
-        size_t time_points = M0_trajectory.size();
+        unsigned long long time_points_ull = 0;
+        if (rank == 0) {
+            time_points_ull = static_cast<unsigned long long>(M0_trajectory.size());
+        } else if (!local_M1_trajectories.empty()) {
+            time_points_ull = static_cast<unsigned long long>(local_M1_trajectories.front().size());
+        }
+        MPI_Bcast(&time_points_ull, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+        size_t time_points = static_cast<size_t>(time_points_ull);
         // Data per point: time + 3 SU2 vectors + 3 SU3 vectors
         size_t data_per_point = 1 + 3 * spin_dim_SU2 + 3 * spin_dim_SU3;
         size_t traj_size = time_points * data_per_point;
@@ -6201,7 +6038,7 @@ public:
         int received_count = 0;
         
         for (int tau_idx = 0; tau_idx < tau_steps; ++tau_idx) {
-            int owner_rank = tau_idx % mpi_size;
+            int owner_rank = scheduler_writer_only ? (1 + (tau_idx % worker_count)) : 0;
             
             if (owner_rank == 0) continue;  // Already written above
             
@@ -6724,7 +6561,7 @@ private:
             for (size_t n = 0; n < max_mixed_bi_SU3; ++n) {
                 if (n < mixed_bilinear_partners_SU3[i].size()) {
                     flat_mixed_partners_SU2_from_SU3.push_back(mixed_bilinear_partners_SU3[i][n]);
-                    // mixed_bilinear_interaction_SU3[i][n] is 8x3 (spin_dim_SU3 x spin_dim_SU2)
+                    // mixed_bilinear_interaction_SU3[i][n] is 8x3 (spin_dim_SU3 x spin_dim_SU2) [transposed from storage]
                     for (size_t r = 0; r < spin_dim_SU3; ++r) {
                         for (size_t c = 0; c < spin_dim_SU2; ++c) {
                             flat_mixed_bilinear_SU3.push_back(mixed_bilinear_interaction_SU3[i][n](r, c));

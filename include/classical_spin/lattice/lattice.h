@@ -4,6 +4,7 @@
 #include "unitcell.h"
 #include "simple_linear_alg.h"
 #include "hdf5_io.h"
+#include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include <vector>
 #include <functional>
 #include <random>
@@ -63,14 +64,15 @@ using std::ifstream;
 using std::function;
 using std::array;
 
-// Helper struct for autocorrelation analysis
-struct AutocorrelationResult {
-    double tau_int;
-    size_t sampling_interval;
-    vector<double> correlation_function;
-};
+// Common MC structs (from mc_common.h)
+using mc::AutocorrelationResult;
+using mc::BinningResult;
+using mc::Observable;
+using mc::VectorObservable;
+using mc::ThermodynamicObservables;
+using mc::OptimizedTempGridResult;
 
-// Simulated annealing parameters
+// Simulated annealing parameters (Lattice-specific)
 struct SAParams {
     double T_start = 1.0;
     double T_end = 1e-3;
@@ -1752,6 +1754,13 @@ public:
         }
         
         return E;
+    }
+
+    /**
+     * Total energy of current spin configuration (no-arg wrapper)
+     */
+    double total_energy() const {
+        return total_energy(spins);
     }
 
     /**
@@ -5548,9 +5557,10 @@ public:
      * @param feedback_iters    Number of feedback optimization iterations
      * @param gaussian_move     Use Gaussian moves (true) or uniform (false)
      * @param overrelaxation_rate  Apply overrelaxation every N sweeps (0 = disabled)
-     * @param target_acceptance Target acceptance rate (default: 0.5)
+     * @param target_acceptance Target acceptance rate (default: 0.45, Denschlag et al. 2009)
      * @param convergence_tol   Convergence tolerance for acceptance rate uniformity
      * @param comm              MPI communicator (default: MPI_COMM_WORLD)
+     * @param use_gradient      If true, use gradient-based optimizer (Miyata et al. 2024); else Katzgraber
      * @return OptimizedTempGridResult with temperatures, sweep schedule, diagnostics
      */
     OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
@@ -5560,9 +5570,10 @@ public:
         size_t feedback_iters = 20,
         bool gaussian_move = false,
         size_t overrelaxation_rate = 0,
-        double target_acceptance = 0.5,
+        double target_acceptance = 0.45,
         double convergence_tol = 0.05,
-        MPI_Comm comm = MPI_COMM_WORLD) {
+        MPI_Comm comm = MPI_COMM_WORLD,
+        bool use_gradient = true) {
         
         // Get MPI info - number of ranks = number of replicas
         int rank, R;
@@ -5583,6 +5594,12 @@ public:
             result.acceptance_rates = {0.5};
             result.converged = true;
             return result;
+        }
+        
+        if (use_gradient) {
+            return mc::generate_optimized_temperature_grid_mpi(*this, Tmin, Tmax,
+                warmup_sweeps, sweeps_per_iter, feedback_iters, gaussian_move,
+                overrelaxation_rate, target_acceptance, convergence_tol, comm, true);
         }
         
         // Set random seed unique to each rank
@@ -7686,6 +7703,8 @@ public:
         
         // Calculate total tau steps
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
+        const bool scheduler_writer_only = (mpi_size > 1);
+        const int worker_count = scheduler_writer_only ? (mpi_size - 1) : 1;
         
         if (rank == 0) {
             cout << "\n==========================================" << endl;
@@ -7699,7 +7718,12 @@ public:
             cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
             cout << "Total delay points: " << tau_steps << endl;
             cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
-            cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            if (scheduler_writer_only) {
+                cout << "Rank 0 role: scheduler/writer only" << endl;
+                cout << "Tau points per worker rank: ~" << (tau_steps + worker_count - 1) / worker_count << endl;
+            } else {
+                cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+            }
             if (use_gpu) {
                 cout << "GPU acceleration: ENABLED (each rank uses assigned GPU)" << endl;
             }
@@ -7731,9 +7755,11 @@ public:
             if (use_gpu) cout << "  Using GPU acceleration" << endl;
         }
         
-        // All ranks compute M0 (they have same ground state)
-        auto M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
-                                   T_start, T_end, T_step, method, use_gpu);
+        vector<pair<double, array<SpinVector, 3>>> M0_trajectory;
+        if (rank == 0) {
+            M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
+                                               T_start, T_end, T_step, method, use_gpu);
+        }
         
         // Restore ground state
         spins = ground_state;
@@ -7746,13 +7772,24 @@ public:
         // Calculate which tau indices this rank handles
         vector<int> my_tau_indices;
         vector<double> my_tau_values;
-        for (int i = rank; i < tau_steps; i += mpi_size) {
-            my_tau_indices.push_back(i);
-            my_tau_values.push_back(tau_start + i * tau_step);
+        if (!scheduler_writer_only) {
+            for (int i = rank; i < tau_steps; i += mpi_size) {
+                my_tau_indices.push_back(i);
+                my_tau_values.push_back(tau_start + i * tau_step);
+            }
+        } else if (rank > 0) {
+            for (int i = rank - 1; i < tau_steps; i += worker_count) {
+                my_tau_indices.push_back(i);
+                my_tau_values.push_back(tau_start + i * tau_step);
+            }
         }
         
         if (rank == 0) {
-            cout << "  Each rank processing " << my_tau_indices.size() << " tau points" << endl;
+            if (scheduler_writer_only) {
+                cout << "  Rank 0 processes 0 tau points (scheduler/writer only)" << endl;
+            } else {
+                cout << "  Each rank processing " << my_tau_indices.size() << " tau points" << endl;
+            }
         }
         
         // Local storage for this rank's trajectories
@@ -7796,7 +7833,14 @@ public:
         }
         
         // Compute sizes for serialization
-        size_t time_points = M0_trajectory.size();
+        unsigned long long time_points_ull = 0;
+        if (rank == 0) {
+            time_points_ull = static_cast<unsigned long long>(M0_trajectory.size());
+        } else if (!local_M1_trajectories.empty()) {
+            time_points_ull = static_cast<unsigned long long>(local_M1_trajectories.front().size());
+        }
+        MPI_Bcast(&time_points_ull, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+        size_t time_points = static_cast<size_t>(time_points_ull);
         size_t data_per_point = 1 + 3 * spin_dim;  // time + 3 SpinVectors
         size_t traj_size = time_points * data_per_point;
         
@@ -7977,7 +8021,7 @@ public:
         int received_count = 0;
         
         for (int tau_idx = 0; tau_idx < tau_steps; ++tau_idx) {
-            int owner_rank = tau_idx % mpi_size;
+            int owner_rank = scheduler_writer_only ? (1 + (tau_idx % worker_count)) : 0;
             
             if (owner_rank == 0) continue;  // Already written above
             
