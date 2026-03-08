@@ -3117,6 +3117,12 @@ double StrainPhononLattice::metropolis(double temperature, bool gaussian_move, d
         }
     }
     
+    // Relax strain to equilibrium for the updated spin configuration.
+    // This ensures the magnetoelastic field (used in site_energy_diff) and
+    // total_energy() (used in replica exchange criteria) remain self-consistent
+    // under the Born-Oppenheimer approximation.
+    relax_strain(false);
+    
     return double(accepted) / double(lattice_size);
 }
 
@@ -3146,6 +3152,9 @@ void StrainPhononLattice::overrelaxation() {
         
         count++;
     }
+    
+    // Relax strain after spin updates (Born-Oppenheimer consistency)
+    relax_strain(false);
 }
 
 // greedy_quench is now an inline wrapper in strain_phonon_lattice.h
