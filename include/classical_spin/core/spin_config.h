@@ -124,6 +124,7 @@ struct SpinConfig {
     double pump_width_su3 = 10.0;
     double pump_frequency_su3 = 0.0;
     vector<vector<double>> pump_directions_su3 = {{0, 0, 1, 0, 0, 0, 0, 0}};  // Per-sublattice pump directions for SU3 sublattice in mixed systems
+    bool auto_su3_pump = false;  // Auto-compute SU3 pulse from physical 3D direction using mu_act and g_ratio_tm
     
     double probe_amplitude = 0.1;
     double probe_width = 10.0;

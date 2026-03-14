@@ -255,6 +255,156 @@ void StrainPhononLattice::set_uniform_field(const SpinVector& B) {
 }
 
 // ============================================================
+// QUENCHED DISORDER
+// ============================================================
+
+void StrainPhononLattice::store_clean_interactions() {
+    clean_nn_interaction_ = nn_interaction;
+    clean_j2_interaction_ = j2_interaction;
+    clean_j3_interaction_ = j3_interaction;
+    has_clean_interactions_ = true;
+}
+
+void StrainPhononLattice::restore_clean_interactions() {
+    if (!has_clean_interactions_) {
+        cerr << "WARNING: restore_clean_interactions() called without prior store_clean_interactions()!" << endl;
+        return;
+    }
+    nn_interaction = clean_nn_interaction_;
+    j2_interaction = clean_j2_interaction_;
+    j3_interaction = clean_j3_interaction_;
+}
+
+void StrainPhononLattice::apply_exchange_disorder(double disorder_strength, unsigned int seed) {
+    if (disorder_strength <= 0.0) return;
+    
+    // Use a separate RNG seeded deterministically so disorder is reproducible per trial
+    std::mt19937 disorder_rng(seed);
+    std::normal_distribution<double> gauss(0.0, 1.0);
+    
+    // NN bonds: each bond is stored twice (site→partner AND partner→site).
+    // To ensure J_ij and J_ji get the same random factor, we process
+    // (site, neighbor_index) pairs and track which bonds we've already modified.
+    // Strategy: for each site, for each neighbor, only apply if partner > site
+    // to avoid double-counting, then copy the transpose factor.
+    
+    // Build a map: (min_site, max_site) → random factor
+    // But bonds can be duplicated (multiple NN bonds between same pair is unlikely on honeycomb).
+    // On a honeycomb lattice each NN bond appears exactly once in each direction.
+    
+    // NN disorder
+    for (size_t site = 0; site < lattice_size; ++site) {
+        for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+            size_t partner = nn_partners[site][n];
+            if (partner > site) {
+                double factor = 1.0 + disorder_strength * gauss(disorder_rng);
+                nn_interaction[site][n] *= factor;
+                // Find the reverse bond and apply same factor
+                for (size_t m = 0; m < nn_partners[partner].size(); ++m) {
+                    if (nn_partners[partner][m] == site && 
+                        nn_bond_types[partner][m] == nn_bond_types[site][n]) {
+                        nn_interaction[partner][m] *= factor;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // J2 disorder
+    for (size_t site = 0; site < lattice_size; ++site) {
+        for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+            size_t partner = j2_partners[site][n];
+            if (partner > site) {
+                double factor = 1.0 + disorder_strength * gauss(disorder_rng);
+                j2_interaction[site][n] *= factor;
+                for (size_t m = 0; m < j2_partners[partner].size(); ++m) {
+                    if (j2_partners[partner][m] == site) {
+                        j2_interaction[partner][m] *= factor;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // J3 disorder
+    for (size_t site = 0; site < lattice_size; ++site) {
+        for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+            size_t partner = j3_partners[site][n];
+            if (partner > site) {
+                double factor = 1.0 + disorder_strength * gauss(disorder_rng);
+                j3_interaction[site][n] *= factor;
+                for (size_t m = 0; m < j3_partners[partner].size(); ++m) {
+                    if (j3_partners[partner][m] == site) {
+                        j3_interaction[partner][m] *= factor;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    cout << "  Applied exchange disorder: σ = " << disorder_strength 
+         << ", seed = " << seed << endl;
+}
+
+void StrainPhononLattice::apply_site_dilution(double dilution_fraction, unsigned int seed) {
+    if (dilution_fraction <= 0.0) return;
+    if (dilution_fraction >= 1.0) {
+        cerr << "ERROR: dilution_fraction >= 1.0 would remove all sites!" << endl;
+        return;
+    }
+    
+    std::mt19937 dilution_rng(seed);
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    
+    size_t n_removed = 0;
+    for (size_t site = 0; site < lattice_size; ++site) {
+        if (uni(dilution_rng) < dilution_fraction) {
+            // Zero out all interactions connected to this site
+            // NN
+            for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+                nn_interaction[site][n] = SpinMatrix::Zero(3, 3);
+                size_t partner = nn_partners[site][n];
+                for (size_t m = 0; m < nn_partners[partner].size(); ++m) {
+                    if (nn_partners[partner][m] == site) {
+                        nn_interaction[partner][m] = SpinMatrix::Zero(3, 3);
+                    }
+                }
+            }
+            // J2
+            for (size_t n = 0; n < j2_partners[site].size(); ++n) {
+                j2_interaction[site][n] = SpinMatrix::Zero(3, 3);
+                size_t partner = j2_partners[site][n];
+                for (size_t m = 0; m < j2_partners[partner].size(); ++m) {
+                    if (j2_partners[partner][m] == site) {
+                        j2_interaction[partner][m] = SpinMatrix::Zero(3, 3);
+                    }
+                }
+            }
+            // J3
+            for (size_t n = 0; n < j3_partners[site].size(); ++n) {
+                j3_interaction[site][n] = SpinMatrix::Zero(3, 3);
+                size_t partner = j3_partners[site][n];
+                for (size_t m = 0; m < j3_partners[partner].size(); ++m) {
+                    if (j3_partners[partner][m] == site) {
+                        j3_interaction[partner][m] = SpinMatrix::Zero(3, 3);
+                    }
+                }
+            }
+            // Zero the spin itself (non-magnetic impurity)
+            spins[site] = SpinVector::Zero(3);
+            n_removed++;
+        }
+    }
+    
+    cout << "  Applied site dilution: p = " << dilution_fraction 
+         << ", removed " << n_removed << "/" << lattice_size 
+         << " sites, seed = " << seed << endl;
+}
+
+// ============================================================
 // INITIALIZATION
 // ============================================================
 

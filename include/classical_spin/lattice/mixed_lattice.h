@@ -3934,8 +3934,10 @@ public:
         MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
         
         for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
-            SpinVector local_field1 = sublattice_frames_SU2[atom] * field_in1[atom];
-            SpinVector local_field2 = sublattice_frames_SU2[atom] * field_in2[atom];
+            // B_local = F^T * B_global (field transforms covariantly: B^(i) = F_i^T B^(0))
+            // For symmetric frames (e.g. diagonal sign matrices), F^T = F
+            SpinVector local_field1 = sublattice_frames_SU2[atom].transpose() * field_in1[atom];
+            SpinVector local_field2 = sublattice_frames_SU2[atom].transpose() * field_in2[atom];
             field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2) = local_field1;
             field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2) = local_field2;
         }
@@ -4000,8 +4002,10 @@ public:
         MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
         
         for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
-            SpinVector local_field1 = sublattice_frames_SU3[atom] * field_in1[atom];
-            SpinVector local_field2 = sublattice_frames_SU3[atom] * field_in2[atom];
+            // B_local = F^T * B_global (field transforms covariantly: B^(i) = F_i^T B^(0))
+            // Derivation: B^(i) = χ^T D_i h = (χ^{-1} D_i χ)^T χ^T h = F_i^T B^(0)
+            SpinVector local_field1 = sublattice_frames_SU3[atom].transpose() * field_in1[atom];
+            SpinVector local_field2 = sublattice_frames_SU3[atom].transpose() * field_in2[atom];
             field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3) = local_field1;
             field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3) = local_field2;
         }

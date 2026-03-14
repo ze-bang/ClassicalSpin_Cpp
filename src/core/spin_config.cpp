@@ -211,6 +211,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pump_direction_su3") {
                 config.pump_directions_su3 = parse_vectorN_list_auto(value, 8);  // Default to 8D for SU3
             }
+            else if (key == "auto_su3_pump") {
+                config.auto_su3_pump = (value == "true" || value == "1");
+            }
             else if (key == "probe_amplitude") {
                 config.probe_amplitude = stod(value);
             }
@@ -525,7 +528,8 @@ void SpinConfig::to_file(const string& filename) const {
             file << pump_directions_su3[i][j];
         }
     }
-    file << "\n\n";
+    file << "\n";
+    file << "auto_su3_pump = " << (auto_su3_pump ? "true" : "false") << "\n\n";
     
     file << "# Hamiltonian Parameters\n";
     for (const auto& [key, value] : hamiltonian_params) {

@@ -356,6 +356,27 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double chi7z = config.get_param("chi7z", 0.0);
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
+    
+    // Projected magnetic moment matrix: J_α = Σ_a μ_{αa} λ_a  (from CEF wavefunctions)
+    // This is a property of the Tm ion CEF states, independent of the Fe-Tm exchange coupling (chi)
+    // Used for: sublattice frame construction, Zeeman coupling, magnetization output
+    // Defaults from Tm3+ J=6 CEF calculation for TmFeO3 Pbnm:
+    //   Jz = 5.264 λ_2,  Jx = 2.3915 λ_5 + 0.9128 λ_7,  Jy = -2.7866 λ_5 + 0.4655 λ_7
+    const double mu_2x = config.get_param("mu_2x", 0.0);
+    const double mu_2y = config.get_param("mu_2y", 0.0);
+    const double mu_2z = config.get_param("mu_2z", 5.264);
+    const double mu_5x = config.get_param("mu_5x", 2.3915);
+    const double mu_5y = config.get_param("mu_5y", -2.7866);
+    const double mu_5z = config.get_param("mu_5z", 0.0);
+    const double mu_7x = config.get_param("mu_7x", 0.9128);
+    const double mu_7y = config.get_param("mu_7y", 0.4655);
+    const double mu_7z = config.get_param("mu_7z", 0.0);
+    
+    // g-factor ratio: g_Tm / g_Fe = (7/6) / 2 = 7/12 ≈ 0.5833
+    // Scales Tm Zeeman coupling relative to Fe so both respond to the same physical field h.
+    // Fe Zeeman: -h·S (g_Fe absorbed into h), Tm Zeeman: -g_ratio * h·(μ·λ)
+    const double g_ratio_tm = config.get_param("g_ratio_tm", 7.0/12.0);
+    
     // Tm-Tm diagonal bilinear coupling (nearest neighbor) - each component couples λ_a ⊗ λ_a only
     const double Jtm_1 = config.get_param("Jtm_1", 0.0);
     const double Jtm_2 = config.get_param("Jtm_2", 0.0);
@@ -491,6 +512,64 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Tm_atoms.set_field(tm_field, 1);
     Tm_atoms.set_field(tm_field, 2);
     Tm_atoms.set_field(tm_field, 3);
+    
+    // Build SU(3) sublattice frames from projected magnetic moment (mu matrix)
+    // J_α = Σ_a μ_{αa} λ_a maps physical angular momentum to Gell-Mann generators
+    // This is distinct from the Fe-Tm exchange coupling chi — the mu matrix is a
+    // CEF property, while chi is an exchange coupling that can take any symmetry-allowed form.
+    // Active generators carrying magnetic moment: λ_2 (idx 1), λ_5 (idx 4), λ_7 (idx 6)
+    // Frame F_i = μ_act^{-1} D_i μ_act in the active subspace transforms
+    // local SU(3) spins to a global frame where M_α = g_J Σ_a μ_{αa} (F^T S)_a
+    // Pbnm sublattice signs (same as Fe): η = {(+,+,+), (+,-,-), (-,+,-), (-,-,+)}
+    {
+        Eigen::Matrix3d mu_act;
+        mu_act << mu_2x, mu_5x, mu_7x,
+                  mu_2y, mu_5y, mu_7y,
+                  mu_2z, mu_5z, mu_7z;
+        
+        double mu_det = mu_act.determinant();
+        if (std::abs(mu_det) > 1e-12) {
+            Eigen::Matrix3d mu_act_inv = mu_act.inverse();
+            const int active_idx[3] = {1, 4, 6};
+            
+            for (int sub = 0; sub < 4; ++sub) {
+                Eigen::Matrix3d D = Eigen::Matrix3d::Zero();
+                D(0,0) = eta[sub][0];
+                D(1,1) = eta[sub][1];
+                D(2,2) = eta[sub][2];
+                
+                Eigen::Matrix3d R_act = mu_act_inv * D * mu_act;
+                
+                SpinMatrix frame = SpinMatrix::Identity(8, 8);
+                for (int a = 0; a < 3; ++a) {
+                    for (int b = 0; b < 3; ++b) {
+                        frame(active_idx[a], active_idx[b]) = R_act(a, b);
+                    }
+                }
+                Tm_atoms.set_sublattice_frame(frame, sub);
+            }
+            
+            // Add Zeeman field from external magnetic field
+            // B_a^(i) = g_ratio * Σ_α η_{iα} μ_{αa} h_α  (sublattice-dependent projection)
+            // g_ratio = g_Tm/g_Fe scales Tm Zeeman relative to Fe for the same physical field
+            if (h != 0.0 && config.field_direction.size() >= 3) {
+                Eigen::Vector3d h_vec;
+                h_vec << config.field_direction[0] * h,
+                         config.field_direction[1] * h,
+                         config.field_direction[2] * h;
+                
+                for (int sub = 0; sub < 4; ++sub) {
+                    for (int a = 0; a < 3; ++a) {
+                        double B_a = 0.0;
+                        for (int al = 0; al < 3; ++al) {
+                            B_a += eta[sub][al] * mu_act(al, a) * h_vec(al);
+                        }
+                        Tm_atoms.field[sub](active_idx[a]) += g_ratio_tm * B_a;
+                    }
+                }
+            }
+        }
+    }
     
     // Tm-Tm diagonal bilinear interactions (nearest neighbor)
     // Diagonal in Gell-Mann space: J_a * λ_a ⊗ λ_a (no cross terms)
@@ -790,6 +869,26 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
     
+    // Projected magnetic moment matrix: J_α = Σ_a μ_{αa} λ_a  (from CEF wavefunctions)
+    // This is a property of the Tm ion CEF states, used for sublattice frames and Zeeman.
+    // Defaults from Tm3+ J=6 CEF calculation for TmFeO3 Pbnm:
+    //   Jz = 5.264 λ_2,  Jx = 2.3915 λ_5 + 0.9128 λ_7,  Jy = -2.7866 λ_5 + 0.4655 λ_7
+    const double mu_2x = config.get_param("mu_2x", 0.0);
+    const double mu_2y = config.get_param("mu_2y", 0.0);
+    const double mu_2z = config.get_param("mu_2z", 5.264);
+    const double mu_5x = config.get_param("mu_5x", 2.3915);
+    const double mu_5y = config.get_param("mu_5y", -2.7866);
+    const double mu_5z = config.get_param("mu_5z", 0.0);
+    const double mu_7x = config.get_param("mu_7x", 0.9128);
+    const double mu_7y = config.get_param("mu_7y", 0.4655);
+    const double mu_7z = config.get_param("mu_7z", 0.0);
+    
+    // g-factor ratio: g_Tm / g_Fe = (7/6) / 2 = 7/12 ≈ 0.5833
+    // For standalone Tm system, this scales the Zeeman coupling relative to an implicit Fe scale.
+    const double g_ratio_tm = config.get_param("g_ratio_tm", 7.0/12.0);
+    
+    const double h = config.field_strength;
+    
     // Tm-Tm diagonal bilinear coupling (nearest neighbor) - each component couples λ_a ⊗ λ_a only
     const double Jtm_1 = config.get_param("Jtm_1", 0.0);
     const double Jtm_2 = config.get_param("Jtm_2", 0.0);
@@ -803,6 +902,10 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     // Use TmFeO3_Tm class from unitcell.h (already has structure)
     // SU(3) has 8-dimensional spin space (Gell-Mann basis)
     TmFeO3_Tm Tm_atoms(8);
+    
+    // Pbnm sublattice sign factors (pseudovector transformation)
+    // Tm0(E): (+,+,+), Tm1(S2): (+,-,-), Tm2(S1S2): (-,+,-), Tm3(S1): (-,-,+)
+    std::array<std::array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
     
     // Set energy splitting (field in SU(3) space)
     // For a 3-level system with energies 0, e1, e2, the Hamiltonian is H = diag(0, e1, e2)
@@ -821,6 +924,59 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
     Tm_atoms.set_field(tm_field, 1);
     Tm_atoms.set_field(tm_field, 2);
     Tm_atoms.set_field(tm_field, 3);
+    
+    // Build SU(3) sublattice frames from projected magnetic moment (mu matrix)
+    // Active generators: λ_2 (idx 1), λ_5 (idx 4), λ_7 (idx 6)
+    // Frame F_i = μ_act^{-1} D_i μ_act maps local SU(3) spins to global frame
+    {
+        Eigen::Matrix3d mu_act;
+        mu_act << mu_2x, mu_5x, mu_7x,
+                  mu_2y, mu_5y, mu_7y,
+                  mu_2z, mu_5z, mu_7z;
+        
+        double mu_det = mu_act.determinant();
+        if (std::abs(mu_det) > 1e-12) {
+            Eigen::Matrix3d mu_act_inv = mu_act.inverse();
+            const int active_idx[3] = {1, 4, 6};
+            
+            for (int sub = 0; sub < 4; ++sub) {
+                Eigen::Matrix3d D = Eigen::Matrix3d::Zero();
+                D(0,0) = eta[sub][0];
+                D(1,1) = eta[sub][1];
+                D(2,2) = eta[sub][2];
+                
+                Eigen::Matrix3d R_act = mu_act_inv * D * mu_act;
+                
+                SpinMatrix frame = SpinMatrix::Identity(8, 8);
+                for (int a = 0; a < 3; ++a) {
+                    for (int b = 0; b < 3; ++b) {
+                        frame(active_idx[a], active_idx[b]) = R_act(a, b);
+                    }
+                }
+                Tm_atoms.set_sublattice_frame(frame, sub);
+            }
+            
+            // Add Zeeman field from external magnetic field
+            // B_a^(i) = g_ratio * Σ_α η_{iα} μ_{αa} h_α  (sublattice-dependent projection)
+            // g_ratio = g_Tm/g_Fe scales Tm Zeeman relative to Fe for the same physical field
+            if (h != 0.0 && config.field_direction.size() >= 3) {
+                Eigen::Vector3d h_vec;
+                h_vec << config.field_direction[0] * h,
+                         config.field_direction[1] * h,
+                         config.field_direction[2] * h;
+                
+                for (int sub = 0; sub < 4; ++sub) {
+                    for (int a = 0; a < 3; ++a) {
+                        double B_a = 0.0;
+                        for (int al = 0; al < 3; ++al) {
+                            B_a += eta[sub][al] * mu_act(al, a) * h_vec(al);
+                        }
+                        Tm_atoms.field[sub](active_idx[a]) += g_ratio_tm * B_a;
+                    }
+                }
+            }
+        }
+    }
     
     // Tm-Tm diagonal bilinear interactions (nearest neighbor)
     // Diagonal in Gell-Mann space: J_a * λ_a ⊗ λ_a (no cross terms)

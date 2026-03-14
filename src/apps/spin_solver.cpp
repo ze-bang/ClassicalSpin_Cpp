@@ -1946,6 +1946,26 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         cout << "  n_deterministics = " << config.n_deterministics << endl;
     }
     
+    // ── Quenched disorder parameters ──
+    double disorder_strength = config.get_param("disorder_strength", 0.0);
+    double dilution_fraction = config.get_param("dilution_fraction", 0.0);
+    unsigned int disorder_seed_base = static_cast<unsigned int>(config.get_param("disorder_seed", 0.0));
+    bool has_disorder = (disorder_strength > 0.0 || dilution_fraction > 0.0);
+    
+    if (has_disorder) {
+        // Store clean interactions before any disorder is applied
+        lattice.store_clean_interactions();
+        if (rank == 0) {
+            cout << "\nQuenched disorder enabled:" << endl;
+            if (disorder_strength > 0.0)
+                cout << "  Exchange disorder σ = " << disorder_strength << endl;
+            if (dilution_fraction > 0.0)
+                cout << "  Site dilution p = " << dilution_fraction << endl;
+            cout << "  Base seed = " << disorder_seed_base << endl;
+            cout << "  Each trial gets a unique disorder realization." << endl;
+        }
+    }
+    
     // Distribute trials across MPI ranks
     for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -1953,6 +1973,16 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         
         if (config.num_trials > 1) {
             cout << "[Rank " << rank << "] Trial " << trial << " / " << config.num_trials << endl;
+        }
+        
+        // ── Apply fresh disorder realization for this trial ──
+        if (has_disorder) {
+            lattice.restore_clean_interactions();
+            unsigned int trial_seed = disorder_seed_base + static_cast<unsigned int>(trial);
+            if (disorder_strength > 0.0)
+                lattice.apply_exchange_disorder(disorder_strength, trial_seed);
+            if (dilution_fraction > 0.0)
+                lattice.apply_site_dilution(dilution_fraction, trial_seed + 1000000);
         }
         
         // Re-initialize for each trial (except first)
@@ -2943,8 +2973,63 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
     }
     
     // Prepare per-sublattice pulse directions for SU3 (Gell-Mann basis)
-    // Normalize all SU3 pump directions
+    double local_pump_amplitude_su3 = config.pump_amplitude_su3;
+    double local_pump_width_su3 = config.pump_width_su3;
+    double local_pump_frequency_su3 = config.pump_frequency_su3;
+    
+    // Auto-compute SU3 pulse from physical 3D direction using mu_act projection
     vector<vector<double>> pump_dirs_su3_norm = config.pump_directions_su3;
+    if (config.auto_su3_pump) {
+        const double mu_2x = config.get_param("mu_2x", 0.0);
+        const double mu_2y = config.get_param("mu_2y", 0.0);
+        const double mu_2z = config.get_param("mu_2z", 5.264);
+        const double mu_5x = config.get_param("mu_5x", 2.3915);
+        const double mu_5y = config.get_param("mu_5y", -2.7866);
+        const double mu_5z = config.get_param("mu_5z", 0.0);
+        const double mu_7x = config.get_param("mu_7x", 0.9128);
+        const double mu_7y = config.get_param("mu_7y", 0.4655);
+        const double mu_7z = config.get_param("mu_7z", 0.0);
+        const double g_ratio = config.get_param("g_ratio_tm", 7.0/12.0);
+        
+        double mu_act[3][3] = {
+            {mu_2x, mu_5x, mu_7x},
+            {mu_2y, mu_5y, mu_7y},
+            {mu_2z, mu_5z, mu_7z}
+        };
+        const int active_idx[3] = {1, 4, 6};
+        
+        // Project each physical 3D pump direction to 8D Gell-Mann space
+        // B_a = Σ_α μ_{αa} n̂_α  (sublattice-0 reference, frames handle the rest)
+        pump_dirs_su3_norm.clear();
+        for (const auto& dir3d : pump_dirs_norm) {
+            vector<double> su3_dir(lattice.spin_dim_SU3, 0.0);
+            for (int a = 0; a < 3; ++a) {
+                for (int al = 0; al < 3; ++al) {
+                    su3_dir[active_idx[a]] += mu_act[al][a] * dir3d[al];
+                }
+            }
+            pump_dirs_su3_norm.push_back(su3_dir);
+        }
+        
+        double su3_norm = 0.0;
+        for (double v : pump_dirs_su3_norm[0]) su3_norm += v * v;
+        su3_norm = sqrt(su3_norm);
+        
+        // SU3 amplitude = physical_amplitude * g_ratio * |μ^T n̂|
+        local_pump_amplitude_su3 = config.pump_amplitude * g_ratio * su3_norm;
+        local_pump_width_su3 = config.pump_width;
+        local_pump_frequency_su3 = config.pump_frequency;
+        
+        if (rank == 0) {
+            cout << "Auto-computing SU3 pulse from physical direction:" << endl;
+            cout << "  g_ratio_tm = " << g_ratio << endl;
+            cout << "  |mu^T * n| = " << su3_norm << endl;
+            cout << "  SU3 amplitude = " << local_pump_amplitude_su3 
+                 << " (Fe amplitude = " << config.pump_amplitude << ")" << endl;
+        }
+    }
+    
+    // Normalize all SU3 pump directions
     for (auto& dir : pump_dirs_su3_norm) {
         double norm = 0.0;
         for (const auto& comp : dir) {
@@ -3057,7 +3142,7 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
         auto trajectory = lattice.single_pulse_drive(
             field_dirs_su2, field_dirs_su3, config.pump_time,
             config.pump_amplitude, config.pump_width, config.pump_frequency,
-            config.pump_amplitude_su3, config.pump_width_su3, config.pump_frequency_su3,
+            local_pump_amplitude_su3, local_pump_width_su3, local_pump_frequency_su3,
             config.md_time_start, config.md_time_end, config.md_timestep,
             config.md_integrator, config.use_gpu
         );
@@ -3182,8 +3267,60 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
     }
     
     // Prepare per-sublattice pulse directions for SU3 (Gell-Mann basis)
-    // Normalize all SU3 pump directions
+    double local_pump_amplitude_su3 = config.pump_amplitude_su3;
+    double local_pump_width_su3 = config.pump_width_su3;
+    double local_pump_frequency_su3 = config.pump_frequency_su3;
+    
+    // Auto-compute SU3 pulse from physical 3D direction using mu_act projection
     vector<vector<double>> pump_dirs_su3_norm = config.pump_directions_su3;
+    if (config.auto_su3_pump) {
+        const double mu_2x = config.get_param("mu_2x", 0.0);
+        const double mu_2y = config.get_param("mu_2y", 0.0);
+        const double mu_2z = config.get_param("mu_2z", 5.264);
+        const double mu_5x = config.get_param("mu_5x", 2.3915);
+        const double mu_5y = config.get_param("mu_5y", -2.7866);
+        const double mu_5z = config.get_param("mu_5z", 0.0);
+        const double mu_7x = config.get_param("mu_7x", 0.9128);
+        const double mu_7y = config.get_param("mu_7y", 0.4655);
+        const double mu_7z = config.get_param("mu_7z", 0.0);
+        const double g_ratio = config.get_param("g_ratio_tm", 7.0/12.0);
+        
+        double mu_act[3][3] = {
+            {mu_2x, mu_5x, mu_7x},
+            {mu_2y, mu_5y, mu_7y},
+            {mu_2z, mu_5z, mu_7z}
+        };
+        const int active_idx[3] = {1, 4, 6};
+        
+        pump_dirs_su3_norm.clear();
+        for (const auto& dir3d : pump_dirs_norm) {
+            vector<double> su3_dir(lattice.spin_dim_SU3, 0.0);
+            for (int a = 0; a < 3; ++a) {
+                for (int al = 0; al < 3; ++al) {
+                    su3_dir[active_idx[a]] += mu_act[al][a] * dir3d[al];
+                }
+            }
+            pump_dirs_su3_norm.push_back(su3_dir);
+        }
+        
+        double su3_norm = 0.0;
+        for (double v : pump_dirs_su3_norm[0]) su3_norm += v * v;
+        su3_norm = sqrt(su3_norm);
+        
+        local_pump_amplitude_su3 = config.pump_amplitude * g_ratio * su3_norm;
+        local_pump_width_su3 = config.pump_width;
+        local_pump_frequency_su3 = config.pump_frequency;
+        
+        if (rank == 0) {
+            cout << "Auto-computing SU3 pulse from physical direction:" << endl;
+            cout << "  g_ratio_tm = " << g_ratio << endl;
+            cout << "  |mu^T * n| = " << su3_norm << endl;
+            cout << "  SU3 amplitude = " << local_pump_amplitude_su3 
+                 << " (Fe amplitude = " << config.pump_amplitude << ")" << endl;
+        }
+    }
+    
+    // Normalize all SU3 pump directions
     for (auto& dir : pump_dirs_su3_norm) {
         double norm = 0.0;
         for (const auto& comp : dir) {
@@ -3360,9 +3497,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             config.pump_amplitude,
             config.pump_width,
             config.pump_frequency,
-            config.pump_amplitude_su3,
-            config.pump_width_su3,
-            config.pump_frequency_su3,
+            local_pump_amplitude_su3,
+            local_pump_width_su3,
+            local_pump_frequency_su3,
             config.tau_start,
             config.tau_end,
             config.tau_step,
@@ -3464,9 +3601,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 config.pump_amplitude,
                 config.pump_width,
                 config.pump_frequency,
-                config.pump_amplitude_su3,
-                config.pump_width_su3,
-                config.pump_frequency_su3,
+                local_pump_amplitude_su3,
+                local_pump_width_su3,
+                local_pump_frequency_su3,
                 config.tau_start,
                 config.tau_end,
                 config.tau_step,

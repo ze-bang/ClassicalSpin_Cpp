@@ -497,6 +497,44 @@ public:
     void set_uniform_field(const SpinVector& B);
     
     // ============================================================
+    // QUENCHED DISORDER
+    // ============================================================
+    
+    /**
+     * Save a snapshot of the clean (disorder-free) interaction matrices.
+     * Must be called once after set_parameters() and before apply_exchange_disorder().
+     */
+    void store_clean_interactions();
+    
+    /**
+     * Restore interactions to the clean state saved by store_clean_interactions().
+     */
+    void restore_clean_interactions();
+    
+    /**
+     * Apply quenched exchange disorder to ALL bond interaction matrices.
+     *
+     * Each 3×3 bond matrix J_ij is replaced by J_ij * (1 + σ * ξ_ij)
+     * where ξ_ij ~ N(0,1) is drawn independently for each bond (but
+     * shared between J_ij and J_ji for hermiticity).
+     *
+     * @param disorder_strength  σ — fractional standard deviation (0.1 = 10%)
+     * @param seed               RNG seed for reproducibility (different per trial)
+     */
+    void apply_exchange_disorder(double disorder_strength, unsigned int seed);
+    
+    /**
+     * Apply site dilution: randomly zero out all bonds connected to a site.
+     *
+     * @param dilution_fraction  Fraction of sites to remove (0.0–1.0)
+     * @param seed               RNG seed for reproducibility
+     */
+    void apply_site_dilution(double dilution_fraction, unsigned int seed);
+    
+    /** Whether clean interactions have been stored */
+    bool has_clean_interactions_ = false;
+    
+    // ============================================================
     // INITIALIZATION
     // ============================================================
     
@@ -1256,6 +1294,11 @@ private:
     std::mt19937 rng;
     std::uniform_real_distribution<double> uniform_dist;
     std::normal_distribution<double> normal_dist{0.0, 1.0};
+    
+    // Clean interaction backup (for applying fresh disorder per trial)
+    vector<vector<SpinMatrix>> clean_nn_interaction_;
+    vector<vector<SpinMatrix>> clean_j2_interaction_;
+    vector<vector<SpinMatrix>> clean_j3_interaction_;
 };
 
 #endif // STRAIN_PHONON_LATTICE_H
