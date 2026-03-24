@@ -342,6 +342,7 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double J2bi = J2ai;
     const double J2ci = config.get_param("J2c", 0.29);
     const double Ka = config.get_param("Ka", 0.0);
+    const double Kb = config.get_param("Kb", 0.0);
     const double Kc = config.get_param("Kc", -0.09);
     const double D1 = config.get_param("D1", 0.0);
     const double D2 = config.get_param("D2", 0.0);
@@ -396,8 +397,12 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     std::array<std::array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
     
     // Original exchange matrices in global frame
+    // For bonds 1→0: standard DM with d_y = +D1
     std::array<std::array<double, 3>, 3> Ja_orig = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
     std::array<std::array<double, 3>, 3> Jb_orig = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
+    // For bonds 2→3: Pbnm symmetry requires opposite DM sign (d_y = -D1)
+    std::array<std::array<double, 3>, 3> Ja23_orig = {{{Jai, -D2, D1}, {D2, Jai, 0}, {-D1, 0, Jai}}};
+    std::array<std::array<double, 3>, 3> Jb23_orig = {{{Jbi, -D2, D1}, {D2, Jbi, 0}, {-D1, 0, Jbi}}};
     std::array<std::array<double, 3>, 3> Jc_orig = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
     std::array<std::array<double, 3>, 3> J2a_orig = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
     std::array<std::array<double, 3>, 3> J2b_orig = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
@@ -405,12 +410,15 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     
     // Transform to local frames: J_local[i][j][a][b] = J_orig[a][b] * eta[i][a] * eta[j][b]
     std::array<std::array<std::array<std::array<double, 3>, 3>, 4>, 4> Ja, Jb, Jc, J2a, J2b, J2c;
+    std::array<std::array<std::array<std::array<double, 3>, 3>, 4>, 4> Ja23, Jb23;
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             for (int a = 0; a < 3; a++) {
                 for (int b = 0; b < 3; b++) {
                     Ja[i][j][a][b] = Ja_orig[a][b] * eta[i][a] * eta[j][b];
                     Jb[i][j][a][b] = Jb_orig[a][b] * eta[i][a] * eta[j][b];
+                    Ja23[i][j][a][b] = Ja23_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jb23[i][j][a][b] = Jb23_orig[a][b] * eta[i][a] * eta[j][b];
                     Jc[i][j][a][b] = Jc_orig[a][b] * eta[i][a] * eta[j][b];
                     J2a[i][j][a][b] = J2a_orig[a][b] * eta[i][a] * eta[j][b];
                     J2b[i][j][a][b] = J2b_orig[a][b] * eta[i][a] * eta[j][b];
@@ -438,10 +446,10 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Fe_atoms.set_bilinear_interaction(to_eigen(Jb[1][0]), 1, 0, Eigen::Vector3i(0, -1, 0));
     Fe_atoms.set_bilinear_interaction(to_eigen(Jb[1][0]), 1, 0, Eigen::Vector3i(1, 0, 0));
     
-    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[2][3]), 2, 3, Eigen::Vector3i(0, 0, 0));
-    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[2][3]), 2, 3, Eigen::Vector3i(1, -1, 0));
-    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[2][3]), 2, 3, Eigen::Vector3i(0, -1, 0));
-    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[2][3]), 2, 3, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja23[2][3]), 2, 3, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja23[2][3]), 2, 3, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb23[2][3]), 2, 3, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb23[2][3]), 2, 3, Eigen::Vector3i(1, 0, 0));
     
     // Next nearest neighbor (J2 type, along a, b, and c axes - same sublattice)
     Fe_atoms.set_bilinear_interaction(to_eigen(J2a[0][0]), 0, 0, Eigen::Vector3i(1, 0, 0));
@@ -485,6 +493,7 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     // Single ion anisotropy (same in all local frames)
     Eigen::MatrixXd K_mat = Eigen::MatrixXd::Zero(3, 3);
     K_mat(0, 0) = Ka;
+    K_mat(1, 1) = Kb;
     K_mat(2, 2) = Kc;
     Fe_atoms.set_onsite_interaction(K_mat, 0);
     Fe_atoms.set_onsite_interaction(K_mat, 1);
@@ -742,21 +751,40 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     const double J2bi = J2ai;
     const double J2ci = config.get_param("J2c", 0.29);
     const double Ka = config.get_param("Ka", 0.0);
+    const double Kb = config.get_param("Kb", 0.0);
     const double Kc = config.get_param("Kc", -0.09);
     const double D1 = config.get_param("D1", 0.0);
     const double D2 = config.get_param("D2", 0.0);
     const double h = config.field_strength;
+    const int use_local_frame = (int)config.get_param("use_local_frame", 1.0);
     
     // Use TmFeO3_Fe class from unitcell.h (already has structure)
     TmFeO3_Fe Fe_atoms(3);
     
 
     // Local frame transformation (following molecular_dynamic_TmFeO3.cpp exactly)
-    std::array<std::array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
+    std::array<std::array<double, 3>, 4> eta;
+    if (use_local_frame) {
+        eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
+    } else {
+        // Global frame: no eta transformation
+        eta = {{{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}};
+        // Reset sublattice frames to identity
+        Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(3, 3);
+        Fe_atoms.set_sublattice_frame(identity, 0);
+        Fe_atoms.set_sublattice_frame(identity, 1);
+        Fe_atoms.set_sublattice_frame(identity, 2);
+        Fe_atoms.set_sublattice_frame(identity, 3);
+    }
     
     // Original exchange matrices in global frame
+    // For bonds 1→0: standard DM with d_y = +D1
     std::array<std::array<double, 3>, 3> Ja_orig = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
     std::array<std::array<double, 3>, 3> Jb_orig = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
+    // For bonds 2→3: Pbnm symmetry requires opposite DM sign (d_y = -D1)
+    // This produces the correct F_x weak ferromagnetism in Gamma_2 phase
+    std::array<std::array<double, 3>, 3> Ja23_orig = {{{Jai, -D2, D1}, {D2, Jai, 0}, {-D1, 0, Jai}}};
+    std::array<std::array<double, 3>, 3> Jb23_orig = {{{Jbi, -D2, D1}, {D2, Jbi, 0}, {-D1, 0, Jbi}}};
     std::array<std::array<double, 3>, 3> Jc_orig = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
     std::array<std::array<double, 3>, 3> J2a_orig = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
     std::array<std::array<double, 3>, 3> J2b_orig = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
@@ -764,12 +792,15 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     
     // Transform to local frames: J_local[i][j][a][b] = J_orig[a][b] * eta[i][a] * eta[j][b]
     std::array<std::array<std::array<std::array<double, 3>, 3>, 4>, 4> Ja, Jb, Jc, J2a, J2b, J2c;
+    std::array<std::array<std::array<std::array<double, 3>, 3>, 4>, 4> Ja23, Jb23;
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             for (int a = 0; a < 3; a++) {
                 for (int b = 0; b < 3; b++) {
                     Ja[i][j][a][b] = Ja_orig[a][b] * eta[i][a] * eta[j][b];
                     Jb[i][j][a][b] = Jb_orig[a][b] * eta[i][a] * eta[j][b];
+                    Ja23[i][j][a][b] = Ja23_orig[a][b] * eta[i][a] * eta[j][b];
+                    Jb23[i][j][a][b] = Jb23_orig[a][b] * eta[i][a] * eta[j][b];
                     Jc[i][j][a][b] = Jc_orig[a][b] * eta[i][a] * eta[j][b];
                     J2a[i][j][a][b] = J2a_orig[a][b] * eta[i][a] * eta[j][b];
                     J2b[i][j][a][b] = J2b_orig[a][b] * eta[i][a] * eta[j][b];
@@ -797,10 +828,10 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     Fe_atoms.set_bilinear_interaction(to_eigen(Jb[1][0]), 1, 0, Eigen::Vector3i(0, -1, 0));
     Fe_atoms.set_bilinear_interaction(to_eigen(Jb[1][0]), 1, 0, Eigen::Vector3i(1, 0, 0));
     
-    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[2][3]), 2, 3, Eigen::Vector3i(0, 0, 0));
-    Fe_atoms.set_bilinear_interaction(to_eigen(Ja[2][3]), 2, 3, Eigen::Vector3i(1, -1, 0));
-    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[2][3]), 2, 3, Eigen::Vector3i(0, -1, 0));
-    Fe_atoms.set_bilinear_interaction(to_eigen(Jb[2][3]), 2, 3, Eigen::Vector3i(1, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja23[2][3]), 2, 3, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Ja23[2][3]), 2, 3, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb23[2][3]), 2, 3, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(to_eigen(Jb23[2][3]), 2, 3, Eigen::Vector3i(1, 0, 0));
     
     // Next nearest neighbor (J2 type, along a, b, and c axes - same sublattice)
     Fe_atoms.set_bilinear_interaction(to_eigen(J2a[0][0]), 0, 0, Eigen::Vector3i(1, 0, 0));
@@ -846,6 +877,7 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     Eigen::MatrixXd K_mat = Eigen::MatrixXd::Zero(3, 3);
     K_mat(0, 0) = Ka;
     K_mat(2, 2) = Kc;
+    K_mat(1, 1) = Kb;
     Fe_atoms.set_onsite_interaction(K_mat, 0);
     Fe_atoms.set_onsite_interaction(K_mat, 1);
     Fe_atoms.set_onsite_interaction(K_mat, 2);
