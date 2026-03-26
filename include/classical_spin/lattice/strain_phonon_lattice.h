@@ -159,6 +159,30 @@ struct StrainState {
 };
 
 /**
+ * Per-cell strain state for local (spatially varying) strain.
+ * Each unit cell c has its own strain tensor (ε_xx, ε_yy, ε_xy) + velocities.
+ */
+struct CellStrain {
+    double epsilon_xx = 0.0;
+    double epsilon_yy = 0.0;
+    double epsilon_xy = 0.0;
+    double V_xx = 0.0;
+    double V_yy = 0.0;
+    double V_xy = 0.0;
+
+    static constexpr size_t N_COMP = 6;  // 3 strain + 3 velocity
+
+    double Eg_amplitude() const {
+        double d = epsilon_xx - epsilon_yy;
+        return std::sqrt(d * d + 4.0 * epsilon_xy * epsilon_xy);
+    }
+
+    double kinetic_energy() const {
+        return 0.5 * (V_xx * V_xx + V_yy * V_yy + V_xy * V_xy);
+    }
+};
+
+/**
  * Elastic parameters (in units of stiffness)
  */
 struct ElasticParams {
@@ -183,6 +207,10 @@ struct ElasticParams {
     // Optional: quartic anharmonicity
     double lambda_A1g = 0.0;  // A1g quartic coefficient
     double lambda_Eg = 0.0;   // Eg quartic coefficient
+
+    // Elastic gradient stiffness for local strain (penalizes ∇ε)
+    // H_grad = (K_gradient/2) Σ_<cc'> |ε(c) - ε(c')|²
+    double K_gradient = 0.0;
 };
 
 /**
@@ -390,6 +418,33 @@ public:
     double drive_F_Eg2_ = 0.0;     // Static drive force along Eg2: H_drive = -Σ_b F2*Q_Eg2(b)
     
     // ============================================================
+    // LOCAL (SPATIALLY VARYING) STRAIN
+    // ============================================================
+    bool use_local_strain_ = false;   // If true, use per-cell strain instead of uniform
+    size_t N_cells_ = 0;             // Number of unit cells (dim1*dim2*dim3)
+    vector<CellStrain> local_strain_;          // Per-cell strain state
+    vector<CellStrain> local_strain_equil_;    // Per-cell equilibrium strain
+    vector<vector<size_t>> cell_neighbors_;    // Neighbor list for gradient coupling
+
+    /** Get cell index from unit cell coordinates */
+    size_t cell_index(size_t i, size_t j, size_t k = 0) const {
+        return (i * dim2 + j) * dim3 + k;
+    }
+
+    /** Get cell index for a spin site (each cell has N_atoms sites) */
+    size_t site_to_cell(size_t site) const {
+        return site / N_atoms;
+    }
+
+    /** Initialize local strain storage and cell neighbor lists */
+    void init_local_strain();
+
+    /** Get local strain DOF count */
+    size_t local_strain_dof() const {
+        return use_local_strain_ ? N_cells_ * CellStrain::N_COMP : 0;
+    }
+    
+    // ============================================================
     // EXTRA DOF INTERFACE (for mc::attempt_replica_exchange)
     // Ensures strain state is exchanged together with spins in PT
     // ============================================================
@@ -593,14 +648,21 @@ public:
             double Eg2_b = strain.epsilon_xy[b];
             E -= drive_F_Eg1_ * Eg1_b + drive_F_Eg2_ * Eg2_b;
         }
-        return E;
+        // Extensive: each cell contributes drive work
+        return E * (double)lattice_size;
     }
     
     double total_energy() const {
+        if (use_local_strain_) {
+            return spin_energy() + local_strain_energy() + local_magnetoelastic_energy() + drive_energy();
+        }
         return spin_energy() + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
     double total_energy(double t) const {
+        if (use_local_strain_) {
+            return spin_energy(t) + local_strain_energy() + local_magnetoelastic_energy() + drive_energy();
+        }
         return spin_energy(t) + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
@@ -684,6 +746,35 @@ public:
      */
     double f_Gammap_Eg1() const;
     double f_Gammap_Eg2() const;
+    
+    // ============================================================
+    // LOCAL STRAIN: PER-CELL SPIN BASIS FUNCTIONS & COUPLING
+    // ============================================================
+    
+    /**
+     * Per-cell Eg spin basis functions.
+     * Sums only over the 3 NN bonds originating from cell c.
+     * Returns the composite spin order parameter Σ_Eg for cell c:
+     *   Σ_Eg1(c) = (J+K)f_K^{Eg,1}(c) + J f_J^{Eg,1}(c) + Γ f_Γ^{Eg,1}(c) + Γ' f_Γ'^{Eg,1}(c)
+     */
+    void compute_cell_Eg_spin_factors(size_t cell, double& Eg1_factor, double& Eg2_factor) const;
+    
+    /** Local magnetoelastic energy: H_c = λ Σ_c ε(c) · Σ(c) */
+    double local_magnetoelastic_energy() const;
+    
+    /** Local elastic energy with gradient: H_el + H_grad */
+    double local_strain_energy() const;
+    
+    /** Local ME effective field on spin site */
+    SpinVector get_local_magnetoelastic_field(size_t site) const;
+    
+    /** Local strain EOM: fills derivatives for all cells */
+    void local_strain_derivatives(double t,
+                                  vector<CellStrain>& deps_dt) const;
+    
+    /** Relax local strain to equilibrium iteratively (Jacobi/CG) */
+    void relax_local_strain(bool verbose = true,
+                            size_t max_iter = 500, double tol = 1e-8);
     
     // ============================================================
     // DERIVATIVES

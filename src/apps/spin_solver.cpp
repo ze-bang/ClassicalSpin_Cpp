@@ -1008,6 +1008,9 @@ void build_strain_params(const SpinConfig& config,
     el_params.lambda_A1g = config.get_param("lambda_A1g_quartic", 0.0);
     el_params.lambda_Eg = config.get_param("lambda_Eg_quartic", 0.0);
     
+    // Gradient stiffness for local (per-cell) strain
+    el_params.K_gradient = config.get_param("K_gradient", 0.0);
+    
     // Drive parameters (pulse 1 - pump)
     dr_params.E0_1 = config.pump_amplitude;
     dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : el_params.omega_A1g();
@@ -1129,6 +1132,13 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
         if (trial > 0) {
             lattice.init_random();
         }
+        
+        // Relax strain to adiabatic equilibrium for the initial spin configuration
+        // This prevents violent quench when ME coupling is strong
+        if (rank == 0) {
+            cout << "Relaxing strain to adiabatic equilibrium..." << endl;
+        }
+        lattice.relax_strain();
         
         if (use_langevin) {
             lattice.integrate_langevin(config.md_timestep, config.md_time_start, config.md_time_end,
@@ -4439,6 +4449,18 @@ int main(int argc, char** argv) {
             
             // Set parameters (this builds the interaction matrices)
             strain_lattice.set_parameters(me_params, el_params, dr_params);
+            
+            // Initialize local strain if requested
+            bool use_local_strain = config.get_param("local_strain", 0.0) > 0.5;
+            if (use_local_strain) {
+                strain_lattice.init_local_strain();
+                if (rank == 0) {
+                    cout << "LOCAL STRAIN enabled: " << strain_lattice.local_strain_dof()
+                         << " strain DOF (" << (config.lattice_size[0] * config.lattice_size[1])
+                         << " cells × 6)" << endl;
+                    cout << "  K_gradient = " << el_params.K_gradient << endl;
+                }
+            }
             
             // Set static drive force on Eg phonon (for GNEB barrier)
             strain_lattice.drive_F_Eg1_ = config.drive_F_Eg1;
