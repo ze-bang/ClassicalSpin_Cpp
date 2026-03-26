@@ -170,6 +170,7 @@ public:
     // Sublattice frame transformations
     vector<SpinMatrix> sublattice_frames_SU2;  // Frame transformations for SU(2) sublattices
     vector<SpinMatrix> sublattice_frames_SU3;  // Frame transformations for SU(3) sublattices
+    vector<double> afm_sublattice_signs_SU2;   // AFM sublattice signs for SU(2) (Bertaut modes)
 
     // Interaction counts per site
     size_t num_bi_SU2;       // Number of SU(2)-SU(2) bilinear neighbors per site
@@ -294,6 +295,7 @@ public:
         for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
             sublattice_frames_SU3[atom] = mixed_uc.SU3_cell.sublattice_frames[atom];
         }
+        afm_sublattice_signs_SU2 = mixed_uc.SU2_cell.afm_sublattice_signs;
 
         // Initialize time-dependent fields
         field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
@@ -4960,6 +4962,25 @@ public:
         for (size_t d = 0; d < spin_dim_SU3; ++d) M_global_arr[d] /= double(lattice_size_SU3);
     }
 
+    /**
+     * Helper function to compute SU(2) staggered magnetization from flat state
+     * Uses sublattice frames and AFM signs (Bertaut modes)
+     */
+    void compute_magnetization_staggered_SU2_from_flat(const double* x, double* M_stag_arr) const {
+        for (size_t d = 0; d < spin_dim_SU2; ++d) M_stag_arr[d] = 0.0;
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            size_t atom = i % N_atoms_SU2;
+            double sign = afm_sublattice_signs_SU2[atom];
+            size_t idx = i * spin_dim_SU2;
+            for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
+                for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
+                    M_stag_arr[mu] += sign * sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
+                }
+            }
+        }
+        for (size_t d = 0; d < spin_dim_SU2; ++d) M_stag_arr[d] /= double(lattice_size_SU2);
+    }
+
     // ============================================================
     // FILE I/O
     // ============================================================
@@ -5215,6 +5236,7 @@ public:
                 compute_sublattice_magnetizations_from_flat(x.data(), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
                 compute_magnetization_global_SU2_from_flat(x.data(), M_SU2_global_arr);
+                compute_magnetization_staggered_SU2_from_flat(x.data(), M_SU2_antiferro_arr);
                 
                 // Compute SU(3) magnetizations using helper functions
                 double M_SU3_local_arr[8] = {0};
@@ -5226,7 +5248,7 @@ public:
                 compute_magnetization_global_SU3_from_flat(x.data(), M_SU3_global_arr);
                 
                 SpinVector M_SU2_local = Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2);
                 SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
                 SpinVector M_SU3_local = Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
@@ -5304,6 +5326,7 @@ public:
                 compute_sublattice_magnetizations_from_flat(x.data(), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
                 compute_magnetization_global_SU2_from_flat(x.data(), M_SU2_global_arr);
+                compute_magnetization_staggered_SU2_from_flat(x.data(), M_SU2_antiferro_arr);
                 
                 // Compute SU(3) magnetizations using helper functions
                 double M_SU3_local_arr[8] = {0};
@@ -5315,7 +5338,7 @@ public:
                 compute_magnetization_global_SU3_from_flat(x.data(), M_SU3_global_arr);
                 
                 SpinVector M_SU2_local = Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2);
                 SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
                 SpinVector M_SU3_local = Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3);
                 SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);
@@ -5410,8 +5433,9 @@ public:
                 compute_sublattice_magnetizations_from_flat(x.data(), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
                 compute_magnetization_global_SU2_from_flat(x.data(), M_SU2_global_arr);
+                compute_magnetization_staggered_SU2_from_flat(x.data(), M_SU2_antiferro_arr);
                 M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2);
                 M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
                 
                 double M_SU3_arr[8] = {0};
@@ -6754,8 +6778,9 @@ private:
                 double M_SU2_antiferro_arr[8] = {0};
                 compute_sublattice_magnetizations_from_flat(thrust::raw_pointer_cast(h_state.data()), 0, 
                     lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
+                compute_magnetization_staggered_SU2_from_flat(thrust::raw_pointer_cast(h_state.data()), M_SU2_antiferro_arr);
                 M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-                M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+                M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2);
                 
                 double M_SU3_arr[8] = {0};
                 double M_SU3_antiferro_arr[8] = {0};
@@ -7331,6 +7356,7 @@ private:
             compute_sublattice_magnetizations_from_flat(state_vec.data(), 0, 
                 lattice_size_SU2, spin_dim_SU2, M_SU2_arr, M_SU2_antiferro_arr);
             compute_magnetization_global_SU2_from_flat(state_vec.data(), M_SU2_global_arr);
+            compute_magnetization_staggered_SU2_from_flat(state_vec.data(), M_SU2_antiferro_arr);
             
             size_t SU3_offset = lattice_size_SU2 * spin_dim_SU2;
             compute_sublattice_magnetizations_from_flat(state_vec.data(), SU3_offset, 
@@ -7338,7 +7364,7 @@ private:
             compute_magnetization_global_SU3_from_flat(state_vec.data(), M_SU3_global_arr);
             
             SpinVector M_SU2 = Eigen::Map<Eigen::VectorXd>(M_SU2_arr, spin_dim_SU2) / double(lattice_size_SU2);
-            SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2) / double(lattice_size_SU2);
+            SpinVector M_SU2_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2);
             SpinVector M_SU2_global = Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2);
             SpinVector M_SU3 = Eigen::Map<Eigen::VectorXd>(M_SU3_arr, spin_dim_SU3) / double(lattice_size_SU3);
             SpinVector M_SU3_antiferro = Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3);

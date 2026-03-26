@@ -1122,6 +1122,7 @@ public:
     vector<vector<size_t>> bilinear_partners;            // Partner site indices
     vector<vector<array<size_t, 2>>> trilinear_partners; // Trilinear partner pairs
     vector<SpinMatrix> sublattice_frames;                // Sublattice frame transformations
+    vector<double> afm_sublattice_signs;                  // Signs for staggered magnetization per sublattice
 
     size_t num_bi;  // Number of bilinear neighbors per site
     size_t num_tri; // Number of trilinear interactions per site
@@ -1185,6 +1186,9 @@ public:
         for (size_t atom = 0; atom < N_atoms; ++atom) {
             sublattice_frames[atom] = uc.sublattice_frames[atom];
         }
+        
+        // Copy AFM sublattice signs from unit cell
+        afm_sublattice_signs = uc.afm_sublattice_signs;
 
         // Initialize twist matrices to identity
         for (size_t d = 0; d < 3; ++d) {
@@ -6516,18 +6520,18 @@ public:
                 double M_global_arr[8] = {0};
                 
                 for (size_t i = 0; i < lattice_size; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
                     for (size_t d = 0; d < spin_dim; ++d) {
                         M_local_arr[d] += x[i * spin_dim + d];
-                        M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
                     }
                 }
                 
                 // Compute global magnetization (sublattice-frame transformed)
                 compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                // Compute staggered magnetization (sublattice-frame + AFM signs)
+                compute_magnetization_staggered_from_flat(x.data(), M_antiferro_arr);
                 
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
                 SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
                 // Compute accurate energy density directly from flat state (includes bilinear)
@@ -6630,9 +6634,10 @@ public:
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
             compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            compute_magnetization_staggered_from_flat(state_vec.data(), M_antiferro_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
             SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             if (hdf5_writer) {
@@ -6718,6 +6723,33 @@ public:
         // Normalize by lattice size
         for (size_t d = 0; d < spin_dim; ++d) {
             M_global_arr[d] /= double(lattice_size);
+        }
+    }
+
+    /**
+     * Compute staggered (antiferromagnetic) magnetization in global frame.
+     * Uses sublattice_frames for local-to-global transformation and
+     * afm_sublattice_signs for the staggered pattern (e.g., G-mode for orthoferrites).
+     */
+    void compute_magnetization_staggered_from_flat(const double* x, double* M_stag_arr) const {
+        for (size_t d = 0; d < spin_dim; ++d) {
+            M_stag_arr[d] = 0.0;
+        }
+        
+        for (size_t i = 0; i < lattice_size; ++i) {
+            size_t atom = i % N_atoms;
+            size_t idx = i * spin_dim;
+            double sign = afm_sublattice_signs[atom];
+            
+            for (size_t mu = 0; mu < spin_dim; ++mu) {
+                for (size_t nu = 0; nu < spin_dim; ++nu) {
+                    M_stag_arr[mu] += sign * sublattice_frames[atom](mu, nu) * x[idx + nu];
+                }
+            }
+        }
+        
+        for (size_t d = 0; d < spin_dim; ++d) {
+            M_stag_arr[d] /= double(lattice_size);
         }
     }
 
@@ -7320,20 +7352,16 @@ public:
                 double M_antiferro_arr[8] = {0};
                 double M_global_arr[8] = {0};
                 
-                for (size_t i = 0; i < lattice_size; ++i) {
-                    double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                    
-                    for (size_t d = 0; d < spin_dim; ++d) {
-                        M_local_arr[d] += x[i * spin_dim + d];
-                        M_antiferro_arr[d] += x[i * spin_dim + d] * sign;
-                    }
-                }
+                compute_magnetizations_from_flat(x.data(), lattice_size, spin_dim, 
+                    M_local_arr, M_antiferro_arr);
                 
                 // Use helper function for global magnetization
                 compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                // Compute staggered magnetization (sublattice-frame + AFM signs)
+                compute_magnetization_staggered_from_flat(x.data(), M_antiferro_arr);
                 
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
                 SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
                 trajectory.push_back({t, {M_antiferro, M_local, M_global}});
@@ -7408,9 +7436,11 @@ public:
                 
                 // Use helper function for global magnetization
                 compute_magnetization_global_from_flat(x.data(), M_global_arr);
+                // Compute staggered magnetization (sublattice-frame + AFM signs)
+                compute_magnetization_staggered_from_flat(x.data(), M_antiferro_arr);
                 
                 SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+                SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
                 SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
                 
                 trajectory.push_back({t, {M_antiferro, M_local, M_global}});
@@ -8203,9 +8233,10 @@ private:
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
             compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            compute_magnetization_staggered_from_flat(state_vec.data(), M_antiferro_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
             SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             trajectory.push_back({t, {M_antiferro, M_local, M_global}});
@@ -8261,9 +8292,10 @@ private:
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
             compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            compute_magnetization_staggered_from_flat(state_vec.data(), M_antiferro_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
             SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             trajectory.push_back({t, {M_antiferro, M_local, M_global}});
@@ -8430,9 +8462,10 @@ private:
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
             compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            compute_magnetization_staggered_from_flat(state_vec.data(), M_antiferro_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
             SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             if (hdf5_writer) {
@@ -8495,9 +8528,10 @@ private:
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
             compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            compute_magnetization_staggered_from_flat(state_vec.data(), M_antiferro_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
             SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             trajectory.push_back({t, {M_antiferro, M_local, M_global}});
@@ -8550,9 +8584,10 @@ private:
             compute_magnetizations_from_flat(state_vec.data(), 
                 lattice_size, spin_dim, M_local_arr, M_antiferro_arr);
             compute_magnetization_global_from_flat(state_vec.data(), M_global_arr);
+            compute_magnetization_staggered_from_flat(state_vec.data(), M_antiferro_arr);
             
             SpinVector M_local = Eigen::Map<Eigen::VectorXd>(M_local_arr, spin_dim) / double(lattice_size);
-            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim) / double(lattice_size);
+            SpinVector M_antiferro = Eigen::Map<Eigen::VectorXd>(M_antiferro_arr, spin_dim);
             SpinVector M_global = Eigen::Map<Eigen::VectorXd>(M_global_arr, spin_dim);
             
             trajectory.push_back({t, {M_antiferro, M_local, M_global}});

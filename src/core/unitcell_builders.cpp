@@ -335,16 +335,16 @@ UnitCell build_pyrochlore_non_kramer(const SpinConfig& config) {
 }
 
 MixedUnitCell build_tmfeo3(const SpinConfig& config) {
-    const double Jai = config.get_param("J1ab", 4.92);
+    const double Jai = config.get_param("J1ab", 4.74);
     const double Jbi = Jai;
-    const double Jci = config.get_param("J1c", 4.92);
-    const double J2ai = config.get_param("J2ab", 0.29);
+    const double Jci = config.get_param("J1c", 5.15);
+    const double J2ai = config.get_param("J2ab", 0.15);
     const double J2bi = J2ai;
-    const double J2ci = config.get_param("J2c", 0.29);
-    const double Ka = config.get_param("Ka", 0.0);
+    const double J2ci = config.get_param("J2c", 0.30);
+    const double Ka = config.get_param("Ka", -0.16221);
     const double Kb = config.get_param("Kb", 0.0);
-    const double Kc = config.get_param("Kc", -0.09);
-    const double D1 = config.get_param("D1", 0.0);
+    const double Kc = config.get_param("Kc", -0.18318);
+    const double D1 = config.get_param("D1", 0.12);
     const double D2 = config.get_param("D2", 0.0);
     const double chi2x = config.get_param("chi2x", 0.0);
     const double chi2y = config.get_param("chi2y", 0.0);
@@ -509,6 +509,9 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Fe_atoms.set_field(field, 1);
     Fe_atoms.set_field(field, 2);
     Fe_atoms.set_field(field, 3);
+    
+    // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,-,+)
+    Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, -1.0, 1.0});
     
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
@@ -744,16 +747,16 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
 }
 
 UnitCell build_tmfeo3_fe(const SpinConfig& config) {
-    const double Jai = config.get_param("J1ab", 4.92);
+    const double Jai = config.get_param("J1ab", 4.74);
     const double Jbi = Jai;
-    const double Jci = config.get_param("J1c", 4.92);
-    const double J2ai = config.get_param("J2ab", 0.29);
+    const double Jci = config.get_param("J1c", 5.15);
+    const double J2ai = config.get_param("J2ab", 0.15);
     const double J2bi = J2ai;
-    const double J2ci = config.get_param("J2c", 0.29);
-    const double Ka = config.get_param("Ka", 0.0);
+    const double J2ci = config.get_param("J2c", 0.30);
+    const double Ka = config.get_param("Ka", -0.16221);
     const double Kb = config.get_param("Kb", 0.0);
-    const double Kc = config.get_param("Kc", -0.09);
-    const double D1 = config.get_param("D1", 0.0);
+    const double Kc = config.get_param("Kc", -0.18318);
+    const double D1 = config.get_param("D1", 0.12);
     const double D2 = config.get_param("D2", 0.0);
     const double h = config.field_strength;
     const int use_local_frame = (int)config.get_param("use_local_frame", 1.0);
@@ -892,6 +895,9 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     Fe_atoms.set_field(field, 1);
     Fe_atoms.set_field(field, 2);
     Fe_atoms.set_field(field, 3);
+    
+    // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,-,+)
+    Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, -1.0, 1.0});
     
     return Fe_atoms;
 }

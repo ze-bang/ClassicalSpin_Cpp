@@ -70,6 +70,7 @@ PhononLattice::PhononLattice(const UnitCell& uc, size_t d1, size_t d2, size_t d3
     for (size_t atom = 0; atom < N_atoms; ++atom) {
         sublattice_frames[atom] = uc.sublattice_frames[atom];
     }
+    afm_sublattice_signs = uc.afm_sublattice_signs;
     
     // Initialize RNG
     auto seed_val = std::chrono::high_resolution_clock::now().time_since_epoch().count();
@@ -2487,13 +2488,14 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
             double O_custom = 0.0;
             
             for (size_t i = 0; i < lattice_size; ++i) {
-                double sign = (i % 2 == 0) ? 1.0 : -1.0;
                 size_t atom = i % N_atoms;
+                double sign = afm_sublattice_signs[atom];
                 Eigen::Vector3d S(x[i*spin_dim], x[i*spin_dim+1], x[i*spin_dim+2]);
                 M_local += S;
-                M_antiferro += sign * S;
                 // Transform to global frame using sublattice frame
-                M_global += sublattice_frames[atom] * S;
+                Eigen::Vector3d S_global = sublattice_frames[atom] * S;
+                M_antiferro += sign * S_global;
+                M_global += S_global;
                 // Custom order parameter projection
                 if (has_ordering_pattern) {
                     O_custom += S.dot(ordering_pattern[i]);
@@ -2571,13 +2573,14 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
             double O_custom = 0.0;
             
             for (size_t i = 0; i < lattice_size; ++i) {
-                double sign = (i % 2 == 0) ? 1.0 : -1.0;
                 size_t atom = i % N_atoms;
+                double sign = afm_sublattice_signs[atom];
                 Eigen::Vector3d S(x[i*spin_dim], x[i*spin_dim+1], x[i*spin_dim+2]);
                 M_local += S;
-                M_antiferro += sign * S;
                 // Transform to global frame using sublattice frame
-                M_global += sublattice_frames[atom] * S;
+                Eigen::Vector3d S_global = sublattice_frames[atom] * S;
+                M_antiferro += sign * S_global;
+                M_global += S_global;
                 // Custom order parameter projection
                 if (has_ordering_pattern) {
                     O_custom += S.dot(ordering_pattern[i]);
