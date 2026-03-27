@@ -86,6 +86,7 @@ public:
     vector<Vector3d> lattice_pos;  // Atomic positions
     vector<Vector3d> lattice_vectors;  // 3 lattice vectors
     vector<SpinMatrix> sublattice_frames;  // Local coordinate frames for each atom
+    vector<double> afm_sublattice_signs;  // Signs for staggered magnetization per sublattice
     
     vector<SpinVector> field;  // External field per atom
     vector<SpinMatrix> onsite_interaction;  // On-site interactions per atom
@@ -111,6 +112,7 @@ public:
         field.resize(N_atoms, SpinVector::Zero(N));
         onsite_interaction.resize(N_atoms, SpinMatrix::Zero(N, N));
         sublattice_frames.resize(N_atoms, SpinMatrix::Identity(N, N));
+        afm_sublattice_signs.resize(N_atoms, 1.0);
     }
     
     UnitCell(size_t spin_dim, size_t num_atoms)
@@ -120,6 +122,7 @@ public:
         field.resize(N_atoms, SpinVector::Zero(N));
         onsite_interaction.resize(N_atoms, SpinMatrix::Zero(N, N));
         sublattice_frames.resize(N_atoms, SpinMatrix::Identity(N, N));
+        afm_sublattice_signs.resize(N_atoms, 1.0);
     }
     
     // Setters
@@ -180,6 +183,11 @@ public:
             throw invalid_argument("Frame matrix dimension mismatch");
         }
         sublattice_frames[index] = frame;
+    }
+    
+    void set_afm_sublattice_signs(const vector<double>& signs) {
+        if (signs.size() != N_atoms) throw invalid_argument("AFM signs size must match N_atoms");
+        afm_sublattice_signs = signs;
     }
     
     // Print method for debugging

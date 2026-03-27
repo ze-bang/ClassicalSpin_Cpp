@@ -632,6 +632,7 @@ public:
     // For Kitaev honeycomb, transforms from local Kitaev basis to global cubic frame
     // sublattice_frames[atom] is a 3x3 rotation matrix: S_global = R * S_local
     vector<SpinMatrix> sublattice_frames;
+    vector<double> afm_sublattice_signs;   // AFM sublattice signs for Bertaut modes
     
     // Custom ordering vector (set from initial spin configuration)
     // Used to compute order parameter along the ground state ordering direction
