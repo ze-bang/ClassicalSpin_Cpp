@@ -987,8 +987,7 @@ void build_strain_params(const SpinConfig& config,
     // J7(t) = J7 * (1 - γ*f(t)*λ_Eg/4)^4 * (1 + γ*f(t)*λ_Eg/2)^2
     me_params.gamma_J7 = config.get_param("gamma_J7", 0.0);
     
-    // Magnetoelastic coupling strengths (A1g and Eg channels)
-    me_params.lambda_A1g = config.get_param("lambda_A1g", 0.0);
+    // Magnetoelastic coupling strength (Eg channel)
     me_params.lambda_Eg = config.get_param("lambda_Eg", 0.0);
     
     // Elastic constants (Voigt notation)
@@ -1000,30 +999,24 @@ void build_strain_params(const SpinConfig& config,
     // Effective mass for strain dynamics
     el_params.M = config.get_param("strain_mass", config.get_param("M", 1.0));
     
-    // Damping coefficients
-    el_params.gamma_A1g = config.get_param("gamma_A1g", 0.1);
+    // Damping coefficient (Eg channel)
     el_params.gamma_Eg = config.get_param("gamma_Eg", 0.1);
-    
-    // Quartic anharmonicity (optional)
-    el_params.lambda_A1g = config.get_param("lambda_A1g_quartic", 0.0);
-    el_params.lambda_Eg = config.get_param("lambda_Eg_quartic", 0.0);
     
     // Drive parameters (pulse 1 - pump)
     dr_params.E0_1 = config.pump_amplitude;
-    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : el_params.omega_A1g();
+    dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : el_params.omega_Eg();
     dr_params.t_1 = config.pump_time;
     dr_params.sigma_1 = config.pump_width;
     dr_params.phi_1 = config.get_param("pump_phase", 0.0);
     
     // Drive parameters (pulse 2 - probe)
     dr_params.E0_2 = config.probe_amplitude;
-    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : el_params.omega_A1g();
+    dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : el_params.omega_Eg();
     dr_params.t_2 = config.probe_time;
     dr_params.sigma_2 = config.probe_width;
     dr_params.phi_2 = config.get_param("probe_phase", 0.0);
     
     // Drive strength for different strain modes
-    dr_params.drive_strength_A1g = config.get_param("drive_strength_A1g", 1.0);
     dr_params.drive_strength_Eg1 = config.get_param("drive_strength_Eg1", 0.0);
     dr_params.drive_strength_Eg2 = config.get_param("drive_strength_Eg2", 0.0);
 }
@@ -1129,6 +1122,13 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
         if (trial > 0) {
             lattice.init_random();
         }
+        
+        // Relax strain to adiabatic equilibrium for the initial spin configuration
+        // This prevents violent quench when ME coupling is strong
+        if (rank == 0) {
+            cout << "Relaxing strain to adiabatic equilibrium..." << endl;
+        }
+        lattice.relax_strain();
         
         if (use_langevin) {
             lattice.integrate_langevin(config.md_timestep, config.md_time_start, config.md_time_end,
@@ -1246,11 +1246,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             cout << "[Rank " << rank << "] Finding initial (triple-Q) ground state..." << endl;
             
             // Zero out strain initially
-            for (size_t b = 0; b < 3; ++b) {
-                lattice.strain.epsilon_xx[b] = 0.0;
-                lattice.strain.epsilon_yy[b] = 0.0;
-                lattice.strain.epsilon_xy[b] = 0.0;
-            }
+            lattice.strain.epsilon_xx = 0.0;
+            lattice.strain.epsilon_yy = 0.0;
+            lattice.strain.epsilon_xy = 0.0;
             
             lattice.init_random();
             lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
@@ -1270,11 +1268,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         }
         
         // Update lattice strain to match initial_state
-        for (size_t b = 0; b < 3; ++b) {
-            lattice.strain.epsilon_xx[b] = initial_strain.Eg1;
-            lattice.strain.epsilon_yy[b] = -initial_strain.Eg1;
-            lattice.strain.epsilon_xy[b] = initial_strain.Eg2;
-        }
+        lattice.strain.epsilon_xx = initial_strain.Eg1;
+        lattice.strain.epsilon_yy = -initial_strain.Eg1;
+        lattice.strain.epsilon_xy = initial_strain.Eg2;
         
         // Analyze initial state
         for (size_t i = 0; i < n_sites; ++i) {
@@ -1314,11 +1310,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             
             // Apply strong Eg strain to induce zigzag
             const double bias_strain = 3.0;
-            for (size_t b = 0; b < 3; ++b) {
-                lattice.strain.epsilon_xx[b] = bias_strain / 2.0;
-                lattice.strain.epsilon_yy[b] = -bias_strain / 2.0;
-                lattice.strain.epsilon_xy[b] = 0.0;
-            }
+            lattice.strain.epsilon_xx = bias_strain / 2.0;
+            lattice.strain.epsilon_yy = -bias_strain / 2.0;
+            lattice.strain.epsilon_xy = 0.0;
             
             lattice.init_random();
             lattice.anneal(config.T_start, config.T_end, config.annealing_steps,
@@ -1338,11 +1332,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
         }
         
         // Update lattice strain to match final_state
-        for (size_t b = 0; b < 3; ++b) {
-            lattice.strain.epsilon_xx[b] = final_strain.Eg1;
-            lattice.strain.epsilon_yy[b] = -final_strain.Eg1;
-            lattice.strain.epsilon_xy[b] = final_strain.Eg2;
-        }
+        lattice.strain.epsilon_xx = final_strain.Eg1;
+        lattice.strain.epsilon_yy = -final_strain.Eg1;
+        lattice.strain.epsilon_xy = final_strain.Eg2;
         
         // Analyze final state
         for (size_t i = 0; i < n_sites; ++i) {
@@ -1449,9 +1441,9 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                     for (size_t i = 0; i < n_sites; ++i) {
                         cfg.spins[i] = lattice.spins[i];
                     }
-                    // Extract Eg strain from lattice (bond 0)
-                    cfg.strain = StrainEg(lattice.strain.epsilon_xx[0], 
-                                          lattice.strain.epsilon_xy[0]);
+                    // Extract Eg strain from lattice
+                    cfg.strain = StrainEg(lattice.strain.epsilon_xx, 
+                                          lattice.strain.epsilon_xy);
                     
                     initial_path.push_back(cfg);
                     cout << "  Loaded image " << idx << ": ε = (" 
@@ -1615,27 +1607,18 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                 
                 // For initial state
                 for (size_t i = 0; i < n_sites; ++i) lattice.spins[i] = initial_spins[i];
-                for (size_t b = 0; b < 3; ++b) {
-                    lattice.strain.epsilon_xx[b] = ext_Eg1;
-                    lattice.strain.epsilon_yy[b] = -ext_Eg1;
-                    lattice.strain.epsilon_xy[b] = ext_Eg2;
-                }
+                lattice.strain.epsilon_xx = ext_Eg1;
+                lattice.strain.epsilon_yy = -ext_Eg1;
+                lattice.strain.epsilon_xy = ext_Eg2;
                 double E_spin_init = lattice.spin_energy();
                 double E_strain_init = lattice.strain_energy();
                 double E_me_init = lattice.magnetoelastic_energy();
                 double E_gneb_init = lattice.energy_for_gneb_with_strain(initial_spins, ext_Eg1, ext_Eg2);
                 
                 // Also print the spin bilinears
-                double fK_Eg1 = lattice.f_K_Eg1();
-                double fJ_Eg1 = lattice.f_J_Eg1();
-                double fG_Eg1 = lattice.f_Gamma_Eg1();
-                double fGp_Eg1 = lattice.f_Gammap_Eg1();
-                double J = lattice.magnetoelastic_params.J;
-                double K = lattice.magnetoelastic_params.K;
-                double Gamma = lattice.magnetoelastic_params.Gamma;
-                double Gammap = lattice.magnetoelastic_params.Gammap;
+                auto [Sigma_Eg1, Sigma_Eg2_init] = lattice.Eg_spin_factors();
+                auto basis_init = lattice.compute_Eg_basis();
                 double lambda_Eg = lattice.magnetoelastic_params.lambda_Eg;
-                double Sigma_Eg1 = (J+K)*fK_Eg1 + J*fJ_Eg1 + Gamma*fG_Eg1 + Gammap*fGp_Eg1;
                 
                 cout << "  Initial (triple-Q):" << endl;
                 cout << "    spin_energy = " << E_spin_init << endl;
@@ -1643,29 +1626,26 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                 cout << "    magnetoelastic_energy = " << E_me_init << endl;
                 cout << "    energy_for_gneb = " << E_gneb_init << endl;
                 cout << "    --- Spin bilinears ---" << endl;
-                cout << "    f_K_Eg1 = " << fK_Eg1 << ", f_J_Eg1 = " << fJ_Eg1 << endl;
-                cout << "    f_Gamma_Eg1 = " << fG_Eg1 << ", f_Gammap_Eg1 = " << fGp_Eg1 << endl;
-                cout << "    Sigma_Eg1 = (J+K)*fK + J*fJ + Γ*fΓ + Γ'*fΓ' = " << Sigma_Eg1 << endl;
-                cout << "    J=" << J << ", K=" << K << ", Γ=" << Gamma << ", Γ'=" << Gammap << ", λ_Eg=" << lambda_Eg << endl;
+                cout << "    f_K_Eg1 = " << basis_init.K1 << ", f_J_Eg1 = " << basis_init.J1 << endl;
+                cout << "    f_Gamma_Eg1 = " << basis_init.G1 << ", f_Gammap_Eg1 = " << basis_init.Gp1 << endl;
+                cout << "    Sigma_Eg1 = " << Sigma_Eg1 << endl;
+                cout << "    λ_Eg=" << lambda_Eg << endl;
                 
                 // For final state
                 for (size_t i = 0; i < n_sites; ++i) lattice.spins[i] = final_spins[i];
                 double E_spin_fin = lattice.spin_energy();
                 double E_me_fin = lattice.magnetoelastic_energy();
                 double E_gneb_fin = lattice.energy_for_gneb_with_strain(final_spins, ext_Eg1, ext_Eg2);
-                double fK_Eg1_f = lattice.f_K_Eg1();
-                double fJ_Eg1_f = lattice.f_J_Eg1();
-                double fG_Eg1_f = lattice.f_Gamma_Eg1();
-                double fGp_Eg1_f = lattice.f_Gammap_Eg1();
-                double Sigma_Eg1_f = (J+K)*fK_Eg1_f + J*fJ_Eg1_f + Gamma*fG_Eg1_f + Gammap*fGp_Eg1_f;
+                auto [Sigma_Eg1_f, Sigma_Eg2_f] = lattice.Eg_spin_factors();
+                auto basis_fin = lattice.compute_Eg_basis();
                 
                 cout << "  Final (zigzag):" << endl;
                 cout << "    spin_energy = " << E_spin_fin << endl;
                 cout << "    magnetoelastic_energy = " << E_me_fin << endl;
                 cout << "    energy_for_gneb = " << E_gneb_fin << endl;
                 cout << "    --- Spin bilinears ---" << endl;
-                cout << "    f_K_Eg1 = " << fK_Eg1_f << ", f_J_Eg1 = " << fJ_Eg1_f << endl;
-                cout << "    f_Gamma_Eg1 = " << fG_Eg1_f << ", f_Gammap_Eg1 = " << fGp_Eg1_f << endl;
+                cout << "    f_K_Eg1 = " << basis_fin.K1 << ", f_J_Eg1 = " << basis_fin.J1 << endl;
+                cout << "    f_Gamma_Eg1 = " << basis_fin.G1 << ", f_Gammap_Eg1 = " << basis_fin.Gp1 << endl;
                 cout << "    Sigma_Eg1 = " << Sigma_Eg1_f << endl;
                 cout << "  Delta_Sigma_Eg1 = " << (Sigma_Eg1_f - Sigma_Eg1) << endl;
             }
@@ -1934,7 +1914,6 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         cout << "  Pump frequency: " << config.pump_frequency << endl;
         cout << "  Pump time: " << config.pump_time << endl;
         cout << "  Pump width: " << config.pump_width << endl;
-        cout << "  Drive strength A1g: " << lattice.drive_params.drive_strength_A1g << endl;
         cout << "  Drive strength Eg1: " << lattice.drive_params.drive_strength_Eg1 << endl;
         cout << "  Drive strength Eg2: " << lattice.drive_params.drive_strength_Eg2 << endl;
         cout << "\nTime-dependent J7 modulation:" << endl;

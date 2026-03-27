@@ -5,20 +5,13 @@
  * Implements honeycomb lattice with:
  * - Generic NN, 2nd NN, and 3rd NN spin interactions (Kitaev-Heisenberg-Γ-Γ')
  * - Strain field phonons with elastic Hamiltonian
- * - Magnetoelastic coupling through A1g and Eg symmetry channels of D3d
+ * - Magnetoelastic coupling through the Eg symmetry channel of D3d
  * 
  * Magnetoelastic coupling (following D3d point group basis functions):
- * H_c^{A1g} = λ_{A1g} Σ_r (ε_xx + ε_yy) {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
- * H_c^{Eg} = λ_{Eg} Σ_r {(ε_xx - ε_yy)[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
- *                       + 2ε_xy[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+ * H_c = λ_{Eg} Σ_r {(ε_xx - ε_yy)[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
+ *                  + 2ε_xy[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
  * 
- * Spin basis functions (D3d irreps, M_x/y/z = x/y/z-type Kitaev bonds):
- * 
- * A1g irrep:
- *   f_K^{A1g} = S^x·S^x_{M_x} + S^y·S^y_{M_y} + S^z·S^z_{M_z}
- *   f_J^{A1g} = S^x·S^x_{M_{y,z}} + S^y·S^y_{M_{x,z}} + S^z·S^z_{M_{x,y}}
- *              (non-Kitaev components: α≠γ on γ-bond)
- *   f_Γ^{A1g} = (S^y·S^z + S^z·S^y)_{M_x} + (S^x·S^z + S^z·S^x)_{M_y} + (S^x·S^y + S^y·S^x)_{M_z}
+ * Spin basis functions (D3d Eg irrep, M_x/y/z = x/y/z-type Kitaev bonds):
  * 
  * Eg irrep:
  *   f_K^{Eg,1} = S^x·S^x_{M_x} + S^y·S^y_{M_y} - 2·S^z·S^z_{M_z}
@@ -218,7 +211,7 @@ void StrainPhononLattice::set_parameters(const MagnetoelasticParams& me_params,
          << ", Γ=" << me_params.Gamma << ", Γ'=" << me_params.Gammap << endl;
     cout << "  J2_A=" << me_params.J2_A << ", J2_B=" << me_params.J2_B << endl;
     cout << "  J3=" << me_params.J3 << ", J7=" << me_params.J7 << endl;
-    cout << "  λ_A1g=" << me_params.lambda_A1g << ", λ_Eg=" << me_params.lambda_Eg << endl;
+    cout << "  λ_Eg=" << me_params.lambda_Eg << endl;
     cout << "  C11=" << el_params.C11 << ", C12=" << el_params.C12 << ", C44=" << el_params.C44 << endl;
 }
 
@@ -482,24 +475,13 @@ double StrainPhononLattice::get_effective_J7(double t) const {
     }
     
     // Get the Eg strain DEVIATION from equilibrium
-    // δε_Eg = |ε_Eg(t) - ε_Eg^eq| computed component-wise then averaged
-    double delta_eps_Eg_norm = 0.0;
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        // Current Eg strain components
-        double Eg1 = strain.epsilon_xx[b] - strain.epsilon_yy[b];
-        double Eg2 = 2.0 * strain.epsilon_xy[b];
-        
-        // Equilibrium Eg strain components
-        double Eg1_eq = strain_equilibrium.epsilon_xx[b] - strain_equilibrium.epsilon_yy[b];
-        double Eg2_eq = 2.0 * strain_equilibrium.epsilon_xy[b];
-        
-        // Deviation from equilibrium
-        double dEg1 = Eg1 - Eg1_eq;
-        double dEg2 = Eg2 - Eg2_eq;
-        
-        delta_eps_Eg_norm += std::sqrt(dEg1 * dEg1 + dEg2 * dEg2);
-    }
-    delta_eps_Eg_norm /= StrainState::N_BONDS;
+    double Eg1 = strain.epsilon_xx - strain.epsilon_yy;
+    double Eg2 = 2.0 * strain.epsilon_xy;
+    double Eg1_eq = strain_equilibrium.epsilon_xx - strain_equilibrium.epsilon_yy;
+    double Eg2_eq = 2.0 * strain_equilibrium.epsilon_xy;
+    double dEg1 = Eg1 - Eg1_eq;
+    double dEg2 = Eg2 - Eg2_eq;
+    double delta_eps_Eg_norm = std::sqrt(dEg1 * dEg1 + dEg2 * dEg2);
     
     // Compute the modulation factors using strain deviation
     double x = gamma * delta_eps_Eg_norm;
@@ -562,8 +544,8 @@ double StrainPhononLattice::get_ring_exchange_normalized() const {
     return E;
 }
 
-void StrainPhononLattice::get_dJ7_deps(double* dJ7_deps_xx, double* dJ7_deps_yy, 
-                                       double* dJ7_deps_xy) const {
+void StrainPhononLattice::get_dJ7_deps(double& dJ7_deps_xx, double& dJ7_deps_yy, 
+                                       double& dJ7_deps_xy) const {
     // Compute ∂J7/∂ε_xx, ∂J7/∂ε_yy, ∂J7/∂ε_xy for each bond type
     //
     // J7 = J7_0 * f1^4 * f2^2
@@ -576,42 +558,31 @@ void StrainPhononLattice::get_dJ7_deps(double* dJ7_deps_xx, double* dJ7_deps_yy,
     // dJ7/dr = J7_0 * [4*f1^3*(-γ/4)*f2^2 + f1^4*2*f2*(γ/2)]
     //        = J7_0 * f1^3 * f2 * [-γ*f2 + γ*f1]
     //        = J7_0 * γ * f1^3 * f2 * (f1 - f2)
-    //        = J7_0 * γ * f1^3 * f2 * (-3γr/4)
     //
-    // ∂r/∂ε_xx = (1/N_bonds) * (Eg1 - Eg1_eq) / |δε_Eg|  (where Eg1 = ε_xx - ε_yy)
+    // ∂r/∂ε_xx = (Eg1 - Eg1_eq) / r  (where Eg1 = ε_xx - ε_yy)
     
     double J7_0 = magnetoelastic_params.J7;
     double gamma = magnetoelastic_params.gamma_J7;
     
     // Initialize to zero
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        dJ7_deps_xx[b] = 0.0;
-        dJ7_deps_yy[b] = 0.0;
-        dJ7_deps_xy[b] = 0.0;
-    }
+    dJ7_deps_xx = 0.0;
+    dJ7_deps_yy = 0.0;
+    dJ7_deps_xy = 0.0;
     
     // If no J7-strain coupling, return zeros
     if (std::abs(gamma) < 1e-12 || std::abs(J7_0) < 1e-12) {
         return;
     }
     
-    // Compute Eg strain deviation for each bond and the total norm
-    double dEg1[StrainState::N_BONDS], dEg2[StrainState::N_BONDS];
-    double norm_b[StrainState::N_BONDS];
-    double r = 0.0;  // Average norm
+    // Compute Eg strain deviation from equilibrium
+    double Eg1 = strain.epsilon_xx - strain.epsilon_yy;
+    double Eg2 = 2.0 * strain.epsilon_xy;
+    double Eg1_eq = strain_equilibrium.epsilon_xx - strain_equilibrium.epsilon_yy;
+    double Eg2_eq = 2.0 * strain_equilibrium.epsilon_xy;
     
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        double Eg1 = strain.epsilon_xx[b] - strain.epsilon_yy[b];
-        double Eg2 = 2.0 * strain.epsilon_xy[b];
-        double Eg1_eq = strain_equilibrium.epsilon_xx[b] - strain_equilibrium.epsilon_yy[b];
-        double Eg2_eq = 2.0 * strain_equilibrium.epsilon_xy[b];
-        
-        dEg1[b] = Eg1 - Eg1_eq;
-        dEg2[b] = Eg2 - Eg2_eq;
-        norm_b[b] = std::sqrt(dEg1[b] * dEg1[b] + dEg2[b] * dEg2[b]);
-        r += norm_b[b];
-    }
-    r /= StrainState::N_BONDS;
+    double dEg1 = Eg1 - Eg1_eq;
+    double dEg2 = Eg2 - Eg2_eq;
+    double r = std::sqrt(dEg1 * dEg1 + dEg2 * dEg2);
     
     // If at equilibrium, derivative is zero (to avoid division by zero)
     if (r < 1e-12) {
@@ -627,274 +598,123 @@ void StrainPhononLattice::get_dJ7_deps(double* dJ7_deps_xx, double* dJ7_deps_yy,
     if (f1 < 0.0) f1 = 0.0;
     if (f2 < 0.0) f2 = 0.0;
     
-    // dJ7/dr = J7_0 * [4*f1^3*(-γ/4)*f2^2 + f1^4*2*f2*(γ/2)]
-    //        = J7_0 * γ * f1^3 * f2 * (f1 - f2)
+    // dJ7/dr = J7_0 * γ * f1^3 * f2 * (f1 - f2)
     double dJ7_dr = J7_0 * gamma * std::pow(f1, 3) * f2 * (f1 - f2);
     
-    // For each bond type, compute ∂r/∂ε and then ∂J7/∂ε
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        if (norm_b[b] < 1e-12) continue;  // Skip if this bond is at equilibrium
-        
-        // ∂r/∂ε_xx = (1/N_bonds) * (∂|δε_Eg|_b/∂ε_xx)
-        //          = (1/N_bonds) * (dEg1_b / |δε_Eg|_b) * (∂Eg1/∂ε_xx)
-        //          = (1/N_bonds) * (dEg1_b / norm_b) * 1
-        double dr_deps_xx = (1.0 / StrainState::N_BONDS) * (dEg1[b] / norm_b[b]);
-        
-        // ∂r/∂ε_yy = (1/N_bonds) * (dEg1_b / norm_b) * (-1)
-        double dr_deps_yy = (1.0 / StrainState::N_BONDS) * (dEg1[b] / norm_b[b]) * (-1.0);
-        
-        // ∂r/∂ε_xy = (1/N_bonds) * (dEg2_b / norm_b) * 2
-        double dr_deps_xy = (1.0 / StrainState::N_BONDS) * (dEg2[b] / norm_b[b]) * 2.0;
-        
-        dJ7_deps_xx[b] = dJ7_dr * dr_deps_xx;
-        dJ7_deps_yy[b] = dJ7_dr * dr_deps_yy;
-        dJ7_deps_xy[b] = dJ7_dr * dr_deps_xy;
-    }
+    // ∂r/∂ε_xx = dEg1 / r  (since Eg1 = ε_xx - ε_yy, ∂Eg1/∂ε_xx = 1)
+    double dr_deps_xx = dEg1 / r;
+    
+    // ∂r/∂ε_yy = -dEg1 / r  (∂Eg1/∂ε_yy = -1)
+    double dr_deps_yy = -dEg1 / r;
+    
+    // ∂r/∂ε_xy = 2 * dEg2 / r  (Eg2 = 2ε_xy, ∂Eg2/∂ε_xy = 2)
+    double dr_deps_xy = 2.0 * dEg2 / r;
+    
+    dJ7_deps_xx = dJ7_dr * dr_deps_xx;
+    dJ7_deps_yy = dJ7_dr * dr_deps_yy;
+    dJ7_deps_xy = dJ7_dr * dr_deps_xy;
 }
 
 // ============================================================
 // ENERGY CALCULATIONS
 // ============================================================
 
-double StrainPhononLattice::spin_energy() const {
+double StrainPhononLattice::bilinear_energy() const {
     double E = 0.0;
-    
-    // NN exchange
     for (size_t i = 0; i < lattice_size; ++i) {
         const Eigen::Vector3d& Si = spins[i];
-        
-        // Zeeman term
         E -= Si.dot(field[i]);
-        
-        // NN interactions (count once by j > i)
         for (size_t n = 0; n < nn_partners[i].size(); ++n) {
             size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                E += Si.dot(nn_interaction[i][n] * Sj);
-            }
+            if (j > i) E += Si.dot(nn_interaction[i][n] * spins[j]);
         }
-        
-        // 2nd NN
         for (size_t n = 0; n < j2_partners[i].size(); ++n) {
             size_t j = j2_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                E += Si.dot(j2_interaction[i][n] * Sj);
-            }
+            if (j > i) E += Si.dot(j2_interaction[i][n] * spins[j]);
         }
-        
-        // 3rd NN
         for (size_t n = 0; n < j3_partners[i].size(); ++n) {
             size_t j = j3_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                E += Si.dot(j3_interaction[i][n] * Sj);
-            }
+            if (j > i) E += Si.dot(j3_interaction[i][n] * spins[j]);
         }
     }
+    return E;
+}
+
+double StrainPhononLattice::spin_energy() const {
+    return bilinear_energy() + ring_exchange_energy();
+}
+
+double StrainPhononLattice::ring_exchange_sum(double J7_val) const {
+    if (std::abs(J7_val) < 1e-12 || hexagons.empty()) return 0.0;
     
-    // Ring exchange
-    E += ring_exchange_energy();
+    double E = 0.0;
+    double prefactor = J7_val / 6.0;
     
+    for (const auto& hex : hexagons) {
+        const Eigen::Vector3d& S0 = spins[hex[0]];
+        const Eigen::Vector3d& S1 = spins[hex[1]];
+        const Eigen::Vector3d& S2 = spins[hex[2]];
+        const Eigen::Vector3d& S3 = spins[hex[3]];
+        const Eigen::Vector3d& S4 = spins[hex[4]];
+        const Eigen::Vector3d& S5 = spins[hex[5]];
+        
+        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
+        double d04 = S0.dot(S4), d05 = S0.dot(S5);
+        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
+        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
+        double d34 = S3.dot(S4), d35 = S3.dot(S5);
+        double d45 = S4.dot(S5);
+        
+        double term0 = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
+                     + 3.0*d02*d14*d35 - d03*d14*d25;
+        double term1 = 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
+                     + 3.0*d13*d25*d04 - d14*d25*d03;
+        double term2 = 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
+                     + 3.0*d24*d03*d15 - d25*d03*d14;
+        double term3 = 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
+                     + 3.0*d35*d14*d02 - d03*d14*d25;
+        double term4 = 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
+                     + 3.0*d04*d25*d13 - d14*d25*d03;
+        double term5 = 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
+                     + 3.0*d15*d03*d24 - d25*d03*d14;
+        
+        E += prefactor * (term0 + term1 + term2 + term3 + term4 + term5);
+    }
     return E;
 }
 
 double StrainPhononLattice::ring_exchange_energy() const {
-    // Six-spin ring exchange on hexagonal plaquettes
-    // H_7 = (J_7/6) Σ_{hex} [2(S_i·S_j)(S_k·S_l)(S_m·S_n)
-    //                       -6(S_i·S_k)(S_j·S_l)(S_m·S_n)
-    //                       +3(S_i·S_l)(S_j·S_k)(S_m·S_n)
-    //                       +3(S_i·S_k)(S_j·S_m)(S_l·S_n)
-    //                       -(S_i·S_l)(S_j·S_m)(S_k·S_n)
-    //                       + cyclic permutations of (i,j,k,l,m,n)]
-    
-    // Use strain-dependent J7 if gamma_J7 is nonzero
-    // This makes the static energy consistent with the dynamics
     double J7;
     if (std::abs(magnetoelastic_params.gamma_J7) > 1e-12) {
-        J7 = get_effective_J7(0.0);  // t=0 is unused; uses current strain state
+        J7 = get_effective_J7(0.0);
     } else {
         J7 = magnetoelastic_params.J7;
     }
-    if (std::abs(J7) < 1e-12 || hexagons.empty()) {
-        return 0.0;
-    }
-    
-    double E = 0.0;
-    double prefactor = J7 / 6.0;
-    
-    for (const auto& hex : hexagons) {
-        // Get the 6 spins around the hexagon
-        const Eigen::Vector3d& S0 = spins[hex[0]];
-        const Eigen::Vector3d& S1 = spins[hex[1]];
-        const Eigen::Vector3d& S2 = spins[hex[2]];
-        const Eigen::Vector3d& S3 = spins[hex[3]];
-        const Eigen::Vector3d& S4 = spins[hex[4]];
-        const Eigen::Vector3d& S5 = spins[hex[5]];
-        
-        // Precompute all pairwise dot products (15 unique pairs)
-        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
-        double d04 = S0.dot(S4), d05 = S0.dot(S5);
-        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
-        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
-        double d34 = S3.dot(S4), d35 = S3.dot(S5);
-        double d45 = S4.dot(S5);
-        
-        // Sum over 6 cyclic permutations
-        // For each permutation (i,j,k,l,m,n), compute:
-        //   2*(i·j)*(k·l)*(m·n) - 6*(i·k)*(j·l)*(m·n) + 3*(i·l)*(j·k)*(m·n)
-        //   + 3*(i·k)*(j·m)*(l·n) - (i·l)*(j·m)*(k·n)
-        
-        // Permutation 0: (0,1,2,3,4,5)
-        double term0 = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
-                     + 3.0*d02*d14*d35 - d03*d14*d25;
-        
-        // Permutation 1: (1,2,3,4,5,0)
-        double term1 = 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
-                     + 3.0*d13*d25*d04 - d14*d25*d03;
-        
-        // Permutation 2: (2,3,4,5,0,1)
-        double term2 = 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
-                     + 3.0*d24*d03*d15 - d25*d03*d14;
-        
-        // Permutation 3: (3,4,5,0,1,2)
-        double term3 = 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
-                     + 3.0*d35*d14*d02 - d03*d14*d25;
-        
-        // Permutation 4: (4,5,0,1,2,3)
-        double term4 = 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
-                     + 3.0*d04*d25*d13 - d14*d25*d03;
-        
-        // Permutation 5: (5,0,1,2,3,4)
-        double term5 = 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
-                     + 3.0*d15*d03*d24 - d25*d03*d14;
-        
-        E += prefactor * (term0 + term1 + term2 + term3 + term4 + term5);
-    }
-    
-    return E;
+    return ring_exchange_sum(J7);
 }
 
 double StrainPhononLattice::spin_energy(double t) const {
-    // Time-dependent version that uses effective J7(t)
-    double E = 0.0;
-    
-    // NN exchange
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        // Zeeman term
-        E -= Si.dot(field[i]);
-        
-        // NN interactions (count once by j > i)
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                E += Si.dot(nn_interaction[i][n] * Sj);
-            }
-        }
-        
-        // 2nd NN
-        for (size_t n = 0; n < j2_partners[i].size(); ++n) {
-            size_t j = j2_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                E += Si.dot(j2_interaction[i][n] * Sj);
-            }
-        }
-        
-        // 3rd NN
-        for (size_t n = 0; n < j3_partners[i].size(); ++n) {
-            size_t j = j3_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                E += Si.dot(j3_interaction[i][n] * Sj);
-            }
-        }
-    }
-    
-    // Time-dependent ring exchange
-    E += ring_exchange_energy(t);
-    
-    return E;
+    return bilinear_energy() + ring_exchange_energy(t);
 }
 
 double StrainPhononLattice::ring_exchange_energy(double t) const {
-    // Time-dependent version using effective J7(t)
-    // J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
-    // where |δε_Eg| is the Eg strain deviation from equilibrium
-    
-    double J7_eff = get_effective_J7(t);
-    if (std::abs(J7_eff) < 1e-12 || hexagons.empty()) {
-        return 0.0;
-    }
-    
-    double E = 0.0;
-    double prefactor = J7_eff / 6.0;
-    
-    for (const auto& hex : hexagons) {
-        const Eigen::Vector3d& S0 = spins[hex[0]];
-        const Eigen::Vector3d& S1 = spins[hex[1]];
-        const Eigen::Vector3d& S2 = spins[hex[2]];
-        const Eigen::Vector3d& S3 = spins[hex[3]];
-        const Eigen::Vector3d& S4 = spins[hex[4]];
-        const Eigen::Vector3d& S5 = spins[hex[5]];
-        
-        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
-        double d04 = S0.dot(S4), d05 = S0.dot(S5);
-        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
-        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
-        double d34 = S3.dot(S4), d35 = S3.dot(S5);
-        double d45 = S4.dot(S5);
-        
-        double term0 = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45 
-                     + 3.0*d02*d14*d35 - d03*d14*d25;
-        double term1 = 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05 
-                     + 3.0*d13*d25*d04 - d14*d25*d03;
-        double term2 = 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01 
-                     + 3.0*d24*d03*d15 - d25*d03*d14;
-        double term3 = 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12 
-                     + 3.0*d35*d14*d02 - d03*d14*d25;
-        double term4 = 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23 
-                     + 3.0*d04*d25*d13 - d14*d25*d03;
-        double term5 = 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34 
-                     + 3.0*d15*d03*d24 - d25*d03*d14;
-        
-        E += prefactor * (term0 + term1 + term2 + term3 + term4 + term5);
-    }
-    
-    return E;
+    return ring_exchange_sum(get_effective_J7(t));
 }
 
 double StrainPhononLattice::strain_energy() const {
-    // H_strain = (1/2) Σ_b [C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²]
-    //          + kinetic energy
-    
-    double V = 0.0;  // Potential energy
-    double T = strain.kinetic_energy() * elastic_params.M;  // Kinetic energy
+    double T = strain.kinetic_energy() * elastic_params.M;
     
     double C11 = elastic_params.C11;
     double C12 = elastic_params.C12;
     double C44 = elastic_params.C44;
     
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        double exx = strain.epsilon_xx[b];
-        double eyy = strain.epsilon_yy[b];
-        double exy = strain.epsilon_xy[b];
-        
-        // Elastic potential energy
-        V += 0.5 * C11 * (exx * exx + eyy * eyy);
-        V += C12 * exx * eyy;
-        V += 2.0 * C44 * exy * exy;  // Factor of 4 for (2ε_xy)² term
-        
-        // Optional quartic anharmonicity
-        double A1g = exx + eyy;
-        double Eg_sq = (exx - eyy) * (exx - eyy) + 4.0 * exy * exy;
-        V += 0.25 * elastic_params.lambda_A1g * A1g * A1g * A1g * A1g;
-        V += 0.25 * elastic_params.lambda_Eg * Eg_sq * Eg_sq;
-    }
+    double exx = strain.epsilon_xx;
+    double eyy = strain.epsilon_yy;
+    double exy = strain.epsilon_xy;
+    
+    double V = 0.5 * C11 * (exx * exx + eyy * eyy)
+             + C12 * exx * eyy
+             + 2.0 * C44 * exy * exy;
     
     return T + V;
 }
@@ -928,9 +748,7 @@ double StrainPhononLattice::site_energy(const SpinVector& spin_here, size_t site
     }
     
     // Magnetoelastic coupling contribution
-    // This is more complex - we need the derivative w.r.t. spin dotted with spin
-    // H_c = λ_{A1g} (ε_xx + ε_yy) [(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}] + ...
-    // For simplicity, we use the effective field approach here
+    // Use the effective field approach
     SpinVector H_me = get_magnetoelastic_field(site);
     E -= spin_here.dot(H_me);  // H_me = -∂H_c/∂S, so E contribution is -S · H_me
     
@@ -1061,552 +879,142 @@ double StrainPhononLattice::site_ring_exchange_energy(const SpinVector& spin_her
 }
 
 // ============================================================
-// SPIN BASIS FUNCTIONS FOR D3d IRREPS
+// Eg SPIN BASIS FUNCTIONS — consolidated single-pass implementations
 // ============================================================
 
-double StrainPhononLattice::f_K_Eg1() const {
-    // f_K^{Eg,1} = S^x_r S^x_{M_x} + S^y_r S^y_{M_y} - 2 S^z_r S^z_{M_z}
-    // This is the Eg,1 basis for Kitaev terms under D3d
-    double f_x = 0.0, f_y = 0.0, f_z = 0.0;
+StrainPhononLattice::EgBasisValues StrainPhononLattice::compute_Eg_basis() const {
+    // Compute all 8 Eg basis function values in ONE loop over NN bonds.
+    //
+    // For each bond (i,j) of type γ with α=(γ+1)%3, β=(γ+2)%3:
+    //   Kitaev:       Si(γ)·Sj(γ)
+    //   Heisenberg:   Si(α)·Sj(α) + Si(β)·Sj(β)
+    //   Gamma:        Si(α)·Sj(β) + Si(β)·Sj(α)
+    //   Gamma':       Si(γ)·(Sj(α)+Sj(β)) + (Si(α)+Si(β))·Sj(γ)
+    //
+    // Eg decomposition:  Eg1 = f_x + f_y - 2·f_z
+    //                    Eg2 = √3·(f_x - f_y)
+    
+    double K_x = 0, K_y = 0, K_z = 0;
+    double J_x = 0, J_y = 0, J_z = 0;
+    double G_x = 0, G_y = 0, G_z = 0;
+    double Gp_x = 0, Gp_y = 0, Gp_z = 0;
     
     for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
+        const auto& Si = spins[i];
         for (size_t n = 0; n < nn_partners[i].size(); ++n) {
             size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int bond_type = nn_bond_types[i][n];
-                
-                double kitaev_term = Si(bond_type) * Sj(bond_type);
-                if (bond_type == 0) f_x += kitaev_term;
-                else if (bond_type == 1) f_y += kitaev_term;
-                else f_z += kitaev_term;
-            }
+            if (j <= i) continue;
+            const auto& Sj = spins[j];
+            int g = nn_bond_types[i][n];
+            int a = (g + 1) % 3;
+            int b = (g + 2) % 3;
+            
+            double kitaev     = Si(g) * Sj(g);
+            double heisenberg = Si(a) * Sj(a) + Si(b) * Sj(b);
+            double gamma_val  = Si(a) * Sj(b) + Si(b) * Sj(a);
+            double gammap_val = Si(g) * (Sj(a) + Sj(b)) + (Si(a) + Si(b)) * Sj(g);
+            
+            if (g == 0)      { K_x += kitaev; J_x += heisenberg; G_x += gamma_val; Gp_x += gammap_val; }
+            else if (g == 1) { K_y += kitaev; J_y += heisenberg; G_y += gamma_val; Gp_y += gammap_val; }
+            else             { K_z += kitaev; J_z += heisenberg; G_z += gamma_val; Gp_z += gammap_val; }
         }
     }
     
-    // f_K^{Eg,1} = f_x + f_y - 2*f_z (from paper Table 2)
-    return f_x + f_y - 2.0 * f_z;
+    const double s3 = std::sqrt(3.0);
+    return {
+        K_x + K_y - 2.0*K_z,   s3*(K_x - K_y),
+        J_x + J_y - 2.0*J_z,   s3*(J_x - J_y),
+        G_x + G_y - 2.0*G_z,   s3*(G_x - G_y),
+        Gp_x + Gp_y - 2.0*Gp_z, s3*(Gp_x - Gp_y)
+    };
 }
 
-double StrainPhononLattice::f_K_Eg2() const {
-    // f_K^{Eg,2} = √3 (S^x_r S^x_{M_x} - S^y_r S^y_{M_y})
-    // This is the Eg,2 basis for Kitaev terms under D3d
-    double f_x = 0.0, f_y = 0.0;
+StrainPhononLattice::EgBasisGradients StrainPhononLattice::compute_Eg_basis_dS(size_t site) const {
+    // Compute all 8 Eg basis function gradients ∂f/∂S_site in ONE neighbor loop.
+    //
+    // For each neighbor j on bond γ (α=(γ+1)%3, β=(γ+2)%3):
+    //   ∂(Kitaev)/∂S:   contrib(γ) = Sj(γ)
+    //   ∂(Heisenberg)/∂S: contrib(α) = Sj(α), contrib(β) = Sj(β)
+    //   ∂(Gamma)/∂S:    contrib(α) = Sj(β), contrib(β) = Sj(α)
+    //   ∂(Gamma')/∂S:   contrib(γ) = Sj(α)+Sj(β), contrib(α) = Sj(γ), contrib(β) = Sj(γ)
     
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
+    Eigen::Vector3d K_x = Eigen::Vector3d::Zero(), K_y = Eigen::Vector3d::Zero(), K_z = Eigen::Vector3d::Zero();
+    Eigen::Vector3d J_x = Eigen::Vector3d::Zero(), J_y = Eigen::Vector3d::Zero(), J_z = Eigen::Vector3d::Zero();
+    Eigen::Vector3d G_x = Eigen::Vector3d::Zero(), G_y = Eigen::Vector3d::Zero(), G_z = Eigen::Vector3d::Zero();
+    Eigen::Vector3d Gp_x = Eigen::Vector3d::Zero(), Gp_y = Eigen::Vector3d::Zero(), Gp_z = Eigen::Vector3d::Zero();
+    
+    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+        size_t j = nn_partners[site][n];
+        int g = nn_bond_types[site][n];
+        int a = (g + 1) % 3;
+        int b = (g + 2) % 3;
+        const auto& Sj = spins[j];
         
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int bond_type = nn_bond_types[i][n];
-                
-                double kitaev_term = Si(bond_type) * Sj(bond_type);
-                if (bond_type == 0) f_x += kitaev_term;
-                else if (bond_type == 1) f_y += kitaev_term;
-            }
-        }
+        Eigen::Vector3d dK = Eigen::Vector3d::Zero();
+        dK(g) = Sj(g);
+        
+        Eigen::Vector3d dJ = Eigen::Vector3d::Zero();
+        dJ(a) = Sj(a);
+        dJ(b) = Sj(b);
+        
+        Eigen::Vector3d dG = Eigen::Vector3d::Zero();
+        dG(a) = Sj(b);
+        dG(b) = Sj(a);
+        
+        Eigen::Vector3d dGp = Eigen::Vector3d::Zero();
+        dGp(g) = Sj(a) + Sj(b);
+        dGp(a) = Sj(g);
+        dGp(b) = Sj(g);
+        
+        if (g == 0)      { K_x += dK; J_x += dJ; G_x += dG; Gp_x += dGp; }
+        else if (g == 1) { K_y += dK; J_y += dJ; G_y += dG; Gp_y += dGp; }
+        else             { K_z += dK; J_z += dJ; G_z += dG; Gp_z += dGp; }
     }
     
-    // f_K^{Eg,2} = √3 * (f_x - f_y) (from paper Table 2)
-    return std::sqrt(3.0) * (f_x - f_y);
+    const double s3 = std::sqrt(3.0);
+    return {
+        K_x + K_y - 2.0*K_z,   s3*(K_x - K_y),
+        J_x + J_y - 2.0*J_z,   s3*(J_x - J_y),
+        G_x + G_y - 2.0*G_z,   s3*(G_x - G_y),
+        Gp_x + Gp_y - 2.0*Gp_z, s3*(Gp_x - Gp_y)
+    };
 }
 
-double StrainPhononLattice::f_J_Eg1() const {
-    // f_J^{Eg,1} = S^x_r S^x_{M_{y,z}} + S^y_r S^y_{M_{x,z}} - 2 S^z_r S^z_{M_{x,y}}
-    // On x-bond (γ=0): sum S^y·S^y + S^z·S^z (non-Kitaev components)
-    // On y-bond (γ=1): sum S^x·S^x + S^z·S^z
-    // On z-bond (γ=2): sum S^x·S^x + S^y·S^y
-    // Then combine: contributions from x,y bonds (coeff +1) and z bonds (coeff -2)
-    double f_x = 0.0, f_y = 0.0, f_z = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                
-                // Sum over non-Kitaev components α ≠ γ
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                double non_kitaev_term = Si(alpha) * Sj(alpha) + Si(beta) * Sj(beta);
-                
-                if (gamma == 0) f_x += non_kitaev_term;  // x-bond contribution
-                else if (gamma == 1) f_y += non_kitaev_term;  // y-bond contribution
-                else f_z += non_kitaev_term;  // z-bond contribution
-            }
-        }
-    }
-    
-    // f_J^{Eg,1} = f_x + f_y - 2*f_z (from paper Table 2)
-    return f_x + f_y - 2.0 * f_z;
+std::pair<double, double> StrainPhononLattice::Eg_spin_factors() const {
+    auto b = compute_Eg_basis();
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
+    return {
+        (J + K)*b.K1 + J*b.J1 + Gamma*b.G1 + Gammap*b.Gp1,
+        (J + K)*b.K2 + J*b.J2 + Gamma*b.G2 + Gammap*b.Gp2
+    };
 }
 
-double StrainPhononLattice::f_J_Eg2() const {
-    // f_J^{Eg,2} = √3 (S^x_r S^x_{M_{y,z}} - S^y_r S^y_{M_{x,z}})
-    // On x-bond (γ=0): contributes S^y·S^y + S^z·S^z (but only x-component matters for Eg2)
-    // On y-bond (γ=1): contributes S^x·S^x + S^z·S^z
-    // The asymmetry is between x-bonds and y-bonds
-    double f_x = 0.0, f_y = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                
-                // Sum over non-Kitaev components
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                double non_kitaev_term = Si(alpha) * Sj(alpha) + Si(beta) * Sj(beta);
-                
-                if (gamma == 0) f_x += non_kitaev_term;
-                else if (gamma == 1) f_y += non_kitaev_term;
-            }
-        }
-    }
-    
-    // f_J^{Eg,2} = √3 * (f_x - f_y) (from paper Table 2)
-    return std::sqrt(3.0) * (f_x - f_y);
-}
-
-double StrainPhononLattice::f_Gamma_Eg1() const {
-    // f_Γ^{Eg,1} = (S^y_r S^z_{M_x} + S^z_r S^y_{M_x}) + (S^x_r S^z_{M_y} + S^z_r S^x_{M_y})
-    //            - 2(S^x_r S^y_{M_z} + S^y_r S^x_{M_z})
-    // This is the off-diagonal symmetric exchange in Eg,1 basis
-    double f_x = 0.0, f_y = 0.0, f_z = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                
-                // Γ term: S^α S^β + S^β S^α where α,β ≠ γ
-                double gamma_term = Si(alpha) * Sj(beta) + Si(beta) * Sj(alpha);
-                if (gamma == 0) f_x += gamma_term;
-                else if (gamma == 1) f_y += gamma_term;
-                else f_z += gamma_term;
-            }
-        }
-    }
-    
-    // f_Γ^{Eg,1} = f_x + f_y - 2*f_z (from paper Table 2)
-    return f_x + f_y - 2.0 * f_z;
-}
-
-double StrainPhononLattice::f_Gamma_Eg2() const {
-    // f_Γ^{Eg,2} = √3 [(S^y_r S^z_{M_x} + S^z_r S^y_{M_x}) - (S^x_r S^z_{M_y} + S^z_r S^x_{M_y})]
-    // This is the off-diagonal symmetric exchange in Eg,2 basis
-    double f_x = 0.0, f_y = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                
-                // Γ term: S^α S^β + S^β S^α where α,β ≠ γ
-                double gamma_term = Si(alpha) * Sj(beta) + Si(beta) * Sj(alpha);
-                if (gamma == 0) f_x += gamma_term;
-                else if (gamma == 1) f_y += gamma_term;
-            }
-        }
-    }
-    
-    // f_Γ^{Eg,2} = √3 * (f_x - f_y) (from paper Table 2)
-    return std::sqrt(3.0) * (f_x - f_y);
-}
-
-double StrainPhononLattice::f_Gammap_Eg1() const {
-    // f_Γ'^{Eg,1} = O_x + O_y - 2*O_z where O_γ is the Γ' operator on γ-bonds
-    // Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ where α,β ≠ γ
-    double f_x = 0.0, f_y = 0.0, f_z = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                
-                // Γ' term: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
-                double gammap_term = Si(gamma) * (Sj(alpha) + Sj(beta)) 
-                                   + (Si(alpha) + Si(beta)) * Sj(gamma);
-                if (gamma == 0) f_x += gammap_term;
-                else if (gamma == 1) f_y += gammap_term;
-                else f_z += gammap_term;
-            }
-        }
-    }
-    
-    // f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
-    return f_x + f_y - 2.0 * f_z;
-}
-
-double StrainPhononLattice::f_Gammap_Eg2() const {
-    // f_Γ'^{Eg,2} = √3 (O_x - O_y) where O_γ is the Γ' operator on γ-bonds
-    double f_x = 0.0, f_y = 0.0;
-    
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const Eigen::Vector3d& Si = spins[i];
-        
-        for (size_t n = 0; n < nn_partners[i].size(); ++n) {
-            size_t j = nn_partners[i][n];
-            if (j > i) {
-                const Eigen::Vector3d& Sj = spins[j];
-                int gamma = nn_bond_types[i][n];
-                int alpha = (gamma + 1) % 3;
-                int beta = (gamma + 2) % 3;
-                
-                // Γ' term: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
-                double gammap_term = Si(gamma) * (Sj(alpha) + Sj(beta)) 
-                                   + (Si(alpha) + Si(beta)) * Sj(gamma);
-                if (gamma == 0) f_x += gammap_term;
-                else if (gamma == 1) f_y += gammap_term;
-            }
-        }
-    }
-    
-    // f_Γ'^{Eg,2} = √3 * (f_x - f_y)
-    return std::sqrt(3.0) * (f_x - f_y);
+std::pair<SpinVector, SpinVector> StrainPhononLattice::Eg_spin_factor_gradients(size_t site) const {
+    auto g = compute_Eg_basis_dS(site);
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
+    return {
+        (J + K)*g.K1 + J*g.J1 + Gamma*g.G1 + Gammap*g.Gp1,
+        (J + K)*g.K2 + J*g.J2 + Gamma*g.G2 + Gammap*g.Gp2
+    };
 }
 
 // ============================================================
 // MAGNETOELASTIC ENERGY
 // ============================================================
 
-double StrainPhononLattice::magnetoelastic_energy() const {
-    // H_c = H_c^{Eg} (A1g terms removed)
-    //
-    // H_c^{Eg} = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
-    //                      + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
-    
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
+double StrainPhononLattice::magnetoelastic_energy() const { 
+    auto [Eg1_fac, Eg2_fac] = Eg_spin_factors();
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Compute Eg spin basis functions
-    double fK_Eg1 = f_K_Eg1();
-    double fK_Eg2 = f_K_Eg2();
-    double fJ_Eg1 = f_J_Eg1();
-    double fJ_Eg2 = f_J_Eg2();
-    double fG_Eg1 = f_Gamma_Eg1();
-    double fG_Eg2 = f_Gamma_Eg2();
-    double fGp_Eg1 = f_Gammap_Eg1();
-    double fGp_Eg2 = f_Gammap_Eg2();
-    
-    // Eg channel contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg1_spin_factor = (J + K) * fK_Eg1 + J * fJ_Eg1 + Gamma * fG_Eg1 + Gammap * fGp_Eg1;
-    double Eg2_spin_factor = (J + K) * fK_Eg2 + J * fJ_Eg2 + Gamma * fG_Eg2 + Gammap * fGp_Eg2;
-    
-    double E_Eg = 0.0;
-    
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        double exx = strain.epsilon_xx[b];
-        double eyy = strain.epsilon_yy[b];
-        double exy = strain.epsilon_xy[b];
-        
-        // Eg: (ε_xx - ε_yy) * Eg1 + 2ε_xy * Eg2
-        E_Eg += lambda_Eg * ((exx - eyy) * Eg1_spin_factor + 2.0 * exy * Eg2_spin_factor);
-    }
-    
-    return E_Eg;
-}
-
-// ============================================================
-// DERIVATIVES FOR STRAIN EOM
-// ============================================================
-
-double StrainPhononLattice::dH_deps_xx(size_t bond_type) const {
-    // ∂H_c/∂ε_xx = λ_{Eg} * Eg1_spin_factor (A1g terms removed)
-    //            + elastic terms: C11 * ε_xx + C12 * ε_yy
-    
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    double lambda_Eg = magnetoelastic_params.lambda_Eg;
-    
-    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    
-    // Magnetoelastic contribution: ∂/∂ε_xx of (ε_xx - ε_yy) = +1
-    double dH_me = lambda_Eg * Eg1_spin_factor;
-    
-    return dH_me;
-}
-
-double StrainPhononLattice::dH_deps_yy(size_t bond_type) const {
-    // ∂H_c/∂ε_yy = -λ_{Eg} * Eg1_spin_factor (A1g terms removed)
-    //            + elastic terms: C11 * ε_yy + C12 * ε_xx
-    
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    double lambda_Eg = magnetoelastic_params.lambda_Eg;
-    
-    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    
-    // Magnetoelastic contribution: ∂/∂ε_yy of (ε_xx - ε_yy) = -1
-    double dH_me = -lambda_Eg * Eg1_spin_factor;
-    
-    return dH_me;
-}
-
-double StrainPhononLattice::dH_deps_xy(size_t bond_type) const {
-    // ∂H_c/∂ε_xy = 2 * λ_{Eg} * Eg2_spin_factor
-    //            + elastic terms: 4 * C44 * ε_xy
-    
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    double lambda_Eg = magnetoelastic_params.lambda_Eg;
-    
-    // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
-                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
-    
-    // Magnetoelastic contribution: ∂/∂ε_xy of 2ε_xy = 2
-    double dH_me = 2.0 * lambda_Eg * Eg2_spin_factor;
-    
-    return dH_me;
-}
-
-// ============================================================
-// DERIVATIVE OF SPIN BASIS FUNCTIONS W.R.T. SPINS
-// ============================================================
-
-SpinVector StrainPhononLattice::df_K_Eg1_dS(size_t site) const {
-    // ∂f_K^{Eg,1}/∂S_site where f_K^{Eg,1} = f_x + f_y - 2*f_z
-    // Each bond contributes S_j^γ to component γ
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    SpinVector df_z = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        contrib(gamma) = spins[j](gamma);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-        else df_z += contrib;
-    }
-    
-    // f_K^{Eg,1} = f_x + f_y - 2*f_z
-    return df_x + df_y - 2.0 * df_z;
-}
-
-SpinVector StrainPhononLattice::df_K_Eg2_dS(size_t site) const {
-    // ∂f_K^{Eg,2}/∂S_site where f_K^{Eg,2} = √3*(f_x - f_y)
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        contrib(gamma) = spins[j](gamma);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-    }
-    
-    // f_K^{Eg,2} = √3 * (f_x - f_y)
-    return std::sqrt(3.0) * (df_x - df_y);
-}
-
-SpinVector StrainPhononLattice::df_J_Eg1_dS(size_t site) const {
-    // ∂f_J^{Eg,1}/∂S_site where f_J^{Eg,1} uses non-Kitaev components
-    // f_J^{Eg,1} = f_x + f_y - 2*f_z where f_γ = Σ (S^α·S^α + S^β·S^β) on γ-bonds
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    SpinVector df_z = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        // Non-Kitaev contribution: S^α_j in component α, S^β_j in component β
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        contrib(alpha) = spins[j](alpha);
-        contrib(beta) = spins[j](beta);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-        else df_z += contrib;
-    }
-    
-    // f_J^{Eg,1} = f_x + f_y - 2*f_z
-    return df_x + df_y - 2.0 * df_z;
-}
-
-SpinVector StrainPhononLattice::df_J_Eg2_dS(size_t site) const {
-    // ∂f_J^{Eg,2}/∂S_site where f_J^{Eg,2} = √3*(f_x - f_y)
-    // with non-Kitaev components
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        // Non-Kitaev contribution
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        contrib(alpha) = spins[j](alpha);
-        contrib(beta) = spins[j](beta);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-    }
-    
-    // f_J^{Eg,2} = √3 * (f_x - f_y)
-    return std::sqrt(3.0) * (df_x - df_y);
-}
-
-SpinVector StrainPhononLattice::df_Gamma_Eg1_dS(size_t site) const {
-    // ∂f_Γ^{Eg,1}/∂S_site where f_Γ^{Eg,1} = f_x + f_y - 2*f_z
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    SpinVector df_z = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        contrib(alpha) = spins[j](beta);
-        contrib(beta) = spins[j](alpha);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-        else df_z += contrib;
-    }
-    
-    // f_Γ^{Eg,1} = f_x + f_y - 2*f_z
-    return df_x + df_y - 2.0 * df_z;
-}
-
-SpinVector StrainPhononLattice::df_Gamma_Eg2_dS(size_t site) const {
-    // ∂f_Γ^{Eg,2}/∂S_site where f_Γ^{Eg,2} = √3*(f_x - f_y)
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        contrib(alpha) = spins[j](beta);
-        contrib(beta) = spins[j](alpha);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-    }
-    
-    // f_Γ^{Eg,2} = √3 * (f_x - f_y)
-    return std::sqrt(3.0) * (df_x - df_y);
-}
-
-SpinVector StrainPhononLattice::df_Gammap_Eg1_dS(size_t site) const {
-    // ∂f_Γ'^{Eg,1}/∂S_site where f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
-    // The Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ
-    // Derivative w.r.t. S_i:
-    //   ∂/∂S_i^γ: S_j^α + S_j^β
-    //   ∂/∂S_i^α: S_j^γ
-    //   ∂/∂S_i^β: S_j^γ
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    SpinVector df_z = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        // ∂/∂S_i^γ contributes S_j^α + S_j^β
-        contrib(gamma) = spins[j](alpha) + spins[j](beta);
-        // ∂/∂S_i^α and ∂/∂S_i^β both contribute S_j^γ
-        contrib(alpha) = spins[j](gamma);
-        contrib(beta) = spins[j](gamma);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-        else df_z += contrib;
-    }
-    
-    // f_Γ'^{Eg,1} = f_x + f_y - 2*f_z
-    return df_x + df_y - 2.0 * df_z;
-}
-
-SpinVector StrainPhononLattice::df_Gammap_Eg2_dS(size_t site) const {
-    // ∂f_Γ'^{Eg,2}/∂S_site where f_Γ'^{Eg,2} = √3*(f_x - f_y)
-    SpinVector df_x = Eigen::Vector3d::Zero();
-    SpinVector df_y = Eigen::Vector3d::Zero();
-    
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        int gamma = nn_bond_types[site][n];
-        int alpha = (gamma + 1) % 3;
-        int beta = (gamma + 2) % 3;
-        
-        SpinVector contrib = Eigen::Vector3d::Zero();
-        // ∂/∂S_i^γ contributes S_j^α + S_j^β
-        contrib(gamma) = spins[j](alpha) + spins[j](beta);
-        // ∂/∂S_i^α and ∂/∂S_i^β both contribute S_j^γ
-        contrib(alpha) = spins[j](gamma);
-        contrib(beta) = spins[j](gamma);
-        
-        if (gamma == 0) df_x += contrib;
-        else if (gamma == 1) df_y += contrib;
-    }
-    
-    // f_Γ'^{Eg,2} = √3 * (f_x - f_y)
-    return std::sqrt(3.0) * (df_x - df_y);
+    double Eg1_strain = strain.epsilon_xx - strain.epsilon_yy;
+    double Eg2_strain = 2.0 * strain.epsilon_xy;
+    return lambda_Eg * (Eg1_strain * Eg1_fac + Eg2_strain * Eg2_fac);
 }
 
 // ============================================================
@@ -1614,411 +1022,37 @@ SpinVector StrainPhononLattice::df_Gammap_Eg2_dS(size_t site) const {
 // ============================================================
 
 SpinVector StrainPhononLattice::get_magnetoelastic_field(size_t site) const {
-    // H_me = -∂H_c/∂S_i (A1g terms removed)
-    // 
-    // H_c = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
-    //                  + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
-    
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
-    // Compute Eg strain factors (summed over bond types)
-    double Eg1_strain = 0.0;
-    double Eg2_strain = 0.0;
+    double Eg1_strain = strain.epsilon_xx - strain.epsilon_yy;
+    double Eg2_strain = 2.0 * strain.epsilon_xy;
     
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        Eg1_strain += strain.epsilon_xx[b] - strain.epsilon_yy[b];
-        Eg2_strain += 2.0 * strain.epsilon_xy[b];
-    }
-    
-    // Compute spin derivatives (Eg only, includes Gammap)
-    SpinVector df_K_Eg1 = df_K_Eg1_dS(site);
-    SpinVector df_J_Eg1 = df_J_Eg1_dS(site);
-    SpinVector df_G_Eg1 = df_Gamma_Eg1_dS(site);
-    SpinVector df_Gp_Eg1 = df_Gammap_Eg1_dS(site);
-    
-    SpinVector df_K_Eg2 = df_K_Eg2_dS(site);
-    SpinVector df_J_Eg2 = df_J_Eg2_dS(site);
-    SpinVector df_G_Eg2 = df_Gamma_Eg2_dS(site);
-    SpinVector df_Gp_Eg2 = df_Gammap_Eg2_dS(site);
-    
-    // Eg contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    SpinVector H_Eg1 = lambda_Eg * Eg1_strain *
-                       ((J + K) * df_K_Eg1 + J * df_J_Eg1 + Gamma * df_G_Eg1 + Gammap * df_Gp_Eg1);
-    SpinVector H_Eg2 = lambda_Eg * Eg2_strain *
-                       ((J + K) * df_K_Eg2 + J * df_J_Eg2 + Gamma * df_G_Eg2 + Gammap * df_Gp_Eg2);
-    
-    // Total magnetoelastic field (negative because H_eff = -∂H/∂S)
-    return -(H_Eg1 + H_Eg2);
+    auto [dEg1, dEg2] = Eg_spin_factor_gradients(site);
+    return -(lambda_Eg * (Eg1_strain * dEg1 + Eg2_strain * dEg2));
+}
+
+SpinVector StrainPhononLattice::bilinear_field(size_t site) const {
+    SpinVector H = field[site];
+    for (size_t n = 0; n < nn_partners[site].size(); ++n)
+        H -= nn_interaction[site][n] * spins[nn_partners[site][n]];
+    for (size_t n = 0; n < j2_partners[site].size(); ++n)
+        H -= j2_interaction[site][n] * spins[j2_partners[site][n]];
+    for (size_t n = 0; n < j3_partners[site].size(); ++n)
+        H -= j3_interaction[site][n] * spins[j3_partners[site][n]];
+    return H;
 }
 
 SpinVector StrainPhononLattice::get_local_field(size_t site) const {
-    // H_eff = B - ∂H_spin/∂S - ∂H_c/∂S
-    
-    SpinVector H = field[site];
-    
-    // NN exchange contribution
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        H -= nn_interaction[site][n] * spins[j];
-    }
-    
-    // 2nd NN
-    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
-        size_t j = j2_partners[site][n];
-        H -= j2_interaction[site][n] * spins[j];
-    }
-    
-    // 3rd NN
-    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
-        size_t j = j3_partners[site][n];
-        H -= j3_interaction[site][n] * spins[j];
-    }
-    
-    // Ring exchange
+    SpinVector H = bilinear_field(site);
     H += get_ring_exchange_field(site);
-    
-    // Magnetoelastic coupling
     H += get_magnetoelastic_field(site);
-    
     return H;
 }
 
 SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site) const {
-    // Compute H_eff_ring = -∂H_7/∂S_site
-    // 
-    // Ring exchange energy: H_7 = (J7/6) Σ_hex Σ_{perms} [2*d_ij*d_kl*d_mn - 6*d_ik*d_jl*d_mn 
-    //                                                    + 3*d_il*d_jk*d_mn + 3*d_ik*d_jm*d_ln - d_il*d_jm*d_kn]
-    //
-    // For a site at position p in the hexagon, we need to differentiate ALL 6 permutations
-    // with respect to S_p. The derivative of d_ab w.r.t. S_p is S_b if a=p, or S_a if b=p, else 0.
-    
-    Eigen::Vector3d H = Eigen::Vector3d::Zero();
-    double J7;
-    if (std::abs(magnetoelastic_params.gamma_J7) > 1e-12) {
-        J7 = get_effective_J7(0.0);
-    } else {
-        J7 = magnetoelastic_params.J7;
-    }
-    
-    if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
-        return H;
-    }
-    
-    const double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
-    
-    // Loop over all hexagons containing this site
-    for (const auto& [hex_idx, pos] : site_hexagons[site]) {
-        const auto& hex = hexagons[hex_idx];
-        
-        // Pre-load spin pointers for better cache locality
-        const SpinVector* S[6] = {
-            &spins[hex[0]], &spins[hex[1]], &spins[hex[2]],
-            &spins[hex[3]], &spins[hex[4]], &spins[hex[5]]
-        };
-        
-        // Precompute all 15 unique pairwise dot products
-        const double d01 = S[0]->dot(*S[1]), d02 = S[0]->dot(*S[2]), d03 = S[0]->dot(*S[3]);
-        const double d04 = S[0]->dot(*S[4]), d05 = S[0]->dot(*S[5]);
-        const double d12 = S[1]->dot(*S[2]), d13 = S[1]->dot(*S[3]), d14 = S[1]->dot(*S[4]);
-        const double d15 = S[1]->dot(*S[5]);
-        const double d23 = S[2]->dot(*S[3]), d24 = S[2]->dot(*S[4]), d25 = S[2]->dot(*S[5]);
-        const double d34 = S[3]->dot(*S[4]), d35 = S[3]->dot(*S[5]);
-        const double d45 = S[4]->dot(*S[5]);
-        
-        Eigen::Vector3d dH = Eigen::Vector3d::Zero();
-        
-        // Compute ∂/∂S_p of ALL 6 permutations
-        // Permutation k: uses indices (k, k+1, k+2, k+3, k+4, k+5) mod 6 as (i,j,k,l,m,n)
-        // Energy term: 2*d_ij*d_kl*d_mn - 6*d_ik*d_jl*d_mn + 3*d_il*d_jk*d_mn + 3*d_ik*d_jm*d_ln - d_il*d_jm*d_kn
-        //
-        // For each permutation, the site at position 'pos' can appear as i,j,k,l,m, or n
-        // We need to differentiate each term that contains a dot product involving 'pos'
-        
-        // For clarity, we compute the full derivative for each position explicitly
-        // This is verbose but correct and verifiable
-        
-        if (pos == 0) {
-            // ∂/∂S_0 of all 6 permutations
-            // Perm 0 (0,1,2,3,4,5): 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
-            //   d01 → S1, d02 → S2, d03 → S3, d04 → S4, d05 → S5
-            dH += 2.0 * (*S[1]) * d23 * d45;   // ∂d01
-            dH += -6.0 * (*S[2]) * d13 * d45;  // ∂d02
-            dH += 3.0 * (*S[3]) * d12 * d45;   // ∂d03
-            dH += 3.0 * (*S[2]) * d14 * d35;   // ∂d02
-            dH += -(*S[3]) * d14 * d25;        // ∂d03
-            
-            // Perm 1 (1,2,3,4,5,0): 2*d12*d34*d50 - 6*d13*d24*d50 + 3*d14*d23*d50 + 3*d13*d25*d40 - d14*d25*d30
-            //   d50=d05 → S5, d40=d04 → S4, d30=d03 → S3
-            dH += 2.0 * (*S[5]) * d12 * d34;   // ∂d05
-            dH += -6.0 * (*S[5]) * d13 * d24;  // ∂d05
-            dH += 3.0 * (*S[5]) * d14 * d23;   // ∂d05
-            dH += 3.0 * (*S[4]) * d13 * d25;   // ∂d04
-            dH += -(*S[3]) * d14 * d25;        // ∂d03
-            
-            // Perm 2 (2,3,4,5,0,1): 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d30*d15 - d25*d30*d14
-            //   d01 → S1, d30=d03 → S3
-            dH += 2.0 * (*S[1]) * d23 * d45;   // ∂d01
-            dH += -6.0 * (*S[1]) * d24 * d35;  // ∂d01
-            dH += 3.0 * (*S[1]) * d25 * d34;   // ∂d01
-            dH += 3.0 * (*S[3]) * d24 * d15;   // ∂d03
-            dH += -(*S[3]) * d25 * d14;        // ∂d03
-            
-            // Perm 3 (3,4,5,0,1,2): 2*d34*d50*d12 - 6*d35*d40*d12 + 3*d30*d45*d12 + 3*d35*d01*d42 - d30*d01*d52
-            //   d50=d05 → S5, d40=d04 → S4, d30=d03 → S3, d01 → S1
-            dH += 2.0 * (*S[5]) * d34 * d12;   // ∂d05
-            dH += -6.0 * (*S[4]) * d35 * d12;  // ∂d04
-            dH += 3.0 * (*S[3]) * d45 * d12;   // ∂d03
-            dH += 3.0 * (*S[1]) * d35 * d24;   // ∂d01
-            dH += -(*S[3]) * d01 * d25;        // ∂d03
-            dH += -(*S[1]) * d03 * d25;        // ∂d01
-            
-            // Perm 4 (4,5,0,1,2,3): 2*d45*d01*d23 - 6*d40*d15*d23 + 3*d41*d05*d23 + 3*d40*d12*d53 - d41*d12*d03
-            //   d01 → S1, d40=d04 → S4, d05 → S5
-            dH += 2.0 * (*S[1]) * d45 * d23;   // ∂d01
-            dH += -6.0 * (*S[4]) * d15 * d23;  // ∂d04
-            dH += 3.0 * (*S[5]) * d14 * d23;   // ∂d05
-            dH += 3.0 * (*S[4]) * d12 * d35;   // ∂d04
-            dH += -(*S[3]) * d14 * d12;        // ∂d03
-            
-            // Perm 5 (5,0,1,2,3,4): 2*d50*d12*d34 - 6*d51*d02*d34 + 3*d52*d01*d34 + 3*d51*d03*d24 - d52*d03*d14
-            //   d50=d05 → S5, d02 → S2, d01 → S1
-            dH += 2.0 * (*S[5]) * d12 * d34;   // ∂d05
-            dH += -6.0 * (*S[2]) * d15 * d34;  // ∂d02
-            dH += 3.0 * (*S[1]) * d25 * d34;   // ∂d01
-            dH += 3.0 * (*S[2]) * d15 * d24;   // ∂d02  (wait, there's also ∂d03)
-            dH += 3.0 * (*S[3]) * d15 * d24;   // ∂d03
-            dH += -(*S[3]) * d25 * d14;        // ∂d03
-        }
-        else if (pos == 1) {
-            // ∂/∂S_1 of all 6 permutations
-            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
-            dH += 2.0 * (*S[0]) * d23 * d45;   // ∂d01
-            dH += -6.0 * (*S[3]) * d02 * d45;  // ∂d13
-            dH += 3.0 * (*S[2]) * d03 * d45;   // ∂d12
-            dH += 3.0 * (*S[4]) * d02 * d35;   // ∂d14
-            dH += -(*S[4]) * d03 * d25;        // ∂d14
-            
-            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
-            dH += 2.0 * (*S[2]) * d34 * d05;   // ∂d12
-            dH += -6.0 * (*S[3]) * d24 * d05;  // ∂d13
-            dH += 3.0 * (*S[4]) * d23 * d05;   // ∂d14
-            dH += 3.0 * (*S[3]) * d25 * d04;   // ∂d13
-            dH += -(*S[4]) * d25 * d03;        // ∂d14
-            
-            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
-            dH += 2.0 * (*S[0]) * d23 * d45;   // ∂d01
-            dH += -6.0 * (*S[0]) * d24 * d35;  // ∂d01
-            dH += 3.0 * (*S[0]) * d25 * d34;   // ∂d01
-            dH += 3.0 * (*S[5]) * d24 * d03;   // ∂d15
-            dH += -(*S[4]) * d25 * d03;        // ∂d14
-            
-            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
-            dH += 2.0 * (*S[2]) * d34 * d05;   // ∂d12
-            dH += -6.0 * (*S[2]) * d35 * d04;  // ∂d12
-            dH += 3.0 * (*S[2]) * d03 * d45;   // ∂d12
-            dH += 3.0 * (*S[0]) * d35 * d24;   // ∂d01
-            dH += -(*S[0]) * d03 * d25;        // ∂d01
-            
-            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03  (typo fixed: last term uses d03)
-            dH += 2.0 * (*S[0]) * d45 * d23;   // ∂d01
-            dH += -6.0 * (*S[5]) * d04 * d23;  // ∂d15
-            dH += 3.0 * (*S[4]) * d05 * d23;   // ∂d14
-            dH += 3.0 * (*S[2]) * d04 * d35;   // ∂d12
-            dH += -(*S[4]) * d12 * d03;        // ∂d14
-            dH += -(*S[2]) * d14 * d03;        // ∂d12
-            
-            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
-            dH += 2.0 * (*S[2]) * d05 * d34;   // ∂d12
-            dH += -6.0 * (*S[5]) * d02 * d34;  // ∂d15
-            dH += 3.0 * (*S[0]) * d25 * d34;   // ∂d01
-            dH += 3.0 * (*S[5]) * d03 * d24;   // ∂d15
-            dH += -(*S[4]) * d25 * d03;        // ∂d14
-        }
-        else if (pos == 2) {
-            // ∂/∂S_2 of all 6 permutations
-            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
-            dH += 2.0 * (*S[3]) * d01 * d45;   // ∂d23
-            dH += -6.0 * (*S[0]) * d13 * d45;  // ∂d02
-            dH += 3.0 * (*S[1]) * d03 * d45;   // ∂d12
-            dH += 3.0 * (*S[0]) * d14 * d35;   // ∂d02
-            dH += -(*S[5]) * d03 * d14;        // ∂d25
-            
-            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
-            dH += 2.0 * (*S[1]) * d34 * d05;   // ∂d12
-            dH += -6.0 * (*S[4]) * d13 * d05;  // ∂d24
-            dH += 3.0 * (*S[3]) * d14 * d05;   // ∂d23
-            dH += 3.0 * (*S[5]) * d13 * d04;   // ∂d25
-            dH += -(*S[5]) * d14 * d03;        // ∂d25
-            
-            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
-            dH += 2.0 * (*S[3]) * d45 * d01;   // ∂d23
-            dH += -6.0 * (*S[4]) * d35 * d01;  // ∂d24
-            dH += 3.0 * (*S[5]) * d34 * d01;   // ∂d25
-            dH += 3.0 * (*S[4]) * d03 * d15;   // ∂d24
-            dH += -(*S[5]) * d03 * d14;        // ∂d25
-            
-            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
-            dH += 2.0 * (*S[1]) * d34 * d05;   // ∂d12
-            dH += -6.0 * (*S[1]) * d35 * d04;  // ∂d12
-            dH += 3.0 * (*S[1]) * d03 * d45;   // ∂d12
-            dH += 3.0 * (*S[4]) * d35 * d01;   // ∂d24
-            dH += -(*S[5]) * d03 * d01;        // ∂d25
-            
-            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
-            dH += 2.0 * (*S[3]) * d45 * d01;   // ∂d23
-            dH += -6.0 * (*S[3]) * d04 * d15;  // ∂d23
-            dH += 3.0 * (*S[3]) * d14 * d05;   // ∂d23
-            dH += 3.0 * (*S[1]) * d04 * d35;   // ∂d12
-            dH += -(*S[1]) * d14 * d03;        // ∂d12
-            
-            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
-            dH += 2.0 * (*S[1]) * d05 * d34;   // ∂d12
-            dH += -6.0 * (*S[0]) * d15 * d34;  // ∂d02
-            dH += 3.0 * (*S[5]) * d01 * d34;   // ∂d25
-            dH += 3.0 * (*S[4]) * d15 * d03;   // ∂d24
-            dH += -(*S[5]) * d03 * d14;        // ∂d25
-        }
-        else if (pos == 3) {
-            // ∂/∂S_3 of all 6 permutations
-            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
-            dH += 2.0 * (*S[2]) * d01 * d45;   // ∂d23
-            dH += -6.0 * (*S[1]) * d02 * d45;  // ∂d13
-            dH += 3.0 * (*S[0]) * d12 * d45;   // ∂d03
-            dH += 3.0 * (*S[5]) * d02 * d14;   // ∂d35
-            dH += -(*S[0]) * d14 * d25;        // ∂d03
-            
-            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
-            dH += 2.0 * (*S[4]) * d12 * d05;   // ∂d34
-            dH += -6.0 * (*S[1]) * d24 * d05;  // ∂d13
-            dH += 3.0 * (*S[2]) * d14 * d05;   // ∂d23
-            dH += 3.0 * (*S[1]) * d25 * d04;   // ∂d13
-            dH += -(*S[0]) * d14 * d25;        // ∂d03
-            
-            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
-            dH += 2.0 * (*S[2]) * d45 * d01;   // ∂d23
-            dH += -6.0 * (*S[5]) * d24 * d01;  // ∂d35
-            dH += 3.0 * (*S[4]) * d25 * d01;   // ∂d34
-            dH += 3.0 * (*S[0]) * d24 * d15;   // ∂d03
-            dH += -(*S[0]) * d25 * d14;        // ∂d03
-            
-            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
-            dH += 2.0 * (*S[4]) * d05 * d12;   // ∂d34
-            dH += -6.0 * (*S[5]) * d04 * d12;  // ∂d35
-            dH += 3.0 * (*S[0]) * d45 * d12;   // ∂d03
-            dH += 3.0 * (*S[5]) * d01 * d24;   // ∂d35
-            dH += -(*S[0]) * d01 * d25;        // ∂d03
-            
-            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
-            dH += 2.0 * (*S[2]) * d45 * d01;   // ∂d23
-            dH += -6.0 * (*S[2]) * d04 * d15;  // ∂d23
-            dH += 3.0 * (*S[2]) * d14 * d05;   // ∂d23
-            dH += 3.0 * (*S[5]) * d04 * d12;   // ∂d35
-            dH += -(*S[0]) * d14 * d12;        // ∂d03
-            
-            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
-            dH += 2.0 * (*S[4]) * d05 * d12;   // ∂d34
-            dH += -6.0 * (*S[4]) * d15 * d02;  // ∂d34
-            dH += 3.0 * (*S[4]) * d25 * d01;   // ∂d34
-            dH += 3.0 * (*S[0]) * d15 * d24;   // ∂d03
-            dH += -(*S[0]) * d25 * d14;        // ∂d03
-        }
-        else if (pos == 4) {
-            // ∂/∂S_4 of all 6 permutations
-            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
-            dH += 2.0 * (*S[5]) * d01 * d23;   // ∂d45
-            dH += -6.0 * (*S[5]) * d02 * d13;  // ∂d45
-            dH += 3.0 * (*S[5]) * d03 * d12;   // ∂d45
-            dH += 3.0 * (*S[1]) * d02 * d35;   // ∂d14
-            dH += -(*S[1]) * d03 * d25;        // ∂d14
-            
-            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
-            dH += 2.0 * (*S[3]) * d12 * d05;   // ∂d34
-            dH += -6.0 * (*S[2]) * d13 * d05;  // ∂d24
-            dH += 3.0 * (*S[1]) * d23 * d05;   // ∂d14
-            dH += 3.0 * (*S[0]) * d13 * d25;   // ∂d04
-            dH += -(*S[1]) * d25 * d03;        // ∂d14
-            
-            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
-            dH += 2.0 * (*S[5]) * d23 * d01;   // ∂d45
-            dH += -6.0 * (*S[2]) * d35 * d01;  // ∂d24
-            dH += 3.0 * (*S[3]) * d25 * d01;   // ∂d34
-            dH += 3.0 * (*S[2]) * d03 * d15;   // ∂d24
-            dH += -(*S[1]) * d25 * d03;        // ∂d14
-            
-            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
-            dH += 2.0 * (*S[3]) * d05 * d12;   // ∂d34
-            dH += -6.0 * (*S[0]) * d35 * d12;  // ∂d04
-            dH += 3.0 * (*S[5]) * d03 * d12;   // ∂d45
-            dH += 3.0 * (*S[2]) * d35 * d01;   // ∂d24
-            // no d04, d14, d24, d34, d45 in last term
-            
-            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
-            dH += 2.0 * (*S[5]) * d01 * d23;   // ∂d45
-            dH += -6.0 * (*S[0]) * d15 * d23;  // ∂d04
-            dH += 3.0 * (*S[1]) * d05 * d23;   // ∂d14
-            dH += 3.0 * (*S[0]) * d12 * d35;   // ∂d04
-            dH += -(*S[1]) * d12 * d03;        // ∂d14
-            
-            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
-            dH += 2.0 * (*S[3]) * d05 * d12;   // ∂d34
-            dH += -6.0 * (*S[3]) * d15 * d02;  // ∂d34
-            dH += 3.0 * (*S[3]) * d25 * d01;   // ∂d34
-            dH += 3.0 * (*S[2]) * d15 * d03;   // ∂d24
-            dH += -(*S[1]) * d25 * d03;        // ∂d14
-        }
-        else { // pos == 5
-            // ∂/∂S_5 of all 6 permutations
-            // Perm 0: 2*d01*d23*d45 - 6*d02*d13*d45 + 3*d03*d12*d45 + 3*d02*d14*d35 - d03*d14*d25
-            dH += 2.0 * (*S[4]) * d01 * d23;   // ∂d45
-            dH += -6.0 * (*S[4]) * d02 * d13;  // ∂d45
-            dH += 3.0 * (*S[4]) * d03 * d12;   // ∂d45
-            dH += 3.0 * (*S[3]) * d02 * d14;   // ∂d35
-            dH += -(*S[2]) * d03 * d14;        // ∂d25
-            
-            // Perm 1: 2*d12*d34*d05 - 6*d13*d24*d05 + 3*d14*d23*d05 + 3*d13*d25*d04 - d14*d25*d03
-            dH += 2.0 * (*S[0]) * d12 * d34;   // ∂d05
-            dH += -6.0 * (*S[0]) * d13 * d24;  // ∂d05
-            dH += 3.0 * (*S[0]) * d14 * d23;   // ∂d05
-            dH += 3.0 * (*S[2]) * d13 * d04;   // ∂d25
-            dH += -(*S[2]) * d14 * d03;        // ∂d25
-            
-            // Perm 2: 2*d23*d45*d01 - 6*d24*d35*d01 + 3*d25*d34*d01 + 3*d24*d03*d15 - d25*d03*d14
-            dH += 2.0 * (*S[4]) * d23 * d01;   // ∂d45
-            dH += -6.0 * (*S[3]) * d24 * d01;  // ∂d35
-            dH += 3.0 * (*S[2]) * d34 * d01;   // ∂d25
-            dH += 3.0 * (*S[1]) * d24 * d03;   // ∂d15
-            dH += -(*S[2]) * d03 * d14;        // ∂d25
-            
-            // Perm 3: 2*d34*d05*d12 - 6*d35*d04*d12 + 3*d03*d45*d12 + 3*d35*d01*d24 - d03*d01*d25
-            dH += 2.0 * (*S[0]) * d34 * d12;   // ∂d05
-            dH += -6.0 * (*S[3]) * d04 * d12;  // ∂d35
-            dH += 3.0 * (*S[4]) * d03 * d12;   // ∂d45
-            dH += 3.0 * (*S[3]) * d01 * d24;   // ∂d35
-            dH += -(*S[2]) * d03 * d01;        // ∂d25
-            
-            // Perm 4: 2*d45*d01*d23 - 6*d04*d15*d23 + 3*d14*d05*d23 + 3*d04*d12*d35 - d14*d12*d03
-            dH += 2.0 * (*S[4]) * d01 * d23;   // ∂d45
-            dH += -6.0 * (*S[1]) * d04 * d23;  // ∂d15
-            dH += 3.0 * (*S[0]) * d14 * d23;   // ∂d05
-            dH += 3.0 * (*S[3]) * d04 * d12;   // ∂d35
-            // no d*5 in last term
-            
-            // Perm 5: 2*d05*d12*d34 - 6*d15*d02*d34 + 3*d25*d01*d34 + 3*d15*d03*d24 - d25*d03*d14
-            dH += 2.0 * (*S[0]) * d12 * d34;   // ∂d05
-            dH += -6.0 * (*S[1]) * d02 * d34;  // ∂d15
-            dH += 3.0 * (*S[2]) * d01 * d34;   // ∂d25
-            dH += 3.0 * (*S[1]) * d03 * d24;   // ∂d15
-            dH += -(*S[2]) * d03 * d14;        // ∂d25
-        }
-        
-        H += prefactor * dH;
-    }
-    
-    return H;
+    // Delegate to the systematic loop-based time-dependent version.
+    // get_effective_J7() uses the current strain state, not t, so t=0 is fine.
+    return get_ring_exchange_field(site, 0.0);
 }
 
 SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site, double t) const {
@@ -2140,36 +1174,9 @@ SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site, double t) c
 }
 
 SpinVector StrainPhononLattice::get_local_field(size_t site, double t) const {
-    // Time-dependent version that uses effective J7(t)
-    SpinVector H = Eigen::Vector3d::Zero();
-    
-    // External field
-    H += field[site];
-    
-    // NN exchange
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        H -= nn_interaction[site][n] * spins[j];
-    }
-    
-    // 2nd NN
-    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
-        size_t j = j2_partners[site][n];
-        H -= j2_interaction[site][n] * spins[j];
-    }
-    
-    // 3rd NN
-    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
-        size_t j = j3_partners[site][n];
-        H -= j3_interaction[site][n] * spins[j];
-    }
-    
-    // Time-dependent ring exchange
+    SpinVector H = bilinear_field(site);
     H += get_ring_exchange_field(site, t);
-    
-    // Magnetoelastic coupling
     H += get_magnetoelastic_field(site);
-    
     return H;
 }
 
@@ -2179,65 +1186,53 @@ SpinVector StrainPhononLattice::get_local_field(size_t site, double t) const {
 
 void StrainPhononLattice::strain_derivatives(
     const StrainState& eps, double t,
-    const double* dH_deps_xx_arr,
-    const double* dH_deps_yy_arr,
-    const double* dH_deps_xy_arr,
+    double dH_deps_xx,
+    double dH_deps_yy,
+    double dH_deps_xy,
     StrainState& deps_dt) const
 {
-    // Strain equations of motion:
-    // M d²ε_xx/dt² = -(C11 ε_xx + C12 ε_yy) - ∂H_c/∂ε_xx - γ V_xx + F_A1g + F_Eg1
-    // M d²ε_yy/dt² = -(C11 ε_yy + C12 ε_xx) - ∂H_c/∂ε_yy - γ V_yy + F_A1g - F_Eg1
-    // M d²ε_xy/dt² = -4C44 ε_xy - ∂H_c/∂ε_xy - γ V_xy + F_Eg2
+    // Strain equations of motion (Eg damping only):
+    // M d²ε_xx/dt² = -(C11 ε_xx + C12 ε_yy) - ∂H_c/∂ε_xx - γ_Eg V_xx + F_Eg1
+    // M d²ε_yy/dt² = -(C11 ε_yy + C12 ε_xx) - ∂H_c/∂ε_yy - γ_Eg V_yy - F_Eg1
+    // M d²ε_xy/dt² = -4C44 ε_xy - ∂H_c/∂ε_xy - γ_Eg V_xy + F_Eg2
     
     double C11 = elastic_params.C11;
     double C12 = elastic_params.C12;
     double C44 = elastic_params.C44;
     double M = elastic_params.M;
-    double gamma_A1g = elastic_params.gamma_A1g;
     double gamma_Eg = elastic_params.gamma_Eg;
     
     // Get drive forces
-    double F_A1g = drive_params.A1g_force(t);
     double F_Eg1 = drive_params.Eg1_force(t);
     double F_Eg2 = drive_params.Eg2_force(t);
     
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        double exx = eps.epsilon_xx[b];
-        double eyy = eps.epsilon_yy[b];
-        double exy = eps.epsilon_xy[b];
-        
-        // Position derivatives = velocities
-        deps_dt.epsilon_xx[b] = eps.V_xx[b];
-        deps_dt.epsilon_yy[b] = eps.V_yy[b];
-        deps_dt.epsilon_xy[b] = eps.V_xy[b];
-        
-        // Velocity derivatives (accelerations)
-        // For A1g mode (ε_xx + ε_yy): use gamma_A1g
-        // For Eg mode (ε_xx - ε_yy, ε_xy): use gamma_Eg
-        
-        // ε_xx has both A1g and Eg character
-        double elastic_force_xx = -(C11 * exx + C12 * eyy);
-        deps_dt.V_xx[b] = (elastic_force_xx - dH_deps_xx_arr[b] 
-                         - 0.5 * (gamma_A1g + gamma_Eg) * eps.V_xx[b]
-                         + F_A1g + F_Eg1) / M;
-        
-        // ε_yy has both A1g and Eg character  
-        double elastic_force_yy = -(C11 * eyy + C12 * exx);
-        deps_dt.V_yy[b] = (elastic_force_yy - dH_deps_yy_arr[b]
-                         - 0.5 * (gamma_A1g + gamma_Eg) * eps.V_yy[b]
-                         + F_A1g - F_Eg1) / M;
-        
-        // ε_xy is pure Eg
-        double elastic_force_xy = -4.0 * C44 * exy;
-        deps_dt.V_xy[b] = (elastic_force_xy - dH_deps_xy_arr[b]
-                         - gamma_Eg * eps.V_xy[b]
-                         + F_Eg2) / M;
-    }
+    double exx = eps.epsilon_xx;
+    double eyy = eps.epsilon_yy;
+    double exy = eps.epsilon_xy;
+    
+    // Position derivatives = velocities
+    deps_dt.epsilon_xx = eps.V_xx;
+    deps_dt.epsilon_yy = eps.V_yy;
+    deps_dt.epsilon_xy = eps.V_xy;
+    
+    // Velocity derivatives (accelerations)
+    double elastic_force_xx = -(C11 * exx + C12 * eyy);
+    deps_dt.V_xx = (elastic_force_xx - dH_deps_xx 
+                     - gamma_Eg * eps.V_xx
+                     + F_Eg1) / M;
+    
+    double elastic_force_yy = -(C11 * eyy + C12 * exx);
+    deps_dt.V_yy = (elastic_force_yy - dH_deps_yy
+                     - gamma_Eg * eps.V_yy
+                     - F_Eg1) / M;
+    
+    double elastic_force_xy = -4.0 * C44 * exy;
+    deps_dt.V_xy = (elastic_force_xy - dH_deps_xy
+                     - gamma_Eg * eps.V_xy
+                     + F_Eg2) / M;
 }
 
 void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
-    // State layout: [S0_x, S0_y, S0_z, ..., SN_z, ε_xx_0, ε_xx_1, ε_xx_2, ...]
-    
     const size_t spin_offset = spin_dim * lattice_size;
     
     // Extract strain state
@@ -2245,19 +1240,17 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
     eps.from_array(&x[spin_offset]);
     
     // Temporarily update strain for field calculations
-    // (Note: this modifies class state during ODE evaluation)
     StrainState saved_strain = strain;
     const_cast<StrainPhononLattice*>(this)->strain = eps;
     
     // Compute magnetoelastic coupling derivatives
-    double dH_deps_xx_arr[StrainState::N_BONDS];
-    double dH_deps_yy_arr[StrainState::N_BONDS];
-    double dH_deps_xy_arr[StrainState::N_BONDS];
-    
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        dH_deps_xx_arr[b] = dH_deps_xx(b);
-        dH_deps_yy_arr[b] = dH_deps_yy(b);
-        dH_deps_xy_arr[b] = dH_deps_xy(b);
+    double dH_deps_xx, dH_deps_yy, dH_deps_xy;
+    {
+        auto [Eg1_fac, Eg2_fac] = Eg_spin_factors();
+        double lambda_Eg = magnetoelastic_params.lambda_Eg;
+        dH_deps_xx = +lambda_Eg * Eg1_fac;
+        dH_deps_yy = -lambda_Eg * Eg1_fac;
+        dH_deps_xy = 2.0 * lambda_Eg * Eg2_fac;
     }
     
     // Update spins from state vector
@@ -2268,19 +1261,14 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
     }
     
     // Add J7-ring exchange force: ∂H_J7/∂ε = (dJ7/dε) * E_ring
-    // This term was previously missing and caused energy non-conservation
-    double dJ7_deps_xx[StrainState::N_BONDS];
-    double dJ7_deps_yy[StrainState::N_BONDS];
-    double dJ7_deps_xy[StrainState::N_BONDS];
+    double dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy;
     get_dJ7_deps(dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy);
     
     double E_ring = get_ring_exchange_normalized();
     
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        dH_deps_xx_arr[b] += dJ7_deps_xx[b] * E_ring;
-        dH_deps_yy_arr[b] += dJ7_deps_yy[b] * E_ring;
-        dH_deps_xy_arr[b] += dJ7_deps_xy[b] * E_ring;
-    }
+    dH_deps_xx += dJ7_deps_xx * E_ring;
+    dH_deps_yy += dJ7_deps_yy * E_ring;
+    dH_deps_xy += dJ7_deps_xy * E_ring;
     
     // Update current time for time-dependent parameters
     const_cast<StrainPhononLattice*>(this)->current_time = t;
@@ -2300,7 +1288,7 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
     
     // Strain equations of motion
     StrainState deps_dt;
-    strain_derivatives(eps, t, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr, deps_dt);
+    strain_derivatives(eps, t, dH_deps_xx, dH_deps_yy, dH_deps_xy, deps_dt);
     deps_dt.to_array(&dxdt[spin_offset]);
     
     // Restore original strain
@@ -2343,16 +1331,11 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
     vector<Eigen::Vector3d> M_stag_traj;
     vector<double> energy_traj;
     
-    // Strain trajectories - per bond type (like PhononLattice)
-    vector<double> eps_xx_0_traj, eps_xx_1_traj, eps_xx_2_traj;
-    vector<double> eps_yy_0_traj, eps_yy_1_traj, eps_yy_2_traj;
-    vector<double> eps_xy_0_traj, eps_xy_1_traj, eps_xy_2_traj;
-    vector<double> V_xx_0_traj, V_xx_1_traj, V_xx_2_traj;
-    vector<double> V_yy_0_traj, V_yy_1_traj, V_yy_2_traj;
-    vector<double> V_xy_0_traj, V_xy_1_traj, V_xy_2_traj;
+    // Strain trajectories
+    vector<double> eps_xx_traj, eps_yy_traj, eps_xy_traj;
+    vector<double> V_xx_traj, V_yy_traj, V_xy_traj;
     
     // Mode amplitude trajectories
-    vector<double> eps_A1g_traj;
     vector<double> eps_Eg1_traj;
     vector<double> eps_Eg2_traj;
     vector<double> J7_eff_traj;
@@ -2370,7 +1353,6 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
             Eigen::Vector3d M = magnetization_local();
             Eigen::Vector3d M_stag = magnetization_local_antiferro();
             double E = total_energy();
-            double eps_A1g = A1g_amplitude();
             double eps_Eg1 = Eg1_amplitude();
             double eps_Eg2 = Eg2_amplitude();
             double J7_eff = get_effective_J7(t);
@@ -2380,30 +1362,17 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
             M_traj.push_back(M);
             M_stag_traj.push_back(M_stag);
             energy_traj.push_back(E);
-            eps_A1g_traj.push_back(eps_A1g);
             eps_Eg1_traj.push_back(eps_Eg1);
             eps_Eg2_traj.push_back(eps_Eg2);
             J7_eff_traj.push_back(J7_eff);
             
-            // Store per-bond-type strain (like PhononLattice per-bond-type phonon)
-            eps_xx_0_traj.push_back(strain.epsilon_xx[0]);
-            eps_xx_1_traj.push_back(strain.epsilon_xx[1]);
-            eps_xx_2_traj.push_back(strain.epsilon_xx[2]);
-            eps_yy_0_traj.push_back(strain.epsilon_yy[0]);
-            eps_yy_1_traj.push_back(strain.epsilon_yy[1]);
-            eps_yy_2_traj.push_back(strain.epsilon_yy[2]);
-            eps_xy_0_traj.push_back(strain.epsilon_xy[0]);
-            eps_xy_1_traj.push_back(strain.epsilon_xy[1]);
-            eps_xy_2_traj.push_back(strain.epsilon_xy[2]);
-            V_xx_0_traj.push_back(strain.V_xx[0]);
-            V_xx_1_traj.push_back(strain.V_xx[1]);
-            V_xx_2_traj.push_back(strain.V_xx[2]);
-            V_yy_0_traj.push_back(strain.V_yy[0]);
-            V_yy_1_traj.push_back(strain.V_yy[1]);
-            V_yy_2_traj.push_back(strain.V_yy[2]);
-            V_xy_0_traj.push_back(strain.V_xy[0]);
-            V_xy_1_traj.push_back(strain.V_xy[1]);
-            V_xy_2_traj.push_back(strain.V_xy[2]);
+            // Store strain trajectory
+            eps_xx_traj.push_back(strain.epsilon_xx);
+            eps_yy_traj.push_back(strain.epsilon_yy);
+            eps_xy_traj.push_back(strain.epsilon_xy);
+            V_xx_traj.push_back(strain.V_xx);
+            V_yy_traj.push_back(strain.V_yy);
+            V_xy_traj.push_back(strain.V_xy);
             
             // Store full spin configuration (like PhononLattice /trajectory/spins)
             vector<double> spin_snapshot(lattice_size * 3);
@@ -2419,7 +1388,6 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
                 cout << "t = " << t << ", E = " << E 
                      << ", |M| = " << M.norm()
                      << ", |M_stag| = " << M_stag.norm()
-                     << ", ε_A1g = " << eps_A1g 
                      << ", |ε_Eg| = " << std::sqrt(eps_Eg1*eps_Eg1 + eps_Eg2*eps_Eg2) << endl;
             }
             
@@ -2448,26 +1416,20 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
     
     // Save text output (always)
     save_trajectory_txt(output_dir, times, M_traj, M_stag_traj, energy_traj,
-                        eps_A1g_traj, eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj);
+                        eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj);
     
-    // Save per-bond-type strain trajectory to separate file
+    // Save strain trajectory to separate file
     {
-        ofstream strain_file(output_dir + "/strain_per_bond_trajectory.txt");
-        strain_file << "# t eps_xx_0 eps_xx_1 eps_xx_2 eps_yy_0 eps_yy_1 eps_yy_2 "
-                    << "eps_xy_0 eps_xy_1 eps_xy_2 V_xx_0 V_xx_1 V_xx_2 "
-                    << "V_yy_0 V_yy_1 V_yy_2 V_xy_0 V_xy_1 V_xy_2\n";
+        ofstream strain_file(output_dir + "/strain_component_trajectory.txt");
+        strain_file << "# t eps_xx eps_yy eps_xy V_xx V_yy V_xy\n";
         strain_file << std::scientific << std::setprecision(12);
         for (size_t i = 0; i < times.size(); ++i) {
             strain_file << times[i] << " "
-                        << eps_xx_0_traj[i] << " " << eps_xx_1_traj[i] << " " << eps_xx_2_traj[i] << " "
-                        << eps_yy_0_traj[i] << " " << eps_yy_1_traj[i] << " " << eps_yy_2_traj[i] << " "
-                        << eps_xy_0_traj[i] << " " << eps_xy_1_traj[i] << " " << eps_xy_2_traj[i] << " "
-                        << V_xx_0_traj[i] << " " << V_xx_1_traj[i] << " " << V_xx_2_traj[i] << " "
-                        << V_yy_0_traj[i] << " " << V_yy_1_traj[i] << " " << V_yy_2_traj[i] << " "
-                        << V_xy_0_traj[i] << " " << V_xy_1_traj[i] << " " << V_xy_2_traj[i] << "\n";
+                        << eps_xx_traj[i] << " " << eps_yy_traj[i] << " " << eps_xy_traj[i] << " "
+                        << V_xx_traj[i] << " " << V_yy_traj[i] << " " << V_xy_traj[i] << "\n";
         }
         strain_file.close();
-        cout << "  strain_per_bond_trajectory.txt: " << times.size() << " timesteps" << endl;
+        cout << "  strain_component_trajectory.txt: " << times.size() << " timesteps" << endl;
     }
     
 #ifdef HDF5_ENABLED
@@ -2533,30 +1495,17 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
             ds.write(data.data(), H5::PredType::NATIVE_DOUBLE);
         };
         
-        // Strain tensor components - per bond type (like PhononLattice per-bond phonon)
-        write_dataset("eps_xx_0", eps_xx_0_traj);
-        write_dataset("eps_xx_1", eps_xx_1_traj);
-        write_dataset("eps_xx_2", eps_xx_2_traj);
-        write_dataset("eps_yy_0", eps_yy_0_traj);
-        write_dataset("eps_yy_1", eps_yy_1_traj);
-        write_dataset("eps_yy_2", eps_yy_2_traj);
-        write_dataset("eps_xy_0", eps_xy_0_traj);
-        write_dataset("eps_xy_1", eps_xy_1_traj);
-        write_dataset("eps_xy_2", eps_xy_2_traj);
+        // Strain tensor components
+        write_dataset("eps_xx", eps_xx_traj);
+        write_dataset("eps_yy", eps_yy_traj);
+        write_dataset("eps_xy", eps_xy_traj);
         
-        // Velocity components - per bond type
-        write_dataset("V_xx_0", V_xx_0_traj);
-        write_dataset("V_xx_1", V_xx_1_traj);
-        write_dataset("V_xx_2", V_xx_2_traj);
-        write_dataset("V_yy_0", V_yy_0_traj);
-        write_dataset("V_yy_1", V_yy_1_traj);
-        write_dataset("V_yy_2", V_yy_2_traj);
-        write_dataset("V_xy_0", V_xy_0_traj);
-        write_dataset("V_xy_1", V_xy_1_traj);
-        write_dataset("V_xy_2", V_xy_2_traj);
+        // Velocity components
+        write_dataset("V_xx", V_xx_traj);
+        write_dataset("V_yy", V_yy_traj);
+        write_dataset("V_xy", V_xy_traj);
         
         // Mode amplitudes
-        write_dataset("eps_A1g", eps_A1g_traj);
         write_dataset("eps_Eg1", eps_Eg1_traj);
         write_dataset("eps_Eg2", eps_Eg2_traj);
         write_dataset("J7_eff", J7_eff_traj);
@@ -2595,11 +1544,9 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
         write_attr_double("C12", elastic_params.C12);
         write_attr_double("C44", elastic_params.C44);
         write_attr_double("M", elastic_params.M);
-        write_attr_double("gamma_A1g", elastic_params.gamma_A1g);
         write_attr_double("gamma_Eg", elastic_params.gamma_Eg);
         
         // Magnetoelastic parameters
-        write_attr_double("lambda_A1g", magnetoelastic_params.lambda_A1g);
         write_attr_double("lambda_Eg", magnetoelastic_params.lambda_Eg);
         write_attr_double("J", magnetoelastic_params.J);
         write_attr_double("K", magnetoelastic_params.K);
@@ -2613,7 +1560,6 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
         write_attr_double("pump_frequency", drive_params.omega_1);
         write_attr_double("pump_time", drive_params.t_1);
         write_attr_double("pump_width", drive_params.sigma_1);
-        write_attr_double("drive_strength_A1g", drive_params.drive_strength_A1g);
         write_attr_double("drive_strength_Eg1", drive_params.drive_strength_Eg1);
         write_attr_double("drive_strength_Eg2", drive_params.drive_strength_Eg2);
         
@@ -2689,8 +1635,6 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     const double spin_noise_sigma =
         (kBT > 0.0) ? std::sqrt(2.0 * alpha_gilbert * kBT / (spin_length * dt)) : 0.0;
 
-    const double strain_noise_sigma_A1g =
-        (kBT > 0.0) ? std::sqrt(2.0 * elastic_params.gamma_A1g * kBT / dt) : 0.0;
     const double strain_noise_sigma_Eg =
         (kBT > 0.0) ? std::sqrt(2.0 * elastic_params.gamma_Eg * kBT / dt) : 0.0;
 
@@ -2700,13 +1644,9 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     vector<double> times;
     vector<Eigen::Vector3d> M_traj, M_stag_traj;
     vector<double> energy_traj;
-    vector<double> eps_xx_0_traj, eps_xx_1_traj, eps_xx_2_traj;
-    vector<double> eps_yy_0_traj, eps_yy_1_traj, eps_yy_2_traj;
-    vector<double> eps_xy_0_traj, eps_xy_1_traj, eps_xy_2_traj;
-    vector<double> V_xx_0_traj, V_xx_1_traj, V_xx_2_traj;
-    vector<double> V_yy_0_traj, V_yy_1_traj, V_yy_2_traj;
-    vector<double> V_xy_0_traj, V_xy_1_traj, V_xy_2_traj;
-    vector<double> eps_A1g_traj, eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj;
+    vector<double> eps_xx_traj, eps_yy_traj, eps_xy_traj;
+    vector<double> V_xx_traj, V_yy_traj, V_xy_traj;
+    vector<double> eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj;
     vector<vector<double>> spin_traj;
 
     double t = t_start;
@@ -2732,9 +1672,7 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     // ----------------------------------------------------------
     // Noise vectors (allocated once, reused every step)
     vector<Eigen::Vector3d> xi_noise(lattice_size);       // spin noise per site
-    vector<double> eta_xx(StrainState::N_BONDS, 0.0);     // strain noise
-    vector<double> eta_yy(StrainState::N_BONDS, 0.0);
-    vector<double> eta_xy(StrainState::N_BONDS, 0.0);
+    double eta_xx = 0.0, eta_yy = 0.0, eta_xy = 0.0;     // strain noise
 
     // RHS buffers
     vector<Eigen::Vector3d> spin_deriv(lattice_size);     // dS/dt per site
@@ -2746,37 +1684,31 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
         current_time = time;
 
         // -- magnetoelastic strain derivatives --
-        double dH_deps_xx_arr[StrainState::N_BONDS];
-        double dH_deps_yy_arr[StrainState::N_BONDS];
-        double dH_deps_xy_arr[StrainState::N_BONDS];
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            dH_deps_xx_arr[b] = dH_deps_xx(b);
-            dH_deps_yy_arr[b] = dH_deps_yy(b);
-            dH_deps_xy_arr[b] = dH_deps_xy(b);
+        double dH_deps_xx, dH_deps_yy, dH_deps_xy;
+        {
+            auto [Eg1_fac, Eg2_fac] = Eg_spin_factors();
+            double lambda_Eg = magnetoelastic_params.lambda_Eg;
+            dH_deps_xx = +lambda_Eg * Eg1_fac;
+            dH_deps_yy = -lambda_Eg * Eg1_fac;
+            dH_deps_xy = 2.0 * lambda_Eg * Eg2_fac;
         }
 
         // J7-ring exchange strain force
-        double dJ7_deps_xx[StrainState::N_BONDS];
-        double dJ7_deps_yy[StrainState::N_BONDS];
-        double dJ7_deps_xy[StrainState::N_BONDS];
+        double dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy;
         get_dJ7_deps(dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy);
         double E_ring = get_ring_exchange_normalized();
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            dH_deps_xx_arr[b] += dJ7_deps_xx[b] * E_ring;
-            dH_deps_yy_arr[b] += dJ7_deps_yy[b] * E_ring;
-            dH_deps_xy_arr[b] += dJ7_deps_xy[b] * E_ring;
-        }
+        dH_deps_xx += dJ7_deps_xx * E_ring;
+        dH_deps_yy += dJ7_deps_yy * E_ring;
+        dH_deps_xy += dJ7_deps_xy * E_ring;
 
         // -- Strain EOM (deterministic part from strain_derivatives) --
-        strain_derivatives(strain, time, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr,
+        strain_derivatives(strain, time, dH_deps_xx, dH_deps_yy, dH_deps_xy,
                            out_strain_deriv);
 
         // Add thermal noise to strain velocity derivatives: η / M
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            out_strain_deriv.V_xx[b] += eta_xx[b] / elastic_params.M;
-            out_strain_deriv.V_yy[b] += eta_yy[b] / elastic_params.M;
-            out_strain_deriv.V_xy[b] += eta_xy[b] / elastic_params.M;
-        }
+        out_strain_deriv.V_xx += eta_xx / elastic_params.M;
+        out_strain_deriv.V_yy += eta_yy / elastic_params.M;
+        out_strain_deriv.V_xy += eta_xy / elastic_params.M;
 
         // -- Spin sLLG --
         for (size_t i = 0; i < lattice_size; ++i) {
@@ -2800,7 +1732,6 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             Eigen::Vector3d M = magnetization_local();
             Eigen::Vector3d M_stag = magnetization_local_antiferro();
             double E = total_energy();
-            double eA1g = A1g_amplitude();
             double eEg1 = Eg1_amplitude();
             double eEg2 = Eg2_amplitude();
             double J7e = get_effective_J7(t);
@@ -2809,29 +1740,16 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             M_traj.push_back(M);
             M_stag_traj.push_back(M_stag);
             energy_traj.push_back(E);
-            eps_A1g_traj.push_back(eA1g);
             eps_Eg1_traj.push_back(eEg1);
             eps_Eg2_traj.push_back(eEg2);
             J7_eff_traj.push_back(J7e);
 
-            eps_xx_0_traj.push_back(strain.epsilon_xx[0]);
-            eps_xx_1_traj.push_back(strain.epsilon_xx[1]);
-            eps_xx_2_traj.push_back(strain.epsilon_xx[2]);
-            eps_yy_0_traj.push_back(strain.epsilon_yy[0]);
-            eps_yy_1_traj.push_back(strain.epsilon_yy[1]);
-            eps_yy_2_traj.push_back(strain.epsilon_yy[2]);
-            eps_xy_0_traj.push_back(strain.epsilon_xy[0]);
-            eps_xy_1_traj.push_back(strain.epsilon_xy[1]);
-            eps_xy_2_traj.push_back(strain.epsilon_xy[2]);
-            V_xx_0_traj.push_back(strain.V_xx[0]);
-            V_xx_1_traj.push_back(strain.V_xx[1]);
-            V_xx_2_traj.push_back(strain.V_xx[2]);
-            V_yy_0_traj.push_back(strain.V_yy[0]);
-            V_yy_1_traj.push_back(strain.V_yy[1]);
-            V_yy_2_traj.push_back(strain.V_yy[2]);
-            V_xy_0_traj.push_back(strain.V_xy[0]);
-            V_xy_1_traj.push_back(strain.V_xy[1]);
-            V_xy_2_traj.push_back(strain.V_xy[2]);
+            eps_xx_traj.push_back(strain.epsilon_xx);
+            eps_yy_traj.push_back(strain.epsilon_yy);
+            eps_xy_traj.push_back(strain.epsilon_xy);
+            V_xx_traj.push_back(strain.V_xx);
+            V_yy_traj.push_back(strain.V_yy);
+            V_xy_traj.push_back(strain.V_xy);
 
             vector<double> snap(lattice_size * 3);
             for (size_t i = 0; i < lattice_size; ++i) {
@@ -2845,7 +1763,6 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
                 cout << "t = " << t << ", E = " << E
                      << ", |M| = " << M.norm()
                      << ", |M_stag| = " << M_stag.norm()
-                     << ", ε_A1g = " << eA1g
                      << ", |ε_Eg| = " << std::sqrt(eEg1*eEg1 + eEg2*eEg2) << endl;
             }
             save_count++;
@@ -2858,13 +1775,9 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             xi_noise[i] = Eigen::Vector3d(normal_dist(rng), normal_dist(rng), normal_dist(rng))
                           * spin_noise_sigma;
         }
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            // ε_xx and ε_yy have mixed A1g/Eg character → average damping
-            double sigma_mixed = 0.5 * (strain_noise_sigma_A1g + strain_noise_sigma_Eg);
-            eta_xx[b] = normal_dist(rng) * sigma_mixed;
-            eta_yy[b] = normal_dist(rng) * sigma_mixed;
-            eta_xy[b] = normal_dist(rng) * strain_noise_sigma_Eg;  // pure Eg
-        }
+        eta_xx = normal_dist(rng) * strain_noise_sigma_Eg;
+        eta_yy = normal_dist(rng) * strain_noise_sigma_Eg;
+        eta_xy = normal_dist(rng) * strain_noise_sigma_Eg;
 
         // ======================================================
         // 2. Save current state
@@ -2882,14 +1795,12 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             spins[i] = spins_saved[i] + dt * spin_deriv[i];
             spins[i] = spins[i].normalized() * spin_length;
         }
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            strain.epsilon_xx[b] = strain_saved.epsilon_xx[b] + dt * strain_deriv.epsilon_xx[b];
-            strain.epsilon_yy[b] = strain_saved.epsilon_yy[b] + dt * strain_deriv.epsilon_yy[b];
-            strain.epsilon_xy[b] = strain_saved.epsilon_xy[b] + dt * strain_deriv.epsilon_xy[b];
-            strain.V_xx[b] = strain_saved.V_xx[b] + dt * strain_deriv.V_xx[b];
-            strain.V_yy[b] = strain_saved.V_yy[b] + dt * strain_deriv.V_yy[b];
-            strain.V_xy[b] = strain_saved.V_xy[b] + dt * strain_deriv.V_xy[b];
-        }
+        strain.epsilon_xx = strain_saved.epsilon_xx + dt * strain_deriv.epsilon_xx;
+        strain.epsilon_yy = strain_saved.epsilon_yy + dt * strain_deriv.epsilon_yy;
+        strain.epsilon_xy = strain_saved.epsilon_xy + dt * strain_deriv.epsilon_xy;
+        strain.V_xx = strain_saved.V_xx + dt * strain_deriv.V_xx;
+        strain.V_yy = strain_saved.V_yy + dt * strain_deriv.V_yy;
+        strain.V_xy = strain_saved.V_xy + dt * strain_deriv.V_xy;
 
         // ======================================================
         // 4. Corrector: evaluate RHS at predicted state (same noise)
@@ -2904,20 +1815,18 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
                 + 0.5 * dt * (spin_deriv[i] + spin_deriv_pred[i]);
             spins[i] = spins[i].normalized() * spin_length;
         }
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            strain.epsilon_xx[b] = strain_saved.epsilon_xx[b]
-                + 0.5 * dt * (strain_deriv.epsilon_xx[b] + strain_deriv_pred.epsilon_xx[b]);
-            strain.epsilon_yy[b] = strain_saved.epsilon_yy[b]
-                + 0.5 * dt * (strain_deriv.epsilon_yy[b] + strain_deriv_pred.epsilon_yy[b]);
-            strain.epsilon_xy[b] = strain_saved.epsilon_xy[b]
-                + 0.5 * dt * (strain_deriv.epsilon_xy[b] + strain_deriv_pred.epsilon_xy[b]);
-            strain.V_xx[b] = strain_saved.V_xx[b]
-                + 0.5 * dt * (strain_deriv.V_xx[b] + strain_deriv_pred.V_xx[b]);
-            strain.V_yy[b] = strain_saved.V_yy[b]
-                + 0.5 * dt * (strain_deriv.V_yy[b] + strain_deriv_pred.V_yy[b]);
-            strain.V_xy[b] = strain_saved.V_xy[b]
-                + 0.5 * dt * (strain_deriv.V_xy[b] + strain_deriv_pred.V_xy[b]);
-        }
+        strain.epsilon_xx = strain_saved.epsilon_xx
+            + 0.5 * dt * (strain_deriv.epsilon_xx + strain_deriv_pred.epsilon_xx);
+        strain.epsilon_yy = strain_saved.epsilon_yy
+            + 0.5 * dt * (strain_deriv.epsilon_yy + strain_deriv_pred.epsilon_yy);
+        strain.epsilon_xy = strain_saved.epsilon_xy
+            + 0.5 * dt * (strain_deriv.epsilon_xy + strain_deriv_pred.epsilon_xy);
+        strain.V_xx = strain_saved.V_xx
+            + 0.5 * dt * (strain_deriv.V_xx + strain_deriv_pred.V_xx);
+        strain.V_yy = strain_saved.V_yy
+            + 0.5 * dt * (strain_deriv.V_yy + strain_deriv_pred.V_yy);
+        strain.V_xy = strain_saved.V_xy
+            + 0.5 * dt * (strain_deriv.V_xy + strain_deriv_pred.V_xy);
 
         t += dt;
         ++step;
@@ -2927,25 +1836,19 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     // Save output (text)
     // ----------------------------------------------------------
     save_trajectory_txt(output_dir, times, M_traj, M_stag_traj, energy_traj,
-                        eps_A1g_traj, eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj);
+                        eps_Eg1_traj, eps_Eg2_traj, J7_eff_traj);
 
     {
-        ofstream strain_file(output_dir + "/strain_per_bond_trajectory.txt");
-        strain_file << "# t eps_xx_0 eps_xx_1 eps_xx_2 eps_yy_0 eps_yy_1 eps_yy_2 "
-                    << "eps_xy_0 eps_xy_1 eps_xy_2 V_xx_0 V_xx_1 V_xx_2 "
-                    << "V_yy_0 V_yy_1 V_yy_2 V_xy_0 V_xy_1 V_xy_2\n";
+        ofstream strain_file(output_dir + "/strain_component_trajectory.txt");
+        strain_file << "# t eps_xx eps_yy eps_xy V_xx V_yy V_xy\n";
         strain_file << std::scientific << std::setprecision(12);
         for (size_t i = 0; i < times.size(); ++i) {
             strain_file << times[i] << " "
-                        << eps_xx_0_traj[i] << " " << eps_xx_1_traj[i] << " " << eps_xx_2_traj[i] << " "
-                        << eps_yy_0_traj[i] << " " << eps_yy_1_traj[i] << " " << eps_yy_2_traj[i] << " "
-                        << eps_xy_0_traj[i] << " " << eps_xy_1_traj[i] << " " << eps_xy_2_traj[i] << " "
-                        << V_xx_0_traj[i] << " " << V_xx_1_traj[i] << " " << V_xx_2_traj[i] << " "
-                        << V_yy_0_traj[i] << " " << V_yy_1_traj[i] << " " << V_yy_2_traj[i] << " "
-                        << V_xy_0_traj[i] << " " << V_xy_1_traj[i] << " " << V_xy_2_traj[i] << "\n";
+                        << eps_xx_traj[i] << " " << eps_yy_traj[i] << " " << eps_xy_traj[i] << " "
+                        << V_xx_traj[i] << " " << V_yy_traj[i] << " " << V_xy_traj[i] << "\n";
         }
         strain_file.close();
-        cout << "  strain_per_bond_trajectory.txt: " << times.size() << " timesteps" << endl;
+        cout << "  strain_component_trajectory.txt: " << times.size() << " timesteps" << endl;
     }
 
 #ifdef HDF5_ENABLED
@@ -3001,13 +1904,9 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             strain_group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, scalar_traj_space)
                 .write(data.data(), H5::PredType::NATIVE_DOUBLE);
         };
-        write_ds("eps_xx_0", eps_xx_0_traj); write_ds("eps_xx_1", eps_xx_1_traj); write_ds("eps_xx_2", eps_xx_2_traj);
-        write_ds("eps_yy_0", eps_yy_0_traj); write_ds("eps_yy_1", eps_yy_1_traj); write_ds("eps_yy_2", eps_yy_2_traj);
-        write_ds("eps_xy_0", eps_xy_0_traj); write_ds("eps_xy_1", eps_xy_1_traj); write_ds("eps_xy_2", eps_xy_2_traj);
-        write_ds("V_xx_0", V_xx_0_traj); write_ds("V_xx_1", V_xx_1_traj); write_ds("V_xx_2", V_xx_2_traj);
-        write_ds("V_yy_0", V_yy_0_traj); write_ds("V_yy_1", V_yy_1_traj); write_ds("V_yy_2", V_yy_2_traj);
-        write_ds("V_xy_0", V_xy_0_traj); write_ds("V_xy_1", V_xy_1_traj); write_ds("V_xy_2", V_xy_2_traj);
-        write_ds("eps_A1g", eps_A1g_traj); write_ds("eps_Eg1", eps_Eg1_traj); write_ds("eps_Eg2", eps_Eg2_traj);
+        write_ds("eps_xx", eps_xx_traj); write_ds("eps_yy", eps_yy_traj); write_ds("eps_xy", eps_xy_traj);
+        write_ds("V_xx", V_xx_traj); write_ds("V_yy", V_yy_traj); write_ds("V_xy", V_xy_traj);
+        write_ds("eps_Eg1", eps_Eg1_traj); write_ds("eps_Eg2", eps_Eg2_traj);
         write_ds("J7_eff", J7_eff_traj); write_ds("energy", energy_traj);
         strain_group.close();
 
@@ -3028,8 +1927,7 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
         write_attr_i("save_interval", output_every);
         write_attr_d("C11", elastic_params.C11); write_attr_d("C12", elastic_params.C12);
         write_attr_d("C44", elastic_params.C44); write_attr_d("M", elastic_params.M);
-        write_attr_d("gamma_A1g", elastic_params.gamma_A1g); write_attr_d("gamma_Eg", elastic_params.gamma_Eg);
-        write_attr_d("lambda_A1g", magnetoelastic_params.lambda_A1g);
+        write_attr_d("gamma_Eg", elastic_params.gamma_Eg);
         write_attr_d("lambda_Eg", magnetoelastic_params.lambda_Eg);
         write_attr_d("J", magnetoelastic_params.J); write_attr_d("K", magnetoelastic_params.K);
         write_attr_d("Gamma", magnetoelastic_params.Gamma); write_attr_d("Gammap", magnetoelastic_params.Gammap);
@@ -3064,14 +1962,14 @@ void StrainPhononLattice::relax_strain(bool verbose) {
     if (fix_strain_) {
         if (verbose) {
             cout << "Strain relaxation SKIPPED (fix_strain = true)" << endl;
-            cout << "  Current Eg1 = " << strain.epsilon_xx[0] 
-                 << ", Eg2 = " << strain.epsilon_xy[0] << endl;
+            cout << "  Current Eg1 = " << strain.epsilon_xx 
+                 << ", Eg2 = " << strain.epsilon_xy << endl;
         }
         return;
     }
     
     // Relax strain to equilibrium given current spin configuration.
-    // We ignore A1g channel - only Eg magnetoelastic coupling is active.
+    // Only Eg magnetoelastic coupling is active.
     // 
     // The total Hamiltonian (elastic + Eg magnetoelastic) is:
     // H = (1/2)[C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²] 
@@ -3107,16 +2005,8 @@ void StrainPhononLattice::relax_strain(bool verbose) {
         return;
     }
     
-    // Compute Eg spin basis function factors (includes Kitaev, Heisenberg, Gamma, Gamma' terms)
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
-                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    // Compute Eg spin factors (consolidated)
+    auto [Eg1_spin_factor, Eg2_spin_factor] = Eg_spin_factors();
     
     // Solve for equilibrium strain (Eg-only, same for all bond types)
     // With drive H_drive = -Σ_b [F1*(ε_xx-ε_yy)/2 + F2*ε_xy]:
@@ -3131,48 +2021,43 @@ void StrainPhononLattice::relax_strain(bool verbose) {
     double eps_yy_eq = -eps_xx_eq;
     double eps_xy_eq = (drive_F_Eg2_ - 2.0 * lambda_Eg * Eg2_spin_factor) / (4.0 * C44);
     
-    // Set all bond types to equilibrium values
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        strain.epsilon_xx[b] = eps_xx_eq;
-        strain.epsilon_yy[b] = eps_yy_eq;
-        strain.epsilon_xy[b] = eps_xy_eq;
-        
-        // Zero out velocities
-        strain.V_xx[b] = 0.0;
-        strain.V_yy[b] = 0.0;
-        strain.V_xy[b] = 0.0;
-        
-        // Store equilibrium values for J7 modulation calculation
-        strain_equilibrium.epsilon_xx[b] = eps_xx_eq;
-        strain_equilibrium.epsilon_yy[b] = eps_yy_eq;
-        strain_equilibrium.epsilon_xy[b] = eps_xy_eq;
-        strain_equilibrium.V_xx[b] = 0.0;
-        strain_equilibrium.V_yy[b] = 0.0;
-        strain_equilibrium.V_xy[b] = 0.0;
-    }
+    // Set strain to equilibrium values
+    strain.epsilon_xx = eps_xx_eq;
+    strain.epsilon_yy = eps_yy_eq;
+    strain.epsilon_xy = eps_xy_eq;
+    
+    // Zero out velocities
+    strain.V_xx = 0.0;
+    strain.V_yy = 0.0;
+    strain.V_xy = 0.0;
+    
+    // Store equilibrium values for J7 modulation calculation
+    strain_equilibrium.epsilon_xx = eps_xx_eq;
+    strain_equilibrium.epsilon_yy = eps_yy_eq;
+    strain_equilibrium.epsilon_xy = eps_xy_eq;
+    strain_equilibrium.V_xx = 0.0;
+    strain_equilibrium.V_yy = 0.0;
+    strain_equilibrium.V_xy = 0.0;
     
     if (verbose) {
         std::cout << "Strain relaxed to equilibrium:" << std::endl;
         std::cout << "  ε_xx = " << eps_xx_eq << std::endl;
         std::cout << "  ε_yy = " << eps_yy_eq << std::endl;
         std::cout << "  ε_xy = " << eps_xy_eq << std::endl;
-        std::cout << "  A1g = " << eps_xx_eq + eps_yy_eq << std::endl;
-        std::cout << "  Eg1 = " << eps_xx_eq - eps_yy_eq << std::endl;
+        std::cout << "  Tr(ε) = " << eps_xx_eq + eps_yy_eq << std::endl;
+        std::cout << "  Eg1   = " << eps_xx_eq - eps_yy_eq << std::endl;
         
         // Diagnostic: print the ∂H/∂ε = 0 analysis
         std::cout << "  --- ∂H/∂ε = 0 diagnostic ---" << std::endl;
         
         // Individual Eg spin basis functions
-        double fK1 = f_K_Eg1(), fK2 = f_K_Eg2();
-        double fJ1 = f_J_Eg1(), fJ2 = f_J_Eg2();
-        double fG1 = f_Gamma_Eg1(), fG2 = f_Gamma_Eg2();
-        double fGp1 = f_Gammap_Eg1(), fGp2 = f_Gammap_Eg2();
+        auto basis = compute_Eg_basis();
         
         std::cout << "  Spin basis functions (Eg irrep):" << std::endl;
-        std::cout << "    f_K^{Eg,1}  = " << fK1 << ",  f_K^{Eg,2}  = " << fK2 << std::endl;
-        std::cout << "    f_J^{Eg,1}  = " << fJ1 << ",  f_J^{Eg,2}  = " << fJ2 << std::endl;
-        std::cout << "    f_Γ^{Eg,1}  = " << fG1 << ",  f_Γ^{Eg,2}  = " << fG2 << std::endl;
-        std::cout << "    f_Γ'^{Eg,1} = " << fGp1 << ", f_Γ'^{Eg,2} = " << fGp2 << std::endl;
+        std::cout << "    f_K^{Eg,1}  = " << basis.K1 << ",  f_K^{Eg,2}  = " << basis.K2 << std::endl;
+        std::cout << "    f_J^{Eg,1}  = " << basis.J1 << ",  f_J^{Eg,2}  = " << basis.J2 << std::endl;
+        std::cout << "    f_Γ^{Eg,1}  = " << basis.G1 << ",  f_Γ^{Eg,2}  = " << basis.G2 << std::endl;
+        std::cout << "    f_Γ'^{Eg,1} = " << basis.Gp1 << ", f_Γ'^{Eg,2} = " << basis.Gp2 << std::endl;
         
         std::cout << "  Composite Eg spin factors:" << std::endl;
         std::cout << "    Σ_Eg1 = (J+K)f_K1 + J·f_J1 + Γ·f_Γ1 + Γ'·f_Γ'1 = " << Eg1_spin_factor << std::endl;
@@ -3436,21 +2321,22 @@ void StrainPhononLattice::simulated_annealing(double T_start, double T_end,
     
     cout << "\nC3 Order Breaking Parameters (D3d Irrep Spin Basis Functions):" << endl;
     cout << "  Eg channel:" << endl;
-    cout << "    f_K^{Eg,1}    = " << std::scientific << f_K_Eg1() << endl;
-    cout << "    f_K^{Eg,2}    = " << std::scientific << f_K_Eg2() << endl;
-    cout << "    f_J^{Eg,1}    = " << std::scientific << f_J_Eg1() << endl;
-    cout << "    f_J^{Eg,2}    = " << std::scientific << f_J_Eg2() << endl;
-    cout << "    f_Γ^{Eg,1}    = " << std::scientific << f_Gamma_Eg1() << endl;
-    cout << "    f_Γ^{Eg,2}    = " << std::scientific << f_Gamma_Eg2() << endl;
-    cout << "    f_Γ'^{Eg,1}   = " << std::scientific << f_Gammap_Eg1() << endl;
-    cout << "    f_Γ'^{Eg,2}   = " << std::scientific << f_Gammap_Eg2() << endl;
+    {
+        auto basis = compute_Eg_basis();
+        cout << "    f_K^{Eg,1}    = " << std::scientific << basis.K1 << endl;
+        cout << "    f_K^{Eg,2}    = " << std::scientific << basis.K2 << endl;
+        cout << "    f_J^{Eg,1}    = " << std::scientific << basis.J1 << endl;
+        cout << "    f_J^{Eg,2}    = " << std::scientific << basis.J2 << endl;
+        cout << "    f_Γ^{Eg,1}    = " << std::scientific << basis.G1 << endl;
+        cout << "    f_Γ^{Eg,2}    = " << std::scientific << basis.G2 << endl;
+        cout << "    f_Γ'^{Eg,1}   = " << std::scientific << basis.Gp1 << endl;
+        cout << "    f_Γ'^{Eg,2}   = " << std::scientific << basis.Gp2 << endl;
+    }
     
     cout << "\nStrain state:" << endl;
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        cout << "  Bond " << b << ": ε_xx=" << std::scientific << strain.epsilon_xx[b]
-             << ", ε_yy=" << strain.epsilon_yy[b]
-             << ", ε_xy=" << strain.epsilon_xy[b] << endl;
-    }
+    cout << "  ε_xx=" << std::scientific << strain.epsilon_xx
+         << ", ε_yy=" << strain.epsilon_yy
+         << ", ε_xy=" << strain.epsilon_xy << endl;
     cout << "==========================================" << endl;
     
     cout << "Annealing complete!" << endl;
@@ -3659,14 +2545,9 @@ void StrainPhononLattice::save_spin_strain_config(const string& filename) const 
     file << std::scientific << std::setprecision(12);
     
     // Header with strain information
-    // Compute uniform Eg strain components (averaged over bond types)
-    double Eg1 = 0.0, Eg2 = 0.0;
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        Eg1 += (strain.epsilon_xx[b] - strain.epsilon_yy[b]) / 2.0;
-        Eg2 += strain.epsilon_xy[b];
-    }
-    Eg1 /= StrainState::N_BONDS;
-    Eg2 /= StrainState::N_BONDS;
+    // Compute Eg strain components
+    double Eg1 = (strain.epsilon_xx - strain.epsilon_yy) / 2.0;
+    double Eg2 = strain.epsilon_xy;
     
     file << "# Combined spin-strain configuration for GNEB\n";
     file << "# strain_Eg1 = " << Eg1 << "\n";
@@ -3713,13 +2594,9 @@ void StrainPhononLattice::load_spin_strain_config(const string& filename) {
     
     // Apply uniform Eg strain if found
     if (found_Eg1 || found_Eg2) {
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            strain.epsilon_xx[b] = Eg1;
-            strain.epsilon_yy[b] = -Eg1;
-            strain.epsilon_xy[b] = Eg2;
-        }
-        // Note: strain values are used directly in energy/field calculations,
-        // no separate update function needed
+        strain.epsilon_xx = Eg1;
+        strain.epsilon_yy = -Eg1;
+        strain.epsilon_xy = Eg2;
     }
     
     // Parse spin data starting from current position
@@ -3756,18 +2633,15 @@ void StrainPhononLattice::save_strain_state(const string& filename) const {
     ofstream file(filename);
     file << std::scientific << std::setprecision(12);
     
-    file << "# Strain state (per bond type)\n";
-    file << "# bond_type epsilon_xx epsilon_yy epsilon_xy V_xx V_yy V_xy\n";
+    file << "# Strain state\n";
+    file << "# epsilon_xx epsilon_yy epsilon_xy V_xx V_yy V_xy\n";
     
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        file << b << " "
-             << strain.epsilon_xx[b] << " "
-             << strain.epsilon_yy[b] << " "
-             << strain.epsilon_xy[b] << " "
-             << strain.V_xx[b] << " "
-             << strain.V_yy[b] << " "
-             << strain.V_xy[b] << "\n";
-    }
+    file << strain.epsilon_xx << " "
+         << strain.epsilon_yy << " "
+         << strain.epsilon_xy << " "
+         << strain.V_xx << " "
+         << strain.V_yy << " "
+         << strain.V_xy << "\n";
 }
 
 void StrainPhononLattice::save_positions(const string& filename) const {
@@ -3822,31 +2696,12 @@ Eigen::Vector3d StrainPhononLattice::magnetization_local_antiferro() const {
     return M_stag / lattice_size;
 }
 
-double StrainPhononLattice::A1g_amplitude() const {
-    // A1g mode: (ε_xx + ε_yy) averaged over bond types
-    double A1g = 0.0;
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        A1g += strain.epsilon_xx[b] + strain.epsilon_yy[b];
-    }
-    return A1g / StrainState::N_BONDS;
-}
-
 double StrainPhononLattice::Eg1_amplitude() const {
-    // Eg1 mode: (ε_xx - ε_yy) averaged over bond types
-    double Eg1 = 0.0;
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        Eg1 += strain.epsilon_xx[b] - strain.epsilon_yy[b];
-    }
-    return Eg1 / StrainState::N_BONDS;
+    return strain.epsilon_xx - strain.epsilon_yy;
 }
 
 double StrainPhononLattice::Eg2_amplitude() const {
-    // Eg2 mode: 2*ε_xy averaged over bond types
-    double Eg2 = 0.0;
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        Eg2 += 2.0 * strain.epsilon_xy[b];
-    }
-    return Eg2 / StrainState::N_BONDS;
+    return 2.0 * strain.epsilon_xy;
 }
 
 double StrainPhononLattice::order_parameter() const {
@@ -3866,7 +2721,6 @@ void StrainPhononLattice::save_trajectory_txt(const string& output_dir,
                                               const vector<Eigen::Vector3d>& M_traj,
                                               const vector<Eigen::Vector3d>& M_stag_traj,
                                               const vector<double>& energy_traj,
-                                              const vector<double>& eps_A1g_traj,
                                               const vector<double>& eps_Eg1_traj,
                                               const vector<double>& eps_Eg2_traj,
                                               const vector<double>& J7_eff_traj) const {
@@ -3894,12 +2748,11 @@ void StrainPhononLattice::save_trajectory_txt(const string& output_dir,
     
     // Save strain trajectory
     ofstream strain_file(output_dir + "/strain_trajectory.txt");
-    strain_file << "# t eps_A1g eps_Eg1 eps_Eg2 |eps_Eg| J7_eff\n";
+    strain_file << "# t eps_Eg1 eps_Eg2 |eps_Eg| J7_eff\n";
     strain_file << std::scientific << std::setprecision(12);
     for (size_t i = 0; i < times.size(); ++i) {
         double Eg_amp = std::sqrt(eps_Eg1_traj[i]*eps_Eg1_traj[i] + eps_Eg2_traj[i]*eps_Eg2_traj[i]);
         strain_file << times[i] << " "
-                    << eps_A1g_traj[i] << " "
                     << eps_Eg1_traj[i] << " "
                     << eps_Eg2_traj[i] << " "
                     << Eg_amp << " "
@@ -3907,20 +2760,17 @@ void StrainPhononLattice::save_trajectory_txt(const string& output_dir,
     }
     strain_file.close();
     
-    // Save per-bond-type strain data
-    ofstream strain_bonds_file(output_dir + "/strain_per_bond.txt");
-    strain_bonds_file << "# Current strain state per bond type\n";
-    strain_bonds_file << "# bond eps_xx eps_yy eps_xy V_xx V_yy V_xy\n";
+    // Save strain state
+    ofstream strain_bonds_file(output_dir + "/strain_state.txt");
+    strain_bonds_file << "# Current strain state\n";
+    strain_bonds_file << "# eps_xx eps_yy eps_xy V_xx V_yy V_xy\n";
     strain_bonds_file << std::scientific << std::setprecision(12);
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        strain_bonds_file << b << " "
-                          << strain.epsilon_xx[b] << " "
-                          << strain.epsilon_yy[b] << " "
-                          << strain.epsilon_xy[b] << " "
-                          << strain.V_xx[b] << " "
-                          << strain.V_yy[b] << " "
-                          << strain.V_xy[b] << "\n";
-    }
+    strain_bonds_file << strain.epsilon_xx << " "
+                      << strain.epsilon_yy << " "
+                      << strain.epsilon_xy << " "
+                      << strain.V_xx << " "
+                      << strain.V_yy << " "
+                      << strain.V_xy << "\n";
     strain_bonds_file.close();
     
     cout << "Trajectory saved to " << output_dir << endl;
@@ -4016,7 +2866,7 @@ vector<Eigen::Vector3d> StrainPhononLattice::compute_Eg_phonon_force(
     // Compute the force from Eg phonon coupling:
     // F_i = +g Q_Eg · ∂f_Eg/∂S_i
     //
-    // The key insight: even if f_Eg = 0 at the triple-Q state (A1g symmetry),
+    // The key insight: even if f_Eg = 0 at the high-symmetry state,
     // ∂f_Eg/∂S_i ≠ 0 generically, so the drive produces a linear-in-Q
     // restoring force that pushes along the E1 symmetry direction.
     
@@ -4061,10 +2911,10 @@ vector<Eigen::Vector3d> StrainPhononLattice::compute_Eg_phonon_force(
 
 std::pair<vector<Eigen::Vector3d>, vector<Eigen::Vector3d>> 
 StrainPhononLattice::compute_Eg_derivatives(const vector<Eigen::Vector3d>& config) const {
-    // Compute ∂f_Eg1/∂S_i and ∂f_Eg2/∂S_i for each site
+    // Compute ∂Σ_Eg1/∂S_i and ∂Σ_Eg2/∂S_i for each site
     // These are the directions in spin space that the Eg phonon "pushes"
     
-    // Temporarily set configuration (already done in caller, but be safe)
+    // Temporarily set configuration
     auto* self = const_cast<StrainPhononLattice*>(this);
     SpinConfig original_spins = self->spins;
     
@@ -4075,30 +2925,10 @@ StrainPhononLattice::compute_Eg_derivatives(const vector<Eigen::Vector3d>& confi
     vector<Eigen::Vector3d> df_Eg1(lattice_size);
     vector<Eigen::Vector3d> df_Eg2(lattice_size);
     
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    
     for (size_t i = 0; i < lattice_size; ++i) {
-        // Total Eg1 derivative combines K, J, Γ, and Γ' contributions
-        // f_Eg1 = (J+K) f_K_Eg1 + J f_J_Eg1 + Γ f_Γ_Eg1 + Γ' f_Γ'_Eg1
-        // So ∂f_Eg1/∂S = (J+K) ∂f_K_Eg1/∂S + J ∂f_J_Eg1/∂S + Γ ∂f_Γ_Eg1/∂S + Γ' ∂f_Γ'_Eg1/∂S
-        
-        SpinVector dfK_Eg1 = df_K_Eg1_dS(i);
-        SpinVector dfJ_Eg1 = df_J_Eg1_dS(i);
-        SpinVector dfG_Eg1 = df_Gamma_Eg1_dS(i);
-        SpinVector dfGp_Eg1 = df_Gammap_Eg1_dS(i);
-        
-        df_Eg1[i] = (J + K) * dfK_Eg1 + J * dfJ_Eg1 + Gamma * dfG_Eg1 + Gammap * dfGp_Eg1;
-        
-        // Same for Eg2
-        SpinVector dfK_Eg2 = df_K_Eg2_dS(i);
-        SpinVector dfJ_Eg2 = df_J_Eg2_dS(i);
-        SpinVector dfG_Eg2 = df_Gamma_Eg2_dS(i);
-        SpinVector dfGp_Eg2 = df_Gammap_Eg2_dS(i);
-        
-        df_Eg2[i] = (J + K) * dfK_Eg2 + J * dfJ_Eg2 + Gamma * dfG_Eg2 + Gammap * dfGp_Eg2;
+        auto [dEg1, dEg2] = Eg_spin_factor_gradients(i);
+        df_Eg1[i] = dEg1;
+        df_Eg2[i] = dEg2;
     }
     
     // Restore original spins
@@ -4143,14 +2973,9 @@ double StrainPhononLattice::energy_for_gneb_with_strain(
         self->spins[i] = spins_in[i];
     }
     
-    // Apply uniform Eg strain to all bond types
-    // Eg1 = (ε_xx - ε_yy)/2, Eg2 = ε_xy
-    // So: ε_xx = ε_Eg1, ε_yy = -ε_Eg1, ε_xy = ε_Eg2
-    for (size_t b = 0; b < 3; ++b) {
-        self->strain.epsilon_xx[b] = strain_Eg1;
-        self->strain.epsilon_yy[b] = -strain_Eg1;
-        self->strain.epsilon_xy[b] = strain_Eg2;
-    }
+    self->strain.epsilon_xx = strain_Eg1;
+    self->strain.epsilon_yy = -strain_Eg1;
+    self->strain.epsilon_xy = strain_Eg2;
     
     // Compute total energy (spin + elastic + magnetoelastic)
     double E = total_energy();
@@ -4178,11 +3003,9 @@ StrainPhononLattice::gradient_for_gneb_with_strain(
     }
     
     // Apply strain
-    for (size_t b = 0; b < 3; ++b) {
-        self->strain.epsilon_xx[b] = strain_Eg1;
-        self->strain.epsilon_yy[b] = -strain_Eg1;
-        self->strain.epsilon_xy[b] = strain_Eg2;
-    }
+    self->strain.epsilon_xx = strain_Eg1;
+    self->strain.epsilon_yy = -strain_Eg1;
+    self->strain.epsilon_xy = strain_Eg2;
     
     // Compute spin gradients: ∂E/∂S_i = -H_eff_i
     vector<Eigen::Vector3d> grad_spins(lattice_size);
@@ -4235,15 +3058,7 @@ std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     double det = C11 * C11 - C12 * C12;
     
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1()
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2()
-                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    auto [Eg1_spin_factor, Eg2_spin_factor] = Eg_spin_factors();
     
     // Restore original spins
     self->spins = original_spins;
@@ -4429,16 +3244,8 @@ StrainPhononLattice::CollectiveVars StrainPhononLattice::compute_collective_vari
     // We use the max of the three
     cv.m_zigzag = std::max({structure_factor(M1), structure_factor(M2), structure_factor(M3)});
     
-    // Eg symmetry breaking: |f_Eg| = sqrt(f_Eg1² + f_Eg2²)
-    // where f_Eg = (J+K)f_K_Eg + J f_J_Eg + Γ f_Γ_Eg + Γ' f_Γ'_Eg
-    // This must match magnetoelastic_energy() formula exactly!
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    
-    double fEg1 = (J + K) * f_K_Eg1() + J * f_J_Eg1() + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    double fEg2 = (J + K) * f_K_Eg2() + J * f_J_Eg2() + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    // Eg symmetry breaking: |f_Eg| = sqrt(Σ_Eg1² + Σ_Eg2²)
+    auto [fEg1, fEg2] = Eg_spin_factors();
     
     cv.f_Eg_amplitude = std::sqrt(fEg1 * fEg1 + fEg2 * fEg2);
     
