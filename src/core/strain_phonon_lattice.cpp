@@ -1055,31 +1055,6 @@ SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site) const {
     return get_ring_exchange_field(site, 0.0);
 }
 
-SpinVector StrainPhononLattice::ring_exchange_field_numerical(size_t site, double delta) const {
-    // Finite-difference verification: H_eff = -∂H_7/∂S via central differences
-    auto* self = const_cast<StrainPhononLattice*>(this);
-    SpinVector original = self->spins[site];
-    SpinVector H = Eigen::Vector3d::Zero();
-    
-    for (int c = 0; c < 3; ++c) {
-        SpinVector plus = original;
-        SpinVector minus = original;
-        plus(c) += delta;
-        minus(c) -= delta;
-        
-        self->spins[site] = plus;
-        double Ep = ring_exchange_energy();
-        
-        self->spins[site] = minus;
-        double Em = ring_exchange_energy();
-        
-        H(c) = -(Ep - Em) / (2.0 * delta);
-    }
-    
-    self->spins[site] = original;
-    return H;
-}
-
 SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site, double t) const {
     // Time-dependent version using effective J7(t)
     // J7(t) = J7 * (1 - γ*|δε_Eg|/4)^4 * (1 + γ*|δε_Eg|/2)^2
