@@ -510,8 +510,8 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Fe_atoms.set_field(field, 2);
     Fe_atoms.set_field(field, 3);
     
-    // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,-,+)
-    Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, -1.0, 1.0});
+    // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,+,-)
+    Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, 1.0, -1.0});
     
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
@@ -896,8 +896,8 @@ UnitCell build_tmfeo3_fe(const SpinConfig& config) {
     Fe_atoms.set_field(field, 2);
     Fe_atoms.set_field(field, 3);
     
-    // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,-,+)
-    Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, -1.0, 1.0});
+    // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,+,-)
+    Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, 1.0, -1.0});
     
     return Fe_atoms;
 }
