@@ -1057,7 +1057,7 @@ public:
             // Mixed bilinear SU2-SU3 (count half for SU2)
             for (size_t j = 0; j < mixed_bilinear_partners_SU2[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU2[i][j];
-                energy += 0.25 * spin.dot(mixed_bilinear_interaction_SU2[i][j] * spins_SU3[partner]);
+                energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU2[i][j] * spins_SU3[partner]);
             }
             
             // Trilinear SU2-SU2-SU2
@@ -1104,7 +1104,7 @@ public:
             // Mixed bilinear SU3-SU2 (count half for SU3)
             for (size_t j = 0; j < mixed_bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU3[i][j];
-                energy += 0.25 * spin.dot(mixed_bilinear_interaction_SU3[i][j] * spins_SU2[partner]);
+                energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU3[i][j] * spins_SU2[partner]);
             }
             
             // Trilinear SU3-SU3-SU3
