@@ -1656,41 +1656,14 @@ SpinVector StrainPhononLattice::get_magnetoelastic_field(size_t site) const {
 }
 
 SpinVector StrainPhononLattice::get_local_field(size_t site) const {
-    // H_eff = B - ∂H_spin/∂S - ∂H_c/∂S
-    
-    SpinVector H = field[site];
-    
-    // NN exchange contribution
-    for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-        size_t j = nn_partners[site][n];
-        H -= nn_interaction[site][n] * spins[j];
-    }
-    
-    // 2nd NN
-    for (size_t n = 0; n < j2_partners[site].size(); ++n) {
-        size_t j = j2_partners[site][n];
-        H -= j2_interaction[site][n] * spins[j];
-    }
-    
-    // 3rd NN
-    for (size_t n = 0; n < j3_partners[site].size(); ++n) {
-        size_t j = j3_partners[site][n];
-        H -= j3_interaction[site][n] * spins[j];
-    }
-    
-    // Ring exchange
-    H += get_ring_exchange_field(site);
-    
-    // Magnetoelastic coupling
-    H += get_magnetoelastic_field(site);
-    
-    return H;
+    // Keep the static and time-dependent code paths identical so MC,
+    // relaxation, and dynamics use the same Hamiltonian derivative.
+    return get_local_field(site, 0.0);
 }
 
 SpinVector StrainPhononLattice::get_ring_exchange_field(size_t site) const {
-    // Delegate to the loop-based implementation which is verified correct.
-    // The time parameter in get_effective_J7() is unused (it reads current strain state),
-    // so passing 0.0 gives identical J7 to the manual gamma check that was here before.
+    // Delegate to the canonical loop-based implementation so the static and
+    // time-dependent paths share exactly the same derivative.
     return get_ring_exchange_field(site, 0.0);
 }
 
@@ -1921,6 +1894,14 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
     // (Note: this modifies class state during ODE evaluation)
     StrainState saved_strain = strain;
     const_cast<StrainPhononLattice*>(this)->strain = eps;
+
+    // Update spins from the ODE state before evaluating any spin-dependent
+    // strain force so all coupled derivatives use the same configuration.
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const size_t idx = i * spin_dim;
+        const_cast<StrainPhononLattice*>(this)->spins[i] =
+            Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
+    }
     
     // Compute magnetoelastic coupling derivatives
     double dH_deps_xx_arr[StrainState::N_BONDS];
@@ -1931,13 +1912,6 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
         dH_deps_xx_arr[b] = dH_deps_xx(b);
         dH_deps_yy_arr[b] = dH_deps_yy(b);
         dH_deps_xy_arr[b] = dH_deps_xy(b);
-    }
-    
-    // Update spins from state vector
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const size_t idx = i * spin_dim;
-        const_cast<StrainPhononLattice*>(this)->spins[i] = 
-            Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
     }
     
     // Add J7-ring exchange force: ∂H_J7/∂ε = (dJ7/dε) * E_ring

@@ -3859,7 +3859,8 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 MixedLattice mixed_lattice(mixed_uc, sweep_config.lattice_size[0], 
                                           sweep_config.lattice_size[1], 
                                           sweep_config.lattice_size[2],
-                                          sweep_config.use_twist_boundary);
+                                          sweep_config.spin_length,
+                                          sweep_config.spin_length_su3);
                 
                 // Initialize spins
                 if (sweep_config.use_ferromagnetic_init) {
@@ -4150,7 +4151,8 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
             MixedLattice mixed_lattice(mixed_uc, sweep_config.lattice_size[0], 
                                       sweep_config.lattice_size[1], 
                                       sweep_config.lattice_size[2],
-                                      sweep_config.use_twist_boundary);
+                                      sweep_config.spin_length,
+                                      sweep_config.spin_length_su3);
             
             // Initialize spins
             if (sweep_config.use_ferromagnetic_init) {

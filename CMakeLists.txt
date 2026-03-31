@@ -46,6 +46,8 @@ endif()
 # Enable position independent code
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+include(CTest)
+
 # CUDA architectures
 if(ENABLE_CUDA)
     if(NOT CMAKE_CUDA_ARCHITECTURES)
@@ -75,7 +77,99 @@ find_package(Boost 1.65 REQUIRED CONFIG)
 if(DEFINED ENV{HDF5_DIR} AND NOT HDF5_ROOT)
     set(HDF5_ROOT "$ENV{HDF5_DIR}")
 endif()
-find_package(HDF5 REQUIRED COMPONENTS C CXX)
+find_package(HDF5 QUIET COMPONENTS C CXX)
+
+if(NOT HDF5_FOUND)
+    find_package(PkgConfig QUIET)
+
+    set(CLASSICAL_SPIN_HDF5_INCLUDE_HINTS "")
+    set(CLASSICAL_SPIN_HDF5_LIBRARY_HINTS "")
+
+    if(PkgConfig_FOUND)
+        pkg_check_modules(CLASSICAL_SPIN_HDF5_PKG QUIET hdf5-serial)
+        if(NOT CLASSICAL_SPIN_HDF5_PKG_FOUND)
+            pkg_check_modules(CLASSICAL_SPIN_HDF5_PKG QUIET hdf5)
+        endif()
+
+        if(CLASSICAL_SPIN_HDF5_PKG_FOUND)
+            list(APPEND CLASSICAL_SPIN_HDF5_INCLUDE_HINTS ${CLASSICAL_SPIN_HDF5_PKG_INCLUDE_DIRS})
+            list(APPEND CLASSICAL_SPIN_HDF5_LIBRARY_HINTS ${CLASSICAL_SPIN_HDF5_PKG_LIBRARY_DIRS})
+            if(NOT HDF5_VERSION)
+                set(HDF5_VERSION "${CLASSICAL_SPIN_HDF5_PKG_VERSION}")
+            endif()
+        endif()
+    endif()
+
+    list(APPEND CLASSICAL_SPIN_HDF5_INCLUDE_HINTS
+        /usr/include/hdf5/serial
+        /usr/include/hdf5/openmpi
+        /usr/local/include/hdf5/serial
+        /usr/local/include/hdf5/openmpi
+    )
+    list(APPEND CLASSICAL_SPIN_HDF5_LIBRARY_HINTS
+        /usr/lib/x86_64-linux-gnu/hdf5/serial
+        /usr/lib/x86_64-linux-gnu/hdf5/openmpi
+        /usr/lib64/hdf5/serial
+        /usr/lib64/hdf5/openmpi
+        /usr/lib/hdf5/serial
+        /usr/lib/hdf5/openmpi
+        /usr/local/lib/hdf5/serial
+        /usr/local/lib/hdf5/openmpi
+    )
+
+    find_path(CLASSICAL_SPIN_HDF5_INCLUDE_DIR
+        NAMES hdf5.h H5Cpp.h
+        HINTS ${CLASSICAL_SPIN_HDF5_INCLUDE_HINTS}
+    )
+    find_library(CLASSICAL_SPIN_HDF5_C_LIBRARY
+        NAMES hdf5
+        HINTS ${CLASSICAL_SPIN_HDF5_LIBRARY_HINTS}
+    )
+    find_library(CLASSICAL_SPIN_HDF5_CXX_LIBRARY
+        NAMES hdf5_cpp
+        HINTS ${CLASSICAL_SPIN_HDF5_LIBRARY_HINTS}
+    )
+    find_library(CLASSICAL_SPIN_HDF5_HL_LIBRARY
+        NAMES hdf5_hl
+        HINTS ${CLASSICAL_SPIN_HDF5_LIBRARY_HINTS}
+    )
+    find_library(CLASSICAL_SPIN_HDF5_HL_CXX_LIBRARY
+        NAMES hdf5_hl_cpp
+        HINTS ${CLASSICAL_SPIN_HDF5_LIBRARY_HINTS}
+    )
+
+    if(CLASSICAL_SPIN_HDF5_INCLUDE_DIR AND CLASSICAL_SPIN_HDF5_C_LIBRARY AND CLASSICAL_SPIN_HDF5_CXX_LIBRARY)
+        set(HDF5_FOUND TRUE)
+        set(HDF5_INCLUDE_DIRS ${CLASSICAL_SPIN_HDF5_INCLUDE_DIR})
+        set(HDF5_C_LIBRARIES ${CLASSICAL_SPIN_HDF5_C_LIBRARY})
+        set(HDF5_CXX_LIBRARIES ${CLASSICAL_SPIN_HDF5_CXX_LIBRARY} ${CLASSICAL_SPIN_HDF5_C_LIBRARY})
+
+        if(CLASSICAL_SPIN_HDF5_HL_LIBRARY)
+            list(APPEND HDF5_C_LIBRARIES ${CLASSICAL_SPIN_HDF5_HL_LIBRARY})
+            list(APPEND HDF5_CXX_LIBRARIES ${CLASSICAL_SPIN_HDF5_HL_LIBRARY})
+        endif()
+        if(CLASSICAL_SPIN_HDF5_HL_CXX_LIBRARY)
+            list(APPEND HDF5_CXX_LIBRARIES ${CLASSICAL_SPIN_HDF5_HL_CXX_LIBRARY})
+        endif()
+
+        set(HDF5_LIBRARIES ${HDF5_CXX_LIBRARIES})
+        list(REMOVE_DUPLICATES HDF5_C_LIBRARIES)
+        list(REMOVE_DUPLICATES HDF5_CXX_LIBRARIES)
+        list(REMOVE_DUPLICATES HDF5_LIBRARIES)
+
+        message(STATUS "HDF5 found via pkg-config/manual fallback")
+    endif()
+
+    unset(CLASSICAL_SPIN_HDF5_INCLUDE_HINTS)
+    unset(CLASSICAL_SPIN_HDF5_LIBRARY_HINTS)
+endif()
+
+if(NOT HDF5_FOUND)
+    message(FATAL_ERROR
+        "Unable to find HDF5 C and C++ development files. "
+        "Set HDF5_ROOT/HDF5_DIR or install the HDF5 development package."
+    )
+endif()
 
 # ============================================================================
 # COMPILER FLAGS
@@ -387,6 +481,17 @@ add_optimized_executable(test_zigzag_strain src/apps/test_zigzag_strain.cpp)
 
 # Test: parallel tempering on StrainPhononLattice (NCTO_STRAIN)
 add_optimized_executable(test_pt_strain src/apps/test_pt_strain.cpp)
+
+# Regression tests for strain-phonon Hamiltonian consistency
+add_optimized_executable(test_strain_phonon_regressions src/apps/test_strain_phonon_regressions.cpp)
+
+# Regression tests for mixed SU2-SU3 trilinear bookkeeping
+add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_trilinear_regressions.cpp)
+
+if(BUILD_TESTING)
+    add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
+    add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
+endif()
 
 
 # ============================================================================

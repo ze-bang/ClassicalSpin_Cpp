@@ -75,6 +75,7 @@ using mc::BinningResult;
 using mc::Observable;
 using mc::VectorObservable;
 using mc::AutocorrelationResult;
+using mc::OptimizedTempGridResult;
 
 // Legacy type aliases for backward compatibility
 using MixedBinningResult = mc::BinningResult;
@@ -920,17 +921,26 @@ public:
             const size_t p1_idx = trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU2[site_index][i][1];
             const auto& T = trilinear_interaction_SU2[site_index][i];
-            
-            // Contract: sum_abc T[a](b,c) * spin_diff[a] * S1[b] * S2[c]
+            const SpinVector& p1_old = (p1_idx == site_index) ? old_spin : spins_SU2[p1_idx];
+            const SpinVector& p1_new = (p1_idx == site_index) ? new_spin : spins_SU2[p1_idx];
+            const SpinVector& p2_old = (p2_idx == site_index) ? old_spin : spins_SU2[p2_idx];
+            const SpinVector& p2_new = (p2_idx == site_index) ? new_spin : spins_SU2[p2_idx];
+
+            double old_term = 0.0;
+            double new_term = 0.0;
             for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                double temp = 0.0;
                 for (size_t b = 0; b < spin_dim_SU2; ++b) {
                     for (size_t c = 0; c < spin_dim_SU2; ++c) {
-                        temp += T[a](b, c) * spins_SU2[p1_idx](b) * spins_SU2[p2_idx](c);
+                        const double coeff = T[a](b, c);
+                        old_term += coeff * old_spin(a) * p1_old(b) * p2_old(c);
+                        new_term += coeff * new_spin(a) * p1_new(b) * p2_new(c);
                     }
                 }
-                trilinear_energy += spin_diff(a) * temp;
             }
+            const double multiplicity = 1.0 +
+                (p1_idx == site_index ? 1.0 : 0.0) +
+                (p2_idx == site_index ? 1.0 : 0.0);
+            trilinear_energy += (new_term - old_term) / multiplicity;
         }
         
         // Mixed trilinear SU(2)-SU(2)-SU(3) interactions
@@ -939,17 +949,22 @@ public:
             const size_t p1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU2[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU2[site_index][i];
-            
-            // Contract: sum_abc T[a](b,c) * spin_diff[a] * SU2[b] * SU3[c]
+            const SpinVector& p1_old = (p1_idx == site_index) ? old_spin : spins_SU2[p1_idx];
+            const SpinVector& p1_new = (p1_idx == site_index) ? new_spin : spins_SU2[p1_idx];
+
+            double old_term = 0.0;
+            double new_term = 0.0;
             for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                double temp = 0.0;
                 for (size_t b = 0; b < spin_dim_SU2; ++b) {
                     for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        temp += T[a](b, c) * spins_SU2[p1_idx](b) * spins_SU3[p2_idx](c);
+                        const double coeff = T[a](b, c);
+                        old_term += coeff * old_spin(a) * p1_old(b) * spins_SU3[p2_idx](c);
+                        new_term += coeff * new_spin(a) * p1_new(b) * spins_SU3[p2_idx](c);
                     }
                 }
-                mixed_trilinear_energy += spin_diff(a) * temp;
             }
+            const double multiplicity = 1.0 + (p1_idx == site_index ? 1.0 : 0.0);
+            mixed_trilinear_energy += (new_term - old_term) / multiplicity;
         }
         
         return field_energy + onsite_energy + bilinear_energy + mixed_bilinear_energy + 
@@ -988,17 +1003,26 @@ public:
             const size_t p1_idx = trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU3[site_index][i][1];
             const auto& T = trilinear_interaction_SU3[site_index][i];
-            
-            // Contract: sum_abc T[a](b,c) * spin_diff[a] * S1[b] * S2[c]
+            const SpinVector& p1_old = (p1_idx == site_index) ? old_spin : spins_SU3[p1_idx];
+            const SpinVector& p1_new = (p1_idx == site_index) ? new_spin : spins_SU3[p1_idx];
+            const SpinVector& p2_old = (p2_idx == site_index) ? old_spin : spins_SU3[p2_idx];
+            const SpinVector& p2_new = (p2_idx == site_index) ? new_spin : spins_SU3[p2_idx];
+
+            double old_term = 0.0;
+            double new_term = 0.0;
             for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                double temp = 0.0;
                 for (size_t b = 0; b < spin_dim_SU3; ++b) {
                     for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        temp += T[a](b, c) * spins_SU3[p1_idx](b) * spins_SU3[p2_idx](c);
+                        const double coeff = T[a](b, c);
+                        old_term += coeff * old_spin(a) * p1_old(b) * p2_old(c);
+                        new_term += coeff * new_spin(a) * p1_new(b) * p2_new(c);
                     }
                 }
-                trilinear_energy += spin_diff(a) * temp;
             }
+            const double multiplicity = 1.0 +
+                (p1_idx == site_index ? 1.0 : 0.0) +
+                (p2_idx == site_index ? 1.0 : 0.0);
+            trilinear_energy += (new_term - old_term) / multiplicity;
         }
         
         // Mixed trilinear SU(3)-SU(2)-SU(2) interactions
@@ -1007,17 +1031,19 @@ public:
             const size_t p1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU3[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU3[site_index][i];
-            
-            // Contract: sum_abc T[a](b,c) * spin_diff[a] * SU2_1[b] * SU2_2[c]
+
+            double old_term = 0.0;
+            double new_term = 0.0;
             for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                double temp = 0.0;
                 for (size_t b = 0; b < spin_dim_SU2; ++b) {
                     for (size_t c = 0; c < spin_dim_SU2; ++c) {
-                        temp += T[a](b, c) * spins_SU2[p1_idx](b) * spins_SU2[p2_idx](c);
+                        const double coeff = T[a](b, c);
+                        old_term += coeff * old_spin(a) * spins_SU2[p1_idx](b) * spins_SU2[p2_idx](c);
+                        new_term += coeff * new_spin(a) * spins_SU2[p1_idx](b) * spins_SU2[p2_idx](c);
                     }
                 }
-                mixed_trilinear_energy += spin_diff(a) * temp;
             }
+            mixed_trilinear_energy += new_term - old_term;
         }
         
         return field_energy + onsite_energy + bilinear_energy + mixed_bilinear_energy + 
@@ -1077,6 +1103,23 @@ public:
                 const size_t partner = mixed_bilinear_partners_SU2[i][j];
                 energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU2[i][j] * spins_SU3[partner]);
             }
+
+            // Mixed trilinear SU2-SU2-SU3
+            for (size_t j = 0; j < mixed_trilinear_partners_SU2[i].size(); ++j) {
+                const size_t p1 = mixed_trilinear_partners_SU2[i][j][0];
+                const size_t p2 = mixed_trilinear_partners_SU2[i][j][1];
+                const auto& T = mixed_trilinear_interaction_SU2[i][j];
+
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    double temp = 0.0;
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            temp += T[a](b, c) * spins_SU2[p1](b) * spins_SU3[p2](c);
+                        }
+                    }
+                    energy += (1.0 / 3.0) * spin(a) * temp;
+                }
+            }
             
             // Trilinear SU2-SU2-SU2
             for (size_t j = 0; j < trilinear_partners_SU2[i].size(); ++j) {
@@ -1123,6 +1166,23 @@ public:
             for (size_t j = 0; j < mixed_bilinear_partners_SU3[i].size(); ++j) {
                 const size_t partner = mixed_bilinear_partners_SU3[i][j];
                 energy += 0.5 * spin.dot(mixed_bilinear_interaction_SU3[i][j] * spins_SU2[partner]);
+            }
+
+            // Mixed trilinear SU3-SU2-SU2
+            for (size_t j = 0; j < mixed_trilinear_partners_SU3[i].size(); ++j) {
+                const size_t p1 = mixed_trilinear_partners_SU3[i][j][0];
+                const size_t p2 = mixed_trilinear_partners_SU3[i][j][1];
+                const auto& T = mixed_trilinear_interaction_SU3[i][j];
+
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    double temp = 0.0;
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            temp += T[a](b, c) * spins_SU2[p1](b) * spins_SU2[p2](c);
+                        }
+                    }
+                    energy += (1.0 / 3.0) * spin(a) * temp;
+                }
             }
             
             // Trilinear SU3-SU3-SU3
@@ -1192,6 +1252,25 @@ public:
                     }
                 }
             }
+
+            // Mixed trilinear
+            for (size_t j = 0; j < mixed_trilinear_partners_SU2[i].size(); ++j) {
+                const size_t p1 = mixed_trilinear_partners_SU2[i][j][0];
+                const size_t p2 = mixed_trilinear_partners_SU2[i][j][1];
+                const double* spin1 = &state_flat[p1 * spin_dim_SU2];
+                const double* spin2 = &state_flat[offset_SU3 + p2 * spin_dim_SU3];
+                const auto& T = mixed_trilinear_interaction_SU2[i][j];
+
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    double temp = 0.0;
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            temp += T[a](b, c) * spin1[b] * spin2[c];
+                        }
+                    }
+                    energy += (1.0 / 3.0) * spin[a] * temp;
+                }
+            }
             
             // Trilinear
             for (size_t j = 0; j < trilinear_partners_SU2[i].size(); ++j) {
@@ -1248,6 +1327,25 @@ public:
                     for (size_t b = 0; b < spin_dim_SU2; ++b) {
                         energy += 0.5 * spin[a] * mixed_bilinear_interaction_SU3[i][j](a, b) * partner_spin[b];
                     }
+                }
+            }
+
+            // Mixed trilinear
+            for (size_t j = 0; j < mixed_trilinear_partners_SU3[i].size(); ++j) {
+                const size_t p1 = mixed_trilinear_partners_SU3[i][j][0];
+                const size_t p2 = mixed_trilinear_partners_SU3[i][j][1];
+                const double* spin1 = &state_flat[p1 * spin_dim_SU2];
+                const double* spin2 = &state_flat[p2 * spin_dim_SU2];
+                const auto& T = mixed_trilinear_interaction_SU3[i][j];
+
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    double temp = 0.0;
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            temp += T[a](b, c) * spin1[b] * spin2[c];
+                        }
+                    }
+                    energy += (1.0 / 3.0) * spin[a] * temp;
                 }
             }
             
