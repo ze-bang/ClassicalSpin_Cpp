@@ -421,6 +421,22 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double u8 = config.get_param("u8", 0.0);   // λ8 (A1+) aniso-mod coupling
     const double v4 = config.get_param("v4", 0.0);   // λ4 (A2+) aniso-mod coupling
     const double v6 = config.get_param("v6", 0.0);   // λ6 (A2+) aniso-mod coupling
+    // =========================================================================
+    // Inter-site anisotropy-modulation trilinear: λ^a_Tm · S^b_{Fe_i} · S^c_{Fe_i'}
+    // =========================================================================
+    // From tmfeo3_notes.tex Eq.11: extends aniso-mod to inter-site Fe bilinears.
+    // Same A1+/A2+ sector decomposition as on-site, but the two Fe legs sit on
+    // DIFFERENT sublattice sites (c-axis NN pairs: Fe0↔Fe3, Fe1↔Fe2).
+    // Key physics: the on-site A2+ channel (v4,v6) cancels at q=0 for paired
+    //   chi/chi_inv bonds, but the inter-site A2+ channel (w4,w6) does NOT—
+    //   providing an escape route for λ4/λ6 excitations at zone center.
+    // Convention: H += Σ V[a](b,c) S_{Fe_i}^a S_{Fe_i'}^b λ_{Tm_j}^c
+    //   w-params couple to the same bilinear forms as u/v but across Fe-Fe NN pairs.
+    const double w1 = config.get_param("w1", 0.0);   // λ1 (A1+) inter-site aniso-mod
+    const double w3 = config.get_param("w3", 0.0);   // λ3 (A1+) inter-site aniso-mod
+    const double w8 = config.get_param("w8", 0.0);   // λ8 (A1+) inter-site aniso-mod
+    const double w4 = config.get_param("w4", 0.0);   // λ4 (A2+) inter-site aniso-mod
+    const double w6 = config.get_param("w6", 0.0);   // λ6 (A2+) inter-site aniso-mod
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
     
@@ -899,6 +915,97 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, -1));
         mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
         mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
+    }
+    
+    // =========================================================================
+    // Inter-site anisotropy-modulation trilinear (tmfeo3_notes.tex Eq.11)
+    // =========================================================================
+    // H_inter = Σ V[a](b,c) S_{Fe_i}^a S_{Fe_i'}^b λ_{Tm_j}^c
+    // Same A1+/A2+ tensor structure as on-site W, but the two Fe legs are on
+    // different sites: c-axis NN pairs Fe0↔Fe3, Fe1↔Fe2.
+    // Each of the 32 Fe-Tm bonds generates 2 inter-site bonds (one per c-axis NN).
+    // c-axis Fe NN offsets (offset = partner_cell - source_cell):
+    //   Fe0 → Fe3 @ (0,0,0) and (0,0,1)
+    //   Fe1 → Fe2 @ (0,0,0) and (0,0,1)
+    //   Fe2 → Fe1 @ (0,0,0) and (0,0,-1)
+    //   Fe3 → Fe0 @ (0,0,0) and (0,0,-1)
+    if (w1 != 0.0 || w3 != 0.0 || w8 != 0.0 || w4 != 0.0 || w6 != 0.0) {
+        auto build_V = [&](double sign_A2) -> SpinTensor3 {
+            SpinTensor3 V(3);
+            for (int a = 0; a < 3; ++a) {
+                V[a] = Eigen::MatrixXd::Zero(3, 8);
+            }
+            // A1+ sector: λ1 (idx 0), λ3 (idx 2), λ8 (idx 7)
+            V[2](2, 0) = w1;  V[0](0, 0) = -w1;
+            V[2](2, 2) = w3;  V[0](0, 2) = -w3;
+            V[2](2, 7) = w8;  V[0](0, 7) = -w8;
+            // A2+ sector: λ4 (idx 3), λ6 (idx 5)
+            V[0](2, 3) = sign_A2 * w4;  V[2](0, 3) = sign_A2 * w4;
+            V[0](2, 5) = sign_A2 * w6;  V[2](0, 5) = sign_A2 * w6;
+            return V;
+        };
+        
+        SpinTensor3 V_chi = build_V(+1.0);
+        SpinTensor3 V_chi_inv = build_V(-1.0);
+        
+        // c-axis NN partner sublattice index and two offsets for each Fe site
+        // Fe_i → partner Fe_p at offsets c_off[0], c_off[1]
+        struct CAxisNN { int partner; Eigen::Vector3i off0, off1; };
+        CAxisNN c_nn[4] = {
+            {3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0,0,1)},   // Fe0→Fe3
+            {2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0,0,1)},   // Fe1→Fe2
+            {1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0,0,-1)},  // Fe2→Fe1
+            {0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0,0,-1)}   // Fe3→Fe0
+        };
+        
+        // Macro-like lambda to set inter-site trilinear for one Fe-Tm bond
+        // with both c-axis Fe NN offsets
+        auto set_inter = [&](const SpinTensor3& V, int fe_src, int tm_dst,
+                             const Eigen::Vector3i& tm_off) {
+            const auto& nn = c_nn[fe_src];
+            mixed_uc.set_mixed_trilinear(V, fe_src, nn.partner, tm_dst, nn.off0, tm_off);
+            mixed_uc.set_mixed_trilinear(V, fe_src, nn.partner, tm_dst, nn.off1, tm_off);
+        };
+        
+        // Fe site 0 — 8 bonds (same Fe-Tm topology as bilinear/on-site trilinear)
+        set_inter(V_chi,     0, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_inv, 0, 0, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi,     0, 2, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv, 0, 1, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi,     0, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv, 0, 2, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi,     0, 0, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_inv, 0, 3, Eigen::Vector3i(-1, 1, 0));
+        
+        // Fe site 1 — 8 bonds
+        set_inter(V_chi,     1, 2, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv, 1, 1, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_inv, 1, 0, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi,     1, 3, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi,     1, 0, Eigen::Vector3i(1, -1, 0));
+        set_inter(V_chi_inv, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi,     1, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv, 1, 2, Eigen::Vector3i(0, -1, 0));
+        
+        // Fe site 2 — 8 bonds
+        set_inter(V_chi_inv, 2, 2, Eigen::Vector3i(0, 0, -1));
+        set_inter(V_chi,     2, 1, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi,     2, 0, Eigen::Vector3i(0, -1, -1));
+        set_inter(V_chi_inv, 2, 3, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv, 2, 0, Eigen::Vector3i(1, -1, -1));
+        set_inter(V_chi,     2, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_inv, 2, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi,     2, 2, Eigen::Vector3i(0, -1, -1));
+        
+        // Fe site 3 — 8 bonds
+        set_inter(V_chi_inv, 3, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi,     3, 0, Eigen::Vector3i(0, 0, -1));
+        set_inter(V_chi_inv, 3, 2, Eigen::Vector3i(0, 0, -1));
+        set_inter(V_chi,     3, 1, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_inv, 3, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi,     3, 2, Eigen::Vector3i(-1, 0, -1));
+        set_inter(V_chi_inv, 3, 0, Eigen::Vector3i(0, -1, -1));
+        set_inter(V_chi,     3, 3, Eigen::Vector3i(-1, 1, 0));
     }
     
     return mixed_uc;

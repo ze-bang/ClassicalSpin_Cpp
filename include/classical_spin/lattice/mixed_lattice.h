@@ -650,10 +650,28 @@ public:
                             size_t partner2_idx = flatten_index_periodic(p2i, p2j, p2k, tri.partner2, N_atoms_SU3);
                             
                             // Original: K[a](b,c) for site[a] with SU2[b] and SU3[c]
+                            // H = Σ_abc K[a](b,c) S_source^a S_partner1^b λ_partner2^c
                             mixed_trilinear_interaction_SU2[site_idx].push_back(tri.interaction);
                             mixed_trilinear_partners_SU2[site_idx].push_back({partner1_idx, partner2_idx});
                             
-                            // Symmetric contribution to SU3 site: K[c](a,b)
+                            // Symmetric contribution to SU2 partner1: K_bac[b](a,c) = K[a](b,c)
+                            // ∂H/∂S_partner1^b = Σ_ac K[a](b,c) S_source^a λ^c
+                            // For partner1: T_p1[b] is (spin_dim_SU2 × spin_dim_SU3)
+                            //   with T_p1[b](a,c) = K[a](b,c)
+                            SpinTensor3 K_bac(spin_dim_SU2);
+                            for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                                K_bac[b] = Eigen::MatrixXd(spin_dim_SU2, spin_dim_SU3);
+                                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                                        K_bac[b](a, c) = tri.interaction[a](b, c);
+                                    }
+                                }
+                            }
+                            mixed_trilinear_interaction_SU2[partner1_idx].push_back(K_bac);
+                            mixed_trilinear_partners_SU2[partner1_idx].push_back({site_idx, partner2_idx});
+                            
+                            // Symmetric contribution to SU3 site: K_cab[c](a,b) = K[a](b,c)
+                            // ∂H/∂λ^c = Σ_ab K[a](b,c) S_source^a S_partner1^b
                             SpinTensor3 K_cab(spin_dim_SU3);
                             for (size_t c = 0; c < spin_dim_SU3; ++c) {
                                 K_cab[c] = Eigen::MatrixXd(spin_dim_SU2, spin_dim_SU2);
