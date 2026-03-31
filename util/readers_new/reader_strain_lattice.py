@@ -339,7 +339,11 @@ def read_hdf5_trajectory(filepath):
             result['spins'] = f['/trajectory/spins'][:]  # (n_times, n_sites, 3)
         
         # Read strain mode amplitudes
-        result['eps_A1g'] = f['/strain_trajectory/eps_A1g'][:]
+        if '/strain_trajectory/eps_A1g' in f:
+            result['eps_A1g'] = f['/strain_trajectory/eps_A1g'][:]
+        else:
+            # Uniform-strain HDF5: compute A1g = eps_xx + eps_yy
+            result['eps_A1g'] = f['/strain_trajectory/eps_xx'][:] + f['/strain_trajectory/eps_yy'][:]
         result['eps_Eg1'] = f['/strain_trajectory/eps_Eg1'][:]
         result['eps_Eg2'] = f['/strain_trajectory/eps_Eg2'][:]
         result['eps_Eg_norm'] = np.sqrt(result['eps_Eg1']**2 + result['eps_Eg2']**2)

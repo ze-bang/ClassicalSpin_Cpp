@@ -383,16 +383,15 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     //   and multi-orbital effects modify the bare estimate).
     //
     // WHY THIS MATTERS: Pbnm inversion symmetry pairs every chi bond with a
-    // chi_inv bond (sign-flipped on λ5/λ7 columns). At q=0, each Tm site sees
-    // equal chi and chi_inv contributions from paired orbits, causing EXACT
-    // cancellation of the net effective field on λ5 and λ7:
-    //
-    //   h_eff(λ5) ∝ (-s1 + s4 - s2 + s3 + s2 - s3 + s1 - s4) · chi_5α = 0
-    //
-    // This cancellation is accidental — it occurs only when all orbit scale factors
-    // are equal (s1 = s2 = s3 = s4). With distance-dependent scaling, the pairs
-    // from different orbits no longer cancel, enabling direct q=0 driving of λ5/λ7.
-    // The λ2 channel is UNAFFECTED (all terms add: h_eff(λ2) ∝ 2·Σ s_i · chi_2α).
+    // chi_inv bond (sign-flipped on λ5/λ7 columns). In the minimal chi/chi_inv
+    // bond pattern implemented below, the static q=0 field on λ5 and λ7 cancels
+    // EXACTLY orbit-by-orbit for a uniform Gamma_2 background, because each chi/
+    // chi_inv pair samples Fe sublattices with the same local-frame sign.
+    // Distance-dependent orbit scales s_k change the overall bond weights, but do
+    // not lift this static q=0 cancellation. The λ5/λ7 channels become active only
+    // for bond-resolved finite-q dynamics or if the microscopic bond ansatz is
+    // enlarged beyond the minimal inversion-paired pattern. The λ2 channel is
+    // UNAFFECTED in the static q=0 limit (all paired contributions add).
     //
     // PRESETS (s_i = (d_min/d_i)^n, normalized to mean = 1):
     //   Conservative (n=5,  3d-3d-like):   1.42, 1.16, 0.88, 0.54
@@ -405,6 +404,23 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double chi_orbit2_scale = config.get_param("chi_orbit2_scale", 1.0);  // d=3.179 Å
     const double chi_orbit3_scale = config.get_param("chi_orbit3_scale", 1.0);  // d=3.357 Å
     const double chi_orbit4_scale = config.get_param("chi_orbit4_scale", 1.0);  // d=3.711 Å
+    // =========================================================================
+    // Anisotropy-modulation trilinear coupling: λ^a_Tm · S^b_Fe · S^c_Fe
+    // =========================================================================
+    // From tmfeo3_notes.tex Eq.10: key mechanism for qFM-linked 2DCS peaks.
+    // A1+ sector (mirror-even Tm operators): λ1, λ3, λ8 couple to (S_z² - S_x²)
+    //   → projects to I_{A1}^Fe = G_z² - F_x² at q=0
+    // A2+ sector (mirror-odd Tm operators): λ4, λ6 couple to S_x·S_z
+    //   → projects to I_{A2}^Fe = F_x·G_z at q=0
+    // Inversion constraint: chi-type bonds carry full W, chi_inv-type bonds
+    //   have A2+ components (v4, v6) sign-flipped.
+    // Convention: H += Σ_abc K[a](b,c) S_Fe^a S_Fe^b λ_Tm^c (on-site Fe bilinear)
+    //   u-params give coefficient of (S_z²-S_x²)·λ^a, v-params give coeff of 2·S_x·S_z·λ^a
+    const double u1 = config.get_param("u1", 0.0);   // λ1 (A1+) aniso-mod coupling
+    const double u3 = config.get_param("u3", 0.0);   // λ3 (A1+) aniso-mod coupling
+    const double u8 = config.get_param("u8", 0.0);   // λ8 (A1+) aniso-mod coupling
+    const double v4 = config.get_param("v4", 0.0);   // λ4 (A2+) aniso-mod coupling
+    const double v6 = config.get_param("v6", 0.0);   // λ6 (A2+) aniso-mod coupling
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
     
@@ -656,24 +672,25 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 0, 0));
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 1, 0));
         
-        // Tm1 ↔ Tm3 nearest neighbors (z=0.25 plane, d ≈ 0.68)
+        // Tm1 ↔ Tm3 nearest neighbors (z=0.25 plane)
+        // S2 maps Tm0-Tm2@(0,0,0)→Tm1-Tm3@(0,1,0), @(0,1,0)→@(0,0,0),
+        //         @(-1,0,0)→@(-1,1,0), @(-1,1,0)→@(-1,0,0)
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 0, 0));
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 1, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(-1, 1, 0));
         
         // Out-of-plane nearest neighbors (between z=0.75 and z=0.25 planes)
-        // Tm0 (0.02111, 0.92839, 0.75) ↔ Tm3 (0.97889, 0.07161, 0.25)
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 1));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 1));
+        // Only 2 NN bonds per pair (d=3.893Å); the other 2 candidate offsets
+        // give d=6.107Å which is far beyond NN.
+        // S2 maps Tm2-Tm1@(0,0,0)→Tm0-Tm3@(-1,1,0),
+        //         Tm2-Tm1@(0,0,1)→Tm0-Tm3@(-1,1,1)
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(-1, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(-1, 1, 1));
         
-        // Tm2 (0.47889, 0.42839, 0.75) ↔ Tm1 (0.52111, 0.57161, 0.25)
+        // Tm2 ↔ Tm1: nearest at d=3.893Å
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 0));
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 1));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 1));
     }
     
     // Create mixed unit cell
@@ -692,12 +709,12 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         chi_inv(0, 4) = -chi5x; chi_inv(1, 4) = -chi5y; chi_inv(2, 4) = -chi5z;
         chi_inv(0, 6) = -chi7x; chi_inv(1, 6) = -chi7y; chi_inv(2, 6) = -chi7z;
         
-        // Orbit-specific chi/chi_inv matrices
-        // chi_o[i] = s_i * chi_base: each orbit's superexchange scaled by distance
-        // At q=0, net field on Tm sublattice:
-        //   λ2: ∝ 2(s1+s2+s3+s4)·chi_2  (always nonzero, unaffected by scaling)
-        //   λ5: ∝ (s1-s4)·χ_E + (s2-s3)·χ_E + ...  (zero when s_i uniform, nonzero otherwise)
-        //   λ7: same cancellation structure as λ5
+        // Orbit-specific chi/chi_inv matrices.
+        // chi_o[k] = s_k * chi_base: each orbit's superexchange scaled by distance.
+        // In the minimal bond pattern used here, the static q=0 field has:
+        //   λ2: constructive addition across paired bonds.
+        //   λ5, λ7: exact cancellation across each chi/chi_inv pair for a uniform
+        //           Gamma_2 background, independent of the orbit scales s_k.
         Eigen::MatrixXd chi_o1 = chi_orbit1_scale * chi;
         Eigen::MatrixXd chi_inv_o1 = chi_orbit1_scale * chi_inv;
         Eigen::MatrixXd chi_o2 = chi_orbit2_scale * chi;
@@ -806,6 +823,82 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         mixed_uc.set_mixed_bilinear(chi_inv_o4, 3, 0, Eigen::Vector3i(0, -1, -1));
         // Orbit 4 (d=0.624): S1  -> Fe3-Tm3@(-1,1,0)  chi
         mixed_uc.set_mixed_bilinear(chi_o4, 3, 3, Eigen::Vector3i(-1, 1, 0));
+    }
+    
+    // =========================================================================
+    // Anisotropy-modulation trilinear coupling (tmfeo3_notes.tex Eq.10,12)
+    // =========================================================================
+    // H_aniso = Σ K[a](b,c) S_source^a S_partner1^b λ_partner2^c
+    // where source=Fe_i, partner1=Fe_i (same site, offset1=0), partner2=Tm_j
+    // Uses the same Fe-Tm bond list as the bilinear chi coupling.
+    // chi-type bonds: full W tensor; chi_inv-type bonds: A2+ (v4,v6) flipped.
+    if (u1 != 0.0 || u3 != 0.0 || u8 != 0.0 || v4 != 0.0 || v6 != 0.0) {
+        // Build the on-site Fe bilinear ⊗ Tm Gell-Mann tensor
+        // K[a](b,c): a,b ∈ {x=0,y=1,z=2} (SU2), c ∈ {λ1..λ8} (SU3, 0-indexed)
+        // A1+ channel: u_a * (S_z² - S_x²) * λ_a  →  K[z](z,a) = u_a, K[x](x,a) = -u_a
+        // A2+ channel: v_a * (S_x·S_z + S_z·S_x) * λ_a  →  K[x](z,a) = v_a, K[z](x,a) = v_a
+        auto build_W = [&](double sign_A2) -> SpinTensor3 {
+            SpinTensor3 W(3);  // 3 matrices of size 3×8
+            for (int a = 0; a < 3; ++a) {
+                W[a] = Eigen::MatrixXd::Zero(3, 8);
+            }
+            // A1+ sector: λ1 (idx 0), λ3 (idx 2), λ8 (idx 7)
+            // Couples to S_z² - S_x² in local frame
+            W[2](2, 0) = u1;  W[0](0, 0) = -u1;   // λ1
+            W[2](2, 2) = u3;  W[0](0, 2) = -u3;   // λ3
+            W[2](2, 7) = u8;  W[0](0, 7) = -u8;   // λ8
+            // A2+ sector: λ4 (idx 3), λ6 (idx 5)
+            // Couples to S_x·S_z in local frame; sign_A2 = ±1 for chi/chi_inv
+            W[0](2, 3) = sign_A2 * v4;  W[2](0, 3) = sign_A2 * v4;   // λ4
+            W[0](2, 5) = sign_A2 * v6;  W[2](0, 5) = sign_A2 * v6;   // λ6
+            return W;
+        };
+        
+        SpinTensor3 W_chi = build_W(+1.0);
+        SpinTensor3 W_chi_inv = build_W(-1.0);
+        
+        // Set trilinear on the same 32 Fe-Tm bonds as the bilinear chi coupling.
+        // source=Fe_i, partner1=Fe_i (offset1=0,0,0), partner2=Tm_j (offset2 from bond list)
+        
+        // Fe site 0
+        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
+        
+        // Fe site 1
+        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        
+        // Fe site 2
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        
+        // Fe site 3
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
     }
     
     return mixed_uc;
@@ -1104,24 +1197,23 @@ UnitCell build_tmfeo3_tm(const SpinConfig& config) {
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 0, 0));
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 2, Eigen::Vector3i(-1, 1, 0));
         
-        // Tm1 ↔ Tm3 nearest neighbors (z=0.25 plane, d ≈ 0.68)
+        // Tm1 ↔ Tm3 nearest neighbors (z=0.25 plane)
+        // S2 maps Tm0-Tm2@(0,0,0)→Tm1-Tm3@(0,1,0), @(0,1,0)→@(0,0,0),
+        //         @(-1,0,0)→@(-1,1,0), @(-1,1,0)→@(-1,0,0)
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 0, 0));
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(0, 1, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(1, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 1, 3, Eigen::Vector3i(-1, 1, 0));
         
         // Out-of-plane nearest neighbors (between z=0.75 and z=0.25 planes)
-        // Tm0 (0.02111, 0.92839, 0.75) ↔ Tm3 (0.97889, 0.07161, 0.25)
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 0, 1));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(0, 1, 1));
+        // Only 2 NN bonds per pair (d=3.893Å); the other 2 candidate offsets
+        // give d=6.107Å which is far beyond NN.
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(-1, 1, 0));
+        Tm_atoms.set_bilinear_interaction(J_tm_mat, 0, 3, Eigen::Vector3i(-1, 1, 1));
         
-        // Tm2 (0.47889, 0.42839, 0.75) ↔ Tm1 (0.52111, 0.57161, 0.25)
+        // Tm2 ↔ Tm1: nearest at d=3.893Å
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 0));
         Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, 0, 1));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 0));
-        Tm_atoms.set_bilinear_interaction(J_tm_mat, 2, 1, Eigen::Vector3i(0, -1, 1));
     }
     
     return Tm_atoms;

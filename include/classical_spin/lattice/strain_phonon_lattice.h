@@ -4,8 +4,8 @@
  * 
  * This implements a honeycomb lattice with:
  * - Generic NN, 2nd NN, and 3rd NN spin-spin interactions (Kitaev-Heisenberg-Γ-Γ')
- * - Strain field phonons: Eg (ε_xx - ε_yy, 2ε_xy)
- * - Magnetoelastic coupling through the Eg symmetry channel
+ * - Strain field phonons: A1g (ε_xx + ε_yy) and Eg (ε_xx - ε_yy, 2ε_xy)
+ * - Magnetoelastic coupling through A1g and Eg symmetry channels
  * 
  * Hamiltonian:
  * H = H_spin + H_strain + H_magnetoelastic + H_drive
@@ -17,9 +17,13 @@
  *          + (1/2) Σ_r M [V_xx² + V_yy² + V_xy²]   (kinetic energy)
  *          (V_ij = dε_ij/dt are strain velocities)
  * 
- * Magnetoelastic coupling (D3d point group symmetry, Eg channel only):
- * H_c = λ_{Eg} Σ_r {(ε_xx - ε_yy)[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
- *                  + 2ε_xy[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
+ * Magnetoelastic coupling (D3d point group symmetry):
+ * H_c = H_c^{A1g} + H_c^{Eg}
+ * 
+ * H_c^{A1g} = λ_{A1g} Σ_r (ε_xx + ε_yy) {(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}}
+ * 
+ * H_c^{Eg} = λ_{Eg} Σ_r {(ε_xx - ε_yy)[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1}]
+ *                       + 2ε_xy[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2}]}
  * 
  * where f_X^{IRR} are the spin basis functions for the D3d point group irreps.
  * 
@@ -72,45 +76,85 @@ using std::array;
  * 
  * The strain tensor in 2D has 3 independent components: ε_xx, ε_yy, ε_xy
  * These transform under the D3d point group as:
+ * - A1g: ε_xx + ε_yy (breathing mode)
  * - Eg: (ε_xx - ε_yy, 2ε_xy) (shear modes)
  * 
- * Unit-cell strain (Eg irrep of D3d point group).
+ * Each bond type can have independent strain fields (for local coupling).
  */
 struct StrainState {
-    // Strain tensor components (unit-cell level)
-    double epsilon_xx = 0.0;
-    double epsilon_yy = 0.0;
-    double epsilon_xy = 0.0;
+    static constexpr size_t N_BONDS = 3;  // Number of bond types (x=0, y=1, z=2)
+    
+    // Strain components per bond type
+    double epsilon_xx[N_BONDS] = {0.0, 0.0, 0.0};
+    double epsilon_yy[N_BONDS] = {0.0, 0.0, 0.0};
+    double epsilon_xy[N_BONDS] = {0.0, 0.0, 0.0};
     
     // Strain velocities (time derivatives)
-    double V_xx = 0.0;
-    double V_yy = 0.0;
-    double V_xy = 0.0;
+    double V_xx[N_BONDS] = {0.0, 0.0, 0.0};
+    double V_yy[N_BONDS] = {0.0, 0.0, 0.0};
+    double V_xy[N_BONDS] = {0.0, 0.0, 0.0};
     
-    // Total DOF: 3 strain components × 2 (coords + velocities) = 6
-    static constexpr size_t N_DOF = 6;
+    // Total DOF: 3 strain components × 3 bond types × 2 (coords + velocities) = 18
+    static constexpr size_t N_DOF = 18;
     
     // Pack to flat array
     void to_array(double* arr) const {
-        arr[0] = epsilon_xx; arr[1] = epsilon_yy; arr[2] = epsilon_xy;
-        arr[3] = V_xx;       arr[4] = V_yy;       arr[5] = V_xy;
+        size_t idx = 0;
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = epsilon_xx[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = epsilon_yy[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = epsilon_xy[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_xx[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_yy[b];
+        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_xy[b];
     }
     
     // Unpack from flat array
     void from_array(const double* arr) {
-        epsilon_xx = arr[0]; epsilon_yy = arr[1]; epsilon_xy = arr[2];
-        V_xx       = arr[3]; V_yy       = arr[4]; V_xy       = arr[5];
+        size_t idx = 0;
+        for (size_t b = 0; b < N_BONDS; ++b) epsilon_xx[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) epsilon_yy[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) epsilon_xy[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_xx[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_yy[b] = arr[idx++];
+        for (size_t b = 0; b < N_BONDS; ++b) V_xy[b] = arr[idx++];
     }
     
     // Kinetic energy (with unit mass)
     double kinetic_energy() const {
-        return 0.5 * (V_xx * V_xx + V_yy * V_yy + V_xy * V_xy);
+        double T = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            T += V_xx[b] * V_xx[b] + V_yy[b] * V_yy[b] + V_xy[b] * V_xy[b];
+        }
+        return 0.5 * T;
     }
     
-    // Eg amplitude sqrt((ε_xx - ε_yy)² + 4ε_xy²)
+    // A1g amplitude (ε_xx + ε_yy) for specific bond type
+    double A1g_amplitude(size_t bond_type) const {
+        return epsilon_xx[bond_type] + epsilon_yy[bond_type];
+    }
+    
+    // Eg amplitude sqrt((ε_xx - ε_yy)² + 4ε_xy²) for specific bond type
+    double Eg_amplitude(size_t bond_type) const {
+        double d = epsilon_xx[bond_type] - epsilon_yy[bond_type];
+        return std::sqrt(d * d + 4.0 * epsilon_xy[bond_type] * epsilon_xy[bond_type]);
+    }
+    
+    // Total A1g amplitude (averaged over bonds)
+    double A1g_amplitude() const {
+        double sum = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            sum += A1g_amplitude(b);
+        }
+        return sum / N_BONDS;
+    }
+    
+    // Total Eg amplitude (averaged over bonds)
     double Eg_amplitude() const {
-        double d = epsilon_xx - epsilon_yy;
-        return std::sqrt(d * d + 4.0 * epsilon_xy * epsilon_xy);
+        double sum = 0.0;
+        for (size_t b = 0; b < N_BONDS; ++b) {
+            sum += Eg_amplitude(b);
+        }
+        return sum / N_BONDS;
     }
 };
 
@@ -126,12 +170,19 @@ struct ElasticParams {
     // Effective mass for strain dynamics
     double M = 1.0;
     
-    // Damping coefficient (Eg mode)
-    double gamma_Eg = 0.1;
+    // Damping coefficients
+    double gamma_A1g = 0.1;   // A1g mode damping
+    double gamma_Eg = 0.1;    // Eg mode damping
     
-    // Characteristic Eg frequency (derived from elastic constants)
+    // Characteristic frequencies (derived from elastic constants)
+    // ω_A1g² ≈ (C11 + C12) / M
     // ω_Eg² ≈ (C11 - C12) / M ≈ 2C44 / M
+    double omega_A1g() const { return std::sqrt((C11 + C12) / M); }
     double omega_Eg() const { return std::sqrt(2.0 * C44 / M); }
+    
+    // Optional: quartic anharmonicity
+    double lambda_A1g = 0.0;  // A1g quartic coefficient
+    double lambda_Eg = 0.0;   // Eg quartic coefficient
 };
 
 /**
@@ -162,8 +213,9 @@ struct MagnetoelasticParams {
     // where |δε_Eg| is the Eg strain deviation from equilibrium
     double gamma_J7 = 0.0;  // Set to 0 to disable time dependence
     
-    // Magnetoelastic coupling constant (Eg channel)
-    double lambda_Eg = 0.0;
+    // Magnetoelastic coupling constants
+    double lambda_A1g = 0.0;  // A1g channel coupling
+    double lambda_Eg = 0.0;   // Eg channel coupling
     
     /**
      * Get the Kitaev local-to-global rotation matrix R.
@@ -244,6 +296,9 @@ struct StrainDriveParams {
     double sigma_2 = 1.0;
     double phi_2 = 0.0;
     
+    // Drive strength for A1g mode
+    double drive_strength_A1g = 1.0;
+    
     // Drive strength for Eg mode (separate for Eg1 and Eg2)
     double drive_strength_Eg1 = 0.0;  // ε_xx - ε_yy component
     double drive_strength_Eg2 = 0.0;  // 2ε_xy component
@@ -262,6 +317,11 @@ struct StrainDriveParams {
         double F2 = E0_2 * env2 * osc2;
         
         return F1 + F2;
+    }
+    
+    // Get A1g drive force
+    double A1g_force(double t) const {
+        return drive_strength_A1g * drive_force(t);
     }
     
     // Get Eg1 drive force (ε_xx - ε_yy)
@@ -349,9 +409,11 @@ public:
      * @param Eg2  Eg2 component: ε_xy = Eg2
      */
     void set_strain_Eg(double Eg1, double Eg2) {
-        strain.epsilon_xx = Eg1;
-        strain.epsilon_yy = -Eg1;
-        strain.epsilon_xy = Eg2;
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            strain.epsilon_xx[b] = Eg1;
+            strain.epsilon_yy[b] = -Eg1;
+            strain.epsilon_xy[b] = Eg2;
+        }
     }
     
     // NN interactions
@@ -504,10 +566,10 @@ public:
     
     /**
      * Get derivatives of J7 with respect to strain components
-     * ∂J7/∂ε_xx, ∂J7/∂ε_yy, ∂J7/∂ε_xy
+     * ∂J7/∂ε_xx, ∂J7/∂ε_yy, ∂J7/∂ε_xy for each bond type
      */
-    void get_dJ7_deps(double& dJ7_deps_xx, double& dJ7_deps_yy, 
-                      double& dJ7_deps_xy) const;
+    void get_dJ7_deps(double* dJ7_deps_xx, double* dJ7_deps_yy, 
+                      double* dJ7_deps_xy) const;
     
     // Current simulation time (for time-dependent parameters)
     mutable double current_time = 0.0;
@@ -515,12 +577,6 @@ public:
     // ============================================================
     // ENERGY CALCULATIONS
     // ============================================================
-    
-    /** Bilinear exchange energy (NN + J2 + J3 + Zeeman).  Excludes ring exchange. */
-    double bilinear_energy() const;
-    
-    /** Ring exchange hexagon sum for a given J7 value. */
-    double ring_exchange_sum(double J7_val) const;
     
     double spin_energy() const;
     double spin_energy(double t) const;  // Time-dependent version
@@ -531,9 +587,13 @@ public:
     
     double drive_energy() const {
         if (std::abs(drive_F_Eg1_) < 1e-15 && std::abs(drive_F_Eg2_) < 1e-15) return 0.0;
-        double Eg1_b = (strain.epsilon_xx - strain.epsilon_yy) / 2.0;
-        double Eg2_b = strain.epsilon_xy;
-        return -(drive_F_Eg1_ * Eg1_b + drive_F_Eg2_ * Eg2_b);
+        double E = 0.0;
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            double Eg1_b = (strain.epsilon_xx[b] - strain.epsilon_yy[b]) / 2.0;
+            double Eg2_b = strain.epsilon_xy[b];
+            E -= drive_F_Eg1_ * Eg1_b + drive_F_Eg2_ * Eg2_b;
+        }
+        return E;
     }
     
     double total_energy() const {
@@ -581,61 +641,81 @@ public:
     double site_ring_exchange_energy(const SpinVector& spin_here, size_t site_index) const;
     
     // ============================================================
-    // Eg SPIN BASIS FUNCTIONS (D3d irrep)
+    // SPIN BASIS FUNCTIONS FOR D3d IRREPS
     // ============================================================
     
     /**
-     * All 8 Eg spin basis function values, computed in a single pass
-     * over nearest-neighbor bonds.  Each interaction type (K, J, Γ, Γ')
-     * has an Eg1 and Eg2 component following the D3d point-group decomposition.
+     * A1g spin basis function: f_K^{A1g}
+     * Sum over nearest-neighbor bonds of Kitaev-type term
+     * f_K^{A1g} = Σ_<ij>_γ S_i^γ S_j^γ (where γ is the bond direction)
      */
-    struct EgBasisValues {
-        double K1, K2;     // Kitaev
-        double J1, J2;     // Heisenberg (non-Kitaev diagonal)
-        double G1, G2;     // Gamma (off-diagonal symmetric)
-        double Gp1, Gp2;   // Gamma' (off-diagonal asymmetric)
-    };
+    double f_K_A1g() const;
     
     /**
-     * Spin gradients of all 8 Eg basis functions at a given site,
-     * computed in a single pass over the site's nearest neighbors.
+     * A1g spin basis function: f_J^{A1g}
+     * Sum over nearest-neighbor bonds of Heisenberg-type term
+     * f_J^{A1g} = Σ_<ij> S_i · S_j
      */
-    struct EgBasisGradients {
-        SpinVector K1, K2;
-        SpinVector J1, J2;
-        SpinVector G1, G2;
-        SpinVector Gp1, Gp2;
-    };
-    
-    /** Compute all Eg basis function values in one bond loop. */
-    EgBasisValues compute_Eg_basis() const;
-    
-    /** Compute all Eg basis function gradients ∂f/∂S_site in one neighbor loop. */
-    EgBasisGradients compute_Eg_basis_dS(size_t site) const;
+    double f_J_A1g() const;
     
     /**
-     * Weighted Eg spin factors:
-     *   Σ_Eg1 = (J+K)·f_K1 + J·f_J1 + Γ·f_Γ1 + Γ'·f_Γ'1
-     *   Σ_Eg2 = (J+K)·f_K2 + J·f_J2 + Γ·f_Γ2 + Γ'·f_Γ'2
-     * These are the coupling-weighted bilinears that enter the ME energy/force.
+     * A1g spin basis function: f_Γ^{A1g}
+     * Sum over nearest-neighbor bonds of Γ-type term
+     * f_Γ^{A1g} = Σ_<ij>_γ (S_i^α S_j^β + S_i^β S_j^α) where α,β ≠ γ
      */
-    std::pair<double, double> Eg_spin_factors() const;
+    double f_Gamma_A1g() const;
     
     /**
-     * Weighted Eg spin factor gradients at a given site:
-     *   ∂Σ_Eg1/∂S = (J+K)·∂f_K1/∂S + J·∂f_J1/∂S + Γ·∂f_Γ1/∂S + Γ'·∂f_Γ'1/∂S
-     *   ∂Σ_Eg2/∂S = ...
-     * These are the coupling-weighted spin gradients that enter the ME field.
+     * Eg spin basis functions: f_K^{Eg,1}, f_K^{Eg,2}
+     * The Eg representation is 2-dimensional
      */
-    std::pair<SpinVector, SpinVector> Eg_spin_factor_gradients(size_t site) const;
+    double f_K_Eg1() const;
+    double f_K_Eg2() const;
+    
+    double f_J_Eg1() const;
+    double f_J_Eg2() const;
+    
+    double f_Gamma_Eg1() const;
+    double f_Gamma_Eg2() const;
+    
+    /**
+     * Eg spin basis functions for Gammap (Γ') term: f_Γ'^{Eg,1}, f_Γ'^{Eg,2}
+     * The Γ' operator on γ-bond: S_i^γ (S_j^α + S_j^β) + (S_i^α + S_i^β) S_j^γ where α,β ≠ γ
+     */
+    double f_Gammap_Eg1() const;
+    double f_Gammap_Eg2() const;
+    
+    // ============================================================
+    // DERIVATIVES
+    // ============================================================
+    
+    /**
+     * Derivative of magnetoelastic energy with respect to strain components
+     * ∂H_c/∂ε_xx, ∂H_c/∂ε_yy, ∂H_c/∂ε_xy
+     */
+    double dH_deps_xx(size_t bond_type) const;
+    double dH_deps_yy(size_t bond_type) const;
+    double dH_deps_xy(size_t bond_type) const;
+    
+    /**
+     * Derivative of spin basis functions w.r.t. spins (for effective field)
+     */
+    SpinVector df_K_A1g_dS(size_t site) const;
+    SpinVector df_J_A1g_dS(size_t site) const;
+    SpinVector df_Gamma_A1g_dS(size_t site) const;
+    SpinVector df_K_Eg1_dS(size_t site) const;
+    SpinVector df_K_Eg2_dS(size_t site) const;
+    SpinVector df_J_Eg1_dS(size_t site) const;
+    SpinVector df_J_Eg2_dS(size_t site) const;
+    SpinVector df_Gamma_Eg1_dS(size_t site) const;
+    SpinVector df_Gamma_Eg2_dS(size_t site) const;
+    SpinVector df_Gammap_Eg1_dS(size_t site) const;
+    SpinVector df_Gammap_Eg2_dS(size_t site) const;
     
     /**
      * Effective field on spin from magnetoelastic coupling
      */
     SpinVector get_magnetoelastic_field(size_t site) const;
-    
-    /** Bilinear effective field (NN + J2 + J3 + Zeeman). Excludes ring exchange & ME. */
-    SpinVector bilinear_field(size_t site) const;
     
     /**
      * Total effective field on spin
@@ -646,13 +726,6 @@ public:
     SpinVector get_ring_exchange_field(size_t site) const;
     SpinVector get_ring_exchange_field(size_t site, double t) const;  // Time-dependent version
     
-    /**
-     * Finite-difference verification of the ring exchange effective field.
-     * Computes -∂H_7/∂S_site using central differences on ring_exchange_energy().
-     * Use to validate the analytical get_ring_exchange_field() against energy.
-     */
-    SpinVector ring_exchange_field_numerical(size_t site, double delta = 1e-5) const;
-
     // ============================================================
     // EQUATIONS OF MOTION
     // ============================================================
@@ -677,16 +750,25 @@ public:
     }
     
     /**
-     * Strain EOM derivatives (Eg damping only)
+     * Strain EOM derivatives
      * 
-     * M d²ε_xx/dt² = -(C11 ε_xx + C12 ε_yy) - ∂H_c/∂ε_xx - γ_Eg V_xx + F_Eg1
-     * M d²ε_yy/dt² = -(C11 ε_yy + C12 ε_xx) - ∂H_c/∂ε_yy - γ_Eg V_yy - F_Eg1
-     * M d²ε_xy/dt² = -4C44 ε_xy - ∂H_c/∂ε_xy - γ_Eg V_xy + F_Eg2
+     * For the elastic Hamiltonian:
+     * H_elastic = (1/2)[C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + C44(2ε_xy)²]
+     * 
+     * The equations of motion are:
+     * M d²ε_xx/dt² = -∂H/∂ε_xx - γ dε_xx/dt
+     *              = -(C11 ε_xx + C12 ε_yy) - ∂H_c/∂ε_xx - γ V_xx
+     * 
+     * M d²ε_yy/dt² = -∂H/∂ε_yy - γ dε_yy/dt
+     *              = -(C11 ε_yy + C12 ε_xx) - ∂H_c/∂ε_yy - γ V_yy
+     * 
+     * M d²ε_xy/dt² = -∂H/∂ε_xy - γ dε_xy/dt
+     *              = -4C44 ε_xy - ∂H_c/∂ε_xy - γ V_xy
      */
     void strain_derivatives(const StrainState& eps, double t,
-                           double dH_deps_xx,
-                           double dH_deps_yy,
-                           double dH_deps_xy,
+                           const double* dH_deps_xx_arr,
+                           const double* dH_deps_yy_arr,
+                           const double* dH_deps_xy_arr,
                            StrainState& deps_dt) const;
     
     /**
@@ -963,6 +1045,7 @@ public:
                              const vector<Eigen::Vector3d>& M_traj,
                              const vector<Eigen::Vector3d>& M_stag_traj,
                              const vector<double>& energy_traj,
+                             const vector<double>& eps_A1g_traj,
                              const vector<double>& eps_Eg1_traj,
                              const vector<double>& eps_Eg2_traj,
                              const vector<double>& J7_eff_traj) const;
@@ -980,6 +1063,7 @@ public:
     double order_parameter() const;
     
     // Strain mode amplitudes (averaged over bond types)
+    double A1g_amplitude() const;
     double Eg1_amplitude() const;
     double Eg2_amplitude() const;
     

@@ -69,13 +69,14 @@ int main(int argc, char** argv) {
     me.Gammap = -2.94;
     me.J2_A = 0.0;  me.J2_B = 0.0;
     me.J3 = 0.0;    me.J7 = 0.0;
+    me.lambda_A1g = 0.0;
     me.lambda_Eg  = 0.1;  // Nonzero to test magnetoelastic coupling
     me.gamma_J7   = 0.0;
 
     ElasticParams el;
     el.C11 = 1.0;  el.C12 = 0.3;  el.C44 = 0.35;
     el.M = 1.0;
-    el.gamma_Eg = 0.1;
+    el.gamma_A1g = 0.1;  el.gamma_Eg = 0.1;
 
     StrainDriveParams dr;
     dr.E0_1 = 0; dr.E0_2 = 0;
@@ -119,9 +120,11 @@ int main(int argc, char** argv) {
         lattice.unpack_extra_dof(buf);
 
         bool ok = true;
-        if (std::abs(lattice.strain.epsilon_xx - 0.05) > 1e-15) ok = false;
-        if (std::abs(lattice.strain.epsilon_yy - (-0.05)) > 1e-15) ok = false;
-        if (std::abs(lattice.strain.epsilon_xy - 0.03) > 1e-15) ok = false;
+        for (size_t b = 0; b < 3; ++b) {
+            if (std::abs(lattice.strain.epsilon_xx[b] - 0.05) > 1e-15) ok = false;
+            if (std::abs(lattice.strain.epsilon_yy[b] - (-0.05)) > 1e-15) ok = false;
+            if (std::abs(lattice.strain.epsilon_xy[b] - 0.03) > 1e-15) ok = false;
+        }
 
         if (rank == 0) {
             std::cout << "[" << (ok ? "PASS" : "FAIL") << "] Test 2: Strain pack/unpack round-trip\n\n";
@@ -141,8 +144,8 @@ int main(int argc, char** argv) {
         lattice.set_strain_Eg(init_Eg1, init_Eg2);
 
         // Record initial strain
-        double pre_Eg1 = lattice.strain.epsilon_xx;
-        double pre_Eg2 = lattice.strain.epsilon_xy;
+        double pre_Eg1 = lattice.strain.epsilon_xx[0];
+        double pre_Eg2 = lattice.strain.epsilon_xy[0];
 
         // Set up for a forced exchange (use high temperature to almost always accept)
         std::vector<double> temps = {1000.0, 2000.0};
@@ -162,8 +165,8 @@ int main(int argc, char** argv) {
             lattice, exchange_rng, rank, size, temps, curr_T, 0, MPI_COMM_WORLD);
 
         // Check if strain changed (if exchange was accepted)
-        double post_Eg1 = lattice.strain.epsilon_xx;
-        double post_Eg2 = lattice.strain.epsilon_xy;
+        double post_Eg1 = lattice.strain.epsilon_xx[0];
+        double post_Eg2 = lattice.strain.epsilon_xy[0];
 
         bool strain_exchanged = (std::abs(post_Eg1 - pre_Eg1) > 1e-15 ||
                                  std::abs(post_Eg2 - pre_Eg2) > 1e-15);

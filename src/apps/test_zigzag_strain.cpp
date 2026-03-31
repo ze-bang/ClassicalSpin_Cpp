@@ -38,13 +38,15 @@ int main(int argc, char** argv) {
     me.Gammap = -4.0;
     me.J2_A = 0.0;  me.J2_B = 0.0;
     me.J3 = 0.0;    me.J7 = -0.3;
+    me.lambda_A1g = 0.0;
     me.lambda_Eg  = 0.1;
     me.gamma_J7   = 0.0;
 
     ElasticParams el;
     el.C11 = 1.0;  el.C12 = 0.3;  el.C44 = 0.35;
     el.M = 1.0;
-    el.gamma_Eg = 0.1;
+    el.gamma_A1g = 0.1;  el.gamma_Eg = 0.1;
+    el.lambda_A1g = 0.0;  el.lambda_Eg = 0.0;
 
     StrainDriveParams dr;
     dr.E0_1 = 0; dr.E0_2 = 0;  // No drive
