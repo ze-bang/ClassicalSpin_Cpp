@@ -422,6 +422,54 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double v4 = config.get_param("v4", 0.0);   // λ4 (A2+) aniso-mod coupling
     const double v6 = config.get_param("v6", 0.0);   // λ6 (A2+) aniso-mod coupling
     // =========================================================================
+    // General on-site trilinear Fe bilinear channels (tmfeo3_notes.tex §5.3)
+    // =========================================================================
+    // The full on-site trilinear has 5 Tm-even channels × 6 symmetric Fe bilinears
+    // = 30 independent parameters per orbit. The u/v shorthand above covers only
+    // the Γ2-dominant channels (S_z²-S_x² and S_x·S_z). These general params
+    // ADD to the u/v base, enabling the full symmetric Fe quadrupole tensor:
+    //   H_aniso = Σ_a W_a^{bc} λ^a S^b S^c  (a ∈ {1,3,4,6,8}; bc symmetric)
+    // Naming: W{channel}_{bilinear}, e.g. W1_yy couples λ1 to S_y².
+    // Params here are VALUES placed in K[b](c, a_idx) (and symmetrized in bc).
+    // Diagonal (bb): effective coupling = W * S_b².  Off-diag (bc): eff = 2W * S_b S_c.
+    struct TrilinearChannel {
+        double xx, yy, zz, xy, xz, yz;
+    };
+    // Antisymmetric Fe bilinear channel: S_i^a S_{i'}^b - S_i^b S_{i'}^a (DM-like)
+    // Only meaningful for inter-site (i ≠ i') trilinear; identically zero on-site.
+    struct AntiTrilinearChannel {
+        double xy, xz, yz;
+    };
+    auto read_tri_ch = [&](const std::string& pfx, double u_zzmxx, double v_xz) -> TrilinearChannel {
+        // u_zzmxx from old u-param: adds +u to zz, -u to xx
+        // v_xz from old v-param: adds +v to xz
+        return {
+            config.get_param(pfx + "_xx", 0.0) - u_zzmxx,   // S_x² coupling
+            config.get_param(pfx + "_yy", 0.0),               // S_y² coupling
+            config.get_param(pfx + "_zz", 0.0) + u_zzmxx,    // S_z² coupling
+            config.get_param(pfx + "_xy", 0.0),               // S_x S_y coupling
+            config.get_param(pfx + "_xz", 0.0) + v_xz,       // S_x S_z coupling
+            config.get_param(pfx + "_yz", 0.0)                // S_y S_z coupling
+        };
+    };
+    auto read_anti_ch = [&](const std::string& pfx) -> AntiTrilinearChannel {
+        return {
+            config.get_param(pfx + "_Axy", 0.0),   // [S_x S'_y - S_y S'_x] coupling
+            config.get_param(pfx + "_Axz", 0.0),   // [S_x S'_z - S_z S'_x] coupling
+            config.get_param(pfx + "_Ayz", 0.0)    // [S_y S'_z - S_z S'_y] coupling
+        };
+    };
+    TrilinearChannel W1_ch = read_tri_ch("W1", u1, 0.0);  // λ1 (A1+)
+    TrilinearChannel W3_ch = read_tri_ch("W3", u3, 0.0);  // λ3 (A1+)
+    TrilinearChannel W4_ch = read_tri_ch("W4", 0.0, v4);   // λ4 (A2+)
+    TrilinearChannel W6_ch = read_tri_ch("W6", 0.0, v6);   // λ6 (A2+)
+    TrilinearChannel W8_ch = read_tri_ch("W8", u8, 0.0);  // λ8 (A1+)
+    // Orbit-dependent on-site trilinear scaling (analogous to chi_orbit_scale)
+    const double W_orbit1_scale = config.get_param("W_orbit1_scale", 1.0);
+    const double W_orbit2_scale = config.get_param("W_orbit2_scale", 1.0);
+    const double W_orbit3_scale = config.get_param("W_orbit3_scale", 1.0);
+    const double W_orbit4_scale = config.get_param("W_orbit4_scale", 1.0);
+    // =========================================================================
     // Inter-site anisotropy-modulation trilinear: λ^a_Tm · S^b_{Fe_i} · S^c_{Fe_i'}
     // =========================================================================
     // From tmfeo3_notes.tex Eq.11: extends aniso-mod to inter-site Fe bilinears.
@@ -437,6 +485,24 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double w8 = config.get_param("w8", 0.0);   // λ8 (A1+) inter-site aniso-mod
     const double w4 = config.get_param("w4", 0.0);   // λ4 (A2+) inter-site aniso-mod
     const double w6 = config.get_param("w6", 0.0);   // λ6 (A2+) inter-site aniso-mod
+    // General inter-site channels (additive with w-params, same structure as on-site)
+    TrilinearChannel V1_ch = read_tri_ch("V1", w1, 0.0);
+    TrilinearChannel V3_ch = read_tri_ch("V3", w3, 0.0);
+    TrilinearChannel V4_ch = read_tri_ch("V4", 0.0, w4);
+    TrilinearChannel V6_ch = read_tri_ch("V6", 0.0, w6);
+    TrilinearChannel V8_ch = read_tri_ch("V8", w8, 0.0);
+    // Antisymmetric inter-site channels: DM-like Fe bilinear × Tm Gell-Mann
+    // VA{n}_A{ab}: couples (S_i^a S_{i'}^b - S_i^b S_{i'}^a) to λ_n
+    AntiTrilinearChannel VA1_ch = read_anti_ch("V1");  // λ1 (A1+)
+    AntiTrilinearChannel VA3_ch = read_anti_ch("V3");  // λ3 (A1+)
+    AntiTrilinearChannel VA4_ch = read_anti_ch("V4");  // λ4 (A2+)
+    AntiTrilinearChannel VA6_ch = read_anti_ch("V6");  // λ6 (A2+)
+    AntiTrilinearChannel VA8_ch = read_anti_ch("V8");  // λ8 (A1+)
+    // Orbit-dependent inter-site trilinear scaling
+    const double V_orbit1_scale = config.get_param("V_orbit1_scale", 1.0);
+    const double V_orbit2_scale = config.get_param("V_orbit2_scale", 1.0);
+    const double V_orbit3_scale = config.get_param("V_orbit3_scale", 1.0);
+    const double V_orbit4_scale = config.get_param("V_orbit4_scale", 1.0);
     const double e1 = config.get_param("e1", 0.97);
     const double e2 = config.get_param("e2", 3.97);
     
@@ -848,73 +914,100 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     // where source=Fe_i, partner1=Fe_i (same site, offset1=0), partner2=Tm_j
     // Uses the same Fe-Tm bond list as the bilinear chi coupling.
     // chi-type bonds: full W tensor; chi_inv-type bonds: A2+ (v4,v6) flipped.
-    if (u1 != 0.0 || u3 != 0.0 || u8 != 0.0 || v4 != 0.0 || v6 != 0.0) {
-        // Build the on-site Fe bilinear ⊗ Tm Gell-Mann tensor
+    // Shared helpers for building trilinear SpinTensor3 from TrilinearChannel
+    auto fill_channel = [](SpinTensor3& T, int c_idx, const TrilinearChannel& ch, double sign) {
+        T[0](0, c_idx) = sign * ch.xx;
+        T[1](1, c_idx) = sign * ch.yy;
+        T[2](2, c_idx) = sign * ch.zz;
+        T[0](1, c_idx) = sign * ch.xy;  T[1](0, c_idx) = sign * ch.xy;
+        T[0](2, c_idx) = sign * ch.xz;  T[2](0, c_idx) = sign * ch.xz;
+        T[1](2, c_idx) = sign * ch.yz;  T[2](1, c_idx) = sign * ch.yz;
+    };
+    // Antisymmetric Fe bilinear: T[a](b,c) = -T[b](a,c) for inter-site coupling.
+    // Adds to (not overwrites) existing tensor entries, so call after fill_channel.
+    auto fill_anti_channel = [](SpinTensor3& T, int c_idx, const AntiTrilinearChannel& ch, double sign) {
+        T[0](1, c_idx) += sign * ch.xy;  T[1](0, c_idx) -= sign * ch.xy;
+        T[0](2, c_idx) += sign * ch.xz;  T[2](0, c_idx) -= sign * ch.xz;
+        T[1](2, c_idx) += sign * ch.yz;  T[2](1, c_idx) -= sign * ch.yz;
+    };
+    auto scale_tensor3 = [](const SpinTensor3& T, double s) -> SpinTensor3 {
+        SpinTensor3 out(T.size());
+        for (size_t i = 0; i < T.size(); ++i) out[i] = s * T[i];
+        return out;
+    };
+
+    {
+        // Build the on-site Fe bilinear ⊗ Tm Gell-Mann tensor (general form)
         // K[a](b,c): a,b ∈ {x=0,y=1,z=2} (SU2), c ∈ {λ1..λ8} (SU3, 0-indexed)
-        // A1+ channel: u_a * (S_z² - S_x²) * λ_a  →  K[z](z,a) = u_a, K[x](x,a) = -u_a
-        // A2+ channel: v_a * (S_x·S_z + S_z·S_x) * λ_a  →  K[x](z,a) = v_a, K[z](x,a) = v_a
-        auto build_W = [&](double sign_A2) -> SpinTensor3 {
-            SpinTensor3 W(3);  // 3 matrices of size 3×8
-            for (int a = 0; a < 3; ++a) {
-                W[a] = Eigen::MatrixXd::Zero(3, 8);
-            }
-            // A1+ sector: λ1 (idx 0), λ3 (idx 2), λ8 (idx 7)
-            // Couples to S_z² - S_x² in local frame
-            W[2](2, 0) = u1;  W[0](0, 0) = -u1;   // λ1
-            W[2](2, 2) = u3;  W[0](0, 2) = -u3;   // λ3
-            W[2](2, 7) = u8;  W[0](0, 7) = -u8;   // λ8
-            // A2+ sector: λ4 (idx 3), λ6 (idx 5)
-            // Couples to S_x·S_z in local frame; sign_A2 = ±1 for chi/chi_inv
-            W[0](2, 3) = sign_A2 * v4;  W[2](0, 3) = sign_A2 * v4;   // λ4
-            W[0](2, 5) = sign_A2 * v6;  W[2](0, 5) = sign_A2 * v6;   // λ6
+        // Full symmetric Fe quadrupole: 6 independent bilinears × 5 Tm-even channels
+        // sign_A2 = ±1 distinguishes chi (E-type) vs chi_inv (I-type) bonds
+        auto build_W_general = [&](double sign_A2) -> SpinTensor3 {
+            SpinTensor3 W(3);
+            for (int a = 0; a < 3; ++a) W[a] = Eigen::MatrixXd::Zero(3, 8);
+            // A1+ sector: λ1 (idx 0), λ3 (idx 2), λ8 (idx 7) — sign=+1 always
+            fill_channel(W, 0, W1_ch, 1.0);
+            fill_channel(W, 2, W3_ch, 1.0);
+            fill_channel(W, 7, W8_ch, 1.0);
+            // A2+ sector: λ4 (idx 3), λ6 (idx 5) — sign flips under inversion
+            fill_channel(W, 3, W4_ch, sign_A2);
+            fill_channel(W, 5, W6_ch, sign_A2);
             return W;
         };
-        
-        SpinTensor3 W_chi = build_W(+1.0);
-        SpinTensor3 W_chi_inv = build_W(-1.0);
+        SpinTensor3 W_chi_base     = build_W_general(+1.0);
+        SpinTensor3 W_chi_inv_base = build_W_general(-1.0);
+        // Orbit-scaled on-site trilinear tensors
+        SpinTensor3 W_chi_o1 = scale_tensor3(W_chi_base, W_orbit1_scale);
+        SpinTensor3 W_chi_inv_o1 = scale_tensor3(W_chi_inv_base, W_orbit1_scale);
+        SpinTensor3 W_chi_o2 = scale_tensor3(W_chi_base, W_orbit2_scale);
+        SpinTensor3 W_chi_inv_o2 = scale_tensor3(W_chi_inv_base, W_orbit2_scale);
+        SpinTensor3 W_chi_o3 = scale_tensor3(W_chi_base, W_orbit3_scale);
+        SpinTensor3 W_chi_inv_o3 = scale_tensor3(W_chi_inv_base, W_orbit3_scale);
+        SpinTensor3 W_chi_o4 = scale_tensor3(W_chi_base, W_orbit4_scale);
+        SpinTensor3 W_chi_inv_o4 = scale_tensor3(W_chi_inv_base, W_orbit4_scale);
         
         // Set trilinear on the same 32 Fe-Tm bonds as the bilinear chi coupling.
         // source=Fe_i, partner1=Fe_i (offset1=0,0,0), partner2=Tm_j (offset2 from bond list)
+        // Bond order follows bilinear: orbit 1,1, 2,2, 3,3, 4,4 per Fe site
         
         // Fe site 0
-        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o1,     0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o2,     0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o3,     0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o4,     0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
         
         // Fe site 1
-        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o1,     1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o2,     1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o3,     1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o4,     1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
         
         // Fe site 2
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, -1));
-        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_o1,     2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o2,     2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_o3,     2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o4,     2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
         
         // Fe site 3
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_inv, 3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
-        mixed_uc.set_mixed_trilinear(W_chi,     3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o1,     3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_o2,     3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        mixed_uc.set_mixed_trilinear(W_chi_o3,     3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        mixed_uc.set_mixed_trilinear(W_chi_o4,     3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
     }
     
     // =========================================================================
@@ -929,24 +1022,50 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     //   Fe1 → Fe2 @ (0,0,0) and (0,0,1)
     //   Fe2 → Fe1 @ (0,0,0) and (0,0,-1)
     //   Fe3 → Fe0 @ (0,0,0) and (0,0,-1)
-    if (w1 != 0.0 || w3 != 0.0 || w8 != 0.0 || w4 != 0.0 || w6 != 0.0) {
-        auto build_V = [&](double sign_A2) -> SpinTensor3 {
+    if (w1 != 0.0 || w3 != 0.0 || w8 != 0.0 || w4 != 0.0 || w6 != 0.0
+        || V1_ch.xx != 0.0 || V1_ch.yy != 0.0 || V1_ch.xy != 0.0 || V1_ch.yz != 0.0
+        || V3_ch.xx != 0.0 || V3_ch.yy != 0.0 || V3_ch.xy != 0.0 || V3_ch.yz != 0.0
+        || V4_ch.xx != 0.0 || V4_ch.yy != 0.0 || V4_ch.xy != 0.0 || V4_ch.yz != 0.0
+        || V6_ch.xx != 0.0 || V6_ch.yy != 0.0 || V6_ch.xy != 0.0 || V6_ch.yz != 0.0
+        || V8_ch.xx != 0.0 || V8_ch.yy != 0.0 || V8_ch.xy != 0.0 || V8_ch.yz != 0.0
+        || VA1_ch.xy != 0.0 || VA1_ch.xz != 0.0 || VA1_ch.yz != 0.0
+        || VA3_ch.xy != 0.0 || VA3_ch.xz != 0.0 || VA3_ch.yz != 0.0
+        || VA4_ch.xy != 0.0 || VA4_ch.xz != 0.0 || VA4_ch.yz != 0.0
+        || VA6_ch.xy != 0.0 || VA6_ch.xz != 0.0 || VA6_ch.yz != 0.0
+        || VA8_ch.xy != 0.0 || VA8_ch.xz != 0.0 || VA8_ch.yz != 0.0) {
+        // Reuse fill_channel and fill_anti_channel from on-site (captured above)
+        auto build_V_general = [&](double sign_A2) -> SpinTensor3 {
             SpinTensor3 V(3);
-            for (int a = 0; a < 3; ++a) {
-                V[a] = Eigen::MatrixXd::Zero(3, 8);
-            }
-            // A1+ sector: λ1 (idx 0), λ3 (idx 2), λ8 (idx 7)
-            V[2](2, 0) = w1;  V[0](0, 0) = -w1;
-            V[2](2, 2) = w3;  V[0](0, 2) = -w3;
-            V[2](2, 7) = w8;  V[0](0, 7) = -w8;
-            // A2+ sector: λ4 (idx 3), λ6 (idx 5)
-            V[0](2, 3) = sign_A2 * w4;  V[2](0, 3) = sign_A2 * w4;
-            V[0](2, 5) = sign_A2 * w6;  V[2](0, 5) = sign_A2 * w6;
+            for (int a = 0; a < 3; ++a) V[a] = Eigen::MatrixXd::Zero(3, 8);
+            // Symmetric Fe bilinear: S_i^a S_{i'}^b + S_i^b S_{i'}^a
+            fill_channel(V, 0, V1_ch, 1.0);
+            fill_channel(V, 2, V3_ch, 1.0);
+            fill_channel(V, 7, V8_ch, 1.0);
+            fill_channel(V, 3, V4_ch, sign_A2);
+            fill_channel(V, 5, V6_ch, sign_A2);
+            // Antisymmetric Fe bilinear: S_i^a S_{i'}^b - S_i^b S_{i'}^a
+            // Same A1+/A2+ sign structure — inversion maps each Fe site to itself
+            // so the Fe bilinear (symmetric or antisymmetric) is unchanged; only
+            // the Tm λ parity (A1+/A2+) determines the sign_A2 flip.
+            fill_anti_channel(V, 0, VA1_ch, 1.0);
+            fill_anti_channel(V, 2, VA3_ch, 1.0);
+            fill_anti_channel(V, 7, VA8_ch, 1.0);
+            fill_anti_channel(V, 3, VA4_ch, sign_A2);
+            fill_anti_channel(V, 5, VA6_ch, sign_A2);
             return V;
         };
         
-        SpinTensor3 V_chi = build_V(+1.0);
-        SpinTensor3 V_chi_inv = build_V(-1.0);
+        SpinTensor3 V_chi_base     = build_V_general(+1.0);
+        SpinTensor3 V_chi_inv_base = build_V_general(-1.0);
+        // Orbit-scaled inter-site trilinear tensors
+        SpinTensor3 V_chi_o1 = scale_tensor3(V_chi_base, V_orbit1_scale);
+        SpinTensor3 V_chi_inv_o1 = scale_tensor3(V_chi_inv_base, V_orbit1_scale);
+        SpinTensor3 V_chi_o2 = scale_tensor3(V_chi_base, V_orbit2_scale);
+        SpinTensor3 V_chi_inv_o2 = scale_tensor3(V_chi_inv_base, V_orbit2_scale);
+        SpinTensor3 V_chi_o3 = scale_tensor3(V_chi_base, V_orbit3_scale);
+        SpinTensor3 V_chi_inv_o3 = scale_tensor3(V_chi_inv_base, V_orbit3_scale);
+        SpinTensor3 V_chi_o4 = scale_tensor3(V_chi_base, V_orbit4_scale);
+        SpinTensor3 V_chi_inv_o4 = scale_tensor3(V_chi_inv_base, V_orbit4_scale);
         
         // c-axis NN partner sublattice index and two offsets for each Fe site
         // Fe_i → partner Fe_p at offsets c_off[0], c_off[1]
@@ -968,44 +1087,44 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         };
         
         // Fe site 0 — 8 bonds (same Fe-Tm topology as bilinear/on-site trilinear)
-        set_inter(V_chi,     0, 3, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi_inv, 0, 0, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi,     0, 2, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi_inv, 0, 1, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi,     0, 1, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi_inv, 0, 2, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi,     0, 0, Eigen::Vector3i(0, -1, 0));
-        set_inter(V_chi_inv, 0, 3, Eigen::Vector3i(-1, 1, 0));
+        set_inter(V_chi_o1,     0, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_inv_o1, 0, 0, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_o2,     0, 2, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv_o2, 0, 1, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_o3,     0, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv_o3, 0, 2, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_o4,     0, 0, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_inv_o4, 0, 3, Eigen::Vector3i(-1, 1, 0));
         
         // Fe site 1 — 8 bonds
-        set_inter(V_chi,     1, 2, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi_inv, 1, 1, Eigen::Vector3i(0, -1, 0));
-        set_inter(V_chi_inv, 1, 0, Eigen::Vector3i(0, -1, 0));
-        set_inter(V_chi,     1, 3, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi,     1, 0, Eigen::Vector3i(1, -1, 0));
-        set_inter(V_chi_inv, 1, 3, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi,     1, 1, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi_inv, 1, 2, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_o1,     1, 2, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv_o1, 1, 1, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_inv_o2, 1, 0, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_o2,     1, 3, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_o3,     1, 0, Eigen::Vector3i(1, -1, 0));
+        set_inter(V_chi_inv_o3, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_o4,     1, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv_o4, 1, 2, Eigen::Vector3i(0, -1, 0));
         
         // Fe site 2 — 8 bonds
-        set_inter(V_chi_inv, 2, 2, Eigen::Vector3i(0, 0, -1));
-        set_inter(V_chi,     2, 1, Eigen::Vector3i(0, -1, 0));
-        set_inter(V_chi,     2, 0, Eigen::Vector3i(0, -1, -1));
-        set_inter(V_chi_inv, 2, 3, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi_inv, 2, 0, Eigen::Vector3i(1, -1, -1));
-        set_inter(V_chi,     2, 3, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi_inv, 2, 1, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi,     2, 2, Eigen::Vector3i(0, -1, -1));
+        set_inter(V_chi_inv_o1, 2, 2, Eigen::Vector3i(0, 0, -1));
+        set_inter(V_chi_o1,     2, 1, Eigen::Vector3i(0, -1, 0));
+        set_inter(V_chi_o2,     2, 0, Eigen::Vector3i(0, -1, -1));
+        set_inter(V_chi_inv_o2, 2, 3, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_inv_o3, 2, 0, Eigen::Vector3i(1, -1, -1));
+        set_inter(V_chi_o3,     2, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_inv_o4, 2, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_o4,     2, 2, Eigen::Vector3i(0, -1, -1));
         
         // Fe site 3 — 8 bonds
-        set_inter(V_chi_inv, 3, 3, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi,     3, 0, Eigen::Vector3i(0, 0, -1));
-        set_inter(V_chi_inv, 3, 2, Eigen::Vector3i(0, 0, -1));
-        set_inter(V_chi,     3, 1, Eigen::Vector3i(-1, 0, 0));
-        set_inter(V_chi_inv, 3, 1, Eigen::Vector3i(0, 0, 0));
-        set_inter(V_chi,     3, 2, Eigen::Vector3i(-1, 0, -1));
-        set_inter(V_chi_inv, 3, 0, Eigen::Vector3i(0, -1, -1));
-        set_inter(V_chi,     3, 3, Eigen::Vector3i(-1, 1, 0));
+        set_inter(V_chi_inv_o1, 3, 3, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_o1,     3, 0, Eigen::Vector3i(0, 0, -1));
+        set_inter(V_chi_inv_o2, 3, 2, Eigen::Vector3i(0, 0, -1));
+        set_inter(V_chi_o2,     3, 1, Eigen::Vector3i(-1, 0, 0));
+        set_inter(V_chi_inv_o3, 3, 1, Eigen::Vector3i(0, 0, 0));
+        set_inter(V_chi_o3,     3, 2, Eigen::Vector3i(-1, 0, -1));
+        set_inter(V_chi_inv_o4, 3, 0, Eigen::Vector3i(0, -1, -1));
+        set_inter(V_chi_o4,     3, 3, Eigen::Vector3i(-1, 1, 0));
     }
     
     return mixed_uc;

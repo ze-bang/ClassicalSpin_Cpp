@@ -193,6 +193,13 @@ public:
     double field_drive_freq_SU3;              // Pulse frequency for SU(3)
     double field_drive_width_SU3;             // Pulse width (Gaussian) for SU(3)
 
+    // SU(3) Bloch damping/relaxation (tmfeo3_notes.tex Eq. blochdampedfull)
+    // dn^a/dt = (1/ℏ) f_{abc} h^b n^c  −  Γ_a (n^a − n^a_eq)
+    // damping_rates_SU3[a]: phenomenological relaxation rates Γ_a for each Gell-Mann channel
+    // equilibrium_SU3[site]: thermal equilibrium Bloch vector n^a_eq for each SU(3) site
+    SpinVector damping_rates_SU3;               // 8-component, one Γ per Gell-Mann channel
+    SpinConfigSU3 equilibrium_SU3;              // Per-site equilibrium Bloch vector
+
     // ============================================================
     // LOCAL FIELD CACHING FOR OPTIMIZED MONTE CARLO
     // ============================================================
@@ -314,6 +321,10 @@ public:
         field_drive_freq_SU3 = 0.0;
         field_drive_width_SU3 = 1.0;
 
+        // SU(3) Bloch damping: default zero rates (no damping)
+        damping_rates_SU3 = SpinVector::Zero(spin_dim_SU3);
+        // equilibrium_SU3 will be sized after lattice is built (see below)
+
         // Initialize random seed
         seed_lehman(chrono::system_clock::now().time_since_epoch().count() * 2 + 1);
 
@@ -340,6 +351,9 @@ public:
         field_valid_SU2.resize(lattice_size_SU2, false);
         field_valid_SU3.resize(lattice_size_SU3, false);
         use_field_caching = false;  // Disabled by default
+
+        // Initialize SU(3) Bloch damping equilibrium (default: zero = infinite temperature)
+        equilibrium_SU3.resize(lattice_size_SU3, SpinVector::Zero(spin_dim_SU3));
 
         // Build reverse lookup tables for mixed interactions
         build_reverse_lookup_tables();
@@ -4189,6 +4203,38 @@ public:
     }
 
     /**
+     * Set SU(3) Bloch damping rates Γ_a for each Gell-Mann channel.
+     * See tmfeo3_notes.tex Eq. blochdampedfull:
+     *   dn^a/dt += −Γ_a (n^a − n^a_eq)
+     * @param rates  8-component vector of damping rates (one per Gell-Mann index)
+     */
+    void set_damping_SU3(const SpinVector& rates) {
+        assert(rates.size() == (int)spin_dim_SU3);
+        damping_rates_SU3 = rates;
+    }
+
+    /**
+     * Set per-site SU(3) equilibrium Bloch vectors for Bloch damping.
+     * @param eq  Per-site equilibrium vectors (size = lattice_size_SU3)
+     */
+    void set_equilibrium_SU3(const SpinConfigSU3& eq) {
+        assert(eq.size() == lattice_size_SU3);
+        equilibrium_SU3 = eq;
+    }
+
+    /**
+     * Set uniform equilibrium Bloch vector for all SU(3) sites.
+     * Transforms to local sublattice frame via F^T.
+     * @param eq_global  Single equilibrium vector in global (Bertaut) frame
+     */
+    void set_equilibrium_SU3_uniform(const SpinVector& eq_global) {
+        for (size_t site = 0; site < lattice_size_SU3; ++site) {
+            size_t atom = site % N_atoms_SU3;
+            equilibrium_SU3[site] = sublattice_frames_SU3[atom].transpose() * eq_global;
+        }
+    }
+
+    /**
      * Compute time-dependent drive field for SU(2) site (pre-transformed to local frame)
      */
     SpinVector drive_field_SU2_at_time(double t, size_t site_index) const {
@@ -4609,7 +4655,7 @@ public:
             }
         }
         
-        // SU(3) dynamics: dS/dt = f_ijk H_j S_k (structure constant contraction)
+        // SU(3) dynamics: dS/dt = f_ijk H_j S_k − Γ_i (S_i − S_i^eq)
         const auto& f = get_SU3_structure();
         for (size_t site = 0; site < lattice_size_SU3; ++site) {
             const size_t idx = offset_SU3 + site * spin_dim_SU3;
@@ -4624,6 +4670,10 @@ public:
                     for (size_t k = 0; k < spin_dim_SU3; ++k) {
                         dSdt_i += f[i](j, k) * H(j) * state[idx + k];
                     }
+                }
+                // Bloch damping: −Γ_i (n^i − n^i_eq)
+                if (damping_rates_SU3(i) != 0.0) {
+                    dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - equilibrium_SU3[site](i));
                 }
                 dsdt[idx + i] = dSdt_i;
             }
