@@ -1142,6 +1142,9 @@ public:
     double field_drive_freq;          // Pulse frequency
     double field_drive_width;         // Pulse width (Gaussian)
 
+    // Gilbert damping parameter for LLG dynamics
+    double alpha_gilbert = 0.0;       // 0 = undamped (pure LL)
+
     /**
      * Check if lattice is a pyrochlore type (pyrochlore or pyrochlore_non_kramer)
      * Used to validate pyrochlore-specific order parameters.
@@ -5990,9 +5993,25 @@ public:
                 const double Sz = state_flat[idx + 2];
                 
                 // Cross product: dS/dt = H × S
-                dsdt_flat[idx + 0] = H[1] * Sz - H[2] * Sy;
-                dsdt_flat[idx + 1] = H[2] * Sx - H[0] * Sz;
-                dsdt_flat[idx + 2] = H[0] * Sy - H[1] * Sx;
+                double dSx = H[1] * Sz - H[2] * Sy;
+                double dSy = H[2] * Sx - H[0] * Sz;
+                double dSz = H[0] * Sy - H[1] * Sx;
+
+                if (alpha_gilbert > 0.0) {
+                    // Gilbert damping: -α/|S| S × (S × H)
+                    // S × H = (dSx, dSy, dSz), so S × (S × H):
+                    double SxdS_x = Sy * dSz - Sz * dSy;
+                    double SxdS_y = Sz * dSx - Sx * dSz;
+                    double SxdS_z = Sx * dSy - Sy * dSx;
+                    double inv_S = 1.0 / std::sqrt(Sx*Sx + Sy*Sy + Sz*Sz);
+                    dSx -= alpha_gilbert * inv_S * SxdS_x;
+                    dSy -= alpha_gilbert * inv_S * SxdS_y;
+                    dSz -= alpha_gilbert * inv_S * SxdS_z;
+                }
+
+                dsdt_flat[idx + 0] = dSx;
+                dsdt_flat[idx + 1] = dSy;
+                dsdt_flat[idx + 2] = dSz;
             }
         } else if (spin_dim == 8) {
             // SU(3): Structure constant contraction dS_i/dt = f_{ijk} H_j S_k

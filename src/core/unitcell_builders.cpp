@@ -74,6 +74,17 @@ UnitCell build_kitaev_honeycomb(const SpinConfig& config) {
     const double Gammap = config.get_param("Gammap", -0.02);
     const double J = config.get_param("J", 0.0);
     
+    // Extended interactions for KCTO-type models
+    const double J2_A = config.get_param("J2_A", 0.0);
+    const double J2_B = config.get_param("J2_B", 0.0);
+    const double J3 = config.get_param("J3", 0.0);
+    const double J_perp = config.get_param("J_perp", 0.0);
+    
+    // Single-ion anisotropy (easy-plane: Ka=Kb>0, Kc<0 or vice versa)
+    const double Ka = config.get_param("Ka", 0.0);
+    const double Kb = config.get_param("Kb", 0.0);
+    const double Kc = config.get_param("Kc", 0.0);
+    
     // Use HoneyComb class from unitcell.h
     HoneyComb atoms(3);
     
@@ -98,6 +109,47 @@ UnitCell build_kitaev_honeycomb(const SpinConfig& config) {
     atoms.set_bilinear_interaction(Jy, 0, 1, Eigen::Vector3i(1, -1, 0));
     atoms.set_bilinear_interaction(Jz, 0, 1, Eigen::Vector3i(0, 0, 0));
     
+    // 2nd NN interactions (isotropic Heisenberg, sublattice-dependent)
+    if (std::abs(J2_A) > 1e-12 || std::abs(J2_B) > 1e-12) {
+        Eigen::Matrix3d J2A_mat = J2_A * Eigen::Matrix3d::Identity();
+        Eigen::Matrix3d J2B_mat = J2_B * Eigen::Matrix3d::Identity();
+        
+        // A-sublattice 2nd NN
+        atoms.set_bilinear_interaction(J2A_mat, 0, 0, Eigen::Vector3i(1, 0, 0));
+        atoms.set_bilinear_interaction(J2A_mat, 0, 0, Eigen::Vector3i(0, 1, 0));
+        atoms.set_bilinear_interaction(J2A_mat, 0, 0, Eigen::Vector3i(1, -1, 0));
+        
+        // B-sublattice 2nd NN
+        atoms.set_bilinear_interaction(J2B_mat, 1, 1, Eigen::Vector3i(1, 0, 0));
+        atoms.set_bilinear_interaction(J2B_mat, 1, 1, Eigen::Vector3i(0, 1, 0));
+        atoms.set_bilinear_interaction(J2B_mat, 1, 1, Eigen::Vector3i(1, -1, 0));
+    }
+    
+    // 3rd NN interactions (isotropic Heisenberg, A↔B)
+    if (std::abs(J3) > 1e-12) {
+        Eigen::Matrix3d J3_mat = J3 * Eigen::Matrix3d::Identity();
+        atoms.set_bilinear_interaction(J3_mat, 0, 1, Eigen::Vector3i(1, -2, 0));
+        atoms.set_bilinear_interaction(J3_mat, 0, 1, Eigen::Vector3i(-1, 0, 0));
+        atoms.set_bilinear_interaction(J3_mat, 0, 1, Eigen::Vector3i(1, 0, 0));
+    }
+    
+    // Interlayer coupling (isotropic Heisenberg between same sublattice sites)
+    if (std::abs(J_perp) > 1e-12) {
+        Eigen::Matrix3d Jp_mat = J_perp * Eigen::Matrix3d::Identity();
+        atoms.set_bilinear_interaction(Jp_mat, 0, 0, Eigen::Vector3i(0, 0, 1));
+        atoms.set_bilinear_interaction(Jp_mat, 1, 1, Eigen::Vector3i(0, 0, 1));
+    }
+    
+    // Single-ion anisotropy
+    if (std::abs(Ka) > 1e-12 || std::abs(Kb) > 1e-12 || std::abs(Kc) > 1e-12) {
+        Eigen::MatrixXd K_mat = Eigen::MatrixXd::Zero(3, 3);
+        K_mat(0, 0) = Ka;
+        K_mat(1, 1) = Kb;
+        K_mat(2, 2) = Kc;
+        atoms.set_onsite_interaction(K_mat, 0);
+        atoms.set_onsite_interaction(K_mat, 1);
+    }
+    
     // Set Kitaev local frame for honeycomb sublattices
     // Transforms from local Kitaev basis to global cubic frame:
     // Local basis: x' = (1,1,-2)/√6, y' = (-1,1,0)/√2, z' = (1,1,1)/√3
@@ -111,11 +163,11 @@ UnitCell build_kitaev_honeycomb(const SpinConfig& config) {
     atoms.set_sublattice_frame(kitaev_frame, 0);
     atoms.set_sublattice_frame(kitaev_frame, 1);
     
-    // Set magnetic field
+    // Set magnetic field (with g-factor anisotropy)
     Eigen::Vector3d field;
-    field << config.field_strength * config.field_direction[0],
-             config.field_strength * config.field_direction[1],
-             config.field_strength * config.field_direction[2];
+    field << config.g_factor[0] * config.field_strength * config.field_direction[0],
+             config.g_factor[1] * config.field_strength * config.field_direction[1],
+             config.g_factor[2] * config.field_strength * config.field_direction[2];
     
     atoms.set_field(field, 0);
     atoms.set_field(field, 1);
@@ -537,12 +589,25 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double Jtm_8 = config.get_param("Jtm_8", 0.0);
     const double h = config.field_strength;
     
+    // Global-frame mode: all sublattice frames are identity, no eta transformation
+    // on exchange matrices.  Spins live in the lab frame; the Γ₂ AFM pattern
+    // appears explicitly as sign differences among sublattice spin vectors.
+    // This is a pure basis change and does not alter the physics.
+    const bool use_global_frame = (config.get_param("use_global_frame", 0.0) != 0.0);
+    
     // Use TmFeO3_Fe and TmFeO3_Tm classes from unitcell.h (already have structure)
     TmFeO3_Fe Fe_atoms(3);
     TmFeO3_Tm Tm_atoms(8);
     
     // Local frame transformation (following molecular_dynamic_TmFeO3.cpp exactly)
     std::array<std::array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
+    
+    if (use_global_frame) {
+        // Override: all eta = identity, all Fe sublattice frames = identity
+        eta = {{{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}};
+        SpinMatrix id3 = SpinMatrix::Identity(3, 3);
+        for (int i = 0; i < 4; ++i) Fe_atoms.set_sublattice_frame(id3, i);
+    }
     
     // Original exchange matrices in global frame
     // For bonds 1→0: standard DM with d_y = +D1
@@ -681,6 +746,7 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     // Frame F_i = μ_act^{-1} D_i μ_act in the active subspace transforms
     // local SU(3) spins to a global frame where M_α = g_J Σ_a μ_{αa} (F^T S)_a
     // Pbnm sublattice signs (same as Fe): η = {(+,+,+), (+,-,-), (-,+,-), (-,-,+)}
+    if (!use_global_frame)
     {
         Eigen::Matrix3d mu_act;
         mu_act << mu_2x, mu_5x, mu_7x,

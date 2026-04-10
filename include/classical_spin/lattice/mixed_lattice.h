@@ -193,6 +193,9 @@ public:
     double field_drive_freq_SU3;              // Pulse frequency for SU(3)
     double field_drive_width_SU3;             // Pulse width (Gaussian) for SU(3)
 
+    // SU(2) Gilbert damping: dS/dt += (alpha/|S|) * S × (S × H)
+    double alpha_gilbert = 0.0;
+
     // SU(3) Bloch damping/relaxation (tmfeo3_notes.tex Eq. blochdampedfull)
     // dn^a/dt = (1/ℏ) f_{abc} h^b n^c  −  Γ_a (n^a − n^a_eq)
     // damping_rates_SU3[a]: phenomenological relaxation rates Γ_a for each Gell-Mann channel
@@ -4641,12 +4644,23 @@ public:
             // Compute local field using helper function
             SpinVector H = get_local_field_SU2_flat(site, state, offset_SU3, t);
             
-            // Compute dS/dt = H × S for SU(2)
+            // Compute dS/dt = H × S for SU(2), plus LLG Gilbert damping
             if (spin_dim_SU2 == 3) {
                 // Standard cross product for 3D vectors
                 dsdt[idx + 0] = H(1) * state[idx + 2] - H(2) * state[idx + 1];
                 dsdt[idx + 1] = H(2) * state[idx + 0] - H(0) * state[idx + 2];
                 dsdt[idx + 2] = H(0) * state[idx + 1] - H(1) * state[idx + 0];
+                // Gilbert damping: dS/dt += (alpha/|S|) * S × (S × H)
+                // S × (S × H) = S(S·H) - H|S|^2  (BAC-CAB identity)
+                if (alpha_gilbert != 0.0) {
+                    const double Sx = state[idx + 0], Sy = state[idx + 1], Sz = state[idx + 2];
+                    const double S2 = Sx*Sx + Sy*Sy + Sz*Sz;
+                    const double SdotH = Sx*H(0) + Sy*H(1) + Sz*H(2);
+                    const double inv_S = (S2 > 0.0) ? alpha_gilbert / std::sqrt(S2) : 0.0;
+                    dsdt[idx + 0] += inv_S * (Sx * SdotH - H(0) * S2);
+                    dsdt[idx + 1] += inv_S * (Sy * SdotH - H(1) * S2);
+                    dsdt[idx + 2] += inv_S * (Sz * SdotH - H(2) * S2);
+                }
             } else {
                 // General case: would need proper SU(N) structure constants
                 for (size_t j = 0; j < spin_dim_SU2; ++j) {
@@ -5358,7 +5372,8 @@ public:
                double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
                double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
                double T_start, double T_end, double step_size,
-               const string& method = "dopri5", bool use_gpu = false) {
+               const string& method = "dopri5", bool use_gpu = false,
+               vector<vector<double>>* spin_state_out = nullptr) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -5422,6 +5437,9 @@ public:
                 
                 trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local, M_SU2_global}, {M_SU3_antiferro, M_SU3_local, M_SU3_global}}});
                 last_save_time = t;
+                if (spin_state_out != nullptr) {
+                    spin_state_out->push_back(vector<double>(x.begin(), x.end()));
+                }
             }
         };
         
@@ -5447,7 +5465,8 @@ public:
                double pulse_amp_SU2, double pulse_width_SU2, double pulse_freq_SU2,
                double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
                double T_start, double T_end, double step_size,
-               const string& method = "dopri5", bool use_gpu = false) {
+               const string& method = "dopri5", bool use_gpu = false,
+               vector<vector<double>>* spin_state_out = nullptr) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -5512,6 +5531,9 @@ public:
                 
                 trajectory.push_back({t, {{M_SU2_antiferro, M_SU2_local, M_SU2_global}, {M_SU3_antiferro, M_SU3_local, M_SU3_global}}});
                 last_save_time = t;
+                if (spin_state_out != nullptr) {
+                    spin_state_out->push_back(vector<double>(x.begin(), x.end()));
+                }
             }
         };
         
@@ -5872,7 +5894,8 @@ public:
                                      size_t n_anneal = 1000,
                                      bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                      string dir_name = "spectroscopy_mixed",
-                                     string method = "dopri5", bool use_gpu = false) {
+                                     string method = "dopri5", bool use_gpu = false,
+                                     bool save_spin_trajectories = false) {
         
         int rank, mpi_size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -5883,6 +5906,7 @@ public:
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
         const bool scheduler_writer_only = (mpi_size > 1);
         const int worker_count = scheduler_writer_only ? (mpi_size - 1) : 1;
+        const size_t state_dim = lattice_size_SU2 * spin_dim_SU2 + lattice_size_SU3 * spin_dim_SU3;
         
         if (rank == 0) {
             cout << "\n==========================================" << endl;
@@ -5903,6 +5927,10 @@ public:
             }
             if (use_gpu) {
                 cout << "GPU acceleration: ENABLED (each rank uses assigned GPU)" << endl;
+            }
+            if (save_spin_trajectories) {
+                cout << "Spin trajectory saving: ENABLED (state_dim=" << state_dim << ")" << endl;
+                cout << "  WARNING: This will significantly increase memory usage and file size." << endl;
             }
         }
         
@@ -5943,11 +5971,24 @@ public:
         typedef vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>> TrajectoryType;
         
         TrajectoryType M0_trajectory;
+        vector<double> M0_spin_flat;  // flat (n_t * state_dim) spin state for M0, rank 0 only
         if (rank == 0) {
+            vector<vector<double>> M0_spin_states;
             M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
                                                pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                               T_start, T_end, T_step, method, use_gpu);
+                                               T_start, T_end, T_step, method, use_gpu,
+                                               save_spin_trajectories ? &M0_spin_states : nullptr);
+            if (save_spin_trajectories && !M0_spin_states.empty()) {
+                size_t n_t = M0_spin_states.size();
+                M0_spin_flat.resize(n_t * state_dim);
+                for (size_t t = 0; t < n_t; ++t) {
+                    std::copy(M0_spin_states[t].begin(), M0_spin_states[t].end(),
+                              M0_spin_flat.data() + t * state_dim);
+                }
+            }
+            // Note: M0_spin_states[0] (if save_spin_traj) holds flat (n_t * state_dim) buffer
+            // It is written to HDF5 after the file is opened below
         }
         
         // Restore ground state
@@ -5976,9 +6017,16 @@ public:
         // Local trajectories
         vector<TrajectoryType> local_M1_trajectories;
         vector<TrajectoryType> local_M01_trajectories;
+        // Local spin state flat buffers (n_t * state_dim each), only populated if save_spin_trajectories
+        vector<vector<double>> local_spin_flat_M1;
+        vector<vector<double>> local_spin_flat_M01;
         
         local_M1_trajectories.reserve(my_tau_indices.size());
         local_M01_trajectories.reserve(my_tau_indices.size());
+        if (save_spin_trajectories) {
+            local_spin_flat_M1.reserve(my_tau_indices.size());
+            local_spin_flat_M01.reserve(my_tau_indices.size());
+        }
         
         for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
             double current_tau = my_tau_values[idx];
@@ -5992,23 +6040,49 @@ public:
             spins_SU3 = ground_state_SU3;
             
             // M1: Probe at tau
-            auto M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
-                                pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                T_start, T_end, T_step, method, use_gpu);
-            local_M1_trajectories.push_back(M1_traj);
+            {
+                vector<vector<double>> M1_spin_states;
+                auto M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
+                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                    T_start, T_end, T_step, method, use_gpu,
+                                    save_spin_trajectories ? &M1_spin_states : nullptr);
+                local_M1_trajectories.push_back(M1_traj);
+                if (save_spin_trajectories && !M1_spin_states.empty()) {
+                    size_t n_t = M1_spin_states.size();
+                    vector<double> flat(n_t * state_dim);
+                    for (size_t t = 0; t < n_t; ++t)
+                        std::copy(M1_spin_states[t].begin(), M1_spin_states[t].end(), flat.data() + t * state_dim);
+                    local_spin_flat_M1.push_back(std::move(flat));
+                } else if (save_spin_trajectories) {
+                    local_spin_flat_M1.emplace_back();
+                }
+            }
             
             // Restore ground state
             spins_SU2 = ground_state_SU2;
             spins_SU3 = ground_state_SU3;
             
             // M01: Pump at 0 + Probe at tau
-            auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
-                                     field_in_SU2, field_in_SU3, current_tau,
-                                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                     T_start, T_end, T_step, method, use_gpu);
-            local_M01_trajectories.push_back(M01_traj);
+            {
+                vector<vector<double>> M01_spin_states;
+                auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
+                                         field_in_SU2, field_in_SU3, current_tau,
+                                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                         T_start, T_end, T_step, method, use_gpu,
+                                         save_spin_trajectories ? &M01_spin_states : nullptr);
+                local_M01_trajectories.push_back(M01_traj);
+                if (save_spin_trajectories && !M01_spin_states.empty()) {
+                    size_t n_t = M01_spin_states.size();
+                    vector<double> flat(n_t * state_dim);
+                    for (size_t t = 0; t < n_t; ++t)
+                        std::copy(M01_spin_states[t].begin(), M01_spin_states[t].end(), flat.data() + t * state_dim);
+                    local_spin_flat_M01.push_back(std::move(flat));
+                } else if (save_spin_trajectories) {
+                    local_spin_flat_M01.emplace_back();
+                }
+            }
         }
         
         MPI_Barrier(MPI_COMM_WORLD);
@@ -6029,6 +6103,8 @@ public:
         // Data per point: time + 3 SU2 vectors + 3 SU3 vectors
         size_t data_per_point = 1 + 3 * spin_dim_SU2 + 3 * spin_dim_SU3;
         size_t traj_size = time_points * data_per_point;
+        // Size of flat spin state per trajectory (when save_spin_trajectories)
+        size_t state_traj_size_spins = time_points * state_dim;
         
         // Compute tau values (needed for HDF5)
         vector<double> tau_values(tau_steps);
@@ -6088,6 +6164,10 @@ public:
                     write_attr("tau_step", tau_step);
                     write_attr_int("tau_steps", static_cast<size_t>(tau_steps));
                     write_attr("ground_state_energy", E_ground);
+                    write_attr_int("save_spin_trajectories", save_spin_trajectories ? 1u : 0u);
+                    write_attr_int("state_dim_SU2", lattice_size_SU2 * spin_dim_SU2);
+                    write_attr_int("state_dim_SU3", lattice_size_SU3 * spin_dim_SU3);
+                    write_attr_int("state_dim_total", state_dim);
                 }
                 
                 // Write tau values array
@@ -6128,6 +6208,21 @@ public:
                 write_mag_dataset(reference_group, "M_local_SU3", spin_dim_SU3, 1, false);
                 write_mag_dataset(reference_group, "M_global_SU3", spin_dim_SU3, 2, false);
                 
+                // Write M0 spin state if enabled
+                if (save_spin_trajectories && !M0_spin_flat.empty()) {
+                    hsize_t n_t = static_cast<hsize_t>(time_points);
+                    hsize_t sd = static_cast<hsize_t>(state_dim);
+                    hsize_t dims[2] = {n_t, sd};
+                    hsize_t chunk[2] = {std::min((hsize_t)128, n_t), sd};
+                    H5::DSetCreatPropList plist;
+                    plist.setChunk(2, chunk);
+                    plist.setDeflate(4);
+                    H5::DataSpace dsp(2, dims);
+                    H5::DataSet ds = reference_group.createDataSet("M0_spin_state",
+                                        H5::PredType::NATIVE_DOUBLE, dsp, plist);
+                    ds.write(M0_spin_flat.data(), H5::PredType::NATIVE_DOUBLE);
+                }
+                
                 cout << "  Reference trajectory (M0) written." << endl;
                 
             } catch (H5::Exception& e) {
@@ -6138,7 +6233,9 @@ public:
         }
         
         // Helper lambda to write a trajectory to HDF5 (rank 0 only)
-        auto write_tau_to_hdf5 = [&](int tau_idx, const TrajectoryType& M1_traj, const TrajectoryType& M01_traj) {
+        auto write_tau_to_hdf5 = [&](int tau_idx, const TrajectoryType& M1_traj, const TrajectoryType& M01_traj,
+                                     const vector<double>* spin_M1_flat = nullptr,
+                                     const vector<double>* spin_M01_flat = nullptr) {
             if (!file_ptr) return;
             
             std::string grp_name = "/tau_scan/tau_" + std::to_string(tau_idx);
@@ -6181,6 +6278,23 @@ public:
             write_mag("M01_local_SU3", M01_traj, spin_dim_SU3, 1, false);
             write_mag("M01_global_SU3", M01_traj, spin_dim_SU3, 2, false);
             
+            // Write full spin state trajectories with gzip compression if provided
+            auto write_spin_state = [&](const char* name, const vector<double>* flat_buf) {
+                if (flat_buf == nullptr || flat_buf->empty()) return;
+                hsize_t n_t = static_cast<hsize_t>(n_times);
+                hsize_t sd = static_cast<hsize_t>(state_dim);
+                hsize_t dims[2] = {n_t, sd};
+                hsize_t chunk[2] = {std::min((hsize_t)128, n_t), sd};
+                H5::DSetCreatPropList plist;
+                plist.setChunk(2, chunk);
+                plist.setDeflate(4);
+                H5::DataSpace dsp(2, dims);
+                H5::DataSet ds = tau_grp.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dsp, plist);
+                ds.write(flat_buf->data(), H5::PredType::NATIVE_DOUBLE);
+            };
+            write_spin_state("M1_spin_state", spin_M1_flat);
+            write_spin_state("M01_spin_state", spin_M01_flat);
+            
             tau_grp.close();
         };
         
@@ -6213,7 +6327,11 @@ public:
         if (rank == 0) {
             for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
                 int tau_idx = my_tau_indices[idx];
-                write_tau_to_hdf5(tau_idx, local_M1_trajectories[idx], local_M01_trajectories[idx]);
+                const vector<double>* sp_m1 = save_spin_trajectories && idx < local_spin_flat_M1.size()
+                                              ? &local_spin_flat_M1[idx] : nullptr;
+                const vector<double>* sp_m01 = save_spin_trajectories && idx < local_spin_flat_M01.size()
+                                               ? &local_spin_flat_M01[idx] : nullptr;
+                write_tau_to_hdf5(tau_idx, local_M1_trajectories[idx], local_M01_trajectories[idx], sp_m1, sp_m01);
             }
             cout << "  Rank 0 local trajectories written (" << my_tau_indices.size() << " tau points)." << endl;
             
@@ -6222,11 +6340,20 @@ public:
             local_M1_trajectories.shrink_to_fit();
             local_M01_trajectories.clear();
             local_M01_trajectories.shrink_to_fit();
+            local_spin_flat_M1.clear();
+            local_spin_flat_M1.shrink_to_fit();
+            local_spin_flat_M01.clear();
+            local_spin_flat_M01.shrink_to_fit();
         }
         
         // Now receive from other ranks and write immediately (streaming)
         vector<double> M1_buffer(traj_size);
         vector<double> M01_buffer(traj_size);
+        vector<double> spin_M1_buf, spin_M01_buf;
+        if (save_spin_trajectories) {
+            spin_M1_buf.resize(state_traj_size_spins);
+            spin_M01_buf.resize(state_traj_size_spins);
+        }
         
         int progress_interval = std::max(1, tau_steps / 20);  // Report every 5%
         int received_count = 0;
@@ -6237,17 +6364,27 @@ public:
             if (owner_rank == 0) continue;  // Already written above
             
             if (rank == 0) {
-                // Receive from owner and write immediately
+                // Receive obs trajectories from owner
                 MPI_Recv(M1_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
                         2 * tau_idx, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(M01_buffer.data(), traj_size, MPI_DOUBLE, owner_rank, 
                         2 * tau_idx + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 
+                // Receive spin state trajectories if enabled
+                if (save_spin_trajectories) {
+                    MPI_Recv(spin_M1_buf.data(), state_traj_size_spins, MPI_DOUBLE, owner_rank,
+                             2 * tau_steps + 2 * tau_idx, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    MPI_Recv(spin_M01_buf.data(), state_traj_size_spins, MPI_DOUBLE, owner_rank,
+                             2 * tau_steps + 2 * tau_idx + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                }
+                
                 // Deserialize and write to HDF5 immediately (no storage)
                 TrajectoryType M1_traj = deserialize_trajectory(M1_buffer);
                 TrajectoryType M01_traj = deserialize_trajectory(M01_buffer);
                 
-                write_tau_to_hdf5(tau_idx, M1_traj, M01_traj);
+                write_tau_to_hdf5(tau_idx, M1_traj, M01_traj,
+                                  save_spin_trajectories ? &spin_M1_buf : nullptr,
+                                  save_spin_trajectories ? &spin_M01_buf : nullptr);
                 
                 received_count++;
                 if (received_count % progress_interval == 0) {
@@ -6306,6 +6443,16 @@ public:
                 
                 MPI_Send(M1_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx, MPI_COMM_WORLD);
                 MPI_Send(M01_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx + 1, MPI_COMM_WORLD);
+                
+                // Send spin state trajectories if enabled
+                if (save_spin_trajectories) {
+                    const vector<double>& sf_m1 = local_spin_flat_M1[local_idx];
+                    const vector<double>& sf_m01 = local_spin_flat_M01[local_idx];
+                    MPI_Send(sf_m1.data(), static_cast<int>(sf_m1.size()), MPI_DOUBLE, 0,
+                             2 * tau_steps + 2 * tau_idx, MPI_COMM_WORLD);
+                    MPI_Send(sf_m01.data(), static_cast<int>(sf_m01.size()), MPI_DOUBLE, 0,
+                             2 * tau_steps + 2 * tau_idx + 1, MPI_COMM_WORLD);
+                }
             }
         }
         

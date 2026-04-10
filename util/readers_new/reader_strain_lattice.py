@@ -2021,7 +2021,8 @@ def plot_gneb_summary(gneb_result, output_file=None):
 
 def animate_spin_trajectory(result, output_file='spin_animation.mp4', 
                             fps=10, interval=1, 
-                            show_strain=True, show_energy=True, figsize=(12, 10)):
+                            show_strain=True, show_energy=True, figsize=(12, 10),
+                            pump_params=None):
     """Create animation of spin configuration evolution from MD/pump-probe trajectory.
     
     Spins are transformed from local Kitaev frame to global Cartesian frame.
@@ -2035,6 +2036,8 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
         show_strain: If True, show strain amplitude panel
         show_energy: If True, show energy panel
         figsize: Figure size
+        pump_params: Optional dict with keys 'amplitude', 'time', 'width' (Gaussian pulse params).
+                     If provided, overlays the normalized pump envelope on strain/energy panels.
     
     Returns:
         matplotlib.animation.FuncAnimation object
@@ -2132,6 +2135,16 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
     ax_2d.set_aspect('equal')
     ax_2d.grid(True, alpha=0.3)
     
+    # Compute pump envelope if pump_params provided
+    pump_envelope = None
+    pump_envelope_scaled_strain = None
+    pump_envelope_scaled_energy = None
+    if pump_params is not None:
+        pt = pump_params.get('time', 0.0)
+        pw = pump_params.get('width', 1.0)
+        pa = pump_params.get('amplitude', 1.0)
+        pump_envelope = pa * np.exp(-0.5 * ((T - pt) / pw) ** 2)
+
     # Initialize strain plot
     if ax_strain is not None:
         ax_strain.plot(T, eps_Eg_norm, 'r-', alpha=0.3, label=r'$|\varepsilon_{Eg}|$')
@@ -2139,6 +2152,17 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
         line_Eg, = ax_strain.plot([], [], 'r-', lw=2)
         line_A1g, = ax_strain.plot([], [], 'b-', lw=2)
         vline_strain = ax_strain.axvline(T[0], color='k', linestyle='--', lw=1)
+        if pump_envelope is not None:
+            # Scale envelope to strain axis range for overlay
+            strain_max = max(np.max(np.abs(eps_Eg_norm)), 1e-6)
+            pump_envelope_scaled_strain = pump_envelope * (strain_max / pump_envelope.max())
+            ax_strain.plot(T, pump_envelope_scaled_strain, 'g--', alpha=0.5, lw=1.5,
+                           label='pump envelope')
+            # Add shaded pump window (±2σ)
+            sigma = pump_params.get('width', 1.0)
+            t0 = pump_params.get('time', 0.0)
+            ax_strain.axvspan(t0 - 2*sigma, t0 + 2*sigma, alpha=0.08, color='green',
+                              label='pump window')
         ax_strain.set_xlabel('Time (ℏ/meV)')
         ax_strain.set_ylabel('Strain Amplitude')
         ax_strain.legend(loc='upper right', fontsize=8)
@@ -2149,16 +2173,26 @@ def animate_spin_trajectory(result, output_file='spin_animation.mp4',
     
     # Initialize energy plot
     if ax_energy is not None:
-        ax_energy.plot(T, E, 'k-', alpha=0.3, label='Energy')
+        ax_energy.plot(T, E, 'k-', alpha=0.3, label='Energy/site')
         line_E, = ax_energy.plot([], [], 'k-', lw=2)
         vline_energy = ax_energy.axvline(T[0], color='k', linestyle='--', lw=1)
+        if pump_envelope is not None:
+            # Scale envelope to span lower portion of energy axis
+            E_min, E_max = np.min(E), np.max(E)
+            E_range = E_max - E_min if E_max > E_min else 1.0
+            pump_envelope_scaled_energy = E_min + pump_envelope * (0.25 * E_range / pump_envelope.max())
+            ax_energy.plot(T, pump_envelope_scaled_energy, 'g--', alpha=0.6, lw=1.5,
+                           label='pump pulse')
+            sigma = pump_params.get('width', 1.0)
+            t0 = pump_params.get('time', 0.0)
+            ax_energy.axvspan(t0 - 2*sigma, t0 + 2*sigma, alpha=0.08, color='green')
         # Add J7_eff on twin axis
         ax_energy_twin = ax_energy.twinx()
         ax_energy_twin.plot(T, J7_eff, 'b-', alpha=0.3)
         line_J7, = ax_energy_twin.plot([], [], 'b-', lw=2)
         ax_energy_twin.set_ylabel(r'$J_7^{eff}$', color='blue')
         ax_energy.set_xlabel('Time (ℏ/meV)')
-        ax_energy.set_ylabel('Energy')
+        ax_energy.set_ylabel('Energy/site')
         ax_energy.legend(loc='upper right', fontsize=8)
         ax_energy.set_xlim(T[0], T[-1])
         ax_energy.grid(True, alpha=0.3)

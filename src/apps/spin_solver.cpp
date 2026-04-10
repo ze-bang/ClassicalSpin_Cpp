@@ -553,6 +553,9 @@ void run_pump_probe(Lattice& lattice, const SpinConfig& config, int rank, int si
  * This is equivalent to pump-probe with a delay time (tau) scan
  */
 void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank, int size) {
+    // Set Gilbert damping if specified
+    lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);
+    
     // Determine parallelization strategy:
     // - If num_trials == 1 and parallel_tau is enabled: parallelize over tau (use MPI version)
     // - If num_trials > 1: parallelize over trials (original behavior)
@@ -564,6 +567,9 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
         cout << "MPI ranks: " << size << endl;
         cout << "Delay scan: tau = " << config.tau_start << " to " << config.tau_end 
              << " (step: " << config.tau_step << ")" << endl;
+        if (lattice.alpha_gilbert > 0.0) {
+            cout << "Gilbert damping: alpha = " << lattice.alpha_gilbert << endl;
+        }
         if (use_tau_parallel) {
             cout << "Parallelization mode: tau-parallel (distributing delay points across ranks)" << endl;
         } else if (config.num_trials > 1) {
@@ -3491,6 +3497,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         }
         
         // Run MPI-parallelized version
+        const bool save_spin_traj = (config.get_param("save_spin_trajectories", 0.0) > 0.5);
         lattice.pump_probe_spectroscopy_mpi(
             field_dirs_su2,
             field_dirs_su3,
@@ -3513,7 +3520,8 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             config.overrelaxation_rate,
             trial_dir,
             config.md_integrator,
-            config.use_gpu
+            config.use_gpu,
+            save_spin_traj
         );
         
     } else {
@@ -3951,7 +3959,7 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
                 Lattice lattice(*uc_ptr, sweep_config.lattice_size[0], 
                               sweep_config.lattice_size[1], 
                               sweep_config.lattice_size[2],
-                              sweep_config.use_twist_boundary);
+                              sweep_config.spin_length);
                 lattice.lattice_type = system_type_to_string(sweep_config.system);
                 
                 // Initialize spins
@@ -4232,7 +4240,7 @@ void run_parameter_sweep(const SpinConfig& base_config, int rank, int size) {
             Lattice lattice(*uc_ptr, sweep_config.lattice_size[0], 
                           sweep_config.lattice_size[1], 
                           sweep_config.lattice_size[2],
-                          sweep_config.use_twist_boundary);
+                          sweep_config.spin_length);
             lattice.lattice_type = system_type_to_string(sweep_config.system);
             
             // Initialize spins
@@ -4530,7 +4538,16 @@ int main(int argc, char** argv) {
             } else {
                 mixed_lattice.init_random();
             }
+
+            // Gilbert damping (optional; defaults to 0 = undamped)
+            mixed_lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.0);
+            if (mixed_lattice.alpha_gilbert > 0.0 && rank == 0) {
+                cout << "Gilbert damping: α = " << mixed_lattice.alpha_gilbert << endl;
+            }
             
+            // Whether to save full spin state trajectories (large, for diagnosis)
+            const bool save_spin_trajectories = (config.get_param("save_spin_trajectories", 0.0) > 0.5);
+
             // Run simulation
             switch (config.simulation) {
                 case SimulationType::SIMULATED_ANNEALING:

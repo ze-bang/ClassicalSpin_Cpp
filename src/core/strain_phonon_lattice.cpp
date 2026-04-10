@@ -869,8 +869,11 @@ double StrainPhononLattice::ring_exchange_energy(double t) const {
 }
 
 double StrainPhononLattice::strain_energy() const {
-    // H_strain = (1/2) Σ_b [C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²]
+    // H_strain = N_cells * (1/2) Σ_b [C11(ε_xx² + ε_yy²) + 2C12 ε_xx ε_yy + 4C44 ε_xy²]
     //          + kinetic energy
+    // The N_cells factor accounts for all unit cells sharing the same uniform (q=0) strain.
+    // The spin basis functions f_*(all bonds) are O(N_cells), so the elastic energy must
+    // scale the same way to keep the equilibrium strain ε_eq intensive.
     
     double V = 0.0;  // Potential energy
     double T = strain.kinetic_energy() * elastic_params.M;  // Kinetic energy
@@ -878,6 +881,7 @@ double StrainPhononLattice::strain_energy() const {
     double C11 = elastic_params.C11;
     double C12 = elastic_params.C12;
     double C44 = elastic_params.C44;
+    double N_cells = static_cast<double>(lattice_size) / 2.0;  // unit cells in honeycomb
     
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
         double exx = strain.epsilon_xx[b];
@@ -896,7 +900,7 @@ double StrainPhononLattice::strain_energy() const {
         V += 0.25 * elastic_params.lambda_Eg * Eg_sq * Eg_sq;
     }
     
-    return T + V;
+    return T + N_cells * V;
 }
 
 // ============================================================
@@ -1354,8 +1358,11 @@ double StrainPhononLattice::dH_deps_xx(size_t bond_type) const {
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
     // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
+    // Divided by N_cells: the f-functions sum over all O(N) bonds; dividing makes
+    // the force-per-mode intensive so the equilibrium strain ε_eq is system-size independent.
+    double N_cells = static_cast<double>(lattice_size) / 2.0;
+    double Eg1_spin_factor = ((J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1()) / N_cells;
     
     // Magnetoelastic contribution: ∂/∂ε_xx of (ε_xx - ε_yy) = +1
     double dH_me = lambda_Eg * Eg1_spin_factor;
@@ -1374,8 +1381,9 @@ double StrainPhononLattice::dH_deps_yy(size_t bond_type) const {
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
     // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
+    double N_cells = static_cast<double>(lattice_size) / 2.0;
+    double Eg1_spin_factor = ((J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1()) / N_cells;
     
     // Magnetoelastic contribution: ∂/∂ε_yy of (ε_xx - ε_yy) = -1
     double dH_me = -lambda_Eg * Eg1_spin_factor;
@@ -1394,8 +1402,9 @@ double StrainPhononLattice::dH_deps_xy(size_t bond_type) const {
     double lambda_Eg = magnetoelastic_params.lambda_Eg;
     
     // Spin factor (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
-                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    double N_cells = static_cast<double>(lattice_size) / 2.0;
+    double Eg2_spin_factor = ((J + K) * f_K_Eg2() + J * f_J_Eg2() 
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2()) / N_cells;
     
     // Magnetoelastic contribution: ∂/∂ε_xy of 2ε_xy = 2
     double dH_me = 2.0 * lambda_Eg * Eg2_spin_factor;
@@ -2760,20 +2769,23 @@ void StrainPhononLattice::relax_strain(bool verbose) {
     double Gamma = magnetoelastic_params.Gamma;
     double Gammap = magnetoelastic_params.Gammap;
     
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1() 
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2() 
-                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    // The f-functions sum over all O(N_cells) bonds; dividing gives the per-unit-cell
+    // spin factor so that the equilibrium strain ε_eq is intensive (independent of N).
+    double N_cells = static_cast<double>(lattice_size) / 2.0;
+    double Eg1_spin_factor = ((J + K) * f_K_Eg1() + J * f_J_Eg1() 
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1()) / N_cells;
+    double Eg2_spin_factor = ((J + K) * f_K_Eg2() + J * f_J_Eg2() 
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2()) / N_cells;
     
     // Solve for equilibrium strain (Eg-only, same for all bond types)
     // With drive H_drive = -Σ_b [F1*(ε_xx-ε_yy)/2 + F2*ε_xy]:
-    //   ∂E/∂ε_xx = C11 ε_xx + C12 ε_yy + λ_Eg Σ_Eg1 - F1/2 = 0
-    //   ∂E/∂ε_yy = C12 ε_xx + C11 ε_yy - λ_Eg Σ_Eg1 + F1/2 = 0
-    //   ∂E/∂ε_xy = 4C44 ε_xy + 2λ_Eg Σ_Eg2 - F2 = 0
+    //   ∂E/∂ε_xx = C11 ε_xx + C12 ε_yy + λ_Eg (Σ_Eg1/N_cells) - F1/2 = 0
+    //   ∂E/∂ε_yy = C12 ε_xx + C11 ε_yy - λ_Eg (Σ_Eg1/N_cells) + F1/2 = 0
+    //   ∂E/∂ε_xy = 4C44 ε_xy + 2λ_Eg (Σ_Eg2/N_cells) - F2 = 0
     // Solution (traceless: ε_yy = -ε_xx):
-    //   ε_xx = (F1/2 - λ_Eg Σ_Eg1)(C11+C12) / det
+    //   ε_xx = (F1/2 - λ_Eg Σ_Eg1/N_cells)(C11+C12) / det
     //   ε_yy = -ε_xx
-    //   ε_xy = (F2 - 2λ_Eg Σ_Eg2) / (4C44)
+    //   ε_xy = (F2 - 2λ_Eg Σ_Eg2/N_cells) / (4C44)
     double eps_xx_eq = (drive_F_Eg1_ / 2.0 - lambda_Eg * Eg1_spin_factor) * (C11 + C12) / det;
     double eps_yy_eq = -eps_xx_eq;
     double eps_xy_eq = (drive_F_Eg2_ - 2.0 * lambda_Eg * Eg2_spin_factor) / (4.0 * C44);
@@ -3887,16 +3899,16 @@ std::pair<double, double> StrainPhononLattice::relax_strain_at_fixed_spins(
     double Gamma = magnetoelastic_params.Gamma;
     double Gammap = magnetoelastic_params.Gammap;
     
-    double Eg1_spin_factor = (J + K) * f_K_Eg1() + J * f_J_Eg1()
-                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1();
-    double Eg2_spin_factor = (J + K) * f_K_Eg2() + J * f_J_Eg2()
-                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2();
+    double Eg1_spin_factor = ((J + K) * f_K_Eg1() + J * f_J_Eg1()
+                           + Gamma * f_Gamma_Eg1() + Gammap * f_Gammap_Eg1()) / (static_cast<double>(lattice_size) / 2.0);
+    double Eg2_spin_factor = ((J + K) * f_K_Eg2() + J * f_J_Eg2()
+                           + Gamma * f_Gamma_Eg2() + Gammap * f_Gammap_Eg2()) / (static_cast<double>(lattice_size) / 2.0);
     
     // Restore original spins
     self->spins = original_spins;
     
-    // Analytic equilibrium: ε_xx = (F1/2 - λ_Eg Σ_Eg1)(C11+C12) / det
-    //                       ε_xy = (F2 - 2λ_Eg Σ_Eg2) / (4C44)
+    // Analytic equilibrium: ε_xx = (F1/2 - λ_Eg Σ_Eg1/N_cells)(C11+C12) / det
+    //                       ε_xy = (F2 - 2λ_Eg Σ_Eg2/N_cells) / (4C44)
     double Eg1 = (drive_F_Eg1_ / 2.0 - lambda_Eg * Eg1_spin_factor) * (C11 + C12) / det;
     double Eg2 = (drive_F_Eg2_ - 2.0 * lambda_Eg * Eg2_spin_factor) / (4.0 * C44);
     
