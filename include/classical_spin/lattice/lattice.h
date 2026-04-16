@@ -7562,20 +7562,28 @@ public:
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
         cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
         
-        // Store all trajectories in memory first
-        vector<vector<pair<double, array<SpinVector, 3>>>> M1_trajectories;
-        vector<vector<pair<double, array<SpinVector, 3>>>> M01_trajectories;
-        vector<double> tau_values;
+        // Open HDF5 writer BEFORE the loop to write incrementally (avoids OOM)
+        string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
         
-        M1_trajectories.reserve(tau_steps);
-        M01_trajectories.reserve(tau_steps);
-        tau_values.reserve(tau_steps);
+#ifdef HDF5_ENABLED
+        HDF5PumpProbeWriter writer(
+            hdf5_file,
+            lattice_size, spin_dim, N_atoms, dim1, dim2, dim3, spin_length,
+            pulse_amp, pulse_width, pulse_freq,
+            T_start, T_end, T_step, method,
+            tau_start, tau_end, tau_step,
+            E_ground, M_ground, Temp_start, Temp_end, n_anneal,
+            T_zero_quench, quench_sweeps,
+            &field_in, &site_positions
+        );
+        
+        // Write reference trajectory
+        writer.write_reference_trajectory(M0_trajectory);
+#endif
         
         double current_tau = tau_start;
         for (int i = 0; i < tau_steps; ++i) {
             cout << "\n--- Delay time " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
-            
-            tau_values.push_back(current_tau);
             
             // Restore ground state for each scan point
             spins = ground_state;
@@ -7584,7 +7592,6 @@ public:
             cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
             auto M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
                                        T_start, T_end, T_step, method, use_gpu);
-            M1_trajectories.push_back(M1_trajectory);
             
             // Restore ground state again
             spins = ground_state;
@@ -7594,49 +7601,18 @@ public:
             auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
                                             pulse_amp, pulse_width, pulse_freq,
                                             T_start, T_end, T_step, method, use_gpu);
-            M01_trajectories.push_back(M01_trajectory);
+            
+            // Write this tau step immediately and release memory
+#ifdef HDF5_ENABLED
+            writer.write_tau_trajectory(i, current_tau, M1_trajectory, M01_trajectory);
+#endif
             
             current_tau += tau_step;
         }
         
-        // Write everything to a single HDF5 file with comprehensive metadata
-        string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
-        cout << "\nWriting all data to single HDF5 file: " << hdf5_file << endl;
-        
 #ifdef HDF5_ENABLED
-        try {
-            // Create HDF5 writer with comprehensive metadata
-            HDF5PumpProbeWriter writer(
-                hdf5_file,
-                // Lattice parameters
-                lattice_size, spin_dim, N_atoms, dim1, dim2, dim3, spin_length,
-                // Pulse parameters
-                pulse_amp, pulse_width, pulse_freq,
-                // Time evolution
-                T_start, T_end, T_step, method,
-                // Delay scan
-                tau_start, tau_end, tau_step,
-                // Ground state info
-                E_ground, M_ground, Temp_start, Temp_end, n_anneal,
-                T_zero_quench, quench_sweeps,
-                // Optional data
-                &field_in, &site_positions
-            );
-            
-            // Write reference trajectory
-            writer.write_reference_trajectory(M0_trajectory);
-            
-            // Write delay-dependent trajectories
-            for (int i = 0; i < tau_steps; ++i) {
-                writer.write_tau_trajectory(i, tau_values[i], M1_trajectories[i], M01_trajectories[i]);
-            }
-            
-            writer.close();
-            cout << "Successfully wrote all data to single HDF5 file" << endl;
-            
-        } catch (H5::Exception& e) {
-            std::cerr << "HDF5 Error: " << e.getDetailMsg() << endl;
-        }
+        writer.close();
+        cout << "\n[Complete] All data written incrementally to: " << hdf5_file << endl;
 #else
         cout << "Warning: HDF5 support not enabled. Data not saved to HDF5 file." << endl;
         cout << "  Rebuild with -DHDF5_ENABLED to enable HDF5 output." << endl;

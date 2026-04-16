@@ -772,28 +772,28 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
                 lattice.init_random();
             }
             
-            // First equilibrate to ground state (skip if spins loaded from file)
-            if (config.initial_spin_config.empty()) {
-                if (rank == 0 || config.num_trials == 1) {
+            // Always equilibrate for 2DCS (need true ground state even if seed loaded)
+            if (rank == 0 || config.num_trials == 1) {
+                if (!config.initial_spin_config.empty()) {
+                    cout << "\n[1/3] Equilibrating from loaded seed to true ground state..." << endl;
+                } else {
                     cout << "\n[1/3] Equilibrating to ground state..." << endl;
                 }
-                lattice.simulated_annealing(
-                    config.T_start,
-                    config.T_end,
-                    config.annealing_steps,
-                    config.overrelaxation_rate,
-                    config.use_twist_boundary,
-                    config.gaussian_move,
-                    config.cooling_rate,
-                    "",
-                    config.save_observables,
-                    config.T_zero,
-                    config.n_deterministics,
-                config.twist_sweep_count
-                );
-            } else if (rank == 0) {
-                cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
             }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.use_twist_boundary,
+                config.gaussian_move,
+                config.cooling_rate,
+                "",
+                config.save_observables,
+                config.T_zero,
+                config.n_deterministics,
+                config.twist_sweep_count
+            );
             
             // Save initial spin configuration before time evolution
             lattice.save_spin_config(trial_dir + "/initial_spins.txt");
@@ -1972,6 +1972,19 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         }
     }
     
+    // ── Local strain (per-unit-cell DOF) ──
+    bool use_local_strain = static_cast<bool>(config.get_param("local_strain", 0.0));
+    double K_gradient = config.get_param("K_gradient", 0.0);
+    if (use_local_strain) {
+        lattice.elastic_params.K_gradient = K_gradient;
+        lattice.init_local_strain();
+        if (rank == 0) {
+            cout << "\nLocal strain (per-cell DOF) enabled:" << endl;
+            cout << "  K_gradient = " << K_gradient << endl;
+            cout << "  N_cells = " << lattice.get_N_cells() << endl;
+        }
+    }
+    
     // Distribute trials across MPI ranks
     for (int trial = rank; trial < config.num_trials; trial += size) {
         string trial_dir = config.output_dir + "/sample_" + to_string(trial);
@@ -2050,6 +2063,9 @@ void run_pump_probe_strain(StrainPhononLattice& lattice, const SpinConfig& confi
         lattice.save_spin_strain_config(trial_dir + "/final_spin_strain.txt");
         lattice.save_spin_config(trial_dir + "/final_spins.txt");
         lattice.save_strain_state(trial_dir + "/final_strain.txt");
+        if (use_local_strain) {
+            lattice.save_local_strain_map(trial_dir + "/final_local_strain_map.txt");
+        }
         
         cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
     }
@@ -3393,25 +3409,25 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         string trial_dir = config.output_dir + "/sample_0";
         filesystem::create_directories(trial_dir);
         
-        // Equilibrate to ground state (only rank 0)
-        if (config.initial_spin_config.empty()) {
-            if (rank == 0) {
+        // Always equilibrate for 2DCS (only rank 0)
+        if (rank == 0) {
+            if (!config.initial_spin_config.empty()) {
+                cout << "\n[1/2] Equilibrating from loaded seed to true ground state..." << endl;
+            } else {
                 cout << "\n[1/2] Equilibrating to ground state..." << endl;
-                lattice.simulated_annealing(
-                    config.T_start,
-                    config.T_end,
-                    config.annealing_steps,
-                    config.gaussian_move,
-                    config.cooling_rate,
-                    "",
-                    false,
-                    config.T_zero,
-                    config.n_deterministics,
-                config.twist_sweep_count
-                );
             }
-        } else if (rank == 0) {
-            cout << "\n[1/2] Skipping equilibration (using loaded spin configuration)" << endl;
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.gaussian_move,
+                config.cooling_rate,
+                "",
+                false,
+                config.T_zero,
+                config.n_deterministics,
+                config.twist_sweep_count
+            );
         }
         
         // Wait for rank 0 to finish annealing
@@ -3539,26 +3555,26 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 lattice.init_random();
             }
             
-            // First equilibrate to ground state (skip if spins loaded from file)
-            if (config.initial_spin_config.empty()) {
-                if (rank == 0 || config.num_trials == 1) {
+            // Always equilibrate for 2DCS (need true ground state even if seed loaded)
+            if (rank == 0 || config.num_trials == 1) {
+                if (!config.initial_spin_config.empty()) {
+                    cout << "\n[1/3] Equilibrating from loaded seed to true ground state..." << endl;
+                } else {
                     cout << "\n[1/3] Equilibrating to ground state..." << endl;
                 }
-                lattice.simulated_annealing(
-                    config.T_start,
-                    config.T_end,
-                    config.annealing_steps,
-                    config.gaussian_move,
-                    config.cooling_rate,
-                    trial_dir,
-                    config.save_observables,
-                    config.T_zero,
-                    config.n_deterministics,
-                config.twist_sweep_count
-                );
-            } else if (rank == 0) {
-                cout << "\n[1/3] Skipping equilibration (using loaded spin configuration)" << endl;
             }
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.gaussian_move,
+                config.cooling_rate,
+                trial_dir,
+                config.save_observables,
+                config.T_zero,
+                config.n_deterministics,
+                config.twist_sweep_count
+            );
             
             // Save initial spin configuration before time evolution
             lattice.save_spin_config_to_dir(trial_dir, "initial_spins");

@@ -159,6 +159,37 @@ struct StrainState {
 };
 
 /**
+ * Per-unit-cell strain state for local strain mode.
+ * Each honeycomb unit cell (2 sites) carries its own strain field.
+ */
+struct CellStrain {
+    double epsilon_xx = 0.0;
+    double epsilon_yy = 0.0;
+    double epsilon_xy = 0.0;
+    double V_xx = 0.0;
+    double V_yy = 0.0;
+    double V_xy = 0.0;
+    
+    static constexpr size_t N_DOF = 6;
+    
+    void to_array(double* arr) const {
+        arr[0] = epsilon_xx; arr[1] = epsilon_yy; arr[2] = epsilon_xy;
+        arr[3] = V_xx; arr[4] = V_yy; arr[5] = V_xy;
+    }
+    void from_array(const double* arr) {
+        epsilon_xx = arr[0]; epsilon_yy = arr[1]; epsilon_xy = arr[2];
+        V_xx = arr[3]; V_yy = arr[4]; V_xy = arr[5];
+    }
+    
+    double Eg1() const { return epsilon_xx - epsilon_yy; }
+    double Eg2() const { return 2.0 * epsilon_xy; }
+    double Eg_amplitude() const {
+        double d = epsilon_xx - epsilon_yy;
+        return std::sqrt(d * d + 4.0 * epsilon_xy * epsilon_xy);
+    }
+};
+
+/**
  * Elastic parameters (in units of stiffness)
  */
 struct ElasticParams {
@@ -183,6 +214,10 @@ struct ElasticParams {
     // Optional: quartic anharmonicity
     double lambda_A1g = 0.0;  // A1g quartic coefficient
     double lambda_Eg = 0.0;   // Eg quartic coefficient
+    
+    // Gradient stiffness coupling neighboring cells (local strain mode)
+    // E_grad = (K_gradient/2) Σ_{<cc'>} |ε(c) - ε(c')|²
+    double K_gradient = 0.0;
 };
 
 /**
@@ -390,18 +425,60 @@ public:
     double drive_F_Eg2_ = 0.0;     // Static drive force along Eg2: H_drive = -Σ_b F2*Q_Eg2(b)
     
     // ============================================================
+    // LOCAL STRAIN (per-unit-cell strain DOF)
+    // ============================================================
+    bool use_local_strain_ = false;  // If true, use per-cell strain instead of global
+    size_t N_cells_ = 0;            // Number of unit cells = dim1 * dim2 * dim3
+    
+    // Per-cell strain arrays
+    vector<CellStrain> cell_strains_;          // Current cell strains [N_cells]
+    vector<CellStrain> cell_strains_eq_;       // Equilibrium cell strains
+    
+    // Cell topology
+    vector<size_t> site_to_cell_;              // Map site index → cell index
+    vector<std::array<size_t, 2>> cell_sites_; // Map cell index → {site_A, site_B}
+    
+    // Bonds belonging to each cell: list of (site_i, neighbor_idx, bond_type)
+    struct CellBond {
+        size_t site_i;
+        size_t site_j;
+        size_t nn_idx;   // index into nn_partners[site_i]
+        int bond_type;
+    };
+    vector<vector<CellBond>> cell_bonds_;      // cell → bonds
+    
+    // Cell neighbors (triangular lattice: 6 neighbors per cell)
+    vector<vector<size_t>> cell_neighbors_;
+    
+    // ============================================================
     // EXTRA DOF INTERFACE (for mc::attempt_replica_exchange)
     // Ensures strain state is exchanged together with spins in PT
     // ============================================================
     
     /** Number of extra (non-spin) degrees of freedom to exchange in PT */
-    size_t extra_dof_size() const { return StrainState::N_DOF; }
+    size_t extra_dof_size() const { 
+        return use_local_strain_ ? CellStrain::N_DOF * N_cells_ : StrainState::N_DOF; 
+    }
     
     /** Pack strain state into flat array for MPI exchange */
-    void pack_extra_dof(double* buf) const { strain.to_array(buf); }
+    void pack_extra_dof(double* buf) const {
+        if (use_local_strain_) {
+            for (size_t c = 0; c < N_cells_; ++c)
+                cell_strains_[c].to_array(buf + c * CellStrain::N_DOF);
+        } else {
+            strain.to_array(buf);
+        }
+    }
     
     /** Unpack strain state from flat array after MPI exchange */
-    void unpack_extra_dof(const double* buf) { strain.from_array(buf); }
+    void unpack_extra_dof(const double* buf) {
+        if (use_local_strain_) {
+            for (size_t c = 0; c < N_cells_; ++c)
+                cell_strains_[c].from_array(buf + c * CellStrain::N_DOF);
+        } else {
+            strain.from_array(buf);
+        }
+    }
     
     /**
      * Set uniform Eg strain on all bond types.
@@ -597,10 +674,16 @@ public:
     }
     
     double total_energy() const {
+        if (use_local_strain_) {
+            return spin_energy() + local_strain_energy() + local_magnetoelastic_energy();
+        }
         return spin_energy() + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
     double total_energy(double t) const {
+        if (use_local_strain_) {
+            return spin_energy(t) + local_strain_energy() + local_magnetoelastic_energy();
+        }
         return spin_energy(t) + strain_energy() + magnetoelastic_energy() + drive_energy();
     }
     
@@ -842,6 +925,62 @@ public:
      * @param verbose If true, print equilibrium strain values
      */
     void relax_strain(bool verbose = true);
+    
+    // ============================================================
+    // LOCAL STRAIN METHODS
+    // ============================================================
+    
+    /**
+     * Initialize local strain mode: build cell topology, allocate per-cell arrays.
+     * Must be called after constructor and set_parameters() if local_strain=1.
+     */
+    void init_local_strain();
+    
+    /** Number of unit cells (valid after init_local_strain). */
+    size_t get_N_cells() const { return N_cells_; }
+    
+    /**
+     * Compute Eg spin factors for a single cell (3 NN bonds per cell).
+     * Returns (Σ_Eg1, Σ_Eg2) for the cell's bonds only.
+     */
+    std::pair<double, double> compute_cell_Eg_spin_factors(size_t cell) const;
+    
+    /**
+     * Local magnetoelastic energy: Σ_c λ_Eg [ε_Eg1(c) Σ_Eg1(c) + ε_Eg2(c) Σ_Eg2(c)]
+     */
+    double local_magnetoelastic_energy() const;
+    
+    /**
+     * Local strain energy: elastic + kinetic + gradient stiffness
+     */
+    double local_strain_energy() const;
+    
+    /**
+     * Get magnetoelastic field on a spin using its cell's local strain
+     */
+    SpinVector get_local_magnetoelastic_field(size_t site) const;
+    
+    /**
+     * Compute per-cell strain derivatives (local strain EOM).
+     * Includes elastic, ME, gradient, damping, and drive forces.
+     */
+    void local_strain_derivatives(double t, vector<CellStrain>& dcell_dt) const;
+    
+    /**
+     * Relax all cell strains to local equilibrium (Jacobi iteration).
+     * Each cell's strain minimizes E_elastic(c) + E_ME(c) + E_gradient(c).
+     */
+    void relax_local_strain(bool verbose = true);
+    
+    /**
+     * Save local strain map to file (one line per cell with position + strain)
+     */
+    void save_local_strain_map(const string& filename) const;
+    
+    /**
+     * Load local strain state from file
+     */
+    void load_local_strain_state(const string& filename);
     
     // ============================================================
     // MONTE CARLO

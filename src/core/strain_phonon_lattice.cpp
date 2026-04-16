@@ -932,10 +932,8 @@ double StrainPhononLattice::site_energy(const SpinVector& spin_here, size_t site
     }
     
     // Magnetoelastic coupling contribution
-    // This is more complex - we need the derivative w.r.t. spin dotted with spin
-    // H_c = λ_{A1g} (ε_xx + ε_yy) [(J+K)f_K^{A1g} + J f_J^{A1g} + Γ f_Γ^{A1g}] + ...
-    // For simplicity, we use the effective field approach here
-    SpinVector H_me = get_magnetoelastic_field(site);
+    SpinVector H_me = use_local_strain_ ? get_local_magnetoelastic_field(site) 
+                                        : get_magnetoelastic_field(site);
     E -= spin_here.dot(H_me);  // H_me = -∂H_c/∂S, so E contribution is -S · H_me
     
     // Ring exchange contribution from hexagons containing this site
@@ -972,7 +970,8 @@ double StrainPhononLattice::site_energy_diff(const SpinVector& new_spin,
     }
     
     // Magnetoelastic contribution: -δS · H_me
-    SpinVector H_me = get_magnetoelastic_field(site);
+    SpinVector H_me = use_local_strain_ ? get_local_magnetoelastic_field(site)
+                                        : get_magnetoelastic_field(site);
     dE -= delta.dot(H_me);
     
     // Ring exchange: need to compute E_ring(new) - E_ring(old) for hexagons containing this site
@@ -1822,8 +1821,12 @@ SpinVector StrainPhononLattice::get_local_field(size_t site, double t) const {
     // Time-dependent ring exchange
     H += get_ring_exchange_field(site, t);
     
-    // Magnetoelastic coupling
-    H += get_magnetoelastic_field(site);
+    // Magnetoelastic coupling (dispatch to local or global strain)
+    if (use_local_strain_) {
+        H += get_local_magnetoelastic_field(site);
+    } else {
+        H += get_magnetoelastic_field(site);
+    }
     
     return H;
 }
@@ -1891,76 +1894,99 @@ void StrainPhononLattice::strain_derivatives(
 }
 
 void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
-    // State layout: [S0_x, S0_y, S0_z, ..., SN_z, ε_xx_0, ε_xx_1, ε_xx_2, ...]
-    
     const size_t spin_offset = spin_dim * lattice_size;
     
-    // Extract strain state
-    StrainState eps;
-    eps.from_array(&x[spin_offset]);
-    
-    // Temporarily update strain for field calculations
-    // (Note: this modifies class state during ODE evaluation)
-    StrainState saved_strain = strain;
-    const_cast<StrainPhononLattice*>(this)->strain = eps;
-
-    // Update spins from the ODE state before evaluating any spin-dependent
-    // strain force so all coupled derivatives use the same configuration.
+    // Update spins from ODE state
     for (size_t i = 0; i < lattice_size; ++i) {
         const size_t idx = i * spin_dim;
         const_cast<StrainPhononLattice*>(this)->spins[i] =
             Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
     }
     
-    // Compute magnetoelastic coupling derivatives
-    double dH_deps_xx_arr[StrainState::N_BONDS];
-    double dH_deps_yy_arr[StrainState::N_BONDS];
-    double dH_deps_xy_arr[StrainState::N_BONDS];
-    
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        dH_deps_xx_arr[b] = dH_deps_xx(b);
-        dH_deps_yy_arr[b] = dH_deps_yy(b);
-        dH_deps_xy_arr[b] = dH_deps_xy(b);
-    }
-    
-    // Add J7-ring exchange force: ∂H_J7/∂ε = (dJ7/dε) * E_ring
-    // This term was previously missing and caused energy non-conservation
-    double dJ7_deps_xx[StrainState::N_BONDS];
-    double dJ7_deps_yy[StrainState::N_BONDS];
-    double dJ7_deps_xy[StrainState::N_BONDS];
-    get_dJ7_deps(dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy);
-    
-    double E_ring = get_ring_exchange_normalized();
-    
-    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-        dH_deps_xx_arr[b] += dJ7_deps_xx[b] * E_ring;
-        dH_deps_yy_arr[b] += dJ7_deps_yy[b] * E_ring;
-        dH_deps_xy_arr[b] += dJ7_deps_xy[b] * E_ring;
-    }
-    
     // Update current time for time-dependent parameters
     const_cast<StrainPhononLattice*>(this)->current_time = t;
     
-    // Spin equations of motion (use time-dependent local field for J7 modulation)
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const size_t idx = i * spin_dim;
-        Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
+    if (use_local_strain_) {
+        // ── LOCAL STRAIN PATH ──
+        // State: [spins..., cell_0(6), cell_1(6), ..., cell_{N-1}(6)]
         
-        SpinVector H = get_local_field(i, t);  // Time-dependent version
-        Eigen::Vector3d dSdt = spin_derivative(Si, H);
+        // Extract per-cell strains from ODE state
+        vector<CellStrain> saved_cells = cell_strains_;
+        for (size_t c = 0; c < N_cells_; ++c) {
+            cell_strains_[c].from_array(&x[spin_offset + c * CellStrain::N_DOF]);
+        }
         
-        dxdt[idx] = dSdt(0);
-        dxdt[idx+1] = dSdt(1);
-        dxdt[idx+2] = dSdt(2);
+        // Spin EOM (get_local_field dispatches to local ME field)
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t idx = i * spin_dim;
+            Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
+            SpinVector H = get_local_field(i, t);
+            Eigen::Vector3d dSdt = spin_derivative(Si, H);
+            dxdt[idx] = dSdt(0);
+            dxdt[idx+1] = dSdt(1);
+            dxdt[idx+2] = dSdt(2);
+        }
+        
+        // Local strain EOM
+        vector<CellStrain> dcell_dt;
+        local_strain_derivatives(t, dcell_dt);
+        for (size_t c = 0; c < N_cells_; ++c) {
+            dcell_dt[c].to_array(&dxdt[spin_offset + c * CellStrain::N_DOF]);
+        }
+        
+        // Restore
+        const_cast<StrainPhononLattice*>(this)->cell_strains_ = saved_cells;
+        
+    } else {
+        // ── GLOBAL STRAIN PATH (original) ──
+        // State: [spins..., StrainState(18)]
+        
+        StrainState eps;
+        eps.from_array(&x[spin_offset]);
+        
+        StrainState saved_strain = strain;
+        const_cast<StrainPhononLattice*>(this)->strain = eps;
+        
+        // Compute ME + J7 strain forces
+        double dH_deps_xx_arr[StrainState::N_BONDS];
+        double dH_deps_yy_arr[StrainState::N_BONDS];
+        double dH_deps_xy_arr[StrainState::N_BONDS];
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            dH_deps_xx_arr[b] = dH_deps_xx(b);
+            dH_deps_yy_arr[b] = dH_deps_yy(b);
+            dH_deps_xy_arr[b] = dH_deps_xy(b);
+        }
+        
+        double dJ7_deps_xx_arr[StrainState::N_BONDS];
+        double dJ7_deps_yy_arr[StrainState::N_BONDS];
+        double dJ7_deps_xy_arr[StrainState::N_BONDS];
+        get_dJ7_deps(dJ7_deps_xx_arr, dJ7_deps_yy_arr, dJ7_deps_xy_arr);
+        double E_ring = get_ring_exchange_normalized();
+        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+            dH_deps_xx_arr[b] += dJ7_deps_xx_arr[b] * E_ring;
+            dH_deps_yy_arr[b] += dJ7_deps_yy_arr[b] * E_ring;
+            dH_deps_xy_arr[b] += dJ7_deps_xy_arr[b] * E_ring;
+        }
+        
+        // Spin EOM
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t idx = i * spin_dim;
+            Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
+            SpinVector H = get_local_field(i, t);
+            Eigen::Vector3d dSdt = spin_derivative(Si, H);
+            dxdt[idx] = dSdt(0);
+            dxdt[idx+1] = dSdt(1);
+            dxdt[idx+2] = dSdt(2);
+        }
+        
+        // Global strain EOM
+        StrainState deps_dt;
+        strain_derivatives(eps, t, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr, deps_dt);
+        deps_dt.to_array(&dxdt[spin_offset]);
+        
+        // Restore
+        const_cast<StrainPhononLattice*>(this)->strain = saved_strain;
     }
-    
-    // Strain equations of motion
-    StrainState deps_dt;
-    strain_derivatives(eps, t, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr, deps_dt);
-    deps_dt.to_array(&dxdt[spin_offset]);
-    
-    // Restore original strain
-    const_cast<StrainPhononLattice*>(this)->strain = saved_strain;
 }
 
 // ============================================================
@@ -1988,7 +2014,12 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
         state[idx+1] = spins[i](1);
         state[idx+2] = spins[i](2);
     }
-    strain.to_array(&state[spin_dim * lattice_size]);
+    if (use_local_strain_) {
+        for (size_t c = 0; c < N_cells_; ++c)
+            cell_strains_[c].to_array(&state[spin_dim * lattice_size + c * CellStrain::N_DOF]);
+    } else {
+        strain.to_array(&state[spin_dim * lattice_size]);
+    }
     
     // RK4 integrator
     odeint::runge_kutta4<ODEState> stepper;
@@ -2099,7 +2130,12 @@ void StrainPhononLattice::integrate_rk4(double dt, double t_start, double t_fina
             state[idx+1] = spins[i](1);
             state[idx+2] = spins[i](2);
         }
-        strain.from_array(&state[spin_dim * lattice_size]);
+        if (use_local_strain_) {
+            for (size_t c = 0; c < N_cells_; ++c)
+                cell_strains_[c].from_array(&state[spin_dim * lattice_size + c * CellStrain::N_DOF]);
+        } else {
+            strain.from_array(&state[spin_dim * lattice_size]);
+        }
     }
     
     // Save text output (always)
@@ -2388,53 +2424,71 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     // ----------------------------------------------------------
     // Noise vectors (allocated once, reused every step)
     vector<Eigen::Vector3d> xi_noise(lattice_size);       // spin noise per site
-    vector<double> eta_xx(StrainState::N_BONDS, 0.0);     // strain noise
+    vector<double> eta_xx(StrainState::N_BONDS, 0.0);     // strain noise (global)
     vector<double> eta_yy(StrainState::N_BONDS, 0.0);
     vector<double> eta_xy(StrainState::N_BONDS, 0.0);
+    
+    // Local strain noise (per cell)
+    vector<double> eta_cell_xx, eta_cell_yy, eta_cell_xy;
+    if (use_local_strain_) {
+        eta_cell_xx.resize(N_cells_, 0.0);
+        eta_cell_yy.resize(N_cells_, 0.0);
+        eta_cell_xy.resize(N_cells_, 0.0);
+    }
 
     // RHS buffers
     vector<Eigen::Vector3d> spin_deriv(lattice_size);     // dS/dt per site
-    StrainState strain_deriv;                              // dε/dt
+    StrainState strain_deriv;                              // dε/dt (global)
+    vector<CellStrain> cell_strain_deriv;                  // dε/dt (local)
 
     auto compute_full_rhs = [&](double time,
                                 vector<Eigen::Vector3d>& out_spin_deriv,
-                                StrainState& out_strain_deriv) {
+                                StrainState& out_strain_deriv,
+                                vector<CellStrain>& out_cell_strain_deriv) {
         current_time = time;
 
-        // -- magnetoelastic strain derivatives --
-        double dH_deps_xx_arr[StrainState::N_BONDS];
-        double dH_deps_yy_arr[StrainState::N_BONDS];
-        double dH_deps_xy_arr[StrainState::N_BONDS];
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            dH_deps_xx_arr[b] = dH_deps_xx(b);
-            dH_deps_yy_arr[b] = dH_deps_yy(b);
-            dH_deps_xy_arr[b] = dH_deps_xy(b);
+        if (use_local_strain_) {
+            // -- Local strain EOM --
+            local_strain_derivatives(time, out_cell_strain_deriv);
+            // Add thermal noise to velocity derivatives
+            for (size_t c = 0; c < N_cells_; ++c) {
+                out_cell_strain_deriv[c].V_xx += eta_cell_xx[c] / elastic_params.M;
+                out_cell_strain_deriv[c].V_yy += eta_cell_yy[c] / elastic_params.M;
+                out_cell_strain_deriv[c].V_xy += eta_cell_xy[c] / elastic_params.M;
+            }
+        } else {
+            // -- Global strain EOM --
+            double dH_deps_xx_arr[StrainState::N_BONDS];
+            double dH_deps_yy_arr[StrainState::N_BONDS];
+            double dH_deps_xy_arr[StrainState::N_BONDS];
+            for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                dH_deps_xx_arr[b] = dH_deps_xx(b);
+                dH_deps_yy_arr[b] = dH_deps_yy(b);
+                dH_deps_xy_arr[b] = dH_deps_xy(b);
+            }
+
+            double dJ7_deps_xx_arr[StrainState::N_BONDS];
+            double dJ7_deps_yy_arr[StrainState::N_BONDS];
+            double dJ7_deps_xy_arr[StrainState::N_BONDS];
+            get_dJ7_deps(dJ7_deps_xx_arr, dJ7_deps_yy_arr, dJ7_deps_xy_arr);
+            double E_ring = get_ring_exchange_normalized();
+            for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                dH_deps_xx_arr[b] += dJ7_deps_xx_arr[b] * E_ring;
+                dH_deps_yy_arr[b] += dJ7_deps_yy_arr[b] * E_ring;
+                dH_deps_xy_arr[b] += dJ7_deps_xy_arr[b] * E_ring;
+            }
+
+            strain_derivatives(strain, time, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr,
+                               out_strain_deriv);
+
+            for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                out_strain_deriv.V_xx[b] += eta_xx[b] / elastic_params.M;
+                out_strain_deriv.V_yy[b] += eta_yy[b] / elastic_params.M;
+                out_strain_deriv.V_xy[b] += eta_xy[b] / elastic_params.M;
+            }
         }
 
-        // J7-ring exchange strain force
-        double dJ7_deps_xx[StrainState::N_BONDS];
-        double dJ7_deps_yy[StrainState::N_BONDS];
-        double dJ7_deps_xy[StrainState::N_BONDS];
-        get_dJ7_deps(dJ7_deps_xx, dJ7_deps_yy, dJ7_deps_xy);
-        double E_ring = get_ring_exchange_normalized();
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            dH_deps_xx_arr[b] += dJ7_deps_xx[b] * E_ring;
-            dH_deps_yy_arr[b] += dJ7_deps_yy[b] * E_ring;
-            dH_deps_xy_arr[b] += dJ7_deps_xy[b] * E_ring;
-        }
-
-        // -- Strain EOM (deterministic part from strain_derivatives) --
-        strain_derivatives(strain, time, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr,
-                           out_strain_deriv);
-
-        // Add thermal noise to strain velocity derivatives: η / M
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            out_strain_deriv.V_xx[b] += eta_xx[b] / elastic_params.M;
-            out_strain_deriv.V_yy[b] += eta_yy[b] / elastic_params.M;
-            out_strain_deriv.V_xy[b] += eta_xy[b] / elastic_params.M;
-        }
-
-        // -- Spin sLLG --
+        // -- Spin sLLG (get_local_field already dispatches ME field) --
         for (size_t i = 0; i < lattice_size; ++i) {
             SpinVector H = get_local_field(i, time);
             out_spin_deriv[i] = spin_rhs(spins[i], H, xi_noise[i]);
@@ -2447,8 +2501,10 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
     // Saved copies for predictor-corrector
     vector<Eigen::Vector3d> spins_saved(lattice_size);
     StrainState strain_saved;
+    vector<CellStrain> cells_saved;
     vector<Eigen::Vector3d> spin_deriv_pred(lattice_size);
     StrainState strain_deriv_pred;
+    vector<CellStrain> cell_strain_deriv_pred;
 
     while (t < t_final) {
         // ---- record observables ----
@@ -2521,36 +2577,57 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             eta_yy[b] = normal_dist(rng) * sigma_mixed;
             eta_xy[b] = normal_dist(rng) * strain_noise_sigma_Eg;  // pure Eg
         }
+        if (use_local_strain_) {
+            double sigma_mixed = 0.5 * (strain_noise_sigma_A1g + strain_noise_sigma_Eg);
+            for (size_t c = 0; c < N_cells_; ++c) {
+                eta_cell_xx[c] = normal_dist(rng) * sigma_mixed;
+                eta_cell_yy[c] = normal_dist(rng) * sigma_mixed;
+                eta_cell_xy[c] = normal_dist(rng) * strain_noise_sigma_Eg;
+            }
+        }
 
         // ======================================================
         // 2. Save current state
         // ======================================================
         for (size_t i = 0; i < lattice_size; ++i) spins_saved[i] = spins[i];
         strain_saved = strain;
+        if (use_local_strain_) cells_saved = cell_strains_;
 
         // ======================================================
         // 3. Predictor: evaluate RHS at current state
         // ======================================================
-        compute_full_rhs(t, spin_deriv, strain_deriv);
+        compute_full_rhs(t, spin_deriv, strain_deriv, cell_strain_deriv);
 
-        // Euler step → predicted state
+        // Euler step → predicted state (spins)
         for (size_t i = 0; i < lattice_size; ++i) {
             spins[i] = spins_saved[i] + dt * spin_deriv[i];
             spins[i] = spins[i].normalized() * spin_length;
         }
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            strain.epsilon_xx[b] = strain_saved.epsilon_xx[b] + dt * strain_deriv.epsilon_xx[b];
-            strain.epsilon_yy[b] = strain_saved.epsilon_yy[b] + dt * strain_deriv.epsilon_yy[b];
-            strain.epsilon_xy[b] = strain_saved.epsilon_xy[b] + dt * strain_deriv.epsilon_xy[b];
-            strain.V_xx[b] = strain_saved.V_xx[b] + dt * strain_deriv.V_xx[b];
-            strain.V_yy[b] = strain_saved.V_yy[b] + dt * strain_deriv.V_yy[b];
-            strain.V_xy[b] = strain_saved.V_xy[b] + dt * strain_deriv.V_xy[b];
+        // Euler step → predicted state (strain)
+        if (use_local_strain_) {
+            for (size_t c = 0; c < N_cells_; ++c) {
+                cell_strains_[c].epsilon_xx = cells_saved[c].epsilon_xx + dt * cell_strain_deriv[c].epsilon_xx;
+                cell_strains_[c].epsilon_yy = cells_saved[c].epsilon_yy + dt * cell_strain_deriv[c].epsilon_yy;
+                cell_strains_[c].epsilon_xy = cells_saved[c].epsilon_xy + dt * cell_strain_deriv[c].epsilon_xy;
+                cell_strains_[c].V_xx = cells_saved[c].V_xx + dt * cell_strain_deriv[c].V_xx;
+                cell_strains_[c].V_yy = cells_saved[c].V_yy + dt * cell_strain_deriv[c].V_yy;
+                cell_strains_[c].V_xy = cells_saved[c].V_xy + dt * cell_strain_deriv[c].V_xy;
+            }
+        } else {
+            for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                strain.epsilon_xx[b] = strain_saved.epsilon_xx[b] + dt * strain_deriv.epsilon_xx[b];
+                strain.epsilon_yy[b] = strain_saved.epsilon_yy[b] + dt * strain_deriv.epsilon_yy[b];
+                strain.epsilon_xy[b] = strain_saved.epsilon_xy[b] + dt * strain_deriv.epsilon_xy[b];
+                strain.V_xx[b] = strain_saved.V_xx[b] + dt * strain_deriv.V_xx[b];
+                strain.V_yy[b] = strain_saved.V_yy[b] + dt * strain_deriv.V_yy[b];
+                strain.V_xy[b] = strain_saved.V_xy[b] + dt * strain_deriv.V_xy[b];
+            }
         }
 
         // ======================================================
         // 4. Corrector: evaluate RHS at predicted state (same noise)
         // ======================================================
-        compute_full_rhs(t + dt, spin_deriv_pred, strain_deriv_pred);
+        compute_full_rhs(t + dt, spin_deriv_pred, strain_deriv_pred, cell_strain_deriv_pred);
 
         // ======================================================
         // 5. Heun update: average predictor & corrector
@@ -2560,19 +2637,36 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
                 + 0.5 * dt * (spin_deriv[i] + spin_deriv_pred[i]);
             spins[i] = spins[i].normalized() * spin_length;
         }
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            strain.epsilon_xx[b] = strain_saved.epsilon_xx[b]
-                + 0.5 * dt * (strain_deriv.epsilon_xx[b] + strain_deriv_pred.epsilon_xx[b]);
-            strain.epsilon_yy[b] = strain_saved.epsilon_yy[b]
-                + 0.5 * dt * (strain_deriv.epsilon_yy[b] + strain_deriv_pred.epsilon_yy[b]);
-            strain.epsilon_xy[b] = strain_saved.epsilon_xy[b]
-                + 0.5 * dt * (strain_deriv.epsilon_xy[b] + strain_deriv_pred.epsilon_xy[b]);
-            strain.V_xx[b] = strain_saved.V_xx[b]
-                + 0.5 * dt * (strain_deriv.V_xx[b] + strain_deriv_pred.V_xx[b]);
-            strain.V_yy[b] = strain_saved.V_yy[b]
-                + 0.5 * dt * (strain_deriv.V_yy[b] + strain_deriv_pred.V_yy[b]);
-            strain.V_xy[b] = strain_saved.V_xy[b]
-                + 0.5 * dt * (strain_deriv.V_xy[b] + strain_deriv_pred.V_xy[b]);
+        if (use_local_strain_) {
+            for (size_t c = 0; c < N_cells_; ++c) {
+                cell_strains_[c].epsilon_xx = cells_saved[c].epsilon_xx
+                    + 0.5 * dt * (cell_strain_deriv[c].epsilon_xx + cell_strain_deriv_pred[c].epsilon_xx);
+                cell_strains_[c].epsilon_yy = cells_saved[c].epsilon_yy
+                    + 0.5 * dt * (cell_strain_deriv[c].epsilon_yy + cell_strain_deriv_pred[c].epsilon_yy);
+                cell_strains_[c].epsilon_xy = cells_saved[c].epsilon_xy
+                    + 0.5 * dt * (cell_strain_deriv[c].epsilon_xy + cell_strain_deriv_pred[c].epsilon_xy);
+                cell_strains_[c].V_xx = cells_saved[c].V_xx
+                    + 0.5 * dt * (cell_strain_deriv[c].V_xx + cell_strain_deriv_pred[c].V_xx);
+                cell_strains_[c].V_yy = cells_saved[c].V_yy
+                    + 0.5 * dt * (cell_strain_deriv[c].V_yy + cell_strain_deriv_pred[c].V_yy);
+                cell_strains_[c].V_xy = cells_saved[c].V_xy
+                    + 0.5 * dt * (cell_strain_deriv[c].V_xy + cell_strain_deriv_pred[c].V_xy);
+            }
+        } else {
+            for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                strain.epsilon_xx[b] = strain_saved.epsilon_xx[b]
+                    + 0.5 * dt * (strain_deriv.epsilon_xx[b] + strain_deriv_pred.epsilon_xx[b]);
+                strain.epsilon_yy[b] = strain_saved.epsilon_yy[b]
+                    + 0.5 * dt * (strain_deriv.epsilon_yy[b] + strain_deriv_pred.epsilon_yy[b]);
+                strain.epsilon_xy[b] = strain_saved.epsilon_xy[b]
+                    + 0.5 * dt * (strain_deriv.epsilon_xy[b] + strain_deriv_pred.epsilon_xy[b]);
+                strain.V_xx[b] = strain_saved.V_xx[b]
+                    + 0.5 * dt * (strain_deriv.V_xx[b] + strain_deriv_pred.V_xx[b]);
+                strain.V_yy[b] = strain_saved.V_yy[b]
+                    + 0.5 * dt * (strain_deriv.V_yy[b] + strain_deriv_pred.V_yy[b]);
+                strain.V_xy[b] = strain_saved.V_xy[b]
+                    + 0.5 * dt * (strain_deriv.V_xy[b] + strain_deriv_pred.V_xy[b]);
+            }
         }
 
         t += dt;
@@ -2716,6 +2810,12 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
 }
 
 void StrainPhononLattice::relax_strain(bool verbose) {
+    // Dispatch to local strain relaxation if enabled
+    if (use_local_strain_) {
+        relax_local_strain(verbose);
+        return;
+    }
+    
     // If strain is pinned (Born-Oppenheimer scan), skip relaxation
     if (fix_strain_) {
         if (verbose) {
@@ -2857,6 +2957,491 @@ void StrainPhononLattice::relax_strain(bool verbose) {
         std::cout << "    ∂H/∂ε_xy = " << residual_xy << std::endl;
         std::cout << "  ---------------------------------" << std::endl;
     }
+}
+
+// ============================================================
+// LOCAL STRAIN (per-unit-cell strain DOF)
+// ============================================================
+
+void StrainPhononLattice::init_local_strain() {
+    use_local_strain_ = true;
+    N_cells_ = dim1 * dim2 * dim3;
+    
+    // Allocate per-cell strain
+    cell_strains_.resize(N_cells_);
+    cell_strains_eq_.resize(N_cells_);
+    
+    // Build site → cell mapping
+    // On honeycomb: each unit cell (i,j,k) has 2 atoms: atom 0 and atom 1
+    // Cell index = i * dim2 * dim3 + j * dim3 + k (same flattening, no atom index)
+    site_to_cell_.resize(lattice_size);
+    cell_sites_.resize(N_cells_);
+    
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                size_t cell_idx = (i * dim2 + j) * dim3 + k;
+                size_t site_A = flatten_index(i, j, k, 0);
+                size_t site_B = flatten_index(i, j, k, 1);
+                cell_sites_[cell_idx] = {site_A, site_B};
+                site_to_cell_[site_A] = cell_idx;
+                site_to_cell_[site_B] = cell_idx;
+            }
+        }
+    }
+    
+    // Build cell bonds: for each cell, collect NN bonds where BOTH sites belong to this cell
+    // On the honeycomb lattice, each unit cell has exactly 3 NN bonds (one per bond type)
+    // connecting site_A to site_B (within the cell or across boundary to the same cell via PBC)
+    // Actually, NN bonds connect A↔B sites. The bond belongs to the cell of site_A.
+    // We assign each bond to the cell of the A-sublattice site (atom index 0).
+    cell_bonds_.resize(N_cells_);
+    for (size_t site = 0; site < lattice_size; ++site) {
+        // Only process A-sublattice sites (atom 0) to avoid double-counting
+        size_t atom = site % N_atoms;
+        if (atom != 0) continue;
+        
+        size_t cell = site_to_cell_[site];
+        for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+            size_t partner = nn_partners[site][n];
+            int btype = nn_bond_types[site][n];
+            cell_bonds_[cell].push_back({site, partner, n, btype});
+        }
+    }
+    
+    // Build cell neighbor list (triangular lattice of unit cells)
+    // 6 neighbors: (±1,0,0), (0,±1,0), (+1,-1,0), (-1,+1,0) for 2D honeycomb
+    cell_neighbors_.resize(N_cells_);
+    for (size_t i = 0; i < dim1; ++i) {
+        for (size_t j = 0; j < dim2; ++j) {
+            for (size_t k = 0; k < dim3; ++k) {
+                size_t cell_idx = (i * dim2 + j) * dim3 + k;
+                
+                // 6 triangular lattice neighbors (2D, accounting for PBC)
+                int di[] = {1, -1, 0, 0, 1, -1};
+                int dj[] = {0, 0, 1, -1, -1, 1};
+                
+                for (int d = 0; d < 6; ++d) {
+                    int ni = periodic_boundary(static_cast<int>(i) + di[d], dim1);
+                    int nj = periodic_boundary(static_cast<int>(j) + dj[d], dim2);
+                    int nk = static_cast<int>(k);  // 2D: k doesn't change
+                    size_t neighbor_cell = (ni * dim2 + nj) * dim3 + nk;
+                    cell_neighbors_[cell_idx].push_back(neighbor_cell);
+                }
+            }
+        }
+    }
+    
+    // Update state_size to account for local strain DOF
+    state_size = spin_dim * lattice_size + CellStrain::N_DOF * N_cells_;
+    
+    cout << "Local strain mode enabled:" << endl;
+    cout << "  N_cells = " << N_cells_ << endl;
+    cout << "  Strain DOF = " << CellStrain::N_DOF * N_cells_ << " (6 per cell)" << endl;
+    cout << "  K_gradient = " << elastic_params.K_gradient << endl;
+    cout << "  Total ODE state size: " << state_size << endl;
+    
+    // Verify cell bonds
+    size_t total_cell_bonds = 0;
+    for (size_t c = 0; c < N_cells_; ++c) {
+        total_cell_bonds += cell_bonds_[c].size();
+    }
+    cout << "  Total cell bonds: " << total_cell_bonds 
+         << " (expected " << 3 * N_cells_ << ")" << endl;
+}
+
+std::pair<double, double> StrainPhononLattice::compute_cell_Eg_spin_factors(size_t cell) const {
+    // Compute Eg spin factors from the 3 NN bonds belonging to this cell
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
+    
+    // Per-bond-type contributions
+    double fK_x = 0, fK_y = 0, fK_z = 0;    // Kitaev
+    double fJ_x = 0, fJ_y = 0, fJ_z = 0;    // non-Kitaev Heisenberg
+    double fG_x = 0, fG_y = 0, fG_z = 0;    // Gamma
+    double fGp_x = 0, fGp_y = 0, fGp_z = 0; // Gamma'
+    
+    for (const auto& bond : cell_bonds_[cell]) {
+        const Eigen::Vector3d& Si = spins[bond.site_i];
+        const Eigen::Vector3d& Sj = spins[bond.site_j];
+        int gamma = bond.bond_type;
+        int alpha = (gamma + 1) % 3;
+        int beta = (gamma + 2) % 3;
+        
+        // Kitaev: S_i^γ S_j^γ
+        double fK = Si(gamma) * Sj(gamma);
+        // Non-Kitaev Heisenberg: S_i^α S_j^α + S_i^β S_j^β
+        double fJ = Si(alpha) * Sj(alpha) + Si(beta) * Sj(beta);
+        // Gamma: S_i^α S_j^β + S_i^β S_j^α
+        double fG = Si(alpha) * Sj(beta) + Si(beta) * Sj(alpha);
+        // Gamma': S_i^γ(S_j^α + S_j^β) + (S_i^α + S_i^β)S_j^γ
+        double fGp = Si(gamma) * (Sj(alpha) + Sj(beta)) + (Si(alpha) + Si(beta)) * Sj(gamma);
+        
+        if (gamma == 0) { fK_x += fK; fJ_x += fJ; fG_x += fG; fGp_x += fGp; }
+        else if (gamma == 1) { fK_y += fK; fJ_y += fJ; fG_y += fG; fGp_y += fGp; }
+        else { fK_z += fK; fJ_z += fJ; fG_z += fG; fGp_z += fGp; }
+    }
+    
+    // Eg1: f_x + f_y - 2*f_z;  Eg2: √3*(f_x - f_y)
+    double Eg1 = (J + K) * (fK_x + fK_y - 2.0 * fK_z)
+               + J * (fJ_x + fJ_y - 2.0 * fJ_z)
+               + Gamma * (fG_x + fG_y - 2.0 * fG_z)
+               + Gammap * (fGp_x + fGp_y - 2.0 * fGp_z);
+    
+    double sqrt3 = std::sqrt(3.0);
+    double Eg2 = (J + K) * sqrt3 * (fK_x - fK_y)
+               + J * sqrt3 * (fJ_x - fJ_y)
+               + Gamma * sqrt3 * (fG_x - fG_y)
+               + Gammap * sqrt3 * (fGp_x - fGp_y);
+    
+    return {Eg1, Eg2};
+}
+
+double StrainPhononLattice::local_magnetoelastic_energy() const {
+    // E_ME = N_BONDS × Σ_c λ_Eg [(ε_xx(c) - ε_yy(c)) Σ_Eg1(c) + 2 ε_xy(c) Σ_Eg2(c)]
+    // The N_BONDS factor (=3) accounts for 3 bonds per unit cell, matching the
+    // global convention where 3 bond-type strains each couple to the total Eg factor.
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    constexpr double nbpc = static_cast<double>(StrainState::N_BONDS);  // 3
+    if (std::abs(lambda_Eg) < 1e-15) return 0.0;
+    
+    double E = 0.0;
+    for (size_t c = 0; c < N_cells_; ++c) {
+        auto [Eg1_f, Eg2_f] = compute_cell_Eg_spin_factors(c);
+        const auto& cs = cell_strains_[c];
+        E += nbpc * lambda_Eg * ((cs.epsilon_xx - cs.epsilon_yy) * Eg1_f + 2.0 * cs.epsilon_xy * Eg2_f);
+    }
+    return E;
+}
+
+double StrainPhononLattice::local_strain_energy() const {
+    double C11 = elastic_params.C11;
+    double C12 = elastic_params.C12;
+    double C44 = elastic_params.C44;
+    double M = elastic_params.M;
+    double K_grad = elastic_params.K_gradient;
+    
+    double E_elastic = 0.0;
+    double E_kinetic = 0.0;
+    double E_gradient = 0.0;
+    
+    constexpr double nbpc = static_cast<double>(StrainState::N_BONDS);  // 3
+    
+    for (size_t c = 0; c < N_cells_; ++c) {
+        const auto& cs = cell_strains_[c];
+        
+        // Elastic potential per cell (×N_BONDS to match global convention)
+        E_elastic += nbpc * 0.5 * (C11 * (cs.epsilon_xx * cs.epsilon_xx + cs.epsilon_yy * cs.epsilon_yy)
+                    + 2.0 * C12 * cs.epsilon_xx * cs.epsilon_yy
+                    + 4.0 * C44 * cs.epsilon_xy * cs.epsilon_xy);
+        
+        // Kinetic energy per cell (×N_BONDS to match global convention)
+        E_kinetic += nbpc * 0.5 * M * (cs.V_xx * cs.V_xx + cs.V_yy * cs.V_yy + cs.V_xy * cs.V_xy);
+        
+        // Gradient energy: (K_grad/2) Σ_{neighbors} |ε(c) - ε(c')|²
+        // Count each pair once by requiring c < c'
+        if (K_grad > 0.0) {
+            for (size_t c2 : cell_neighbors_[c]) {
+                if (c2 > c) {
+                    const auto& cs2 = cell_strains_[c2];
+                    double dxx = cs.epsilon_xx - cs2.epsilon_xx;
+                    double dyy = cs.epsilon_yy - cs2.epsilon_yy;
+                    double dxy = cs.epsilon_xy - cs2.epsilon_xy;
+                    E_gradient += 0.5 * K_grad * (dxx * dxx + dyy * dyy + dxy * dxy);
+                }
+            }
+        }
+    }
+    
+    return E_elastic + E_kinetic + E_gradient;
+}
+
+SpinVector StrainPhononLattice::get_local_magnetoelastic_field(size_t site) const {
+    // H_me = -∂H_ME/∂S_i using the cell's local strain
+    double J = magnetoelastic_params.J;
+    double K = magnetoelastic_params.K;
+    double Gamma = magnetoelastic_params.Gamma;
+    double Gammap = magnetoelastic_params.Gammap;
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    
+    size_t cell = site_to_cell_[site];
+    const auto& cs = cell_strains_[cell];
+    double Eg1_strain = cs.epsilon_xx - cs.epsilon_yy;
+    double Eg2_strain = 2.0 * cs.epsilon_xy;
+    
+    // Compute spin derivatives (same basis functions, but coupling to local strain)
+    SpinVector df_K_E1 = df_K_Eg1_dS(site);
+    SpinVector df_J_E1 = df_J_Eg1_dS(site);
+    SpinVector df_G_E1 = df_Gamma_Eg1_dS(site);
+    SpinVector df_Gp_E1 = df_Gammap_Eg1_dS(site);
+    
+    SpinVector df_K_E2 = df_K_Eg2_dS(site);
+    SpinVector df_J_E2 = df_J_Eg2_dS(site);
+    SpinVector df_G_E2 = df_Gamma_Eg2_dS(site);
+    SpinVector df_Gp_E2 = df_Gammap_Eg2_dS(site);
+    
+    // N_BONDS factor (=3): each cell has 3 bonds, matching the global convention
+    // where 3 bond-type strains each couple to the total Eg spin factor.
+    constexpr double nbpc = static_cast<double>(StrainState::N_BONDS);  // 3
+    
+    SpinVector H_Eg1 = nbpc * lambda_Eg * Eg1_strain *
+                       ((J + K) * df_K_E1 + J * df_J_E1 + Gamma * df_G_E1 + Gammap * df_Gp_E1);
+    SpinVector H_Eg2 = nbpc * lambda_Eg * Eg2_strain *
+                       ((J + K) * df_K_E2 + J * df_J_E2 + Gamma * df_G_E2 + Gammap * df_Gp_E2);
+    
+    return -(H_Eg1 + H_Eg2);
+}
+
+void StrainPhononLattice::local_strain_derivatives(double t, vector<CellStrain>& dcell_dt) const {
+    // N_BONDS factor (=3): each unit cell has 3 NN bonds. The per-cell effective
+    // elastic, ME, damping, inertia, and drive are all ×N_BONDS, matching the
+    // global convention. The gradient force is per-cell and not scaled.
+    // Since all bulk terms AND inertia scale by N_BONDS, it cancels in ω²=C/M
+    // and damping ratio γ/M. The gradient term gets effectively weaker by N_BONDS.
+    constexpr double nbpc = static_cast<double>(StrainState::N_BONDS);  // 3
+    
+    double C11 = elastic_params.C11;
+    double C12 = elastic_params.C12;
+    double C44 = elastic_params.C44;
+    double M_eff = nbpc * elastic_params.M;  // effective mass = N_BONDS × M
+    double gamma_A1g = elastic_params.gamma_A1g;
+    double gamma_Eg = elastic_params.gamma_Eg;
+    double K_grad = elastic_params.K_gradient;
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    
+    double F_A1g = drive_params.A1g_force(t);
+    double F_Eg1 = drive_params.Eg1_force(t);
+    double F_Eg2 = drive_params.Eg2_force(t);
+    
+    dcell_dt.resize(N_cells_);
+    
+    for (size_t c = 0; c < N_cells_; ++c) {
+        const auto& cs = cell_strains_[c];
+        auto& dc = dcell_dt[c];
+        
+        // Position derivatives = velocities
+        dc.epsilon_xx = cs.V_xx;
+        dc.epsilon_yy = cs.V_yy;
+        dc.epsilon_xy = cs.V_xy;
+        
+        // Compute local Eg spin factors for this cell
+        auto [Eg1_f, Eg2_f] = compute_cell_Eg_spin_factors(c);
+        
+        // Magnetoelastic force: -∂H_ME/∂ε (×N_BONDS)
+        double dHme_dxx = nbpc * lambda_Eg * Eg1_f;
+        double dHme_dyy = -nbpc * lambda_Eg * Eg1_f;
+        double dHme_dxy = nbpc * 2.0 * lambda_Eg * Eg2_f;
+        
+        // Elastic force (×N_BONDS)
+        double elastic_xx = -nbpc * (C11 * cs.epsilon_xx + C12 * cs.epsilon_yy);
+        double elastic_yy = -nbpc * (C11 * cs.epsilon_yy + C12 * cs.epsilon_xx);
+        double elastic_xy = -nbpc * 4.0 * C44 * cs.epsilon_xy;
+        
+        // Gradient force: -∂E_grad/∂ε(c) = K_grad Σ_{c'} (ε(c') - ε(c))
+        // NOT scaled by N_BONDS (cell-cell coupling, not per-bond)
+        double grad_xx = 0.0, grad_yy = 0.0, grad_xy = 0.0;
+        if (K_grad > 0.0) {
+            for (size_t c2 : cell_neighbors_[c]) {
+                const auto& cs2 = cell_strains_[c2];
+                grad_xx += cs2.epsilon_xx - cs.epsilon_xx;
+                grad_yy += cs2.epsilon_yy - cs.epsilon_yy;
+                grad_xy += cs2.epsilon_xy - cs.epsilon_xy;
+            }
+            grad_xx *= K_grad;
+            grad_yy *= K_grad;
+            grad_xy *= K_grad;
+        }
+        
+        // Damping (×N_BONDS)
+        double gamma_mixed = nbpc * 0.5 * (gamma_A1g + gamma_Eg);
+        double gamma_Eg_eff = nbpc * gamma_Eg;
+        
+        // Drive (×N_BONDS)
+        double F_xx = nbpc * (F_A1g + F_Eg1);
+        double F_yy = nbpc * (F_A1g - F_Eg1);
+        double F_xy = nbpc * F_Eg2;
+        
+        // Acceleration: divide by effective mass M_eff = N_BONDS × M
+        dc.V_xx = (elastic_xx + grad_xx - dHme_dxx - gamma_mixed * cs.V_xx + F_xx) / M_eff;
+        dc.V_yy = (elastic_yy + grad_yy - dHme_dyy - gamma_mixed * cs.V_yy + F_yy) / M_eff;
+        dc.V_xy = (elastic_xy + grad_xy - dHme_dxy - gamma_Eg_eff * cs.V_xy + F_xy) / M_eff;
+    }
+}
+
+void StrainPhononLattice::relax_local_strain(bool verbose) {
+    // Jacobi iterative relaxation: for each cell, solve for equilibrium strain
+    // at fixed spins and fixed neighbor strains.
+    //
+    // With N_BONDS factor (=3) for per-cell elastic and ME:
+    // ∂E/∂ε_xx(c) = nb*C11 ε_xx + nb*C12 ε_yy + nb*λ Σ_Eg1(c)
+    //             + K_grad Σ_{c'} (ε_xx(c) - ε_xx(c')) = 0
+    //
+    // Rearranging:
+    // (nb*C11 + z*K_grad) ε_xx + nb*C12 ε_yy = -nb*λ Σ_Eg1 + K_grad Σ_{c'} ε_xx(c')
+    //
+    // where z = 6, nb = N_BONDS = 3
+    
+    constexpr double nbpc = static_cast<double>(StrainState::N_BONDS);  // 3
+    double C11 = elastic_params.C11;
+    double C12 = elastic_params.C12;
+    double C44 = elastic_params.C44;
+    double K_grad = elastic_params.K_gradient;
+    double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    
+    const size_t max_iter = 5000;
+    const double tol = 1e-10;
+    
+    // ── Step 0: seed with mean-field (homogeneous) solution ──
+    // This ensures rapid convergence even for large K_gradient, where Jacobi's
+    // spectral radius ρ ≈ 1 − nb*C11/(z·K_grad) → 1 would otherwise stall.
+    double det_bare = (nbpc * C11) * (nbpc * C11) - (nbpc * C12) * (nbpc * C12);
+    if (std::abs(det_bare) > 1e-12 && std::abs(lambda_Eg) > 1e-15) {
+        double mean_Eg1 = 0.0, mean_Eg2 = 0.0;
+        for (size_t c = 0; c < N_cells_; ++c) {
+            auto [e1, e2] = compute_cell_Eg_spin_factors(c);
+            mean_Eg1 += e1;
+            mean_Eg2 += e2;
+        }
+        mean_Eg1 /= static_cast<double>(N_cells_);
+        mean_Eg2 /= static_cast<double>(N_cells_);
+        
+        double seed_xx = -nbpc * lambda_Eg * mean_Eg1 * (nbpc * C11 + nbpc * C12) / det_bare;
+        double seed_yy = -seed_xx;
+        double seed_xy = -nbpc * 2.0 * lambda_Eg * mean_Eg2 / (nbpc * 4.0 * C44);
+        
+        for (size_t c = 0; c < N_cells_; ++c) {
+            cell_strains_[c].epsilon_xx = seed_xx;
+            cell_strains_[c].epsilon_yy = seed_yy;
+            cell_strains_[c].epsilon_xy = seed_xy;
+        }
+    }
+    
+    // Effective elastic constants with gradient stiffness
+    double z_nn = 6.0;  // triangular lattice coordination
+    double C11_eff = nbpc * C11 + z_nn * K_grad;
+    double C12_eff = nbpc * C12;
+    double det_eff = C11_eff * C11_eff - C12_eff * C12_eff;
+    
+    if (std::abs(det_eff) < 1e-12) {
+        std::cerr << "Warning: Effective elastic matrix singular in relax_local_strain" << std::endl;
+        return;
+    }
+    
+    for (size_t iter = 0; iter < max_iter; ++iter) {
+        double max_change = 0.0;
+        
+        for (size_t c = 0; c < N_cells_; ++c) {
+            auto [Eg1_f, Eg2_f] = compute_cell_Eg_spin_factors(c);
+            
+            // RHS from ME (×N_BONDS) + neighbor gradient
+            double rhs_xx = -nbpc * lambda_Eg * Eg1_f;
+            double rhs_yy = nbpc * lambda_Eg * Eg1_f;
+            double rhs_xy_num = -nbpc * 2.0 * lambda_Eg * Eg2_f;
+            
+            if (K_grad > 0.0) {
+                double sum_xx = 0.0, sum_yy = 0.0, sum_xy = 0.0;
+                for (size_t c2 : cell_neighbors_[c]) {
+                    sum_xx += cell_strains_[c2].epsilon_xx;
+                    sum_yy += cell_strains_[c2].epsilon_yy;
+                    sum_xy += cell_strains_[c2].epsilon_xy;
+                }
+                rhs_xx += K_grad * sum_xx;
+                rhs_yy += K_grad * sum_yy;
+                rhs_xy_num += K_grad * sum_xy;
+            }
+            
+            // Solve 2x2 system: [C11_eff C12_eff; C12_eff C11_eff] ε = rhs
+            double new_xx = (C11_eff * rhs_xx - C12_eff * rhs_yy) / det_eff;
+            double new_yy = (C11_eff * rhs_yy - C12_eff * rhs_xx) / det_eff;
+            double new_xy = rhs_xy_num / (nbpc * 4.0 * C44 + z_nn * K_grad);
+            
+            double change = std::abs(new_xx - cell_strains_[c].epsilon_xx)
+                          + std::abs(new_yy - cell_strains_[c].epsilon_yy)
+                          + std::abs(new_xy - cell_strains_[c].epsilon_xy);
+            max_change = std::max(max_change, change);
+            
+            cell_strains_[c].epsilon_xx = new_xx;
+            cell_strains_[c].epsilon_yy = new_yy;
+            cell_strains_[c].epsilon_xy = new_xy;
+            cell_strains_[c].V_xx = 0.0;
+            cell_strains_[c].V_yy = 0.0;
+            cell_strains_[c].V_xy = 0.0;
+        }
+        
+        if (max_change < tol) {
+            if (verbose) {
+                cout << "Local strain relaxed in " << iter + 1 << " iterations (max_change = " 
+                     << max_change << ")" << endl;
+            }
+            break;
+        }
+    }
+    
+    // Copy to equilibrium
+    cell_strains_eq_ = cell_strains_;
+    
+    if (verbose) {
+        // Print statistics
+        double mean_Eg1 = 0.0, mean_Eg_amp = 0.0;
+        double min_Eg1 = 1e30, max_Eg1 = -1e30;
+        for (size_t c = 0; c < N_cells_; ++c) {
+            double eg1 = cell_strains_[c].Eg1();
+            mean_Eg1 += eg1;
+            mean_Eg_amp += cell_strains_[c].Eg_amplitude();
+            min_Eg1 = std::min(min_Eg1, eg1);
+            max_Eg1 = std::max(max_Eg1, eg1);
+        }
+        mean_Eg1 /= N_cells_;
+        mean_Eg_amp /= N_cells_;
+        cout << "  Mean ε_Eg1 = " << mean_Eg1 
+             << ", range [" << min_Eg1 << ", " << max_Eg1 << "]" << endl;
+        cout << "  Mean |ε_Eg| = " << mean_Eg_amp << endl;
+    }
+}
+
+void StrainPhononLattice::save_local_strain_map(const string& filename) const {
+    ofstream f(filename);
+    f << "# cell_idx  i  j  k  eps_xx  eps_yy  eps_xy  V_xx  V_yy  V_xy  Eg1  |Eg|\n";
+    f << std::scientific << std::setprecision(10);
+    
+    for (size_t c = 0; c < N_cells_; ++c) {
+        // Decode cell index to (i, j, k)
+        size_t k = c % dim3;
+        size_t j = (c / dim3) % dim2;
+        size_t i = c / (dim2 * dim3);
+        
+        const auto& cs = cell_strains_[c];
+        f << c << "  " << i << "  " << j << "  " << k << "  "
+          << cs.epsilon_xx << "  " << cs.epsilon_yy << "  " << cs.epsilon_xy << "  "
+          << cs.V_xx << "  " << cs.V_yy << "  " << cs.V_xy << "  "
+          << cs.Eg1() << "  " << cs.Eg_amplitude() << "\n";
+    }
+}
+
+void StrainPhononLattice::load_local_strain_state(const string& filename) {
+    ifstream f(filename);
+    if (!f.is_open()) {
+        std::cerr << "ERROR: Cannot open local strain file: " << filename << std::endl;
+        return;
+    }
+    
+    string line;
+    size_t c = 0;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        if (c >= N_cells_) break;
+        
+        std::istringstream iss(line);
+        size_t idx;
+        size_t i, j, k;
+        iss >> idx >> i >> j >> k;
+        iss >> cell_strains_[c].epsilon_xx >> cell_strains_[c].epsilon_yy >> cell_strains_[c].epsilon_xy;
+        iss >> cell_strains_[c].V_xx >> cell_strains_[c].V_yy >> cell_strains_[c].V_xy;
+        ++c;
+    }
+    cout << "Loaded local strain for " << c << " cells from " << filename << endl;
 }
 
 // ============================================================
@@ -3482,6 +4067,12 @@ Eigen::Vector3d StrainPhononLattice::magnetization_local_antiferro() const {
 }
 
 double StrainPhononLattice::A1g_amplitude() const {
+    if (use_local_strain_) {
+        double A1g = 0.0;
+        for (size_t c = 0; c < N_cells_; ++c)
+            A1g += cell_strains_[c].epsilon_xx + cell_strains_[c].epsilon_yy;
+        return A1g / N_cells_;
+    }
     // A1g mode: (ε_xx + ε_yy) averaged over bond types
     double A1g = 0.0;
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
@@ -3491,6 +4082,12 @@ double StrainPhononLattice::A1g_amplitude() const {
 }
 
 double StrainPhononLattice::Eg1_amplitude() const {
+    if (use_local_strain_) {
+        double Eg1 = 0.0;
+        for (size_t c = 0; c < N_cells_; ++c)
+            Eg1 += cell_strains_[c].Eg1();
+        return Eg1 / N_cells_;
+    }
     // Eg1 mode: (ε_xx - ε_yy) averaged over bond types
     double Eg1 = 0.0;
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
@@ -3500,6 +4097,12 @@ double StrainPhononLattice::Eg1_amplitude() const {
 }
 
 double StrainPhononLattice::Eg2_amplitude() const {
+    if (use_local_strain_) {
+        double Eg2 = 0.0;
+        for (size_t c = 0; c < N_cells_; ++c)
+            Eg2 += cell_strains_[c].Eg2();
+        return Eg2 / N_cells_;
+    }
     // Eg2 mode: 2*ε_xy averaged over bond types
     double Eg2 = 0.0;
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {

@@ -613,9 +613,9 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     // For bonds 1→0: standard DM with d_y = +D1
     std::array<std::array<double, 3>, 3> Ja_orig = {{{Jai, D2, -D1}, {-D2, Jai, 0}, {D1, 0, Jai}}};
     std::array<std::array<double, 3>, 3> Jb_orig = {{{Jbi, D2, -D1}, {-D2, Jbi, 0}, {D1, 0, Jbi}}};
-    // For bonds 2→3: Pbnm symmetry requires opposite DM sign (d_y = -D1)
-    std::array<std::array<double, 3>, 3> Ja23_orig = {{{Jai, -D2, D1}, {D2, Jai, 0}, {-D1, 0, Jai}}};
-    std::array<std::array<double, 3>, 3> Jb23_orig = {{{Jbi, -D2, D1}, {D2, Jbi, 0}, {-D1, 0, Jbi}}};
+    // For bonds 2→3: R_z(pi) conjugation flips D_y but preserves D_z
+    std::array<std::array<double, 3>, 3> Ja23_orig = {{{Jai, D2, D1}, {-D2, Jai, 0}, {-D1, 0, Jai}}};
+    std::array<std::array<double, 3>, 3> Jb23_orig = {{{Jbi, D2, D1}, {-D2, Jbi, 0}, {-D1, 0, Jbi}}};
     std::array<std::array<double, 3>, 3> Jc_orig = {{{Jci, 0, 0}, {0, Jci, 0}, {0, 0, Jci}}};
     std::array<std::array<double, 3>, 3> J2a_orig = {{{J2ai, 0, 0}, {0, J2ai, 0}, {0, 0, J2ai}}};
     std::array<std::array<double, 3>, 3> J2b_orig = {{{J2bi, 0, 0}, {0, J2bi, 0}, {0, 0, J2bi}}};
