@@ -1,0 +1,516 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,bm,mathtools}
+\usepackage{booktabs,array,longtable,tabularx,multirow}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{framed}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+\setstretch{1.08}
+\setlength{\parskip}{0.55em}
+\setlength{\parindent}{0pt}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{K$_2$Co$_2$TeO$_6$ neutron interpretation note}
+\rhead{\thepage/\pageref{LastPage}}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE \textbf{Interpretive note on the neutron data of K$_2$Co$_2$TeO$_6$}}\\[0.6em]
+    {\large Why the observed elastic and inelastic signatures are unlikely to be a simple single-$\bm{q}$ zigzag state}\\[1em]
+    \rule{0.9\textwidth}{0.5pt}
+\end{center}
+
+\textbf{Purpose.} This note organizes the full discussion into one coherent working interpretation of the collaborator's neutron data on K$_2$Co$_2$TeO$_6$. The goal is not to claim a final magnetic structure from incomplete information, but to identify which classes of interpretation are internally consistent with the reported observations and which ones are already disfavored.
+
+\textbf{Bottom line in one sentence.} The data are most naturally read as a \emph{dominant M-centered ordered state, derived from zigzag wave vectors but not reducible to a plain single-$q$ zigzag}, together with weak symmetry-coupled commensurate satellites and a field-selected descendant phase; the flat inelastic bands are then better interpreted as folded, partially local, or weakly dispersive modes of a larger and more intricate magnetic structure rather than as four ordinary zigzag magnons.
+
+\section{Empirical input to be explained}
+
+I take the following points as the experimental input, based on the collaborator's description:
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item In the \(hk1\) plane, the elastic neutron data show dominant magnetic peaks at \emph{all six} symmetry-related M points.
+    \item In addition, there are much weaker but still distinct peaks at exact commensurate fractions such as \(1/6\), \(1/4\), and \(1/3\) along symmetry-related in-plane directions. Their intensities are about \(10\%\) of the dominant M-point intensity.
+    \item These fractional peaks disappear at the same temperature or field scale as the dominant M-point peaks.
+    \item In inelastic neutron scattering, one observes \emph{four nearly dispersionless bands}. Along the \(h00\) direction there is no obvious extra anomaly at the M point, and the \(h01\) cut looks essentially the same.
+    \item Under an in-plane field applied along \((h00)\), the M-point signatures on the perpendicular arm, i.e. along \((h01)\), disappear together with some of the lower-frequency modes tied to those arms. At the same time, new elastic intensity appears in the field-selected \((h00)\) plane, together with nearby peaks displaced by about \(1/3\) along C$_6$-related M directions.
+\end{enumerate}
+
+This combination is already highly restrictive. The crucial features are:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item sixfold-symmetric dominant elastic intensity at M,
+    \item weak but exact commensurate satellites,
+    \item common onset/disappearance of the dominant and weak peaks,
+    \item flat inelastic modes with little directional contrast,
+    \item strong field-induced redistribution rather than a small perturbation.
+\end{itemize}
+
+\section{What is known about K$_2$Co$_2$TeO$_6$ from the literature}
+
+The presently available literature on K$_2$Co$_2$TeO$_6$ already tells us that the material is not a trivial copy of Na$_2$Co$_2$TeO$_6$.
+
+First, the single-crystal structural and bulk study of Xu \emph{et al.} shows that K$_2$Co$_2$TeO$_6$ crystallizes in space group \(P6_3/mcm\), not the \(P6_3 22\) structure of Na$_2$Co$_2$TeO$_6$, due to a distinct stacking type. The Co ions form a structurally ordered honeycomb lattice, but the K ions occupy partially occupied interlayer sites and are explicitly reported to be disordered. The same work further shows two magnetic transitions near \(T_{N1}\approx 4.1\,\mathrm{K}\) and \(T_{N2}\approx 12.3\,\mathrm{K}\), easy-plane anisotropy, and three in-plane metamagnetic transitions near \(3.4\,\mathrm{T}\), \(4.5\,\mathrm{T}\), and \(6.3\,\mathrm{T}\). Importantly, increasing K disorder smears the upper transition and pushes the magnetism toward more short-range two-dimensional correlations rather than clean long-range order \cite{Xu2023K2Co2TeO6}.
+
+Second, the 2025 terahertz study of Pilch \emph{et al.} resolves several low-energy magnetic modes and finds critical fields \(B_{c1}=3.3\,\mathrm{T}\), \(B_{c2}=4.4\,\mathrm{T}\), and \(B_{c3}=6\,\mathrm{T}\) for an in-plane field. That work interprets \(B_{c2}\) as the field scale where long-range magnetic order is suppressed, and explicitly notes that it does \emph{not} observe a clear continuumlike feature even when the order is presumably suppressed, suggesting that any Kitaev term is subleading in K$_2$Co$_2$TeO$_6$ \cite{Pilch2025K2Co2TeO6THz}.
+
+Thus, before even looking at the collaborator's neutron pattern, the literature already says the following:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item the system is structurally different from Na$_2$Co$_2$TeO$_6$,
+    \item the interlayer alkali subsystem is disordered and magnetically relevant,
+    \item the in-plane field response is rich and strongly nontrivial,
+    \item the ordered state is fragile,
+    \item the high-field state does not obviously resemble the field-induced continuum physics emphasized in more Kitaev-dominated systems.
+\end{itemize}
+
+This already pushes us away from overly naive analogies with textbook zigzag order in idealized honeycomb Kitaev magnets.
+
+\section{Why a plain single-$q$ zigzag interpretation is too narrow}
+
+It is useful to state explicitly what a plain single-$q$ zigzag interpretation would predict.
+
+A conventional single-$q$ zigzag state on the honeycomb lattice has a primary ordering wave vector at one member of the M-star. In a real crystal with several domains, one may indeed observe intensity at several or even all symmetry-related M points. So the mere presence of all six M peaks does \emph{not} by itself rule out zigzag.
+
+However, that interpretation becomes strained once we include the rest of the data.
+
+\subsection{Problem 1: the weak commensurate satellites}
+
+A simple sinusoidal zigzag order produces Bragg peaks at its ordering vector and symmetry-related positions. It does not naturally produce additional sharp elastic peaks at exact fractions such as \(1/6\), \(1/4\), and \(1/3\), all tied to the same transition.
+
+One might try to save the zigzag interpretation by calling these higher harmonics of the dominant M order. But this does not really work cleanly. If the primary wave vector were a single commensurate one and the order simply squared up, the harmonics would follow a specific ladder. Here, \(1/6\to 1/3\to 1/2\) sits on one such ladder, but \(1/4\) does not fit that same sequence. Therefore the weak peaks are better viewed as \emph{additional symmetry-coupled Fourier components} rather than mere harmonics of one sinusoid.
+
+\subsection{Problem 2: the inelastic spectrum}
+
+A zigzag honeycomb magnet can certainly have four magnon branches because the magnetic unit cell is enlarged. But the collaborator's description is stronger than that: the four observed bands look almost completely flat, with no strong special anomaly at M and little difference between the \(h00\) and \(h01\) cuts.
+
+That is not what one expects from a clean, weakly damped, conventional single-$q$ zigzag spin-wave spectrum. Even when anisotropy gaps the branches, one usually expects at least one low-energy branch to retain visible momentum dependence and for neutron intensity to know about the ordering wave vector in a more obvious way. A spectrum that appears almost direction-independent and dispersionless is much more suggestive of one of the following:
+\begin{enumerate}[leftmargin=2em,itemsep=0.3em]
+    \item strong zone folding from a larger magnetic supercell,
+    \item partially local or clusterlike excitations,
+    \item heavy matrix-element selection among many folded branches,
+    \item disorder-pinned modes or weakly propagating excitations,
+    \item a coexistence of dominant M-centered order with additional long-period modulation.
+\end{enumerate}
+
+\subsection{Problem 3: the field response}
+
+If the zero-field state were merely a multidomain single-$q$ zigzag, then an in-plane field could indeed repopulate domains and suppress the zigzag arms least favored by the field. But the collaborator sees more than simple domain selection: new peaks appear in the field-selected plane together with nearby satellites displaced by approximately \(1/3\). This looks like a genuine reorganization of the ordering pattern, not just the removal of some domains.
+
+Thus a plain single-$q$ zigzag language is too small for the entire phenomenology.
+
+\section{What the dominant M peaks probably still mean}
+
+Although the state is unlikely to be a plain single-$q$ zigzag, the dominant M-point peaks are still telling us something important.
+
+They strongly suggest that the \emph{primary instability lives in the M sector}. In other words, the ordered state is still built from the zigzag-family wave vectors. This is why the collaborator's instinct to call the state ``zigzag'' is not crazy: the dominant ordering scale is indeed M-centered. The problem is not the M assignment itself. The problem is the assumption that the state must therefore be a simple single-$q$ zigzag with ordinary magnons.
+
+This distinction is important:
+\begin{center}
+\fbox{\parbox{0.9\textwidth}{
+\textbf{Reasonable statement:} the zero-field state is \emph{zigzag-derived} or \emph{M-centered}.\\
+\textbf{Too strong statement:} the zero-field state is a simple single-$q$ zigzag antiferromagnet.
+}}
+\end{center}
+
+The cobaltate literature already provides motivation for this distinction. In Na$_2$Co$_2$TeO$_6$, Kr"uger \emph{et al.} proposed that the low-temperature order is actually a \emph{triple-$q$} state, not plain zigzag, and argued that this explains the unusually high symmetry of the excitation spectrum as well as the coexistence of dispersive low-energy and flat high-energy bands \cite{Kruger2023TripleQNCTO}. Likewise, ORNL work on Na$_3$Co$_2$SbO$_6$ found that the ground state remains an in-plane multi-$q$ state and that such multi-$q$ orders appear robust within the cobaltate family \cite{Maksimov2024NCSOmultiq}. K$_2$Co$_2$TeO$_6$ is structurally distinct from both, so one should not directly transplant their conclusions, but they show that in the cobalt honeycomb materials, ``M-based'' and ``simple zigzag'' are not synonymous.
+
+\section{Interpretation of the weak commensurate peaks}
+
+The fact that the fractional peaks are exact commensurate fractions and vanish together with the dominant M peaks is one of the most informative pieces of the whole story.
+
+This strongly argues that the fractional peaks are \emph{secondary Fourier components of the same ordered phase}. Their small intensity, roughly \(10\%\) of the M intensity, also supports this. If they were equally strong, one might instead think of a distinct competing order parameter of comparable weight. But being weak and slaved to the same transition makes them look like satellites, harmonics, or symmetry-coupled descendants of the dominant M-sector order.
+
+However, they still carry significant physical information:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item They indicate that the magnetic structure is \emph{not a simple single-mode sinusoid}.
+    \item They suggest either a \emph{multi-$q$ state}, a \emph{commensurate lock-in}, or a \emph{large magnetic supercell}.
+    \item The presence of more than one fractional family means the order likely has \emph{strong anharmonic content} or a coupled texture rather than just one squaring-up process.
+\end{itemize}
+
+A natural working picture is therefore:
+\begin{equation}
+\text{dominant order at the M-star} \quad + \quad \text{weak symmetry-coupled commensurate satellites}.
+\end{equation}
+
+This does \emph{not} mean the satellites are unimportant. On the contrary, they are exactly what tells us that the dominant M order has condensed into something richer than ordinary zigzag.
+
+\section{Interpreting the flat inelastic bands}
+
+The four flat bands are perhaps the most striking feature. Here one has to separate two questions:
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item Why are there about four visible modes?
+    \item Why do they look so flat and so insensitive to momentum direction?
+\end{enumerate}
+
+The first question is not especially mysterious. Once the ordered state has an enlarged magnetic cell, zone folding can easily generate several one-magnon branches. Even a simple zigzag can do that.
+
+The second question is the real issue. Four branches existing is fine. Four branches appearing almost dispersionless everywhere is not generic for a clean small-cell spin-wave problem.
+
+The most plausible ways to obtain such a spectrum are:
+
+\subsection{Folded modes from a larger magnetic supercell}
+
+If the real ordered state is multi-$q$ or contains weak commensurate satellites that enlarge the magnetic unit cell, then the magnon spectrum is folded into many branches. Neutron matrix elements may show only a subset of them strongly. The visible bands can then look flat, especially if the underlying bandwidths are already modest and the intensity is concentrated in only a few sectors.
+
+\subsection{Partially local modes}
+
+Given the known interlayer K disorder in K$_2$Co$_2$TeO$_6$ \cite{Xu2023K2Co2TeO6}, one should take seriously the possibility that some excitations are not good long-wavelength propagating magnons but rather more local modes associated with inequivalent local environments or weakly coupled magnetic building blocks. This possibility is strengthened by the fact that the bulk study explicitly shows that more K disorder weakens three-dimensional order and enhances short-range two-dimensional correlations \cite{Xu2023K2Co2TeO6}.
+
+\subsection{Anisotropy-dominated weakly dispersive branches}
+
+Because Co$^{2+}$ systems can be strongly anisotropic, some branches may simply have rather small bandwidth to begin with. This alone could make them look flatter than expected. But by itself this does not naturally explain the whole package of satellites, field-induced commensurate reconstruction, and nearly identical cuts along symmetry-inequivalent directions.
+
+\subsection{Conclusion on the INS}
+
+The most conservative statement is therefore:
+\begin{center}
+\fbox{\parbox{0.9\textwidth}{
+The four flat INS bands are more naturally interpreted as excitations of a \emph{larger and more complex M-derived ordered state}, possibly with folded and partly local character, than as four ordinary magnons of a minimal single-$q$ zigzag structure.
+}}
+\end{center}
+
+\section{Why a multi-$q$ language is natural}
+
+The zero-field pattern has high in-plane symmetry: strong intensity at all symmetry-related M points and weak but symmetry-related commensurate satellites. This immediately suggests writing the order in terms of three primary complex M-sector order parameters,
+\begin{equation}
+\psi_1,\quad \psi_2,\quad \psi_3,
+\end{equation}
+corresponding to the three inequivalent M directions in the hexagonal plane.
+
+A plain single-$q$ zigzag corresponds schematically to one nonzero \(\psi_i\) and the other two zero. A multidomain sample averages over several such states, but that is still different from a genuine multi-$q$ state in which multiple \(\psi_i\) coexist within the same thermodynamic phase.
+
+The collaborator's data are more naturally summarized by the latter. Namely, at zero field the phase likely involves several nonzero M-sector amplitudes, producing the nearly C$_6$-symmetric elastic pattern. The weak commensurate satellites then arise because once multiple symmetry-related order parameters coexist, higher-order couplings can generate additional Fourier components.
+
+A schematic Landau free energy is
+\begin{align}
+\mathcal{F}_M = {}& r\sum_{i=1}^3 |\psi_i|^2
++ u_1\left(\sum_{i=1}^3 |\psi_i|^2\right)^2
++ u_2\sum_{i<j}|\psi_i|^2|\psi_j|^2 \\
+&+ v\, (\psi_1\psi_2\psi_3 + \text{c.c.})
++ \cdots.
+\end{align}
+
+Depending on the signs of the couplings, the ground state can prefer one, two, or three nonzero components. This is standard multi-$q$ logic. The important point is not the exact form of the coefficients but the conceptual payoff: once more than one M component condenses, there is no reason for the elastic spectrum to remain as simple as a one-harmonic zigzag.
+
+To include the weak commensurate satellites, introduce secondary amplitudes \(\eta_\alpha\) at the observed fractional wave vectors. Symmetry allows couplings of the form
+\begin{equation}
+\mathcal{F}_{\mathrm{sat}} = \sum_\alpha \left[m_\alpha |\eta_\alpha|^2 + \lambda_\alpha\, \eta_\alpha^* f_\alpha(\psi_1,\psi_2,\psi_3) + \text{c.c.}\right] + \cdots,
+\end{equation}
+where \(f_\alpha\) is some symmetry-allowed polynomial in the primary M-order parameters. If \(m_\alpha>0\), then the \(\eta_\alpha\) are not independent primary orders, but are linearly induced once the \(\psi_i\) condense. This is exactly the qualitative pattern one wants for the collaborator's weak fractional peaks: small, commensurate, and disappearing together with the dominant M sector.
+
+\section{Field response: why it looks like field selection of a multi-$q$ manifold}
+
+Now consider an in-plane field along \((h00)\). The observed field evolution is not just the weakening of the zero-field state. Instead:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item M-point intensity on the perpendicular arm disappears,
+    \item some lower-frequency modes associated with those arms disappear,
+    \item new peaks emerge in the field-selected plane,
+    \item nearby satellites spaced by about \(1/3\) also appear.
+\end{itemize}
+
+The cleanest interpretation is that the field couples anisotropically to the multi-$q$ manifold and selects one subset of components while suppressing others. In Landau language, the field lifts the near-degeneracy among the M-sector order parameters. Schematically one adds a term
+\begin{equation}
+\delta \mathcal{F}_H = - \sum_{i=1}^3 \gamma_i(H) |\psi_i|^2 + \cdots,
+\end{equation}
+with coefficients that depend on the field direction relative to the crystal axes and the spin orientation in each component. Then a nearly C$_6$-symmetric zero-field state can continuously or discontinuously evolve into a field-selected descendant with lower symmetry.
+
+This is precisely the type of behavior one expects in a genuine multi-$q$ problem, but not in the most naive single-domain zigzag picture.
+
+The known bulk and THz measurements of K$_2$Co$_2$TeO$_6$ support the plausibility of such a field-tunable landscape. Xu \emph{et al.} found three in-plane metamagnetic transitions near \(3.4\), \(4.5\), and \(6.3\,\mathrm{T}\) \cite{Xu2023K2Co2TeO6}. Pilch \emph{et al.} found closely matching critical fields and argued that long-range magnetic order is suppressed at \(B_{c2}\approx 4.4\,\mathrm{T}\) while the full spin polarization occurs only at much larger field, around \(18\,\mathrm{T}\) \cite{Pilch2025K2Co2TeO6THz}. Therefore a field-driven reorganization among several nearby ordered states is entirely realistic in this material.
+
+\section{A concrete hierarchy of interpretations}
+
+It is useful to rank the plausible scenarios from most likely to least likely.
+
+\subsection*{Scenario A: M-based multi-$q$ order with weak commensurate satellites \hfill (most likely)}
+
+\textbf{Content.} The zero-field state is built from the zigzag-family M vectors but contains more than one M component simultaneously. The dominant elastic weight remains at M, while the weak exact fractions are secondary Fourier components induced by the same ordered state. The flat INS bands are then folded, anisotropy-dominated, and possibly partially local excitations of that more complex structure.
+
+\textbf{Why it fits.} This scenario naturally explains the coexistence of high symmetry at M, weak symmetry-related satellites, common disappearance of all peaks, and a field-selected redistribution rather than mere peak broadening.
+
+\subsection*{Scenario B: dominant single-$q$ zigzag with anharmonic lock-in \hfill (possible but strained)}
+
+\textbf{Content.} The zero-field order is fundamentally single-$q$ zigzag, but additional commensurate peaks arise from squaring-up or lock-in to a larger commensurate texture.
+
+\textbf{Why it is strained.} The multiple distinct fractions, especially the simultaneous presence of \(1/4\) together with the \(1/6\)-\(1/3\)-\(1/2\) family, are not very natural in the simplest version of this picture. The field-induced appearance of a new commensurate pattern also goes beyond ordinary domain repopulation.
+
+\subsection*{Scenario C: two unrelated coexisting phases \hfill (disfavored)}
+
+\textbf{Content.} The M peaks and fractional peaks belong to different phases.
+
+\textbf{Why it is disfavored.} The weak peaks track the dominant ones through the same transition scale, which is exactly what one expects for secondary components of the same order, not for unrelated phases.
+
+\section{Most likely physical picture}
+
+Combining everything, the most coherent working picture is the following.
+
+\subsection*{Zero field}
+
+K$_2$Co$_2$TeO$_6$ enters an \emph{M-centered, zigzag-derived ordered phase} whose primary elastic weight sits at the six M points. However, this phase is not a plain single-$q$ zigzag. Instead, it contains either genuine multi-$q$ order or a closely related commensurately modulated texture. The weak exact peaks at \(1/6\), \(1/4\), and \(1/3\) are secondary satellites generated by the same ordered state. The flat inelastic modes are excitations of this enlarged or symmetry-mixed structure, likely with substantial folding and possibly some partially local character.
+
+\subsection*{Finite in-plane field}
+
+An in-plane field selects one orientation sector of the zero-field manifold. Components associated with M points perpendicular or unfavorable to the field are suppressed. New Bragg peaks and nearby satellites in the field-selected plane signal that the system does not simply depopulate domains, but reorganizes into a lower-symmetry commensurate descendant phase. This descendant phase remains strongly nontrivial and likely still inherits memory of the multi-component M-sector structure.
+
+\subsection*{Relation to ``zigzag''}
+
+Thus the most honest statement is:
+\begin{center}
+\fbox{\parbox{0.9\textwidth}{
+The observed order is likely \textbf{zigzag-derived but not simple zigzag}. More precisely, it is an \textbf{M-centered multi-component commensurate order} whose dominant Fourier weight lies at the zigzag wave vectors.
+}}
+\end{center}
+
+\section{Experimental predictions and diagnostics}
+
+If this interpretation is correct, several concrete consequences should follow.
+
+\subsection{Temperature scaling of the weak peaks}
+
+The weak commensurate peaks should scale as \emph{secondary} order parameters. Their onset should be tied to that of the dominant M order, and their intensities may grow more steeply below the transition than the M intensity itself. If one can track the integrated intensity carefully, this is a powerful test.
+
+\subsection{Polarization or full structure refinement}
+
+A genuine multi-$q$ state and a multidomain average of single-$q$ zigzag can be difficult to distinguish using only unpolarized elastic intensity at symmetry-related points. Polarized diffraction or a full refinement sensitive to spin orientation and domain correlations would be extremely valuable.
+
+\subsection{Reciprocal-space width of the flat INS bands}
+
+If the flat bands are local or partially local modes, their intensity may be broad in momentum even if they remain relatively sharp in energy. By contrast, purely folded but coherent magnon branches should still retain more structured momentum dependence in intensity.
+
+\subsection{Search for additional folded branches}
+
+If the flat bands come from a larger magnetic unit cell, there should in principle be additional weaker branches or replica intensities elsewhere in reciprocal space. Some may be hidden by matrix elements, but targeted cuts near the weak commensurate satellites may reveal them.
+
+\subsection{Field evolution of the satellites}
+
+The satellites should not evolve independently of the dominant M sector. Rather, they should follow the field-induced symmetry lowering and perhaps reorganize into the new field-selected pattern. This would support the idea that they are slaved to the primary M-derived order.
+
+
+\section{Simulation program to diagnose the ordered state}
+
+The data are now rich enough that one should move beyond verbal interpretation and organize a concrete simulation program. The goal is not merely to fit one feature at a time, but to ask what is the \emph{minimal microscopic or phenomenological model} that can reproduce the following package simultaneously:
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item dominant elastic weight at the full M-star,
+    \item weak but exact commensurate satellites at rational fractions,
+    \item four nearly dispersionless INS bands with very weak directional dependence,
+    \item and field-induced redistribution into a lower-symmetry commensurate pattern for an in-plane field.
+\end{enumerate}
+
+A useful way to proceed is in stages, from the most controlled and cheapest calculations to the more realistic and expensive ones.
+
+\subsection{Stage I: identify viable ordered states at the static level}
+
+The first task is to determine whether a realistic spin model on the K$_2$Co$_2$TeO$_6$ lattice naturally prefers single-$q$ zigzag, genuine multi-$q$, or a larger commensurate superstructure.
+
+\subsubsection*{(I.a) Luttinger--Tisza / Fourier-space minimization}
+
+Start from a minimal anisotropic honeycomb Hamiltonian with interlayer coupling,
+\begin{align}
+\mathcal{H} = {}& \sum_{\langle ij \rangle_\gamma}
+\left[J\,\mathbf{S}_i\!\cdot\!\mathbf{S}_j
++K\,S_i^\gamma S_j^\gamma
++\Gamma\,(S_i^\alpha S_j^\beta + S_i^\beta S_j^\alpha)
++\Gamma'\,(S_i^\gamma S_j^\alpha + S_i^\alpha S_j^\gamma + S_i^\gamma S_j^\beta + S_i^\beta S_j^\gamma)\right] \\
+&+ J_2 \sum_{\langle\langle ij\rangle\rangle} \mathbf{S}_i\!\cdot\!\mathbf{S}_j
++ J_3 \sum_{\langle\langle\langle ij\rangle\rangle\rangle} \mathbf{S}_i\!\cdot\!\mathbf{S}_j
++ J_\perp \sum_{\langle ij\rangle_\perp} \mathbf{S}_i\!\cdot\!\mathbf{S}_j
+- \mu_B \sum_i \mathbf{H}\!\cdot\!\hat g\,\mathbf{S}_i,
+\end{align}
+with easy-plane tendencies built either into the exchange sector or, if one works with an effective classical description, into an explicit anisotropy term. The exact parameterization can be simplified later; the point of the first pass is to let the lattice symmetry and the M-star structure speak.
+
+For each parameter set, compute the lowest eigenvalue of the exchange matrix in momentum space. This will tell us whether the soft manifold is centered at M, whether several M vectors are nearly degenerate, and whether other commensurate vectors close to the observed fractions are naturally competitive. This step is cheap and should be done broadly.
+
+\textbf{Diagnostic value.} If the dominant instability is isolated at one M vector with no nearby competition, then a complicated multi-component state becomes less natural. If instead the whole M-star is nearly degenerate, or the system sits near a hidden-SU(2) or other accidental degeneracy point as in related cobaltates, then a multi-$q$ interpretation gains immediate support \cite{Kruger2023TripleQNCTO,Maksimov2024NCSOmultiq}.
+
+\subsubsection*{(I.b) Real-space classical minimization over large magnetic cells}
+
+The observed exact fractions mean that one should not restrict the search to the minimal two-site or four-site cells. One should explicitly allow magnetic supercells compatible with the observed commensurate satellites. In practice, I would scan the following ans"atze:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item single-$q$ zigzag with one chosen M vector,
+    \item genuine two-$q$ and three-$q$ M-star states,
+    \item M-based states with additional commensurate modulation along a $\Gamma$--M direction,
+    \item supercells large enough to host simultaneously the observed rational fractions.
+\end{itemize}
+
+A pragmatic way is to perform simulated annealing or conjugate-gradient minimization on large periodic clusters, for example $L\times L\times L_z$ cells with $L$ chosen to accommodate the rational fractions exactly. Because the measured satellites are weak, the energy differences may be tiny, so the search should be systematic rather than biased toward one preconceived structure.
+
+\textbf{Output to compare with experiment.} For every candidate state, compute the elastic structure factor
+\begin{equation}
+S(\mathbf{Q}) = \sum_{ij} e^{i\mathbf{Q}\cdot(\mathbf{r}_i-\mathbf{r}_j)}\left(\delta_{\mu\nu}-\hat Q_\mu \hat Q_\nu\right)\langle S_i^\mu\rangle \langle S_j^\nu\rangle.
+\end{equation}
+Then compare the full reciprocal-space pattern, including the relative intensity of the dominant M peaks and the weak satellites. This is the first hard test. If a candidate state cannot reproduce the simultaneous presence of dominant M intensity and tiny commensurate fractions, it should be discarded early.
+
+\subsection{Stage II: compute the excitation spectrum for the candidate states}
+
+Once a few candidate elastic structures survive, the next question is whether their excitations can reproduce four nearly flat bands.
+
+\subsubsection*{(II.a) Linear spin-wave theory for each candidate static order}
+
+For each optimized classical state from Stage I, perform harmonic spin-wave theory and calculate the full neutron cross section $S(\mathbf{Q},\omega)$ with the polarization factor and, if possible, the Co$^{2+}$ form factor. This must be done not only for a simple zigzag state, but also for the multi-$q$ and supercell candidates.
+
+The important point is not just the dispersion relation; one must generate the actual intensity maps along the same cuts measured experimentally, especially the directions where the collaborator reports that the $h00$ and $h01$ cuts look nearly identical.
+
+\textbf{Why this matters.} A simple zigzag state may indeed produce four branches because of the enlarged magnetic unit cell, but it should generally retain momentum structure. A larger supercell or multi-$q$ state can create much stronger folding, many near-degenerate branches, and visible modes that appear much flatter once instrumental resolution is included.
+
+\subsubsection*{(II.b) Resolution convolution and experimental cuts}
+
+Do not compare bare magnon eigenvalues to the data. Instead, convolve the calculated $S(\mathbf{Q},\omega)$ with the experimental momentum and energy resolution, and then extract the same one-dimensional cuts and constant-energy maps as in the measurement. This is essential because a moderately folded but weakly dispersive spectrum can easily look fully flat after resolution broadening.
+
+\textbf{Minimal deliverable.} For every candidate order, make side-by-side panels of:
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item elastic maps in the measured plane,
+    \item INS intensity along $h00$,
+    \item INS intensity along the orthogonal cut,
+    \item and the field evolution of the lowest modes.
+\end{enumerate}
+The right comparison is not one mode at one point, but the whole phenomenology.
+
+\subsubsection*{(II.c) Falsification logic}
+
+This spin-wave stage is already highly diagnostic.
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item If single-$q$ zigzag cannot produce both the elastic satellites and the flatness of all visible modes, it is falsified as a complete description.
+    \item If a multi-$q$ or large-supercell state reproduces the flatness only after realistic resolution convolution, that is still a success.
+    \item If \emph{no} coherent ordered-state spin-wave calculation can produce nearly momentum-independent INS, then the flat bands are telling us that disorder or local physics must be included explicitly.
+\end{itemize}
+
+\subsection{Stage III: test whether disorder is essential}
+
+K$_2$Co$_2$TeO$_6$ is unusual because the interlayer K subsystem is known to be disordered and to affect the magnetic response strongly \cite{Xu2023K2Co2TeO6}. This makes disorder simulations not an optional afterthought, but one of the central diagnostics.
+
+\subsubsection*{(III.a) Random-bond and random-interlayer simulations}
+
+Take the best ordered-state Hamiltonian from Stage I/II and add controlled disorder in the couplings most plausibly affected by K disorder. The obvious first choices are:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item random interlayer exchange $J_\perp$, since the K layers sit between the Co honeycomb planes,
+    \item weaker bond randomness in the in-plane exchanges,
+    \item and possibly random easy-axis/easy-plane anisotropy if the local crystal field varies appreciably with K environment.
+\end{itemize}
+
+Generate ensembles of large real-space spin configurations and compute both the elastic structure factor and the dynamical response. If the disorder is weak, one may start from harmonic theory on top of a nearly ordered background. If the disorder is stronger, one should use real-time classical spin dynamics about the disordered ground state.
+
+\textbf{Diagnostic value.} If modest disorder leaves the M-centered order intact but converts dispersive branches into nearly momentum-insensitive, weakly broadened local modes, then the flat INS is likely a disorder-dressed descendant of an otherwise ordered state. If instead the disorder required is so strong that the dominant M peaks are destroyed, then disorder alone cannot be the main explanation.
+
+\subsubsection*{(III.b) Local-mode fingerprints}
+
+A true local or quasi-local mode should display sharper structure in energy than in momentum. Therefore, in the simulated $S(\mathbf{Q},\omega)$ one should check whether the candidate flat bands are broad in $\mathbf{Q}$ but narrow in $\omega$. This is a sharper diagnostic than simply saying they ``look flat.''
+
+\subsection{Stage IV: finite-field simulations of the reconstruction}
+
+The field evolution is too informative to be left to qualitative reasoning. A viable model must reproduce the fact that an in-plane field along $(h00)$ suppresses the M points on the perpendicular arm, redistributes the low-energy spectral weight, and induces a new commensurate pattern in the field-selected plane.
+
+\subsubsection*{(IV.a) Classical Monte Carlo or zero-temperature minimization in field}
+
+For the candidate Hamiltonians, sweep an in-plane field through the experimentally relevant window and record:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item the ordering wave vectors,
+    \item the intensities at the M-star and satellite positions,
+    \item the real-space spin texture,
+    \item and the magnetization components.
+\end{itemize}
+
+This will immediately tell us whether the field is merely repopulating zigzag domains or selecting a lower-symmetry descendant of a multi-$q$ manifold.
+
+\textbf{A very important target.} The simulation should reproduce not just the disappearance of some M peaks, but the \emph{appearance of new commensurate peaks} in the field-selected plane. That is the fingerprint that goes beyond ordinary zigzag domain selection.
+
+\subsubsection*{(IV.b) Field-dependent spin dynamics}
+
+Once the field-dependent static states are obtained, run linear spin-wave or classical spin-dynamics calculations in field and follow the evolution of the lowest modes. This is the natural way to test whether the lower-frequency branches associated with the suppressed M arms should disappear, split, or migrate in momentum.
+
+\subsection{Stage V: phenomenological Landau modeling as a bridge between data and microscopic simulation}
+
+In parallel to the microscopic work, I would strongly recommend a minimal phenomenological model with primary M-sector order parameters $\psi_1,\psi_2,\psi_3$ and secondary commensurate satellite amplitudes $\eta_\alpha$. This is not a substitute for a microscopic Hamiltonian, but it is the fastest way to encode the observed hierarchy of scales:
+\begin{itemize}[leftmargin=2em,itemsep=0.35em]
+    \item strong primary M peaks,
+    \item weak slaved satellites,
+    \item and field-induced lifting of the degeneracy among symmetry-related M components.
+\end{itemize}
+
+Such a model can explain, at almost no computational cost, which satellites are expected to appear linearly as induced secondary order and how an in-plane field lowers the symmetry. It will also help decide which large-supercell states are worth simulating microscopically.
+
+\subsection{A prioritized practical workflow}
+
+If one wants the most efficient route rather than the most exhaustive one, I would do the following in order.
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item \textbf{Static search first.} Run Fourier-space minimization and then real-space classical minimization on supercells large enough to host the observed fractions. Immediately compare elastic maps.
+    \item \textbf{Then LSWT on the winners.} Compute $S(\mathbf{Q},\omega)$ for the best two or three candidate states, with experimental resolution convolution.
+    \item \textbf{Then disorder.} If none of the clean candidates gives nearly flat INS, add controlled random $J_\perp$ and related disorder motivated by the K subsystem.
+    \item \textbf{Then field sweeps.} Test whether the surviving models reproduce the field-selected redistribution and the emergence of the new commensurate pattern.
+\end{enumerate}
+
+This workflow minimizes wasted effort because it avoids performing expensive dynamics on candidate orders that already fail at the elastic level.
+
+\subsection{What outcomes would be most decisive?}
+
+Several outcomes would settle the issue quickly.
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item If a clean single-$q$ zigzag model fails already at the elastic level, then the interpretation should move on.
+    \item If a clean multi-$q$ or supercell state reproduces both the elastic satellites and the apparently flat INS after resolution convolution, then that becomes the leading explanation.
+    \item If only disorder-enhanced calculations can make the INS nearly momentum independent while preserving dominant M elastic order, then the correct picture is likely \emph{ordered but disorder-dressed}.
+    \item If the field-induced commensurate reconstruction can only be reproduced by a manifold of nearly degenerate M-sector states, that would strongly support the multi-$q$ language adopted in this note.
+\end{enumerate}
+
+\subsection{My recommendation for the very first simulation to run}
+
+If I had to choose only one thing to do immediately, I would run a \textbf{large-supercell classical minimization plus elastic structure-factor calculation} for a realistic anisotropic honeycomb model with interlayer coupling, allowing one-, two-, and three-$q$ M-sector states and commensurate lock-in. This is the fastest way to determine whether the weak exact fractions are natural descendants of the dominant M order or whether something more exotic is required.
+
+Right after that, I would run \textbf{resolution-convolved spin-wave spectra} for the best candidate states. Those two steps together would already tell us whether the phrase ``zigzag but complicated'' is tenable, or whether the flat INS forces us into a fundamentally different picture.
+
+\section{What I would currently say in a paper or discussion}
+
+A cautious but physically sharp wording would be:
+
+\begin{framed}
+The neutron data of K$_2$Co$_2$TeO$_6$ are difficult to reconcile with a minimal single-$q$ zigzag state. The dominant elastic intensity at the six M points shows that the primary ordering instability is M-centered, i.e. zigzag-derived, but the simultaneous presence of weak exact commensurate satellites, their common disappearance with the M peaks, and the observation of four nearly dispersionless inelastic bands point instead to a more complex commensurate multi-component order. The most natural working picture is an M-based multi-$q$ or commensurately modulated state with weak symmetry-coupled satellites and folded, partly local, or weakly dispersive magnetic excitations. An in-plane field then appears to select a lower-symmetry descendant of this manifold rather than merely repopulating ordinary zigzag domains.
+\end{framed}
+
+\section{Final conclusion}
+
+The collaborator's data are internally consistent with the following interpretation:
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.35em]
+    \item The primary magnetic order in K$_2$Co$_2$TeO$_6$ is centered on the M-star, so calling it ``zigzag-derived'' is reasonable.
+    \item The state is nevertheless very unlikely to be a simple single-$q$ zigzag antiferromagnet.
+    \item The weak exact fractional peaks are best viewed as secondary commensurate satellites slaved to the same ordered phase.
+    \item The four flat INS bands are more naturally associated with folded, anisotropy-dominated, and possibly partly local excitations of a larger magnetic structure than with four ordinary zigzag magnons.
+    \item The field response points to selection and reconstruction within a nearby manifold of ordered states, which is naturally described in a multi-$q$ language.
+\end{enumerate}
+
+Therefore, the most coherent current label is:
+\begin{equation}
+\boxed{\text{M-centered, zigzag-derived, field-tunable multi-component commensurate order}}
+\end{equation}
+with weak symmetry-coupled satellites and unusually flat magnetic excitations.
+
+\begin{thebibliography}{99}
+
+\bibitem{Xu2023K2Co2TeO6}
+X. Xu \emph{et al.}, ``A layered magnet with a S = 1/2 Co$^{2+}$ honeycomb lattice,'' 2023. Available via OSTI at \href{https://www.osti.gov/servlets/purl/2283308}{https://www.osti.gov/servlets/purl/2283308}.
+
+\bibitem{Pilch2025K2Co2TeO6THz}
+P. Pilch \emph{et al.}, ``Quantum spin dynamics of the honeycomb magnet K$_2$Co$_2$TeO$_6$ in high magnetic fields,'' arXiv:2503.07174 (2025). \href{https://arxiv.org/abs/2503.07174}{https://arxiv.org/abs/2503.07174}.
+
+\bibitem{Kruger2023TripleQNCTO}
+W. G. F. Kr"uger, W. Chen, X. Jin, Y. Li, and L. Janssen, ``Triple-q order in Na$_2$Co$_2$TeO$_6$ from proximity to hidden-SU(2)-symmetric point,'' Phys. Rev. Lett. \textbf{131}, 146702 (2023). Preprint: \href{https://arxiv.org/abs/2211.16957}{https://arxiv.org/abs/2211.16957}.
+
+\bibitem{Maksimov2024NCSOmultiq}
+P. A. Maksimov \emph{et al.}, ``In-plane multi-q magnetic ground state of Na$_3$Co$_2$SbO$_6$,'' npj Quantum Materials \textbf{9}, 78 (2024). Summary page: \href{https://www.ornl.gov/publication/plane-multi-q-magnetic-ground-state-na3co2sbo6}{https://www.ornl.gov/publication/plane-multi-q-magnetic-ground-state-na3co2sbo6}.
+
+\end{thebibliography}
+
+\end{document}

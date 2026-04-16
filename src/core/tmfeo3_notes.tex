@@ -1,0 +1,3079 @@
+\documentclass[amsmath,amssymb,aps,prb,floatfix]{revtex4-2}
+
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{dsfont}
+\usepackage{mathtools}
+\usepackage{graphicx}
+\usepackage{bm}
+\usepackage{hyperref}
+\usepackage{physics}
+\usepackage{empheq}
+\usepackage{color}
+\usepackage{mathrsfs}
+\usepackage{tikz}
+\usepackage{float}
+\usepackage{pifont}
+\usetikzlibrary{shapes}
+\usetikzlibrary{tikzmark,calc,positioning,arrows.meta}
+
+% -- pathway diagram styles --
+\tikzset{
+  pthz/.style={draw, rounded corners=3pt, fill=green!12,
+               minimum width=1.6cm, minimum height=0.65cm,
+               align=center, font=\small},
+  pfe/.style ={draw, rounded corners=3pt, fill=blue!10,
+               minimum width=2.0cm, minimum height=0.65cm,
+               align=center, font=\small},
+  ptm/.style ={draw, rounded corners=3pt, fill=orange!12,
+               minimum width=2.0cm, minimum height=0.65cm,
+               align=center, font=\small},
+  pdet/.style={draw, rounded corners=3pt, fill=violet!10,
+               minimum width=1.8cm, minimum height=0.65cm,
+               align=center, font=\small},
+  parr/.style={-{Stealth[length=5pt]}, thick},
+  plab/.style={font=\scriptsize, midway, align=center},
+  ptag/.style={font=\scriptsize\itshape, text=gray!70!black}
+}
+
+\newcommand{\xhat}{\hat{\mathbf x}}
+\newcommand{\yhat}{\hat{\mathbf y}}
+\newcommand{\zhat}{\hat{\mathbf z}}
+
+\title{Detailed Notes on a Minimal Symmetry-Allowed Model for \texorpdfstring{TmFeO$_3$}{TmFeO3} in the \texorpdfstring{$\Gamma_2$}{Gamma2} Phase}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\section{Introduction}
+
+\subsection{Purpose and scope}
+
+These notes are meant to do four things at once.
+
+First, they keep the detailed lattice, local-frame, and bond-convention setup already present in a companion implementation document, so that the final model can be translated back to code with minimal ambiguity.
+
+Second, they isolate the low-temperature \(\Gamma_2\) phase of TmFeO\(_3\), where the weak ferromagnetic moment is along the crystallographic \(a\) axis and the dominant antiferromagnetic vector is along \(c\).
+
+Third, they rewrite the Tm sector as a three-level problem in the Gell-Mann basis. This is \emph{not} an assumption of physical SU(3) symmetry. It is merely the natural operator basis for the lowest three crystal-field singlets, which form a qutrit.
+
+Fourth, they derive a minimal hybrid model that is symmetry allowed and flexible enough to explain the 2DCS phenomenology observed in three complementary geometries:
+\begin{align}
+(H\!\parallel\! a,\;E\!\parallel\! c,\;\mathrm{VV}):&\quad
+(E_1\!\to\!E_2,0),\ 
+(E_1\!\to\!E_2,E_2\!\to\!E_3),\
+(E_1\!\to\!E_2,\mathrm{qFM}),\
+(E_1\!\to\!E_2,E_1\!\to\!E_3),\
+(\mathrm{qAFM},E_1\!\to\!E_3),
+\notag\\
+(H\!\parallel\! a,\;E\!\parallel\! c,\;\mathrm{VH}):&\quad
+(\mathrm{qAFM},E_1\!\to\!E_2),\
+(0,E_1\!\to\!E_2),\
+(\mathrm{qAFM},E_1\!\to\!E_3),
+\notag\\
+(H\!\parallel\! c,\;E\!\parallel\! a,\;\mathrm{VH}):&\quad
+(E_1\!\to\!E_2,\mathrm{qAFM}),\
+(\mathrm{qFM},\mathrm{qAFM}),\
+(0,\mathrm{qAFM}),
+\end{align}
+listed in descending amplitude.
+
+The central claim of these notes is simple:
+
+\begin{enumerate}
+    \item A Fe-only LLG model is not enough, because it cannot produce detection frequencies at Tm crystal-field transitions.
+    \item A bare three-level Tm model is not enough, because it cannot produce the Fe qFM/qAFM branches.
+    \item The minimal model is therefore a \emph{hybrid}: Fe spins treated by LLG, coupled to a three-level Tm density matrix written in the Gell-Mann basis.
+\end{enumerate}
+
+The literature gives strong guidance for this structure. The low-temperature neutron work~\cite{Skorobogatov2020} establishes the low-lying Tm levels and their anisotropic magnetic-dipole matrix elements. The THz-TDS work~\cite{Zhang2016,Grishunin2018} establishes the low-frequency Fe qFM/qAFM modes and the broad Tm absorption bands. The nonlinear THz work~\cite{Baierl2016} establishes that driving Tm orbital transitions can transiently modify the Fe anisotropy and thereby excite the qFM mode much more strongly than one would expect from linear Zeeman torque alone.
+
+\subsection{Historical phenomenology to be captured}
+
+\subsubsection{Low-temperature magnetic phase}
+
+In TmFeO\(_3\), the Fe sublattice undergoes the standard orthoferrite spin reorientation from \(\Gamma_4\) at high temperature to \(\Gamma_2\) at low temperature~\cite{Zhang2016,Baierl2016}. In the notation used throughout the orthoferrite literature,
+\begin{equation}
+\Gamma_4 = G_x A_y F_z,
+\qquad
+\Gamma_2 = F_x C_y G_z.
+\end{equation}
+Thus in the low-temperature \(\Gamma_2\) phase, the weak ferromagnetic moment lies along \(a\) and the dominant antiferromagnetic vector lies along \(c\). This assignment is consistent with THz spectroscopy~\cite{Zhang2016} and nonlinear THz spin-control work~\cite{Baierl2016} on TmFeO\(_3\), where the \(\Gamma_2\) phase is explicitly identified with \(G\parallel z\) and a weak ferromagnetic moment along \(x\) (that is, the crystallographic \(a\) axis in the notation of those papers).
+
+\subsubsection{Low-energy Fe and Tm excitations}
+
+The relevant low-energy excitations separate into two sectors:
+
+\begin{enumerate}
+    \item \textbf{Fe sector.} There are two \(\mathbf q\approx 0\) magnon branches: the quasi-ferromagnetic mode (qFM) and the quasi-antiferromagnetic mode (qAFM). THz work on TmFeO\(_3\) reports a low-temperature qFM resonance near \(0.28\)~THz and a high-temperature qAFM resonance near \(0.71\)~THz~\cite{Zhang2016}; the nonlinear THz work reports representative values of about \(0.10\) and \(0.83\)~THz near the spin-reorientation regime, where the qFM mode softens strongly~\cite{Baierl2016}.
+    \item \textbf{Tm sector.} The Tm\(^{3+}\) crystal field splits the \(^{3}H_6\) ground multiplet ($J=6$, $g_J=7/6$) into singlets. THz and neutron work consistently find low-lying transitions near \(2\)~meV (\(\sim 0.5\)~THz) and \(5\)--\(8\)~meV (\(\sim 1.2\)--\(1.9\)~THz)~\cite{Zhang2016,Skorobogatov2020}. In the historical spectroscopy language~\cite{Malozemoff1971,Kozlov1990,Mukhin1991} these are the \(R\)-modes; in the later THz and neutron language they are the low-lying Tm crystal-field transitions.
+\end{enumerate}
+
+\subsubsection{Non-Kramers ion physics and its consequences}
+
+The microscopic specialness of Tm$^{3+}$ relative to (say) Er$^{3+}$ or Yb$^{3+}$ is that it is a \emph{non-Kramers} ion: $4f^{12}$ has an even number of electrons, so time-reversal symmetry does not protect any degeneracies. Kramers' theorem guarantees that ions with an odd electron count ($4f^{11}$, $4f^{13}$, \ldots) have at least twofold-degenerate ground states (Kramers doublets), which carry a permanent magnetic moment. By contrast, Tm$^{3+}$ generically splits into 13 non-degenerate singlets in any crystal field of symmetry lower than cubic.
+
+This has three important physical consequences for the model:
+\begin{enumerate}
+\item \textbf{Zero static moment.} Each crystal-field singlet $|E_\alpha\rangle$ satisfies $\langle E_\alpha|\mathbf J|E_\alpha\rangle=0$ as a consequence of time-reversal invariance: if $T|E_\alpha\rangle=e^{i\phi}|E_\alpha\rangle$ (non-degenerate, so $T$ acts as a phase) and $\mathbf J$ is $T$-odd, then $\langle E_\alpha|\mathbf J|E_\alpha\rangle=-\langle E_\alpha|\mathbf J|E_\alpha\rangle=0$. Magnetic activity therefore requires \emph{off-diagonal} matrix elements, i.e.\ transitions between singlets. This is why the Gell-Mann vectors $\lambda^{2,5,7}$ (the time-reversal-odd generators, which are purely imaginary and off-diagonal) are the only carriers of the projected magnetic dipole.
+\item \textbf{Van Vleck paramagnetism.} The static magnetic susceptibility of the Tm sublattice is entirely of Van Vleck (second-order perturbation theory) origin, not of Curie (first-order, permanent-moment) type. This means $\chi_{\rm Tm}\propto|\langle E_1|J_\alpha|E_2\rangle|^2/(\epsilon_2-\epsilon_1)$ at low $T$, which is temperature-independent. Experimentally, this is seen as a large, nearly $T$-independent anisotropic susceptibility below $\sim 50$~K. The Van Vleck susceptibility is also what mediates the anisotropy back-action mechanism (Sec.~\ref{sec:vanvleck}).
+\item \textbf{Real wavefunctions.} For a non-Kramers singlet, one can always choose a phase convention such that the wavefunction is real in the $|m_J\rangle$ basis (i.e.\ invariant under time reversal with $K=$ complex conjugation). This is the convention used throughout these notes and explains why all projected operators $J_\alpha^{\rm eff}$ are purely imaginary: the matrix elements $\langle E_\alpha|J_\beta|E_\gamma\rangle$ between real wavefunctions are purely imaginary because $J_\beta$ is Hermitian and time-reversal-odd.
+\end{enumerate}
+
+\subsubsection{Selection-rule facts we want the model to remember}
+
+The most robust microscopic selection-rule facts are the following.
+
+\begin{enumerate}
+    \item The local Tm point group is \(C_s\), with one mirror plane. The lowest two Tm singlets are mirror-even and the next one is mirror-odd~\cite{Skorobogatov2020}.
+    \item The magnetic dipole operator is an \emph{axial} vector. If the local mirror is the \(ab\) plane, then \(J_z\) is mirror even whereas \(J_x\) and \(J_y\) are mirror odd.
+    \item Therefore, in the three-level truncation,
+    \begin{equation}
+    E_1(A_1)\leftrightarrow E_2(A_1) \ \text{is of}\ J_z\text{-type},
+    \end{equation}
+    whereas
+    \begin{equation}
+    E_1(A_1)\leftrightarrow E_3(A_2),\ 
+    E_2(A_1)\leftrightarrow E_3(A_2)
+    \ \text{are of}\ J_x/J_y\text{-type}.
+    \end{equation}
+    \item The neutron point-charge analysis of TmFeO\(_3\)~\cite{Skorobogatov2020} confirms exactly this structure: the lowest transition has nonzero \(J_z\) matrix element and vanishing \(J_x,J_y\), while the next strong transition has nonzero \(J_x,J_y\) and vanishing \(J_z\).
+    \item Because the Tm site is non-centrosymmetric, electric-dipole activity is also allowed~\cite{Kozlov1990,Mukhin1991}. In the same local mirror language, the electric dipole \(d_z\) is mirror odd, while \(d_x,d_y\) are mirror even. Thus the same parity logic applies to the electric-dipole sector, but with time-reversal-even operators instead of time-reversal-odd ones.
+\end{enumerate}
+
+\subsubsection{Why the 2DCS amplitudes already point to a hybrid mechanism}
+
+The 2DCS peak hierarchy in the geometry \(H\parallel a, E\parallel c\) tells us something very specific.
+
+In this geometry the pump fields \(h_x\) and \(e_z\) address exclusively the odd Tm sector (\(J_x^{\rm eff}\sim\lambda^{5,7}\), \(d_z^{\rm eff}\sim\lambda^{4,6}\)) and the Fe Zeeman channel. Naively one therefore expects only odd-sector Tm transitions and Fe magnons on the excitation axis. However, the dominant excitation feature sits near \(0.4\)--\(0.5\)~THz---matching the even-sector \(E_1\!\to\!E_2\) crystal-field gap---with a hierarchy
+\begin{equation}
+(E_1\!\to\!E_2,0),\ 
+(E_1\!\to\!E_2,E_2\!\to\!E_3),\
+(E_1\!\to\!E_2,\mathrm{qFM}),\
+(E_1\!\to\!E_2,E_1\!\to\!E_3).
+\end{equation}
+The resolution of this apparent paradox lies in the \emph{interplay of the SU(3) commutator algebra and VV detection selection rules}. The pulse \emph{does} drive the odd sector directly, but the VV detection operator (\(d_z^{\rm eff}\sim\lambda^{4,6}\), \(J_x^{\rm eff}\sim\lambda^{5,7}\)) is also odd-sector. The product of two odd-sector operations yields an even-sector result: \([\lambda^{5,7},\lambda^{5,7}]\to\lambda^{1,2,3,8}\). Thus odd-sector coherences oscillating during \(\tau_1\) become \emph{invisible} on the excitation axis in VV, because \(\mathrm{odd}\times\mathrm{odd}\to\mathrm{even}\) cannot radiate in the odd detection channel. Conversely, the same pump--pump commutator \([\lambda^5,\lambda^7]=i\lambda^2\) creates even-sector \(E_1\!\leftrightarrow\!E_2\) coherence at second order, and this \emph{is} visible because \(\mathrm{odd}\times\mathrm{even}\to\mathrm{odd}\) feeds the VV detection channel. The VV co-polarized geometry therefore acts as a natural \emph{even-sector filter} on the excitation axis.
+
+A decisive experimental confirmation that the excitation feature is the \(E_1\!\to\!E_2\) crystal-field transition---rather than the qFM magnon---comes from the temperature dependence: the mode is flat across the full \(0\)--\(100\)~K range, persisting through the spin reorientation at \(T_{\rm SR}\approx 85\)~K (it dims during the reorientation but re-emerges at the same energy above \(T_{\rm SR}\)). The qFM mode, by contrast, is the soft mode of the \(\Gamma_2\) phase and \emph{must} vanish at \(T_{\rm SR}\).
+
+\section{Lattice conventions}
+
+In this section we state the lattice and symmetry conventions used throughout, so that the final reduced model has a transparent dictionary back to the full implementation code.
+
+\subsection{Crystal structure and space group}
+
+We consider the orthorhombic crystal structure with lattice constants \(a,b,c\) along the crystallographic \(x,y,z\) directions, respectively. We parametrize positions in fractional coordinates as
+\begin{equation}
+\{q_1,q_2,q_3\}\equiv q_1 a \xhat+q_2 b \yhat+q_3 c \zhat.
+\end{equation}
+
+Within one primitive unit cell, the four Tm positions are
+\begin{align}
+t_1 &= \{0.02111,\,0.92839,\,0.75\},\\
+t_2 &= \{0.52111,\,0.57161,\,0.25\},\\
+t_3 &= \{0.47889,\,0.42839,\,0.75\},\\
+t_4 &= \{0.97889,\,0.07161,\,0.25\},
+\end{align}
+while the four Fe positions are
+\begin{align}
+f_1 &= \{0,\,0.5,\,0.5\},\\
+f_2 &= \{0.5,\,0,\,0.5\},\\
+f_3 &= \{0.5,\,0,\,0\},\\
+f_4 &= \{0,\,0.5,\,0\}.
+\end{align}
+
+Let \(\mathbf n=(n_1,n_2,n_3)\in \mathbb Z^3\) label Bravais-lattice translations,
+\begin{equation}
+\mathbf T_{\mathbf n}=n_1 a\xhat+n_2 b\yhat+n_3 c\zhat.
+\end{equation}
+Then
+\begin{align}
+\mathbf r^{\,\mathrm{Tm}}_{\mathbf n,\mu} &= \mathbf T_{\mathbf n}+t_\mu,\\
+\mathbf r^{\,\mathrm{Fe}}_{\mathbf n,\mu} &= \mathbf T_{\mathbf n}+f_\mu,
+\end{align}
+with \(\mu=1,2,3,4\).
+
+We work in the orthorhombic space group No.~62 ($Pbnm$) with generators
+\begin{align}
+S_1:\{x,y,z\} &\mapsto \{-x,\,-y,\,z+\tfrac12\},\\
+S_2:\{x,y,z\} &\mapsto \{x+\tfrac12,\,-y+\tfrac12,\,-z\},\\
+I:\{x,y,z\} &\mapsto \{-x,\,-y,\,-z\},
+\end{align}
+together with lattice translations.
+
+\subsection{Action on Tm and Fe sublattices}
+
+The generators act on Tm sites as
+\begin{align}
+S_1:\{n_1,n_2,n_3\}_{\mu}
+&\mapsto
+\{-n_1-1,\,-n_2-1,\,n_3+\delta_{\mu,1}+\delta_{\mu,3}\}_{\sigma^{\mathrm{Tm}}_{S_1}(\mu)},
+\\
+S_2:\{n_1,n_2,n_3\}_{\mu}
+&\mapsto
+\{n_1+\delta_{\mu,2}+\delta_{\mu,4},\,-n_2-\delta_{\mu,1}-\delta_{\mu,2},\,-n_3-1\}_{\sigma^{\mathrm{Tm}}_{S_2}(\mu)},
+\\
+I:\{n_1,n_2,n_3\}_{\mu}
+&\mapsto
+\{-n_1-1,\,-n_2-1,\,-n_3-1\}_{\sigma^{\mathrm{Tm}}_{I}(\mu)},
+\end{align}
+with sublattice permutations
+\begin{equation}
+\sigma^{\mathrm{Tm}}_{S_1}=(14)(23),\qquad
+\sigma^{\mathrm{Tm}}_{S_2}=(12)(34),\qquad
+\sigma^{\mathrm{Tm}}_{I}=(14)(23).
+\end{equation}
+
+Similarly, the action on Fe sites is
+\begin{align}
+S_1:\{n_1,n_2,n_3\}_{\mu}
+&\mapsto
+\{-n_1-\delta_{\mu,2}-\delta_{\mu,3},\,-n_2-\delta_{\mu,1}-\delta_{\mu,4},\,n_3+\delta_{\mu,1}+\delta_{\mu,2}\}_{\sigma^{\mathrm{Fe}}_{S_1}(\mu)},
+\\
+S_2:\{n_1,n_2,n_3\}_{\mu}
+&\mapsto
+\{n_1+\delta_{\mu,2}+\delta_{\mu,3},\,-n_2,\,-n_3-\delta_{\mu,1}-\delta_{\mu,2}\}_{\sigma^{\mathrm{Fe}}_{S_2}(\mu)},
+\\
+I:\{n_1,n_2,n_3\}_{\mu}
+&\mapsto
+\{-n_1-\delta_{\mu,2}-\delta_{\mu,3},\,-n_2-\delta_{\mu,1}-\delta_{\mu,4},\,-n_3-\delta_{\mu,1}-\delta_{\mu,2}\}_{\sigma^{\mathrm{Fe}}_{I}(\mu)},
+\end{align}
+where
+\begin{equation}
+\sigma^{\mathrm{Fe}}_{S_1}=(14)(23),\qquad
+\sigma^{\mathrm{Fe}}_{S_2}=(12)(34),\qquad
+\sigma^{\mathrm{Fe}}_{I}=e.
+\end{equation}
+
+\subsection{Local sublattice frames}
+\label{sec:sublatticeframes}
+
+\subsubsection{Why local frames are necessary: closure of the SU(3) manifold}
+
+For Fe spins, the point parts of $S_1$ ($R_z(\pi)$) and $S_2$ ($R_x(\pi)$) act as standard $\mathrm{SO}(3)$ rotations that lift to unitaries in $\mathrm{SU}(2S+1)$. For the truncated Tm qutrit this fails. Since $\ket{E_{1,2}}$ are built from even-$m_J$ components and $\ket{E_3}$ from odd-$m_J$ components, $R_z(\pi)$ projects to
+\begin{equation}
+R_z(\pi)\big|_{\mathrm{3-level}} = \mathrm{diag}(+1,+1,-1) \equiv P_{z},
+\label{eq:Pzdef}
+\end{equation}
+which conjugates the Gell-Mann generators as
+\begin{equation}
+P_z\,\lambda^\alpha\,P_z^{-1}=\begin{cases}
++\lambda^\alpha, & \alpha\in\{1,2,3,8\}\quad\text{(even sector)},\\
+-\lambda^\alpha, & \alpha\in\{4,5,6,7\}\quad\text{(odd sector)}.
+\end{cases}
+\label{eq:Pzaction}
+\end{equation}
+This $P_z$ is at least a valid $\mathrm{U}(3)$ matrix, though its adjoint action on the Bloch vector $r_\mu^\alpha$ is a reflection in $\mathrm{O}(8)\setminus\mathrm{SO}(8)$, not a rotation. The fundamental obstruction comes from $S_2$: the projected matrix $\langle E_\alpha|e^{-i\pi J_x}|E_\beta\rangle$ has unitarity error $\sim 1.3$ (see Sec.~\ref{sec:CEFcomputation}), because the three-level subspace is not closed under $R_x(\pi)$. The screw $S_2$---and hence the full Pbnm action---would be ill-defined on the truncated Tm qutrit in the global frame.
+
+The resolution is sublattice-dependent local frames that absorb both $R_z(\pi)$ and $R_x(\pi)$, so that these rotations never act explicitly on the internal SU(3) degrees of freedom. Their construction appears in Sec.~\ref{sec:canonicalframes}.
+
+
+\section{Tm crystal-field sector in the \texorpdfstring{$E_1(A_1),E_2(A_1),E_3(A_2)$}{E1(A1), E2(A1), E3(A2)} convention}
+
+\subsection{Three-level truncation and notation}
+
+For the low-temperature THz and 2DCS phenomenology, we truncate the Tm crystal-field manifold to the lowest three singlets and use the following notation throughout:
+\begin{equation}
+\ket{E_1(A_1)},\qquad \ket{E_2(A_1)},\qquad \ket{E_3(A_2)}.
+\end{equation}
+The point of this notation is that the mirror character is visible directly in the state labels: the lowest two states are mirror-even and transform as $A_1$, while the third state is mirror-odd and transforms as $A_2$.
+
+The neutron paper~\cite{Skorobogatov2020} uses the shifted indexing $\ket{E_0},\ket{E_1},\ket{E_2}$. The dictionary is simply
+\begin{equation}
+\ket{E_1(A_1)}\leftrightarrow \ket{E_0}_{\rm neutron},
+\qquad
+\ket{E_2(A_1)}\leftrightarrow \ket{E_1}_{\rm neutron},
+\qquad
+\ket{E_3(A_2)}\leftrightarrow \ket{E_2}_{\rm neutron}.
+\end{equation}
+Thus every quoted matrix element from the neutron work can be used directly after this relabeling.
+
+We denote the corresponding energies by
+\begin{equation}
+\epsilon_{1},\qquad \epsilon_{2},\qquad \epsilon_{3},
+\end{equation}
+with
+\begin{equation}
+\epsilon_2-\epsilon_1 \approx 1.920\ \mathrm{meV},
+\qquad
+\epsilon_3-\epsilon_1 \approx 7.844\ \mathrm{meV},
+\end{equation}
+at the level of the point-charge crystal-field scheme fitted to inelastic neutron scattering data~\cite{Skorobogatov2020} (see Sec.~\ref{sec:CEFcomputation} for the explicit computation).
+
+\subsection{Crystal-field Hamiltonian and computed wavefunctions}
+\label{sec:CEFcomputation}
+
+The three-level truncation used throughout these notes originates from a full diagonalization of the crystal-field (CEF) Hamiltonian for Tm$^{3+}$ ($4f^{12}$, ground term $^3H_6$, $J=6$), which acts in the 13-dimensional $|J,m_J\rangle$ Hilbert space ($m_J=-6,\dots,+6$). Following Ref.~\cite{Skorobogatov2020}, we write the CEF Hamiltonian in the Stevens operator formalism,
+\begin{equation}
+H_{\mathrm{CEF}} = \sum_{l=2,4,6}\sum_{m=-l}^{l} B_l^m\,O_l^m,
+\label{eq:HCEF}
+\end{equation}
+where $O_l^m$ are the Stevens (tesseral) operator equivalents defined via $J_z$, $J_+$, $J_-$ in the standard way.
+
+\subsubsection{Stevens operator coefficients}
+
+The point-charge crystal-field parameters fitted to inelastic neutron scattering data on TmFeO$_3$~\cite{Skorobogatov2020} are (all in meV):
+
+\begin{center}
+\begin{tabular}{lrrr}
+\hline
+$l$ & $m$ & $B_l^m$ \\
+\hline
+2 & $0$ & $-5.29\times 10^{-1}$ \\
+2 & $+2$ & $-1.35\times 10^{-1}$ \\
+2 & $-2$ & $+1.279\times 10^{0}$ \\
+\hline
+4 & $0$ & $-1.3\times 10^{-4}$ \\
+4 & $+2$ & $-1.7\times 10^{-3}$ \\
+4 & $-2$ & $+3.29\times 10^{-3}$ \\
+4 & $+4$ & $-1.22\times 10^{-3}$ \\
+4 & $-4$ & $-9.57\times 10^{-3}$ \\
+\hline
+6 & $0$ & $+2.0\times 10^{-6}$ \\
+6 & $+2$ & $-1.1\times 10^{-5}$ \\
+6 & $-2$ & $-9.0\times 10^{-6}$ \\
+6 & $+4$ & $+6.1\times 10^{-5}$ \\
+6 & $-4$ & $+3.0\times 10^{-6}$ \\
+6 & $+6$ & $-9.0\times 10^{-6}$ \\
+6 & $-6$ & $0$ \\
+\hline
+\end{tabular}
+\end{center}
+The convention for $m<0$ operators is $O_l^{-|m|}=(J_+^{|m|}-J_-^{|m|})/(2i)$ (times the appropriate polynomial in $J_z$), consistent with the tesseral decomposition of the crystal field into $\cos(m\phi)$ and $\sin(m\phi)$ harmonics. The $l=2$ terms dominate and set the overall splitting scale, while the $l=4,6$ terms stabilize the fine structure of the multiplet.
+
+\subsubsection{Diagonalization and lowest eigenvalues}
+
+Diagonalizing $H_{\mathrm{CEF}}$ in the $m_J$ basis yields 13 singlets (all Kramers degeneracies are already lifted because Tm$^{3+}$ is a non-Kramers ion with even electron count). Shifting the ground state to zero, the three lowest eigenvalues are
+\begin{equation}
+\epsilon_1=0,
+\qquad
+\epsilon_2=1.920\;\mathrm{meV},
+\qquad
+\epsilon_3=7.844\;\mathrm{meV},
+\end{equation}
+in agreement with the inelastic neutron data~\cite{Skorobogatov2020}. The gap to the fourth level is $\epsilon_4\approx 14.3$~meV, which is well separated from $\epsilon_3$ and justifies the three-level truncation for the sub-THz and few-THz spectroscopy considered here.
+
+\subsubsection{Crystal-field wavefunctions and mirror character}
+
+In a phase convention where all three lowest eigenstates are invariant under time reversal (which is always possible for non-Kramers singlets), the wavefunctions in the $|J,m_J\rangle$ basis take the form
+\begin{align}
+\ket{E_1(A_1)} &= \sum_{m\,\mathrm{even}} c_{1,m}\,|m\rangle,
+\qquad m\in\{-6,-4,-2,0,+2,+4,+6\},
+\label{eq:wf_E1}\\
+\ket{E_2(A_1)} &= \sum_{m\,\mathrm{even}} c_{2,m}\,|m\rangle,
+\label{eq:wf_E2}\\
+\ket{E_3(A_2)} &= \sum_{m\,\mathrm{odd}} c_{3,m}\,|m\rangle,
+\qquad m\in\{-5,-3,-1,+1,+3,+5\},
+\label{eq:wf_E3}
+\end{align}
+where \emph{even} and \emph{odd} refer to the parity of $m_J$ under the local mirror. Specifically, the orthorhombic CEF at the Tm site ($C_s$ point group in Pbnm) mixes only states with the same $m_J$ parity: the $ab$-plane mirror sends $m_J\to -m_J$ for $J_z$, and the $O_l^m$ operators with even $l$ preserve the even/odd-$m$ subspace structure. The explicit amplitudes (with coefficients grouped by the dominant components) are:
+\begin{align}
+\ket{E_1(A_1)} &:\ |c_{1,\pm 6}|=0.580,\
+|c_{1,\pm 4}|=0.322,\
+|c_{1,\pm 2}|=0.212,\
+|c_{1,0}|=0.168,
+\label{eq:wf_E1_magnitudes}\\
+\ket{E_2(A_1)} &:\ |c_{2,\pm 6}|=0.636,\
+|c_{2,\pm 4}|=0.286,\
+|c_{2,\pm 2}|=0.118,\
+|c_{2,0}|=0.018,
+\label{eq:wf_E2_magnitudes}\\
+\ket{E_3(A_2)} &:\ |c_{3,\pm 5}|=0.484,\
+|c_{3,\pm 3}|=0.402,\
+|c_{3,\pm 1}|=0.323.
+\label{eq:wf_E3_magnitudes}
+\end{align}
+Both $|E_1\rangle$ and $|E_2\rangle$ are spread over the $m_J$-even sector with dominant weight at $|m_J|=6$. The $A_2$ state $|E_3\rangle$ is spread over the $m_J$-odd sector. The overlap matrix of the three lowest states is the identity to numerical precision, confirming orthonormality.
+
+\subsubsection{Numerical verification of selection rules and Gell-Mann decomposition}
+
+Projecting the angular-momentum operators into the three-level subspace yields the $3\times 3$ matrices
+\begin{align}
+(J_x^{\rm eff})_{\alpha\beta} &= \langle E_\alpha|J_x|E_\beta\rangle,
+&
+(J_y^{\rm eff})_{\alpha\beta} &= \langle E_\alpha|J_y|E_\beta\rangle,
+&
+(J_z^{\rm eff})_{\alpha\beta} &= \langle E_\alpha|J_z|E_\beta\rangle.
+\end{align}
+The numerical computation confirms the expected selection-rule zero pattern:
+\begin{itemize}
+\item $J_z^{\rm eff}$ has nonzero entries only in the $(1,2)$ and $(2,1)$ block (even transition), with all other entries vanishing to machine precision.
+\item $J_x^{\rm eff}$ and $J_y^{\rm eff}$ have nonzero entries only in the $(1,3)$, $(3,1)$, $(2,3)$, and $(3,2)$ positions (odd transitions), again with all others vanishing.
+\end{itemize}
+
+In the time-reversal-symmetric phase convention adopted here, the projected matrices are purely imaginary off-diagonal. The overall sign of every matrix element connecting to $|E_3(A_2)\rangle$ depends on the global phase of that state; choosing the convention $\langle E_1|J_x|E_3\rangle/i<0$ (which makes the $\lambda^5$ coefficient of $J_x^{\rm eff}$ positive) gives
+\begin{align}
+(J_z^{\rm eff})_{12} &= -5.264\,i, &
+(J_z^{\rm eff})_{21} &= +5.264\,i,
+\label{eq:Jz_numerical}\\
+(J_x^{\rm eff})_{13} &= -2.3915\,i, &
+(J_x^{\rm eff})_{23} &= -0.9128\,i,
+\label{eq:Jx_numerical}\\
+(J_y^{\rm eff})_{13} &= +2.7866\,i, &
+(J_y^{\rm eff})_{23} &= -0.4655\,i.
+\label{eq:Jy_numerical}
+\end{align}
+Being purely imaginary, each projected operator lives entirely in the time-reversal-odd Gell-Mann channels:
+\begin{equation}
+J_z^{\rm eff}=5.264\,\lambda^2\in\mathcal A_1^-,
+\qquad
+J_{x}^{\rm eff}=2.3915\,\lambda^5+0.9128\,\lambda^7,
+\qquad
+J_{y}^{\rm eff}=-2.7866\,\lambda^5+0.4655\,\lambda^7,
+\end{equation}
+all in $\mathcal A_2^-$, with no admixture of time-reversal-even generators ($\lambda^1$, $\lambda^4$, $\lambda^6$). This confirms Eq.~\eqref{eq:projectedJfullbasis} from first principles. The magnitudes
+\begin{equation}
+|\langle E_1|J_z|E_2\rangle|=5.264,
+\quad
+|\langle E_1|J_x|E_3\rangle|=2.3915,
+\quad
+|\langle E_1|J_y|E_3\rangle|=2.7866,
+\end{equation}
+are phase-convention independent and coincide with the Gell-Mann coefficients quoted in the body of these notes (Eq.~\eqref{eq:projectedJfullbasis}).
+
+\subsubsection{Time-reversal and mirror symmetry in the projected subspace}
+
+Two additional quantities verify the symmetry structure at the numerical level:
+
+\begin{enumerate}
+\item \textbf{Time reversal.} The unitary part $U_T$ of the time-reversal operator ($T=U_T K$, with $K$ complex conjugation) projects to the identity in the three-level subspace:
+\begin{equation}
+\langle E_\alpha|U_T|E_\beta^*\rangle = \delta_{\alpha\beta}.
+\end{equation}
+This confirms that all three lowest singlets are individually time-reversal invariant, as required for non-Kramers ion singlets with no accidental degeneracies.
+
+\item \textbf{Mirror ($ab$-plane reflection).} The $\pi$-rotation about $z$, $R_z(\pi)=e^{-i\pi J_z}$, which acts as the mirror operation for the axial degrees of freedom, projects as
+\begin{equation}
+R_z(\pi)\big|_{\rm 3-level}=\mathrm{diag}(+1,+1,-1),
+\end{equation}
+reproducing the $A_1,A_1,A_2$ mirror assignment.
+
+\item \textbf{Non-unitarity of $R_x(\pi)$ in the truncated subspace.} By contrast, the $\pi$-rotation $R_x(\pi)=e^{-i\pi J_x}$ does \emph{not} project to a unitary matrix in the three-level subspace (unitarity error $\sim 1.3$), reflecting significant leakage to higher-lying states through the large $J_x$ matrix elements to the excited manifold.
+\end{enumerate}
+
+This last point is the numerical confirmation of the obstruction discussed in Sec.~\ref{sec:sublatticeframes}: the screw generator $S_2$, whose point part is $R_x(\pi)$, cannot be represented as a unitary transformation on the truncated Tm qutrit. We now present the canonical local frames that resolve this obstruction.
+
+\subsubsection{Construction of the canonical local frames}
+\label{sec:canonicalframes}
+
+The strategy is to introduce sublattice-dependent local frames that absorb the internal $R_z(\pi)$ and $R_x(\pi)$ actions of $S_1$ and $S_2$, so that these generators act \emph{trivially} on the local operator components. Crucially, the frame transformation is applied at the level of the dipolar operators (spin vectors, effective moments), and does \emph{not} require projecting $R_x(\pi)$ into the truncated subspace---thereby circumventing the non-unitarity obstruction demonstrated above.
+
+For the Fe sector, the point parts of the generators are:
+\begin{align}
+S_1&: \quad R_z(\pi) \;=\; \mathrm{diag}(-1,-1,+1) \quad\text{($\pi$ about $z$)},\\
+S_2&: \quad R_x(\pi) \;=\; \mathrm{diag}(+1,-1,-1) \quad\text{($\pi$ about $x$)}.
+\end{align}
+These act on the spin vector $\mathbf S$ by matrix multiplication. We want to choose sublattice-dependent sign matrices $R_\mu$ such that, after defining local-frame operators $\mathbf S_i^{(\ell)} = R_i^{-1}\mathbf S_i^{(g)}$, the action of $S_1$ and $S_2$ on the local components is the identity.
+
+Starting from sublattice~1 with $R_1=\mathbf{1}$, we build the remaining frames by composing the point parts along the orbit. The sublattice permutations for both Tm and Fe are
+\begin{equation}
+\sigma_{S_1}=(14)(23),\qquad \sigma_{S_2}=(12)(34).
+\end{equation}
+These generate the Klein four-group $\mathbb{Z}_2\times\mathbb{Z}_2$, and the orbit of sublattice~1 is the full set $\{1,2,3,4\}$. We define
+\begin{align}
+R_1 &= \mathbf{1}, \notag\\
+R_2 &= R_1\cdot R_x(\pi) = \mathrm{diag}(+1,-1,-1) \quad\text{(via $S_2$: $1\to 2$)}, \notag\\
+R_3 &= R_2\cdot R_z(\pi) = \mathrm{diag}(-1,+1,-1) \quad\text{(via $S_1$: $2\to 3$)}, \notag\\
+R_4 &= R_1\cdot R_z(\pi) = \mathrm{diag}(-1,-1,+1) \quad\text{(via $S_1$: $1\to 4$)}.
+\label{eq:Rmu_construction}
+\end{align}
+In summary,
+\begin{align}
+1 &: (\hat x,\hat y,\hat z),\\
+2 &: (\hat x,-\hat y,-\hat z),\\
+3 &: (-\hat x,\hat y,-\hat z),\\
+4 &: (-\hat x,-\hat y,\hat z).
+\end{align}
+The same pattern is chosen for the Fe local frames, since the sublattice permutations are identical for both species. For the Tm sector, the frame transformation absorbs the $R_z(\pi)$ and $R_x(\pi)$ actions into sign changes of the effective moment components on each sublattice, without ever requiring a unitary representation of $R_x(\pi)$ in the truncated Hilbert space.
+
+\subsubsection{Verification and residual constraints}
+
+By construction, $S_1$ and $S_2$ act trivially on local-frame operators: $\mathbf{O}_{\sigma_g(\mu)}^{(\ell)} = \mathbf{O}_\mu^{(\ell)}$ for $g=S_1,S_2$, and similarly $\lambda_{\sigma_g(\mu)}^{\alpha,(\ell)} = \lambda_\mu^{\alpha,(\ell)}$. The screw operations thus permute sublattices and shift unit cells without transforming the internal SU(3) components.
+
+The only remaining nontrivial internal constraint comes from inversion $I$. For Fe, $\sigma_I^{\mathrm{Fe}}=e$ and the spin is inversion-even. For Tm, $\sigma_I^{\mathrm{Tm}}=(14)(23)$, and the Gell-Mann operators carry the parity inherited from $P_z$ (Eq.~\ref{eq:Pzaction}):
+\begin{equation}
+I:\;\lambda_\mu^{\alpha,(\ell)} \mapsto \eta_P(\alpha)\,\lambda_{\sigma_I(\mu)}^{\alpha,(\ell)}.
+\end{equation}
+This sign pattern $\eta_P(\alpha)$ governs the parity selection rules for all bilinear couplings. In particular, only time-reversal-odd operators $\lambda^2,\lambda^5,\lambda^7$ couple linearly to the Fe spin, and among these, $\lambda^2$ ($A_1^-$) and $\lambda^{5,7}$ ($A_2^-$) carry opposite inversion parities.
+
+\subsubsection{Explicit frame and sign conventions}
+
+Equivalently, the sign matrices are
+\begin{equation}
+R_\mu=\mathrm{diag}(\eta_\mu^x,\eta_\mu^y,\eta_\mu^z),
+\end{equation}
+with
+\begin{align}
+(\eta_1^x,\eta_1^y,\eta_1^z)&=(+1,+1,+1),\\
+(\eta_2^x,\eta_2^y,\eta_2^z)&=(+1,-1,-1),\\
+(\eta_3^x,\eta_3^y,\eta_3^z)&=(-1,+1,-1),\\
+(\eta_4^x,\eta_4^y,\eta_4^z)&=(-1,-1,+1).
+\end{align}
+For any dipolar operator $\mathbf O_i$,
+\begin{equation}
+\mathbf O_i^{(g)}=R_i\,\mathbf O_i^{(\ell)}.
+\end{equation}
+
+\subsection{Local mirror symmetry stated in the \texorpdfstring{$A_1/A_2$}{A1/A2} convention}
+
+At the Tm site the local point group is $C_s$ with one mirror plane, which we identify with the local $ab$ plane. We denote the mirror-even irrep by $A_1$ and the mirror-odd irrep by $A_2$. Therefore,
+\begin{equation}
+\ket{E_1(A_1)},\ \ket{E_2(A_1)} \in A_1,
+\qquad
+\ket{E_3(A_2)} \in A_2.
+\end{equation}
+If $m$ denotes the local mirror operation, then
+\begin{equation}
+m\ket{E_1(A_1)}=+\ket{E_1(A_1)},
+\qquad
+m\ket{E_2(A_1)}=+\ket{E_2(A_1)},
+\qquad
+m\ket{E_3(A_2)}=-\ket{E_3(A_2)}.
+\end{equation}
+
+This immediately fixes the local selection rules. Since the magnetic dipole is an axial vector, under the $ab$-plane mirror one has
+\begin{equation}
+J_z \sim A_1,
+\qquad
+J_x,J_y \sim A_2,
+\end{equation}
+while for the electric dipole, which is a polar vector,
+\begin{equation}
+d_x,d_y \sim A_1,
+\qquad
+d_z \sim A_2.
+\end{equation}
+Therefore,
+\begin{equation}
+E_1(A_1)\leftrightarrow E_2(A_1)
+\end{equation}
+is the even channel, of $J_z$ and $d_{x,y}$ type, whereas
+\begin{equation}
+E_1(A_1)\leftrightarrow E_3(A_2),
+\qquad
+E_2(A_1)\leftrightarrow E_3(A_2)
+\end{equation}
+are odd channels, of $J_x/J_y$ and $d_z$ type.
+
+\subsection{Gell-Mann basis in the ordered basis \texorpdfstring{$(E_1(A_1),E_2(A_1),E_3(A_2))$}{(E1(A1),E2(A1),E3(A2))}}
+
+We now introduce the eight Gell-Mann matrices $\lambda^a$ in the ordered basis
+\begin{equation}
+\big(\ket{E_1(A_1)},\ket{E_2(A_1)},\ket{E_3(A_2)}\big).
+\end{equation}
+Their explicit matrix forms are
+\begin{align}
+\lambda^1 &=
+\begin{pmatrix}
+0&1&0\\
+1&0&0\\
+0&0&0
+\end{pmatrix},
+&
+\lambda^2 &=
+\begin{pmatrix}
+0&-i&0\\
+i&0&0\\
+0&0&0
+\end{pmatrix},
+&
+\lambda^3 &=
+\begin{pmatrix}
+1&0&0\\
+0&-1&0\\
+0&0&0
+\end{pmatrix},
+\\[6pt]
+\lambda^4 &=
+\begin{pmatrix}
+0&0&1\\
+0&0&0\\
+1&0&0
+\end{pmatrix},
+&
+\lambda^5 &=
+\begin{pmatrix}
+0&0&-i\\
+0&0&0\\
+i&0&0
+\end{pmatrix},
+&
+\lambda^6 &=
+\begin{pmatrix}
+0&0&0\\
+0&0&1\\
+0&1&0
+\end{pmatrix},
+\\[6pt]
+\lambda^7 &=
+\begin{pmatrix}
+0&0&0\\
+0&0&-i\\
+0&i&0
+\end{pmatrix},
+&
+\lambda^8 &=
+\frac{1}{\sqrt 3}
+\begin{pmatrix}
+1&0&0\\
+0&1&0\\
+0&0&-2
+\end{pmatrix}.
+\end{align}
+They satisfy
+\begin{equation}
+[\lambda^a,\lambda^b]=2if_{abc}\lambda^c,
+\qquad
+\{\lambda^a,\lambda^b\}=\frac{4}{3}\delta_{ab}\mathds 1+2d_{abc}\lambda^c,
+\qquad
+\mathrm{Tr}(\lambda^a\lambda^b)=2\delta_{ab}.
+\end{equation}
+
+\subsubsection{Explicit structure constants and key commutators}
+
+The totally antisymmetric structure constants $f_{abc}$ of SU(3) control the coherent dynamics in the Bloch equation and are central to the pathway analysis of Sec.~\ref{sec:2DCSpeaks}. The nine independent nonzero values are
+\begin{center}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{lclc}
+\hline
+$f_{123}=1$ & & $f_{156}=-\tfrac12$ & \\
+$f_{147}=+\tfrac12$ & & $f_{246}=+\tfrac12$ & \\
+$f_{257}=+\tfrac12$ & & $f_{345}=+\tfrac12$ & \\
+$f_{367}=-\tfrac12$ & & $f_{458}=+\tfrac{\sqrt3}{2}$ & \\
+$f_{678}=+\tfrac{\sqrt3}{2}$ & & & \\
+\hline
+\end{tabular}
+\end{center}
+All other values are obtained by total antisymmetry or vanish. For the implementation, these translate to explicit index look-ups in the Bloch equation $\dot n^a = \hbar^{-1}\sum_{bc}f_{abc}\,h^b n^c$.
+
+The commutators most directly used in the spectroscopy analysis are:
+\begin{alignat}{2}
+&\textbf{Even\;$\leftrightarrow$\;odd conversion:} &\quad
+[\lambda^2,\lambda^5]&=+i\lambda^7,
+\qquad
+[\lambda^2,\lambda^7]=-i\lambda^5,
+\notag\\
+&& [\lambda^2,\lambda^4]&=+i\lambda^6,
+\qquad
+[\lambda^2,\lambda^6]=-i\lambda^4,
+\notag\\
+&\textbf{Odd\;$\to$\;even (Raman):} &\quad
+[\lambda^5,\lambda^7]&=+i\lambda^2,
+\qquad
+[\lambda^4,\lambda^6]=+i\lambda^2,
+\notag\\
+&\textbf{Odd\;$\to$\;diagonal:} &\quad
+[\lambda^4,\lambda^5]&=+i\lambda^3+i\tfrac{1}{\sqrt3}\lambda^8,
+\notag\\
+&& [\lambda^6,\lambda^7]&=-i\lambda^3+i\tfrac{1}{\sqrt3}\lambda^8.
+\label{eq:keycommutators}
+\end{alignat}
+A few structural points:
+\begin{enumerate}
+\item The commutator $[\lambda^5,\lambda^7]=+i\lambda^2$ is the key Raman step that populates the even $E_1\!\leftrightarrow\!E_2$ coherence at second order from the odd pump in Geometry~I (Sec.~\ref{sec:geomI}).
+\item The even-to-odd commutators $[\lambda^2,\lambda^{5,7}]$ control the pulse-B conversion that feeds odd-sector Tm detection in VV.
+\item The odd-to-diagonal commutators produce population redistribution ($\lambda^3,\lambda^8$) from two-photon processes, responsible for the $(E_1\!\to\!E_2,0)$ population-grating peak.
+\item All commutators within the even sector ($[\lambda^1,\lambda^2]=2i\lambda^3$, etc.) follow the conventional $\mathfrak{su}(2)$ sub-algebra.
+\end{enumerate}
+
+The totally symmetric $d$-coefficients are needed for the anticommutator closure but do not appear in the coherent equations of motion. The nonzero values are
+\begin{center}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{lclc}
+\hline
+$d_{118}=d_{228}=d_{338}=\tfrac{1}{\sqrt3}$ & & $d_{888}=-\tfrac{1}{\sqrt3}$ & \\
+$d_{146}=d_{157}=\tfrac12$ & & $d_{247}=-\tfrac12$ & \\
+$d_{256}=+\tfrac12$ & & $d_{344}=d_{355}=+\tfrac12$ & \\
+$d_{366}=d_{377}=-\tfrac12$ & & $d_{448}=d_{558}=-\tfrac{1}{2\sqrt3}$ & \\
+$d_{668}=d_{778}=-\tfrac{1}{2\sqrt3}$ & & & \\
+\hline
+\end{tabular}
+\end{center}
+These enter if the simulation code needs to evaluate anticommutators (e.g.\ for Lindblad dissipators or positivity checks on $\rho$).
+
+In this basis the mirror action gives
+\begin{equation}
+m\lambda^a m^{-1}=
+\begin{cases}
++\lambda^a, & a\in\{1,2,3,8\},\\
+-\lambda^a, & a\in\{4,5,6,7\}.
+\end{cases}
+\end{equation}
+Thus, as operator channels,
+\begin{equation}
+\mathcal A_{1}=\{\lambda^1,\lambda^2,\lambda^3,\lambda^8\},
+\qquad
+\mathcal A_{2}=\{\lambda^4,\lambda^5,\lambda^6,\lambda^7\}.
+\end{equation}
+The first set is mirror-even and the second set is mirror-odd.
+
+Time reversal splits them further. In the real basis chosen above, the purely imaginary matrices $\lambda^2,\lambda^5,\lambda^7$ are odd under time reversal, while the remaining generators are even. It is therefore useful to organize the operator content as
+\begin{align}
+\mathcal A_1^+ &= \{\lambda^1,\lambda^3,\lambda^8\}, &
+\mathcal A_1^- &= \{\lambda^2\},\\
+\mathcal A_2^+ &= \{\lambda^4,\lambda^6\}, &
+\mathcal A_2^- &= \{\lambda^5,\lambda^7\}.
+\end{align}
+Here the superscript $+$ or $-$ indicates time-reversal parity, while the subscript $1$ or $2$ indicates mirror parity.
+
+\subsection{Projected magnetic and electric operators}
+
+Within this three-level subspace, the neutron point-charge analysis~\cite{Skorobogatov2020} gives the projected angular-momentum operators (verified by the explicit Stevens-operator diagonalization of Sec.~\ref{sec:CEFcomputation})
+\begin{equation}
+\begin{pmatrix}
+J_x\\
+J_y\\
+J_z
+\end{pmatrix}
+=
+\begin{pmatrix}
+2.3915\,\lambda^5 + 0.9128\,\lambda^7\\
+-2.7866\,\lambda^5 + 0.4655\,\lambda^7\\
+5.264\,\lambda^2
+\end{pmatrix}.
+\label{eq:projectedJfullbasis}
+\end{equation}
+This is the key microscopic result behind the entire modeling strategy:
+\begin{enumerate}
+    \item $J_z$ lives entirely in the $A_1^-$ channel and therefore couples only the even transition
+    \begin{equation}
+    E_1(A_1)\leftrightarrow E_2(A_1).
+    \end{equation}
+    \item $J_x$ and $J_y$ live entirely in the $A_2^-$ channel and therefore couple only the odd transitions
+    \begin{equation}
+    E_1(A_1)\leftrightarrow E_3(A_2),
+    \qquad
+    E_2(A_1)\leftrightarrow E_3(A_2).
+    \end{equation}
+\end{enumerate}
+
+Equivalently, the symmetry-allowed connectivity of the projected magnetic operators is
+\begin{equation}
+J_z^{\rm eff}
+\propto
+\lambda^2
+=
+i\bigl(\ket{E_2(A_1)}\bra{E_1(A_1)}-\ket{E_1(A_1)}\bra{E_2(A_1)}\bigr),
+\end{equation}
+and
+\begin{align}
+J_{x,y}^{\rm eff}
+&\in \mathrm{span}(\lambda^5,\lambda^7)
+\notag\\
+&=
+\mathrm{span}\!\Big(
+i\bigl(\ket{E_3(A_2)}\bra{E_1(A_1)}-\ket{E_1(A_1)}\bra{E_3(A_2)}\bigr),\;
+i\bigl(\ket{E_3(A_2)}\bra{E_2(A_1)}-\ket{E_2(A_1)}\bra{E_3(A_2)}\bigr)
+\Big).
+\end{align}
+The neutron matrix elements quoted in Ref.~\cite{Skorobogatov2020} are then read as
+\begin{equation}
+|\langle E_1(A_1)|J_z|E_2(A_1)\rangle|^2=27.71,
+\qquad
+|\langle E_1(A_1)|J_x|E_2(A_1)\rangle|^2=|\langle E_1(A_1)|J_y|E_2(A_1)\rangle|^2=0,
+\end{equation}
+and
+\begin{equation}
+|\langle E_1(A_1)|J_x|E_3(A_2)\rangle|^2=5.72,
+\qquad
+|\langle E_1(A_1)|J_y|E_3(A_2)\rangle|^2=7.77,
+\qquad
+|\langle E_1(A_1)|J_z|E_3(A_2)\rangle|^2=0,
+\end{equation}
+where the numerical values follow from the projected coefficients in Eq.~\eqref{eq:projectedJfullbasis} via $|\langle E_1|J_z|E_2\rangle|^2=(5.264)^2$, $|\langle E_1|J_x|E_3\rangle|^2=(2.3915)^2$, etc.
+
+For later use it is convenient to define the projected magnetic dipoles explicitly as
+\begin{align}
+J_x^{\rm eff} &= 2.3915\,\lambda^5 + 0.9128\,\lambda^7,\nonumber\\
+J_y^{\rm eff} &= -2.7866\,\lambda^5 + 0.4655\,\lambda^7,\nonumber\\
+J_z^{\rm eff} &= 5.264\,\lambda^2.
+\label{eq:Jeffdefs}
+\end{align}
+These are the physical Tm dipole operators that should appear in the Hamiltonian. The Gell-Mann generators are then the symmetry-adapted operator basis in which those dipoles are expanded.
+
+For the electric dipole, the most general transition-active projected operators at this level are
+\begin{equation}
+d_x^{\rm eff}\sim p_x\lambda^1,
+\qquad
+d_y^{\rm eff}\sim p_y\lambda^1,
+\qquad
+d_z^{\rm eff}\sim p_{z4}\lambda^4+p_{z6}\lambda^6,
+\label{eq:deffdefs}
+\end{equation}
+possibly supplemented by diagonal $\mathds 1$, $\lambda^3$, and $\lambda^8$ Stark-shift pieces in $d_x^{\rm eff}$ and $d_y^{\rm eff}$, which do not create transitions in linear response. The even electric channel is therefore
+\begin{equation}
+E_1(A_1)\leftrightarrow E_2(A_1),
+\end{equation}
+and the odd electric channels are
+\begin{equation}
+E_1(A_1)\leftrightarrow E_3(A_2),
+\qquad
+E_2(A_1)\leftrightarrow E_3(A_2).
+\end{equation}
+
+\subsection{Note on the electric-dipole parameters}
+
+The electric-dipole parameters $p_x$, $p_y$, $p_{z4}$, $p_{z6}$ appearing in Eq.~\eqref{eq:deffdefs} arise from the Judd--Ofelt mechanism: odd-parity crystal-field components at the non-centrosymmetric Tm site admix opposite-parity configurations ($4f^{11}5d$, etc.), making intra-$f$-shell electric-dipole transitions allowed~\cite{Kozlov1990,Mukhin1991,Malozemoff1971}. In the standard Judd--Ofelt theory, the effective operator projected into the $J=6$ ground multiplet involves unit tensor operators of even rank $\lambda=2,4,6$, with the rank-2 contribution dominating.
+
+In principle, the four $p$ parameters can be constrained from the crystal-field wavefunctions (which fix the ratios $p_{z4}/p_{z6}$ and $p_x/p_y$ to leading order) together with the Judd--Ofelt intensity parameters $\Xi_{q,\lambda}$ (which set the overall scale). The latter can be obtained from point-charge calculations or from the polarization-resolved THz absorption data of Refs.~\cite{Kozlov1990,Mukhin1991}. We have not carried out this computation; in the present implementation, $(p_x,p_y,p_{z4},p_{z6})$ are treated as phenomenological parameters.
+
+\subsection{Bare qutrit Hamiltonian}
+
+The onsite Tm Hamiltonian in the three-level subspace can be written as
+\begin{equation}
+H_{\mathrm{Tm}}^{(0)}
+=
+\bar\epsilon\,\mathds 1
++h_3^{(0)}\lambda^3+h_8^{(0)}\lambda^8,
+\end{equation}
+where
+\begin{equation}
+\bar\epsilon=\frac{\epsilon_1+\epsilon_2+\epsilon_3}{3},
+\qquad
+h_3^{(0)}=\frac{\epsilon_1-\epsilon_2}{2},
+\qquad
+h_8^{(0)}=\frac{\epsilon_1+\epsilon_2-2\epsilon_3}{2\sqrt3}.
+\end{equation}
+This is simply the diagonal crystal-field splitting written in the Gell-Mann basis. One can verify that these relations invert to give the eigenvalues $\epsilon_\alpha=\bar\epsilon+h_3^{(0)}(\lambda^3)_{\alpha\alpha}+h_8^{(0)}(\lambda^8)_{\alpha\alpha}$.
+
+\section{Full four-sublattice Fe sector and \texorpdfstring{$\Gamma_2$}{Gamma2} order}
+
+\subsection{Four-sublattice Fe Hamiltonian}
+
+We keep the Fe subsystem directly in the four-sublattice lattice formulation. Let $\mathbf S_{\mathbf n,\mu}$ denote the Fe spin at Bravais cell $\mathbf n$ and Fe sublattice $\mu=1,2,3,4$. The full Fe Hamiltonian is
+\begin{align}
+H_{\mathrm{Fe\text{--}Fe}}
+=&
+-J_1\sum_{\langle (\mathbf n,\mu),(\mathbf m,\nu)\rangle}
+\mathbf S_{\mathbf n,\mu}\cdot \mathbf S_{\mathbf m,\nu}
+-J_2\sum_{\langle\langle (\mathbf n,\mu),(\mathbf m,\nu)\rangle\rangle}
+\mathbf S_{\mathbf n,\mu}\cdot \mathbf S_{\mathbf m,\nu}
+\notag\\
+&
+-D_1\sum_{\langle (\mathbf n,\mu),(\mathbf m,\nu)\rangle_{xy}}
+\yhat\cdot
+\left(
+\mathbf S_{\mathbf n,\mu}\times \mathbf S_{\mathbf m,\nu}
+\right)
+-D_2\sum_{\langle (\mathbf n,\mu),(\mathbf m,\nu)\rangle_{xy}}
+\zhat\cdot
+\left(
+\mathbf S_{\mathbf n,\mu}\times \mathbf S_{\mathbf m,\nu}
+\right)
+\notag\\
+&
+-K_a\sum_{\mathbf n,\mu}(S_{\mathbf n,\mu}^{x})^2
+-K_b\sum_{\mathbf n,\mu}(S_{\mathbf n,\mu}^{y})^2
+-K_c\sum_{\mathbf n,\mu}(S_{\mathbf n,\mu}^{z})^2
+-\mu_B g_S\sum_{\mathbf n,\mu}\mathbf h(t)\cdot \mathbf S_{\mathbf n,\mu}.
+\label{eq:fullFeHamiltonian4sub}
+\end{align}
+Here $J_1$ and $J_2$ are the nearest-neighbor and next-nearest-neighbor Heisenberg exchange constants; $D_1$ and $D_2$ are the two independent Dzyaloshinskii--Moriya (DM) components on the in-plane bonds; $K_a$, $K_b$, and $K_c$ are single-ion anisotropy constants favoring the $a$, $b$, and $c$ axes respectively; $g_S\approx 2$ is the Fe$^{3+}$ Land\'e factor; and $\mathbf h(t)$ is the applied magnetic field.
+
+\subsubsection{DM vector symmetry}
+
+The Dzyaloshinskii--Moriya interaction arises from the spin-orbit correction to superexchange. In the Pbnm setting, the NN Fe--Fe bonds in each $ab$ plane connect sublattice pairs related by $S_1$ ($\pi$ rotation about $c$). The Moriya rules then constrain the DM vector $\mathbf D_{ij}$ on each bond. For two NN Fe sites in the $z=\tfrac12$ plane, the midpoint of the bond sits on the $ab$-plane mirror of the Tm site (or rather, the bond lies in a plane containing the $c$ axis). The $ab$-plane mirror sends $D_x\to -D_x$ and $D_y\to +D_y$, $D_z\to +D_z$. Combined with the constraint that the DM vector must be antisymmetric under exchange of the two Fe sites, one obtains $D_x=0$. The surviving components are therefore $\mathbf D=(0,D_1,D_2)$, with $D_1$ (along $b$) responsible for the weak ferromagnetism ($F_x$) and $D_2$ (along $c$) producing the $C_y$ canting.
+
+\subsubsection{Single-ion anisotropy}
+
+The three single-ion anisotropy constants $K_a$, $K_b$, $K_c$ parametrize the second-order crystal-field contribution at the Fe$^{3+}$ site, which has $S$-state ion character ($L=0$ in the free ion, so single-ion anisotropy arises only at second order in spin-orbit coupling). For orthoferrites, $|K_{a,b,c}|\sim 10^{-2}$--$10^{-1}$~K per Fe ion in temperature units, much smaller than the exchange scale but decisive for the magnon gap and the spin-reorientation transition. The $\Gamma_2$ phase is stabilized when $K_c>K_a>K_b$, i.e.\ the $c$ axis is the easy axis for the antiferromagnetic staggered moment. The $b$ axis anisotropy $K_b$ is often the smallest of the three but must be retained for completeness: it controls the out-of-plane fluctuation stiffness and enters the qAFM frequency at order $(K_b-K_a)/J_1$.
+
+This is the Fe layer that should be evolved by LLG in the final implementation. No reduction to two Fe sublattices is assumed in the equations of motion.
+
+\subsubsection{Representative parameter values}
+
+For TmFeO$_3$ and other rare-earth orthoferrites, the Fe$^{3+}$ exchange and anisotropy parameters fall in well-established ranges. Representative values (mostly from THz spectroscopy~\cite{Zhang2016}, nonlinear THz~\cite{Baierl2016}, and the broader orthoferrite literature~\cite{OrthoferriteReview2022}) are:
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\hline
+Parameter & Typical value & Physical role \\
+\hline
+$|J_1|$ & $4$--$5$~meV ($\sim 50$--$60$~K) & NN antiferromagnetic exchange \\
+$|J_2|$ & $\sim 0.1$--$0.5$~meV & NNN exchange (weaker) \\
+$D_1$ & $\sim 0.05$--$0.15$~meV & DM: weak ferromagnetism ($F_x$) \\
+$D_2$ & $\sim 0.03$--$0.10$~meV & DM: $C_y$ canting \\
+$K_c-K_a$ & $\sim 10^{-3}$--$10^{-2}$~meV & In-plane anisotropy (controls $\omega_{\rm qFM}$) \\
+$K_a-K_b$ & $\sim 10^{-3}$~meV & Out-of-plane anisotropy ($\omega_{\rm qAFM}$ correction) \\
+$S$ & $5/2$ & Fe$^{3+}$ spin \\
+$g_S$ & $\approx 2.0$ & Fe$^{3+}$ $g$-factor \\
+\hline
+\end{tabular}
+\end{center}
+The exchange scale $|J_1|$ sets the N\'eel temperature ($T_N\approx 630$~K for TmFeO$_3$), and the ratio $D_1/J_1\sim 10^{-2}$ sets the canting angle. The critical fact for the THz spectroscopy is the large hierarchy between the exchange scale ($\sim 50$~K), the DM scale ($\sim 1$~K), and the anisotropy scale ($\sim 0.01$--$0.1$~K), which produces the characteristic two-branch magnon spectrum with $\omega_{\rm qAFM}\sim 0.7$--$0.85$~THz (exchange-dominated) and $\omega_{\rm qFM}\sim 0.1$--$0.3$~THz (anisotropy-dominated). The precise low-temperature values depend on the temperature-dependent Tm contribution to the effective Fe anisotropy via the Van Vleck mechanism (Sec.~\ref{sec:vanvleck}).
+
+\subsection{Bertaut mode decomposition on the four Fe sublattices}
+
+For each unit cell define the usual four-sublattice combinations
+\begin{align}
+\mathbf F_{\mathbf n} &= \frac{1}{4}\left(
+\mathbf S_{\mathbf n,1}+\mathbf S_{\mathbf n,2}+\mathbf S_{\mathbf n,3}+\mathbf S_{\mathbf n,4}
+\right),\\
+\mathbf G_{\mathbf n} &= \frac{1}{4}\left(
+\mathbf S_{\mathbf n,1}-\mathbf S_{\mathbf n,2}+\mathbf S_{\mathbf n,3}-\mathbf S_{\mathbf n,4}
+\right),\\
+\mathbf C_{\mathbf n} &= \frac{1}{4}\left(
+\mathbf S_{\mathbf n,1}+\mathbf S_{\mathbf n,2}-\mathbf S_{\mathbf n,3}-\mathbf S_{\mathbf n,4}
+\right),\\
+\mathbf A_{\mathbf n} &= \frac{1}{4}\left(
+\mathbf S_{\mathbf n,1}-\mathbf S_{\mathbf n,2}-\mathbf S_{\mathbf n,3}+\mathbf S_{\mathbf n,4}
+\right).
+\end{align}
+Their cell averages are
+\begin{equation}
+\mathbf F=\frac{1}{N_c}\sum_{\mathbf n}\mathbf F_{\mathbf n},
+\qquad
+\mathbf G=\frac{1}{N_c}\sum_{\mathbf n}\mathbf G_{\mathbf n},
+\qquad
+\mathbf C=\frac{1}{N_c}\sum_{\mathbf n}\mathbf C_{\mathbf n},
+\qquad
+\mathbf A=\frac{1}{N_c}\sum_{\mathbf n}\mathbf A_{\mathbf n}.
+\end{equation}
+In the low-temperature phase,
+\begin{equation}
+\Gamma_2 = F_x C_y G_z.
+\end{equation}
+Thus the static background is characterized by
+\begin{equation}
+F_x\neq 0,
+\qquad
+C_y\neq 0,
+\qquad
+G_z\neq 0,
+\end{equation}
+with all other components either vanishing by symmetry or remaining parametrically small.
+
+\subsection{\texorpdfstring{$\Gamma_2$}{Gamma2} equilibrium: canting angles and order-parameter magnitudes}
+
+In the $\Gamma_2$ background the four Fe spins in the local frame are all nearly aligned along $+\hat x_{\rm loc}$ (i.e.\ $S^{x,(\ell)}\approx S$), but with small cantings in $y$ and $z$. Passing to the global frame, the static configuration is determined by minimizing $H_{\rm Fe\text{--}Fe}$ within the $\Gamma_2$ manifold. Parametrize the four sublattice spins in terms of the canting angles $\theta_F$ (for the weak ferromagnetic tilt) and $\theta_C$ (for the $C_y$ canting):
+\begin{equation}
+\mathbf S_\mu^{(g)} = S\bigl(\eta_\mu^x\sin\theta_F,\;\eta_\mu^y\sin\theta_C\cos\theta_F,\;\eta_\mu^z\cos\theta_C\cos\theta_F\bigr),
+\end{equation}
+so that
+\begin{equation}
+F_x = S\sin\theta_F,
+\qquad
+C_y = S\sin\theta_C\cos\theta_F,
+\qquad
+G_z = S\cos\theta_C\cos\theta_F.
+\end{equation}
+In orthoferrites the canting angles are small ($\theta_F,\theta_C\ll 1$), set by the ratio of DM to exchange:
+
+\paragraph{Weak ferromagnetism ($\theta_F$).}
+The DM component $D_1$ ($\hat y$ direction) generates a torque on the spins toward the $a$ axis. The equilibrium tilt is obtained by balancing the DM energy gain against the exchange cost:
+\begin{equation}
+\theta_F \approx \frac{D_1}{2J_1 z_1},
+\label{eq:thetaF}
+\end{equation}
+where $z_1$ is the in-plane NN coordination number ($z_1=4$ per sublattice in the orthorhombic structure). Because $D_1/J_1\sim 10^{-2}$, one has $\theta_F\sim 0.1^\circ$--$0.3^\circ$ and $F_x/G_z=\tan\theta_F\approx D_1/(2J_1 z_1)$.
+
+\paragraph{$C_y$ canting ($\theta_C$).}
+The DM component $D_2$ ($\hat z$ direction) similarly generates a canting toward the $b$ axis:
+\begin{equation}
+\theta_C \approx \frac{D_2}{2J_1 z_1}.
+\label{eq:thetaC}
+\end{equation}
+The $C_y$ component is typically comparable to or slightly smaller than $F_x$.
+
+\paragraph{Order-parameter hierarchy.}
+The dominant magnetic order parameter is therefore $G_z\approx S$, with the small canted components
+\begin{equation}
+\frac{F_x}{G_z}\approx\frac{D_1}{2J_1 z_1}\sim 10^{-2},
+\qquad
+\frac{C_y}{G_z}\approx\frac{D_2}{2J_1 z_1}\sim 10^{-2}.
+\end{equation}
+This hierarchy is essential for the spectroscopy: the dominant Fe order parameter entering the linear Tm--Fe coupling is $G_z\approx S=5/2$, while the weak ferromagnetic moment $F_x$ and the $C_y$ canting provide the small symmetry-breaking fields that enable the secondary coupling channels.
+
+For spectroscopy it is useful to remember the physical roles of the zone-center Fe modes. The qFM branch is the soft anisotropy-dominated oscillation around the $\Gamma_2$ background, while the qAFM branch is the stiffer exchange-dominated branch. In the present four-sublattice language, these two modes are extracted from the linearized dynamics of the coupled $\mathbf F$, $\mathbf G$, $\mathbf C$, and $\mathbf A$ coordinates around the $F_x C_y G_z$ background.
+
+\subsection{Full-lattice LLG dynamics}
+
+The Fe equations of motion are written directly for every Fe site,
+\begin{equation}
+\dot{\mathbf S}_{\mathbf n,\mu}
+=
+-\gamma\,\mathbf S_{\mathbf n,\mu}\times \mathbf H^{\rm eff}_{\mathbf n,\mu}
++\frac{\alpha_{\rm G}}{S}
+\mathbf S_{\mathbf n,\mu}\times \dot{\mathbf S}_{\mathbf n,\mu},
+\label{eq:LLG4sub}
+\end{equation}
+with
+\begin{equation}
+\mathbf H^{\rm eff}_{\mathbf n,\mu}
+=-\frac{\partial H_{\rm tot}}{\partial \mathbf S_{\mathbf n,\mu}},
+\end{equation}
+where $\gamma>0$ is the gyromagnetic ratio, $\alpha_{\rm G}$ is the Gilbert damping constant, and $S=|\mathbf S_{\mathbf n,\mu}|$ is the spin magnitude ($S=5/2$ for Fe$^{3+}$).
+This is the level at which the simulation should be performed. The Bertaut combinations above are then used only for diagnosis of qFM/qAFM content and for writing compact symmetry-allowed couplings.
+
+\subsection{Linearized magnon mode analysis: qFM and qAFM frequencies}
+\label{sec:magnonfreqs}
+
+The zone-center ($\mathbf q=0$) magnon frequencies are obtained by linearizing the LLG equation~\eqref{eq:LLG4sub} around the $\Gamma_2$ equilibrium. In the local frame, where all spins point approximately along $+\hat x_{\rm loc}$, we write
+\begin{equation}
+\mathbf S_\mu^{(\ell)} = S\hat x + \delta S_\mu^y(t)\hat y + \delta S_\mu^z(t)\hat z,
+\end{equation}
+with $|\delta S^{y,z}|\ll S$. The linearized equations of motion decouple into two independent $2\times 2$ problems for the qFM and qAFM sectors. To leading order in DM/$J$ (i.e.\ neglecting terms of order $\theta_{F,C}^2$), the frequencies are:
+
+\paragraph{Quasi-ferromagnetic mode (qFM).}
+The qFM mode is the uniform precession of the net magnetization $\mathbf F$ around the effective anisotropy field. Its frequency is controlled by the anisotropy gap:
+\begin{equation}
+\omega_{\rm qFM}
+\approx
+\gamma\sqrt{2S\bigl(H_E^{\rm eff}+H_A^{xz}\bigr)\cdot 2S H_A^{xz}},
+\label{eq:omqFM}
+\end{equation}
+where
+\begin{equation}
+H_E^{\rm eff} = 2|J_1|z_1 S + 2|J_2|z_2 S
+\end{equation}
+is the effective exchange field (with $z_1,z_2$ the NN and NNN coordination numbers), and
+\begin{equation}
+H_A^{xz} = (K_c - K_a)S
+\end{equation}
+is the anisotropy field in the $xz$ plane. In the limit $H_A^{xz}\ll H_E^{\rm eff}$ (which always holds for orthoferrites), this simplifies to
+\begin{equation}
+\omega_{\rm qFM} \approx \gamma\,2S\sqrt{H_E^{\rm eff}\cdot H_A^{xz}}
+= \gamma\,2S\sqrt{2(|J_1|z_1+|J_2|z_2)(K_c-K_a)}\cdot S.
+\end{equation}
+The qFM frequency therefore vanishes when $K_c=K_a$, which is the spin-reorientation condition: this is why qFM is the ``soft mode'' of the $\Gamma_2$ phase and its frequency drops to zero at $T_{\rm SR}\approx 85$~K.
+
+\paragraph{Quasi-antiferromagnetic mode (qAFM).}
+The qAFM mode is the exchange-stiffness-dominated oscillation of the staggered moment $\mathbf G$ perpendicular to its equilibrium direction. Its frequency is set by the exchange scale:
+\begin{equation}
+\omega_{\rm qAFM}
+\approx
+\gamma\sqrt{2S\bigl(H_E^{\rm eff}+H_A^{xy}\bigr)\cdot 2S\bigl(H_E^{\rm eff}+H_A^{xz}\bigr)},
+\label{eq:omqAFM}
+\end{equation}
+where
+\begin{equation}
+H_A^{xy} = (K_a-K_b)S
+\end{equation}
+is the in-plane anisotropy gap. Since $H_E^{\rm eff}\gg H_A^{xy},H_A^{xz}$, this reduces to
+\begin{equation}
+\omega_{\rm qAFM}\approx \gamma\,2S\,H_E^{\rm eff}\approx \gamma\cdot 4S^2(|J_1|z_1+|J_2|z_2).
+\end{equation}
+The qAFM frequency is therefore nearly temperature-independent and sits at the exchange scale ($\sim 0.7$--$0.85$~THz for TmFeO$_3$).
+
+\paragraph{Physical interpretation and coupling to Tm.}
+The qFM mode involves out-of-phase oscillations of $\delta F_x$ and $\delta G_z$ (and to a lesser extent $\delta C_y$), so it modulates the weak ferromagnetic moment and the staggered moment simultaneously. The qAFM mode involves oscillations of $G_z$ and $F_x$ in phase, predominantly modulating the staggered component. Because the dominant Tm--Fe linear coupling is $J_z^{\rm eff}\cdot G_z$ (the even channel), the qAFM mode---which has the largest $\delta G_z$ amplitude---couples most efficiently to the even Tm sector. The qFM mode, with its smaller $\delta G_z$ component, couples more weakly to Tm linearly but can be strongly excited via the anisotropy-modulation back-action channel.
+
+\paragraph{DM-induced mode mixing.}
+The DM interaction mixes $\mathbf F$ and $\mathbf G$ oscillations, so the physical qFM and qAFM eigenmodes are not purely $F$-like or $G$-like. The mixing angle is of order $D_1/(2J_1 z_1)\sim\theta_F$, the same as the static canting angle. This has the important consequence that even the ``qFM'' mode carries a small $\delta G_z$ component, providing a weak linear coupling channel to the even Tm sector that would be strictly forbidden in an ideal two-sublattice model without DM.
+
+\subsection{Fe-Fe Hamiltonian in the sublattice frame}
+\label{sec:FeFelocalframe}
+
+In the global frame, every Fe spin $\mathbf S_{\mathbf n,\mu}^{(g)}$ is expressed in the laboratory Cartesian basis $(\hat x,\hat y,\hat z)$. The $\Gamma_2$ ground state therefore has spins on different sublattices pointing in different directions (those dictated by the $F_xC_yG_z$ order). When passing to local-frame spins
+\begin{equation}
+\mathbf S_{\mathbf n,\mu}^{(g)} = R_\mu\,\mathbf S_{\mathbf n,\mu}^{(\ell)},
+\qquad
+R_\mu=\mathrm{diag}(\eta_\mu^x,\eta_\mu^y,\eta_\mu^z),
+\label{eq:localframeFe}
+\end{equation}
+with $R_\mu$ given in Eq.~\eqref{eq:Rmu_construction}, all four spins in the $\Gamma_2$ state are approximately aligned along $+\hat x_{\rm loc}$. The price is that the interaction terms acquire sublattice-dependent sign factors.
+
+\paragraph{Heisenberg exchange.}
+
+For an inter-sublattice bond $(\mathbf n,\mu)\leftrightarrow(\mathbf m,\nu)$ with $\mu\neq\nu$,
+\begin{equation}
+\mathbf S_\mu^{(g)}\cdot\mathbf S_\nu^{(g)}
+=
+\bigl(R_\mu\,\mathbf S_\mu^{(\ell)}\bigr)^{\!\mathsf T}\bigl(R_\nu\,\mathbf S_\nu^{(\ell)}\bigr)
+=
+\mathbf S_\mu^{(\ell)\mathsf T}\,\underbrace{R_\mu^{\mathsf T}R_\nu}_{\displaystyle\equiv\,\Pi_{\mu\nu}}\,\mathbf S_\nu^{(\ell)}.
+\end{equation}
+Because $R_\mu$ are diagonal sign matrices, $\Pi_{\mu\nu}=\mathrm{diag}(\eta_\mu^x\eta_\nu^x,\,\eta_\mu^y\eta_\nu^y,\,\eta_\mu^z\eta_\nu^z)$ is again a diagonal matrix of $\pm 1$. For the six distinct sublattice pairs:
+\begin{align}
+\Pi_{12}=\Pi_{34}&=\mathrm{diag}(+1,-1,-1), \notag\\
+\Pi_{13}=\Pi_{24}&=\mathrm{diag}(-1,+1,-1), \notag\\
+\Pi_{14}=\Pi_{23}&=\mathrm{diag}(-1,-1,+1).
+\label{eq:Pimu}
+\end{align}
+For intra-sublattice bonds ($\mu=\nu$), $\Pi_{\mu\mu}=\mathbf{1}$. Therefore the isotropic Heisenberg exchange on an inter-sublattice bond becomes \emph{anisotropic} in the local frame:
+\begin{equation}
+-J\,\mathbf S_\mu^{(g)}\cdot\mathbf S_\nu^{(g)}
+=
+-J\sum_{a=x,y,z}\eta_\mu^a\eta_\nu^a\,S^{a,(\ell)}_\mu\,S^{a,(\ell)}_\nu.
+\end{equation}
+This is physically expected: the local-frame transformation encodes the canting and staggering structure of $\Gamma_2$ into the interaction coefficients, so that the ground state in the local frame is a simple aligned configuration.
+
+\paragraph{Dzyaloshinskii--Moriya interaction.}
+
+The DM interaction on a bond involves the cross product,
+\begin{equation}
+\hat{\mathbf D}\cdot\bigl(\mathbf S_\mu^{(g)}\times\mathbf S_\nu^{(g)}\bigr)
+=
+\hat{\mathbf D}\cdot\bigl(R_\mu\,\mathbf S_\mu^{(\ell)}\times R_\nu\,\mathbf S_\nu^{(\ell)}\bigr).
+\end{equation}
+For diagonal $R_\mu$, the $c$-th component of the cross product picks up the sign $\eta_\mu^a\eta_\nu^b$ for each Levi-Civita term $\epsilon_{abc}$. Explicitly, for a DM vector $\mathbf D=(D_x,D_y,D_z)$, the local-frame expression is
+\begin{equation}
+\sum_{abc}\epsilon_{abc}\,D_c\,\eta_\mu^a\eta_\nu^b\,S^{a,(\ell)}_\mu S^{b,(\ell)}_\nu,
+\end{equation}
+which is equivalent to rescaling the DM-vector components by the sign pattern $(\eta_\mu^y\eta_\nu^z,\;\eta_\mu^z\eta_\nu^x,\;\eta_\mu^x\eta_\nu^y)$. The DM interaction becomes a bond-dependent antisymmetric exchange with sublattice-pair-dependent sign changes on each DM component.
+
+\paragraph{Single-ion anisotropy.}
+
+The single-ion terms $-K_a(S_\mu^{x,(g)})^2-K_c(S_\mu^{z,(g)})^2$ are invariant under the local-frame transformation because
+\begin{equation}
+(S_\mu^{a,(g)})^2=(\eta_\mu^a)^2(S_\mu^{a,(\ell)})^2=(S_\mu^{a,(\ell)})^2.
+\end{equation}
+The squared sign factor is unity. Single-ion anisotropy is therefore the same in both frames.
+
+\paragraph{Summary.}
+
+In the local frame, the Fe-Fe Hamiltonian receives no new coupling constants. The isotropic Heisenberg exchange acquires the diagonal sign matrix $\Pi_{\mu\nu}$ (Eq.~\ref{eq:Pimu}), the DM interaction picks up analogous bond-dependent signs, and the single-ion anisotropy is unchanged. The advantage of the local frame is that the $\Gamma_2$ equilibrium is a uniform state ($\mathbf S^{(\ell)}\approx S\hat x$ on every sublattice), which simplifies linearized spin-wave analyses and the interface with the Tm qutrit dynamics.
+
+\section{Most general symmetry-allowed Tm--Fe coupling on the full lattice}
+
+\subsection{Tm degrees of freedom on every Tm site}
+
+For each Tm site $(\mathbf n,j)$, with $j=1,2,3,4$ the Tm sublattice index, introduce a local three-level density matrix
+\begin{equation}
+\rho_{\mathbf n,j}
+=
+\frac{\mathds 1}{3}+\frac{1}{2}\sum_{a=1}^{8}n^a_{\mathbf n,j}\lambda^a.
+\end{equation}
+The corresponding local qutrit Hamiltonian is
+\begin{equation}
+H^{\rm loc}_{\mathrm{Tm},\mathbf n,j}
+=
+H_{\mathrm{Tm}}^{(0)}
++H_{\mathrm{lin},\mathbf n,j}
++H_{\mathrm{aniso},\mathbf n,j}
++H_{\mathrm{drive},\mathbf n,j}^{(m)}
++H_{\mathrm{drive},\mathbf n,j}^{(e)}.
+\end{equation}
+The total Tm Hamiltonian is then
+\begin{equation}
+H_{\mathrm{Tm}}=\sum_{\mathbf n,j} H^{\rm loc}_{\mathrm{Tm},\mathbf n,j}.
+\end{equation}
+
+\subsection{Most general linear Tm--Fe coupling}
+
+Because the Fe spins are odd under time reversal, only the time-reversal-odd projected Tm magnetic dipoles may couple linearly to them. In the present three-level basis these are precisely
+\begin{equation}
+J_z^{\rm eff},\qquad J_x^{\rm eff},\qquad J_y^{\rm eff},
+\end{equation}
+with $J_z^{\rm eff}\propto \lambda^2$ and $(J_x^{\rm eff},J_y^{\rm eff})\in \mathrm{span}(\lambda^5,\lambda^7)$ as given in Eq.~\eqref{eq:Jeffdefs}. The physically transparent full-lattice coupling is therefore
+\begin{equation}
+H_{\mathrm{Tm\text{--}Fe}}^{\rm lin}
+=
+\sum_{\mathbf n,j,i,\mathbf R}
+\mathcal J_{\mathbf n+\mathbf R,j}^{\mathsf T}
+\mathcal K_{ji}(\mathbf R)
+\mathbf S_{\mathbf n,i},
+\qquad
+\mathcal J_{\mathbf n,j}=
+\begin{pmatrix}
+J^{\rm eff}_{z,\mathbf n,j}\\
+J^{\rm eff}_{x,\mathbf n,j}\\
+J^{\rm eff}_{y,\mathbf n,j}
+\end{pmatrix},
+\label{eq:fullmixednew}
+\end{equation}
+where the row index of $\mathcal K$ is $(J_z^{\rm eff},J_x^{\rm eff},J_y^{\rm eff})$ and the column index is $(S^x,S^y,S^z)$. This is the form that most directly exposes the physical content of the coupling.
+
+To connect back to the SU(3) implementation, define
+\begin{equation}
+\Lambda_{\mathbf n,j}=
+\begin{pmatrix}
+\lambda^{2}_{\mathbf n,j}\\
+\lambda^{5}_{\mathbf n,j}\\
+\lambda^{7}_{\mathbf n,j}
+\end{pmatrix},
+\qquad
+\mathcal J_{\mathbf n,j}=M_J\Lambda_{\mathbf n,j},
+\qquad
+M_J=
+\begin{pmatrix}
+5.264 & 0 & 0\\
+0 & 2.3915 & 0.9128\\
+0 & -2.7866 & 0.4655
+\end{pmatrix}.
+\label{eq:MJdef}
+\end{equation}
+Equation~\eqref{eq:fullmixednew} is therefore equivalent to the $\Lambda^\mathsf T\chi\mathbf S$ implementation form, with the two coupling matrices related by
+\begin{equation}
+\chi_{ji}(\mathbf R)=M_J^{\mathsf T}\mathcal K_{ji}(\mathbf R).
+\end{equation}
+Thus the choice between $\lambda^2$ and $J_z^{\rm eff}$ is not a difference in symmetry content; it is only a difference in operator basis. In the main text it is cleaner to write the Hamiltonian in terms of the physical dipole $J_z^{\rm eff}$.
+
+At the level of the uniform $\mathbf q\approx 0$ sector, the only Fe order-parameter components present in the $\Gamma_2$ phase are $F_x$, $C_y$, and $G_z$. The most general $\mathbf q\approx 0$ reduction of the bond-level tensor is therefore
+\begin{equation}
+H_{\mathrm{lin}}^{\mathbf q\approx 0,\mathrm{gen}}
+=
+-\sum_{\mathbf n,j}
+\mathcal J_{\mathbf n,j}^{\mathsf T}
+\mathsf G_j
+\begin{pmatrix}
+F_x\\
+C_y\\
+G_z
+\end{pmatrix},
+\qquad
+\mathsf G_j=
+\begin{pmatrix}
+g_{zx,j} & g_{zy,j} & g_{zz,j}\\
+g_{xx,j} & g_{xy,j} & g_{xz,j}\\
+g_{yx,j} & g_{yy,j} & g_{yz,j}
+\end{pmatrix},
+\label{eq:q0linear_general}
+\end{equation}
+where each entry of $\mathsf G_j$ is a bond-summed linear combination of the microscopic tensor elements $\mathcal K_{ji}(\mathbf R)$. This is the correct general starting point: a generic microscopic linear coupling produces a full $3\times 3$ tensor in the space $(J_z^{\rm eff},J_x^{\rm eff},J_y^{\rm eff})\otimes(F_x,C_y,G_z)$.
+
+A particularly useful leading-channel truncation keeps only the three channel-aligned terms,
+\begin{equation}
+H_{\mathrm{lin}}^{\mathbf q\approx 0}
+\sim
+-\sum_{\mathbf n,j}
+\left[
+ g_{z,j}\,J^{\rm eff}_{z,\mathbf n,j}\,G_z
++g_{x,j}\,J^{\rm eff}_{x,\mathbf n,j}\,F_x
++g_{y,j}\,J^{\rm eff}_{y,\mathbf n,j}\,C_y
+\right],
+\label{eq:q0linearfull}
+\end{equation}
+which is not the most general $\mathbf q\approx 0$ coupling, but the minimal form that isolates the dominant even-sector $(J_z^{\rm eff}\leftrightarrow G_z)$ and odd-sector $(J_{x,y}^{\rm eff}\leftrightarrow F_x,C_y)$ transfer channels used later in the spectroscopy discussion.
+
+In the full coupling~\eqref{eq:fullmixednew}, summing $\mathcal K$ over Fe neighbors and projecting onto $\mathbf q=0$ generates $3\times 4\times 3=36$ terms ($J_\alpha\cdot B_\beta$), which the $\Gamma_2$ restriction ($F_x,G_z,C_y$ nonzero) collapses to the $9$ entries of $\mathsf G_j$. Time reversal fixes the Tm side to $J_z^{\rm eff}$, $J_x^{\rm eff}$, $J_y^{\rm eff}$, but does not force $\mathsf G_j$ to be diagonal; off-diagonal terms such as $J_z^{\rm eff}F_x$ are generically allowed. The diagonal truncation~\eqref{eq:q0linearfull} is nevertheless useful as a leading-order channel decomposition: $G_z$ feeds $J_z^{\rm eff}\sim\lambda^2$ (even), while $F_x$ and $C_y$ feed $J_{x,y}^{\rm eff}\in\mathrm{span}(\lambda^5,\lambda^7)$ (odd). In the inversion-paired $\chi/\chi_{\rm inv}$ implementation, the bond symmetry generates an additional static $\mathbf q=0$ cancellation in the $\lambda^{5,7}$ sector (Appendix~\ref{app:q0cancel}). The actual numerics should use the full bond-level form~\eqref{eq:fullmixednew}.
+
+\subsection{Most general anisotropy-modulation coupling}
+
+The nonlinear THz work~\cite{Baierl2016} shows that resonant excitation of the Tm orbital sector can transiently modify the effective Fe anisotropy and thereby strongly enhance the qFM response. What is firmly established by that literature is the \emph{existence} of an anisotropy-mediated rare-earth--Fe coupling mechanism. What is \emph{not} fixed by the current literature is a unique microscopic bond operator for that mechanism. In the present notes we therefore separate the symmetry statement from any stronger microscopic claim.
+
+In the Gell-Mann language, such a mechanism must couple time-reversal-even qutrit operators to time-reversal-even Fe bilinears. In the present three-level basis the time-reversal-even Gell-Mann operators are precisely
+\begin{equation}
+\lambda^1,\;\lambda^3,\;\lambda^4,\;\lambda^6,\;\lambda^8,
+\end{equation}
+of which $\lambda^{1,3,8}\in\mathcal A_1^+$ (even mirror parity) and $\lambda^{4,6}\in\mathcal A_2^+$ (odd mirror parity).
+The most general full-lattice trilinear Fe--Tm coupling at this level is
+\begin{equation}
+H_{\rm aniso}^{\rm gen}
+=
+\sum_{\mathbf n,j}\sum_{\substack{\mathbf R,i\\\mathbf R',i'}}\sum_{a,bc}
+\mathcal V_{ji,i'}^{a;bc}(\mathbf R,\mathbf R')\,\lambda^a_{\mathbf n,j}\,
+S^b_{\mathbf n+\mathbf R,i}S^c_{\mathbf n+\mathbf R',i'},
+\label{eq:Hanisogen}
+\end{equation}
+where the sum over $a$ runs over $a\in\{1,3,4,6,8\}$. For a generic ordered Fe pair $(i,\mathbf R;b)$ and $(i',\mathbf R';c)$, the Fe side carries the full $3\times 3=9$ Cartesian channels. Only when the two Fe legs coincide does one recover the usual symmetric on-site spin-quadrupole tensor with 6 independent components.
+
+The dominant microscopic piece retained in the implementation is the on-site specialization
+\begin{equation}
+H_{\rm aniso}^{\rm on\text{-}site}
+=
+\sum_{\mathbf n,j,\mathbf R,i}\sum_{a,bc}
+W_{ji}^{a;bc}(\mathbf R)\,\lambda^a_{\mathbf n,j}\,S^b_{\mathbf n+\mathbf R,i}S^c_{\mathbf n+\mathbf R,i},
+\label{eq:Honsite}
+\end{equation}
+with
+\begin{equation}
+W_{ji}^{a;bc}(\mathbf R)=\mathcal V_{ji,i}^{a;bc}(\mathbf R,\mathbf R),
+\end{equation}
+so $W_{ji}^{a;bc}(\mathbf R)$ is symmetric in $b,c$. This is the trilinear analogue of the linear coupling~\eqref{eq:fullmixednew}: each Tm site couples to the spin-quadrupole moment $S_i^b S_i^c$ on each of its Fe neighbors. A residual inter-site sector,
+\begin{equation}
+H_{\rm aniso}^{\rm inter}
+=
+\sum_{\mathbf n,j}\sum_{\substack{\mathbf R,i\\\mathbf R',i'}}\sum_{a,bc}
+V_{ji,i'}^{a;bc}(\mathbf R,\mathbf R')\,\lambda^a_{\mathbf n,j}\,S^b_{\mathbf n+\mathbf R,i}S^c_{\mathbf n+\mathbf R',i'},
+\label{eq:Hinter}
+\end{equation}
+accounts for triplets with $(i,\mathbf R)\neq(i',\mathbf R')$. It is a three-body coupling (one Tm, two Fe). This sector is expected to be parametrically weaker, but it is important conceptually because it provides one natural route by which the odd channel can survive even when the most truncated on-site scheme exhibits additional cancellations.
+
+At the level of the uniform $\mathbf q\approx 0$ sector, the Fe bilinears reduce to a small set of Bertaut-mode invariants. In the $\Gamma_2$ background (spins in the $xz$ plane, $S_y\approx 0$), a convenient coarse-grained choice is
+\begin{equation}
+S_i^z S_i^z - S_i^x S_i^x \to G_z^2-F_x^2\equiv \mathcal I_{A_1}^{\rm Fe},
+\qquad
+S_i^x S_i^z \to F_xG_z\equiv \mathcal I_{A_2}^{\rm Fe}.
+\label{eq:Feinvariantsfull}
+\end{equation}
+The first is mirror-even and time-reversal-even; the second is mirror-odd and time-reversal-even. The important point is that Eq.~\eqref{eq:Feinvariantsfull} should be read as a \emph{representative channel decomposition} in the $\Gamma_2$ background. In particular, the odd invariant $F_xG_z$ is a convenient coarse-grained representative of the leading odd anisotropy coordinate, not a uniquely established microscopic bond operator.
+
+For the coupling to be a scalar under $R_z(\pi)$, the parities of the Fe bilinear and the Tm operator must multiply to $+1$, selecting two allowed channels: $A_1^+$ Tm operators ($\lambda^{1,3,8}$) pair with the even bilinear, and $A_2^+$ Tm operators ($\lambda^{4,6}$) pair with the odd bilinear. The most general symmetry-allowed $\mathbf q\approx 0$ anisotropy-renormalization form is therefore
+\begin{align}
+H_{\mathrm{aniso}}^{\mathbf q\approx 0}
+=&
+-\sum_{\mathbf n,j}
+\left[
+ u_{1,j}\lambda^1_{\mathbf n,j}
++u_{3,j}\lambda^3_{\mathbf n,j}
++u_{8,j}\lambda^8_{\mathbf n,j}
+\right]\mathcal I_{A_1}^{\rm Fe}
+\notag\\
+&
+-\sum_{\mathbf n,j}
+\left[
+ v_{4,j}\lambda^4_{\mathbf n,j}
++v_{6,j}\lambda^6_{\mathbf n,j}
+\right]\mathcal I_{A_2}^{\rm Fe},
+\label{eq:Hanisofull}
+\end{align}
+which is the anisotropy-modulation analogue of Eq.~\eqref{eq:q0linear_general}. Here $u_{a,j}$ and $v_{a,j}$ are effective $\mathbf q\approx 0$ coefficients built from the underlying bond tensors: if only Eq.~\eqref{eq:Honsite} is kept they are bond-summed combinations of $W_{ji}^{a;bc}(\mathbf R)$, while inclusion of Eq.~\eqref{eq:Hinter} renormalizes them further.
+
+Equation~\eqref{eq:Hanisofull} should therefore be interpreted as a coarse-grained, symmetry-allowed channel decomposition of the anisotropy renormalization, rather than as proof that a single microscopic invariant such as $F_xG_z$ is uniquely responsible. In particular, for the specific inversion-paired on-site $\chi/\chi_{\rm inv}$ ansatz analyzed below, the static uniform $A_2^+$ contribution cancels exactly at $\mathbf q=0$; the odd channel is then activated only by bond-level finite-$\mathbf q$ dynamics or by enlarging the microscopic model to include inter-site terms such as Eq.~\eqref{eq:Hinter}. This distinction is worked out explicitly in Sec.~\ref{sec:anisobonds}.
+
+As with the linear coupling, Eq.~\eqref{eq:Hanisofull} is most useful as a diagnostic reduction of the bond-level theory. The actual numerics still evaluate the coupling on the full bond list.
+
+Two remarks are important for the 2DCS peak analysis.
+\begin{enumerate}
+    \item The $A_1^+$ qutrit operators $\lambda^{1,3,8}$ couple to the even Fe anisotropy invariant. These terms are especially important for rectified features because $\lambda^3$ and $\lambda^8$ encode population imbalance.
+    \item The $A_2^+$ qutrit operators $\lambda^{4,6}$ provide the minimal \emph{effective} odd-sector vertex required to reproduce the strong qFM-linked VV peaks. In the present formulation this odd channel should be viewed as a symmetry-allowed phenomenological ansatz, to be realized in practice by bond-level dynamics and/or by inter-site extensions of the microscopic coupling, rather than as an already-established unique microscopic bond term.
+\end{enumerate}
+
+
+\subsection{Bond-level symmetry analysis of the Tm--Fe couplings}
+\label{sec:bondsymmetry}
+
+Equations~\eqref{eq:fullmixednew} and~\eqref{eq:Hanisogen} specify the most general operator content of the linear and anisotropy-modulation couplings, but they still leave the bond tensors $\mathcal K_{ji}(\mathbf R)$ and $\mathcal V_{ji,i'}^{a;bc}(\mathbf R,\mathbf R')$ unrestricted. The cleanest way to organize the remaining symmetry analysis is to proceed in two steps.
+
+First, one identifies how the space group acts on the \emph{operators} once the Tm and Fe sublattice frames have been fixed. This is the point at which the local-frame construction does its real work: $S_1$ and $S_2$ become trivial on the operator indices, while inversion remains as the only nontrivial internal action.
+
+Second, one lets the same space-group elements act on the \emph{labeled geometric objects}---Tm--Fe bonds for the linear coupling and Fe--Fe--Tm triplets for the anisotropy-modulation coupling. The bond tensors are then constrained by combining the operator action from the first step with the orbit structure of these labeled objects.
+
+This order is conceptually cleaner than starting from the bonds themselves, because it isolates the universal operator algebra from the geometry-dependent bond enumeration.
+
+\subsubsection{Space-group action on local-frame Fe and Tm operators}
+
+Let
+\begin{equation}
+\mathbf S^{(\ell)}_{\mathbf n,i}=R_i^{\mathsf T}\mathbf S^{(g)}_{\mathbf n,i},
+\qquad
+\mathcal J^{(\ell)}_{\mathbf n,j}=R_j^{\mathsf T}\mathcal J^{(g)}_{\mathbf n,j},
+\end{equation}
+denote the Fe spin and projected Tm magnetic-dipole vectors in the local sublattice frames, with
+\(
+\mathcal J=(J_z^{\rm eff},J_x^{\rm eff},J_y^{\rm eff})^{\mathsf T}
+\)
+in the ordering used throughout the coupling section. For the projected time-even qutrit operators we likewise work with the local-frame Gell-Mann basis $\lambda^{a,(\ell)}_{\mathbf n,j}$ constructed in Secs.~\ref{sec:sublatticeframes} and~\ref{eq:Pzaction}.
+
+The direct subgroup
+\[
+D=\{E,S_1,S_2,S_1S_2\}
+\]
+acts trivially on these local-frame operators. Concretely, if $g\in D$ maps $(\mathbf n,i)\mapsto(\mathbf n_g,i_g)$ and $(\mathbf n,j)\mapsto(\mathbf n_g,j_g)$, then
+\begin{align}
+\mathbf S^{(\ell)}_{\mathbf n_g,i_g} &= \mathbf S^{(\ell)}_{\mathbf n,i},
+\label{eq:FeDirectLocal}\\
+\mathcal J^{(\ell)}_{\mathbf n_g,j_g} &= \mathcal J^{(\ell)}_{\mathbf n,j},
+\label{eq:TmJDirectLocal}\\
+\lambda^{a,(\ell)}_{\mathbf n_g,j_g} &= \lambda^{a,(\ell)}_{\mathbf n,j}.
+\label{eq:TmLambdaDirectLocal}
+\end{align}
+This is simply the local-frame statement that the point-part rotation accompanying $S_1$ or $S_2$ is exactly absorbed by the sublattice frame.
+
+Inversion is different. For the Fe spins, $\sigma_I^{\rm Fe}=e$ and the spin is an axial vector, so the local-frame Fe operator is unchanged:
+\begin{equation}
+I:\quad
+\mathbf S^{(\ell)}_{\mathbf n,i}\mapsto \mathbf S^{(\ell)}_{\mathbf n_I,i}.
+\label{eq:FeInvLocal}
+\end{equation}
+For the projected Tm magnetic dipoles, inversion exchanges Tm sublattices and leaves a residual $P_z$ action in the local frame,
+\begin{equation}
+I:\quad
+\mathcal J^{(\ell)}_{\mathbf n,j}\mapsto
+\tilde P_z\,\mathcal J^{(\ell)}_{\mathbf n_I,\bar j},
+\qquad
+\tilde P_z=\mathrm{diag}(+1,-1,-1)
+\ \text{in the }(J_z^{\rm eff},J_x^{\rm eff},J_y^{\rm eff})\text{ ordering}.
+\label{eq:TmJInvLocal}
+\end{equation}
+Equivalently, $J_z^{\rm eff}$ is inversion-even in the local frame, while $J_x^{\rm eff}$ and $J_y^{\rm eff}$ pick up a minus sign.
+
+For the time-even Gell-Mann operators relevant to $H_{\rm aniso}$, inversion acts through the parity factor inherited from the $P_z$ conjugation discussed earlier:
+\begin{equation}
+I:\quad
+\lambda^{a,(\ell)}_{\mathbf n,j}\mapsto
+\eta_P(a)\,\lambda^{a,(\ell)}_{\mathbf n_I,\bar j}.
+\label{eq:TmLambdaInvLocal}
+\end{equation}
+Among the channels retained in the anisotropy-modulation term,
+\begin{equation}
+\eta_P(a)=+1 \quad \text{for } a\in\{1,3,8\}\equiv A_1^+,
+\qquad
+\eta_P(a)=-1 \quad \text{for } a\in\{4,6\}\equiv A_2^+.
+\label{eq:etaPchannels}
+\end{equation}
+
+These four equations are the essential operator-level input. Once they are known, the bond constraints follow mechanically.
+
+\subsubsection{Action on labeled bonds and triplets}
+
+A labeled Tm--Fe bond is
+\begin{equation}
+B=(j,i,\mathbf R),
+\qquad
+\boldsymbol\delta_{ji}(\mathbf R)=(f_i+\mathbf T_{\mathbf R})-t_j,
+\end{equation}
+and a labeled Fe--Fe--Tm triplet is
+\begin{equation}
+\Xi=(j,i,\mathbf R;i',\mathbf R').
+\end{equation}
+The on-site anisotropy model is the special subset $\Xi=(j,i,\mathbf R;i,\mathbf R)$.
+
+A space-group element $g$ acts on the labels by
+\begin{align}
+g:B=(j,i,\mathbf R)&\mapsto B_g=(j_g,i_g,\mathbf R_g),\\
+g:\Xi=(j,i,\mathbf R;i',\mathbf R')&\mapsto
+\Xi_g=(j_g,i_g,\mathbf R_g;i'_g,\mathbf R'_g),
+\end{align}
+with the sublattice permutations supplied by $\sigma_g^{\rm Tm}$ and $\sigma_g^{\rm Fe}$ and the cell offsets shifted by the translational part of $g$.
+
+The important point is that the \emph{geometry} only tells us which labeled object maps to which other labeled object. The nontrivial signs are already fully contained in Eqs.~\eqref{eq:FeDirectLocal}--\eqref{eq:etaPchannels}. This is why the analysis is simplest when one separates operator action from bond action.
+
+\subsubsection{Induced constraint on the linear bond tensor}
+
+Define the local-frame linear coupling tensor by
+\begin{equation}
+\mathcal K^{(\ell)}_{ji}(\mathbf R)
+=
+R_j^{\mathsf T}\,\mathcal K^{(g)}_{ji}(\mathbf R)\,R_i.
+\label{eq:Klocaldef}
+\end{equation}
+The Hamiltonian is then
+\begin{equation}
+H_{\mathrm{Tm\text{--}Fe}}^{\rm lin}
+=
+\sum_{\mathbf n,j,i,\mathbf R}
+\mathcal J_{\mathbf n+\mathbf R,j}^{(\ell)\mathsf T}\,
+\mathcal K^{(\ell)}_{ji}(\mathbf R)\,
+\mathbf S_{\mathbf n,i}^{(\ell)}.
+\end{equation}
+
+Because both operator sectors are trivial under the direct subgroup, every $D$-related bond carries exactly the same local-frame tensor:
+\begin{equation}
+\boxed{
+\mathcal K^{(\ell)}(B_g)=\mathcal K^{(\ell)}(B)
+\qquad\text{for }g\in D.
+}
+\label{eq:S1S2trivial}
+\end{equation}
+Thus $S_1$ and $S_2$ do not generate new tensor structures; they only identify symmetry-related bonds.
+
+Inversion acts nontrivially only on the Tm operator index, so if $B_I=(\bar j,i,\mathbf R_I)$ is the inversion partner of $B=(j,i,\mathbf R)$, then
+\begin{equation}
+\boxed{
+\mathcal K^{(\ell)}(B_I)=\tilde P_z\,\mathcal K^{(\ell)}(B).
+}
+\label{eq:inversionK}
+\end{equation}
+Writing the tensor in the row basis $(J_z^{\rm eff},J_x^{\rm eff},J_y^{\rm eff})$ and column basis $(S^x,S^y,S^z)$,
+\begin{equation}
+\mathcal K^{(\ell)}=
+\begin{pmatrix}
+K_{zx} & K_{zy} & K_{zz}\\
+K_{xx} & K_{xy} & K_{xz}\\
+K_{yx} & K_{yy} & K_{yz}
+\end{pmatrix},
+\end{equation}
+the inversion partner carries
+\begin{equation}
+\tilde P_z\,\mathcal K^{(\ell)}
+=
+\begin{pmatrix}
++K_{zx} & +K_{zy} & +K_{zz}\\
+-K_{xx} & -K_{xy} & -K_{xz}\\
+-K_{yx} & -K_{yy} & -K_{yz}
+\end{pmatrix}.
+\label{eq:PzKcomponents}
+\end{equation}
+Hence the $J_z^{\rm eff}$ row is inversion-even, whereas the $J_x^{\rm eff}$ and $J_y^{\rm eff}$ rows are inversion-odd.
+
+If an orbit is self-paired under inversion, Eq.~\eqref{eq:inversionK} becomes the internal constraint
+\[
+\mathcal K^{(\ell)}=\tilde P_z\,\mathcal K^{(\ell)},
+\]
+so only the first row survives and the orbit carries 3 independent parameters. If the orbit is not self-paired, one representative $3\times 3$ tensor determines the full inversion pair, so the orbit carries 9 independent parameters.
+
+\subsubsection{Induced constraint on the anisotropy-modulation tensor}
+\label{sec:anisobonds}
+
+For the general trilinear coupling of Eq.~\eqref{eq:Hanisogen}, define the local-frame tensor by
+\begin{equation}
+\mathcal V^{(\ell),a;bc}_{ji,i'}(\mathbf R,\mathbf R')
+=
+\eta_P^{(j)}(a)\,\eta_i^b\,\eta_{i'}^c\,
+\mathcal V^{(g),a;bc}_{ji,i'}(\mathbf R,\mathbf R'),
+\label{eq:Wlocaldef}
+\end{equation}
+where $\eta_P^{(j)}(a)$ is the accumulated Tm parity factor from the sublattice-frame construction and $\eta_i^b$, $\eta_{i'}^c$ are the Fe frame signs on the two Fe legs. The Hamiltonian becomes
+\begin{equation}
+H_{\rm aniso}^{\rm gen}
+=
+\sum_{\mathbf n,j}\sum_{\substack{\mathbf R,i\\\mathbf R',i'}}\sum_{a,bc}
+\mathcal V^{(\ell),a;bc}_{ji,i'}(\mathbf R,\mathbf R')\,
+\lambda^{a,(\ell)}_{\mathbf n,j}\,
+S^{b,(\ell)}_{\mathbf n+\mathbf R,i}\,
+S^{c,(\ell)}_{\mathbf n+\mathbf R',i'}.
+\end{equation}
+
+Now the same operator logic applies. For every direct-subgroup image $\Xi_g$ of a triplet $\Xi$,
+\begin{equation}
+\boxed{
+\mathcal V^{(\ell),a;bc}(\Xi_g)=\mathcal V^{(\ell),a;bc}(\Xi)
+\qquad\text{for }g\in D.
+}
+\label{eq:Vdirecttrivial}
+\end{equation}
+Inversion acts only on the Tm Gell-Mann index:
+\begin{equation}
+\boxed{
+\mathcal V^{(\ell),a;bc}(\Xi_I)=\eta_P(a)\,\mathcal V^{(\ell),a;bc}(\Xi).
+}
+\label{eq:Vinversion}
+\end{equation}
+The Fe bilinear carries no extra inversion factor because the Fe spin is an axial vector and $\sigma_I^{\rm Fe}=e$.
+
+Equation~\eqref{eq:Vinversion} is the precise statement behind the even/odd split used throughout the macroscopic discussion. On a self-paired triplet orbit, all $A_2^+$ channels ($a=4,6$) are forced to vanish, whereas the $A_1^+$ channels ($a=1,3,8$) survive. For a non-self-paired orbit, one representative tensor determines the inversion partner and no component is annihilated on the representative itself.
+
+The on-site tensor $W^{a;bc}_{ji}(\mathbf R)$ used in the reduced implementation is the subset
+\[
+W^{a;bc}_{ji}(\mathbf R)=\mathcal V^{a;bc}_{ji,i}(\mathbf R,\mathbf R),
+\]
+so it obeys exactly the same symmetry rules as Eq.~\eqref{eq:Vinversion}; the only extra simplification is that the coincident Fe legs force the Fe bilinear to be symmetric in $(b,c)$.
+
+\subsubsection{Bond classification: distance shells and symmetry orbits}
+\label{sec:bondclassification}
+
+Once the operator action is fixed, the remaining task is purely geometric: classify the labeled objects by their distance shell and by their orbit under the full space group.
+
+For the linear coupling, one enumerates all bonds $(j,i,\mathbf R)$ within a distance cutoff, groups them by bond length $|\boldsymbol\delta_{ji}(\mathbf R)|$, and then quotients each shell by the $D_{2h}$ action generated by $\{S_1,S_2,I\}$. The direct subgroup contributes the four images
+\[
+\{E,S_1,S_2,S_1S_2\},
+\]
+all carrying the same local-frame tensor by Eq.~\eqref{eq:S1S2trivial}. The inversion coset
+\[
+\{I,S_1I,S_2I,S_1S_2I\}
+\]
+generates the four partner images related by Eq.~\eqref{eq:inversionK}.
+
+For the anisotropy-modulation coupling, the same construction is carried out on the labeled triplets $\Xi=(j,i,\mathbf R;i',\mathbf R')$. The on-site model simply inherits the same bond orbits because the second Fe leg coincides with the first.
+
+This organization leads directly to the generic counting rules summarized in Table~\ref{tab:orbitreduction}. The concrete nearest-neighbor Fe--Tm orbit content relevant for the present implementation is listed in Table~\ref{tab:nnorbitsummary}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{l l l l l}
+\hline
+Coupling & Labeled object & Local-frame orbit rule & Non-self-paired orbit & Self-paired orbit \\
+\hline
+Linear $\mathcal K$ & bond $(j,i,\mathbf R)$ & $S_{1,2}$ identify the 4 direct images; $I$ maps the partner to $\tilde P_z\mathcal K^{(\ell)}$ & 9 parameters (one $3\times 3$ representative tensor) & 3 parameters; only the $J_z^{\rm eff}$ row survives \\
+General trilinear $\mathcal V$ & triplet $(j,i,\mathbf R;i',\mathbf R')$ & $S_{1,2}$ identify the 4 direct images; $I$ maps the partner to $\eta_P(a)\mathcal V^{(\ell),a;bc}$ & 45 parameters ($5$ Tm-even channels $\times 9$ Fe-pair channels) & 27 parameters; only $A_1^+$ Tm channels survive \\
+On-site trilinear $W$ & triplet $(j,i,\mathbf R;i,\mathbf R)$ & same orbit rule as $\mathcal V$, but the coincident Fe legs force $bc$ to be symmetric & 30 parameters ($5\times 6$) & 18 parameters ($3\times 6$) \\
+\hline
+\end{tabular}
+\caption{Generic space-group-orbit reduction in the local frames. The trilinear counts use the time-even Tm operators $a\in\{1,3,4,6,8\}$.}
+\label{tab:orbitreduction}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{c c l l l}
+\hline
+Orbit & $d$ (\AA) & Fe$_0$ representative $\chi$ bond & Fe$_0$ inversion partner & Orbit status \\
+\hline
+1 & 3.054 & Tm$_3$, $(-1,0,0)$ & Tm$_0$, $(0,0,0)$ & non-self-paired; $8=4+4$ images \\
+2 & 3.179 & Tm$_2$, $(0,0,0)$ & Tm$_1$, $(-1,0,0)$ & non-self-paired; $8=4+4$ images \\
+3 & 3.357 & Tm$_1$, $(0,0,0)$ & Tm$_2$, $(-1,0,0)$ & non-self-paired; $8=4+4$ images \\
+4 & 3.711 & Tm$_0$, $(0,-1,0)$ & Tm$_3$, $(-1,1,0)$ & non-self-paired; $8=4+4$ images \\
+\hline
+\end{tabular}
+\caption{The four nearest-neighbor Fe--Tm space-group orbits in TmFeO$_3$. In every row, the direct subgroup $\{E,S_1,S_2,S_1S_2\}$ generates the four $\chi$-type images and the inversion coset $\{I,S_1I,S_2I,S_1S_2I\}$ generates the four partner images. The present on-site trilinear implementation uses exactly the same four bond orbits, replacing $\chi/\chi_{\rm inv}$ by $W/W_{\rm inv}$. Each row therefore carries 9 raw linear parameters or 30 raw on-site trilinear parameters before the extra orbit-universality and $\Gamma_2$ truncations used in the code. Full bond tables are given in Appendix~\ref{app:bondtable} and Appendix~\ref{app:trilineartable}.}
+\label{tab:nnorbitsummary}
+\end{table}
+
+\subsubsection{Macroscopic consequence for the \texorpdfstring{$\mathbf q\approx 0$}{q=0} anisotropy channels}
+
+The operator-first organization makes the origin of the macroscopic anisotropy channels transparent. The $A_1^+$ qutrit operators $\lambda^{1,3,8}$ are inversion-even and therefore naturally couple to the even Fe anisotropy invariant, while the $A_2^+$ operators $\lambda^{4,6}$ are inversion-odd and therefore require an inversion-odd Fe anisotropy coordinate or a bond pattern that effectively realizes one.
+
+In the coarse-grained $\Gamma_2$/$\mathbf q\approx 0$ reduction this gives
+\[
+\mathcal I_{A_1}^{\rm Fe}\sim G_z^2-F_x^2,
+\qquad
+\mathcal I_{A_2}^{\rm Fe}\sim F_xG_z,
+\]
+which is exactly the split used in Eq.~\eqref{eq:Hanisofull}. For the specific inversion-paired on-site nearest-neighbor implementation, the $A_2^+$ contribution cancels identically at strictly uniform $\mathbf q=0$, because each orbit contributes equal Fe bilinears with opposite $\eta_P(a)$ signs. The odd sector therefore becomes active only through finite-$\mathbf q$ bond dynamics, inter-site extensions, or a more general microscopic ansatz. This is why the $A_2^+$ part of $H_{\rm aniso}$ should be read as a symmetry-allowed effective channel rather than as a literal static on-site $\mathbf q=0$ field of the most truncated implementation.
+
+
+\subsubsection{Uniform \texorpdfstring{$\mathbf q\approx 0$}{q≈0} diagnostics and cancellation patterns}
+\label{sec:q0diagnostics}
+
+``Symmetry-allowed on a bond'' and ``visible in the strict $\mathbf q=0$ channel'' are not the same. For every orbit $\Xi$ with inversion partner $\Xi_I$, the uniform projection of Tm channel $a$ has the form
+\begin{equation}
+\mathcal C_a^{\mathbf q=0}(\Xi)
+\propto
+\mathcal M_a(\Xi)\,\mathcal O^{\rm Fe}_{\Xi}
++
+\eta_P(a)\,\mathcal M_a(\Xi)\,\mathcal O^{\rm Fe}_{\Xi_I}.
+\label{eq:q0pairdiagnostic}
+\end{equation}
+If $\mathcal O^{\rm Fe}_{\Xi_I}=\mathcal O^{\rm Fe}_{\Xi}$ (same Fe operator on the pair), the sum is $\propto [1+\eta_P(a)]$, so inversion-even channels survive and inversion-odd channels cancel. For the nearest-neighbor on-site implementation, the inversion-paired bonds in each orbit probe identical Fe bilinears at $\mathbf q=0$. The consequence is:
+\begin{itemize}
+\item $A_1^+$ channels ($\lambda^{1,3,8}$) add constructively;
+\item $A_2^+$ channels ($\lambda^{4,6}$) cancel exactly:
+$[1+\eta_P(4,6)]W\,\mathcal I_{A_2}^{\rm Fe}=0$.
+\item For the linear coupling, $J_z^{\rm eff}\sim\lambda^2$ survives while $J_{x,y}^{\rm eff}\sim\lambda^{5,7}$ cancel (see Appendix~\ref{app:q0cancel}).
+\end{itemize}
+The cancellation fails in three ways: (i) at finite momentum, where magnon phases differ across bonds; (ii) in the inter-site trilinear sector~\eqref{eq:Hinter}; (iii) with additional bond shells or tensor structures.
+
+\subsubsection{Independent parameter count}
+
+For the four non-self-paired Fe--Tm bond orbits: 36 raw linear parameters ($9$ per orbit) and 120 raw on-site trilinear parameters ($30$ per orbit). The Bertaut-mode couplings used in the $\mathbf q\approx 0$ phenomenology are specific linear combinations of these bond tensors, not independent new parameters.
+
+\subsection{Drive terms}
+
+The total drive Hamiltonian is
+\begin{equation}
+H_{\rm drive}=H_{\rm drive}^{\rm Fe}+H_{\rm drive}^{\rm Tm,m}+H_{\rm drive}^{\rm Tm,e}.
+\end{equation}
+The Fe Zeeman drive is
+\begin{equation}
+H_{\rm drive}^{\rm Fe}
+=-\mu_B g_S\sum_{\mathbf n,\mu}\mathbf h(t)\cdot \mathbf S_{\mathbf n,\mu}.
+\end{equation}
+The Tm magnetic-dipole drive is
+\begin{equation}
+H_{\rm drive}^{\rm Tm,m}
+=-\mu_B g_J\sum_{\mathbf n,j}
+\left[
+ h_x(t)J^{\rm eff}_{x,\mathbf n,j}
++h_y(t)J^{\rm eff}_{y,\mathbf n,j}
++h_z(t)J^{\rm eff}_{z,\mathbf n,j}
+\right],
+\end{equation}
+where $g_J=7/6$ is the Tm$^{3+}$ Land\'e factor, and the Tm electric-dipole drive is
+\begin{equation}
+H_{\rm drive}^{\rm Tm,e}
+=-\sum_{\mathbf n,j}
+\left[
+ e_x(t)d^{\rm eff}_{x,\mathbf n,j}
++e_y(t)d^{\rm eff}_{y,\mathbf n,j}
++e_z(t)d^{\rm eff}_{z,\mathbf n,j}
+\right],
+\end{equation}
+with $d_x^{\rm eff}$, $d_y^{\rm eff}$, and $d_z^{\rm eff}$ given in Eq.~\eqref{eq:deffdefs}.
+
+For the geometry emphasized in the discussion,
+\begin{equation}
+H\parallel a,\qquad E\parallel c,
+\end{equation}
+one has
+\begin{equation}
+h_x(t)\neq 0,
+\qquad e_z(t)\neq 0,
+\qquad h_y=h_z=e_x=e_y=0.
+\end{equation}
+Then the Tm drive addresses only the odd-sector generators
+\begin{equation}
+\lambda^4,\lambda^5,\lambda^6,\lambda^7,
+\end{equation}
+so it directly favors the odd transitions
+\begin{equation}
+E_1(A_1)\leftrightarrow E_3(A_2),
+\qquad
+E_2(A_1)\leftrightarrow E_3(A_2),
+\end{equation}
+while the even transition
+\begin{equation}
+E_1(A_1)\leftrightarrow E_2(A_1)
+\end{equation}
+remains indirect or subleading in this geometry.
+
+\section{Density-matrix dynamics of the Tm qutrits}
+
+\subsection{Local SU(3) Bloch equations}
+
+For each Tm site $(\mathbf n,j)$,
+\begin{equation}
+\rho_{\mathbf n,j}
+=
+\frac{\mathds 1}{3}+\frac{1}{2}\sum_{a=1}^{8}n^a_{\mathbf n,j}\lambda^a.
+\end{equation}
+If the local effective Hamiltonian is written as
+\begin{equation}
+H^{\rm loc}_{\mathrm{Tm},\mathbf n,j}
+=h_{0;\mathbf n,j}\mathds 1+\frac{1}{2}\sum_{a=1}^{8} h^a_{\mathbf n,j}\lambda^a,
+\end{equation}
+then the coherent dynamics is
+\begin{equation}
+\dot n^a_{\mathbf n,j}
+=\frac{1}{\hbar}\sum_{b,c}f_{abc}\,h^b_{\mathbf n,j}\,n^c_{\mathbf n,j}.
+\end{equation}
+A phenomenological relaxation model is
+\begin{equation}
+\dot n^a_{\mathbf n,j}
+=\frac{1}{\hbar}\sum_{b,c}f_{abc}\,h^b_{\mathbf n,j}\,n^c_{\mathbf n,j}
+-\Gamma_a\big(n^a_{\mathbf n,j}-n^{a,\rm eq}_{\mathbf n,j}\big),
+\label{eq:blochdampedfull}
+\end{equation}
+where $\Gamma_a$ is the relaxation rate for component $a$ and $n^{a,\rm eq}$ is the thermal equilibrium value of the Bloch vector.
+
+\subsubsection{Thermal equilibrium Bloch vector}
+
+At thermal equilibrium the density matrix is diagonal in the energy basis, $\rho^{\rm eq}=\mathrm{diag}(p_1,p_2,p_3)$ with Boltzmann weights
+\begin{equation}
+p_\alpha = \frac{e^{-\epsilon_\alpha/k_BT}}{Z},
+\qquad
+Z=\sum_{\alpha=1}^{3}e^{-\epsilon_\alpha/k_BT}.
+\end{equation}
+Expanding in the Gell-Mann basis, $\rho^{\rm eq}=\frac13\mathds{1}+\frac12\sum_a n^{a,\rm eq}\lambda^a$, the equilibrium Bloch vector has only diagonal components:
+\begin{align}
+n^{3,\rm eq} &= p_1-p_2, \\
+n^{8,\rm eq} &= \frac{1}{\sqrt 3}(p_1+p_2-2p_3), \\
+n^{a,\rm eq} &= 0 \quad\text{for } a\in\{1,2,4,5,6,7\}.
+\end{align}
+At low temperature ($k_BT\ll\epsilon_2-\epsilon_1\approx 1.92$~meV $\approx 22$~K), $p_1\to 1$ and $p_2,p_3\to 0$, so
+\begin{equation}
+n^{3,\rm eq}\to 1,
+\qquad
+n^{8,\rm eq}\to \frac{1}{\sqrt3},
+\qquad
+\text{(pure ground state)}.
+\end{equation}
+At intermediate temperatures ($T\sim 20$--$50$~K) the thermal population of $|E_2\rangle$ becomes significant and reduces $|n^{3,\rm eq}|$, weakening the population-grating contrast and the Van Vleck back-action. At $T\gg\epsilon_3/k_B\approx 90$~K the populations equalize, $n^{3,8,\rm eq}\to 0$, and the qutrit becomes maximally mixed.
+
+\subsubsection{Relaxation rate structure}
+
+The relaxation rates $\Gamma_a$ separate naturally into two physical classes:
+\begin{enumerate}
+\item \textbf{Coherence dephasing rates:} $\Gamma_1$, $\Gamma_2$ (even-sector coherences $\lambda^{1,2}$), $\Gamma_4$, $\Gamma_5$ ($E_1\!\leftrightarrow\!E_3$ coherences), and $\Gamma_6$, $\Gamma_7$ ($E_2\!\leftrightarrow\!E_3$ coherences). In the simplest model, each transition pair shares a single $T_2$ time: $\Gamma_1=\Gamma_2\equiv 1/T_2^{(12)}$, $\Gamma_4=\Gamma_5\equiv 1/T_2^{(13)}$, $\Gamma_6=\Gamma_7\equiv 1/T_2^{(23)}$.
+\item \textbf{Population relaxation rates:} $\Gamma_3$ and $\Gamma_8$, which control the return of $n^3$ and $n^8$ to their equilibrium values. These involve actual energy exchange with the phonon bath and are generically slower than the dephasing rates ($T_1\geq T_2$).
+\end{enumerate}
+The microscopic origin of the dephasing is primarily (i) spin-lattice relaxation through the Fe exchange field and (ii) inhomogeneous broadening from Tm site disorder. For the 2DCS simulation, the $T_2$ times control the \emph{linewidths} of the crystal-field peaks along both the excitation and detection axes. Typical values for rare-earth crystal-field transitions in orthoferrites at low temperature are $T_2\sim 1$--$10$~ps (linewidths $\sim 0.01$--$0.1$~THz), consistent with the observed 2DCS peak widths.
+
+\subsubsection{Explicit Hamiltonian field decomposition}
+
+The implementation requires the explicit $h^a$ field components entering the Bloch equation. Collecting all contributions from the bare crystal field, the linear Tm--Fe coupling, the anisotropy-modulation coupling, and the drive terms, the total field on Tm site $(\mathbf n,j)$ is
+\begin{equation}
+h^a_{\mathbf n,j} = h^{a,(0)} + h^{a,\rm lin}_{\mathbf n,j} + h^{a,\rm aniso}_{\mathbf n,j} + h^{a,\rm drive}_{\mathbf n,j},
+\end{equation}
+where:
+\begin{align}
+\text{Crystal field:}&\quad h^{3,(0)}=2h_3^{(0)}=\epsilon_1-\epsilon_2,
+\qquad h^{8,(0)}=2h_8^{(0)}=\frac{\epsilon_1+\epsilon_2-2\epsilon_3}{\sqrt3},
+\notag\\
+&\quad h^{a,(0)}=0\text{ for }a\notin\{3,8\}.
+\\[4pt]
+\text{Linear coupling:}&\quad
+h^{2,\rm lin}_{\mathbf n,j}
+=2\sum_{i,\mathbf R}\chi_{2\alpha}(\mathbf R)\,S^\alpha_{\mathbf n+\mathbf R,i},
+\notag\\
+&\quad h^{5,\rm lin}_{\mathbf n,j}
+=2\sum_{i,\mathbf R}\chi_{5\alpha}(\mathbf R)\,S^\alpha_{\mathbf n+\mathbf R,i},
+\notag\\
+&\quad h^{7,\rm lin}_{\mathbf n,j}
+=2\sum_{i,\mathbf R}\chi_{7\alpha}(\mathbf R)\,S^\alpha_{\mathbf n+\mathbf R,i},
+\quad\text{(other $a$: zero).}
+\\[4pt]
+\text{Aniso.\ modn.:}&\quad
+h^{a,\rm aniso}_{\mathbf n,j}
+=-2\,u_a\,\mathcal I_{A_1}^{\rm Fe}\;\;(a\in\{1,3,8\}),
+\notag\\
+&\quad h^{a,\rm aniso}_{\mathbf n,j}
+=-2\,v_a\,\mathcal I_{A_2}^{\rm Fe}\;\;(a\in\{4,6\}).
+\\[4pt]
+\text{Mag.\ drive:}&\quad
+h^{a,\rm drive} \text{ from } -\mu_Bg_J\bigl[h_\alpha(t)J_\alpha^{\rm eff}\bigr]
+\text{ projected onto } \lambda^a.
+\notag\\
+\text{Elec.\ drive:}&\quad
+h^{a,\rm drive}\text{ from } -e_\alpha(t)d_\alpha^{\rm eff}
+\text{ projected onto }\lambda^a.
+\end{align}
+The factor of 2 in the coupling contributions arises from the convention $H=\frac12\sum_a h^a\lambda^a$. For the magnetic drive, the projection is
+\begin{align}
+h^{2,\rm m\text{-}drive} &= -2\mu_Bg_J\cdot 5.264\,h_z(t),
+\notag\\
+h^{5,\rm m\text{-}drive} &= -2\mu_Bg_J\bigl[2.3915\,h_x(t)-2.7866\,h_y(t)\bigr],
+\notag\\
+h^{7,\rm m\text{-}drive} &= -2\mu_Bg_J\bigl[0.9128\,h_x(t)+0.4655\,h_y(t)\bigr].
+\end{align}
+For the electric drive,
+\begin{align}
+h^{1,\rm e\text{-}drive} &= -2p_x\,e_x(t),
+\notag\\
+h^{4,\rm e\text{-}drive} &= -2p_{z4}\,e_z(t),
+\notag\\
+h^{6,\rm e\text{-}drive} &= -2p_{z6}\,e_z(t).
+\end{align}
+These expressions, together with the structure constants of Eq.~\eqref{eq:keycommutators}, completely specify the coherent part of the Bloch dynamics.
+
+The physical interpretation of the Bloch-vector components is now most naturally stated in the $E_1(A_1),E_2(A_1),E_3(A_2)$ convention:
+\begin{align}
+\lambda^{1,2} &\leftrightarrow E_1(A_1)\leftrightarrow E_2(A_1) \quad\text{(even coherence)},\\
+\lambda^{4,5} &\leftrightarrow E_1(A_1)\leftrightarrow E_3(A_2) \quad\text{(odd coherence)},\\
+\lambda^{6,7} &\leftrightarrow E_2(A_1)\leftrightarrow E_3(A_2) \quad\text{(odd coherence)},\\
+\lambda^{3,8} &\leftrightarrow \text{population imbalance and diagonal Stark/anisotropy shifts}.
+\end{align}
+
+\subsection{Hybrid full-lattice simulation loop}
+
+The practical simulation scheme is now straightforward.
+\begin{enumerate}
+    \item Evolve every Fe spin $\mathbf S_{\mathbf n,\mu}$ with the four-sublattice LLG equation~\eqref{eq:LLG4sub}.
+    \item Evolve every Tm density matrix $\rho_{\mathbf n,j}$ with the damped SU(3) Bloch equation~\eqref{eq:blochdampedfull}.
+    \item At each time step, compute the qutrit expectation values
+    \begin{equation}
+    \langle \lambda^a_{\mathbf n,j}\rangle = \mathrm{Tr}(\rho_{\mathbf n,j}\lambda^a)=n^a_{\mathbf n,j}
+    \end{equation}
+    and feed them back into the Fe effective field through Eqs.~\eqref{eq:fullmixednew} and~\eqref{eq:Hanisofull}.
+    \item Diagnose qFM and qAFM by Fourier-analyzing the time traces of the appropriate Fe order parameters built from $\mathbf F$, $\mathbf G$, $\mathbf C$, and $\mathbf A$.
+    \item Construct the emitted signal from the Tm polarization and Fe magnetization. For a given detection polarization $\hat{\mathbf e}_{\rm det}$, the Tm contribution is
+    \begin{equation}
+    P_{\rm out}(t)=\sum_{\mathbf n,j}\mathrm{Tr}\big[\rho_{\mathbf n,j}(t)\,d_{\rm det}^{\rm eff}\big],
+    \end{equation}
+    where the detection operator depends on the geometry:
+    \begin{equation}
+    d_{\rm det}^{\rm eff}=
+    \begin{cases}
+    p_{z4}\lambda^4+p_{z6}\lambda^6 & (E\parallel c\text{ detection: odd sector}),\\
+    p_x\lambda^1 & (E\parallel a\text{ detection: even sector}).
+    \end{cases}
+    \end{equation}
+    In cross-polarized (VH) geometries, the Fe magnetic-dipole radiation also contributes to the detected signal and must be included as a separate emission channel.
+\end{enumerate}
+
+\subsection{Van Vleck back-action: Tm coherences as a transient Fe anisotropy}
+\label{sec:vanvleck}
+
+The anisotropy-modulation channel of Eq.~\eqref{eq:Hanisofull} implies a concrete \emph{back-action} mechanism by which Tm coherences transiently modify the effective Fe anisotropy. This is the mechanism underlying the Baierl experiment~\cite{Baierl2016} and the $(E_1\!\to\!E_2,\mathrm{qFM})$ cross-peak in Geometry~I. It deserves an explicit derivation.
+
+\subsubsection{Origin: second-order virtual excitation (Van Vleck process)}
+
+Consider a single Tm site coupled to its Fe neighbors through the overall coupling $H_{\rm Tm\text{--}Fe}=H_{\rm lin}+H_{\rm aniso}$. At thermal equilibrium, the Tm qutrit occupies its ground state $|E_1\rangle$ with high probability (at $T\ll\epsilon_2-\epsilon_1\approx 22$~K). The Fe exchange field $\mathbf{h}_{\rm Fe}$ acts as a perturbation on the Tm system via the linear coupling. To second order in $H_{\rm lin}$, the virtual admixture of excited Tm levels contributes an energy correction that depends quadratically on $\mathbf{h}_{\rm Fe}$:
+\begin{equation}
+\Delta E^{(2)} = -\sum_{\alpha>1}\frac{|\langle E_\alpha|H_{\rm lin}|E_1\rangle|^2}{\epsilon_\alpha-\epsilon_1}.
+\label{eq:vanvleck2nd}
+\end{equation}
+Since $H_{\rm lin}$ depends linearly on the Fe spin components through the projected operators $J_{x,y,z}^{\rm eff}$, this second-order correction is a \emph{bilinear} function of the Fe spin---i.e.\ it acts as an effective Fe anisotropy. This is the Van Vleck mechanism: the rare-earth orbital polarizability renormalizes the Fe anisotropy by an amount that depends on which Tm level is occupied and on the coherence state of the Tm qutrit.
+
+\subsubsection{Explicit anisotropy renormalization}
+
+In the three-level subspace, the Van Vleck contribution to the Fe effective anisotropy from one Tm site coupled to one Fe neighbor with exchange constant $g$ is:
+\begin{align}
+\delta K^{\rm VV}_{ab} &= -g^2\sum_{\alpha\neq\beta}\frac{\langle E_\beta|J_a^{\rm eff}|E_\alpha\rangle\langle E_\alpha|J_b^{\rm eff}|E_\beta\rangle}{\epsilon_\alpha-\epsilon_\beta}\,\rho_{\beta\beta}
+\notag\\
+&= -g^2\left[
+\frac{|\langle E_1|J_a^{\rm eff}|E_2\rangle|^2(\rho_{11}-\rho_{22})}{\epsilon_2-\epsilon_1}\,\delta_{a,z}\delta_{b,z}
+\right.
+\notag\\
+&\qquad\left.
++\sum_{\beta=1,2}\frac{\langle E_\beta|J_a^{\rm eff}|E_3\rangle\langle E_3|J_b^{\rm eff}|E_\beta\rangle}{\epsilon_3-\epsilon_\beta}\,\rho_{\beta\beta}
++\text{coherence terms}
+\right].
+\label{eq:vanvleckexplicit}
+\end{align}
+The first term involves $J_z^{\rm eff}$ (since only $J_z$ connects $E_1\leftrightarrow E_2$) and contributes a renormalization of $K_c$. The second pair involves $J_x^{\rm eff}$ and $J_y^{\rm eff}$ and renormalizes $K_a$ and $K_b$. The ``coherence terms'' involve off-diagonal density-matrix elements $\rho_{\alpha\beta}$ ($\alpha\neq\beta$) and produce \emph{time-dependent} anisotropy modulations.
+
+\subsubsection{Dynamic mechanism for the qFM cross-peak}
+
+The pathway for the $(E_1\!\to\!E_2,\mathrm{qFM})$ cross-peak in Geometry~I (Sec.~\ref{sec:geomI}) proceeds as follows:
+\begin{enumerate}
+\item The pump creates $E_1\!\leftrightarrow\!E_2$ coherence ($\lambda^2$ at frequency $\omega_{12}$) via the Raman process.
+\item This oscillating coherence modulates the diagonal populations and the off-diagonal elements of $\rho$, which in turn modulate the Van Vleck anisotropy $\delta K^{\rm VV}_{ab}(t)$ at frequency $\omega_{12}$.
+\item The time-dependent effective anisotropy exerts a parametric torque on the Fe spins. If the modulation frequency is close to $\omega_{\rm qFM}$---or if the anisotropy shift is impulsive enough to overlap with the qFM spectral width---the Fe system responds by launching qFM oscillations.
+\item The qFM oscillation is detected as Fe magnetic-dipole emission at $\omega_{\rm qFM}$ during the detection period.
+\end{enumerate}
+The key point is that this mechanism does not require a direct resonance between $\omega_{12}$ and $\omega_{\rm qFM}$; it requires only that the Tm coherence produce a time-dependent shift of the Fe anisotropy landscape. In the $\Gamma_2$ phase, even a small transient shift of $K_c-K_a$ is amplified by the fact that the qFM frequency is $\omega_{\rm qFM}\propto\sqrt{K_c-K_a}$, so a fractional change $\delta K/(K_c-K_a)$ produces a fractional frequency shift of half that amount and a parametric excitation if the perturbation is fast enough.
+
+\subsubsection{Connection to the Gell-Mann formulation}
+
+In the Gell-Mann language, the Van Vleck back-action is encoded by the even-sector ($A_1^+$) part of $H_{\rm aniso}$ (Eq.~\ref{eq:Hanisofull}). The population difference $\rho_{11}-\rho_{22}\propto\lambda^3$ and the average population deviation from $E_3$, $\propto\lambda^8$, are the diagonal channels that shift the Fe anisotropy. The off-diagonal even-sector coherence $\lambda^1$ ($\propto\mathrm{Re}\,\rho_{12}$) provides an additional oscillating channel. Together, these form the ``population sector'' of the Van Vleck mechanism. The odd sector ($A_2^+$: $\lambda^{4,6}$) provides a parametrically weaker modulation through the odd Fe bilinear $F_xG_z$, but as shown in Sec.~\ref{sec:q0diagnostics}, this channel cancels at $\mathbf q=0$ in the on-site implementation and is activated only by finite-$\mathbf q$ dynamics.
+
+The relative importance of the population-driven ($\lambda^{3,8}$) and coherence-driven ($\lambda^{1,2}$) Van Vleck mechanisms depends on the pump pulse parameters and cannot be determined from symmetry alone. In the impulsive limit (pulse shorter than $\omega_{12}^{-1}$), both contribute comparably; in the quasi-CW limit, the coherence channel dominates because the population redistribution requires absorption or stimulated emission to occur during the pulse.
+
+\section{How the desired 2DCS peaks emerge in the full-lattice model}
+\label{sec:2DCSpeaks}
+
+Throughout this section we use the notation $(\omega_\tau,\omega_t)$ for a 2DCS peak, where $\omega_\tau$ is the excitation (pump) frequency and $\omega_t$ is the detection (emission) frequency. We denote the two THz polarization axes as $a$ and $c$ (with propagation along $b$). In the Faraday or near-Faraday geometry the THz magnetic and electric fields satisfy $h\parallel a\Leftrightarrow e\parallel c$ and $h\parallel c\Leftrightarrow e\parallel a$. Co-polarized detection (VV) means pump and detection share the same polarization axis; cross-polarized detection (VH) means they are orthogonal.
+
+\subsection{Sector classification and detection operators}
+\label{sec:sectorclass}
+
+For later reference, we collect the operator content of each polarization channel:
+\begin{center}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{lccl}
+\hline
+Channel & Pump operator(s) & Detect operator(s) & Gell-Mann sector \\
+\hline
+$h_x$ ($H\parallel a$) & $J_x^{\rm eff}\sim\lambda^5,\lambda^7$ & $J_x^{\rm eff}$ (mag.\ emission) & $\mathcal A_2^-$ \\
+$e_z$ ($E\parallel c$) & $d_z^{\rm eff}\sim\lambda^4,\lambda^6$ & $d_z^{\rm eff}$ (elec.\ emission) & $\mathcal A_2^+$ \\
+$h_z$ ($H\parallel c$) & $J_z^{\rm eff}\sim\lambda^2$ & $J_z^{\rm eff}$ (mag.\ emission) & $\mathcal A_1^-$ \\
+$e_x$ ($E\parallel a$) & $d_x^{\rm eff}\sim\lambda^1$ & $d_x^{\rm eff}$ (elec.\ emission) & $\mathcal A_1^+$ \\
+\hline
+\end{tabular}
+\end{center}
+\noindent
+The key point is that $a$-polarized THz ($h_x/e_x$ channel) addresses the even Tm transition $E_1(A_1)\leftrightarrow E_2(A_1)$ through $d_x^{\rm eff}$ and the odd transitions through $J_x^{\rm eff}$, whereas $c$-polarized THz ($h_z/e_z$ channel) addresses the even transition through $J_z^{\rm eff}$ and the odd transitions through $d_z^{\rm eff}$. In addition, direct Fe Zeeman coupling ($h\cdot S$) provides a polarization-independent excitation pathway for the magnon branches.
+
+\subsection{Geometry~I: \texorpdfstring{$H\parallel a$, $E\parallel c$}{H//a, E//c}, co-polarized (VV)}
+\label{sec:geomI}
+
+\subsubsection{Drive and detection channels}
+
+In this geometry one has
+\begin{equation}
+h_x(t)\neq 0,
+\qquad e_z(t)\neq 0,
+\qquad h_y=h_z=e_x=e_y=0.
+\end{equation}
+The Tm operators directly addressed by these fields are all \emph{odd sector}:
+\begin{equation}
+h_x\to J_x^{\rm eff}\in\mathrm{span}(\lambda^5,\lambda^7),
+\qquad
+e_z\to d_z^{\rm eff}\in\mathrm{span}(\lambda^4,\lambda^6),
+\end{equation}
+while the Fe sector is driven by the Zeeman coupling $h_x\cdot S^x$. Co-polarized detection reads out the same odd sector through $d_z^{\rm eff}$ and, more weakly, through the magnetic-dipole channel $J_x^{\rm eff}$.
+
+The crucial observation is that VV detection acts as an \emph{even-sector filter} on the excitation axis. The reason is algebraic: if a coherence oscillating during $\tau_1$ is odd-sector ($\lambda^{5,7}$), and pulse~B also acts through the odd sector ($J_x^{\rm eff}\sim\lambda^{5,7}$, $d_z^{\rm eff}\sim\lambda^{4,6}$), the commutator $[\mathrm{odd},\mathrm{odd}]$ produces an \emph{even}-sector result ($\lambda^{1,2,3,8}$), which cannot radiate in the odd VV detection channel. Conversely, an \emph{even}-sector coherence on the excitation axis ($\lambda^2$ at $\omega_{12}$) is converted by $[\mathrm{odd},\mathrm{even}]\to\mathrm{odd}$, which \emph{is} VV-visible. Thus the odd-sector Tm transitions $E_1\!\leftrightarrow\!E_3$ and $E_2\!\leftrightarrow\!E_3$, although directly driven by $h_x$ and $e_z$, are invisible on the excitation axis in VV.
+
+The even-sector $E_1\!\leftrightarrow\!E_2$ coherence is created during the pump period by a second-order process: the pulse drives odd-sector coherences $\lambda^{5,7}$ at first order, and the SU(3) commutator
+\begin{equation}
+[\lambda^5,\lambda^7]=i\lambda^2
+\end{equation}
+generates even-sector $E_1\!\leftrightarrow\!E_2$ coherence ($\lambda^2$) at second order. This is an impulsive stimulated Raman process with $E_3(A_2)$ as the virtual intermediate:
+\begin{equation}
+|E_1\rangle\langle E_1|
+\xrightarrow{J_x}
+|E_3\rangle\langle E_1|
+\xrightarrow{J_x}
+\langle E_2|J_x|E_3\rangle\cdot|E_2\rangle\langle E_1|.
+\end{equation}
+No symmetry violation is required; both steps use the allowed odd-sector operators.
+
+\subsubsection{Observed peak hierarchy and diagnostic observations}
+
+The dominant peaks, in descending amplitude, are
+\begin{equation}
+(E_1\!\to\!E_2,\,0),\
+(E_1\!\to\!E_2,\,E_2\!\to\!E_3),\
+(E_1\!\to\!E_2,\,\mathrm{qFM}),\
+(E_1\!\to\!E_2,\,E_1\!\to\!E_3).
+\end{equation}
+Three observations organize the whole geometry and confirm the $E_1\!\to\!E_2$ excitation assignment:
+
+\begin{enumerate}
+\item \textbf{Temperature dependence.} The excitation-axis feature near $0.4$--$0.5$~THz is flat across the full $0$--$100$~K range, persisting through the spin reorientation at $T_{\rm SR}\approx 85$~K: the peak dims during the reorientation window but re-emerges at the same energy above $T_{\rm SR}$. The qFM magnon, by contrast, is the soft mode of the $\Gamma_2$ phase and must vanish at $T_{\rm SR}$---it cannot re-emerge at the same frequency in $\Gamma_4$. This temperature behavior is definitive: the excitation feature is a crystal-field transition, not a magnon.
+\item \textbf{VV detection algebra.} As derived above, VV selectively filters even-sector content onto the excitation axis and odd-sector content onto the detection axis. This is consistent with the peak structure: $E_1\!\to\!E_2$ (even, $\lambda^2$) on excitation, and $E_2\!\to\!E_3$, $E_1\!\to\!E_3$ (odd, $\lambda^{5,7}$) on detection.
+\item \textbf{Frequency.} The excitation feature sits at $0.4$--$0.5$~THz, matching the $E_1\!\to\!E_2$ gap ($\epsilon_2-\epsilon_1=1.92$~meV $\approx 0.46$~THz) within FFT resolution. The qFM mode is resolved separately on the \emph{detection} axis at $\sim 0.36$~THz.
+\end{enumerate}
+
+\subsubsection{Pathway analysis}
+
+All peaks share a common excitation mechanism: the pump creates $\lambda^{5,7}$ (odd) at first order, and $\lambda^2$ ($E_1\!\leftrightarrow\!E_2$ coherence) at second order via the commutator $[\lambda^5,\lambda^7]=i\lambda^2$. The $\lambda^2$ coherence oscillates at $\omega_{12}\approx 0.46$~THz during $\tau_1$. What differs among the peaks is the detection-side conversion by pulse~B.
+
+\emph{Dominant peak} $(E_1\!\to\!E_2,\,0)$: \textbf{population grating}.
+The conjugate pair of $\chi^{(3)}$ diagrams creates and then destroys the $E_1\!\leftrightarrow\!E_2$ coherence within the pump period, leaving a population difference ($\lambda^{3,8}$) that persists during $\tau_2$ at zero frequency. This is the standard population-grating signal and does not require coherence to survive through $\tau_2$, explaining its dominance.
+
+\emph{Second strongest} $(E_1\!\to\!E_2,\,E_2\!\to\!E_3)$:
+Pulse~B converts the $\lambda^2$ coherence to odd-sector via
+$[J_x^{\rm eff},\lambda^2]\sim [\alpha\lambda^5+\beta\lambda^7,\,\lambda^2]\to\lambda^{5,7}$.
+The resulting odd coherence projects onto $E_2\!\leftrightarrow\!E_3$ and $E_1\!\leftrightarrow\!E_3$ with amplitudes proportional to the conversion matrix elements. For the $E_2\!\to\!E_3$ channel, the B-interaction acts on the $\langle E_1|$ bra of $|E_2\rangle\langle E_1|$ via $\langle E_3|J_x|E_1\rangle$ with amplitude $M_{13}=2.39$. This is the larger matrix element, explaining why $E_2\!\to\!E_3$ detection is stronger.
+
+\emph{Third strongest} $(E_1\!\to\!E_2,\,\mathrm{qFM})$:
+The $E_1\!\leftrightarrow\!E_2$ coherence modulates the Tm Van Vleck susceptibility, producing an oscillating effective anisotropy on the Fe sector---the back-action channel (reverse of the Baierl mechanism~\cite{Baierl2016}). This launches qFM oscillations during $\tau_2$, detected through Fe magnetic-dipole emission.
+
+\emph{Weakest} $(E_1\!\to\!E_2,\,E_1\!\to\!E_3)$:
+Same conversion as the $E_2\!\to\!E_3$ peak, but pulse~B acts on the $|E_2\rangle$ ket via $\langle E_3|J_x|E_2\rangle$ with the smaller amplitude $M_{23}=0.91$. The ratio of detection weights is $(M_{13}/M_{23})^2\approx 7$, consistent with $E_2\!\to\!E_3$ being significantly stronger than $E_1\!\to\!E_3$.
+
+\emph{Selection-rule structure.} The peak $(\mathrm{qAFM},E_1\!\to\!E_2)$ is absent in VV for the same reason as before: $\lambda^2$ radiates through $J_z^{\rm eff}$ (requiring $H\!\parallel\! c$ detection) or $d_x^{\rm eff}$ (requiring $E\!\parallel\! a$ detection)---neither available in VV. This peak instead appears as the dominant feature in Geometry~II.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % --- THz pulse ---
+  \node[pthz] (thz) at (0,0) {THz pulse\\$h_x,\,e_z$};
+
+  % --- First-order: odd Tm coherences ---
+  \node[ptm] (oddpump) at (3.8,0) {odd Tm\\$\lambda^{5,7}$};
+
+  % --- Second-order: even coherence via commutator ---
+  \node[ptm] (evencoh) at (7.4,0) {$\lambda^2$\\($E_1\!\leftrightarrow\!E_2$)};
+
+  % --- tau_1 oscillation label ---
+  \node[font=\scriptsize\itshape, text=gray!70!black] at (7.4,-0.8) {oscillates at $\omega_{12}$ during $\tau_1$};
+
+  % --- Branch 1: population grating (dominant) ---
+  \node[pdet] (det1) at (12.0,3.0) {population\\$\lambda^{3,8}$\;($\omega\!=\!0$)};
+
+  % --- Branch 2: odd Tm detection (E2->E3) ---
+  \node[ptm] (odddet) at (11.0,1.0) {odd Tm\\$\lambda^{5,7}$};
+  \node[pdet] (det2) at (14.2,1.0) {$d_z^{\rm eff}$\\(VV)};
+
+  % --- Branch 3: Fe back-action (qFM) ---
+  \node[pfe] (feback) at (11.0,-1.2) {Fe aniso.\\modulation};
+  \node[pfe] (qfmdet) at (14.2,-1.2) {qFM\\emission};
+
+  % === Arrows ===
+  % Pump -> odd
+  \draw[parr] (thz) -- node[plab,above] {$J_x^{\rm eff}$,\;$d_z^{\rm eff}$\\(1st order)} (oddpump);
+
+  % odd -> even via commutator
+  \draw[parr] (oddpump) -- node[plab,above] {$[\lambda^5,\lambda^7]$\\$=i\lambda^2$\\(2nd order)} (evencoh);
+
+  % even -> population grating
+  \draw[parr] (evencoh) -- node[plab,above,sloped] {\footnotesize pop.\ grating} (det1);
+
+  % even -> odd detection (pulse B)
+  \draw[parr] (evencoh) -- node[plab,above,sloped] {\footnotesize pulse B:\;$[\lambda^{5,7},\lambda^2]$} (odddet);
+
+  % odd detection -> d_z
+  \draw[parr] (odddet) -- (det2);
+
+  % even -> Fe back-action
+  \draw[parr] (evencoh) -- node[plab,above,sloped] {\footnotesize Van Vleck\\[-2pt]\footnotesize back-action} (feback);
+
+  % Fe back-action -> qFM
+  \draw[parr] (feback) -- (qfmdet);
+
+  % Peak labels
+  \node[ptag, right=4pt of det1] {$(E_1\!\to\!E_2,\,0)$\;\textbf{(dominant)}};
+  \node[ptag, right=4pt of det2] {$(E_1\!\to\!E_2,\,E_2\!\to\!E_3)$,\;$(E_1\!\to\!E_2,\,E_1\!\to\!E_3)$};
+  \node[ptag, right=4pt of qfmdet] {$(E_1\!\to\!E_2,\,\mathrm{qFM})$};
+\end{tikzpicture}
+\caption{Pathway diagram for Geometry~I ($H\!\parallel\! a$, $E\!\parallel\! c$, VV).
+  The pump drives odd-sector Tm coherences ($\lambda^{5,7}$) at first order.
+  The SU(3) commutator $[\lambda^5,\lambda^7]=i\lambda^2$ generates even-sector
+  $E_1\!\leftrightarrow\!E_2$ coherence at second order (Raman through virtual $E_3$).
+  VV detection preferentially selects this even-sector excitation because
+  $[\mathrm{odd},\mathrm{even}]\to\mathrm{odd}$ feeds the detection channel,
+  whereas $[\mathrm{odd},\mathrm{odd}]\to\mathrm{even}$ does not.
+  The dominant detection peak is the zero-frequency population grating;
+  odd-sector Tm cross-peaks are weighted by $M_{13}=2.39$ ($E_2\!\to\!E_3$) vs.
+  $M_{23}=0.91$ ($E_1\!\to\!E_3$);
+  and the qFM detection peak arises from Tm$\to$Fe anisotropy back-action.
+  The temperature-independent excitation frequency confirms the crystal-field assignment.}
+\label{fig:pathwayI}
+\end{figure}
+
+\subsection{Geometry~II: \texorpdfstring{$H\parallel a$, $E\parallel c$}{H//a, E//c}, cross-polarized (VH)}
+\label{sec:geomII}
+
+\subsubsection{Drive and detection channels}
+
+The pump is identical to Geometry~I:
+\begin{equation}
+h_x\neq 0,\qquad e_z\neq 0.
+\end{equation}
+The same excitation-axis diagnostic still applies: no CEF transition appears at excitation, so the dominant pump route is again Fe-first. The crucial change is the detection channel. In VH the collected emission is even-sector dominated,
+\begin{equation}
+d_x^{\rm eff}\sim \lambda^1,
+\qquad
+J_z^{\rm eff}\sim \lambda^2,
+\end{equation}
+so the natural bright Tm transition is the even coherence $E_1(A_1)\leftrightarrow E_2(A_1)$.
+
+\subsubsection{Observed peak hierarchy}
+
+The dominant peaks are
+\begin{equation}
+(\mathrm{qAFM},E_1\!\to\!E_2),
+\qquad
+(0,E_1\!\to\!E_2).
+\end{equation}
+Compared with Geometry~I, the mode hierarchy is reversed: once the detection channel is rotated into the even sector, the directly driven qAFM branch becomes the dominant excitation-axis feature.
+
+\subsubsection{Pathway analysis}
+
+\emph{Dominant peak} $(\mathrm{qAFM},E_1\!\to\!E_2)$: the cleanest linear-exchange pathway in all three geometries.
+$h_x\to \mathrm{qAFM}\to G_z\to J_z^{\rm eff}\sim \lambda^2\to (d_x^{\rm eff},J_z^{\rm eff})$ detect.
+The pump directly launches qAFM, and the even $J_z^{\rm eff}$ channel is precisely the channel VH detection selects.
+
+\emph{Rectified peak} $(0,E_1\!\to\!E_2)$: a quasi-static Fe-driven perturbation of the Tm even sector during $\tau_1$, read out as a free $E_1\!\to\!E_2$ coherence during $\tau_2$ via even anisotropy or population-to-coherence conversion.
+
+qFM-linked peaks are suppressed because qFM feeds the odd Tm sector most efficiently, but VH detection is even-sector-selective---the opposite selectivity from Geometry~I.
+
+\emph{Selection-rule-forbidden peaks.} The odd Tm transitions $E_1\!\leftrightarrow\!E_3$ and $E_2\!\leftrightarrow\!E_3$ are invisible in VH detection: $d_x^{\rm eff}\sim\lambda^1$ and $J_z^{\rm eff}\sim\lambda^2$ have no matrix elements to $\lambda^{4,5,6,7}$.  Conversely, the dominant pathway of Geometry~I ($E_1\!\to\!E_2$ Raman excitation feeding odd Tm detection) cannot be read out in this polarization.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % --- THz pulse ---
+  \node[pthz] (thz) at (0,0) {THz pulse\\$h_x,\,e_z$};
+
+  % --- Fe sector ---
+  \node[pfe] (qafm) at (3.4,0) {qAFM};
+
+  % --- Branch 1: direct even exchange (dominant) ---
+  \node[ptm] (evencoh) at (7.0,1.8) {even Tm\\$\lambda^{2}$ ($J_z^{\rm eff}$)};
+  \node[pdet] (det1) at (10.6,1.8) {$d_x^{\rm eff},\,J_z^{\rm eff}$\\(VH)};
+
+  % --- Branch 2: rectified route ---
+  \node[pfe] (rect) at (7.0,-1.8) {Fe transient\\(rectified)};
+  \node[ptm] (evenrect) at (10.6,-1.8) {even Tm\\$\lambda^{1,2}$};
+  \node[pdet] (det2) at (13.6,-1.8) {$d_x^{\rm eff}$\\(VH)};
+
+  % === Arrows ===
+  \draw[parr] (thz) -- node[plab,above] {Zeeman\\$h_x\!\cdot\!S^x$} (qafm);
+
+  % qAFM -> even coherence
+  \draw[parr] (qafm) -- node[plab,above,sloped] {\footnotesize $G_z\!\to\!J_z^{\rm eff}$} (evencoh);
+  % qAFM -> rectified
+  \draw[parr] (qafm) -- node[plab,above,sloped] {\footnotesize aniso./rect.} (rect);
+
+  % rectified -> even Tm
+  \draw[parr] (rect) -- node[plab,above] {\footnotesize level shift} (evenrect);
+
+  % Detection
+  \draw[parr] (evencoh) -- (det1);
+  \draw[parr] (evenrect) -- (det2);
+
+  % Peak labels
+  \node[ptag, right=4pt of det1] {$(\mathrm{qAFM},E_1\!\to\!E_2)$\;\textbf{(dominant)}};
+  \node[ptag, right=4pt of det2] {$(0,E_1\!\to\!E_2)$};
+\end{tikzpicture}
+\caption{Pathway diagram for Geometry~II ($H\!\parallel\! a$, $E\!\parallel\! c$, VH).
+  The pump is identical to Geometry~I, but cross-polarized detection selects the
+  even Tm sector ($\lambda^{1,2}$). The dominant peak is the direct linear-exchange route
+  qAFM$\,\to\,G_z\,\to\,J_z^{\rm eff}$. Odd Tm transitions ($E_1\!\leftrightarrow\!E_3$,
+  $E_2\!\leftrightarrow\!E_3$) are invisible in this detection channel.}
+\label{fig:pathwayII}
+\end{figure}
+
+\subsection{Geometry~III: \texorpdfstring{$H\parallel c$, $E\parallel a$}{H//c, E//a}, cross-polarized (VH)}
+\label{sec:geomIII}
+
+\subsubsection{Drive and detection channels}
+
+In this geometry the pump components are reversed relative to Geometries~I and~II:
+\begin{equation}
+h_z(t)\neq 0,
+\qquad e_x(t)\neq 0.
+\end{equation}
+This geometry can directly address the even Tm sector through
+\begin{equation}
+h_z\to J_z^{\rm eff}\sim \lambda^2,
+\qquad e_x\to d_x^{\rm eff}\sim \lambda^1,
+\end{equation}
+and this is exactly what the excitation-axis data show: the transition $E_1\!\to\!E_2$ appears directly on the excitation axis. At the same time, the Fe Zeeman drive is now qualitatively different from the $h_x$ case. Because $\mathbf F_0\parallel \hat x$ and $\mathbf G_0\parallel \hat z$, the field $h_z$ torques the weak-ferromagnetic component but not the dominant staggered moment. The most direct Fe excitation in this geometry is therefore qFM rather than qAFM.
+
+\subsubsection{Observed peak hierarchy}
+
+The dominant peaks are
+\begin{equation}
+(E_1\!\to\!E_2,\mathrm{qAFM}),
+\qquad
+(\mathrm{qFM},\mathrm{qAFM}),
+\qquad
+(0,\mathrm{qAFM}).
+\end{equation}
+This is the only geometry in which a Tm transition appears clearly on the excitation axis, so it is the cleanest evidence for direct Tm pumping in the whole dataset.
+
+\subsubsection{Pathway analysis}
+
+\emph{Dominant peak} $(E_1\!\to\!E_2,\mathrm{qAFM})$: direct even Tm pumping followed by exchange back-action.
+$(h_z,e_x)\to \lambda^{1,2}\;(E_1\!\leftrightarrow\!E_2)\to G_z\to \mathrm{qAFM}\to \text{Fe emission}$.
+This is the time-reversed partner of $(\mathrm{qAFM},E_1\!\to\!E_2)$ in Geometry~II and the cleanest evidence for direct Tm pumping in the whole dataset.
+
+\emph{Cross peak} $(\mathrm{qFM},\mathrm{qAFM})$: $h_z$ directly torques the weak-ferromagnetic component, launching qFM. Intrinsic nonlinear Fe dynamics and DM-enabled mode mixing convert qFM$\to$qAFM; Tm-assisted anisotropy back-action may enhance but is not uniquely required.
+
+\emph{Rectified peak} $(0,\mathrm{qAFM})$: a zero-frequency Tm population shift ($\Delta\lambda^{3,8}$) from even-sector pumping shifts the Fe anisotropy and launches qAFM.
+
+qFM detection is absent despite strong qFM excitation content, indicating geometry-dependent radiative weights strongly favor qAFM over qFM emission in the VH channel.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % === Three parallel branches, well separated ===
+  %   top    y = 2.4   (direct even Tm pump)
+  %   mid    y = 0.0   (direct qFM pump)
+  %   bot    y = -2.4  (rectified population)
+
+  % --- THz pulse ---
+  \node[pthz] (thz) at (0,0) {THz pulse\\$h_z,\,e_x$};
+
+  % === Branch 1: direct even Tm pump ===
+  \node[ptm] (evtm) at (3.6,2.4) {even Tm\\$\lambda^{1,2}$\\($E_1\!\leftrightarrow\!E_2$)};
+  \node[pfe] (qafm1) at (7.4,2.4) {qAFM};
+  \node[pdet] (det1) at (10.2,2.4) {Fe\\emission};
+
+  % === Branch 2: direct Fe (qFM) pump ===
+  \node[pfe] (qfm) at (3.6,0) {qFM};
+  \node[pfe] (qafm2) at (7.4,0) {qAFM};
+  \node[pdet] (det2) at (10.2,0) {Fe\\emission};
+
+  % === Branch 3: rectified population ===
+  \node[ptm] (pop) at (3.6,-2.4) {$\Delta\lambda^{3,8}$\\(population)};
+  \node[pfe] (qafm3) at (7.4,-2.4) {qAFM};
+  \node[pdet] (det3) at (10.2,-2.4) {Fe\\emission};
+
+  % === Arrows ===
+  % Branch 1
+  \draw[parr] (thz) -- node[plab,above,sloped] {\footnotesize $J_z^{\rm eff}$, $d_x^{\rm eff}$} (evtm);
+  \draw[parr] (evtm) -- node[plab,above] {\footnotesize exchange\\[-2pt]\footnotesize back-action} (qafm1);
+  \draw[parr] (qafm1) -- (det1);
+
+  % Branch 2
+  \draw[parr] (thz) -- node[plab,above] {\footnotesize Zeeman\\[-2pt]\footnotesize $h_z\!\cdot\!S^z$} (qfm);
+  \draw[parr] (qfm) -- node[plab,above] {\footnotesize NL mixing\\[-2pt]\footnotesize [+Tm assist]} (qafm2);
+  \draw[parr] (qafm2) -- (det2);
+
+  % Branch 3
+  \draw[parr] (thz) -- node[plab,above,sloped] {\footnotesize rectified} (pop);
+  \draw[parr] (pop) -- node[plab,above] {\footnotesize aniso.\\[-2pt]\footnotesize shift} (qafm3);
+  \draw[parr] (qafm3) -- (det3);
+
+  % Peak labels
+  \node[ptag, right=4pt of det1] {$(E_1\!\to\!E_2,\,\mathrm{qAFM})$\;\textbf{(dominant)}};
+  \node[ptag, right=4pt of det2] {$(\mathrm{qFM},\,\mathrm{qAFM})$};
+  \node[ptag, right=4pt of det3] {$(0,\,\mathrm{qAFM})$};
+\end{tikzpicture}
+\caption{Pathway diagram for Geometry~III ($H\!\parallel\! c$, $E\!\parallel\! a$, VH).
+  This is the only geometry in which a Tm transition appears on the excitation axis.
+  Three parallel branches feed qAFM on the detection axis:
+  direct even Tm pumping with exchange back-action (top),
+  direct qFM pumping with nonlinear Fe conversion (middle),
+  and rectified Tm populations shifting the Fe anisotropy (bottom).}
+\label{fig:pathwayIII}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{lcccc}
+\hline
+Geometry & Pump pol.\ & Detect pol.\ & Pump Tm sector & Detect Tm sector \\
+\hline
+I\quad ($H\!\parallel\! a$, $E\!\parallel\! c$, VV) & $a/c$ & $a/c$ & odd ($\lambda^{5,7}$) + Fe & odd ($\lambda^{4,5,6,7}$) \\
+II\, ($H\!\parallel\! a$, $E\!\parallel\! c$, VH) & $a/c$ & $c/a$ & Fe (Zeeman) & even ($\lambda^{1,2}$) \\
+III ($H\!\parallel\! c$, $E\!\parallel\! a$, VH) & $c/a$ & $a/c$ & even ($\lambda^{1,2}$) + Fe & odd ($\lambda^{4,5,6,7}$) + Fe \\
+\hline
+\end{tabular}
+\caption{Pump and detection sector assignments for the three 2DCS geometries. In Geometry~I the THz pulse drives odd-sector Tm coherences ($\lambda^{5,7}$) and Fe magnons; the SU(3) commutator $[\lambda^5,\lambda^7]=i\lambda^2$ generates even-sector $E_1\!\leftrightarrow\!E_2$ coherence at second order, which VV detection preferentially selects on the excitation axis. In Geometry~II the same pump fields are used but cross-polarized detection selects the even Tm sector. In Geometry~III the pump directly addresses the even Tm sector in addition to the Fe lattice. The notation $a/c$ means $h\parallel a$ and $e\parallel c$ (or vice versa), referring to the THz magnetic and electric field components for propagation along $b$.}
+\label{tab:geosummary}
+\end{table}
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{lll}
+\hline
+Geometry & Dominant peaks & Pathway and detection channel \\
+\hline
+I (VV, Raman$\to$even exc.)
+& $(E_1\!\to\!E_2,0)$ & pump $\to \lambda^{5,7}$ $\to$ $[\lambda^5,\lambda^7]=i\lambda^2$ $\to$ pop.\ grating ($\lambda^{3,8}$) \\
+& $(E_1\!\to\!E_2,E_2\!\to\!E_3)$ & $\lambda^2$ on exc.\ axis, pulse B: $[\lambda^{5,7},\lambda^2]\to\lambda^{5,7}$ $\to d_z^{\rm eff}$ ($M_{13}=2.39$) \\
+& $(E_1\!\to\!E_2,\mathrm{qFM})$ & $\lambda^2$ $\to$ Van Vleck back-action $\to$ Fe qFM emission \\
+& $(E_1\!\to\!E_2,E_1\!\to\!E_3)$ & same as $E_2\!\to\!E_3$ but $M_{23}=0.91$ (weaker) \\
+\hline
+II (VH, Fe$\to$even)
+& $(\mathrm{qAFM},E_1\!\to\!E_2)$ & direct even exchange ($G_z\!\to\!J_z^{\rm eff}\!\sim\!\lambda^2$) $\to d_x^{\rm eff},J_z^{\rm eff}$ \\
+& $(0,E_1\!\to\!E_2)$ & rectified even-sector response $\to\lambda^{1}\to d_x^{\rm eff}$ \\
+\hline
+III (VH, even$\to$Fe)
+& $(E_1\!\to\!E_2,\mathrm{qAFM})$ & direct even Tm pump $\to$ exchange back-action $\to$ Fe emission \\
+& $(\mathrm{qFM},\mathrm{qAFM})$ & direct qFM pump $\to$ nonlinear Fe mixing $\to$ Fe emission \\
+& $(0,\mathrm{qAFM})$ & rectified Tm pop.\ $\to$ anisotropy shift $\to$ qAFM $\to$ Fe emission \\
+\hline
+\end{tabular}
+\caption{Corrected pathway summary for the three 2DCS geometries, with each peak traced through the specific detection operator that reads it out. In Geometry~I the excitation axis shows the $E_1\!\to\!E_2$ crystal-field transition, created at second order by the SU(3) commutator $[\lambda^5,\lambda^7]=i\lambda^2$; VV detection acts as an even-sector filter on the excitation axis because $[\mathrm{odd},\mathrm{odd}]\to\mathrm{even}$ is invisible while $[\mathrm{odd},\mathrm{even}]\to\mathrm{odd}$ feeds the detection channel. The temperature independence of the excitation feature across $T_{\rm SR}$ confirms the CEF assignment. In Geometry~II the even-sector route qAFM\,$\to\lambda^2$\,($E_1\!\leftrightarrow\!E_2$) is directly visible via $d_x^{\rm eff}$ and $J_z^{\rm eff}$. Odd-sector peaks ($E_1\!\leftrightarrow\!E_3$, $E_2\!\leftrightarrow\!E_3$) are invisible in VH (Geometry~II) because $d_x^{\rm eff}$ and $J_z^{\rm eff}$ have no $\lambda^{4,5,6,7}$ matrix elements.}
+\label{tab:peaktable}
+\end{table}
+
+\subsubsection{Consistency checks}
+
+The three geometries mutually constrain the model in the following ways:
+
+\begin{enumerate}
+\item \textbf{Even-sector excitation via SU(3) commutator in $H\parallel a$ and direct even Tm pumping in $H\parallel c$.}
+In Geometry~I, the pump drives odd-sector Tm coherences at first order, and the SU(3) commutator $[\lambda^5,\lambda^7]=i\lambda^2$ generates even-sector $E_1\!\leftrightarrow\!E_2$ coherence at second order; VV detection preferentially selects this on the excitation axis. The temperature independence of the excitation feature across $T_{\rm SR}$ confirms the CEF assignment. In Geometry~III, the pump directly addresses the even Tm sector and $E_1\!\to\!E_2$ appears at first order on the excitation axis.
+
+\item \textbf{Even/odd sector separation remains highly informative.}
+Geometry~I excites $E_1\!\to\!E_2$ (even) on the excitation axis and detects odd-sector Tm transitions and Fe modes. Geometry~II detects the even sector through cross-polarized readout. This is consistent with the $C_s$-based qutrit classification and strongly constrains which transfer vertices can dominate in each geometry.
+
+\item \textbf{The new $\mathbf q\approx 0$ diagnostics sharpen the odd-sector interpretation.}
+The strict on-site nearest-neighbor implementation cancels the odd static channel at uniform projection. Strong odd-sector peaks therefore point to bond-resolved finite-$\mathbf q$ dynamics or to an enlarged inter-site effective coupling, not to a surviving on-site uniform odd invariant by itself.
+
+\item \textbf{Geometry~II and Geometry~III form a direct exchange pair.}
+$(\mathrm{qAFM},E_1\!\to\!E_2)$ in Geometry~II and $(E_1\!\to\!E_2,\mathrm{qAFM})$ in Geometry~III are naturally interpreted as the same even exchange vertex observed in opposite temporal orderings.
+
+\item \textbf{Zero-frequency peaks consistently diagnose rectification or population gratings.}
+The peak $(E_1\!\to\!E_2,0)$ in Geometry~I arises from the population-grating mechanism (conjugate $\chi^{(3)}$ diagrams creating and destroying the $E_1\!\leftrightarrow\!E_2$ coherence). The peak $(0,\mathrm{qAFM})$ in Geometry~III requires the Tm population sector ($\lambda^3,\lambda^8$) and diagnosing anisotropy-modulation back-action.
+
+\item \textbf{The magnon--magnon cross peak requires genuine nonlinear Fe dynamics.}
+The peak $(\mathrm{qFM},\mathrm{qAFM})$ is the clearest sign that the Fe modes communicate nonlinearly. Tm-assisted back-action may enhance this process, but the current literature does not justify presenting it as the only possible conversion route.
+\end{enumerate}
+
+\subsubsection{Summary of required model ingredients}
+
+The full set of observed peaks across three geometries is captured by the following minimal \emph{effective} ingredients:
+\begin{enumerate}
+\item The Tm qutrit with mirror-classified Gell-Mann operators ($\mathcal A_1^\pm$, $\mathcal A_2^\pm$) controls which Tm transitions are bright in which THz polarization channel.
+\item The linear Tm--Fe exchange coupling~\eqref{eq:fullmixednew} supplies the cleanest even-sector transfer pathway, most transparently visible in the qAFM-linked $E_1\!\to\!E_2$ peaks.
+\item The anisotropy-modulation channel~\eqref{eq:Hanisofull} supplies the population-shift pathways and the minimal effective odd-sector transfer vertex required to organize the strong qFM-linked VV peaks. Its odd piece should be viewed as a symmetry-allowed phenomenological ansatz rather than as a uniquely established microscopic bond operator.
+\item Nonlinear Fe-mode mixing is required for the magnon--magnon cross-peak. In the present formulation this may be encoded through Tm-assisted anisotropy back-action, while intrinsic nonlinear Fe dynamics may provide additional weight in a more microscopic treatment.
+\item Geometry-dependent radiative weights are required to explain why some coherences are bright in one polarization channel and suppressed in another, especially the empirical suppression of qFM detection in Geometry~III.
+\end{enumerate}
+
+\section{What is minimal and what is optional in the full-lattice formulation}
+\label{sec:ingredients}
+
+\subsection{Genuinely minimal ingredients}
+
+Within the four-sublattice lattice formulation, the genuinely minimal ingredients are:
+\begin{enumerate}
+    \item the full four-sublattice Fe Hamiltonian of Eq.~\eqref{eq:fullFeHamiltonian4sub};
+    \item one three-level Tm qutrit on every Tm site, written in the ordered basis $(E_1(A_1),E_2(A_1),E_3(A_2))$;
+    \item the magnetic operator identification
+    \begin{equation}
+    J_z^{\rm eff}\propto \lambda^2,
+    \qquad
+    J_x^{\rm eff},J_y^{\rm eff}\in\mathrm{span}(\lambda^5,\lambda^7);
+    \end{equation}
+    \item the electric operator identification
+    \begin{equation}
+    d_x^{\rm eff},d_y^{\rm eff}\sim \lambda^1,
+    \qquad
+    d_z^{\rm eff}\in\mathrm{span}(\lambda^4,\lambda^6);
+    \end{equation}
+    \item the linear Tm--Fe exchange-field coupling of Eq.~\eqref{eq:fullmixednew};
+    \item the anisotropy-modulation channel of Eq.~\eqref{eq:Hanisofull}, understood as an effective symmetry-allowed coarse-grained coupling rather than a unique microscopic bond term.
+\end{enumerate}
+
+\subsection{Optional refinements}
+
+Natural refinements that are not strictly required for the qualitative peak logic include:
+\begin{enumerate}
+    \item explicit Tm--Tm interactions $K_{ij}^{ab}\lambda_i^a\lambda_j^b$;
+    \item a more microscopic derivation of the anisotropy couplings from integrating out higher-lying Tm levels or lattice distortions;
+    \item propagation effects, magnon-polariton mixing~\cite{Grishunin2018}, and Maxwell coupling;
+    \item extension of the qutrit to include higher crystal-field levels;
+    \item a more microscopic electrodynamic treatment of the geometry-dependent emission weights.
+\end{enumerate}
+
+\section{Conclusion}
+
+The right low-energy language for the Tm sector of TmFeO$_3$ is a qutrit written in the Gell-Mann basis, formulated in the physically transparent basis
+\begin{equation}
+\big(\ket{E_1(A_1)},\ket{E_2(A_1)},\ket{E_3(A_2)}\big),
+\end{equation}
+where the mirror character is visible directly in the state labels. The eight Gell-Mann generators organize into four symmetry classes:
+\begin{align}
+A_1^+ &: \lambda^1,\lambda^3,\lambda^8,\\
+A_1^- &: \lambda^2,\\
+A_2^+ &: \lambda^4,\lambda^6,\\
+A_2^- &: \lambda^5,\lambda^7.
+\end{align}
+This classification, combined with the polarization selection rules for THz radiation propagating along $b$, determines which Tm transitions are visible in each THz polarization channel: the even transition $E_1(A_1)\leftrightarrow E_2(A_1)$ radiates into $a$-polarized light (via $d_x^{\rm eff}\sim\lambda^1$ and $J_z^{\rm eff}\sim\lambda^2$), while the odd transitions $E_{1,2}(A_1)\leftrightarrow E_3(A_2)$ radiate into $c$-polarized light (via $d_z^{\rm eff}\sim\lambda^{4,6}$ and $J_{x,y}^{\rm eff}\sim\lambda^{5,7}$).
+
+On the Fe side, the modeling remains at the level of the full four-sublattice lattice Hamiltonian and LLG dynamics. The Bertaut order parameters $\mathbf F$, $\mathbf G$, $\mathbf C$, and $\mathbf A$ serve as diagnostics.
+
+The minimal hybrid mechanism is then constrained by the 2DCS data from three complementary geometries (Sec.~\ref{sec:2DCSpeaks}):
+\begin{enumerate}
+\item \emph{Linear Tm--Fe exchange coupling} ($J^{\rm eff}_\alpha\cdot S$) provides the cleanest even-sector transfer pathway. It is most transparently visible when the detection channel is sensitive to $E_1\!\to\!E_2$, as in the VH geometry of Sec.~\ref{sec:geomII}.
+\item \emph{SU(3) commutator algebra and VV detection selection rules} control the excitation-axis content of Geometry~I (Sec.~\ref{sec:geomI}): the odd-sector pump creates $E_1\!\leftrightarrow\!E_2$ coherence at second order via $[\lambda^5,\lambda^7]=i\lambda^2$, and VV preferentially filters this even-sector content onto the excitation axis. The detection peaks arise from pulse~B reconversion ($[\mathrm{odd},\mathrm{even}]\to\mathrm{odd}$), Fe back-action (Tm$\to$Fe anisotropy modulation launching qFM), and population-grating formation.
+\item The \emph{interplay} of both couplings is directly revealed by the $(H\!\parallel\!c,E\!\parallel\!a)$ VH geometry (Sec.~\ref{sec:geomIII}), where the magnon--magnon cross-peak $(\mathrm{qFM},\mathrm{qAFM})$ indicates strong nonlinear communication between the two Fe modes. In the present formulation this can be encoded through Tm-assisted anisotropy back-action, while intrinsic nonlinear Fe mixing may also contribute.
+\item Geometry-dependent radiative weights are needed to explain why some coherences are bright in one polarization channel and strongly suppressed in another, especially the empirical suppression of qFM detection in Geometry~III.
+\end{enumerate}
+Taken together, these ingredients define a minimal \emph{effective} symmetry-allowed model for the observed 2DCS peak hierarchy. A more microscopic bond-resolved realization remains possible, but is not uniquely fixed by the current data and literature alone.
+
+\appendix
+
+\section{Summary of implementation conventions retained here}
+
+For convenience, we summarize the code-facing conventions preserved from the companion implementation document.
+\begin{enumerate}
+    \item The mixed bond term is
+    \begin{equation}
+    H_{\mathrm{Tm\text{--}Fe}}^{\rm lin}
+    =
+    \sum_{\mathbf n,j,i,\mathbf R}
+    \Lambda_{\mathbf n+\mathbf R,j}^{\mathsf T}
+    \chi_{ji}(\mathbf R)\,
+    \mathbf S_{\mathbf n,i},
+    \end{equation}
+    where the offset $\mathbf R$ is attached to the Tm site.
+    \item The row index of $\chi$ corresponds to $(\lambda^2,\lambda^5,\lambda^7)$, and the column index corresponds to $(S^x,S^y,S^z)$.
+    \item The sublattice-dependent local frames are
+    \begin{align}
+    1 &: (+,+,+),\\
+    2 &: (+,-,-),\\
+    3 &: (-,+,-),\\
+    4 &: (-,-,+).
+    \end{align}
+    \item The Tm qutrit basis used in the present notes is
+    \begin{equation}
+    \big(\ket{E_1(A_1)},\ket{E_2(A_1)},\ket{E_3(A_2)}\big),
+    \end{equation}
+    which maps to the neutron notation~\cite{Skorobogatov2020} $(\ket{E_0},\ket{E_1},\ket{E_2})$ by a simple index shift.
+\end{enumerate}
+
+\section{Compact full-lattice Hamiltonian ready for simulation}
+
+For quick reference, the full-lattice model advocated in these notes is
+\begin{align}
+H_{\rm tot}
+=&\ H_{\mathrm{Fe\text{--}Fe}}
++\sum_{\mathbf n,j}\left(\bar\epsilon\,\mathds 1+h_3^{(0)}\lambda^3_{\mathbf n,j}+h_8^{(0)}\lambda^8_{\mathbf n,j}\right)
+\notag\\
+&+\sum_{\mathbf n,j,i,\mathbf R}
+\mathcal J_{\mathbf n+\mathbf R,j}^{\mathsf T}\mathcal K_{ji}(\mathbf R)\mathbf S_{\mathbf n,i}
+\notag\\
+&-\sum_{\mathbf n,j}\left[
+ u_{1,j}\lambda^1_{\mathbf n,j}+u_{3,j}\lambda^3_{\mathbf n,j}+u_{8,j}\lambda^8_{\mathbf n,j}
+\right](G_z^2-F_x^2)
+\notag\\
+&-\sum_{\mathbf n,j}\left[
+ v_{4,j}\lambda^4_{\mathbf n,j}+v_{6,j}\lambda^6_{\mathbf n,j}
+\right](F_xG_z)
+\notag\\
+&-\mu_B g_J\sum_{\mathbf n,j}
+\left[
+ h_x(t)J^{\rm eff}_{x,\mathbf n,j}
++h_y(t)J^{\rm eff}_{y,\mathbf n,j}
++h_z(t)J^{\rm eff}_{z,\mathbf n,j}
+\right]
+\notag\\
+&-\sum_{\mathbf n,j}
+\left[
+ e_x(t)d^{\rm eff}_{x,\mathbf n,j}
++e_y(t)d^{\rm eff}_{y,\mathbf n,j}
++e_z(t)d^{\rm eff}_{z,\mathbf n,j}
+\right].
+\end{align}
+Here $H_{\mathrm{Fe\text{--}Fe}}$ is given explicitly in Eq.~\eqref{eq:fullFeHamiltonian4sub}, the Fe spins are evolved by Eq.~\eqref{eq:LLG4sub}, and the Tm qutrit density matrices are evolved by Eq.~\eqref{eq:blochdampedfull}.
+
+
+\section{Explicit bond enumeration for TmFeO\texorpdfstring{$_3$}{3}}
+\label{app:bonds}
+
+This appendix derives the complete bond structure used in the simulation code, matching the notation of Secs.~\ref{sec:FeFelocalframe} and~\ref{sec:bondsymmetry}. All positions are given in the fractional coordinates of Sec.~\ref{sec:sublatticeframes} with Pbnm lattice constants $a=5.2534$~\AA, $b=5.5707$~\AA, $c=7.6076$~\AA.
+
+\subsection{Atomic positions}
+\label{app:positions}
+
+The four Fe sites occupy Wyckoff position 4b (site symmetry $\bar 1$):
+\begin{align}
+\mathrm{Fe}_0 &= (0,\;\tfrac12,\;\tfrac12), &
+\mathrm{Fe}_1 &= (\tfrac12,\;0,\;\tfrac12), \notag\\
+\mathrm{Fe}_2 &= (\tfrac12,\;0,\;0), &
+\mathrm{Fe}_3 &= (0,\;\tfrac12,\;0).
+\label{eq:Fepos}
+\end{align}
+The four Tm sites occupy Wyckoff position 4c (site symmetry $m$):
+\begin{align}
+\mathrm{Tm}_0 &= (0.02111,\;0.92839,\;0.75), &
+\mathrm{Tm}_1 &= (0.52111,\;0.57161,\;0.25), \notag\\
+\mathrm{Tm}_2 &= (0.47889,\;0.42839,\;0.75), &
+\mathrm{Tm}_3 &= (0.97889,\;0.07161,\;0.25).
+\label{eq:Tmpos}
+\end{align}
+The local-frame sign matrices are $R_\mu=\mathrm{diag}(\eta_\mu^x,\eta_\mu^y,\eta_\mu^z)$ with
+\begin{equation}
+\boldsymbol\eta = \{(+,+,+),\;(+,-,-),\;(-,+,-),\;(-,-,+)\}
+\label{eq:etaapp}
+\end{equation}
+for $\mu=0,1,2,3$ (0-indexed to match the code; the LaTeX body uses 1-indexing with $\mu\to\mu-1$).
+
+\subsection{Fe--Fe bond structure}
+\label{app:FeFebonds}
+
+\subsubsection{Nearest-neighbor in-plane bonds ($J_1$)}
+
+Fe$_0$ and Fe$_1$ lie in the $z=\tfrac12$ plane; Fe$_2$ and Fe$_3$ lie in the $z=0$ plane. Within each plane, the NN bonds connect sublattices that differ by the $S_1$ screw:
+
+\medskip
+\noindent
+\textbf{$z=\frac12$ plane (Fe$_1\to$Fe$_0$):}
+\begin{center}
+\begin{tabular}{cccc}
+\hline
+Bond & Cell offset $\mathbf R$ & Direction & DM vector $\mathbf D$ \\
+\hline
+$a$-type & $(0,0,0)$, $(1,-1,0)$ & along $\hat a+\hat b$ & $(0,\,+D_1,\,+D_2)$ \\
+$b$-type & $(0,-1,0)$, $(1,0,0)$ & along $\hat a-\hat b$ & $(0,\,+D_1,\,+D_2)$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\noindent
+\textbf{$z=0$ plane (Fe$_2\to$Fe$_3$):}
+\begin{center}
+\begin{tabular}{cccc}
+\hline
+Bond & Cell offset $\mathbf R$ & Direction & DM vector $\mathbf D$ \\
+\hline
+$a$-type & $(0,0,0)$, $(1,-1,0)$ & along $\hat a+\hat b$ & $(0,\,-D_1,\,+D_2)$ \\
+$b$-type & $(0,-1,0)$, $(1,0,0)$ & along $\hat a-\hat b$ & $(0,\,-D_1,\,+D_2)$ \\
+\hline
+\end{tabular}
+\end{center}
+The partial sign reversal of the DM vector between the two planes is required by Pbnm symmetry: $S_1$ maps Fe$_1\to$Fe$_2$ and Fe$_0\to$Fe$_3$ while conjugating the exchange matrix by $R_z(\pi)$, which flips $D_y\to -D_y$ but preserves $D_z\to +D_z$ ($D_x=0$ by the mirror).
+
+In the local frame, each bond's exchange matrix becomes
+\begin{equation}
+J^{(\ell)}_{\alpha\beta}(i,j) = J^{(g)}_{\alpha\beta}(i,j)\;\eta_i^\alpha\,\eta_j^\beta,
+\label{eq:JlocalFeFe}
+\end{equation}
+so the Heisenberg part picks up $\Pi_{ij}=R_i^{\mathsf T}R_j$ (Eq.~\ref{eq:Pimu}) and each DM component picks up $\eta_i^a\eta_j^b$ per the Levi-Civita factor.
+
+\subsubsection{Nearest-neighbor out-of-plane bonds ($J_{1c}$)}
+
+These connect adjacent $z$-planes with pure isotropic exchange $J_{1c}$:
+\begin{center}
+\begin{tabular}{ccc}
+\hline
+Pair & Cell offsets $\mathbf R$ & $\Pi_{\mu\nu}$ (local frame) \\
+\hline
+Fe$_0\to$Fe$_3$ & $(0,0,0)$, $(0,0,1)$ & $\mathrm{diag}(-1,-1,+1)$ \\
+Fe$_1\to$Fe$_2$ & $(0,0,0)$, $(0,0,1)$ & $\mathrm{diag}(-1,-1,+1)$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{Next-nearest-neighbor bonds ($J_2$)}
+
+\paragraph{Intra-sublattice ($J_{2a}, J_{2b}, J_{2c}$).}
+
+Each Fe sublattice has NNN bonds to itself along the three lattice vectors:
+\begin{center}
+\begin{tabular}{ccc}
+\hline
+Direction & Cell offset $\mathbf R$ & Exchange \\
+\hline
+$\hat a$ & $(1,0,0)$ & $J_{2a}$ \\
+$\hat b$ & $(0,1,0)$ & $J_{2b}$ \\
+$\hat c$ & $(0,0,1)$ & $J_{2c}$ \\
+\hline
+\end{tabular}
+\end{center}
+All four sublattices ($\mu=0,1,2,3$) carry the same exchange parameters, and $\Pi_{\mu\mu}=\mathbf 1$ (trivially isotropic in the local frame). In the code, $J_{2a}=J_{2b}$ (tetragonal approximation).
+
+\paragraph{Inter-sublattice NNN ($J_{2c}$ cross-plane).}
+
+The sublattice pairs Fe$_0\leftrightarrow$Fe$_2$ and Fe$_1\leftrightarrow$Fe$_3$ have a large number of equivalent cross-plane NNN bonds. Each pair has 8 cell offsets:
+
+\medskip
+\noindent
+Fe$_0\to$Fe$_2$ ($\Pi_{02}=\mathrm{diag}(\eta_0^x\eta_2^x,\;\eta_0^y\eta_2^y,\;\eta_0^z\eta_2^z)=\mathrm{diag}(-1,+1,-1)$, using $\boldsymbol\eta_0=(+,+,+)$ and $\boldsymbol\eta_2=(-,+,-)$.)
+
+\begin{center}
+\begin{tabular}{cc}
+\hline
+Pair & Cell offsets $\mathbf R$ \\
+\hline
+Fe$_0\to$Fe$_2$ & $(0,0,0)$, $(0,1,0)$, $(-1,0,0)$, $(-1,1,0)$, \\
+ & $(0,0,1)$, $(0,1,1)$, $(-1,0,1)$, $(-1,1,1)$ \\
+\hline
+Fe$_1\to$Fe$_3$ & $(0,0,0)$, $(0,-1,0)$, $(1,0,0)$, $(1,-1,0)$, \\
+ & $(0,0,1)$, $(0,-1,1)$, $(1,0,1)$, $(1,-1,1)$ \\
+\hline
+\end{tabular}
+\end{center}
+All carry isotropic $J_{2c}$ and transform to the local frame with $\Pi_{02}=\Pi_{13}=\mathrm{diag}(-1,+1,-1)$.
+
+\subsection{Fe--Tm bond structure: the four distance orbits}
+\label{app:FeTmbonds}
+
+\subsubsection{Distance shells}
+
+Brute-force enumeration of all Fe--Tm pairs within a cutoff of $\sim 4$~\AA\ yields four distinct nearest-neighbor distance shells (computed in real-space \AA):
+\begin{center}
+\begin{tabular}{ccccc}
+\hline
+Orbit & $d$ (\AA) & $d/\sqrt{a^2+b^2+c^2}$ & Dominant direction & Self-paired? \\
+\hline
+1 & 3.054 & 0.497 (shortest) & $\hat b+\hat c$ & No \\
+2 & 3.179 & 0.545 & $\hat a+\hat c$ & No \\
+3 & 3.357 & 0.582 & $\hat a+\hat c$ & No \\
+4 & 3.711 & 0.624 (longest) & $\hat b+\hat c$ & No \\
+\hline
+\end{tabular}
+\end{center}
+The 21.5\% distance spread from orbit~1 to orbit~4 has important physical consequences (Sec.~\ref{app:distancescaling}).
+
+None of the four orbits is self-paired under inversion. Each orbit has 8 bonds per orbit: 4 carrying $\chi$ and 4 carrying $\chi_{\rm inv}=\tilde P_z\chi$ (Eq.~\ref{eq:inversionK}), for a total of 32 nearest-neighbor Fe--Tm bonds in the unit cell (8 per Fe site, 8 per Tm site).
+
+\subsubsection{Space-group orbit structure}
+
+The D$_{2h}$ group $\{E,S_1,S_2,S_1S_2\}\times\{E,I\}$ has 8 elements. The subgroup $\{E,S_1,S_2,S_1S_2\}$ is $\chi$-preserving (Eq.~\ref{eq:S1S2trivial}), while the coset $\{I,S_1I,S_2I,S_1S_2I\}$ is $\chi$-flipping ($\chi\leftrightarrow\chi_{\rm inv}$). Each of the 4~orbits contains exactly 8~bonds, generated from a single reference bond at Fe$_0$ by applying all 8~operations:
+\begin{center}
+\begin{tabular}{lcccc}
+\hline
+Operation & Fe sublattice & $\sigma^{\rm Fe}$ & $\sigma^{\rm Tm}$ & Coupling \\
+\hline
+$E$       & Fe$_0$ & $e$      & $e$      & $\chi$ \\
+$S_1$     & Fe$_3$ & $(14)(23)$ & $(14)(23)$ & $\chi$ \\
+$S_2$     & Fe$_1$ & $(12)(34)$ & $(12)(34)$ & $\chi$ \\
+$S_1S_2$  & Fe$_2$ & $(13)(24)$ & $(13)(24)$ & $\chi$ \\
+$I$       & Fe$_0$ & $e$      & $(14)(23)$ & $\chi_{\rm inv}$ \\
+$S_1I$    & Fe$_3$ & $(14)(23)$ & $e$      & $\chi_{\rm inv}$ \\
+$S_2I$    & Fe$_1$ & $(12)(34)$ & $(13)(24)$ & $\chi_{\rm inv}$ \\
+$S_1S_2I$ & Fe$_2$ & $(13)(24)$ & $(12)(34)$ & $\chi_{\rm inv}$ \\
+\hline
+\end{tabular}
+\end{center}
+The crucial asymmetry is that inversion acts as $\sigma_I^{\rm Fe}=e$ (Fe sublattices do not permute under $I$) but $\sigma_I^{\rm Tm}=(14)(23)$ (Tm sublattices do permute). This is why inversion produces the nontrivial $\tilde P_z$ constraint of Eq.~\eqref{eq:inversionK} rather than a simple identification.
+
+\subsubsection{Complete 32-bond table}
+\label{app:bondtable}
+
+The following table lists all 32 nearest-neighbor Fe--Tm bonds, organized by Fe site. The ``Gen.''\ column indicates the space-group operation generating the bond from the Fe$_0$ reference bond of the same orbit.
+
+\medskip
+\noindent\textbf{Fe$_0$ ($z=\tfrac12$ plane):}
+\begin{center}
+\begin{tabular}{cccccc}
+\hline
+Orbit & $d$ (\AA) & Tm & $\mathbf R$ & Type & Gen. \\
+\hline
+1 & 3.054 & 3 & $(-1,0,0)$ & $\chi$ & $E$ \\
+1 & 3.054 & 0 & $(0,0,0)$ & $\chi_{\rm inv}$ & $I$ \\
+2 & 3.179 & 2 & $(0,0,0)$ & $\chi$ & $E$ \\
+2 & 3.179 & 1 & $(-1,0,0)$ & $\chi_{\rm inv}$ & $I$ \\
+3 & 3.357 & 1 & $(0,0,0)$ & $\chi$ & $E$ \\
+3 & 3.357 & 2 & $(-1,0,0)$ & $\chi_{\rm inv}$ & $I$ \\
+4 & 3.711 & 0 & $(0,-1,0)$ & $\chi$ & $E$ \\
+4 & 3.711 & 3 & $(-1,1,0)$ & $\chi_{\rm inv}$ & $I$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent\textbf{Fe$_1$ ($z=\tfrac12$ plane):}
+\begin{center}
+\begin{tabular}{cccccc}
+\hline
+Orbit & $d$ (\AA) & Tm & $\mathbf R$ & Type & Gen. \\
+\hline
+1 & 3.054 & 2 & $(0,0,0)$ & $\chi$ & $S_2$ \\
+1 & 3.054 & 1 & $(0,-1,0)$ & $\chi_{\rm inv}$ & $S_2I$ \\
+2 & 3.179 & 3 & $(0,0,0)$ & $\chi$ & $S_2$ \\
+2 & 3.179 & 0 & $(0,-1,0)$ & $\chi_{\rm inv}$ & $S_2I$ \\
+3 & 3.357 & 0 & $(1,-1,0)$ & $\chi$ & $S_2$ \\
+3 & 3.357 & 3 & $(-1,0,0)$ & $\chi_{\rm inv}$ & $S_2I$ \\
+4 & 3.711 & 1 & $(0,0,0)$ & $\chi$ & $S_2$ \\
+4 & 3.711 & 2 & $(0,-1,0)$ & $\chi_{\rm inv}$ & $S_2I$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent\textbf{Fe$_2$ ($z=0$ plane):}
+\begin{center}
+\begin{tabular}{cccccc}
+\hline
+Orbit & $d$ (\AA) & Tm & $\mathbf R$ & Type & Gen. \\
+\hline
+1 & 3.054 & 1 & $(0,-1,0)$ & $\chi$ & $S_1S_2$ \\
+1 & 3.054 & 2 & $(0,0,-1)$ & $\chi_{\rm inv}$ & $S_1S_2I$ \\
+2 & 3.179 & 0 & $(0,-1,-1)$ & $\chi$ & $S_1S_2$ \\
+2 & 3.179 & 3 & $(0,0,0)$ & $\chi_{\rm inv}$ & $S_1S_2I$ \\
+3 & 3.357 & 3 & $(-1,0,0)$ & $\chi$ & $S_1S_2$ \\
+3 & 3.357 & 0 & $(1,-1,-1)$ & $\chi_{\rm inv}$ & $S_1S_2I$ \\
+4 & 3.711 & 2 & $(0,-1,-1)$ & $\chi$ & $S_1S_2$ \\
+4 & 3.711 & 1 & $(0,0,0)$ & $\chi_{\rm inv}$ & $S_1S_2I$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent\textbf{Fe$_3$ ($z=0$ plane):}
+\begin{center}
+\begin{tabular}{cccccc}
+\hline
+Orbit & $d$ (\AA) & Tm & $\mathbf R$ & Type & Gen. \\
+\hline
+1 & 3.054 & 0 & $(0,0,-1)$ & $\chi$ & $S_1$ \\
+1 & 3.054 & 3 & $(-1,0,0)$ & $\chi_{\rm inv}$ & $S_1I$ \\
+2 & 3.179 & 1 & $(-1,0,0)$ & $\chi$ & $S_1$ \\
+2 & 3.179 & 2 & $(0,0,-1)$ & $\chi_{\rm inv}$ & $S_1I$ \\
+3 & 3.357 & 2 & $(-1,0,-1)$ & $\chi$ & $S_1$ \\
+3 & 3.357 & 1 & $(0,0,0)$ & $\chi_{\rm inv}$ & $S_1I$ \\
+4 & 3.711 & 3 & $(-1,1,0)$ & $\chi$ & $S_1$ \\
+4 & 3.711 & 0 & $(0,-1,-1)$ & $\chi_{\rm inv}$ & $S_1I$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{Consistency check.}
+
+Each Fe site has exactly 8 Tm neighbors (2 per orbit $\times$ 4 orbits). Each Tm site also has 8 Fe neighbors (verifiable by transposing the table). The 32 bonds partition into $4\text{ orbits}\times 8\text{ bonds/orbit}$, with within each orbit: 4 bonds carrying $\chi$ (one per Fe sublattice, generated by $E, S_1, S_2, S_1S_2$) and 4 carrying $\chi_{\rm inv}$ (generated by $I, S_1I, S_2I, S_1S_2I$).
+
+\subsubsection{Inversion pairing structure}
+\label{app:inversionpairs}
+
+Within each orbit, inversion pairs the $\chi$ and $\chi_{\rm inv}$ bonds on the \emph{same} Fe sublattice. Reading from the table:
+\begin{center}
+\begin{tabular}{ccccc}
+\hline
+\multirow{2}{*}{Orbit} & \multicolumn{2}{c}{$\chi$ bond} & \multicolumn{2}{c}{$\chi_{\rm inv}$ partner} \\
+\cline{2-5}
+& Tm & $\mathbf R$ & Tm & $\mathbf R$ \\
+\hline
+\multicolumn{5}{c}{Fe$_0$} \\
+\hline
+1 & 3 & $(-1,0,0)$ & 0 & $(0,0,0)$ \\
+2 & 2 & $(0,0,0)$  & 1 & $(-1,0,0)$ \\
+3 & 1 & $(0,0,0)$  & 2 & $(-1,0,0)$ \\
+4 & 0 & $(0,-1,0)$ & 3 & $(-1,1,0)$ \\
+\hline
+\end{tabular}
+\end{center}
+In each row, the $\chi$ bond connects to Tm$_j$ while the $\chi_{\rm inv}$ partner connects to Tm$_{\bar j}=\sigma_I^{\rm Tm}(j)$. Since $\sigma_I^{\rm Tm}=(14)(23)$ in 1-indexed notation (i.e.\ $0\leftrightarrow 3$, $1\leftrightarrow 2$ in 0-indexed), we verify:
+\begin{itemize}
+\item Orbit 1: $j=3\to\bar j=0$ \checkmark
+\item Orbit 2: $j=2\to\bar j=1$ \checkmark
+\item Orbit 3: $j=1\to\bar j=2$ \checkmark
+\item Orbit 4: $j=0\to\bar j=3$ \checkmark
+\end{itemize}
+No orbit is self-paired (no individual bond maps to itself under inversion). Each orbit therefore has the full 9 independent parameters in $\mathcal K^{(\ell)}$ shared between the $\chi$ and $\chi_{\rm inv}$ bonds via Eq.~\eqref{eq:inversionK}.
+
+\subsection{Tm--Tm bond structure}
+\label{app:tmtmbonds}
+
+The Tm atoms occupy the $4c$ Wyckoff sites in two distinct $z$-planes: Tm$_0$ and Tm$_2$ at $z=0.75$, Tm$_1$ and Tm$_3$ at $z=0.25$. The nearest-neighbor Tm--Tm interactions form three distance shells (12 directed bonds total):
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+Shell & Bonds & Distance (\AA) & Type \\
+\hline
+In-plane short & 4 & 3.680 & same $z$-plane \\
+In-plane long & 4 & 3.984 & same $z$-plane \\
+Out-of-plane & 4 & 3.893 & between $z$-planes \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{In-plane bonds}
+
+Each $z$-plane contains two sublattices connected by 4 bonds. In the $z=0.75$ plane (Tm$_0$--Tm$_2$) and the $z=0.25$ plane (Tm$_1$--Tm$_3$):
+
+\begin{center}
+\begin{tabular}{cccc}
+\hline
+Bond & $\mathbf R$ offset & $d$ (\AA) & Shell \\
+\hline
+Tm$_0\to$Tm$_2$ & $(0,0,0)$ & 3.680 & short \\
+Tm$_0\to$Tm$_2$ & $(0,1,0)$ & 3.680 & short \\
+Tm$_0\to$Tm$_2$ & $(-1,0,0)$ & 3.984 & long \\
+Tm$_0\to$Tm$_2$ & $(-1,1,0)$ & 3.984 & long \\
+\hline
+Tm$_1\to$Tm$_3$ & $(0,0,0)$ & 3.680 & short \\
+Tm$_1\to$Tm$_3$ & $(0,1,0)$ & 3.680 & short \\
+Tm$_1\to$Tm$_3$ & $(-1,0,0)$ & 3.984 & long \\
+Tm$_1\to$Tm$_3$ & $(-1,1,0)$ & 3.984 & long \\
+\hline
+\end{tabular}
+\end{center}
+
+The two in-plane distance shells arise because the Pbnm structure shifts the $x$-coordinates of the Tm sites away from $0$ and $\tfrac{1}{2}$: $\Delta x_{\rm frac}=+0.458$ for the short bonds and $\Delta x_{\rm frac}=-0.542$ for the long bonds, while $|\Delta y_{\rm frac}|=0.5$ in both cases.
+
+$S_2$ maps the $z=0.75$ plane to $z=0.25$, exchanging Tm$_0\leftrightarrow$Tm$_1$ and Tm$_2\leftrightarrow$Tm$_3$:
+\begin{align*}
+\text{Tm}_0\text{--Tm}_2@(0,0,0) &\leftrightarrow \text{Tm}_1\text{--Tm}_3@(0,1,0), \\
+\text{Tm}_0\text{--Tm}_2@(-1,0,0) &\leftrightarrow \text{Tm}_1\text{--Tm}_3@(-1,1,0).
+\end{align*}
+
+\subsubsection{Out-of-plane bonds}
+
+Bonds between the two $z$-planes connect Tm$_0\leftrightarrow$Tm$_3$ and Tm$_2\leftrightarrow$Tm$_1$:
+
+\begin{center}
+\begin{tabular}{ccc}
+\hline
+Bond & $\mathbf R$ offset & $d$ (\AA) \\
+\hline
+Tm$_0\to$Tm$_3$ & $(-1,1,0)$ & 3.893 \\
+Tm$_0\to$Tm$_3$ & $(-1,1,1)$ & 3.893 \\
+Tm$_2\to$Tm$_1$ & $(0,0,0)$ & 3.893 \\
+Tm$_2\to$Tm$_1$ & $(0,0,1)$ & 3.893 \\
+\hline
+\end{tabular}
+\end{center}
+
+$S_2$ maps Tm$_2$--Tm$_1$@$(0,0,0)$ $\to$ Tm$_0$--Tm$_3$@$(-1,1,0)$ and Tm$_2$--Tm$_1$@$(0,0,1)$ $\to$ Tm$_0$--Tm$_3$@$(-1,1,1)$.
+
+\paragraph{Excluded offsets.} Alternative candidates Tm$_0\to$Tm$_3$@$(-1,0,0)$, $(-1,0,1)$ and Tm$_2\to$Tm$_1$@$(0,-1,0)$, $(0,-1,1)$ give $d=6.107$~\AA, far beyond the NN shell, and are excluded.
+
+\subsubsection{Coupling structure and coordination}
+
+The Tm--Tm interaction is diagonal in Gell-Mann space, with 8 independent coupling constants $J^{\rm Tm}_a$ ($a=1,\ldots,8$):
+\begin{equation}
+\mathcal H_{\rm Tm\text{-}Tm} = \sum_{\langle ij\rangle} \sum_{a=1}^{8} J^{\rm Tm}_a\,\lambda_i^a\,\lambda_j^a.
+\label{eq:HTmTm}
+\end{equation}
+The same coupling matrix $\mathrm{diag}(J^{\rm Tm}_1,\ldots,J^{\rm Tm}_8)$ is used for all 12 directed bonds across all three distance shells. Each Tm sublattice has coordination number~6: 4 in-plane neighbors (2 short $+$ 2 long) and 2 out-of-plane neighbors.
+
+\section{Distance-dependent superexchange scaling}
+\label{app:distancescaling}
+
+\subsection{Physical motivation}
+
+The Fe--Tm superexchange is mediated by oxygen: Fe($3d^5$)---O($2p$)---Tm($4f^{12}$). The transfer integrals scale with distance as
+\begin{equation}
+t_{pd}\propto d^{-3.5}\quad\text{(Harrison $3d$--$2p$)},
+\qquad
+t_{pf}\propto d^{-5}\quad\text{($4f$--$2p$, steeper due to $4f$ contraction)}.
+\end{equation}
+For 3$d$--3$d$ systems, $J_{\rm SE}\propto d^{-7}$ (well-established). For 4$f$--3$d$ systems, the effective exponent is steeper: $J_{\rm SE}\propto t_{pd}\cdot t_{pf}\propto d^{-(3.5+5)}=d^{-8.5}$, though multi-orbital and path-geometry effects modify this to $n\approx 8$--$12$ in practice.
+
+The orbit-dependent scale factor is defined as
+\begin{equation}
+s_k = \left(\frac{d_{\min}}{d_k}\right)^{\!n},
+\qquad k=1,2,3,4,
+\label{eq:orbitscale}
+\end{equation}
+with $d_{\min}=d_1=3.054$~\AA. For each orbit, the coupling is rescaled: $\chi_k=s_k\,\chi$, $\chi_{{\rm inv},k}=s_k\,\chi_{\rm inv}$.
+
+\subsection{Scale-factor values}
+
+Normalizing to unit mean ($\bar s = 1$):
+
+\begin{center}
+\begin{tabular}{lcccc}
+\hline
+& $s_1$ (3.054~\AA) & $s_2$ (3.179~\AA) & $s_3$ (3.357~\AA) & $s_4$ (3.711~\AA) \\
+\hline
+Uniform ($n=0$) & 1.00 & 1.00 & 1.00 & 1.00 \\
+Conservative ($n=5$) & 1.42 & 1.16 & 0.88 & 0.54 \\
+Moderate ($n=8$) & 1.66 & 1.21 & 0.78 & 0.35 \\
+Aggressive ($n=10$) & 1.82 & 1.22 & 0.71 & 0.26 \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{The $\mathbf q=0$ cancellation mechanism}
+\label{app:q0cancel}
+
+In the SU(3) implementation, the coupling is written in the Gell-Mann basis as $\chi_{\alpha a}\,S^\alpha\,\lambda^a$, with the inversion partner carrying $\chi_{{\rm inv},\alpha a}$. The key structural property is:
+\begin{equation}
+\chi_{{\rm inv},\alpha a}
+=
+\begin{cases}
++\chi_{\alpha a} & a\in\{2\}\;\;\text{($\lambda^2\leftrightarrow J_z^{\rm eff}$, even under $P_z$)},\\
+-\chi_{\alpha a} & a\in\{5,7\}\;\;\text{($\lambda^{5,7}\leftrightarrow J_{x,y}^{\rm eff}$, odd under $P_z$)}.
+\end{cases}
+\label{eq:chiinvsign}
+\end{equation}
+
+Consider the effective field on a single Tm site (say Tm$_0$) at $\mathbf q=0$, where all Fe spins on a given sublattice are identical. Tm$_0$ has 8 Fe neighbors, two per orbit (one $\chi$, one $\chi_{\rm inv}$). For Gell-Mann component $a$, the net effective field is
+\begin{equation}
+h_{\rm eff}^{(a)} = \sum_{k=1}^{4} s_k\bigl[\chi_{\alpha a}\,S^{\alpha}_{i(k)} + \chi_{{\rm inv},\alpha a}\,S^{\alpha}_{i'(k)}\bigr],
+\end{equation}
+where $i(k)$ and $i'(k)$ are the Fe sublattice indices of the $\chi$ and $\chi_{\rm inv}$ bonds in orbit $k$.
+
+\paragraph{$\lambda^2$ channel ($a=2$, $J_z^{\rm eff}$).}
+
+Since $\chi_{{\rm inv},\alpha 2}=+\chi_{\alpha 2}$, both bonds add constructively:
+\begin{equation}
+h_{\rm eff}^{(2)} = \sum_{k=1}^{4} s_k\,\chi_{\alpha 2}\bigl[S^{\alpha}_{i(k)} + S^{\alpha}_{i'(k)}\bigr].
+\end{equation}
+In the $\Gamma_2$ background, $S^z_i=\eta_i^z G_z^0$, and for each orbit, $i(k)$ and $i'(k)$ sit on different Fe sublattices that contribute to the sum. This gives a large nonzero field $\propto 2\sum_k s_k\,\chi_{z,2}\,G_z^0$ (in the dominant $z$-channel). The $\lambda^2$ effective field is always nonzero regardless of the orbit scale factors.
+
+\paragraph{$\lambda^{5,7}$ channels ($a=5,7$; $J_{x,y}^{\rm eff}$).}
+
+Since $\chi_{{\rm inv},\alpha a}=-\chi_{\alpha a}$ for $a\in\{5,7\}$:
+\begin{equation}
+h_{\rm eff}^{(a)} = \sum_{k=1}^{4} s_k\,\chi_{\alpha a}\bigl[S^{\alpha}_{i(k)} - S^{\alpha}_{i'(k)}\bigr],
+\qquad a\in\{5,7\}.
+\label{eq:heff57}
+\end{equation}
+The term in brackets is the \emph{difference} of Fe spin components on the two sublattices connected by the $\chi$ and $\chi_{\rm inv}$ bonds. In the $\Gamma_2$ background, $S^\alpha_i$ depends on the Bertaut mode and the sublattice sign. For the dominant $z$-component:
+\begin{equation}
+S^z_{i(k)} - S^z_{i'(k)} = [\eta_{i(k)}^z - \eta_{i'(k)}^z]\,G_z^0.
+\end{equation}
+
+Reading from the Fe$_0$ bond table (orbit $\to$ Fe sublattice pairs):
+\begin{center}
+\begin{tabular}{ccccc}
+\hline
+Orbit $k$ & $i(k)$ [$\chi$] & $i'(k)$ [$\chi_{\rm inv}$] & $\eta_{i(k)}^z$ & $\eta_{i'(k)}^z$ \\
+\hline
+1 & Fe$_3$ ($\eta^z=+1$) & Fe$_0$ ($\eta^z=+1$) & $+1$ & $+1$ \\
+2 & Fe$_2$ ($\eta^z=-1$) & Fe$_1$ ($\eta^z=-1$) & $-1$ & $-1$ \\
+3 & Fe$_1$ ($\eta^z=-1$) & Fe$_2$ ($\eta^z=-1$) & $-1$ & $-1$ \\
+4 & Fe$_0$ ($\eta^z=+1$) & Fe$_3$ ($\eta^z=+1$) & $+1$ & $+1$ \\
+\hline
+\end{tabular}
+\end{center}
+In every orbit, the $\chi$ and $\chi_{\rm inv}$ bonds connect to Fe sublattices with the \emph{same} $\eta^z$ sign (by inspection: orbits 1 and 4 connect to $\{0,3\}$ with $\eta^z=+1$; orbits 2 and 3 connect to $\{1,2\}$ with $\eta^z=-1$). Therefore $S^z_{i(k)}-S^z_{i'(k)}=0$ in every orbit, and the sum~\eqref{eq:heff57} vanishes \emph{exactly} at $\mathbf q=0$:
+\begin{equation}
+\boxed{h_{\rm eff}^{(5,7)} = 0\qquad\text{(exact, all orbit scales, $z$-channel)}.}
+\end{equation}
+
+For the $x$-channel ($S^x_i\approx F_x^0$, uniform), $S^x_{i(k)}-S^x_{i'(k)}=0$ trivially (both sublattices carry $+F_x^0$). Similarly for $y$. Therefore the $\lambda^{5,7}$ channels receive \emph{no} static exchange field from the Fe background at $\mathbf q=0$, regardless of orbit scaling. The exact cancellation is a consequence of inversion symmetry and is not lifted by distance-dependent scaling.
+
+\paragraph{Dynamic driving of $\lambda^{5,7}$.}
+
+The comment in the code about ``accidental cancellation'' being broken by distance-dependent scaling applies to the \emph{dynamic} driving by magnon oscillations, not the static field. In the dynamic regime, Fe spin deviations $\delta S^\alpha_i(t)$ on different sublattices carry different mode characters (qFM vs.\ qAFM, with different phase relations across sublattices). The effective field~\eqref{eq:heff57} then involves differences of spin \emph{deviations} weighted by orbit-dependent $s_k$, which do not cancel even when the static field does. However, this dynamic effect is already captured by the full bond-level simulation using Eq.~\eqref{eq:fullmixednew}; the orbit scaling primarily controls the \emph{relative strength} of the coupling through different distance shells.
+
+\section{Anisotropy-modulation coupling at the bond level}
+\label{app:anisobonds}
+
+The anisotropy-modulation coupling of Eq.~\eqref{eq:Hanisofull} arises from the sum of bond-level contributions. In the on-site Fe bilinear picture (Eq.~\ref{eq:Honsite}), each Tm site $(\mathbf n,j)$ couples to the spin bilinears $S_i^b S_i^c$ on its Fe neighbors. The bond-level tensor $W_{ji}^{a;bc}(\mathbf R)$ carries the space-group constraints derived in Sec.~\ref{sec:anisobonds}: $S_1/S_2$ act trivially (Eq.~\ref{eq:Vdirecttrivial}), and inversion introduces $\eta_P(a)$ on the Tm index (Eq.~\ref{eq:Vinversion}).
+
+At $\mathbf q\approx 0$, the bond-level sum projects onto the Bertaut-mode invariants. One must sum $W^{a;bc}$ over all Fe neighbors of a given Tm sublattice, weighted by the appropriate bilinear Bertaut combination. The result is the macroscopic form~\eqref{eq:Hanisofull} with
+\begin{equation}
+u_{a,j} = \sum_{k=1}^{4}\sum_{\text{bonds in orbit }k} s_k\,W^{a;zz}_{ji(k)}\,(\eta_{i(k)}^z)^2\cdot[\text{Bertaut weight}],
+\end{equation}
+and similarly for $v_{a,j}$ with the $F_xG_z$ bilinear weight. The orbit-dependent scaling $s_k$ enters identically as for the linear coupling.
+
+The $A_2^+$ couplings ($v_4, v_6$ multiplying $\lambda^{4,6}$) arise from the antisymmetric part of the inversion-paired bond sum:
+\begin{equation}
+v_{a,j} \propto \sum_{k} s_k\bigl[W^{a}_{j,i(k)} - W^{a}_{j,i'(k)}\bigr] = \sum_{k} s_k\cdot 2W^{a}_{j,i(k)},
+\qquad a\in\{4,6\},
+\label{eq:vaniso_bondsum}
+\end{equation}
+using $W^{a}_{\bar j,i}=-W^{a}_{j,i}$ from Eq.~\eqref{eq:Vinversion}. Note, however, that the nonzero $v_{a,j}$ obtained here is the \emph{macroscopic coupling constant} in Eq.~\eqref{eq:Hanisofull}; it does \emph{not} imply that the $A_2^+$ channel survives in the on-site bond sum at $\mathbf q=0$. As shown in Sec.~\ref{sec:anisobonds} and the $\mathbf q\approx 0$ diagnostic of Sec.~\ref{sec:q0diagnostics}, the $A_2^+$ effective Tm field cancels \emph{exactly} at $\mathbf q=0$ in the on-site scheme because each orbit pairs one $\chi$ ($+v$) and one $\chi_{\rm inv}$ ($-v$) bond with identical local-frame Fe bilinears. The macroscopic $v_{4,6}$ terms in Eq.~\eqref{eq:Hanisofull} become active either (i)~at finite $\mathbf q$ where Fe bilinears differ across bonds, or (ii)~through the inter-site mechanism (Eq.~\ref{eq:Hinter}).
+
+\subsection{Independent parameter count for the nearest-neighbor shell}
+\label{app:paramcount}
+
+For the present nearest-neighbor bond implementation there are 4 Fe--Tm bond orbits and none is self-paired under inversion. The generic orbit counts of Table~\ref{tab:orbitreduction} therefore specialize to:
+\begin{center}
+\begin{tabular}{lcc}
+\hline
+Coupling orbit type & Parameters per non-self-paired orbit & Total in present code \\
+\hline
+Linear bond orbit ($\mathcal K^{(\ell)}$) & 9 & 36 \\
+General trilinear triplet orbit ($\mathcal V^{a;bc}$) & $5\times 9=45$ & $45\times N_{\rm triplet\,orbits}$ \\
+On-site trilinear bond orbit ($W^{a;bc}$) & $5\times 6=30$ & 120 \\
+\hline
+\end{tabular}
+\end{center}
+The middle row is listed for comparison: a fully general inter-site model would require its own triplet-orbit enumeration and is not fixed by the 4 bond orbits of the on-site code.
+
+The 36 linear parameters reduce to $3\times 3=9$ in the implementation code, because the code parametrizes only 3 independent $\chi$ channels ($\chi_{2\alpha}$, $\chi_{5\alpha}$, $\chi_{7\alpha}$ with $\alpha\in\{x,y,z\}$) and assumes all 4 orbits share the same normalized coupling tensor (up to the scale factor $s_k$). This is a physically motivated truncation: the angular dependence of the superexchange is assumed universal across orbits, with only the overall magnitude varying via the distance-dependent scaling.
+
+The anisotropy-modulation coupling is even more aggressively truncated in the code: the 120 on-site bond-level parameters reduce to just 5~global parameters ($u_1,u_3,u_8,v_4,v_6$). This truncation has two separate aspects that should not be conflated:
+
+\begin{enumerate}
+\item \textbf{Orbit universality} (same as for $\chi$): all 4 orbits share the same tensor $W^{a;bc}$, differing only by the distance scale factor $s_k$. This reduces $120\to 30$.
+\item \textbf{Fe-bilinear truncation to the $\Gamma_2$ projection}: the full on-site Fe bilinear is a symmetric $3\times 3$ tensor with 6 independent channels ($S_x^2$, $S_y^2$, $S_z^2$, $S_xS_y$, $S_xS_z$, $S_yS_z$). The code retains only the 2~channels that survive the $\mathbf q=0$ projection onto the $\Gamma_2$ order parameters:
+\begin{equation}
+S_z^2 - S_x^2 \quad\xrightarrow{\;\mathbf q=0\;}\quad G_z^2 - F_x^2 = \mathcal I_{A_1}^{\rm Fe},
+\qquad
+S_x S_z \quad\xrightarrow{\;\mathbf q=0\;}\quad F_x G_z = \mathcal I_{A_2}^{\rm Fe}.
+\label{eq:bilineartruncation}
+\end{equation}
+The 4~missing channels are:
+\begin{center}
+\begin{tabular}{lcl}
+\hline
+Channel & $\mathbf q=0$ Bertaut form & Why dropped \\
+\hline
+$S_y^2$ & $C_y^2 + A_y^2$ & $C_y = A_y = 0$ in $\Gamma_2$ \\
+$S_x S_y$ & $F_x C_y + F_x A_y + \cdots$ & $C_y = A_y = 0$ \\
+$S_y S_z$ & $C_y G_z + A_y G_z + \cdots$ & $C_y = A_y = 0$ \\
+$S_x^2 + S_z^2$ & $F_x^2 + G_z^2$ & Isotropic (absorbed into crystal-field $h_3, h_8$) \\
+\hline
+\end{tabular}
+\end{center}
+This reduces $5\times 6 = 30 \to 5\times 2 = 10$, and the further constraint that $A_1^+$ couples only to $S_z^2-S_x^2$ while $A_2^+$ couples only to $S_xS_z$ gives the final $3+2=5$ parameters.
+\end{enumerate}
+
+\paragraph{Important distinction: tensor truncation vs.\ spatial implementation.}
+Although the 5-parameter $W$-tensor \emph{form} was derived from the $\mathbf q=0$ Bertaut-mode projection, the code implements this tensor at the \emph{bond level} on all 32 Fe--Tm bonds (not as a spatially-averaged $\mathbf q=0$ sum). This means:
+\begin{itemize}
+\item The spatial structure of the coupling (bond-by-bond $S_i^b S_i^c$ with site-dependent $\eta_i$ signs) is \emph{fully resolved}. Finite-$\mathbf q$ magnon dynamics---where $\delta S_i^\alpha$ oscillates with different phases on different sublattices---are correctly captured for the two retained Fe-bilinear channels.
+\item What is \emph{missing} at finite $\mathbf q$ are contributions from the 4~dropped Fe-bilinear channels ($S_y^2$, $S_xS_y$, $S_yS_z$, isotropic $S^2$). These involve the $C_y$ and $A_y$ Bertaut modes, which are zero in the $\Gamma_2$ background but can be excited dynamically. For small-amplitude dynamics around the $\Gamma_2$ equilibrium, these channels contribute at second order and are expected to be small.
+\end{itemize}
+
+\paragraph{Implementation: bond-level trilinear coupling.}
+In the code, the anisotropy-modulation coupling is implemented as a trilinear interaction on the \emph{same} 32 Fe--Tm bonds used for the bilinear $\chi$ coupling (Sec.~\ref{app:FeTmbonds}). For each bond, the trilinear has `source' = Fe$_i$, `partner1' = Fe$_i$ (same site, zero offset), `partner2' = Tm$_j$ (same offset as the bilinear bond). The tensor $W^{a;bc}$ is assigned as follows:
+\begin{itemize}
+\item $\chi$-type bonds (generated by $E$, $S_1$, $S_2$, $S_1 S_2$): use the full tensor $W$.
+\item $\chi_{\rm inv}$-type bonds (generated by $I$, $S_1 I$, $S_2 I$, $S_1 S_2 I$): the $A_2^+$ components ($v_4, v_6$) flip sign, i.e.\ $W_{\rm inv}^{a;bc} = \eta_P(a)\,W^{a;bc}$.
+\end{itemize}
+The $W$ tensor has the structure:
+\begin{center}
+\begin{tabular}{lll}
+\hline
+Sector & Gell-Mann channels & Fe bilinear \\
+\hline
+$A_1^+$ ($u$) & $\lambda^1, \lambda^3, \lambda^8$ (indices 0,2,7) & $S_z^2-S_x^2$: $W[z](z,c)=+u_c$, \;$W[x](x,c)=-u_c$ \\
+$A_2^+$ ($v$) & $\lambda^4, \lambda^6$ (indices 3,5) & $S_x S_z$: \;$W[x](z,c)=v_c$, \;$W[z](x,c)=v_c$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Complete 32-bond trilinear table}
+\label{app:trilineartable}
+
+The trilinear coupling uses the identical 32 bonds as the bilinear $\chi$ table (Sec.~\ref{app:bondtable}), with the substitution $\chi\to W$ and $\chi_{\rm inv}\to W_{\rm inv}$. Every row---Fe site, Tm sublattice, offset $\mathbf R$, space-group generator---is the same; only the tensor label changes. This is enforced by construction in the code, which loops over the same bond list for both couplings. The explicit table is therefore omitted; see Sec.~\ref{app:bondtable} and replace $\chi\leftrightarrow W$ throughout.
+
+\section{Correspondence between code variables and model parameters}
+\label{app:codecorrespondence}
+
+For reference, the mapping between the C++ implementation variables and the notation in this appendix:
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+Code variable & Model parameter & Description \\
+\hline
+\texttt{chi2x, chi2y, chi2z} & $\chi_{\alpha 2}$ ($\alpha=x,y,z$) & $\lambda^2$--Fe coupling \\
+\texttt{chi5x, chi5y, chi5z} & $\chi_{\alpha 5}$ & $\lambda^5$--Fe coupling \\
+\texttt{chi7x, chi7y, chi7z} & $\chi_{\alpha 7}$ & $\lambda^7$--Fe coupling \\
+\texttt{chi\_inv} & $\chi_{\rm inv}=\tilde P_z\chi$ & Inversion partner (Eq.~\ref{eq:chiinvsign}) \\
+\texttt{chi\_orbit$k$\_scale} & $s_k$ & Orbit scale factor (Eq.~\ref{eq:orbitscale}) \\
+\texttt{eta[i][a]} & $\eta_i^a$ & Local-frame signs (Eq.~\ref{eq:etaapp}) \\
+\texttt{mu\_act} & $M_J$ & Projected moment matrix (Eq.~\ref{eq:MJdef}) \\
+\texttt{g\_ratio\_tm} & $g_{\rm Tm}/g_{\rm Fe}=7/12$ & Tm/Fe $g$-factor ratio \\
+\texttt{J1ab, J1c} & $J_1, J_{1c}$ & Fe NN exchange \\
+\texttt{J2ab, J2c} & $J_2, J_{2c}$ & Fe NNN exchange \\
+\texttt{D1, D2} & $D_1, D_2$ & DM components \\
+\texttt{Ka, Kb, Kc} & $K_a, K_b, K_c$ & Single-ion anisotropy \\
+\texttt{Jtm\_1, \ldots, Jtm\_8} & $J^{\rm Tm}_1, \ldots, J^{\rm Tm}_8$ & Tm--Tm diagonal Gell-Mann coupling \\
+\texttt{u1, u3, u8} & $u_1, u_3, u_8$ & $A_1^+$ anisotropy-modulation (trilinear) \\
+\texttt{v4, v6} & $v_4, v_6$ & $A_2^+$ anisotropy-modulation (trilinear) \\
+\texttt{e1, e2} & $(\epsilon_2\!-\!\epsilon_1)/2$, $(\epsilon_3\!-\!\epsilon_1)/2$ & Crystal-field half-gaps ($h_3=\texttt{e1}$, $h_8=(2\,\texttt{e2}-\texttt{e1})/\sqrt{3}$) \\
+\texttt{tm\_alpha\_scale} & --- & Scale factor for $h_3$ crystal field \\
+\texttt{tm\_beta\_scale} & --- & Scale factor for $h_8$ crystal field \\
+\hline
+\end{tabular}
+\end{center}
+
+
+\begin{thebibliography}{99}
+
+\bibitem{Malozemoff1971}
+A. P. Malozemoff,
+The optical spectrum and magnetic properties of TmFeO\(_3\) in the single-ion model,
+J. Phys. Chem. Solids \textbf{32}, 1669 (1971).
+
+\bibitem{Kozlov1990}
+G. V. Kozlov, A. A. Mukhin, A. Yu. Pronin, A. S. Prokhorov, V. \v{Z}elezn\'{y}, and J. Petzelt,
+Observation of magnetic dipole and electric dipole electron transitions in the ground multiplet of the rare-earth ion in TmFeO\(_3\),
+JETP Lett. \textbf{52}, 264 (1990).
+
+\bibitem{Mukhin1991}
+A. A. Mukhin, A. Yu. Pronin, A. S. Prokhorov, G. V. Kozlov, V. \v{Z}elezn\'{y}, and J. Petzelt,
+Submillimeter and far IR spectroscopy of magneto- and electrodipolar rare-earth modes in the orthoferrite TmFeO\(_3\),
+Phys. Lett. A \textbf{153}, 499 (1991).
+
+\bibitem{Zhang2016}
+K. Zhang, K. Xu, X. Liu, Z. Zhang, Z. Jin, X. Lin, B. Li, \emph{et al.},
+Resolving the spin reorientation and crystal-field transitions in TmFeO\(_3\) with terahertz transient,
+Sci. Rep. \textbf{6}, 23648 (2016).
+
+\bibitem{Baierl2016}
+S. Baierl, M. Hohenleutner, T. Kampfrath, A. K. Zvezdin, A. V. Kimel, R. Huber, and R. V. Mikhaylovskiy,
+Nonlinear spin control by terahertz-driven anisotropy fields,
+Nat. Photonics \textbf{10}, 715 (2016).
+
+\bibitem{Skorobogatov2020}
+S. A. Skorobogatov, S. E. Nikitin, K. A. Shaykhutdinov, \emph{et al.},
+Low-temperature spin dynamics in the TmFeO\(_3\) orthoferrite with a non-Kramers ion,
+Phys. Rev. B \textbf{101}, 014432 (2020).
+
+\bibitem{Grishunin2018}
+K. Grishunin, T. Huisman, G. Li, E. Mishina, T. Rasing, A. V. Kimel, K. Zhang, Z. Jin, S. Cao, W. Ren, G.-H. Ma, and R. V. Mikhaylovskiy,
+Terahertz magnon-polaritons in TmFeO\(_3\),
+ACS Photonics \textbf{5}, 1375 (2018).
+
+\bibitem{OrthoferriteReview2022}
+X. Li, D. Kim, Y. Liu, and J. Kono,
+Terahertz spin dynamics in rare-earth orthoferrites,
+Photonics Insights \textbf{1}, R05 (2022).
+
+\end{thebibliography}
+
+\end{document}
