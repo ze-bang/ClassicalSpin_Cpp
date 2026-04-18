@@ -295,15 +295,16 @@ set(CLASSICAL_SPIN_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 set(CLASSICAL_SPIN_HEADERS
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/simple_linear_alg.h
-    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/simulation_config.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/spin_config.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/unitcell.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/unitcell_builders.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/gneb.h
+    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/core/gneb_math.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/mixed_lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/phonon_lattice.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/strain_phonon_lattice.h
+    ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/lattice/kitaev_bonds.h
     ${CLASSICAL_SPIN_INCLUDE_DIR}/classical_spin/io/hdf5_io.h
 )
 
@@ -325,6 +326,18 @@ set(CORE_SOURCES
     src/core/strain_phonon_lattice.cpp
     src/core/gneb.cpp
     src/core/gneb_strain.cpp
+    # Per-concern TUs split out of the `lattice.h` / `mixed_lattice.h`
+    # god-object headers. Each one hosts a topical slice of the class so
+    # the header stays slim and the slices build in parallel.
+    src/core/lattice_accumulator.cpp
+    src/core/lattice_mc.cpp
+    src/core/lattice_pt.cpp
+    src/core/lattice_observables.cpp
+    src/core/lattice_md.cpp
+    src/core/mixed_lattice_mc.cpp
+    src/core/mixed_lattice_pt.cpp
+    src/core/mixed_lattice_observables.cpp
+    src/core/mixed_lattice_md.cpp
 )
 
 if(ENABLE_CUDA)
@@ -437,7 +450,10 @@ endif()
 # ============================================================================
 
 function(add_optimized_executable exec_name source_file)
-    add_executable(${exec_name} ${source_file})
+    # Accept any additional source files via ARGN so multi-TU executables
+    # (e.g. spin_solver, which was split into runners_*.cpp) can use the
+    # same wrapper as single-file targets.
+    add_executable(${exec_name} ${source_file} ${ARGN})
     target_compile_features(${exec_name} PRIVATE cxx_std_20)
     target_link_libraries(${exec_name} PRIVATE classical_spin_headers classical_spin_core)
     target_include_directories(${exec_name} PRIVATE ${CLASSICAL_SPIN_INCLUDE_DIR})
@@ -473,8 +489,16 @@ endfunction()
 # EXECUTABLES
 # ============================================================================
 
-# Main spin solver executable
-add_optimized_executable(spin_solver src/apps/spin_solver.cpp)
+# Main spin solver executable — main() plus the per-lattice runner TUs
+# (split out of spin_solver.cpp for parallel compilation and readability).
+add_optimized_executable(spin_solver
+    src/apps/spin_solver.cpp
+    src/apps/runners_lattice.cpp
+    src/apps/runners_phonon.cpp
+    src/apps/runners_strain.cpp
+    src/apps/runners_mixed.cpp
+    src/apps/runners_parameter_sweep.cpp
+)
 
 # Test: zigzag (C3-breaking) → finite strain
 add_optimized_executable(test_zigzag_strain src/apps/test_zigzag_strain.cpp)
@@ -488,9 +512,32 @@ add_optimized_executable(test_strain_phonon_regressions src/apps/test_strain_pho
 # Regression tests for mixed SU2-SU3 trilinear bookkeeping
 add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_trilinear_regressions.cpp)
 
+# HDF5 parallel-tempering writer smoke test (no MPI / GPU needed)
+add_optimized_executable(test_hdf5_pt src/test_hdf5_pt.cpp)
+
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
+    add_test(NAME hdf5_pt_writer_smoke COMMAND test_hdf5_pt)
+    set_tests_properties(hdf5_pt_writer_smoke PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    # MPI-based tests: both use MPI_Init internally. Register the single-rank
+    # invocation of zigzag_strain (Part 3's SA sweep is gated behind
+    # TEST_ZIGZAG_FULL so the default run stays fast) and a 2-rank run of
+    # test_pt_strain. Skip these gracefully if mpirun is not available.
+    find_program(MPIEXEC_EXEC NAMES mpirun mpiexec)
+    if(MPIEXEC_EXEC)
+        add_test(NAME zigzag_strain
+                 COMMAND ${MPIEXEC_EXEC} -n 1 $<TARGET_FILE:test_zigzag_strain>)
+        set_tests_properties(zigzag_strain PROPERTIES TIMEOUT 60)
+
+        add_test(NAME pt_strain
+                 COMMAND ${MPIEXEC_EXEC} -n 2 --oversubscribe
+                         $<TARGET_FILE:test_pt_strain>)
+        set_tests_properties(pt_strain PROPERTIES TIMEOUT 120)
+    endif()
 endif()
 
 

@@ -1,3 +1,27 @@
+"""DEPRECATED legacy entry point for the LSWT parameter search.
+
+`job_search.py` is the original, ad-hoc driver for the inelastic-neutron
+parameter fit. It is superseded by `job_search_refactored.py`, which is
+also the only version imported as a library (see
+`local_parameter_search.py`).
+
+This file is kept so that historical bash wrappers still run, but new work
+should call `job_search_refactored.py` directly. A deprecation warning is
+emitted at import time; pass ``CLASSICAL_SPIN_ALLOW_LEGACY_JOB_SEARCH=1``
+in the environment to silence it if you genuinely need the old behaviour.
+"""
+
+import os
+import warnings
+
+if not os.environ.get("CLASSICAL_SPIN_ALLOW_LEGACY_JOB_SEARCH"):
+    warnings.warn(
+        "workflow/LSWT_fit/job_search.py is deprecated; "
+        "use job_search_refactored.py instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit

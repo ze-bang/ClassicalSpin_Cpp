@@ -19,7 +19,6 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
-#include <cassert>
 #include <filesystem>
 #include <mpi.h>
 
@@ -31,6 +30,12 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     std::cout << std::scientific << std::setprecision(8);
+
+    // Rank-0 tracks how many sub-tests have failed. We all-reduce at the end
+    // and return a non-zero exit code so CTest can pick up regressions. Any
+    // check that would previously have printed "[FAIL]" must call on_fail().
+    int failures = 0;
+    auto on_fail = [&]() { ++failures; };
 
     if (rank == 0) {
         std::cout << "==========================================================\n";
@@ -128,6 +133,7 @@ int main(int argc, char** argv) {
 
         if (rank == 0) {
             std::cout << "[" << (ok ? "PASS" : "FAIL") << "] Test 2: Strain pack/unpack round-trip\n\n";
+            if (!ok) on_fail();
         }
     }
 
@@ -183,6 +189,7 @@ int main(int argc, char** argv) {
                           << "(pre=" << pre_Eg1 << ", post=" << post_Eg1 << ")\n";
                 if (!strain_exchanged) {
                     std::cout << "  BUG: Exchange was accepted but strain was NOT swapped!\n";
+                    on_fail();
                 }
             } else {
                 std::cout << "[SKIP] Test 3: Exchange was rejected (rare at high T), re-run\n";
@@ -228,8 +235,9 @@ int main(int argc, char** argv) {
             temps[i] = 0.01 + (1.0 - 0.01) * double(i) / double(size - 1);
         }
 
-        std::string test_dir = "/tmp/test_pt_strain_" + std::to_string(rank);
-        std::string out_dir = "/tmp/test_pt_strain_output";
+        const auto tmp_root = std::filesystem::temp_directory_path();
+        std::string test_dir = (tmp_root / ("test_pt_strain_" + std::to_string(rank))).string();
+        std::string out_dir  = (tmp_root / "test_pt_strain_output").string();
 
         std::vector<int> ranks_to_write = {-1};  // all ranks write
 
@@ -283,6 +291,7 @@ int main(int argc, char** argv) {
 
         if (rank == 0) {
             std::cout << "\n[" << (all_ok ? "PASS" : "FAIL") << "] Test 4: Full PT run completed\n";
+            if (!all_ok) on_fail();
             std::cout << "  Spin config saved: " << (has_spins ? "yes" : "no") << "\n";
             std::cout << "  Strain state saved: " << (has_strain ? "yes" : "no") << "\n";
 #ifdef HDF5_ENABLED
@@ -344,15 +353,23 @@ int main(int argc, char** argv) {
             std::cout << "  E_magnetoelastic = " << E_me << "\n";
             std::cout << "  Sum = " << E_sum << "\n";
             std::cout << "  Diff = " << std::abs(E_total - E_sum) << "\n\n";
+            if (!energy_ok) on_fail();
         }
     }
 
+    // Broadcast rank-0's failure count so every rank returns the same code.
+    MPI_Bcast(&failures, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
     if (rank == 0) {
         std::cout << "==========================================================\n";
-        std::cout << "  All tests completed.\n";
+        if (failures == 0) {
+            std::cout << "  All tests PASSED.\n";
+        } else {
+            std::cout << "  " << failures << " test(s) FAILED.\n";
+        }
         std::cout << "==========================================================\n";
     }
 
     MPI_Finalize();
-    return 0;
+    return failures == 0 ? 0 : 1;
 }

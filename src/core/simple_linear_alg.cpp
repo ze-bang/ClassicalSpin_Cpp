@@ -8,8 +8,44 @@
 
 #include "classical_spin/core/simple_linear_alg.h"
 
-// Static member initialization
-unsigned __int128 lehman_state = 1;
+#include <atomic>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+// Per-thread Lehman state. Initialised to 0 so that `lehman_next` can detect
+// a freshly-spawned thread and lazily seed it (see `lazy_seed_thread` below).
+thread_local unsigned __int128 lehman_state = 0;
+
+// Shared master seed. `seed_lehman` updates it; each thread derives its own
+// state from this master + its thread id on first use.
+namespace {
+std::atomic<unsigned long long> lehman_master_seed{1ULL};
+
+// splitmix64 finalizer — used to mix (master, thread_id) into a per-thread
+// seed with good avalanche properties.
+inline unsigned long long splitmix64(unsigned long long x) {
+    x += 0x9E3779B97F4A7C15ULL;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    return x ^ (x >> 31);
+}
+
+inline void lazy_seed_thread() {
+#ifdef _OPENMP
+    const int tid = omp_get_thread_num();
+#else
+    const int tid = 0;
+#endif
+    const unsigned long long master =
+        lehman_master_seed.load(std::memory_order_relaxed);
+    const unsigned long long mixed =
+        splitmix64(master + static_cast<unsigned long long>(tid) + 1ULL);
+    // Ensure the low bit is set so the state is never zero (the multiplier
+    // used below preserves odd states).
+    lehman_state = (static_cast<unsigned __int128>(mixed) << 1) | 1;
+}
+} // namespace
 
 // Structure constants initialization
 SpinTensor3 StructureConstants::SU2_structure_constant() {
@@ -160,11 +196,23 @@ SpinTensor3 transpose3D(const SpinTensor3& T, size_t N1, size_t N2, size_t N3) {
 }
 
 // Random number generation
+//
+// `seed_lehman` publishes the seed to the shared master so that other threads
+// can derive their own streams, and also reseeds the calling thread directly
+// so that single-threaded users keep the previous deterministic behaviour.
 void seed_lehman(unsigned __int128 seed) {
-    lehman_state = seed << 1 | 1;
+    const unsigned long long master =
+        static_cast<unsigned long long>(seed == 0 ? 1 : seed);
+    lehman_master_seed.store(master, std::memory_order_relaxed);
+    lehman_state = (seed << 1) | 1;
 }
 
 uint64_t lehman_next() {
+    // Lazy per-thread seeding: threads spawned by OpenMP inherit
+    // `lehman_state == 0` and must pick up a distinct stream before use.
+    if (lehman_state == 0) {
+        lazy_seed_thread();
+    }
     uint64_t result = lehman_state >> 64;
     const unsigned __int128 mult =
         (unsigned __int128)0x12e15e35b500f16e << 64 |

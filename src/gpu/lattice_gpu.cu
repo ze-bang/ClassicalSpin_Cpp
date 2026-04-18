@@ -14,8 +14,16 @@ namespace gpu {
 
 /**
  * Compute local field for a site (device function)
- * 
+ *
  * Computes: H_eff = -B_ext + 2*A·S + sum_j J_ij·S_j
+ *
+ * NOTE: trilinear couplings are intentionally absent here. The CPU
+ *       `Lattice` supports trilinear terms, but they are not yet
+ *       uploaded to or evaluated on the GPU. `Lattice::ensure_gpu_data_initialized`
+ *       throws if the lattice has any trilinear partners so we never
+ *       silently drop a term of the Hamiltonian. Implementing trilinear
+ *       on the GPU also requires extending `create_gpu_lattice_data_internal`
+ *       to upload `trilinear_*` arrays (see audit item T3).
  */
 __device__
 void compute_local_field_device(

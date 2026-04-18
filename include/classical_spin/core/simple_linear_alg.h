@@ -61,8 +61,20 @@ inline SpinMatrix transpose2D(const SpinMatrix& M) {
 // Transpose 3D tensor - defined in simple_linear_alg.cpp
 SpinTensor3 transpose3D(const SpinTensor3& T, size_t N1, size_t N2, size_t N3);
 
-// Random number generation using Lehman generator - defined in simple_linear_alg.cpp
-extern unsigned __int128 lehman_state;
+// Random number generation using Lehman generator - defined in simple_linear_alg.cpp.
+//
+// Thread safety:
+//   `lehman_state` is declared `thread_local`, so each OpenMP / std::thread
+//   thread has its own independent state. Calling `seed_lehman(s)` from any
+//   thread updates a shared master seed and also reseeds the calling thread.
+//   The first time a thread (other than the one that called `seed_lehman`)
+//   invokes `lehman_next` / `random_*_lehman`, its state is lazily derived
+//   from (master_seed, thread_id) via a splitmix64 mix, producing a distinct
+//   stream per thread. This prevents the pre-existing data race where the
+//   OpenMP PT temperature optimizer in `lattice.h` (see ~5200-5286) was
+//   calling the generator from parallel regions against a single global
+//   state.
+extern thread_local unsigned __int128 lehman_state;
 
 void seed_lehman(unsigned __int128 seed);
 uint64_t lehman_next();

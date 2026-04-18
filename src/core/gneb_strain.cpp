@@ -4,6 +4,7 @@
  */
 
 #include "classical_spin/core/gneb_strain.h"
+#include "classical_spin/core/gneb_math.h"
 #include <filesystem>
 #include <algorithm>
 #include <numeric>
@@ -497,34 +498,8 @@ vector<SpinStrainConfig> GNEBStrainOptimizer::interpolate_path(
         
         // Geodesic interpolation for spins
         for (size_t s = 0; s < n_sites; ++s) {
-            const Eigen::Vector3d& Si = initial.spins[s];
-            const Eigen::Vector3d& Sf = final.spins[s];
-            
-            double cos_theta = Si.dot(Sf);
-            cos_theta = std::max(-1.0, std::min(1.0, cos_theta));  // Clamp
-            
-            if (cos_theta > 1.0 - 1e-10) {
-                // Nearly parallel
-                path[img].spins[s] = Si;
-            } else if (cos_theta < -1.0 + 1e-10) {
-                // Antiparallel - find perpendicular direction
-                Eigen::Vector3d perp = Eigen::Vector3d(1, 0, 0).cross(Si);
-                if (perp.norm() < 1e-10) {
-                    perp = Eigen::Vector3d(0, 1, 0).cross(Si);
-                }
-                perp.normalize();
-                
-                double theta_t = t * M_PI;
-                path[img].spins[s] = std::cos(theta_t) * Si + std::sin(theta_t) * perp;
-            } else {
-                // Standard geodesic (slerp)
-                double theta = std::acos(cos_theta);
-                double sin_theta = std::sin(theta);
-                double w1 = std::sin((1.0 - t) * theta) / sin_theta;
-                double w2 = std::sin(t * theta) / sin_theta;
-                path[img].spins[s] = w1 * Si + w2 * Sf;
-            }
-            
+            path[img].spins[s] = classical_spin::gneb_math::slerp_s2(
+                initial.spins[s], final.spins[s], t);
             path[img].spins[s].normalize();
         }
         
@@ -542,9 +517,8 @@ double GNEBStrainOptimizer::configuration_distance(const SpinStrainConfig& c1,
     // Spin distance: sum of geodesic distances squared
     double d_spin_sq = 0.0;
     for (size_t s = 0; s < n_sites; ++s) {
-        double cos_theta = c1.spins[s].dot(c2.spins[s]);
-        cos_theta = std::max(-1.0, std::min(1.0, cos_theta));
-        double theta = std::acos(cos_theta);
+        const double theta = classical_spin::gneb_math::geodesic_angle(
+            c1.spins[s], c2.spins[s]);
         d_spin_sq += theta * theta;
     }
     
@@ -631,29 +605,8 @@ void GNEBStrainOptimizer::redistribute_images() {
         // Interpolate
         new_images[i].spins.resize(n_sites);
         for (size_t s = 0; s < n_sites; ++s) {
-            const auto& Si = images[j].spins[s];
-            const auto& Sf = images[j+1].spins[s];
-            double cos_theta = Si.dot(Sf);
-            cos_theta = std::max(-1.0, std::min(1.0, cos_theta));
-            
-            if (cos_theta > 1.0 - 1e-10) {
-                // Nearly identical — linear
-                new_images[i].spins[s] = ((1.0 - t) * Si + t * Sf).normalized();
-            } else if (cos_theta < -1.0 + 1e-10) {
-                // Antiparallel
-                Eigen::Vector3d perp = Eigen::Vector3d(1, 0, 0).cross(Si);
-                if (perp.norm() < 1e-10) perp = Eigen::Vector3d(0, 1, 0).cross(Si);
-                perp.normalize();
-                double theta_t = t * M_PI;
-                new_images[i].spins[s] = std::cos(theta_t) * Si + std::sin(theta_t) * perp;
-            } else {
-                // SLERP
-                double theta = std::acos(cos_theta);
-                double sin_theta = std::sin(theta);
-                double w1 = std::sin((1.0 - t) * theta) / sin_theta;
-                double w2 = std::sin(t * theta) / sin_theta;
-                new_images[i].spins[s] = w1 * Si + w2 * Sf;
-            }
+            new_images[i].spins[s] = classical_spin::gneb_math::slerp_s2(
+                images[j].spins[s], images[j+1].spins[s], t);
             new_images[i].spins[s].normalize();
         }
         

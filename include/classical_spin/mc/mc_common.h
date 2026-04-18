@@ -33,6 +33,7 @@
 #include <random>
 #include <functional>
 #include <filesystem>
+#include <stdexcept>
 #include <mpi.h>
 
 #include "classical_spin/core/spin_config.h" // should_rank_write
@@ -658,9 +659,19 @@ inline void parallel_tempering(
     const vector<size_t>& sweeps_per_temp = {},
     ExtraSaveFn extra_save = [](const string&, double){}) {
 
-    int initialized;
+    // Policy: a library routine must not call MPI_Init on behalf of the
+    // caller. The executable (spin_solver / test_pt_strain / ...) owns the
+    // MPI lifetime. Fail loudly if MPI is not yet initialised so the caller
+    // fixes its setup instead of silently getting a partially-initialised
+    // MPI state here.
+    int initialized = 0;
     MPI_Initialized(&initialized);
-    if (!initialized) MPI_Init(nullptr, nullptr);
+    if (!initialized) {
+        throw std::runtime_error(
+            "mc::parallel_tempering: MPI has not been initialised. "
+            "Call MPI_Init (or MPI_Init_thread) from main() before invoking "
+            "this function.");
+    }
 
     int rank, size;
     MPI_Comm_rank(comm, &rank);

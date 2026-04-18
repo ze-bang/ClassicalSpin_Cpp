@@ -38,6 +38,7 @@
 #include "unitcell.h"
 #include "unitcell_builders.h"
 #include "simple_linear_alg.h"
+#include "kitaev_bonds.h"
 #include "classical_spin/core/spin_config.h"  // For should_rank_write
 #include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include <vector>
@@ -252,65 +253,46 @@ struct MagnetoelasticParams {
     double lambda_A1g = 0.0;  // A1g channel coupling
     double lambda_Eg = 0.0;   // Eg channel coupling
     
-    /**
-     * Get the Kitaev local-to-global rotation matrix R.
-     */
+    // Kitaev rotation / local-exchange helpers live in kitaev_bonds.h so
+    // PhononLattice and StrainPhononLattice can't drift again. The only
+    // class-specific choice here is that `get_J{x,y,z}` returns the LOCAL
+    // frame, because the magnetoelastic energy and the f_K/f_J/f_Γ basis
+    // functions used downstream are expressed in that frame.
+
+    /// Kitaev local-to-global rotation matrix.
     static SpinMatrix get_kitaev_rotation() {
-        SpinMatrix R(3, 3);
-        R << 1.0/std::sqrt(6.0), -1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
-             1.0/std::sqrt(6.0),  1.0/std::sqrt(2.0), 1.0/std::sqrt(3.0),
-            -2.0/std::sqrt(6.0),  0.0,                1.0/std::sqrt(3.0);
-        return R;
+        return classical_spin::kitaev::kitaev_rotation();
     }
-    
-    /**
-     * Transform exchange matrix from local Kitaev frame to global Cartesian frame.
-     */
+
+    /// Transform a local-frame exchange matrix to the global Cartesian frame.
     static SpinMatrix to_global_frame(const SpinMatrix& J_local) {
-        SpinMatrix R = get_kitaev_rotation();
-        return R * J_local * R.transpose();
+        return classical_spin::kitaev::to_global_frame(J_local);
     }
-    
-    // Build bond-dependent exchange matrices in LOCAL Kitaev frame
+
+    // Bond-dependent exchange matrices in LOCAL Kitaev frame.
     SpinMatrix get_Jx_local() const {
-        SpinMatrix Jx = SpinMatrix::Zero(3, 3);
-        Jx << J + K, Gammap, Gammap,
-              Gammap, J, Gamma,
-              Gammap, Gamma, J;
-        return Jx;
+        return classical_spin::kitaev::make_Jx_local(J, K, Gamma, Gammap);
     }
-    
     SpinMatrix get_Jy_local() const {
-        SpinMatrix Jy = SpinMatrix::Zero(3, 3);
-        Jy << J, Gammap, Gamma,
-              Gammap, J + K, Gammap,
-              Gamma, Gammap, J;
-        return Jy;
+        return classical_spin::kitaev::make_Jy_local(J, K, Gamma, Gammap);
     }
-    
     SpinMatrix get_Jz_local() const {
-        SpinMatrix Jz = SpinMatrix::Zero(3, 3);
-        Jz << J, Gamma, Gammap,
-              Gamma, J, Gammap,
-              Gammap, Gammap, J + K;
-        return Jz;
+        return classical_spin::kitaev::make_Jz_local(J, K, Gamma, Gammap);
     }
-    
-    // Build bond-dependent exchange matrices
-    // NOTE: We work in the LOCAL Kitaev frame where:
-    //   - x-bond has Kitaev term K*S^x*S^x (K on diagonal element 0,0)
-    //   - y-bond has Kitaev term K*S^y*S^y (K on diagonal element 1,1)
-    //   - z-bond has Kitaev term K*S^z*S^z (K on diagonal element 2,2)
-    // This ensures the spin basis functions f_K, f_J, f_Gamma are correctly computed
-    // using the bond_type index directly as the spin component.
+
+    // Exchange matrices as used by StrainPhononLattice — kept in LOCAL frame
+    // (different from PhononLattice, which returns the GLOBAL frame here).
+    // The spin basis functions f_K / f_J / f_Γ used downstream index the
+    // bond_type directly as the spin component, which requires the local
+    // frame.
     SpinMatrix get_Jx() const { return get_Jx_local(); }
     SpinMatrix get_Jy() const { return get_Jy_local(); }
     SpinMatrix get_Jz() const { return get_Jz_local(); }
-    
-    // J2 and J3 matrices
-    SpinMatrix get_J3_matrix() const { return J3 * SpinMatrix::Identity(3, 3); }
-    SpinMatrix get_J2_A_matrix() const { return J2_A * SpinMatrix::Identity(3, 3); }
-    SpinMatrix get_J2_B_matrix() const { return J2_B * SpinMatrix::Identity(3, 3); }
+
+    // Isotropic Heisenberg (rotation-invariant).
+    SpinMatrix get_J3_matrix()   const { return classical_spin::kitaev::heisenberg_matrix(J3);   }
+    SpinMatrix get_J2_A_matrix() const { return classical_spin::kitaev::heisenberg_matrix(J2_A); }
+    SpinMatrix get_J2_B_matrix() const { return classical_spin::kitaev::heisenberg_matrix(J2_B); }
 };
 
 /**

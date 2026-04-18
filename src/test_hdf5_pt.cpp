@@ -1,9 +1,13 @@
-// Simple test program to verify HDF5 PT writer functionality
-// This is a standalone test that doesn't require full MPI run
+// Simple test program to verify HDF5 PT writer functionality.
+// This is a standalone test that doesn't require a full MPI run. It writes
+// into `CMAKE_CURRENT_BINARY_DIR` (via CTest's working directory), so CTest
+// cleans it up on rebuild.
 
 #include <iostream>
 #include <vector>
 #include <ctime>
+#include <cstdio>
+#include <cstring>
 #include "classical_spin/core/simple_linear_alg.h"
 
 #ifdef HDF5_ENABLED
@@ -55,8 +59,10 @@ void test_hdf5_pt_writer() {
     }
     
     // Create HDF5 writer
-    std::cout << "  Creating HDF5 file: test_pt_output.h5" << std::endl;
-    HDF5PTWriter writer("test_pt_output.h5", temperature, lattice_size, spin_dim,
+    const char* out_path = "test_pt_output.h5";
+    std::remove(out_path);
+    std::cout << "  Creating HDF5 file: " << out_path << std::endl;
+    HDF5PTWriter writer(out_path, temperature, lattice_size, spin_dim,
                        n_sublattices, n_samples, n_anneal, n_measure, probe_rate,
                        swap_rate, overrelaxation_rate, acceptance_rate,
                        swap_acceptance_rate);
@@ -66,6 +72,8 @@ void test_hdf5_pt_writer() {
     writer.write_timeseries(energies, magnetizations, sublattice_mags);
     
     // Prepare observables data
+    std::vector<double> magnetization_means(spin_dim, 0.10);
+    std::vector<double> magnetization_errors(spin_dim, 0.01);
     std::vector<std::vector<double>> sublattice_mag_means(n_sublattices);
     std::vector<std::vector<double>> sublattice_mag_errors(n_sublattices);
     std::vector<std::vector<double>> energy_cross_means(n_sublattices);
@@ -81,6 +89,7 @@ void test_hdf5_pt_writer() {
     // Write observables
     std::cout << "  Writing observables data..." << std::endl;
     writer.write_observables(-1.48, 0.03, 1.25, 0.15,
+                            magnetization_means, magnetization_errors,
                             sublattice_mag_means, sublattice_mag_errors,
                             energy_cross_means, energy_cross_errors);
     
@@ -103,8 +112,10 @@ void test_hdf5_aggregated_writer() {
     size_t n_temps = temperatures.size();
     
     // Create HDF5 file
-    std::cout << "  Creating HDF5 file: test_aggregated.h5" << std::endl;
-    H5::H5File file("test_aggregated.h5", H5F_ACC_TRUNC);
+    const char* out_path = "test_aggregated.h5";
+    std::remove(out_path);
+    std::cout << "  Creating HDF5 file: " << out_path << std::endl;
+    H5::H5File file(out_path, H5F_ACC_TRUNC);
     
     // Create groups
     H5::Group data_group = file.createGroup("/temperature_scan");

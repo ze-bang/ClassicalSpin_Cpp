@@ -7,6 +7,7 @@
  */
 
 #include "classical_spin/core/gneb.h"
+#include "classical_spin/core/gneb_math.h"
 #include <filesystem>
 #include <algorithm>
 #include <numeric>
@@ -444,40 +445,10 @@ vector<GNEBSpinConfig> GNEBOptimizer::geodesic_interpolation(const GNEBSpinConfi
         path[img].resize(n_sites);
         
         for (size_t s = 0; s < n_sites; ++s) {
-            const Eigen::Vector3d& Si = initial[s];
-            const Eigen::Vector3d& Sf = final[s];
-            
-            // Geodesic (great circle) interpolation on S^2
-            double cos_theta = Si.dot(Sf);
-            
-            // Handle numerical issues
-            if (cos_theta > 1.0 - 1e-10) {
-                // Spins are nearly parallel
-                path[img][s] = Si;
-            } else if (cos_theta < -1.0 + 1e-10) {
-                // Spins are antiparallel - use linear interpolation through origin
-                // and renormalize (will pass through zero, so use perpendicular)
-                Eigen::Vector3d perp = Eigen::Vector3d(1, 0, 0).cross(Si);
-                if (perp.norm() < 1e-10) {
-                    perp = Eigen::Vector3d(0, 1, 0).cross(Si);
-                }
-                perp.normalize();
-                
-                double theta_total = M_PI;
-                double theta_t = t * theta_total;
-                path[img][s] = std::cos(theta_t) * Si + std::sin(theta_t) * perp;
-            } else {
-                // Standard geodesic interpolation
-                double theta = std::acos(cos_theta);
-                double sin_theta = std::sin(theta);
-                
-                double w1 = std::sin((1.0 - t) * theta) / sin_theta;
-                double w2 = std::sin(t * theta) / sin_theta;
-                
-                path[img][s] = w1 * Si + w2 * Sf;
-            }
-            
-            // Ensure unit length
+            path[img][s] =
+                classical_spin::gneb_math::slerp_s2(initial[s], final[s], t);
+            // Guard against sin/cos rounding before the vector is consumed
+            // by downstream gradient code that assumes |S| = 1.
             path[img][s].normalize();
         }
     }
@@ -650,10 +621,8 @@ GNEBSpinConfig GNEBOptimizer::compute_neb_force(size_t image_index) {
 double GNEBOptimizer::geodesic_distance(const GNEBSpinConfig& c1, const GNEBSpinConfig& c2) const {
     double dist_sq = 0.0;
     for (size_t s = 0; s < n_sites; ++s) {
-        double cos_theta = c1[s].dot(c2[s]);
-        // Clamp for numerical stability
-        cos_theta = std::max(-1.0, std::min(1.0, cos_theta));
-        double theta = std::acos(cos_theta);
+        const double theta =
+            classical_spin::gneb_math::geodesic_angle(c1[s], c2[s]);
         dist_sq += theta * theta;
     }
     return std::sqrt(dist_sq);

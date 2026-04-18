@@ -1,0 +1,150 @@
+# ============================================================================
+# Build artifacts
+# ============================================================================
+build/
+build-*/
+cmake-build-*/
+out/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# CMake user files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.egg-info/
+*.egg
+dist/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ============================================================================
+# Editor / IDE
+# ============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================================================
+# Simulation outputs and research data
+#
+# These directories hold the outputs of individual project runs (HDF5
+# trajectories, spin snapshots, per-trial dirs, etc.). They can be tens of GB
+# and should not be committed to the source repository.
+# ============================================================================
+local_runs/
+logs/
+NCTO_gneb_ensemble/
+gneb_ensemble/
+patch_seeds/
+patch_lifetime/
+tiled_3Q_configs/
+tiled_zz_configs/
+
+# Project workspaces that accumulate results next to analysis scripts.
+# Source scripts are still tracked explicitly via `!` rules below.
+NCTO_project/**/results/
+NCTO_project/**/*.h5
+NCTO_project/**/*.hdf5
+TFO_project/**/results/
+TFO_project/**/*.h5
+TFO_project/**/*.hdf5
+
+# Data / large binary output
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pt
+*.pth
+*.pkl
+*.pickle
+
+# Log & profiler output (keep README / text notes)
+*.log
+*.prof
+*.gprof
+# Match root-level core-dump files only — `core` alone would also
+# swallow `src/core/`, hiding every new C++ TU placed there.
+/core
+core.[0-9]*
+
+# Research output / scratch directories — large simulation data,
+# notes, plots; not source. Add specific subpaths back with
+# `!path` if anything in them is worth tracking.
+TFO_project/
+NCTO_project/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.synctex.gz
+*.toc
+*.dvi
+# NOTE: we intentionally do NOT ignore *.pdf — some PDFs (figures, reports)
+# are deliberately tracked in the repo.
+
+# ============================================================================
+# Vendored dependencies that are not (yet) wired into the build
+# ============================================================================
+# `Einsums/` is a vendored copy of the einsums tensor-contraction library
+# but no `CMakeLists.txt` or C++/CUDA source currently references it. Keep it
+# out of the repository until it is either removed or added to the build.
+Einsums/
+
+# ============================================================================
+# Whitelist: keep committed configuration files that would otherwise be caught
+# ============================================================================
+!example_configs/**
+!docs/**
+!gneb_ensemble/*.param
+
+# ============================================================================
+# Re-exclusions (must come AFTER the !example_configs/** whitelist so they
+# actually take effect). These are heavily generated parameter sweeps that
+# would otherwise drown the repo in near-duplicate configs.
+# ============================================================================
+example_configs/NCTO_strain/
+example_configs/TmFeO3/
+example_configs/Kitaev/pt_gradient_test.param
+example_configs/test_correlation_accumulator.param
