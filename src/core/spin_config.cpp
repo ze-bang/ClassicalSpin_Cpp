@@ -390,6 +390,15 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "gneb_pin_Eg2_zero") {
                 config.gneb_pin_Eg2_zero = parse_bool(value);
             }
+            else if (key == "gneb_polish_endpoints") {
+                config.gneb_polish_endpoints = parse_bool(value);
+            }
+            else if (key == "gneb_polish_max_iter") {
+                config.gneb_polish_max_iter = stoul(value);
+            }
+            else if (key == "gneb_polish_force_tol") {
+                config.gneb_polish_force_tol = stod(value);
+            }
             else if (key == "gneb_weight_strain") {
                 config.gneb_weight_strain = stod(value);
             }

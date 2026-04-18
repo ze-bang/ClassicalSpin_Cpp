@@ -893,11 +893,11 @@ double StrainPhononLattice::strain_energy() const {
         V += C12 * exx * eyy;
         V += 2.0 * C44 * exy * exy;  // Factor of 4 for (2ε_xy)² term
         
-        // Optional quartic anharmonicity
+        // Optional quartic anharmonicity (prevents ME runaway)
         double A1g = exx + eyy;
         double Eg_sq = (exx - eyy) * (exx - eyy) + 4.0 * exy * exy;
-        V += 0.25 * elastic_params.lambda_A1g * A1g * A1g * A1g * A1g;
-        V += 0.25 * elastic_params.lambda_Eg * Eg_sq * Eg_sq;
+        V += 0.25 * elastic_params.kappa_A1g * A1g * A1g * A1g * A1g;
+        V += 0.25 * elastic_params.kappa_Eg * Eg_sq * Eg_sq;
     }
     
     return T + N_cells * V;
@@ -1875,18 +1875,31 @@ void StrainPhononLattice::strain_derivatives(
         
         // ε_xx has both A1g and Eg character
         double elastic_force_xx = -(C11 * exx + C12 * eyy);
+        double elastic_force_yy = -(C11 * eyy + C12 * exx);
+        double elastic_force_xy = -4.0 * C44 * exy;
+        
+        // Quartic anharmonic forces: -∂(¼κ·|ε|⁴)/∂ε
+        double kappa_A1g = elastic_params.kappa_A1g;
+        double kappa_Eg = elastic_params.kappa_Eg;
+        if (kappa_A1g != 0.0 || kappa_Eg != 0.0) {
+            double A1g = exx + eyy;
+            double Eg1 = exx - eyy;
+            double Eg_sq = Eg1 * Eg1 + 4.0 * exy * exy;
+            elastic_force_xx -= kappa_A1g * A1g * A1g * A1g + kappa_Eg * Eg_sq * Eg1;
+            elastic_force_yy -= kappa_A1g * A1g * A1g * A1g - kappa_Eg * Eg_sq * Eg1;
+            elastic_force_xy -= 4.0 * kappa_Eg * Eg_sq * exy;
+        }
+        
         deps_dt.V_xx[b] = (elastic_force_xx - dH_deps_xx_arr[b] 
                          - 0.5 * (gamma_A1g + gamma_Eg) * eps.V_xx[b]
                          + F_A1g + F_Eg1) / M;
         
         // ε_yy has both A1g and Eg character  
-        double elastic_force_yy = -(C11 * eyy + C12 * exx);
         deps_dt.V_yy[b] = (elastic_force_yy - dH_deps_yy_arr[b]
                          - 0.5 * (gamma_A1g + gamma_Eg) * eps.V_yy[b]
                          + F_A1g - F_Eg1) / M;
         
         // ε_xy is pure Eg
-        double elastic_force_xy = -4.0 * C44 * exy;
         deps_dt.V_xy[b] = (elastic_force_xy - dH_deps_xy_arr[b]
                          - gamma_Eg * eps.V_xy[b]
                          + F_Eg2) / M;
@@ -2890,6 +2903,83 @@ void StrainPhononLattice::relax_strain(bool verbose) {
     double eps_yy_eq = -eps_xx_eq;
     double eps_xy_eq = (drive_F_Eg2_ - 2.0 * lambda_Eg * Eg2_spin_factor) / (4.0 * C44);
     
+    // If quartic anharmonicity is active, refine with Newton iteration.
+    // The quadratic solution serves as initial guess.
+    // Full stationarity: ∂H/∂ε = C·ε + λΣ + ∂V₄/∂ε - F = 0
+    double kappa_A1g = elastic_params.kappa_A1g;
+    double kappa_Eg = elastic_params.kappa_Eg;
+    if (kappa_A1g != 0.0 || kappa_Eg != 0.0) {
+        const size_t max_newton = 50;
+        const double newton_tol = 1e-12;
+        double F1_drive = drive_F_Eg1_;
+        double F2_drive = drive_F_Eg2_;
+        
+        for (size_t iter = 0; iter < max_newton; ++iter) {
+            double exx = eps_xx_eq, eyy = eps_yy_eq, exy = eps_xy_eq;
+            double A1g_val = exx + eyy;
+            double Eg1_val = exx - eyy;
+            double Eg_sq = Eg1_val * Eg1_val + 4.0 * exy * exy;
+            
+            // Residual: ∂H/∂ε = 0
+            double r_xx = C11*exx + C12*eyy + lambda_Eg*Eg1_spin_factor
+                        + kappa_A1g*A1g_val*A1g_val*A1g_val + kappa_Eg*Eg_sq*Eg1_val - F1_drive/2.0;
+            double r_yy = C12*exx + C11*eyy - lambda_Eg*Eg1_spin_factor
+                        + kappa_A1g*A1g_val*A1g_val*A1g_val - kappa_Eg*Eg_sq*Eg1_val + F1_drive/2.0;
+            double r_xy = 4.0*C44*exy + 2.0*lambda_Eg*Eg2_spin_factor
+                        + 4.0*kappa_Eg*Eg_sq*exy - F2_drive;
+            
+            double residual = std::abs(r_xx) + std::abs(r_yy) + std::abs(r_xy);
+            if (residual < newton_tol) break;
+            
+            // Jacobian: J_ij = ∂²H/∂ε_i∂ε_j
+            // Quartic Hessian contributions:
+            // ∂²V₄/∂εxx² = 3κ_A1g·A1g² + κ_Eg·[2Eg1² + Eg_sq] (using chain rule)
+            double dA1g_dxx = 1.0, dA1g_dyy = 1.0;
+            double dEg1_dxx = 1.0, dEg1_dyy = -1.0;
+            // d(Eg_sq)/dεxx = 2·Eg1, d(Eg_sq)/dεyy = -2·Eg1, d(Eg_sq)/dεxy = 8·εxy
+            
+            // ∂r_xx/∂εxx = C11 + 3κ_A1g·A1g² + κ_Eg·(2·Eg1·Eg1 + Eg_sq)
+            double J_xx_xx = C11 + 3.0*kappa_A1g*A1g_val*A1g_val + kappa_Eg*(2.0*Eg1_val*Eg1_val + Eg_sq);
+            // ∂r_xx/∂εyy = C12 + 3κ_A1g·A1g² + κ_Eg·(-2·Eg1·Eg1 - Eg_sq) = C12 + 3κ_A1g·A1g² - κ_Eg*(2Eg1²+Eg_sq)
+            double J_xx_yy = C12 + 3.0*kappa_A1g*A1g_val*A1g_val - kappa_Eg*(2.0*Eg1_val*Eg1_val + Eg_sq);
+            // ∂r_xx/∂εxy = κ_Eg·(8·εxy·Eg1)
+            double J_xx_xy = 8.0*kappa_Eg*exy*Eg1_val;
+            
+            // ∂r_yy/∂εxx = C12 + 3κ_A1g·A1g² - κ_Eg·(-2Eg1² - Eg_sq) + κ_Eg·2Eg1_val·(-1)
+            // Actually, let me be more careful: r_yy = C12·exx + C11·eyy - λΣ + κ_A1g·A1g³ - κ_Eg·Eg_sq·Eg1
+            double J_yy_xx = C12 + 3.0*kappa_A1g*A1g_val*A1g_val - kappa_Eg*(2.0*Eg1_val*Eg1_val + Eg_sq);
+            double J_yy_yy = C11 + 3.0*kappa_A1g*A1g_val*A1g_val + kappa_Eg*(2.0*Eg1_val*Eg1_val + Eg_sq);
+            double J_yy_xy = -8.0*kappa_Eg*exy*Eg1_val;
+            
+            // ∂r_xy/∂εxx = 4κ_Eg·(2·Eg1·exy) = 8κ_Eg·Eg1·exy
+            double J_xy_xx = 8.0*kappa_Eg*Eg1_val*exy;
+            // ∂r_xy/∂εyy = 4κ_Eg·(-2·Eg1·exy) = -8κ_Eg·Eg1·exy
+            double J_xy_yy = -8.0*kappa_Eg*Eg1_val*exy;
+            // ∂r_xy/∂εxy = 4C44 + 4κ_Eg·(Eg_sq + 8·exy²)
+            double J_xy_xy = 4.0*C44 + 4.0*kappa_Eg*(Eg_sq + 8.0*exy*exy);
+            
+            // Solve 3x3 system J·δε = -r using Cramer's rule
+            double a11 = J_xx_xx, a12 = J_xx_yy, a13 = J_xx_xy;
+            double a21 = J_yy_xx, a22 = J_yy_yy, a23 = J_yy_xy;
+            double a31 = J_xy_xx, a32 = J_xy_yy, a33 = J_xy_xy;
+            double b1 = -r_xx, b2 = -r_yy, b3 = -r_xy;
+            
+            double det3 = a11*(a22*a33 - a23*a32) - a12*(a21*a33 - a23*a31) + a13*(a21*a32 - a22*a31);
+            if (std::abs(det3) < 1e-30) {
+                std::cerr << "Warning: Newton Jacobian singular in relax_strain" << std::endl;
+                break;
+            }
+            
+            double d_xx = (b1*(a22*a33-a23*a32) - a12*(b2*a33-a23*b3) + a13*(b2*a32-a22*b3)) / det3;
+            double d_yy = (a11*(b2*a33-a23*b3) - b1*(a21*a33-a23*a31) + a13*(a21*b3-b2*a31)) / det3;
+            double d_xy = (a11*(a22*b3-b2*a32) - a12*(a21*b3-b2*a31) + b1*(a21*a32-a22*a31)) / det3;
+            
+            eps_xx_eq += d_xx;
+            eps_yy_eq += d_yy;
+            eps_xy_eq += d_xy;
+        }
+    }
+    
     // Set all bond types to equilibrium values
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
         strain.epsilon_xx[b] = eps_xx_eq;
@@ -2948,9 +3038,15 @@ void StrainPhononLattice::relax_strain(bool verbose) {
         std::cout << "    ε_xy* = -λ_Eg·Σ_Eg2/(2·C44)       = " << eps_xy_eq << std::endl;
         
         // Verify: evaluate ∂H/∂ε at the solved equilibrium
-        double residual_xx = C11 * eps_xx_eq + C12 * eps_yy_eq + lambda_Eg * Eg1_spin_factor;
-        double residual_yy = C12 * eps_xx_eq + C11 * eps_yy_eq - lambda_Eg * Eg1_spin_factor;
-        double residual_xy = 4.0 * C44 * eps_xy_eq + 2.0 * lambda_Eg * Eg2_spin_factor;
+        double A1g_v = eps_xx_eq + eps_yy_eq;
+        double Eg1_v = eps_xx_eq - eps_yy_eq;
+        double Eg_sq_v = Eg1_v*Eg1_v + 4.0*eps_xy_eq*eps_xy_eq;
+        double residual_xx = C11 * eps_xx_eq + C12 * eps_yy_eq + lambda_Eg * Eg1_spin_factor
+                           + kappa_A1g*A1g_v*A1g_v*A1g_v + kappa_Eg*Eg_sq_v*Eg1_v;
+        double residual_yy = C12 * eps_xx_eq + C11 * eps_yy_eq - lambda_Eg * Eg1_spin_factor
+                           + kappa_A1g*A1g_v*A1g_v*A1g_v - kappa_Eg*Eg_sq_v*Eg1_v;
+        double residual_xy = 4.0 * C44 * eps_xy_eq + 2.0 * lambda_Eg * Eg2_spin_factor
+                           + 4.0*kappa_Eg*Eg_sq_v*eps_xy_eq;
         std::cout << "  Verification (∂H/∂ε at ε*):" << std::endl;
         std::cout << "    ∂H/∂ε_xx = " << residual_xx << std::endl;
         std::cout << "    ∂H/∂ε_yy = " << residual_yy << std::endl;
@@ -3137,6 +3233,15 @@ double StrainPhononLattice::local_strain_energy() const {
                     + 2.0 * C12 * cs.epsilon_xx * cs.epsilon_yy
                     + 4.0 * C44 * cs.epsilon_xy * cs.epsilon_xy);
         
+        // Quartic anharmonicity per cell (×N_BONDS)
+        if (elastic_params.kappa_A1g != 0.0 || elastic_params.kappa_Eg != 0.0) {
+            double A1g = cs.epsilon_xx + cs.epsilon_yy;
+            double Eg_sq = (cs.epsilon_xx - cs.epsilon_yy) * (cs.epsilon_xx - cs.epsilon_yy)
+                         + 4.0 * cs.epsilon_xy * cs.epsilon_xy;
+            E_elastic += nbpc * 0.25 * (elastic_params.kappa_A1g * A1g*A1g*A1g*A1g
+                                       + elastic_params.kappa_Eg * Eg_sq*Eg_sq);
+        }
+        
         // Kinetic energy per cell (×N_BONDS to match global convention)
         E_kinetic += nbpc * 0.5 * M * (cs.V_xx * cs.V_xx + cs.V_yy * cs.V_yy + cs.V_xy * cs.V_xy);
         
@@ -3238,6 +3343,18 @@ void StrainPhononLattice::local_strain_derivatives(double t, vector<CellStrain>&
         double elastic_xx = -nbpc * (C11 * cs.epsilon_xx + C12 * cs.epsilon_yy);
         double elastic_yy = -nbpc * (C11 * cs.epsilon_yy + C12 * cs.epsilon_xx);
         double elastic_xy = -nbpc * 4.0 * C44 * cs.epsilon_xy;
+        
+        // Quartic anharmonic forces (×N_BONDS): -∂(¼κ·|ε|⁴)/∂ε
+        double kappa_A1g = elastic_params.kappa_A1g;
+        double kappa_Eg = elastic_params.kappa_Eg;
+        if (kappa_A1g != 0.0 || kappa_Eg != 0.0) {
+            double A1g = cs.epsilon_xx + cs.epsilon_yy;
+            double Eg1 = cs.epsilon_xx - cs.epsilon_yy;
+            double Eg_sq = Eg1 * Eg1 + 4.0 * cs.epsilon_xy * cs.epsilon_xy;
+            elastic_xx -= nbpc * (kappa_A1g * A1g * A1g * A1g + kappa_Eg * Eg_sq * Eg1);
+            elastic_yy -= nbpc * (kappa_A1g * A1g * A1g * A1g - kappa_Eg * Eg_sq * Eg1);
+            elastic_xy -= nbpc * 4.0 * kappa_Eg * Eg_sq * cs.epsilon_xy;
+        }
         
         // Gradient force: -∂E_grad/∂ε(c) = K_grad Σ_{c'} (ε(c') - ε(c))
         // NOT scaled by N_BONDS (cell-cell coupling, not per-bond)
@@ -3356,6 +3473,49 @@ void StrainPhononLattice::relax_local_strain(bool verbose) {
             double new_xx = (C11_eff * rhs_xx - C12_eff * rhs_yy) / det_eff;
             double new_yy = (C11_eff * rhs_yy - C12_eff * rhs_xx) / det_eff;
             double new_xy = rhs_xy_num / (nbpc * 4.0 * C44 + z_nn * K_grad);
+            
+            // Newton refinement for quartic anharmonicity
+            double kappa_A1g = elastic_params.kappa_A1g;
+            double kappa_Eg = elastic_params.kappa_Eg;
+            if (kappa_A1g != 0.0 || kappa_Eg != 0.0) {
+                // Stationarity: nb*C·ε + nb*λΣ + nb*∂V₄/∂ε + K_grad*(z·ε - Σ_c' ε_c') = 0
+                // RHS already captured the ME and gradient neighbor terms, so we need to add quartic.
+                // Use Newton on the full per-cell residual (a few iterations suffice).
+                for (int nit = 0; nit < 10; ++nit) {
+                    double A1g_v = new_xx + new_yy;
+                    double Eg1_v = new_xx - new_yy;
+                    double Eg_sq = Eg1_v*Eg1_v + 4.0*new_xy*new_xy;
+                    
+                    // Residual = C_eff·ε - rhs + nb·quartic_gradient
+                    double r_xx = C11_eff*new_xx + C12_eff*new_yy - rhs_xx
+                                + nbpc*(kappa_A1g*A1g_v*A1g_v*A1g_v + kappa_Eg*Eg_sq*Eg1_v);
+                    double r_yy = C12_eff*new_xx + C11_eff*new_yy - rhs_yy
+                                + nbpc*(kappa_A1g*A1g_v*A1g_v*A1g_v - kappa_Eg*Eg_sq*Eg1_v);
+                    double C44_eff = nbpc*4.0*C44 + z_nn*K_grad;
+                    double r_xy = C44_eff*new_xy - rhs_xy_num
+                                + nbpc*4.0*kappa_Eg*Eg_sq*new_xy;
+                    
+                    if (std::abs(r_xx) + std::abs(r_yy) + std::abs(r_xy) < 1e-13) break;
+                    
+                    // Jacobian with quartic Hessian
+                    double J11 = C11_eff + nbpc*(3.0*kappa_A1g*A1g_v*A1g_v + kappa_Eg*(2.0*Eg1_v*Eg1_v+Eg_sq));
+                    double J12 = C12_eff + nbpc*(3.0*kappa_A1g*A1g_v*A1g_v - kappa_Eg*(2.0*Eg1_v*Eg1_v+Eg_sq));
+                    double J13 = nbpc*8.0*kappa_Eg*new_xy*Eg1_v;
+                    double J21 = J12;
+                    double J22 = J11;  // by symmetry of A1g/Eg decomposition
+                    double J23 = -J13;
+                    double J31 = nbpc*8.0*kappa_Eg*Eg1_v*new_xy;
+                    double J32 = -J31;
+                    double J33 = C44_eff + nbpc*4.0*kappa_Eg*(Eg_sq + 8.0*new_xy*new_xy);
+                    
+                    double det3 = J11*(J22*J33-J23*J32) - J12*(J21*J33-J23*J31) + J13*(J21*J32-J22*J31);
+                    if (std::abs(det3) < 1e-30) break;
+                    double b1=-r_xx, b2=-r_yy, b3=-r_xy;
+                    new_xx += (b1*(J22*J33-J23*J32)-J12*(b2*J33-J23*b3)+J13*(b2*J32-J22*b3))/det3;
+                    new_yy += (J11*(b2*J33-J23*b3)-b1*(J21*J33-J23*J31)+J13*(J21*b3-b2*J31))/det3;
+                    new_xy += (J11*(J22*b3-b2*J32)-J12*(J21*b3-b2*J31)+b1*(J21*J32-J22*J31))/det3;
+                }
+            }
             
             double change = std::abs(new_xx - cell_strains_[c].epsilon_xx)
                           + std::abs(new_yy - cell_strains_[c].epsilon_yy)
@@ -3608,7 +3768,7 @@ void StrainPhononLattice::simulated_annealing(double T_start, double T_end,
         
         // Progress report every 10 steps or near T_end
         if (temp_step % 10 == 0 || T <= T_end * 1.5) {
-            double E = spin_energy() / lattice_size;  // Energy per spin
+            double E = energy_density();  // Total energy per spin (spin + elastic + ME)
             cout << "T=" << std::scientific << T << ", E/N=" << E 
                  << ", acc=" << std::fixed << std::setprecision(3) << acceptance;
             if (gaussian_move) cout << ", σ=" << sigma;
@@ -3767,14 +3927,14 @@ void StrainPhononLattice::deterministic_sweep(size_t num_sweeps, const string& o
             sweep_history.push_back(sweep + 1);
             max_torque_history.push_back(max_torque);
             mean_torque_history.push_back(mean_torque);
-            energy_history.push_back(spin_energy() / lattice_size);
+            energy_history.push_back(energy_density());  // Total energy (spin + elastic + ME)
             worst_site_history.push_back(worst_site);
             
             cout << "  Sweep " << (sweep + 1) << "/" << num_sweeps 
                  << ": max_torque = " << scientific << setprecision(3) << max_torque
                  << " (site " << worst_site << ")"
                  << ", mean_torque = " << mean_torque 
-                 << ", E/N = " << fixed << setprecision(6) << spin_energy() / lattice_size
+                 << ", E/N = " << fixed << setprecision(6) << energy_density()
                  << endl;
             
             if (max_torque < torque_tol) {

@@ -17,6 +17,7 @@
 
 GNEBResult GNEBOptimizer::find_mep(const GNEBSpinConfig& initial, const GNEBSpinConfig& final,
                                     const GNEBParams& params) {
+    active_params = &params;
     if (params.verbosity >= 1) {
         cout << "================================================" << endl;
         cout << "GNEB: Finding Minimum Energy Path" << endl;
@@ -182,7 +183,23 @@ GNEBResult GNEBOptimizer::find_mep(const GNEBSpinConfig& initial, const GNEBSpin
             result.max_force = std::max(result.max_force, grad[s].norm());
         }
     }
-    
+
+    // Saddle curvature: 3-point second derivative of E along raw geodesic arc
+    // length at the saddle image. Expected to be negative (unstable mode).
+    result.saddle_curvature = 0.0;
+    {
+        size_t sdl = result.saddle_index;
+        if (sdl > 0 && sdl + 1 < images.size()) {
+            double h1 = geodesic_distance(images[sdl],     images[sdl - 1]);
+            double h2 = geodesic_distance(images[sdl + 1], images[sdl]);
+            if (h1 > 1e-10 && h2 > 1e-10) {
+                double fwd = (energies[sdl + 1] - energies[sdl]) / h2;
+                double bwd = (energies[sdl]     - energies[sdl - 1]) / h1;
+                result.saddle_curvature = 2.0 * (fwd - bwd) / (h1 + h2);
+            }
+        }
+    }
+
     if (params.verbosity >= 1) {
         cout << endl;
         cout << "================================================" << endl;
@@ -194,6 +211,9 @@ GNEBResult GNEBOptimizer::find_mep(const GNEBSpinConfig& initial, const GNEBSpin
         cout << "Saddle image index: " << result.saddle_index << endl;
         cout << "Energy barrier: " << result.barrier << endl;
         cout << "ΔE (final - initial): " << result.delta_E << endl;
+        cout << "Saddle curvature (d²E/ds²): " << result.saddle_curvature
+             << (result.saddle_curvature < 0 ? "  [unstable mode ok]" : "  [WARNING: non-negative]")
+             << endl;
         cout << endl;
         
         cout << "Energy profile along MEP:" << endl;
@@ -219,6 +239,7 @@ GNEBResult GNEBOptimizer::find_mep_from_path(const vector<GNEBSpinConfig>& initi
         throw std::runtime_error("Initial path must have at least 3 images");
     }
     
+    active_params = &params;
     size_t n_images_in = initial_path.size();
     
     if (params.verbosity >= 1) {
@@ -338,8 +359,15 @@ GNEBResult GNEBOptimizer::find_mep_from_path(const vector<GNEBSpinConfig>& initi
         } else {
             steepest_descent_step(forces, params.step_size, use_climbing);
         }
-        
-        // Update energies
+
+        // Re-normalize spins. Without this, spins drift off the unit sphere over
+        // thousands of iterations and the tangent projection (which assumes |S|=1)
+        // becomes inconsistent. find_mep does this; find_mep_from_path was missing it.
+        for (size_t i = 1; i < n_images_in - 1; ++i) {
+            normalize_spins(images[i]);
+        }
+
+        // Update energies (endpoints fixed → no need to recompute energies[0] / back)
         for (size_t i = 1; i < n_images_in - 1; ++i) {
             energies[i] = compute_energy(images[i]);
         }
@@ -371,7 +399,22 @@ GNEBResult GNEBOptimizer::find_mep_from_path(const vector<GNEBSpinConfig>& initi
             result.max_force = std::max(result.max_force, grad[s].norm());
         }
     }
-    
+
+    // Saddle curvature (3-point FD along geodesic arc length at saddle).
+    result.saddle_curvature = 0.0;
+    {
+        size_t sdl = result.saddle_index;
+        if (sdl > 0 && sdl + 1 < images.size()) {
+            double h1 = geodesic_distance(images[sdl],     images[sdl - 1]);
+            double h2 = geodesic_distance(images[sdl + 1], images[sdl]);
+            if (h1 > 1e-10 && h2 > 1e-10) {
+                double fwd = (energies[sdl + 1] - energies[sdl]) / h2;
+                double bwd = (energies[sdl]     - energies[sdl - 1]) / h1;
+                result.saddle_curvature = 2.0 * (fwd - bwd) / (h1 + h2);
+            }
+        }
+    }
+
     if (params.verbosity >= 1) {
         cout << endl;
         cout << "================================================" << endl;
@@ -383,6 +426,9 @@ GNEBResult GNEBOptimizer::find_mep_from_path(const vector<GNEBSpinConfig>& initi
         cout << "Saddle image index: " << result.saddle_index << endl;
         cout << "Energy barrier: " << result.barrier << endl;
         cout << "ΔE (final - initial): " << result.delta_E << endl;
+        cout << "Saddle curvature (d²E/ds²): " << result.saddle_curvature
+             << (result.saddle_curvature < 0 ? "  [unstable mode ok]" : "  [WARNING: non-negative]")
+             << endl;
     }
     
     return result;
@@ -584,10 +630,11 @@ GNEBSpinConfig GNEBOptimizer::compute_neb_force(size_t image_index) {
     // Spring force (parallel to tangent)
     double d_plus = geodesic_distance(images[image_index + 1], images[image_index]);
     double d_minus = geodesic_distance(images[image_index], images[image_index - 1]);
-    
-    // Spring constant from params would be nice but we use member variable
-    double k_spring = 1.0;  // Will be set by params in caller
-    
+
+    // Pick up the spring constant from the active run's parameters. Prior to
+    // this fix, k_spring was hardcoded to 1.0 and gneb_spring_constant was silently ignored.
+    double k_spring = (active_params != nullptr) ? active_params->spring_constant : 1.0;
+
     double spring_mag = k_spring * (d_plus - d_minus);
     
     for (size_t s = 0; s < n_sites; ++s) {
@@ -657,7 +704,11 @@ size_t GNEBOptimizer::find_climbing_image() const {
 
 double GNEBOptimizer::fire_step(vector<GNEBSpinConfig>& forces, bool climbing) {
     // FIRE algorithm: Bitzek et al., Phys. Rev. Lett. 97, 170201 (2006)
-    
+    // Read parameters from the active run (falls back to sensible defaults
+    // if called outside of find_mep / find_mep_from_path).
+    GNEBParams fallback;
+    const GNEBParams& p = (active_params != nullptr) ? *active_params : fallback;
+
     // Compute P = F · V
     double P = 0.0;
     double F_norm_sq = 0.0;
@@ -684,21 +735,19 @@ double GNEBOptimizer::fire_step(vector<GNEBSpinConfig>& forces, bool climbing) {
         }
     }
     
-    // Adaptive timestep
+    // Adaptive timestep — now driven by params.fire_* instead of magic numbers.
     if (P > 0) {
         fire_n_positive++;
-        if (fire_n_positive > 5) {  // fire_N_min
-            fire_dt = std::min(fire_dt * 1.1, 0.5);  // fire_f_inc, fire_dtmax
-            fire_alpha *= 0.99;  // fire_alpha_decrease
+        if (fire_n_positive > p.fire_N_min) {
+            fire_dt = std::min(fire_dt * p.fire_f_inc, p.fire_dtmax);
+            fire_alpha *= p.fire_alpha_decrease;
         }
     } else {
-        // Reset
         fire_n_positive = 0;
-        fire_dt *= 0.5;  // fire_f_dec
-        fire_dt = std::max(fire_dt, 0.01);  // fire_dtmin
-        fire_alpha = 0.1;  // fire_alpha_start
-        
-        // Zero velocities
+        fire_dt *= p.fire_f_dec;
+        fire_dt = std::max(fire_dt, p.fire_dtmin);
+        fire_alpha = p.fire_alpha_start;
+
         for (size_t i = 1; i < images.size() - 1; ++i) {
             for (size_t s = 0; s < n_sites; ++s) {
                 velocities[i][s].setZero();

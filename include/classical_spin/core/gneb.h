@@ -221,6 +221,11 @@ private:
     EnergyFunc compute_energy;
     GradientFunc compute_gradient;
     size_t n_sites;
+
+    // Cached parameters for the active run (set by find_mep / find_mep_from_path).
+    // These allow compute_neb_force and fire_step to access settings without
+    // changing their signatures.
+    const GNEBParams* active_params = nullptr;
     
     // Current state of the optimization
     vector<GNEBSpinConfig> images;

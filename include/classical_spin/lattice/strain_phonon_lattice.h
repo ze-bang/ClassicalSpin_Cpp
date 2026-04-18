@@ -211,9 +211,9 @@ struct ElasticParams {
     double omega_A1g() const { return std::sqrt((C11 + C12) / M); }
     double omega_Eg() const { return std::sqrt(2.0 * C44 / M); }
     
-    // Optional: quartic anharmonicity
-    double lambda_A1g = 0.0;  // A1g quartic coefficient
-    double lambda_Eg = 0.0;   // Eg quartic coefficient
+    // Optional: quartic anharmonicity (V += ¼κ·|ε|⁴ prevents ME runaway)
+    double kappa_A1g = 0.0;  // A1g quartic coefficient
+    double kappa_Eg = 0.0;   // Eg quartic coefficient
     
     // Gradient stiffness coupling neighboring cells (local strain mode)
     // E_grad = (K_gradient/2) Σ_{<cc'>} |ε(c) - ε(c')|²

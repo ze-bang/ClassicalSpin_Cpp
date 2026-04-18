@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
     el.C11 = 1.0;  el.C12 = 0.3;  el.C44 = 0.35;
     el.M = 1.0;
     el.gamma_A1g = 0.1;  el.gamma_Eg = 0.1;
-    el.lambda_A1g = 0.0;  el.lambda_Eg = 0.0;
+    el.kappa_A1g = 0.0;  el.kappa_Eg = 0.0;
 
     StrainDriveParams dr;
     dr.E0_1 = 0; dr.E0_2 = 0;  // No drive

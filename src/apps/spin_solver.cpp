@@ -1010,9 +1010,9 @@ void build_strain_params(const SpinConfig& config,
     el_params.gamma_A1g = config.get_param("gamma_A1g", 0.1);
     el_params.gamma_Eg = config.get_param("gamma_Eg", 0.1);
     
-    // Quartic anharmonicity (optional)
-    el_params.lambda_A1g = config.get_param("lambda_A1g_quartic", 0.0);
-    el_params.lambda_Eg = config.get_param("lambda_Eg_quartic", 0.0);
+    // Quartic anharmonicity (optional, prevents ME runaway)
+    el_params.kappa_A1g = config.get_param("kappa_A1g", config.get_param("lambda_A1g_quartic", 0.0));
+    el_params.kappa_Eg = config.get_param("kappa_Eg", config.get_param("lambda_Eg_quartic", 0.0));
     
     // Drive parameters (pulse 1 - pump)
     dr_params.E0_1 = config.pump_amplitude;
@@ -1159,6 +1159,134 @@ void run_molecular_dynamics_strain(StrainPhononLattice& lattice, const SpinConfi
 }
 
 /**
+ * Compute the tangent-space projected gradient norm on the adiabatic PES
+ * (strain relaxed to BO equilibrium) at a given spin configuration. This is
+ * the quantity GNEB's convergence criterion acts on: |∇E_⊥| = max_i |∇E_i - (∇E_i·S_i)S_i|.
+ */
+static double adiabatic_projected_gradient_norm(StrainPhononLattice& lattice,
+                                                const vector<Eigen::Vector3d>& spins) {
+    auto [Eg1_eq, Eg2_eq] = lattice.relax_strain_at_fixed_spins(spins);
+    auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(spins, Eg1_eq, Eg2_eq);
+    double max_f = 0.0;
+    for (size_t i = 0; i < spins.size(); ++i) {
+        Eigen::Vector3d g_perp = grad_spins[i] - grad_spins[i].dot(spins[i]) * spins[i];
+        max_f = std::max(max_f, g_perp.norm());
+    }
+    return max_f;
+}
+
+/**
+ * Polish a spin configuration to the nearest local minimum on the adiabatic PES
+ * using FIRE on spins only (strain relaxed to BO at every step). Returns the
+ * final max projected gradient norm, and optionally writes iteration progress
+ * to cout when verbose.
+ *
+ * This is used to ensure that endpoints loaded from files (e.g. pump-probe
+ * output) are true stationary points before feeding them to GNEB — otherwise
+ * the "barrier" measured by GNEB is contaminated by residual endpoint torque.
+ */
+static double polish_endpoint_adiabatic(StrainPhononLattice& lattice,
+                                        vector<Eigen::Vector3d>& spins,
+                                        const string& label,
+                                        size_t max_iter,
+                                        double force_tol,
+                                        bool verbose) {
+    // Defensive: unit-normalize the input spins.
+    for (auto& S : spins) {
+        double n = S.norm();
+        if (n > 1e-12) S /= n;
+    }
+
+    double f0 = adiabatic_projected_gradient_norm(lattice, spins);
+    if (verbose) {
+        cout << "  [" << label << "] initial |∇E_⊥|_max = " << f0 << endl;
+    }
+    if (f0 < force_tol) {
+        if (verbose) cout << "  [" << label << "] already at local min — no polish needed" << endl;
+        return f0;
+    }
+
+    // FIRE on the tangent-projected gradient, strain adiabatically relaxed.
+    size_t n_sites = spins.size();
+    vector<Eigen::Vector3d> velocity(n_sites, Eigen::Vector3d::Zero());
+    double dt = 0.05;
+    const double dt_max = 0.5;
+    const double dt_min = 1e-3;
+    const double f_inc = 1.1, f_dec = 0.5;
+    const double alpha_start = 0.1, alpha_decrease = 0.99;
+    const size_t N_min = 5;
+    double alpha = alpha_start;
+    size_t n_positive = 0;
+
+    double f_max = f0;
+    size_t it = 0;
+    for (; it < max_iter; ++it) {
+        auto [Eg1_eq, Eg2_eq] = lattice.relax_strain_at_fixed_spins(spins);
+        auto [grad_spins, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(spins, Eg1_eq, Eg2_eq);
+
+        // Projected force F_i = -∇E_i + (∇E_i·S_i) S_i
+        vector<Eigen::Vector3d> force(n_sites);
+        f_max = 0.0;
+        for (size_t i = 0; i < n_sites; ++i) {
+            Eigen::Vector3d g_perp = grad_spins[i] - grad_spins[i].dot(spins[i]) * spins[i];
+            force[i] = -g_perp;
+            f_max = std::max(f_max, g_perp.norm());
+        }
+        if (f_max < force_tol) break;
+
+        // FIRE bookkeeping
+        double P = 0.0, F_sq = 0.0, V_sq = 0.0;
+        for (size_t i = 0; i < n_sites; ++i) {
+            P    += force[i].dot(velocity[i]);
+            F_sq += force[i].squaredNorm();
+            V_sq += velocity[i].squaredNorm();
+        }
+        double F_norm = std::sqrt(F_sq), V_norm = std::sqrt(V_sq);
+
+        if (F_norm > 1e-12 && V_norm > 1e-12) {
+            for (size_t i = 0; i < n_sites; ++i) {
+                velocity[i] = (1.0 - alpha) * velocity[i]
+                              + alpha * (V_norm / F_norm) * force[i];
+            }
+        }
+        if (P > 0) {
+            ++n_positive;
+            if (n_positive > N_min) {
+                dt = std::min(dt * f_inc, dt_max);
+                alpha *= alpha_decrease;
+            }
+        } else {
+            n_positive = 0;
+            dt = std::max(dt * f_dec, dt_min);
+            alpha = alpha_start;
+            for (auto& v : velocity) v.setZero();
+        }
+
+        for (size_t i = 0; i < n_sites; ++i) {
+            velocity[i] += dt * force[i];
+            spins[i]    += dt * velocity[i];
+            double n = spins[i].norm();
+            if (n > 1e-12) spins[i] /= n;
+            // Re-project velocity onto tangent plane so it doesn't accumulate radial drift
+            velocity[i] -= velocity[i].dot(spins[i]) * spins[i];
+        }
+
+        if (verbose && it % 200 == 0) {
+            cout << "  [" << label << "] iter " << std::setw(5) << it
+                 << "  |∇E_⊥| = " << std::scientific << std::setprecision(3) << f_max
+                 << "  dt = " << std::fixed << std::setprecision(3) << dt << endl;
+        }
+    }
+
+    if (verbose) {
+        cout << "  [" << label << "] polish done after " << it << " iter, "
+             << "|∇E_⊥|_max = " << f_max
+             << (f_max < force_tol ? "  [converged]" : "  [did not converge]") << endl;
+    }
+    return f_max;
+}
+
+/**
  * Run kinetic barrier analysis for StrainPhononLattice using spin-only GNEB
  * with adiabatic strain relaxation
  * 
@@ -1274,7 +1402,27 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             auto [init_Eg1, init_Eg2] = lattice.relax_strain_at_fixed_spins(initial_spins);
             initial_strain = StrainEg(init_Eg1, config.gneb_pin_Eg2_zero ? 0.0 : init_Eg2);
         }
-        
+
+        // Endpoint diagnostics + optional polish on the adiabatic PES.
+        // A nonzero |∇E_⊥| at the endpoint means it's not a true local minimum,
+        // which contaminates the measured barrier. We always report it; we
+        // optionally FIRE-polish to the nearest local min (default on).
+        {
+            double f_init = adiabatic_projected_gradient_norm(lattice, initial_spins);
+            cout << "[Rank " << rank << "] Initial endpoint |∇E_⊥|_max (adiabatic PES) = "
+                 << std::scientific << std::setprecision(6) << f_init << std::fixed << endl;
+            if (config.gneb_polish_endpoints && f_init >= config.gneb_polish_force_tol) {
+                cout << "[Rank " << rank << "] Polishing initial endpoint to local minimum..." << endl;
+                polish_endpoint_adiabatic(lattice, initial_spins, "initial",
+                                          config.gneb_polish_max_iter,
+                                          config.gneb_polish_force_tol,
+                                          /*verbose=*/rank == 0);
+                // Re-relax strain for the polished spins
+                auto [init_Eg1, init_Eg2] = lattice.relax_strain_at_fixed_spins(initial_spins);
+                initial_strain = StrainEg(init_Eg1, config.gneb_pin_Eg2_zero ? 0.0 : init_Eg2);
+            }
+        }
+
         // Update lattice strain to match initial_state
         for (size_t b = 0; b < 3; ++b) {
             lattice.strain.epsilon_xx[b] = initial_strain.Eg1;
@@ -1342,7 +1490,23 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
             auto [final_Eg1, final_Eg2] = lattice.relax_strain_at_fixed_spins(final_spins);
             final_strain = StrainEg(final_Eg1, config.gneb_pin_Eg2_zero ? 0.0 : final_Eg2);
         }
-        
+
+        // Endpoint diagnostics + optional polish for the final state.
+        {
+            double f_fin = adiabatic_projected_gradient_norm(lattice, final_spins);
+            cout << "[Rank " << rank << "] Final endpoint |∇E_⊥|_max (adiabatic PES) = "
+                 << std::scientific << std::setprecision(6) << f_fin << std::fixed << endl;
+            if (config.gneb_polish_endpoints && f_fin >= config.gneb_polish_force_tol) {
+                cout << "[Rank " << rank << "] Polishing final endpoint to local minimum..." << endl;
+                polish_endpoint_adiabatic(lattice, final_spins, "final",
+                                          config.gneb_polish_max_iter,
+                                          config.gneb_polish_force_tol,
+                                          /*verbose=*/rank == 0);
+                auto [final_Eg1, final_Eg2] = lattice.relax_strain_at_fixed_spins(final_spins);
+                final_strain = StrainEg(final_Eg1, config.gneb_pin_Eg2_zero ? 0.0 : final_Eg2);
+            }
+        }
+
         // Update lattice strain to match final_state
         for (size_t b = 0; b < 3; ++b) {
             lattice.strain.epsilon_xx[b] = final_strain.Eg1;
@@ -1761,6 +1925,42 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                 mep_strains[i] = StrainEg(ext_Eg1 + int_Eg1, ext_Eg2 + int_Eg2);
                 max_strain_amplitude = max(max_strain_amplitude, mep_strains[i].amplitude());
             }
+
+            // ──────────────────────────────────────────────────────────────
+            // BO-invariant check: |∂E/∂ε| at every image must vanish to BO
+            // tolerance after adiabatic relaxation. If it doesn't, the
+            // adiabatic strain relaxation under-converged at that image and
+            // the reported barrier is biased.
+            //
+            // Theoretical statement (for this Hamiltonian, E quadratic and
+            // strictly convex in ε at fixed spins): critical points of the
+            // MEP on the BO surface satisfy ∂E/∂ε = 0 exactly, so the BO
+            // saddle is identical to a saddle of the full E(S, ε). This
+            // check makes that theoretical identity a numerical invariant.
+            // ──────────────────────────────────────────────────────────────
+            double max_dE_deps_all = 0.0;
+            double max_dE_deps_saddle = 0.0;
+            {
+                for (size_t i = 0; i < mep_result.images.size(); ++i) {
+                    auto [gs, dE_dEg1, dE_dEg2] = lattice.gradient_for_gneb_with_strain(
+                        mep_result.images[i], mep_strains[i].Eg1, mep_strains[i].Eg2);
+                    double g = std::sqrt(dE_dEg1 * dE_dEg1 + dE_dEg2 * dE_dEg2);
+                    max_dE_deps_all = std::max(max_dE_deps_all, g);
+                    if (i == mep_result.saddle_index) max_dE_deps_saddle = g;
+                }
+                cout << "[Rank " << rank << "] BO invariant check: "
+                     << "max |∂E/∂ε| over path = " << std::scientific << std::setprecision(3)
+                     << max_dE_deps_all
+                     << "  (saddle: " << max_dE_deps_saddle << ")" << std::fixed << endl;
+                // Warn if the adiabatic relaxation didn't deliver BO-quality strain.
+                const double bo_warn_tol = 1e-3;
+                if (max_dE_deps_all > bo_warn_tol) {
+                    cout << "[Rank " << rank << "] WARNING: |∂E/∂ε| = "
+                         << max_dE_deps_all << " exceeds BO tolerance "
+                         << bo_warn_tol << " — adiabatic strain relaxation "
+                         << "is under-converged on the MEP; barrier is biased." << endl;
+                }
+            }
             
             // Save MEP for this strain point
             string strain_label = config.gneb_strain_sweep ? 
@@ -1806,6 +2006,7 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                 summary << "gneb_iterations = " << mep_result.iterations_used << "\n";
                 summary << "gneb_converged = " << (mep_result.converged ? "true" : "false") << "\n";
                 summary << "saddle_image = " << mep_result.saddle_index << "\n";
+                summary << "saddle_curvature = " << mep_result.saddle_curvature << "\n";
                 summary << "max_force = " << mep_result.max_force << "\n";
                 summary << "#\n";
                 summary << "external_strain_Eg1 = " << ext_Eg1 << "\n";
@@ -1821,6 +2022,10 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                 summary << "final_strain_Eg2 = " << mep_strains.back().Eg2 << "\n";
                 summary << "max_strain_amplitude = " << max_strain_amplitude << "\n";
                 summary << "#\n";
+                summary << "# BO invariant: |∂E/∂ε| should vanish at every image (convex elastic PES)\n";
+                summary << "bo_dE_deps_max_path   = " << max_dE_deps_all << "\n";
+                summary << "bo_dE_deps_at_saddle  = " << max_dE_deps_saddle << "\n";
+                summary << "#\n";
                 summary << "# Initial (triple-Q) energy: " << mep_result.energies.front() << "\n";
                 summary << "# Saddle energy: " << mep_result.energies[mep_result.saddle_index] << "\n";
                 summary << "# Final (zigzag) energy: " << mep_result.energies.back() << "\n";
@@ -1831,21 +2036,39 @@ void run_kinetic_barrier_analysis_strain(StrainPhononLattice& lattice, const Spi
                 string gneb_dir = mep_dir + "/gneb";
                 filesystem::create_directories(gneb_dir);
                 gneb.save_path(gneb_dir, "mep");
-                
+
+                // Overwrite mep_image_*.txt with strain-annotated versions so each
+                // image file carries its own (ε_Eg1, ε_Eg2, ε_ext, E) metadata.
                 for (size_t img = 0; img < mep_result.images.size(); ++img) {
-                    string img_file = gneb_dir + "/image_" + to_string(img) + ".txt";
+                    string img_file = gneb_dir + "/mep_image_" + to_string(img) + ".txt";
                     ofstream out(img_file);
                     out << "# MEP image " << img << " (spin-only GNEB + adiabatic strain)\n";
                     out << "# external_strain_Eg1 = " << ext_Eg1 << "\n";
                     out << "# external_strain_Eg2 = " << ext_Eg2 << "\n";
                     out << "# total_strain_Eg1 = " << mep_strains[img].Eg1 << "\n";
                     out << "# total_strain_Eg2 = " << mep_strains[img].Eg2 << "\n";
+                    out << "# total_strain_amplitude = " << mep_strains[img].amplitude() << "\n";
+                    out << "# arc_length = " << mep_result.arc_lengths[img] << "\n";
                     out << "# energy = " << mep_result.energies[img] << "\n";
                     out << "# site  Sx  Sy  Sz\n";
                     for (size_t i = 0; i < n_sites; ++i) {
-                        out << i << "  " << mep_result.images[img][i].x() 
+                        out << i << "  " << mep_result.images[img][i].x()
                             << "  " << mep_result.images[img][i].y()
                             << "  " << mep_result.images[img][i].z() << "\n";
+                    }
+                }
+
+                // Tidy summary of strain along the MEP (matches mep_energies.txt layout)
+                {
+                    ofstream sfile(gneb_dir + "/mep_strains.txt");
+                    sfile << "# image  arc_length  strain_Eg1  strain_Eg2  strain_amplitude  energy\n";
+                    for (size_t img = 0; img < mep_result.images.size(); ++img) {
+                        sfile << img
+                              << "  " << mep_result.arc_lengths[img]
+                              << "  " << mep_strains[img].Eg1
+                              << "  " << mep_strains[img].Eg2
+                              << "  " << mep_strains[img].amplitude()
+                              << "  " << mep_result.energies[img] << "\n";
                     }
                 }
             }

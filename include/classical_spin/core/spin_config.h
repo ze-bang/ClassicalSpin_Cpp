@@ -180,6 +180,9 @@ struct SpinConfig {
     bool gneb_dynamic_strain = false;       // Use GNEBStrainOptimizer: strain as dynamic GNEB DOF
     bool gneb_adiabatic_strain = false;      // Born-Oppenheimer: relax strain at each GNEB step
     bool gneb_pin_Eg2_zero = false;          // Pin ε_Eg2=0 in BO relaxation (constrain MEP to single C₃ channel)
+    bool gneb_polish_endpoints = true;       // Relax loaded endpoint spins to nearest local min on adiabatic PES before GNEB
+    size_t gneb_polish_max_iter = 2000;      // Max FIRE iterations for endpoint polish
+    double gneb_polish_force_tol = 1e-5;     // Force tolerance for endpoint polish (projected |∇E|)
     double gneb_weight_strain = 1.0;        // Metric weight for strain vs spin distance in dynamic strain GNEB
     string gneb_initial_path_dir = "";       // Directory with intermediate spin_strain_config files for initial path
     
