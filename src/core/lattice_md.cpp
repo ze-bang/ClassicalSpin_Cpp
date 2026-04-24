@@ -30,23 +30,39 @@
 
 // ---- Lattice::landau_lifshitz_flat ----
     void Lattice::landau_lifshitz_flat(const double* state_flat, double* dsdt_flat, double t) const {
+        // Drive-field envelope: factor1, factor2 depend only on `t`, not on
+        // the site, so we hoist the two `exp + cos` calls out of the per-site
+        // loop. When the drive amplitude is exactly zero (the common case
+        // during MC + free LLG evolution), we also skip the drive call
+        // entirely via an outer branch instead of per-site.
+        const bool drive_active = (field_drive_amp != 0.0);
+        double drive_factor1 = 0.0, drive_factor2 = 0.0;
+        if (drive_active) {
+            const double dt1 = t - t_pulse[0];
+            const double dt2 = t - t_pulse[1];
+            drive_factor1 = field_drive_amp *
+                            std::exp(-std::pow(dt1 / (2.0 * field_drive_width), 2)) *
+                            std::cos(field_drive_freq * dt1);
+            drive_factor2 = field_drive_amp *
+                            std::exp(-std::pow(dt2 / (2.0 * field_drive_width), 2)) *
+                            std::cos(field_drive_freq * dt2);
+        }
+
         if (spin_dim == 3) {
             // SU(2): Standard cross product dS/dt = H × S
             for (size_t i = 0; i < lattice_size; ++i) {
                 const size_t idx = i * 3;
-                
-                // Get local field (H_eff)
+
                 double H[3];
                 get_local_field_flat(state_flat, i, H);
-                
-                // Subtract drive field: H = H_eff - B_drive
-                drive_field_at_time_flat(t, i, H);  // Subtracts in-place
-                
-                // Get spin components
+                if (drive_active) {
+                    apply_drive_field_flat(i, drive_factor1, drive_factor2, H);
+                }
+
                 const double Sx = state_flat[idx + 0];
                 const double Sy = state_flat[idx + 1];
                 const double Sz = state_flat[idx + 2];
-                
+
                 // Cross product: dS/dt = H × S
                 double dSx = H[1] * Sz - H[2] * Sy;
                 double dSy = H[2] * Sx - H[0] * Sz;
@@ -69,47 +85,43 @@
                 dsdt_flat[idx + 2] = dSz;
             }
         } else if (spin_dim == 8) {
-            // SU(3): Structure constant contraction dS_i/dt = f_{ijk} H_j S_k
-            const auto& f = get_SU3_structure();
-            
+            // SU(3): structure-constant contraction dS_i/dt = sum_{jk} f_{ijk} H_j S_k
+            //
+            // The structure constants f_{ijk} are the antisymmetric Gell-Mann
+            // constants — extremely sparse, with only 9 unique non-zero
+            // (a<b<c) triples. The full 8×8×8 textbook contraction does 512
+            // mul-adds per site, of which 458 are 0 * something. The
+            // hand-rolled `cross_prod_SU3_flat` evaluates only the 54 non-zero
+            // entries directly, fully inlined, with no Eigen alloc; on the
+            // SU(3) RHS this is roughly an order of magnitude faster.
             for (size_t site = 0; site < lattice_size; ++site) {
                 const size_t idx = site * 8;
-                
-                // Get local field (H_eff)
+
                 double H[8];
                 get_local_field_flat(state_flat, site, H);
-                
-                // Subtract drive field: H = H_eff - B_drive
-                drive_field_at_time_flat(t, site, H);  // Subtracts in-place
-                
-                // Get spin pointer
-                const double* S = &state_flat[idx];
-                
-                // Structure constant contraction: dS_i/dt = sum_{jk} f[i](j,k) * H[j] * S[k]
-                for (size_t i = 0; i < 8; ++i) {
-                    double dSdt_i = 0.0;
-                    for (size_t j = 0; j < 8; ++j) {
-                        for (size_t k = 0; k < 8; ++k) {
-                            dSdt_i += f[i](j, k) * H[j] * S[k];
-                        }
-                    }
-                    dsdt_flat[idx + i] = dSdt_i;
+                if (drive_active) {
+                    apply_drive_field_flat(site, drive_factor1, drive_factor2, H);
                 }
+
+                const double* S = &state_flat[idx];
+                cross_prod_SU3_flat(H, S, &dsdt_flat[idx], /*accumulate=*/false);
             }
         } else {
             // General case: use cross_product function (fallback)
             for (size_t i = 0; i < lattice_size; ++i) {
                 const size_t idx = i * spin_dim;
-                
+
                 double H_arr[16];  // Max reasonable spin_dim
                 get_local_field_flat(state_flat, i, H_arr);
-                
+                if (drive_active) {
+                    apply_drive_field_flat(i, drive_factor1, drive_factor2, H_arr);
+                }
+
                 SpinVector H_eff = Eigen::Map<const Eigen::VectorXd>(H_arr, spin_dim);
-                SpinVector B_drive = drive_field_at_time(t, i);
                 SpinVector S_i = Eigen::Map<const Eigen::VectorXd>(&state_flat[idx], spin_dim);
-                
-                SpinVector dS_dt = cross_product(H_eff - B_drive, S_i);
-                
+
+                SpinVector dS_dt = cross_product(H_eff, S_i);
+
                 for (size_t d = 0; d < spin_dim; ++d) {
                     dsdt_flat[idx + d] = dS_dt(d);
                 }
@@ -119,22 +131,39 @@
 
 // ---- Lattice::drive_field_at_time_flat ----
     void Lattice::drive_field_at_time_flat(double t, size_t site_index, double* H) const {
-        const size_t atom = site_index % N_atoms;
-        
+        // Public/legacy entry point: keep the original semantics (compute the
+        // envelopes from `t` on each call). The hot LLG path uses the
+        // hoisted helper `apply_drive_field_flat` directly so that the two
+        // exp+cos calls are not repeated per site.
+        if (field_drive_amp == 0.0) return;
+
         const double dt1 = t - t_pulse[0];
         const double dt2 = t - t_pulse[1];
-        
-        const double factor1 = field_drive_amp * 
+
+        const double factor1 = field_drive_amp *
                         std::exp(-std::pow(dt1 / (2.0 * field_drive_width), 2)) *
-                        std::cos( field_drive_freq * dt1);
-        
-        const double factor2 = field_drive_amp * 
+                        std::cos(field_drive_freq * dt1);
+
+        const double factor2 = field_drive_amp *
                         std::exp(-std::pow(dt2 / (2.0 * field_drive_width), 2)) *
-                        std::cos( field_drive_freq * dt2);
-        
+                        std::cos(field_drive_freq * dt2);
+
+        apply_drive_field_flat(site_index, factor1, factor2, H);
+    }
+
+// ---- Lattice::apply_drive_field_flat ----
+    void Lattice::apply_drive_field_flat(size_t site_index,
+                                         double factor1, double factor2,
+                                         double* H) const {
+        // Subtracts the two-pulse drive contribution from H in place.
+        // factor1, factor2 are the time-dependent envelopes (already
+        // multiplied by amplitude) — by accepting them as arguments we
+        // avoid the per-site exp/cos that would dominate the LLG hot loop.
+        const size_t atom = site_index % N_atoms;
+        const double* fd0 = field_drive[0].data() + atom * spin_dim;
+        const double* fd1 = field_drive[1].data() + atom * spin_dim;
         for (size_t d = 0; d < spin_dim; ++d) {
-            H[d] -= field_drive[0](atom * spin_dim + d) * factor1 +
-                    field_drive[1](atom * spin_dim + d) * factor2;
+            H[d] -= fd0[d] * factor1 + fd1[d] * factor2;
         }
     }
 

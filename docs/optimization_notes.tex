@@ -238,6 +238,67 @@ already had reasonably contiguous J-table access (Eigen's
 small Wolff regression is consistent with run-to-run variation in
 cluster size; the algorithm's per-spin cost is unchanged.
 
+\subsection{Molecular-dynamics throughput}
+\label{sec:bench-md}
+
+Table~\ref{tab:bench-md} reports the analogous numbers for the
+Landau--Lifshitz / spin--strain RHS kernels, captured with the new
+\texttt{bench\_md} harness in this repository.  The ``v4'' column is
+the state of the code immediately after the Monte-Carlo pass of
+Table~\ref{tab:bench}; the ``v5'' column is after the four
+ODE-time-evolution optimisations of
+Sections~\ref{sec:sparse-su3}--\ref{sec:strain-rhs} (sparse SU(3)
+cross product, drive-envelope hoist + early exit, heap-free local
+field, and strain-RHS state-copy elimination).
+
+\begin{table}[t]
+\centering
+\caption{Single-core LLG / spin--strain RHS-call throughput on the same
+machine and flags as Table~\ref{tab:bench}.  ``rhs/s'' is the number
+of full \texttt{ode\_system()} (or \texttt{landau\_lifshitz\_flat()})
+evaluations per second; for RK4 this is $4 \times$ the integrator step
+count.  ``v4'' is just before the four ODE-targeted refactors,
+``v5'' is after.  Numbers in bold show kernels where v5 moved the
+needle by more than $\sim 25\,\%$.}
+\label{tab:bench-md}
+\begin{tabular}{lllrrr}
+\toprule
+Family & Model & $L$ & $N$ & v4 (rhs/s) & v5 (rhs/s) \\
+\midrule
+\texttt{Lattice} & Heisenberg honeycomb (SU(2))           & 32 & 2048 & $1.01{\times}10^{4}$ & $\mathbf{1.82{\times}10^{4}}$ \\
+\texttt{Lattice} & Kitaev honeycomb (SU(2))               & 32 & 2048 & $1.02{\times}10^{4}$ & $\mathbf{1.83{\times}10^{4}}$ \\
+\midrule
+\texttt{MixedLattice} & TmFeO$_3$ bilinear  (SU(2)+SU(3)) & 4  & 512  & $2.42{\times}10^{3}$ & $\mathbf{3.17{\times}10^{3}}$ \\
+\texttt{MixedLattice} & TmFeO$_3$ trilinear (SU(2)+SU(3)) & 4  & 512  & $2.05{\times}10^{3}$ & $\mathbf{2.58{\times}10^{3}}$ \\
+\texttt{MixedLattice} & TmFeO$_3$ driven (pulse on)       & 4  & 512  & $2.38{\times}10^{3}$ & $\mathbf{3.19{\times}10^{3}}$ \\
+\midrule
+\texttt{StrainPhonon} & Honeycomb bilinear, $\lambda{=}0$ & 24 & 1152 & $3.45{\times}10^{3}$ & $3.42{\times}10^{3}$ \\
+\texttt{StrainPhonon} & Honeycomb $+$ ME, $\lambda{\ne}0$ & 24 & 1152 & $3.31{\times}10^{3}$ & $3.34{\times}10^{3}$ \\
+\texttt{StrainPhonon} & Honeycomb local strain ($N_{\rm cells}{=}576$) & 24 & 1152 & $9.13{\times}10^{2}$ & $9.21{\times}10^{2}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The ``\texttt{Lattice}'' rows show a clean $\sim 1.8\times$ speedup
+that is essentially \emph{all} the drive-envelope early-exit
+(Section~\ref{sec:hoist-time}): even with the drive amplitude set to
+zero, the legacy code spent half its RHS time evaluating
+\texttt{exp + cos} factors that immediately got multiplied by zero.
+The mixed-trilinear and mixed-bilinear rows pick up an additional
+$\sim 30\%$ from the sparse SU(3) cross product
+(Section~\ref{sec:sparse-su3}) and the heap-free local-field
+\texttt{\_into} variants (Section~\ref{sec:hoist-time}, second
+subsection).  The \texttt{StrainPhonon} family shows essentially no
+speedup at $L = 24$ because (a) the magnetoelastic field is already
+fused (Section~\ref{sec:me-fuse}), so the per-RHS arithmetic is now
+small; and (b) the 7~kB heap copy that Section~\ref{sec:strain-rhs}
+removed is below the threshold where a modern \texttt{tcmalloc}/
+\texttt{ptmalloc} starts to hurt.  The win is correctness and
+simplicity rather than measured throughput at this lattice size; on
+larger lattices ($N_{\text{cells}} \gtrsim 10^{4}$) the heap-free
+RHS would scale linearly while the legacy copy-restore pattern would
+not.
+
 % =================================================================
 \section{Ingredient I: the data layout}
 % =================================================================
@@ -321,6 +382,7 @@ Table~\ref{tab:bench} comes from the next ingredient.
 
 % =================================================================
 \section{Ingredient II: zero allocation in the hot loop}
+\label{sec:zero-alloc}
 % =================================================================
 
 A C++ \texttt{std::vector<double> tmp(3)} looks innocent.  But under the
@@ -630,7 +692,216 @@ the speedup is large because a single neighbour-table load is the
 dominant cost in models with cheap per-bond arithmetic.
 
 % =================================================================
-\section{Ingredient VI: sweep order and branch behaviour}
+\section{Ingredient VI: sparse structure constants are not just
+                       theory}
+\label{sec:sparse-su3}
+% =================================================================
+
+The molecular-dynamics side of a Lie-algebra spin model needs the
+analogue of the Heisenberg ``$\mathbf{H} \times \mathbf{S}$'' cross
+product, but for an arbitrary semisimple Lie algebra:
+\[
+   \frac{d S_i}{dt} \;=\; \sum_{j,k} f_{ijk}\, H_j\, S_k ,
+\]
+where $f_{ijk}$ are the totally antisymmetric structure constants of
+the algebra (so for SU(2), $f_{ijk} = \epsilon_{ijk}$ and the formula
+collapses back to the familiar 3D cross product).  For SU(3) the
+indices run $i,j,k = 0,\ldots,7$ and the textbook implementation is a
+triple-nested loop:
+\begin{lstlisting}
+for (size_t i = 0; i < 8; ++i)
+  for (size_t j = 0; j < 8; ++j)
+    for (size_t k = 0; k < 8; ++k)
+      dSdt[i] += f[i](j,k) * H[j] * S[k];   // 512 multiply-adds per site
+\end{lstlisting}
+This is correct and looks innocent, but the SU(3) Gell-Mann structure
+constants are \emph{extremely sparse}: of $8 \times 8 \times 8 = 512$
+entries, only $54$ are non-zero (an antisymmetric $(a{<}b{<}c)$ family
+of $9$ ``unique triples'', each contributing $6$ permutations).  The
+textbook loop therefore does $458$ multiplies of \emph{zero} per site,
+per integrator sub-evaluation.  At RK4's four sub-evaluations per step
+and $\sim 10^{6}$ steps per simulation, that is $\sim 10^{12}$ wasted
+flops on every SU(3) lattice we touch.
+
+\subsection{The fix: hard-code the nine non-zero triples}
+The $9$ unique triples of SU(3) are
+\[
+\begin{aligned}
+   (012),&\quad f = +1, & (036),&\quad f = +\tfrac12, & (045),&\quad f = -\tfrac12, \\
+   (135),&\quad f = +\tfrac12, & (146),&\quad f = +\tfrac12, & (234),&\quad f = +\tfrac12, \\
+   (256),&\quad f = -\tfrac12, & (347),&\quad f = +\tfrac{\sqrt 3}{2}, & (567),&\quad f = +\tfrac{\sqrt 3}{2}.
+\end{aligned}
+\]
+Antisymmetry of $f_{ijk}$ in any pair gives, for each triple
+$(a,b,c)$ with constant $v$,
+\[
+   d_a \mathrel{+}= v\,(H_b S_c - H_c S_b),\quad
+   d_b \mathrel{+}= v\,(H_c S_a - H_a S_c),\quad
+   d_c \mathrel{+}= v\,(H_a S_b - H_b S_a),
+\]
+which is the SU(3) generalisation of ``$\mathbf{a} \times \mathbf{b}$''
+restricted to the plane spanned by directions $a,b,c$.  We unroll all
+nine triples by hand into a single fully-inlined function:
+\begin{lstlisting}
+inline void cross_prod_SU3_flat(const double* H,
+                                const double* S,
+                                double* out,
+                                bool accumulate = false);
+\end{lstlisting}
+The body computes the three antisymmetric combinations of each triple
+into three temporaries, then writes $d_0,\dots,d_7$ as a sum of those
+temporaries (each $d_i$ has $1$--$4$ contributions).  No structure-
+constant lookup, no zero multiplications, no \texttt{std::vector}, no
+heap allocation, and the whole routine is short enough that the
+compiler turns it into a flat sequence of FMAs that the SU(2) and SU(3)
+LLG branches now share.
+
+We verified bit-equivalence against the textbook triple-loop on
+$10^{5}$ random $(H, S)$ pairs (max absolute deviation $8.9\times
+10^{-16}$, i.e. round-off only).
+
+\paragraph{Measured impact (Table~\ref{tab:bench-md}).}
+The SU(3)-only kernel goes from a triple-nested 8\(^3\) loop with $458$
+wasted multiplications per site to a $\sim 60$-FMA inlined routine.
+On the mixed-trilinear benchmark this contributes a $1.26\times$
+speedup in combination with the other RHS optimisations
+(Section~\ref{sec:hoist-time}); on a hypothetical pure-SU(3) lattice
+it would be closer to $8\times$.  This is the same trick that
+\textsc{Sunny}\footnote{\texttt{https://github.com/SunnySuite/Sunny.jl}}
+uses for its CP$^{N{-}1}$ dynamics: SU(3) sparsity is well known in the
+LSWT community and has nothing to do with our particular
+implementation, but it is easy to forget when one is looking at the
+algebra in textbook form.
+
+\paragraph{Generalisation to other algebras.}
+The same trick works for any semisimple Lie algebra: enumerate the
+non-zero structure constants once, hard-code them into a single
+unrolled cross-product routine, and the per-RHS cost goes from
+$O(d^{3})$ to $O(\#\{\text{non-zero triples}\})$.  For SU($N$) with
+$N$ small this is always a win because the structure constants are
+$O(N)$-sparse.  For larger $N$ (CP$^{N-1}$ models, $N \gtrsim 16$) one
+either keeps a sparse coordinate format or lifts the dynamics to an
+$N \times N$ matrix Liouvillian; both are still asymptotically faster
+than the textbook contraction.
+
+% =================================================================
+\section{Ingredient VII: hoist time-only work out of per-site loops}
+\label{sec:hoist-time}
+% =================================================================
+
+A driven spin lattice (e.g. an MD simulation of pump-probe
+spectroscopy) carries a time-dependent external field on every site:
+\[
+   \mathbf{B}_{\text{drive}}(t, i) \;=\;
+       \sum_{p=1}^{2} A_p \,
+                       e^{-(t - t_p)^2 / (2\sigma_p)^2}\,
+                       \cos(\omega_p (t - t_p))\;
+                       \hat{\mathbf{b}}^{(p)}_{a(i)},
+\]
+where $\hat{\mathbf{b}}^{(p)}_{a(i)}$ is a per-sublattice-atom unit
+vector and $A_p, \sigma_p, \omega_p, t_p$ are pulse parameters that
+\emph{do not depend on the site $i$}.  A naive implementation reads
+\begin{lstlisting}
+for (site i = 0; i < N; ++i) {
+    H[i] = local_field(i);
+    H[i] -= drive_field_at_time(t, i);          // <-- contains exp + cos
+}
+\end{lstlisting}
+The inner \texttt{drive\_field\_at\_time(t, i)} re-computes one
+\texttt{exp} and one \texttt{cos} \emph{per site, per pulse, per RHS
+call}.  At $N = 2048$ that is $\sim 8000$ transcendentals per RHS, and
+RK4 calls the RHS four times per step.  On Skylake an \texttt{exp} or
+\texttt{cos} costs $\sim 15\,\mathrm{ns}$, so we are paying
+$\sim 0.5\,\mathrm{ms}$ per RHS call \emph{just to evaluate functions
+of $t$}.  Worse, the most common case in practice is
+$A_1 = A_2 = 0$ (no drive), in which the $\sim 0.5\,\mathrm{ms}$ is
+spent computing factors that immediately get multiplied by zero.
+
+\subsection{The fix: hoist + early exit}
+Because the envelope factors $A_p \exp(\dots) \cos(\dots)$ depend only
+on $t$ and pulse parameters, they can be computed \emph{once} at the
+top of the RHS and reused for every site:
+\begin{lstlisting}
+const bool drive_active = (drive_amp != 0.0);
+double f1 = 0.0, f2 = 0.0;
+if (drive_active) {
+    f1 = drive_amp * std::exp(-((t - t_p1)/(2*sigma))^2)
+                   * std::cos(omega * (t - t_p1));
+    f2 = drive_amp * std::exp(-((t - t_p2)/(2*sigma))^2)
+                   * std::cos(omega * (t - t_p2));
+}
+for (site i = 0; i < N; ++i) {
+    H[i] = local_field(i);
+    if (drive_active)
+        apply_drive(i, f1, f2, H[i].data());    // 6 mul + 6 sub, no transcendentals
+}
+\end{lstlisting}
+The number of \texttt{exp + cos} calls per RHS drops from $4N$ (here
+$\sim 8000$) to $4$, and the entire drive subtraction is skipped when
+$\text{amp} = 0$.
+
+\subsection{The same trick for heap allocations}
+A second offender sits inside the same loop: the legacy
+\texttt{get\_local\_field(i)} returned an \texttt{Eigen::VectorXd},
+which heap-allocates for any non-trivial spin dimension.  We replaced
+it with an \emph{into} variant
+\begin{lstlisting}
+void get_local_field_SU3_flat_into(size_t site,
+                                   const ODEState& x, size_t off_SU3,
+                                   double f1, double f2,
+                                   double* H_out);
+\end{lstlisting}
+which writes the field directly into a stack-allocated
+\texttt{double H[8]}, accepting the precomputed envelope factors so
+the drive math is folded into the local-field computation.  No
+\texttt{malloc}, no \texttt{free}, no Eigen temporaries, and one
+fewer pass over the spin index.  This is the LLG analogue of the
+``flat-spin scratch'' refactor of Section~\ref{sec:soa}.
+
+\paragraph{Measured impact (Table~\ref{tab:bench-md}).}
+On the SU(2) honeycomb LLG kernel the early-exit + hoist alone are
+worth a $1.80\times$ speedup ($1.0\times10^{4} \to 1.8\times10^{4}$
+RHS/sec) -- the cost of the drive-field $\exp$/$\cos$ calls was
+literally half the kernel's runtime even when the drive amplitude was
+zero.  On the mixed-trilinear path the combined hoist + heap-free
+fields + sparse SU(3) cross product (Section~\ref{sec:sparse-su3})
+contribute a $\sim 1.3\times$ speedup; on the explicitly driven path
+(\texttt{tmfeo3-driven}) the hoist alone is worth $1.34\times$ even
+relative to the post-Phase-D heap-free baseline.
+
+\paragraph{When does this matter?}  Hoisting is a free lunch whenever
+\emph{any} per-site work depends only on a small number of global
+parameters.  In MD this is the rule rather than the exception: the
+time-dependent drive, the temperature, the integrator step size, and
+the equilibrium magnetization (in Bloch damping) are all
+$t$-dependent constants from the per-site loop's point of view.  The
+``early exit when amplitude is zero'' is a separate but equally
+important point: in production the drive is \emph{usually} off
+(equilibration runs, ground-state relaxation), so the cheapest path
+through the RHS is the one that asks ``is there anything to do?''
+once and skips the entire per-site work when the answer is no.
+
+\subsection{Strain RHS: the same logic on a different scale}
+\label{sec:strain-rhs}
+The strain--phonon RHS used to copy the entire \texttt{cell\_strains\_}
+vector ($\sim 6 N_{\text{cells}}$ doubles) into a stack-local
+\texttt{vector<CellStrain>} on \emph{every} integrator sub-evaluation,
+and similarly heap-allocate a fresh \texttt{vector<CellStrain>
+dcell\_dt} of the same size for the output strain derivatives.  For
+$L = 24$ honeycomb that is $\sim 7\,\mathrm{kB}$ allocated, copied,
+and freed per RHS call $\times$ four sub-evals per RK4 step $\times$
+$10^{6}$ steps $\sim 28\,\mathrm{GB}$ of heap traffic per simulation.
+The fix is mechanical: keep a single pre-allocated scratch
+\texttt{rhs\_dcell\_dt\_scratch\_} as a member, and stop saving and
+restoring \texttt{cell\_strains\_} (the next RHS overwrites it from
+\texttt{x} anyway, and the outer integrator loop re-syncs from the
+committed state after each step).  This is the same ``allocation-free
+inner loop'' principle as Ingredient~II
+(Section~\ref{sec:zero-alloc}), pushed all the way down to the
+ODE-step level.
+
+% =================================================================
+\section{Ingredient VIII: sweep order and branch behaviour}
 % =================================================================
 
 \subsection{Sequential vs random site order}
@@ -666,7 +937,7 @@ downhill ($\Delta E < 0$), so the saved \texttt{exp()} calls are a
 measurable win and were one of the explicit bugs we fixed in this code.
 
 % =================================================================
-\section{Ingredient VII: better algorithms beat better implementations}
+\section{Ingredient IX: better algorithms beat better implementations}
 % =================================================================
 
 No amount of low-level tuning can beat a fundamentally better
@@ -742,7 +1013,7 @@ own rank.  The systems-level engineering matters here too:
 \end{itemize}
 
 % =================================================================
-\section{Ingredient VIII: parallelism and where to apply it}
+\section{Ingredient X: parallelism and where to apply it}
 % =================================================================
 
 There are three layers of parallelism on a typical CPU node:
@@ -802,7 +1073,7 @@ sweeps that use MPI sub-communicators silently corrupt their gathered
 statistics.
 
 % =================================================================
-\section{Ingredient IX: reproducibility is a feature, not a luxury}
+\section{Ingredient XI: reproducibility is a feature, not a luxury}
 % =================================================================
 
 A common ``optimization'' is to seed the RNG from the wall clock.  This
@@ -875,15 +1146,33 @@ with.
         into a single neighbour pass} (Section~\ref{sec:me-fuse}),
         which is the dominant cost in spin--lattice / magnetoelastic
         models such as the strain--phonon honeycomb here.
+  \item \textbf{Sparse Lie-algebra structure constants are written
+        as a hand-rolled non-zero list, not a dense triple loop}
+        (Section~\ref{sec:sparse-su3}).  For SU(3) this turns the
+        $8 \times 8 \times 8 = 512$ multiply--add tensor contraction
+        into nine fused-multiply--adds.  The same trick (with the
+        Levi--Civita symbol) is implicit in the SU(2) cross product;
+        the SU(N) generalisation is the same statement.
+  \item \textbf{Time-dependent envelopes are hoisted out of the
+        per-site RHS loop, with an early exit when the drive is
+        off} (Section~\ref{sec:hoist-time}).  This includes the
+        elimination of \texttt{Eigen::VectorXd} returns from
+        \texttt{get\_local\_field\_*} in favour of caller-supplied
+        \texttt{double*} buffers, and the elimination of the
+        save-then-restore copy of \texttt{cell\_strains\_} in the
+        strain RHS (Section~\ref{sec:strain-rhs}).
 \end{enumerate}
 
-\texttt{ClassicalSpin\_Cpp} now ticks all fifteen, including
+\texttt{ClassicalSpin\_Cpp} now ticks all seventeen, including
 item~3 (the Structure-of-Arrays bilinear table, see
 Section~\ref{sec:soa}), the Marsaglia sphere sampler
 (Section~\ref{sec:marsaglia}, including its mixed/strain
 extensions), the trilinear pre-contraction of
-Section~\ref{sec:trilinear}, and the magnetoelastic-derivative
-fusion of Section~\ref{sec:me-fuse}.  The remaining gap before
+Section~\ref{sec:trilinear}, the magnetoelastic-derivative
+fusion of Section~\ref{sec:me-fuse}, the sparse SU(3)
+structure-constant kernel of Section~\ref{sec:sparse-su3}, and the
+drive-envelope hoist + heap-free local field of
+Section~\ref{sec:hoist-time}.  The remaining gap before
 head-to-head benchmarking against Vampire/UppASD on large
 Heisenberg lattices ($L \gtrsim 128$) is hand-rolled SIMD
 intrinsics on the SoA bilinear table---the layout is now

@@ -3048,6 +3048,16 @@ public:
     SpinVector drive_field_SU3_at_time(double t, size_t site_index) const;
 
     /**
+     * Drive-field envelope helpers — return the two pulse factors at time
+     * `t` without touching any per-site data. Used by `landau_lifshitz` to
+     * hoist the two `exp + cos` calls per pulse out of the per-site loop;
+     * total cost goes from O(2 * lattice_size) transcendentals per RHS to
+     * O(2) per RHS.
+     */
+    void drive_envelopes_SU2(double t, double& factor1, double& factor2) const;
+    void drive_envelopes_SU3(double t, double& factor1, double& factor2) const;
+
+    /**
      * Convert spin configurations to flat state vector
      */
     ODEState spins_to_state() const {
@@ -3414,6 +3424,25 @@ private:
      * @param offset_SU3 Starting index of SU(3) spins in state vector
      * @param t Current time (for time-dependent drive)
      */
+    /**
+     * Heap-free, drive-hoisted variants of `get_local_field_SU{2,3}_flat`.
+     * The full local field is written directly into the caller-supplied
+     * `H_out[0..spin_dim_SU{2,3}-1]` and the time-dependent envelope
+     * factors are passed in by the caller (typically computed once per RHS
+     * evaluation in `landau_lifshitz`). These are the form used by the LLG
+     * hot loop; together they eliminate one `Eigen::VectorXd` heap
+     * allocation per site per RHS call and the redundant `exp + cos` calls
+     * per site that the legacy `..._flat(t, site)` interface incurs.
+     */
+    void get_local_field_SU2_flat_into(size_t site, const ODEState& state,
+                                       size_t offset_SU3,
+                                       double drive_factor1, double drive_factor2,
+                                       double* H_out) const;
+    void get_local_field_SU3_flat_into(size_t site, const ODEState& state,
+                                       size_t offset_SU3,
+                                       double drive_factor1, double drive_factor2,
+                                       double* H_out) const;
+
     SpinVector get_local_field_SU2_flat(size_t site, const ODEState& state, 
                                          size_t offset_SU3, double t) const;
     

@@ -1964,27 +1964,31 @@ void StrainPhononLattice::strain_derivatives(
 
 void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     const size_t spin_offset = spin_dim * lattice_size;
-    
-    // Update spins from ODE state
+
+    // Sync spins from the integrator state vector. We overwrite in place
+    // (no save/restore): the next sub-evaluation will resync from its own
+    // `x`, and the outer loop in `integrate_*` re-syncs `spins` from the
+    // committed `state` after each step. Same is true of `strain` /
+    // `cell_strains_` below — we removed the save/restore copies that
+    // dominated heap traffic on every RHS call (≈ 6 × N_cells doubles
+    // malloc'd + freed per local-strain RHS).
     for (size_t i = 0; i < lattice_size; ++i) {
         const size_t idx = i * spin_dim;
         const_cast<StrainPhononLattice*>(this)->spins[i] =
             Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
     }
-    
-    // Update current time for time-dependent parameters
+
     const_cast<StrainPhononLattice*>(this)->current_time = t;
-    
+
     if (use_local_strain_) {
         // ── LOCAL STRAIN PATH ──
         // State: [spins..., cell_0(6), cell_1(6), ..., cell_{N-1}(6)]
-        
-        // Extract per-cell strains from ODE state
-        vector<CellStrain> saved_cells = cell_strains_;
+
+        // Sync per-cell strain in place (no `vector` copy/restore).
         for (size_t c = 0; c < N_cells_; ++c) {
             cell_strains_[c].from_array(&x[spin_offset + c * CellStrain::N_DOF]);
         }
-        
+
         // Spin EOM (get_local_field dispatches to local ME field)
         for (size_t i = 0; i < lattice_size; ++i) {
             const size_t idx = i * spin_dim;
@@ -1995,27 +1999,27 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
             dxdt[idx+1] = dSdt(1);
             dxdt[idx+2] = dSdt(2);
         }
-        
-        // Local strain EOM
-        vector<CellStrain> dcell_dt;
-        local_strain_derivatives(t, dcell_dt);
+
+        // Local strain EOM — write into the pre-allocated scratch buffer
+        // instead of materializing a fresh `vector<CellStrain>` per RHS.
+        local_strain_derivatives(t, rhs_dcell_dt_scratch_);
         for (size_t c = 0; c < N_cells_; ++c) {
-            dcell_dt[c].to_array(&dxdt[spin_offset + c * CellStrain::N_DOF]);
+            rhs_dcell_dt_scratch_[c].to_array(&dxdt[spin_offset + c * CellStrain::N_DOF]);
         }
-        
-        // Restore
-        const_cast<StrainPhononLattice*>(this)->cell_strains_ = saved_cells;
-        
     } else {
-        // ── GLOBAL STRAIN PATH (original) ──
+        // ── GLOBAL STRAIN PATH ──
         // State: [spins..., StrainState(18)]
-        
+        //
+        // The legacy code copied `strain` into a local, mutated
+        // `this->strain`, then restored. Strain is just 18 doubles so the
+        // copy cost is small, but `dH_deps_*` and `get_magnetoelastic_field`
+        // both read `this->strain`, so we still need to keep it in sync —
+        // we just stop saving/restoring (next RHS overwrites it; outer
+        // integrate_* loop resyncs after each committed step).
         StrainState eps;
         eps.from_array(&x[spin_offset]);
-        
-        StrainState saved_strain = strain;
         const_cast<StrainPhononLattice*>(this)->strain = eps;
-        
+
         // Compute ME + J7 strain forces
         double dH_deps_xx_arr[StrainState::N_BONDS];
         double dH_deps_yy_arr[StrainState::N_BONDS];
@@ -2025,7 +2029,7 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
             dH_deps_yy_arr[b] = dH_deps_yy(b);
             dH_deps_xy_arr[b] = dH_deps_xy(b);
         }
-        
+
         double dJ7_deps_xx_arr[StrainState::N_BONDS];
         double dJ7_deps_yy_arr[StrainState::N_BONDS];
         double dJ7_deps_xy_arr[StrainState::N_BONDS];
@@ -2036,7 +2040,7 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
             dH_deps_yy_arr[b] += dJ7_deps_yy_arr[b] * E_ring;
             dH_deps_xy_arr[b] += dJ7_deps_xy_arr[b] * E_ring;
         }
-        
+
         // Spin EOM
         for (size_t i = 0; i < lattice_size; ++i) {
             const size_t idx = i * spin_dim;
@@ -2047,14 +2051,11 @@ void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t
             dxdt[idx+1] = dSdt(1);
             dxdt[idx+2] = dSdt(2);
         }
-        
+
         // Global strain EOM
         StrainState deps_dt;
         strain_derivatives(eps, t, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr, deps_dt);
         deps_dt.to_array(&dxdt[spin_offset]);
-        
-        // Restore
-        const_cast<StrainPhononLattice*>(this)->strain = saved_strain;
     }
 }
 
@@ -3122,6 +3123,11 @@ void StrainPhononLattice::init_local_strain() {
     // Allocate per-cell strain
     cell_strains_.resize(N_cells_);
     cell_strains_eq_.resize(N_cells_);
+    // Pre-size the RHS scratch buffer once so `ode_system` does not
+    // heap-allocate a fresh `vector<CellStrain>` on every integrator
+    // sub-evaluation. For RK4 with N_cells ≈ 10^4 cells, this used to
+    // dominate RHS overhead via repeated malloc/free of ~60 kB per call.
+    rhs_dcell_dt_scratch_.resize(N_cells_);
     
     // Build site → cell mapping
     // On honeycomb: each unit cell (i,j,k) has 2 atoms: atom 0 and atom 1

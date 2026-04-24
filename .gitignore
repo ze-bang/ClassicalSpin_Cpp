@@ -120,6 +120,7 @@ NCTO_project/
 *.lot
 *.synctex.gz
 *.toc
+*.out
 *.dvi
 # NOTE: we intentionally do NOT ignore *.pdf — some PDFs (figures, reports)
 # are deliberately tracked in the repo.

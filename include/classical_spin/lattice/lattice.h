@@ -3500,6 +3500,17 @@ public:
     void drive_field_at_time_flat(double t, size_t site_index, double* H) const;
 
     /**
+     * Subtract the two-pulse drive contribution from H in place using
+     * pre-computed envelope factors (factor1, factor2) — i.e. the per-site
+     * inner kernel of `drive_field_at_time_flat`, with the time-only
+     * `exp + cos` math already hoisted out by the caller. This is the form
+     * used inside `landau_lifshitz_flat` so the two transcendentals run
+     * once per RHS call instead of once per site.
+     */
+    void apply_drive_field_flat(size_t site_index, double factor1, double factor2,
+                                double* H) const;
+
+    /**
      * Compute time-dependent drive field (pre-transformed to local frame during set_pulse)
      */
     SpinVector drive_field_at_time(double t, size_t site_index) const;

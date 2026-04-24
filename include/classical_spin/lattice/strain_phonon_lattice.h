@@ -415,6 +415,11 @@ public:
     // Per-cell strain arrays
     vector<CellStrain> cell_strains_;          // Current cell strains [N_cells]
     vector<CellStrain> cell_strains_eq_;       // Equilibrium cell strains
+
+    // Pre-allocated scratch buffer for the local-strain RHS so that
+    // `ode_system` does not heap-allocate a fresh `vector<CellStrain>` on
+    // every integrator sub-evaluation. Sized to N_cells_ at init.
+    mutable vector<CellStrain> rhs_dcell_dt_scratch_;
     
     // Cell topology
     vector<size_t> site_to_cell_;              // Map site index → cell index

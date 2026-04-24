@@ -520,6 +520,11 @@ add_optimized_executable(test_hdf5_pt src/test_hdf5_pt.cpp)
 # the local-update kernels in isolation.
 add_optimized_executable(bench_mc src/apps/bench_mc.cpp)
 
+# Molecular-dynamics RHS micro-benchmark (RHS-calls/sec for each LLG /
+# spin-strain ODE kernel on a few canonical models). Same intent as
+# bench_mc but for the time-evolution side of the library.
+add_optimized_executable(bench_md src/apps/bench_md.cpp)
+
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)

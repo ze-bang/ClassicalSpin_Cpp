@@ -160,40 +160,58 @@
         field_drive_freq_SU3 = freq;
     }
 
+// ---- MixedLattice::drive_envelopes_SU2 ----
+    // Compute the two pulse envelope factors at time `t` (no per-site work).
+    // Hoisted out of the per-site loop so that the two exp + cos calls
+    // happen once per RHS evaluation instead of once per site.
+    void MixedLattice::drive_envelopes_SU2(double t, double& factor1, double& factor2) const {
+        const double dt1 = t - t_pulse_SU2[0];
+        const double dt2 = t - t_pulse_SU2[1];
+        factor1 = field_drive_amp_SU2 *
+                  std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU2), 2)) *
+                  std::cos(field_drive_freq_SU2 * dt1);
+        factor2 = field_drive_amp_SU2 *
+                  std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU2), 2)) *
+                  std::cos(field_drive_freq_SU2 * dt2);
+    }
+
+// ---- MixedLattice::drive_envelopes_SU3 ----
+    void MixedLattice::drive_envelopes_SU3(double t, double& factor1, double& factor2) const {
+        const double dt1 = t - t_pulse_SU3[0];
+        const double dt2 = t - t_pulse_SU3[1];
+        factor1 = field_drive_amp_SU3 *
+                  std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU3), 2)) *
+                  std::cos(field_drive_freq_SU3 * dt1);
+        factor2 = field_drive_amp_SU3 *
+                  std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU3), 2)) *
+                  std::cos(field_drive_freq_SU3 * dt2);
+    }
+
 // ---- MixedLattice::drive_field_SU2_at_time ----
     SpinVector MixedLattice::drive_field_SU2_at_time(double t, size_t site_index) const {
+        // Public/legacy entry point: still returns an Eigen vector. Hot LLG
+        // path uses the hoisted (factor1, factor2) form via
+        // `drive_envelopes_SU2` + an in-place subtract.
         const size_t atom = site_index % N_atoms_SU2;
-        SpinVector result = SpinVector::Zero(spin_dim_SU2);
-        
-        // Two Gaussian pulses
-        for (int pulse = 0; pulse < 2; ++pulse) {
-            double dt = t - t_pulse_SU2[pulse];
-            double envelope = exp(-pow(dt / (2 * field_drive_width_SU2), 2));
-            double oscillation = cos(field_drive_freq_SU2 * dt);
-            double factor = field_drive_amp_SU2 * envelope * oscillation;
-            
-            result += factor * field_drive_SU2[pulse].segment(atom * spin_dim_SU2, spin_dim_SU2);
+        if (field_drive_amp_SU2 == 0.0) {
+            return SpinVector::Zero(spin_dim_SU2);
         }
-        
-        return result;
+        double factor1, factor2;
+        drive_envelopes_SU2(t, factor1, factor2);
+        return factor1 * field_drive_SU2[0].segment(atom * spin_dim_SU2, spin_dim_SU2) +
+               factor2 * field_drive_SU2[1].segment(atom * spin_dim_SU2, spin_dim_SU2);
     }
 
 // ---- MixedLattice::drive_field_SU3_at_time ----
     SpinVector MixedLattice::drive_field_SU3_at_time(double t, size_t site_index) const {
         const size_t atom = site_index % N_atoms_SU3;
-        SpinVector result = SpinVector::Zero(spin_dim_SU3);
-        
-        // Two Gaussian pulses
-        for (int pulse = 0; pulse < 2; ++pulse) {
-            double dt = t - t_pulse_SU3[pulse];
-            double envelope = exp(-pow(dt / (2 * field_drive_width_SU3), 2));
-            double oscillation = cos(field_drive_freq_SU3 * dt);
-            double factor = field_drive_amp_SU3 * envelope * oscillation;
-            
-            result += factor * field_drive_SU3[pulse].segment(atom * spin_dim_SU3, spin_dim_SU3);
+        if (field_drive_amp_SU3 == 0.0) {
+            return SpinVector::Zero(spin_dim_SU3);
         }
-        
-        return result;
+        double factor1, factor2;
+        drive_envelopes_SU3(t, factor1, factor2);
+        return factor1 * field_drive_SU3[0].segment(atom * spin_dim_SU3, spin_dim_SU3) +
+               factor2 * field_drive_SU3[1].segment(atom * spin_dim_SU3, spin_dim_SU3);
     }
 
 // ---- MixedLattice::ode_system ----
@@ -203,61 +221,208 @@
 
 // ---- MixedLattice::landau_lifshitz ----
     void MixedLattice::landau_lifshitz(const ODEState& state, ODEState& dsdt, double t) {
-        const size_t offset_SU3 = lattice_size_SU2 * spin_dim_SU2;  // Start index for SU(3) spins
-        
+        const size_t offset_SU3 = lattice_size_SU2 * spin_dim_SU2;
+
+        // Hoist the time-dependent drive envelopes out of the per-site loop.
+        // Each pulse contributes a (factor1, factor2) computed from one
+        // `exp + cos` per pulse, and these are the same for every site.
+        // Without the hoist we paid 4 transcendentals (× lattice_size) per
+        // RHS call; with it we pay 4 in total per RHS call.
+        double su2_f1 = 0.0, su2_f2 = 0.0;
+        if (field_drive_amp_SU2 != 0.0) {
+            drive_envelopes_SU2(t, su2_f1, su2_f2);
+        }
+        double su3_f1 = 0.0, su3_f2 = 0.0;
+        if (field_drive_amp_SU3 != 0.0) {
+            drive_envelopes_SU3(t, su3_f1, su3_f2);
+        }
+
         // SU(2) dynamics: dS/dt = H × S (cross product for spin-1/2)
-        for (size_t site = 0; site < lattice_size_SU2; ++site) {
-            const size_t idx = site * spin_dim_SU2;
-            
-            // Compute local field using helper function
-            SpinVector H = get_local_field_SU2_flat(site, state, offset_SU3, t);
-            
-            // Compute dS/dt = H × S for SU(2), plus LLG Gilbert damping
-            if (spin_dim_SU2 == 3) {
-                // Standard cross product for 3D vectors
-                dsdt[idx + 0] = H(1) * state[idx + 2] - H(2) * state[idx + 1];
-                dsdt[idx + 1] = H(2) * state[idx + 0] - H(0) * state[idx + 2];
-                dsdt[idx + 2] = H(0) * state[idx + 1] - H(1) * state[idx + 0];
+        if (spin_dim_SU2 == 3) {
+            double H[3];
+            for (size_t site = 0; site < lattice_size_SU2; ++site) {
+                const size_t idx = site * spin_dim_SU2;
+
+                // Heap-free local-field write into a stack buffer.
+                get_local_field_SU2_flat_into(site, state, offset_SU3,
+                                              su2_f1, su2_f2, H);
+
+                dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
+                dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
+                dsdt[idx + 2] = H[0] * state[idx + 1] - H[1] * state[idx + 0];
+
                 // Gilbert damping: dS/dt += (alpha/|S|) * S × (S × H)
                 // S × (S × H) = S(S·H) - H|S|^2  (BAC-CAB identity)
                 if (alpha_gilbert != 0.0) {
                     const double Sx = state[idx + 0], Sy = state[idx + 1], Sz = state[idx + 2];
                     const double S2 = Sx*Sx + Sy*Sy + Sz*Sz;
-                    const double SdotH = Sx*H(0) + Sy*H(1) + Sz*H(2);
+                    const double SdotH = Sx*H[0] + Sy*H[1] + Sz*H[2];
                     const double inv_S = (S2 > 0.0) ? alpha_gilbert / std::sqrt(S2) : 0.0;
-                    dsdt[idx + 0] += inv_S * (Sx * SdotH - H(0) * S2);
-                    dsdt[idx + 1] += inv_S * (Sy * SdotH - H(1) * S2);
-                    dsdt[idx + 2] += inv_S * (Sz * SdotH - H(2) * S2);
+                    dsdt[idx + 0] += inv_S * (Sx * SdotH - H[0] * S2);
+                    dsdt[idx + 1] += inv_S * (Sy * SdotH - H[1] * S2);
+                    dsdt[idx + 2] += inv_S * (Sz * SdotH - H[2] * S2);
                 }
-            } else {
-                // General case: would need proper SU(N) structure constants
+            }
+        } else {
+            // General case: would need proper SU(N) structure constants for
+            // non-spin-1/2 SU(2) sublattice (rare); leave RHS = 0 for safety,
+            // matching the previous behaviour.
+            for (size_t site = 0; site < lattice_size_SU2; ++site) {
+                const size_t idx = site * spin_dim_SU2;
                 for (size_t j = 0; j < spin_dim_SU2; ++j) {
                     dsdt[idx + j] = 0.0;
                 }
             }
         }
-        
+
         // SU(3) dynamics: dS/dt = f_ijk H_j S_k − Γ_i (S_i − S_i^eq)
-        const auto& f = get_SU3_structure();
-        for (size_t site = 0; site < lattice_size_SU3; ++site) {
-            const size_t idx = offset_SU3 + site * spin_dim_SU3;
-            
-            // Compute local field using helper function
-            SpinVector H = get_local_field_SU3_flat(site, state, offset_SU3, t);
-            
-            // Compute dS/dt = f_ijk H_j S_k for SU(3) using Gell-Mann structure constants
-            for (size_t i = 0; i < spin_dim_SU3; ++i) {
-                double dSdt_i = 0.0;
-                for (size_t j = 0; j < spin_dim_SU3; ++j) {
-                    for (size_t k = 0; k < spin_dim_SU3; ++k) {
-                        dSdt_i += f[i](j, k) * H(j) * state[idx + k];
+        //
+        // The textbook contraction is an 8×8×8 triple-loop per site that
+        // multiplies by the Gell-Mann structure constants. Those constants
+        // are extremely sparse (only 9 unique non-zero (a<b<c) triples,
+        // i.e. 54 of 512 entries non-zero), so we route through
+        // `cross_prod_SU3_flat`, which evaluates only the non-zero terms
+        // directly — fully inlined, no heap allocation.
+        if (spin_dim_SU3 == 8) {
+            double H[8];
+            for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                const size_t idx = offset_SU3 + site * spin_dim_SU3;
+
+                get_local_field_SU3_flat_into(site, state, offset_SU3,
+                                              su3_f1, su3_f2, H);
+
+                cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
+
+                // Bloch damping: −Γ_i (n^i − n^i_eq).
+                for (size_t i = 0; i < 8; ++i) {
+                    if (damping_rates_SU3(i) != 0.0) {
+                        dsdt[idx + i] -= damping_rates_SU3(i) *
+                            (state[idx + i] - equilibrium_SU3[site](i));
                     }
                 }
-                // Bloch damping: −Γ_i (n^i − n^i_eq)
-                if (damping_rates_SU3(i) != 0.0) {
-                    dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - equilibrium_SU3[site](i));
+            }
+        } else {
+            // General-d SU(N) fallback for non-standard cases (rarely used).
+            const auto& f = get_SU3_structure();
+            for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                const size_t idx = offset_SU3 + site * spin_dim_SU3;
+                SpinVector H = get_local_field_SU3_flat(site, state, offset_SU3, t);
+                for (size_t i = 0; i < spin_dim_SU3; ++i) {
+                    double dSdt_i = 0.0;
+                    for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                        for (size_t k = 0; k < spin_dim_SU3; ++k) {
+                            dSdt_i += f[i](j, k) * H(j) * state[idx + k];
+                        }
+                    }
+                    if (damping_rates_SU3(i) != 0.0) {
+                        dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - equilibrium_SU3[site](i));
+                    }
+                    dsdt[idx + i] = dSdt_i;
                 }
-                dsdt[idx + i] = dSdt_i;
+            }
+        }
+    }
+
+// ---- MixedLattice::get_local_field_SU2_flat_into ----
+    // Heap-free, drive-hoisted variant of `get_local_field_SU2_flat`. Writes
+    // the full local field directly into the caller-supplied
+    // `H[0..spin_dim_SU2-1]`, accepting pre-computed envelope factors so the
+    // two `exp + cos` math calls per pulse are not repeated per site. This
+    // is the form used by `landau_lifshitz`; it eliminates one
+    // `Eigen::VectorXd` heap allocation per site per RHS call (≈ N_sites
+    // `malloc/free` pairs).
+    void MixedLattice::get_local_field_SU2_flat_into(
+        size_t site, const ODEState& state, size_t offset_SU3,
+        double drive_factor1, double drive_factor2,
+        double* __restrict H) const {
+        const size_t idx = site * spin_dim_SU2;
+        const double* __restrict field0 = field_SU2[site].data();
+        for (size_t a = 0; a < spin_dim_SU2; ++a) H[a] = -field0[a];
+
+        // Onsite: 2*A*S
+        const auto& A = onsite_interaction_SU2[site];
+        for (size_t a = 0; a < spin_dim_SU2; ++a) {
+            double acc = 0.0;
+            for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                acc += A(a, b) * state[idx + b];
+            }
+            H[a] += 2.0 * acc;
+        }
+
+        // Bilinear SU(2)-SU(2)
+        const auto& bp_SU2 = bilinear_partners_SU2[site];
+        const auto& bi_SU2 = bilinear_interaction_SU2[site];
+        for (size_t n = 0; n < bp_SU2.size(); ++n) {
+            const size_t partner_idx = bp_SU2[n] * spin_dim_SU2;
+            const auto& J = bi_SU2[n];
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                double acc = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    acc += J(a, b) * state[partner_idx + b];
+                }
+                H[a] += acc;
+            }
+        }
+
+        // Mixed bilinear SU(2)-SU(3)
+        const auto& mbp = mixed_bilinear_partners_SU2[site];
+        const auto& mbi = mixed_bilinear_interaction_SU2[site];
+        for (size_t n = 0; n < mbp.size(); ++n) {
+            const size_t partner_idx = offset_SU3 + mbp[n] * spin_dim_SU3;
+            const auto& J = mbi[n];
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                double acc = 0.0;
+                for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                    acc += J(a, c) * state[partner_idx + c];
+                }
+                H[a] += acc;
+            }
+        }
+
+        // Trilinear SU(2)-SU(2)-SU(2): T[a](b,c) * S1[b] * S2[c]
+        const auto& tp_SU2 = trilinear_partners_SU2[site];
+        const auto& ti_SU2 = trilinear_interaction_SU2[site];
+        for (size_t n = 0; n < tp_SU2.size(); ++n) {
+            const size_t p1_idx = tp_SU2[n][0] * spin_dim_SU2;
+            const size_t p2_idx = tp_SU2[n][1] * spin_dim_SU2;
+            const auto& T = ti_SU2[n];
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H[a] += temp;
+            }
+        }
+
+        // Mixed trilinear SU(2)-SU(2)-SU(3)
+        const auto& mtp = mixed_trilinear_partners_SU2[site];
+        const auto& mti = mixed_trilinear_interaction_SU2[site];
+        for (size_t n = 0; n < mtp.size(); ++n) {
+            const size_t p1_idx = mtp[n][0] * spin_dim_SU2;
+            const size_t p2_idx = offset_SU3 + mtp[n][1] * spin_dim_SU3;
+            const auto& T = mti[n];
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H[a] += temp;
+            }
+        }
+
+        // Drive (precomputed envelopes). Skip entirely when amp == 0 by the
+        // caller checking before invoking; here we just trust the factors.
+        if (drive_factor1 != 0.0 || drive_factor2 != 0.0) {
+            const size_t atom = site % N_atoms_SU2;
+            const double* fd0 = field_drive_SU2[0].data() + atom * spin_dim_SU2;
+            const double* fd1 = field_drive_SU2[1].data() + atom * spin_dim_SU2;
+            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                H[a] -= fd0[a] * drive_factor1 + fd1[a] * drive_factor2;
             }
         }
     }
@@ -341,6 +506,103 @@
         H -= drive_field_SU2_at_time(t, site);
         
         return H;
+    }
+
+// ---- MixedLattice::get_local_field_SU3_flat_into ----
+    // Heap-free, drive-hoisted variant of `get_local_field_SU3_flat`. See the
+    // docstring on `get_local_field_SU2_flat_into` for the rationale.
+    void MixedLattice::get_local_field_SU3_flat_into(
+        size_t site, const ODEState& state, size_t offset_SU3,
+        double drive_factor1, double drive_factor2,
+        double* __restrict H) const {
+        const size_t idx = offset_SU3 + site * spin_dim_SU3;
+        const double* __restrict field0 = field_SU3[site].data();
+        for (size_t a = 0; a < spin_dim_SU3; ++a) H[a] = -field0[a];
+
+        // Onsite: 2*A*S
+        const auto& A = onsite_interaction_SU3[site];
+        for (size_t a = 0; a < spin_dim_SU3; ++a) {
+            double acc = 0.0;
+            for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                acc += A(a, b) * state[idx + b];
+            }
+            H[a] += 2.0 * acc;
+        }
+
+        // Bilinear SU(3)-SU(3)
+        const auto& bp_SU3 = bilinear_partners_SU3[site];
+        const auto& bi_SU3 = bilinear_interaction_SU3[site];
+        for (size_t n = 0; n < bp_SU3.size(); ++n) {
+            const size_t partner_idx = offset_SU3 + bp_SU3[n] * spin_dim_SU3;
+            const auto& J = bi_SU3[n];
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double acc = 0.0;
+                for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                    acc += J(a, b) * state[partner_idx + b];
+                }
+                H[a] += acc;
+            }
+        }
+
+        // Mixed bilinear SU(3)-SU(2)
+        const auto& mbp = mixed_bilinear_partners_SU3[site];
+        const auto& mbi = mixed_bilinear_interaction_SU3[site];
+        for (size_t n = 0; n < mbp.size(); ++n) {
+            const size_t partner_idx = mbp[n] * spin_dim_SU2;
+            const auto& J = mbi[n];
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double acc = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    acc += J(a, b) * state[partner_idx + b];
+                }
+                H[a] += acc;
+            }
+        }
+
+        // Trilinear SU(3)-SU(3)-SU(3)
+        const auto& tp_SU3 = trilinear_partners_SU3[site];
+        const auto& ti_SU3 = trilinear_interaction_SU3[site];
+        for (size_t n = 0; n < tp_SU3.size(); ++n) {
+            const size_t p1_idx = offset_SU3 + tp_SU3[n][0] * spin_dim_SU3;
+            const size_t p2_idx = offset_SU3 + tp_SU3[n][1] * spin_dim_SU3;
+            const auto& T = ti_SU3[n];
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H[a] += temp;
+            }
+        }
+
+        // Mixed trilinear SU(3)-SU(2)-SU(2)
+        const auto& mtp = mixed_trilinear_partners_SU3[site];
+        const auto& mti = mixed_trilinear_interaction_SU3[site];
+        for (size_t n = 0; n < mtp.size(); ++n) {
+            const size_t p1_idx = mtp[n][0] * spin_dim_SU2;
+            const size_t p2_idx = mtp[n][1] * spin_dim_SU2;
+            const auto& T = mti[n];
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double temp = 0.0;
+                for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                    }
+                }
+                H[a] += temp;
+            }
+        }
+
+        if (drive_factor1 != 0.0 || drive_factor2 != 0.0) {
+            const size_t atom = site % N_atoms_SU3;
+            const double* fd0 = field_drive_SU3[0].data() + atom * spin_dim_SU3;
+            const double* fd1 = field_drive_SU3[1].data() + atom * spin_dim_SU3;
+            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                H[a] -= fd0[a] * drive_factor1 + fd1[a] * drive_factor2;
+            }
+        }
     }
 
 // ---- MixedLattice::get_local_field_SU3_flat ----
