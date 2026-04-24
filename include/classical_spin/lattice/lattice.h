@@ -20,6 +20,9 @@
 #include <filesystem>
 #include <mpi.h>
 #include <boost/numeric/odeint.hpp>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 // Include Boost uBLAS for implicit solvers (rosenbrock4, implicit_euler)
 #include <boost/numeric/ublas/vector.hpp>
@@ -510,6 +513,29 @@ public:
     vector<array<int8_t, 3>>   bi_flat_wrap;
     size_t                     bi_flat_D2 = 0;   // = spin_dim * spin_dim, cached
 
+    // ------------------------------------------------------------------
+    // Sublattice colouring of the bond graph (bilinear + trilinear union).
+    //
+    // Two sites that share *any* interaction (bilinear or trilinear) get
+    // different colours. A coloured Metropolis / overrelaxation sweep then
+    // updates all sites of one colour in parallel without any data race
+    // (the per-site kernel only reads neighbour spins and writes spins[i]).
+    //
+    // Layout (CSR-style):
+    //   color_of_site[i]               in [0, n_colors)
+    //   sites_by_color_csr_off[c..c+1) = range of sites with colour c
+    //   sites_by_color_csr[off]         = site index
+    //
+    // Built once at the end of initialize() by `build_color_partition()`.
+    // n_colors > 0 ⇒ partition is valid; n_colors == 0 ⇒ no partition built
+    // (e.g. running on legacy code paths) ⇒ parallel sweeps fall back to
+    // the serial entry points.
+    // ------------------------------------------------------------------
+    vector<uint16_t>           color_of_site;
+    vector<size_t>             sites_by_color_csr_off;   // size n_colors + 1
+    vector<size_t>             sites_by_color_csr;       // size lattice_size
+    size_t                     n_colors = 0;
+
     // Twist boundary conditions
     array<SpinMatrix, 3> twist_matrices;                 // Rotation matrices per dimension
     array<SpinVector, 3> rotation_axis;                  // Rotation axes
@@ -812,9 +838,12 @@ public:
 
         build_boundary_sites();
         build_flat_bilinear_tables();
+        build_color_partition();
         cout << "Lattice initialization complete!" << endl;
         cout << "Max bilinear interactions per site: " << num_bi << endl;
         cout << "Max trilinear interactions per site: " << num_tri << endl;
+        cout << "Sublattice colouring: " << n_colors << " colour(s) for "
+             << lattice_size << " sites" << endl;
     }
 
     /**
@@ -866,6 +895,91 @@ public:
     }
 
     /**
+     * Build a sublattice colouring of the bond graph (bilinear + trilinear
+     * union) so that no two sites of the same colour share any interaction.
+     *
+     * Used by the coloured (parallel) Metropolis / overrelaxation sweeps:
+     * for each colour in turn, all sites of that colour can be updated by
+     * independent OpenMP threads with zero races, because the per-site
+     * kernel only reads neighbour spins and writes spins[i].
+     *
+     * Algorithm: greedy first-fit colouring on sites in natural order.
+     * For typical lattices (honeycomb 2-colourable, kagome 3-colourable,
+     * pyrochlore 4-colourable, cubic 2-colourable) this returns the
+     * chromatic number; for irregular graphs it returns at most
+     * (max_degree + 1) colours, which is still fine because the parallel
+     * efficiency scales as ~1/n_colors and even 6-7 colours give 4-6x on
+     * 8 threads.
+     *
+     * Idempotent. O(N * (avg_degree + n_colors)). Negligible at init.
+     */
+    void build_color_partition() {
+        if (lattice_size == 0) {
+            n_colors = 0;
+            color_of_site.clear();
+            sites_by_color_csr_off.clear();
+            sites_by_color_csr.clear();
+            return;
+        }
+
+        color_of_site.assign(lattice_size, std::numeric_limits<uint16_t>::max());
+
+        std::vector<uint8_t> forbidden(64, 0);
+        size_t max_color_used = 0;
+
+        for (size_t i = 0; i < lattice_size; ++i) {
+            std::fill(forbidden.begin(), forbidden.end(), uint8_t(0));
+
+            const size_t bi_base = bi_flat_offset[i];
+            const size_t bi_end  = bi_flat_offset[i + 1];
+            for (size_t k = bi_base; k < bi_end; ++k) {
+                const size_t partner = bi_flat_partner[k];
+                if (partner >= lattice_size) continue;
+                const uint16_t c = color_of_site[partner];
+                if (c != std::numeric_limits<uint16_t>::max()) {
+                    if (size_t(c) >= forbidden.size()) forbidden.resize(size_t(c) + 1, 0);
+                    forbidden[c] = 1;
+                }
+            }
+
+            const size_t n_tri_i = trilinear_partners[i].size();
+            for (size_t n = 0; n < n_tri_i; ++n) {
+                for (int e = 0; e < 2; ++e) {
+                    const size_t partner = trilinear_partners[i][n][e];
+                    if (partner >= lattice_size) continue;
+                    const uint16_t c = color_of_site[partner];
+                    if (c != std::numeric_limits<uint16_t>::max()) {
+                        if (size_t(c) >= forbidden.size()) forbidden.resize(size_t(c) + 1, 0);
+                        forbidden[c] = 1;
+                    }
+                }
+            }
+
+            uint16_t chosen = 0;
+            while (size_t(chosen) < forbidden.size() && forbidden[chosen]) ++chosen;
+            color_of_site[i] = chosen;
+            if (size_t(chosen) > max_color_used) max_color_used = chosen;
+        }
+
+        n_colors = max_color_used + 1;
+
+        sites_by_color_csr_off.assign(n_colors + 1, 0);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            sites_by_color_csr_off[color_of_site[i] + 1] += 1;
+        }
+        for (size_t c = 0; c < n_colors; ++c) {
+            sites_by_color_csr_off[c + 1] += sites_by_color_csr_off[c];
+        }
+        sites_by_color_csr.assign(lattice_size, 0);
+        std::vector<size_t> cursor(n_colors, 0);
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const uint16_t c = color_of_site[i];
+            sites_by_color_csr[sites_by_color_csr_off[c] + cursor[c]] = i;
+            ++cursor[c];
+        }
+    }
+
+    /**
      * Copy constructor
      */
     Lattice(const Lattice& other)
@@ -893,6 +1007,10 @@ public:
           bi_flat_needs_twist(other.bi_flat_needs_twist),
           bi_flat_wrap(other.bi_flat_wrap),
           bi_flat_D2(other.bi_flat_D2),
+          color_of_site(other.color_of_site),
+          sites_by_color_csr_off(other.sites_by_color_csr_off),
+          sites_by_color_csr(other.sites_by_color_csr),
+          n_colors(other.n_colors),
           twist_matrices(other.twist_matrices),
           rotation_axis(other.rotation_axis),
           bilinear_wrap_dir(other.bilinear_wrap_dir),
@@ -2494,6 +2612,108 @@ public:
     }
 
     /**
+     * Coloured Metropolis sweep — parallel over sites within each colour.
+     *
+     * Iterates over the precomputed sublattice colour partition built by
+     * `build_color_partition()`: for each colour in turn, all sites of that
+     * colour are updated in parallel by independent OpenMP threads. Because
+     * no two sites of the same colour share any (bilinear or trilinear)
+     * interaction, the per-site Metropolis kernel reads only neighbour
+     * spins (untouched until the next colour pass) and writes only its
+     * own spins[i] slot — fully race-free.
+     *
+     * RNG: each OpenMP thread has its own `thread_local` Lehman state,
+     * lazy-seeded from (master, tid) on first call (see `lazy_seed_thread`
+     * in `simple_linear_alg.cpp`). This means the per-site RNG sequence
+     * differs from the serial `metropolis()` even at 1 thread, but the
+     * Markov chain is correct and each thread's stream is statistically
+     * independent.
+     *
+     * Falls back to the serial `metropolis()` if the colour partition is
+     * empty (e.g. an old `Lattice` built before colouring landed) or if
+     * only one OpenMP thread is available.
+     *
+     * Returns the global acceptance ratio (#accepted / lattice_size).
+     */
+    double metropolis_parallel(double T, bool gaussian_move = false,
+                               double sigma = 60.0) {
+        if (n_colors == 0) return metropolis(T, gaussian_move, sigma);
+#ifdef _OPENMP
+        if (omp_get_max_threads() <= 1) return metropolis(T, gaussian_move, sigma);
+#else
+        return metropolis(T, gaussian_move, sigma);
+#endif
+        if (T <= 0) return 0.0;
+
+        const double beta = 1.0 / T;
+
+#ifdef _OPENMP
+        const int n_threads = omp_get_max_threads();
+#else
+        const int n_threads = 1;
+#endif
+        std::vector<size_t> per_thread_accepted(n_threads, 0);
+
+        constexpr size_t MAX_SPIN_DIM = 16;
+
+        for (size_t c = 0; c < n_colors; ++c) {
+            const size_t off_lo = sites_by_color_csr_off[c];
+            const size_t off_hi = sites_by_color_csr_off[c + 1];
+
+#ifdef _OPENMP
+            #pragma omp parallel
+#endif
+            {
+                alignas(32) double new_spin_buf[MAX_SPIN_DIM];
+#ifdef _OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                size_t local_accepted = 0;
+
+#ifdef _OPENMP
+                #pragma omp for schedule(static) nowait
+#endif
+                for (size_t off = off_lo; off < off_hi; ++off) {
+                    const size_t site     = sites_by_color_csr[off];
+                    double*      old_spin = spins[site].data();
+
+                    if (gaussian_move) {
+                        gen_random_spin_into(new_spin_buf, spin_length);
+                        double sum_sq = 0.0;
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            new_spin_buf[d] = old_spin[d] + sigma * new_spin_buf[d];
+                            sum_sq += new_spin_buf[d] * new_spin_buf[d];
+                        }
+                        if (sum_sq < 1e-20) continue;
+                        const double inv_norm = double(spin_length) / std::sqrt(sum_sq);
+                        for (size_t d = 0; d < spin_dim; ++d) new_spin_buf[d] *= inv_norm;
+                    } else {
+                        gen_random_spin_into(new_spin_buf, spin_length);
+                    }
+
+                    const double dE = site_energy_diff_flat(new_spin_buf, old_spin, site);
+                    const double rand_uni = random_double_lehman(0.0, 1.0);
+
+                    const bool accept = (dE <= 0.0) ||
+                                        (rand_uni < std::exp(-beta * dE));
+                    if (accept) {
+                        std::memcpy(old_spin, new_spin_buf, spin_dim * sizeof(double));
+                        ++local_accepted;
+                    }
+                }
+
+                per_thread_accepted[tid] += local_accepted;
+            } // end omp parallel
+        } // end colour loop
+
+        size_t accepted = 0;
+        for (size_t a : per_thread_accepted) accepted += a;
+        return double(accepted) / double(lattice_size);
+    }
+
+    /**
      * Gaussian move around current spin
      *
      * Backwards-compatible API. Internally allocates a temporary, so prefer
@@ -2605,6 +2825,132 @@ public:
             const double k = 2.0 * S_dot_H / norm_sq;
             for (size_t d = 0; d < spin_dim; ++d) Sw[d] = k * H_buf[d] - Sw[d];
         }
+    }
+
+    /**
+     * Coloured over-relaxation sweep — parallel over sites within each colour.
+     *
+     * Same race-free guarantee as `metropolis_parallel`: the per-site reflect
+     * reads only `spins[partner]` for partners of the current site, and writes
+     * only its own `spins[site]`. Within a colour all reads point to a
+     * different colour, so OpenMP threads can update them concurrently with
+     * no data race.
+     *
+     * Falls back to the serial `overrelaxation()` if no colour partition
+     * is built or only one thread is available.
+     */
+    void overrelaxation_parallel() {
+        if (n_colors == 0) { overrelaxation(); return; }
+#ifdef _OPENMP
+        if (omp_get_max_threads() <= 1) { overrelaxation(); return; }
+#else
+        overrelaxation(); return;
+#endif
+
+        constexpr size_t MAX_SPIN_DIM = 16;
+
+        for (size_t c = 0; c < n_colors; ++c) {
+            const size_t off_lo = sites_by_color_csr_off[c];
+            const size_t off_hi = sites_by_color_csr_off[c + 1];
+
+#ifdef _OPENMP
+            #pragma omp parallel
+#endif
+            {
+                double H_buf[MAX_SPIN_DIM];
+
+#ifdef _OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t off = off_lo; off < off_hi; ++off) {
+                    const size_t site = sites_by_color_csr[off];
+                    const double* B = field[site].data();
+                    for (size_t d = 0; d < spin_dim; ++d) H_buf[d] = -B[d];
+
+                    const auto& A = onsite_interaction[site];
+                    const double* S = spins[site].data();
+                    for (size_t a = 0; a < spin_dim; ++a) {
+                        double acc = 0.0;
+                        for (size_t b = 0; b < spin_dim; ++b) acc += A(a, b) * S[b];
+                        H_buf[a] += 2.0 * acc;
+                    }
+
+                    const size_t bi_base = bi_flat_offset[site];
+                    const size_t bi_end  = bi_flat_offset[site + 1];
+                    const size_t D2      = bi_flat_D2;
+                    for (size_t k = bi_base; k < bi_end; ++k) {
+                        const size_t partner = bi_flat_partner[k];
+                        const double* __restrict P = spins[partner].data();
+                        const double* __restrict J = &bi_flat_J[k * D2];
+
+                        if (__builtin_expect(bi_flat_needs_twist[k] != 0, 0)) {
+                            double tw[3] = {P[0], P[1], P[2]};
+                            const auto& wrap = bi_flat_wrap[k];
+                            for (size_t dim = 0; dim < 3; ++dim) {
+                                if (wrap[dim] == 0) continue;
+                                double tmp[3] = {0, 0, 0};
+                                if (wrap[dim] > 0) {
+                                    for (size_t d = 0; d < 3; ++d)
+                                        tmp[d] = twist_matrices[dim](d, 0) * tw[0]
+                                               + twist_matrices[dim](d, 1) * tw[1]
+                                               + twist_matrices[dim](d, 2) * tw[2];
+                                } else {
+                                    for (size_t d = 0; d < 3; ++d)
+                                        tmp[d] = twist_matrices[dim](0, d) * tw[0]
+                                               + twist_matrices[dim](1, d) * tw[1]
+                                               + twist_matrices[dim](2, d) * tw[2];
+                                }
+                                tw[0] = tmp[0]; tw[1] = tmp[1]; tw[2] = tmp[2];
+                            }
+                            for (size_t a = 0; a < spin_dim; ++a) {
+                                double acc = 0.0;
+                                for (size_t b = 0; b < spin_dim; ++b)
+                                    acc += J[a * spin_dim + b] * tw[b];
+                                H_buf[a] += acc;
+                            }
+                        } else {
+                            for (size_t a = 0; a < spin_dim; ++a) {
+                                double acc = 0.0;
+                                for (size_t b = 0; b < spin_dim; ++b)
+                                    acc += J[a * spin_dim + b] * P[b];
+                                H_buf[a] += acc;
+                            }
+                        }
+                    }
+
+                    const size_t n_tri = trilinear_partners[site].size();
+                    for (size_t n = 0; n < n_tri; ++n) {
+                        const size_t p1 = trilinear_partners[site][n][0];
+                        const size_t p2 = trilinear_partners[site][n][1];
+                        const double* S_j = spins[p1].data();
+                        const double* S_k = spins[p2].data();
+                        const auto& T = trilinear_interaction[site][n];
+                        double S_jk[64];
+                        for (size_t b = 0; b < spin_dim; ++b)
+                            for (size_t cc = 0; cc < spin_dim; ++cc)
+                                S_jk[b * spin_dim + cc] = S_j[b] * S_k[cc];
+                        for (size_t a = 0; a < spin_dim; ++a) {
+                            double acc = 0.0;
+                            for (size_t b = 0; b < spin_dim; ++b)
+                                for (size_t cc = 0; cc < spin_dim; ++cc)
+                                    acc += T[a](b, cc) * S_jk[b * spin_dim + cc];
+                            H_buf[a] += acc;
+                        }
+                    }
+
+                    double norm_sq = 0.0;
+                    for (size_t d = 0; d < spin_dim; ++d) norm_sq += H_buf[d] * H_buf[d];
+                    if (norm_sq <= 0.0) continue;
+
+                    double S_dot_H = 0.0;
+                    double* Sw = spins[site].data();
+                    for (size_t d = 0; d < spin_dim; ++d) S_dot_H += Sw[d] * H_buf[d];
+                    const double k_refl = 2.0 * S_dot_H / norm_sq;
+                    for (size_t d = 0; d < spin_dim; ++d)
+                        Sw[d] = k_refl * H_buf[d] - Sw[d];
+                }
+            } // end omp parallel
+        } // end colour loop
     }
 
     /**

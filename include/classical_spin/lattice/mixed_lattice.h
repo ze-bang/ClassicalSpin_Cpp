@@ -21,6 +21,9 @@
 #include <filesystem>
 #include <mpi.h>
 #include <boost/numeric/odeint.hpp>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 // Include Boost uBLAS for implicit solvers (rosenbrock4, implicit_euler)
 #include <boost/numeric/ublas/vector.hpp>
@@ -180,6 +183,32 @@ public:
     size_t num_tri_SU3;      // Number of SU(3)-SU(3)-SU(3) trilinear interactions per site
     size_t num_bi_SU2_SU3;   // Number of mixed bilinear interactions per site
     size_t num_tri_SU2_SU3;  // Number of mixed trilinear interactions per site
+
+    // ------------------------------------------------------------------
+    // Sublattice colouring of the bond graph for the parallel coloured
+    // Metropolis / over-relaxation sweeps. Built once at init() time.
+    //
+    // SU(2) and SU(3) sublattices are coloured **independently** because the
+    // parallel sweep updates each species in its own pass: while updating
+    // SU(2) sites, the SU(3) configuration is frozen, so only intra-SU(2)
+    // interactions create write-vs-read races. The relevant edges for the
+    // SU(2) graph are: SU(2)-SU(2) bilinear, SU(2)-SU(2)-SU(2) trilinear,
+    // and the SU(2)-SU(2) pair inside any SU(2)-SU(2)-SU(3) mixed trilinear.
+    // Symmetric story for SU(3).
+    //
+    // Mixed bilinear (SU(2)-SU(3)) does NOT add intra-sublattice edges.
+    //
+    // Layout: same CSR pattern as Lattice (cf. lattice.h::color_of_site).
+    // ------------------------------------------------------------------
+    vector<uint16_t>           color_of_site_SU2;
+    vector<size_t>             sites_by_color_csr_off_SU2;   // size n_colors_SU2 + 1
+    vector<size_t>             sites_by_color_csr_SU2;       // size lattice_size_SU2
+    size_t                     n_colors_SU2 = 0;
+
+    vector<uint16_t>           color_of_site_SU3;
+    vector<size_t>             sites_by_color_csr_off_SU3;   // size n_colors_SU3 + 1
+    vector<size_t>             sites_by_color_csr_SU3;       // size lattice_size_SU3
+    size_t                     n_colors_SU3 = 0;
 
     // Time-dependent fields for molecular dynamics
     array<SpinVector, 2> field_drive_SU2;     // Two pulse components for SU(2)
@@ -361,10 +390,17 @@ public:
         // Build reverse lookup tables for mixed interactions
         build_reverse_lookup_tables();
 
+        // Build per-sublattice colour partition for the parallel coloured
+        // Metropolis / over-relaxation sweeps. See header doc on
+        // color_of_site_SU{2,3} for the edge-set we use.
+        build_color_partition();
+
         cout << "Mixed lattice initialization complete!" << endl;
         cout << "SU(2) - Max bilinear: " << num_bi_SU2 << ", Max trilinear: " << num_tri_SU2 << endl;
         cout << "SU(3) - Max bilinear: " << num_bi_SU3 << ", Max trilinear: " << num_tri_SU3 << endl;
         cout << "Mixed - Bilinear: " << num_bi_SU2_SU3 << ", Trilinear: " << num_tri_SU2_SU3 << endl;
+        cout << "SU(2) sublattice colouring: " << n_colors_SU2 << " colour(s)" << endl;
+        cout << "SU(3) sublattice colouring: " << n_colors_SU3 << " colour(s)" << endl;
     }
 
     // ============================================================
@@ -793,6 +829,111 @@ public:
             cout << "Reverse lookup tables built: max SU2->SU3=" << max_reverse_SU2 
                  << ", max SU3->SU2=" << max_reverse_SU3 << endl;
         }
+    }
+
+    /**
+     * Build the per-sublattice colour partition used by metropolis_parallel /
+     * overrelaxation_parallel.
+     *
+     * SU(2) edges considered:
+     *   - SU(2)-SU(2) bilinear: bilinear_partners_SU2
+     *   - SU(2)-SU(2)-SU(2) trilinear: both partners in trilinear_partners_SU2
+     *   - intra-SU(2) pair inside SU(2)-SU(2)-SU(3) mixed trilinear:
+     *     mixed_trilinear_partners_SU2[i][.][0] is the other SU(2) site
+     * (mixed *bilinear* SU(2)-SU(3) does NOT add intra-SU(2) edges; the SU(3)
+     * is read but not written during the SU(2) parallel pass.)
+     *
+     * SU(3) edges considered: mirror of the above.
+     *
+     * Algorithm: greedy first-fit on natural site order. Builds the CSR
+     * sites_by_color_csr_off_SU{2,3} / sites_by_color_csr_SU{2,3} tables.
+     */
+    void build_color_partition() {
+        auto greedy = [&](size_t N,
+                          const std::vector<std::vector<size_t>>& edges,
+                          std::vector<uint16_t>& color_of_site,
+                          std::vector<size_t>& csr_off,
+                          std::vector<size_t>& csr,
+                          size_t& n_colors_out) {
+            if (N == 0) {
+                n_colors_out = 0;
+                color_of_site.clear();
+                csr_off.clear();
+                csr.clear();
+                return;
+            }
+            color_of_site.assign(N, std::numeric_limits<uint16_t>::max());
+            std::vector<uint8_t> forbidden(64, 0);
+            size_t max_color = 0;
+            for (size_t i = 0; i < N; ++i) {
+                std::fill(forbidden.begin(), forbidden.end(), uint8_t(0));
+                for (size_t j : edges[i]) {
+                    if (j >= N) continue;
+                    const uint16_t c = color_of_site[j];
+                    if (c == std::numeric_limits<uint16_t>::max()) continue;
+                    if (size_t(c) >= forbidden.size()) forbidden.resize(size_t(c) + 1, 0);
+                    forbidden[c] = 1;
+                }
+                uint16_t chosen = 0;
+                while (size_t(chosen) < forbidden.size() && forbidden[chosen]) ++chosen;
+                color_of_site[i] = chosen;
+                if (size_t(chosen) > max_color) max_color = chosen;
+            }
+            n_colors_out = max_color + 1;
+            csr_off.assign(n_colors_out + 1, 0);
+            for (size_t i = 0; i < N; ++i) csr_off[color_of_site[i] + 1] += 1;
+            for (size_t c = 0; c < n_colors_out; ++c) csr_off[c + 1] += csr_off[c];
+            csr.assign(N, 0);
+            std::vector<size_t> cursor(n_colors_out, 0);
+            for (size_t i = 0; i < N; ++i) {
+                const uint16_t c = color_of_site[i];
+                csr[csr_off[c] + cursor[c]] = i;
+                ++cursor[c];
+            }
+        };
+
+        // Build undirected adjacency for SU(2) sublattice.
+        std::vector<std::vector<size_t>> adj_SU2(lattice_size_SU2);
+        auto add_edge_SU2 = [&](size_t a, size_t b) {
+            if (a == b || a >= lattice_size_SU2 || b >= lattice_size_SU2) return;
+            adj_SU2[a].push_back(b);
+            adj_SU2[b].push_back(a);
+        };
+        for (size_t i = 0; i < lattice_size_SU2; ++i) {
+            for (size_t j : bilinear_partners_SU2[i]) add_edge_SU2(i, j);
+            for (const auto& pr : trilinear_partners_SU2[i]) {
+                add_edge_SU2(i, pr[0]);
+                add_edge_SU2(i, pr[1]);
+                add_edge_SU2(pr[0], pr[1]);
+            }
+            for (const auto& pr : mixed_trilinear_partners_SU2[i]) {
+                add_edge_SU2(i, pr[0]);  // pr[0] is another SU(2); pr[1] is SU(3)
+            }
+        }
+        greedy(lattice_size_SU2, adj_SU2,
+               color_of_site_SU2, sites_by_color_csr_off_SU2,
+               sites_by_color_csr_SU2, n_colors_SU2);
+
+        // Build undirected adjacency for SU(3) sublattice.
+        std::vector<std::vector<size_t>> adj_SU3(lattice_size_SU3);
+        auto add_edge_SU3 = [&](size_t a, size_t b) {
+            if (a == b || a >= lattice_size_SU3 || b >= lattice_size_SU3) return;
+            adj_SU3[a].push_back(b);
+            adj_SU3[b].push_back(a);
+        };
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            for (size_t j : bilinear_partners_SU3[i]) add_edge_SU3(i, j);
+            for (const auto& pr : trilinear_partners_SU3[i]) {
+                add_edge_SU3(i, pr[0]);
+                add_edge_SU3(i, pr[1]);
+                add_edge_SU3(pr[0], pr[1]);
+            }
+            // mixed_trilinear_partners_SU3 stores (SU(2), SU(2)) pairs from the
+            // SU(3) site's perspective, so they create no intra-SU(3) edges.
+        }
+        greedy(lattice_size_SU3, adj_SU3,
+               color_of_site_SU3, sites_by_color_csr_off_SU3,
+               sites_by_color_csr_SU3, n_colors_SU3);
     }
 
     /**
@@ -1600,6 +1741,199 @@ public:
         }
 
         return double(accepted) / double(total_sites);
+    }
+
+    /**
+     * Coloured Metropolis sweep — parallel over SU(2) sites within each
+     * SU(2) colour, then parallel over SU(3) sites within each SU(3) colour.
+     *
+     * Differs from `metropolis()` (random-with-replacement, coupon-collector
+     * style) in that this version visits every SU(2) and every SU(3) site
+     * exactly once per call, in a colour-stratified deterministic order
+     * within each colour. The Markov chain is still detailed-balance
+     * correct (each colour pass is a valid Metropolis sub-sweep over a
+     * subset of independent single-spin moves), and the per-site sampling
+     * is *better* (no missed sites).
+     *
+     * Race-free guarantee: within an SU(2) colour, no two sites share any
+     * SU(2)-SU(2) bilinear, SU(2)-SU(2)-SU(2) trilinear, or
+     * SU(2)-SU(2)-SU(3) trilinear interaction (the SU(3) read partners are
+     * frozen during the SU(2) pass, hence not racy). Symmetric story for
+     * SU(3). Mixed bilinear couples SU(2) ↔ SU(3) directly across the two
+     * passes, and is correct because each pass treats the other species as
+     * a frozen background.
+     *
+     * Falls back to serial `metropolis()` if no colour partition is built
+     * or only one OpenMP thread is available.
+     */
+    double metropolis_parallel(double T, bool gaussian_move = false,
+                               double sigma = 60.0) {
+        if (n_colors_SU2 == 0 && n_colors_SU3 == 0)
+            return metropolis(T, gaussian_move, sigma);
+#ifdef _OPENMP
+        if (omp_get_max_threads() <= 1) return metropolis(T, gaussian_move, sigma);
+#else
+        return metropolis(T, gaussian_move, sigma);
+#endif
+        if (T <= 0) return 0.0;
+
+        const double inv_T = 1.0 / T;
+        const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+
+#ifdef _OPENMP
+        const int n_threads = omp_get_max_threads();
+#else
+        const int n_threads = 1;
+#endif
+        std::vector<size_t> per_thread_accepted(n_threads, 0);
+
+        // -------------------------- SU(2) pass --------------------------
+        for (size_t c = 0; c < n_colors_SU2; ++c) {
+            const size_t off_lo = sites_by_color_csr_off_SU2[c];
+            const size_t off_hi = sites_by_color_csr_off_SU2[c + 1];
+#ifdef _OPENMP
+            #pragma omp parallel
+#endif
+            {
+#ifdef _OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                size_t local_accepted = 0;
+#ifdef _OPENMP
+                #pragma omp for schedule(static) nowait
+#endif
+                for (size_t off = off_lo; off < off_hi; ++off) {
+                    const size_t i = sites_by_color_csr_SU2[off];
+
+                    SpinVector new_spin;
+                    if (gaussian_move) {
+                        new_spin = spins_SU2[i] + gen_random_spin(sigma, spin_dim_SU2);
+                        const double norm = new_spin.norm();
+                        if (norm > 1e-12) new_spin *= spin_length_SU2 / norm;
+                        else new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+                    } else {
+                        new_spin = gen_random_spin(spin_length_SU2, spin_dim_SU2);
+                    }
+
+                    const double dE = site_energy_SU2_diff(new_spin, spins_SU2[i], i);
+                    const double rand_uniform = random_double_lehman(0.0, 1.0);
+                    const bool accept = (dE <= 0.0) ||
+                                        (rand_uniform < std::exp(-dE * inv_T));
+                    if (accept) {
+                        spins_SU2[i] = new_spin;
+                        ++local_accepted;
+                    }
+                }
+                per_thread_accepted[tid] += local_accepted;
+            }
+        }
+
+        // -------------------------- SU(3) pass --------------------------
+        for (size_t c = 0; c < n_colors_SU3; ++c) {
+            const size_t off_lo = sites_by_color_csr_off_SU3[c];
+            const size_t off_hi = sites_by_color_csr_off_SU3[c + 1];
+#ifdef _OPENMP
+            #pragma omp parallel
+#endif
+            {
+#ifdef _OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                size_t local_accepted = 0;
+#ifdef _OPENMP
+                #pragma omp for schedule(static) nowait
+#endif
+                for (size_t off = off_lo; off < off_hi; ++off) {
+                    const size_t i = sites_by_color_csr_SU3[off];
+
+                    SpinVector new_spin;
+                    if (gaussian_move) {
+                        new_spin = spins_SU3[i] + gen_random_spin(sigma, spin_dim_SU3);
+                        const double norm = new_spin.norm();
+                        if (norm > 1e-12) new_spin *= spin_length_SU3 / norm;
+                        else new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+                    } else {
+                        new_spin = gen_random_spin(spin_length_SU3, spin_dim_SU3);
+                    }
+
+                    const double dE = site_energy_SU3_diff(new_spin, spins_SU3[i], i);
+                    const double rand_uniform = random_double_lehman(0.0, 1.0);
+                    const bool accept = (dE <= 0.0) ||
+                                        (rand_uniform < std::exp(-dE * inv_T));
+                    if (accept) {
+                        spins_SU3[i] = new_spin;
+                        ++local_accepted;
+                    }
+                }
+                per_thread_accepted[tid] += local_accepted;
+            }
+        }
+
+        size_t accepted = 0;
+        for (size_t a : per_thread_accepted) accepted += a;
+        return double(accepted) / double(total_sites);
+    }
+
+    /**
+     * Coloured over-relaxation sweep. Same race-free / parallelism story as
+     * `metropolis_parallel`. Falls back to serial `overrelaxation()` if the
+     * colour partition is empty or only one thread is available.
+     *
+     * NOTE: unlike serial `overrelaxation()`, this version does *not* call
+     * `get_cached_local_field_*` even if `use_field_caching` is on. The
+     * field cache uses shared `field_valid_*` / `cached_local_field_*`
+     * arrays that are not safe to mutate from multiple threads. The
+     * cache is much less useful in a coloured sweep anyway because each
+     * site's local field would typically be invalidated by neighbour
+     * updates in the previous colour pass.
+     */
+    void overrelaxation_parallel() {
+        if (n_colors_SU2 == 0 && n_colors_SU3 == 0) { overrelaxation(); return; }
+#ifdef _OPENMP
+        if (omp_get_max_threads() <= 1) { overrelaxation(); return; }
+#else
+        overrelaxation(); return;
+#endif
+
+        // -------------------------- SU(2) pass --------------------------
+        for (size_t c = 0; c < n_colors_SU2; ++c) {
+            const size_t off_lo = sites_by_color_csr_off_SU2[c];
+            const size_t off_hi = sites_by_color_csr_off_SU2[c + 1];
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static)
+#endif
+            for (size_t off = off_lo; off < off_hi; ++off) {
+                const size_t i = sites_by_color_csr_SU2[off];
+                SpinVector local_field = get_local_field_SU2(i);
+                const double norm = local_field.squaredNorm();
+                if (norm > 1e-12) {
+                    const double proj = 2.0 * spins_SU2[i].dot(local_field) / norm;
+                    spins_SU2[i] = local_field * proj - spins_SU2[i];
+                }
+            }
+        }
+
+        // -------------------------- SU(3) pass --------------------------
+        for (size_t c = 0; c < n_colors_SU3; ++c) {
+            const size_t off_lo = sites_by_color_csr_off_SU3[c];
+            const size_t off_hi = sites_by_color_csr_off_SU3[c + 1];
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static)
+#endif
+            for (size_t off = off_lo; off < off_hi; ++off) {
+                const size_t i = sites_by_color_csr_SU3[off];
+                SpinVector local_field = get_local_field_SU3(i);
+                const double norm = local_field.squaredNorm();
+                if (norm > 1e-12) {
+                    const double proj = 2.0 * spins_SU3[i].dot(local_field) / norm;
+                    spins_SU3[i] = local_field * proj - spins_SU3[i];
+                }
+            }
+        }
     }
 
     /**

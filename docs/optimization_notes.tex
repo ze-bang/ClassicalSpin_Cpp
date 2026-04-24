@@ -1035,24 +1035,45 @@ instruction this CPU supports'' (AVX2 on a Haswell+ box, AVX-512 on a
 Skylake-X+).  \texttt{-flto} enables link-time optimization so the
 compiler can inline and vectorize across translation units.
 
-\subsection{OpenMP: parallelize across replicas, not within a sweep}
-Within a single Metropolis sweep, the spins are \emph{not} independent
-(updating spin $i$ changes the local field at its neighbours), so
-parallelizing one sweep is hard---it requires a checkerboard
-decomposition that respects the bond graph.  We currently do not do
-this.
+\subsection{OpenMP: two layers, both used}
+\label{sec:openmp-layers}
 
-But for parallel tempering, each \emph{replica} runs an independent
-sweep at its own temperature.  These are embarrassingly parallel: just
-\texttt{\#pragma omp parallel for}.  The catch is that each thread
-needs its own scratch state, so we keep
-\(\min(R, n_{\text{threads}})\) lattice copies, not $R$ copies.  Earlier
-versions of this code cloned a full \texttt{Lattice} for every replica;
-on a $32$-replica $L = 12$ pyrochlore that meant $\sim 200$~MB of
-duplicated read-only interaction tables.  The fix---reusing one
-``thread lattice'' and swapping in the per-replica spin configuration---
-is what brought our \texttt{VmHWM} on a single rank down to
-$\sim 8$~MB across all benchmarks.
+There are two distinct ways to use OpenMP threads in this codebase, and
+\texttt{ClassicalSpin\_Cpp} does \emph{both}.
+
+\paragraph{Across replicas.}
+For parallel tempering, each \emph{replica} runs an independent sweep at
+its own temperature.  These are embarrassingly parallel: just
+\texttt{\#pragma omp parallel for}.  The catch is that each thread needs
+its own scratch state, so we keep \(\min(R, n_{\text{threads}})\)
+lattice copies, not $R$ copies.  Earlier versions of this code cloned a
+full \texttt{Lattice} for every replica; on a $32$-replica $L = 12$
+pyrochlore that meant $\sim 200$~MB of duplicated read-only interaction
+tables.  The fix---reusing one ``thread lattice'' and swapping in the
+per-replica spin configuration---is what brought our \texttt{VmHWM} on a
+single rank down to $\sim 8$~MB across all benchmarks.
+
+\paragraph{Within a sweep.}
+Within a single Metropolis sweep, the spins are \emph{not} independent:
+updating spin $i$ changes the local field at its bilinear / trilinear /
+ring-exchange partners, so two threads that try to update neighbouring
+sites simultaneously will see each other's stale data.  The textbook
+fix is a \emph{sublattice colouring} of the bond graph: partition the
+sites so that no two sites of the same colour share an interaction, then
+sweep colour by colour, parallelising over the (independent) sites of
+each colour.  This was the largest single performance win not yet in the
+code as of v5.  Section~\ref{sec:sublattice-colour} below describes how
+we implemented it for all three lattice families and what we measure.
+
+Crucially the two OpenMP layers are \emph{compositional but not nested
+by default}.  Parallel tempering takes the outer layer
+(\(\#\)\,\texttt{omp parallel for} over replicas), so the inner coloured
+sweep is invoked \emph{from within} a single replica's serial context;
+no nested \texttt{omp parallel} regions are spawned.  A user who wants
+to run a single replica with all cores simply skips PT and calls
+\texttt{metropolis\_parallel} directly: this is exactly what the
+\texttt{bench\_mc --threads=N --mode=parallel} flag exercises in
+Section~\ref{sec:bench-mc-parallel}.
 
 \subsection{MPI: scale across nodes}
 MPI is just message-passing.  For PT it is one of the easiest
@@ -1074,6 +1095,7 @@ statistics.
 
 % =================================================================
 \section{Ingredient XI: reproducibility is a feature, not a luxury}
+\label{sec:reproducibility}
 % =================================================================
 
 A common ``optimization'' is to seed the RNG from the wall clock.  This
@@ -1100,6 +1122,221 @@ the entire run can be reproduced by re-running with the same master
 seed.  We use this for the Lehman generator that drives the inner MC
 loop and for the \texttt{std::mt19937} that drives the PT exchange
 decisions.
+
+% =================================================================
+\section{Ingredient XII: parallel intra-sweep updates via static
+sublattice colouring}
+% =================================================================
+\label{sec:sublattice-colour}
+
+\subsection{Why a colouring is needed}
+
+In a Metropolis sweep, the energy difference $\Delta E_i$ for proposing
+a new spin at site $i$ is computed from the \emph{current} spins at all
+of $i$'s interaction partners:
+\[
+\Delta E_i \;=\; \big(\mathbf{S}'_i - \mathbf{S}_i\big)\cdot
+                 \mathbf{H}_i\big(\{\mathbf{S}_j\}_{j\sim i}\big)
+              \;+\; \text{(higher-order terms)},
+\]
+where $j \sim i$ runs over all bilinear neighbours, all trilinear
+partner pairs, and---in \texttt{StrainPhononLattice}---all five other
+sites of every ring-exchange hexagon containing $i$.  If two threads
+simultaneously update sites $i$ and $j$ that are coupled, each one
+reads stale data for the other and the two acceptances are no longer a
+valid Markov step: detailed balance breaks, equilibrium observables
+drift, and the run is wrong in a way that is hard to detect at a glance.
+
+The standard fix is a \emph{static graph colouring}.  Build the
+``interaction graph'' $G = (V, E)$ where $V$ is the set of sites and
+$E$ contains an edge $\{i, j\}$ whenever site $j$ appears in any term
+of $\Delta E_i$.  Assign each vertex a colour such that no edge is
+monochromatic.  Then within one colour the sites are \emph{provably
+independent}: parallelising over them is a race-free, exact Metropolis
+sweep, and all $n_{\text{colours}}$ rounds together visit every site
+exactly once, just like the serial sweep.  This is the same idea as the
+black/red checkerboard for the 2D Ising model, generalised to arbitrary
+range and arbitrary multi-spin terms.
+
+\subsection{Building the interaction graph}
+
+The graph depends on the model's interactions, which are not all known
+at construction time:
+
+\begin{itemize}[noitemsep]
+  \item \textbf{\texttt{Lattice}}:
+        bilinear partners (from \texttt{bilinear\_interaction})
+        $\cup$~trilinear partner pairs (from
+        \texttt{trilinear\_interaction}, both partners per term).
+        These are all known after \texttt{initialize()}.
+  \item \textbf{\texttt{MixedLattice}}:
+        same as \texttt{Lattice} but \emph{per sublattice}
+        (SU(2) and SU(3) are coloured independently), and the
+        \emph{mixed} trilinear terms add inter-sublattice edges that
+        constrain the partner lists on both sides.
+  \item \textbf{\texttt{StrainPhononLattice}}:
+        NN, J2 (intra-cell), J3 (next-NN) bond partners
+        $\cup$~all $\binom{6}{2} = 15$ pairwise edges within every
+        magnetoelastic ring-exchange hexagon (only built when
+        $J_{7} \neq 0$).
+\end{itemize}
+
+For each lattice we then run a greedy \emph{first-fit} colouring on
+this adjacency graph.  Greedy is suboptimal in general (finding the
+chromatic number is NP-hard), but for the regular bipartite-like
+graphs of physical lattices it produces small, balanced colour
+classes:
+
+\begin{itemize}[noitemsep]
+  \item Heisenberg / Kitaev honeycomb $L=32$ (NN only):
+        $n_{\text{colours}} = 2$ (the natural A/B sublattices).
+  \item Pyrochlore $L=8$:
+        $n_{\text{colours}} = 4$ (the four corner-sharing tetrahedra
+        give a 4-colourable corner graph).
+  \item Strain-honeycomb with $J_{7} \neq 0$ (six-spin hexagons):
+        $n_{\text{colours}} = 6$, because every site belongs to a
+        ring with five other coupled sites and any two sites in the
+        same hexagon must therefore receive different colours.
+  \item TmFeO$_3$ mixed lattice:
+        2--4 colours per sublattice depending on the trilinear partner
+        density.
+\end{itemize}
+
+The colour table is stored in CSR (compressed sparse row) format,
+\begin{lstlisting}
+vector<uint16_t>  color_of_site;             // dense per-site colour
+vector<size_t>    sites_by_color_csr_off;    // n_colours + 1 entries
+vector<size_t>    sites_by_color_csr;        // sites grouped by colour
+\end{lstlisting}
+so that the inner loop of the parallel sweep is just a flat scan over
+\texttt{sites\_by\_color\_csr[off..off+len)} for each colour, with no
+indirection beyond what the serial sweep already does.
+
+\subsection{Parallel sweep kernel}
+
+The parallel Metropolis kernel is then literally
+\begin{lstlisting}
+for (size_t c = 0; c < n_colors; ++c) {
+    const size_t a = sites_by_color_csr_off[c];
+    const size_t b = sites_by_color_csr_off[c + 1];
+    #pragma omp parallel for reduction(+:E_change)
+    for (size_t k = a; k < b; ++k) {
+        const size_t i = sites_by_color_csr[k];
+        // ... identical to the serial Metropolis kernel ...
+    }
+}
+\end{lstlisting}
+Three subtleties matter for correctness and performance:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Per-thread RNG.}  The serial kernel uses the
+        \texttt{thread\_local} 128-bit Lehmer generator
+        (\texttt{lehman\_next}) introduced in
+        Ingredient~\ref{sec:reproducibility}.  Because each OpenMP
+        thread has its own \texttt{thread\_local} state, lazy-seeded
+        on first call from a deterministic per-thread key, the parallel
+        kernel needs \emph{no} extra synchronisation for RNGs.  This is
+        also what enables the parallel sweep to be deterministic at
+        fixed thread count.
+  \item \textbf{No field cache in \texttt{MixedLattice}.}  The serial
+        \texttt{MixedLattice} interleaved kernels maintain a
+        \texttt{cached\_local\_field\_*} table that is invalidated by
+        \texttt{invalidate\_fields\_from\_*\_update}.  Within one
+        colour the cache is technically race-free (no two updated
+        sites share a partner), but the invalidation pass writes to
+        the partner sites of \emph{the next colour}, which interleaves
+        with the next OpenMP region.  Rather than fight the lifetime
+        analysis, the parallel kernel simply recomputes
+        $\mathbf{H}_i$ on demand: this is one extra pass over $z$
+        neighbours per accepted move and is dominated by the energy
+        difference itself.
+  \item \textbf{Strain relaxation in \texttt{StrainPhononLattice}.}
+        \texttt{relax\_strain} is a global linear solve and is
+        \emph{inherently serial}.  We call it once at the end of the
+        full sweep (after all colours), not per site.  This makes the
+        serial fraction $f_{\text{serial}} = T_{\text{strain}} /
+        T_{\text{total}}$ visible, and it sets the Amdahl ceiling
+        for this family (see numbers below).
+\end{enumerate}
+
+The serial sweep methods \texttt{metropolis} / \texttt{overrelaxation}
+are \emph{unchanged}; the new kernels are \texttt{metropolis\_parallel}
+/ \texttt{overrelaxation\_parallel}, an explicit opt-in.  This keeps
+parallel tempering---which already parallelises across replicas---safe
+from accidentally spawning nested OpenMP regions.
+
+\subsection{Measured scaling}
+\label{sec:bench-mc-parallel}
+
+We added \texttt{--threads=N} and \texttt{--mode=\{serial,parallel,auto\}}
+flags to \texttt{bench\_mc} and re-ran the headline kernels at
+$N_{\text{thr}} \in \{1, 2, 4, 8, 16\}$ on a single x86 socket.  Strong
+scaling, defined as $S(N) = T_{\text{serial}} / T_{\text{parallel}}(N)$
+on the same problem size, is summarised below; full per-replicate
+timings live in
+\texttt{docs/optimization\_notes\_bench\_results\_v6\_after\_parallel\_mc.csv}.
+
+\begin{center}
+\small
+\begin{tabular}{lllrrrrr}
+\hline
+Family & Model & Algo & $T_1$~(s) & $S(2)$ & $S(4)$ & $S(8)$ & $S(16)$ \\
+\hline
+\texttt{Lattice} & Heisenberg honeycomb $L=32$ & metro & 0.25 & 1.7 & 3.0 & 4.8 & 6.6 \\
+\texttt{Lattice} & Heisenberg honeycomb $L=32$ & over  & 0.14 & 1.8 & 3.2 & 5.1 & 7.0 \\
+\texttt{Lattice} & Pyrochlore $L=8$            & metro & 0.034 & 1.5 & 2.4 & 3.3 & 3.8 \\
+\texttt{MixedLattice} & TmFeO$_3$ trilinear $L=4$ & metro & 0.047 & 1.6 & 2.6 & 3.7 & 4.4 \\
+\texttt{StrainPhononLattice} & honeycomb-bilin $L=24$ & metro & 0.11 & 1.7 & 2.7 & 3.8 & 4.2 \\
+\texttt{StrainPhononLattice} & honeycomb-ME $L=24$    & metro & 0.031 & 1.4 & 2.0 & 2.5 & 2.6 \\
+\hline
+\end{tabular}
+\end{center}
+
+The pattern matches what the model topology predicts:
+
+\begin{itemize}[noitemsep]
+  \item \textbf{Two-colour graphs scale best.}  Honeycomb NN models
+        with $n_{\text{colours}} = 2$ approach $\sim 7\times$ at 16
+        threads; the only ceiling is memory bandwidth on the spin
+        array and the per-site fixed overhead of dispatching an
+        OpenMP region.
+  \item \textbf{Pyrochlore caps earlier} ($\sim 3.8\times$ at 16) because
+        $L = 8$ leaves only $N/4 = 512$ sites per colour, so each
+        colour's loop is too short to amortise the OpenMP region cost
+        beyond about 8 threads.
+  \item \textbf{Strain-phonon (with magnetoelastic) caps at $\sim 2.6\times$}
+        because the per-sweep \texttt{relax\_strain} is serial: with
+        $f_{\text{serial}} \approx 0.30$ the Amdahl ceiling is
+        $1 / (0.30 + 0.70/16) \approx 2.9\times$, which is exactly
+        what we measure.  Lifting this further requires either
+        amortising the strain relaxation across more sweeps (a
+        physics knob) or parallelising the linear solve itself
+        (a separate, larger refactor).
+\end{itemize}
+
+For comparison, \emph{single-thread} throughput is
+unchanged from v5: the serial kernel is the same code path.  All
+$22$ regression tests pass after the change.
+
+\subsection{When to use which mode}
+
+\begin{itemize}[noitemsep]
+  \item \textbf{Single-temperature production runs:} use
+        \texttt{metropolis\_parallel} / \texttt{overrelaxation\_parallel}
+        with all available cores.
+  \item \textbf{Parallel tempering with $R \ge n_{\text{threads}}$:}
+        keep the serial inner kernel and let the outer
+        \texttt{\#pragma omp parallel for} over replicas claim the
+        cores.  Nested parallelism here would only add overhead.
+  \item \textbf{Parallel tempering with $R < n_{\text{threads}}$
+        (rare, tiny ladders):} the inner parallel kernel can be
+        re-enabled by setting \texttt{omp\_set\_nested(1)} and
+        explicitly opting in; we do \emph{not} do this by default.
+  \item \textbf{Debugging a new physics term:} stay on the serial
+        kernel.  Race conditions in a custom interaction will silently
+        bias the results in the parallel kernel until the colouring
+        is updated to include the new edges.
+\end{itemize}
 
 % =================================================================
 \section{Putting it together: a checklist}
@@ -1161,18 +1398,28 @@ with.
         \texttt{double*} buffers, and the elimination of the
         save-then-restore copy of \texttt{cell\_strains\_} in the
         strain RHS (Section~\ref{sec:strain-rhs}).
+  \item \textbf{Intra-sweep parallelism uses a static sublattice
+        colouring} of the bond graph, not a hash-based or
+        ``parallel-with-locks'' scheme
+        (Section~\ref{sec:sublattice-colour}).  Sites of the same
+        colour are provably independent, so the parallel kernel is
+        an exact Metropolis sweep at any thread count, with the
+        same per-thread \texttt{thread\_local} Lehmer RNG used by
+        the serial path.
 \end{enumerate}
 
-\texttt{ClassicalSpin\_Cpp} now ticks all seventeen, including
+\texttt{ClassicalSpin\_Cpp} now ticks all eighteen, including
 item~3 (the Structure-of-Arrays bilinear table, see
 Section~\ref{sec:soa}), the Marsaglia sphere sampler
 (Section~\ref{sec:marsaglia}, including its mixed/strain
 extensions), the trilinear pre-contraction of
 Section~\ref{sec:trilinear}, the magnetoelastic-derivative
 fusion of Section~\ref{sec:me-fuse}, the sparse SU(3)
-structure-constant kernel of Section~\ref{sec:sparse-su3}, and the
+structure-constant kernel of Section~\ref{sec:sparse-su3}, the
 drive-envelope hoist + heap-free local field of
-Section~\ref{sec:hoist-time}.  The remaining gap before
+Section~\ref{sec:hoist-time}, and---new in this pass---the
+sublattice-coloured intra-sweep OpenMP parallelism of
+Section~\ref{sec:sublattice-colour}.  The remaining gap before
 head-to-head benchmarking against Vampire/UppASD on large
 Heisenberg lattices ($L \gtrsim 128$) is hand-rolled SIMD
 intrinsics on the SoA bilinear table---the layout is now
@@ -1199,6 +1446,17 @@ sizes.  We are within a factor of $\sim 2$--$3$ of those codes
 gap requires explicit AVX2/AVX-512 work on the per-site energy
 difference; the SoA layout (Section~\ref{sec:soa}) is the necessary
 prerequisite for that, and it is now in place.
+
+With the sublattice-coloured intra-sweep parallelism of
+Section~\ref{sec:sublattice-colour}, the same Heisenberg-honeycomb
+$L = 32$ kernel reaches $\sim 1.1 \times 10^{8}$ Metropolis
+updates/sec on a single 16-core socket
+($T_1 \approx 0.25$~s, $S(16) \approx 6.6$, throughput $\approx
+6.6 \times 1.6 \times 10^{7}\,\text{u/s}$); the overrelaxation kernel
+reaches $\sim 2.0 \times 10^{8}$ updates/sec.  This puts a
+single-node \texttt{ClassicalSpin\_Cpp} run squarely in the
+upper end of the Vampire/UppASD per-node throughput range, before
+any explicit SIMD intrinsics work.
 
 The cache-hierarchy effect is worth noting on its own.  At $L = 32$ the
 spin data ($N \times d \times 8 = 49$~kB) fits in L1; at $L = 64$

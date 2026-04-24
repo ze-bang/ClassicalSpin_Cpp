@@ -120,6 +120,8 @@ struct CliArgs {
     long   warmup = 0;       // 0 -> at least sweeps
     double T = 1.0;
     int    repeats = 3;
+    int    threads = 0;      // 0 -> leave OMP_NUM_THREADS / default alone
+    string mode   = "auto";  // "serial" | "parallel" | "auto"
     bool   csv = false;
     bool   help = false;
 };
@@ -146,6 +148,8 @@ CliArgs parse_args(int argc, char** argv) {
         else if (eat("--warmup", a.warmup)) {}
         else if (eat("--T",      a.T))      {}
         else if (eat("--repeats",a.repeats)){}
+        else if (eat("--threads",a.threads)){}
+        else if (eat("--mode",   a.mode))   {}
         else {
             cerr << "unknown arg: " << s << "\n";
             a.help = true;
@@ -167,6 +171,12 @@ void print_help() {
 "  --warmup=<int>           warmup sweeps (default = max(1000, sweeps))\n"
 "  --T=<float>              simulation temperature (default 1.0)\n"
 "  --repeats=<int>          number of timed repeats (default 3)\n"
+"  --threads=<int>          OMP threads (overrides OMP_NUM_THREADS; 0 = leave alone)\n"
+"  --mode={serial|parallel|auto}\n"
+"                           which kernel variant to call:\n"
+"                             serial   : use the historical metropolis() / overrelaxation()\n"
+"                             parallel : use metropolis_parallel() / overrelaxation_parallel()\n"
+"                             auto     : pick parallel iff threads>1 (default)\n"
 "  --csv                    print pure CSV (no decoration)\n"
 "  -h, --help               show this help\n"
 "\n"
@@ -346,18 +356,25 @@ unique_ptr<Lattice> build_pyrochlore_lat(int L, double /*T*/) {
     return lat;
 }
 
-void run_lattice_kernel(Lattice& lat, Algo algo, double T, long n_sweeps) {
+void run_lattice_kernel(Lattice& lat, Algo algo, double T, long n_sweeps, bool parallel) {
     switch (algo) {
         case Algo::Metropolis:
-            for (long i = 0; i < n_sweeps; ++i) lat.metropolis(T, false, 60.0);
+            if (parallel) for (long i = 0; i < n_sweeps; ++i) lat.metropolis_parallel(T, false, 60.0);
+            else          for (long i = 0; i < n_sweeps; ++i) lat.metropolis(T, false, 60.0);
             break;
         case Algo::Overrelaxation:
-            for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation();
+            if (parallel) for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation_parallel();
+            else          for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation();
             break;
         case Algo::MetOverMix:
             for (long i = 0; i < n_sweeps; ++i) {
-                lat.metropolis(T, false, 60.0);
-                for (int k = 0; k < 5; ++k) lat.overrelaxation();
+                if (parallel) {
+                    lat.metropolis_parallel(T, false, 60.0);
+                    for (int k = 0; k < 5; ++k) lat.overrelaxation_parallel();
+                } else {
+                    lat.metropolis(T, false, 60.0);
+                    for (int k = 0; k < 5; ++k) lat.overrelaxation();
+                }
             }
             break;
         case Algo::Wolff:
@@ -423,18 +440,25 @@ unique_ptr<MixedLattice> build_tmfeo3_trilinear_lat(int L, double T) {
     return build_tmfeo3_lat(L, T, /*with_trilinear=*/true);
 }
 
-void run_mixed_kernel(MixedLattice& lat, Algo algo, double T, long n_sweeps) {
+void run_mixed_kernel(MixedLattice& lat, Algo algo, double T, long n_sweeps, bool parallel) {
     switch (algo) {
         case Algo::Metropolis:
-            for (long i = 0; i < n_sweeps; ++i) lat.metropolis(T, false, 60.0);
+            if (parallel) for (long i = 0; i < n_sweeps; ++i) lat.metropolis_parallel(T, false, 60.0);
+            else          for (long i = 0; i < n_sweeps; ++i) lat.metropolis(T, false, 60.0);
             break;
         case Algo::Overrelaxation:
-            for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation();
+            if (parallel) for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation_parallel();
+            else          for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation();
             break;
         case Algo::MetOverMix:
             for (long i = 0; i < n_sweeps; ++i) {
-                lat.metropolis(T, false, 60.0);
-                for (int k = 0; k < 5; ++k) lat.overrelaxation();
+                if (parallel) {
+                    lat.metropolis_parallel(T, false, 60.0);
+                    for (int k = 0; k < 5; ++k) lat.overrelaxation_parallel();
+                } else {
+                    lat.metropolis(T, false, 60.0);
+                    for (int k = 0; k < 5; ++k) lat.overrelaxation();
+                }
             }
             break;
         case Algo::Wolff:
@@ -490,18 +514,25 @@ unique_ptr<StrainPhononLattice> build_strain_honeycomb_me_lat(int L, double T) {
     return build_strain_honeycomb_lat(L, T, /*with_me=*/true);
 }
 
-void run_strain_kernel(StrainPhononLattice& lat, Algo algo, double T, long n_sweeps) {
+void run_strain_kernel(StrainPhononLattice& lat, Algo algo, double T, long n_sweeps, bool parallel) {
     switch (algo) {
         case Algo::Metropolis:
-            for (long i = 0; i < n_sweeps; ++i) lat.metropolis(T, false, 60.0);
+            if (parallel) for (long i = 0; i < n_sweeps; ++i) lat.metropolis_parallel(T, false, 60.0);
+            else          for (long i = 0; i < n_sweeps; ++i) lat.metropolis(T, false, 60.0);
             break;
         case Algo::Overrelaxation:
-            for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation();
+            if (parallel) for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation_parallel();
+            else          for (long i = 0; i < n_sweeps; ++i) lat.overrelaxation();
             break;
         case Algo::MetOverMix:
             for (long i = 0; i < n_sweeps; ++i) {
-                lat.metropolis(T, false, 60.0);
-                for (int k = 0; k < 5; ++k) lat.overrelaxation();
+                if (parallel) {
+                    lat.metropolis_parallel(T, false, 60.0);
+                    for (int k = 0; k < 5; ++k) lat.overrelaxation_parallel();
+                } else {
+                    lat.metropolis(T, false, 60.0);
+                    for (int k = 0; k < 5; ++k) lat.overrelaxation();
+                }
             }
             break;
         case Algo::Wolff:
@@ -519,21 +550,22 @@ template <typename LatPtr>
 struct GenericModelSpec {
     using LatticeT = typename LatPtr::element_type;
 
-    string                                              family;
-    string                                              name;
-    int                                                 default_L;
-    long                                                default_sweeps;       // local
-    long                                                default_cluster_sweeps;
-    bool                                                supports_cluster;
-    std::function<LatPtr(int, double)>                  build;
-    std::function<size_t(const LatticeT&)>              size_of;
-    std::function<void(LatticeT&, Algo, double, long)>  run_kernel;
+    string                                                    family;
+    string                                                    name;
+    int                                                       default_L;
+    long                                                      default_sweeps;       // local
+    long                                                      default_cluster_sweeps;
+    bool                                                      supports_cluster;
+    std::function<LatPtr(int, double)>                        build;
+    std::function<size_t(const LatticeT&)>                    size_of;
+    std::function<void(LatticeT&, Algo, double, long, bool)>  run_kernel;
 };
 
 template <typename LatPtr>
 void run_family(const vector<GenericModelSpec<LatPtr>>& models,
                 const CliArgs& args,
-                const vector<Algo>& algos) {
+                const vector<Algo>& algos,
+                bool parallel) {
     for (const auto& m : models) {
         if (!family_selected(args.family, m.family)) continue;
         if (!model_selected(args.model, m.name))     continue;
@@ -558,12 +590,12 @@ void run_family(const vector<GenericModelSpec<LatPtr>>& models,
 
             // Warmup (untimed). Brings the lattice to a stable thermalized
             // state and primes the allocator / branch predictor.
-            m.run_kernel(*lat, algo, args.T, warmup);
+            m.run_kernel(*lat, algo, args.T, warmup, parallel);
             (void)warmup;
 
             for (int rep = 0; rep < args.repeats; ++rep) {
                 double t0 = now_sec();
-                m.run_kernel(*lat, algo, args.T, sweeps);
+                m.run_kernel(*lat, algo, args.T, sweeps, parallel);
                 double t1 = now_sec();
                 double dt = t1 - t0;
                 if (dt <= 0.0) dt = 1e-9;
@@ -644,10 +676,26 @@ int main(int argc, char** argv) {
     CliArgs args = parse_args(argc, argv);
     if (args.help) { print_help(); return 0; }
 
-    int n_threads = 1;
 #ifdef _OPENMP
-    n_threads = omp_get_max_threads();
+    if (args.threads > 0) {
+        omp_set_num_threads(args.threads);
+    }
+    const int n_threads = omp_get_max_threads();
+#else
+    const int n_threads = 1;
 #endif
+
+    bool parallel;
+    if (args.mode == "auto") {
+        parallel = (n_threads > 1);
+    } else if (args.mode == "parallel") {
+        parallel = true;
+    } else if (args.mode == "serial") {
+        parallel = false;
+    } else {
+        cerr << "Unknown --mode=" << args.mode << " (expected serial|parallel|auto)\n";
+        return 1;
+    }
 
     // Force the touch of now_sec()'s static t0 so the first measurement is
     // not skewed by the first call to the clock.
@@ -656,6 +704,7 @@ int main(int argc, char** argv) {
     if (!args.csv) {
         cout << "ClassicalSpin_Cpp Monte-Carlo benchmark\n";
         cout << "  CXX threads (OpenMP): " << n_threads << "\n";
+        cout << "  Kernel mode:          " << (parallel ? "parallel (coloured)" : "serial") << "\n";
         cout << "  Compiler hint:        " <<
 #if defined(__clang__)
         "clang " << __clang_major__ << "." << __clang_minor__
@@ -677,9 +726,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    run_family(default_lattice_models(), args, algos);
-    run_family(default_mixed_models(),   args, algos);
-    run_family(default_strain_models(),  args, algos);
+    run_family(default_lattice_models(), args, algos, parallel);
+    run_family(default_mixed_models(),   args, algos, parallel);
+    run_family(default_strain_models(),  args, algos, parallel);
 
     return 0;
 }

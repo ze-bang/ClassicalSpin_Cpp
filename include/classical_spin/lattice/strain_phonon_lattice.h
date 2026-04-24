@@ -496,6 +496,14 @@ public:
     // Hexagons for ring exchange
     vector<std::array<size_t, 6>> hexagons;
     vector<vector<std::pair<size_t, size_t>>> site_hexagons;
+
+    // Sublattice colouring of the spin bond graph (NN + J2 + J3 + hexagons)
+    // for the parallel coloured Metropolis / over-relaxation sweeps.
+    // See `build_color_partition()` for the edge-set used.
+    vector<uint16_t> color_of_site;
+    vector<size_t>   sites_by_color_csr_off;   // size n_colors + 1
+    vector<size_t>   sites_by_color_csr;       // size lattice_size
+    size_t           n_colors = 0;
     
     // External field
     vector<SpinVector> field;
@@ -981,7 +989,41 @@ public:
      * @return Acceptance rate (0.0 to 1.0)
      */
     double metropolis(double temperature, bool gaussian_move = false, double sigma = 60.0);
-    
+
+    /**
+     * Coloured Metropolis sweep — parallel over spin sites within each colour.
+     *
+     * Iterates over the precomputed colour partition built by
+     * `build_color_partition()`. Within each colour, all sites are updated
+     * by independent OpenMP threads with no data race: the per-site kernel
+     * reads only NN/J2/J3/hexagon partner spins (frozen during the colour
+     * pass) and writes only its own `spins[i]`.
+     *
+     * The strain field is left unchanged during the parallel spin pass and
+     * `relax_strain(false)` is invoked once at the end of the sweep
+     * (still serial — strain is global). The Born-Oppenheimer self-
+     * consistency is preserved exactly as in serial `metropolis()`.
+     *
+     * Falls back to serial `metropolis()` if no colour partition is built
+     * or only one OpenMP thread is available.
+     */
+    double metropolis_parallel(double temperature, bool gaussian_move = false,
+                               double sigma = 60.0);
+
+    /**
+     * Coloured over-relaxation sweep (parallel within each colour).
+     * Same race-free guarantee as `metropolis_parallel`. Calls
+     * `relax_strain(false)` serially at the end.
+     */
+    void overrelaxation_parallel();
+
+    /**
+     * Build the per-site colour partition (NN ∪ J2 ∪ J3 ∪ hexagon edges).
+     * Idempotent. Called automatically from the constructor; can be re-run
+     * if the bond topology is rebuilt at runtime (rare).
+     */
+    void build_color_partition();
+
     /** @brief Legacy alias for metropolis() */
     inline double mc_sweep(double temperature, bool gaussian_move = false, double sigma = 60.0) {
         return metropolis(temperature, gaussian_move, sigma);

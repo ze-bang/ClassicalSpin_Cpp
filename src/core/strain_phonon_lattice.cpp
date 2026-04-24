@@ -38,6 +38,9 @@
 #include <algorithm>
 #include <numeric>
 #include <mpi.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #ifdef HDF5_ENABLED
 #include <H5Cpp.h>
@@ -159,8 +162,15 @@ StrainPhononLattice::StrainPhononLattice(const UnitCell& uc, size_t d1, size_t d
     
     // Initialize random spins
     init_random();
-    
+
+    // Build per-site colour partition for the parallel coloured Metropolis /
+    // over-relaxation sweeps. (Hexagon edges are added later in
+    // set_parameters when J7 != 0; this initial build covers NN / J2 / J3.)
+    build_color_partition();
+
     cout << "StrainPhononLattice initialization complete!" << endl;
+    cout << "  Sublattice colouring (NN+J2+J3): " << n_colors << " colour(s) for "
+         << lattice_size << " sites" << endl;
 }
 
 // ============================================================
@@ -211,8 +221,12 @@ void StrainPhononLattice::set_parameters(const MagnetoelasticParams& me_params,
             }
         }
         cout << "  Built " << hexagons.size() << " hexagonal plaquettes for ring exchange" << endl;
+        // Ring exchange couples all 6 sites of every hexagon → rebuild the
+        // colour partition so the coloured parallel sweeps stay race-free.
+        build_color_partition();
+        cout << "  Sublattice colouring (NN+J2+J3+hex): " << n_colors << " colour(s)" << endl;
     }
-    
+
     cout << "Set StrainPhononLattice parameters:" << endl;
     cout << "  J=" << me_params.J << ", K=" << me_params.K 
          << ", Γ=" << me_params.Gamma << ", Γ'=" << me_params.Gammap << endl;
@@ -3782,6 +3796,197 @@ void StrainPhononLattice::overrelaxation() {
     }
     
     // Relax strain after spin updates (Born-Oppenheimer consistency)
+    relax_strain(false);
+}
+
+// ----------------------------------------------------------------------------
+// Coloured parallel sweeps
+// ----------------------------------------------------------------------------
+
+void StrainPhononLattice::build_color_partition() {
+    if (lattice_size == 0) {
+        n_colors = 0;
+        color_of_site.clear();
+        sites_by_color_csr_off.clear();
+        sites_by_color_csr.clear();
+        return;
+    }
+
+    // Build undirected adjacency: NN ∪ J2 ∪ J3 ∪ hexagon-clique edges.
+    std::vector<std::vector<size_t>> adj(lattice_size);
+    auto add_edge = [&](size_t a, size_t b) {
+        if (a == b || a >= lattice_size || b >= lattice_size) return;
+        adj[a].push_back(b);
+        adj[b].push_back(a);
+    };
+    for (size_t i = 0; i < lattice_size; ++i) {
+        for (size_t j : nn_partners[i]) add_edge(i, j);
+        for (size_t j : j2_partners[i]) add_edge(i, j);
+        for (size_t j : j3_partners[i]) add_edge(i, j);
+    }
+    // Each hexagon couples all 6 sites pairwise in the ring exchange term.
+    for (const auto& hex : hexagons) {
+        for (size_t a = 0; a < 6; ++a) {
+            for (size_t b = a + 1; b < 6; ++b) {
+                add_edge(hex[a], hex[b]);
+            }
+        }
+    }
+
+    color_of_site.assign(lattice_size, std::numeric_limits<uint16_t>::max());
+    std::vector<uint8_t> forbidden(64, 0);
+    size_t max_color = 0;
+    for (size_t i = 0; i < lattice_size; ++i) {
+        std::fill(forbidden.begin(), forbidden.end(), uint8_t(0));
+        for (size_t j : adj[i]) {
+            const uint16_t c = color_of_site[j];
+            if (c == std::numeric_limits<uint16_t>::max()) continue;
+            if (size_t(c) >= forbidden.size()) forbidden.resize(size_t(c) + 1, 0);
+            forbidden[c] = 1;
+        }
+        uint16_t chosen = 0;
+        while (size_t(chosen) < forbidden.size() && forbidden[chosen]) ++chosen;
+        color_of_site[i] = chosen;
+        if (size_t(chosen) > max_color) max_color = chosen;
+    }
+    n_colors = max_color + 1;
+
+    sites_by_color_csr_off.assign(n_colors + 1, 0);
+    for (size_t i = 0; i < lattice_size; ++i) sites_by_color_csr_off[color_of_site[i] + 1] += 1;
+    for (size_t c = 0; c < n_colors; ++c) sites_by_color_csr_off[c + 1] += sites_by_color_csr_off[c];
+    sites_by_color_csr.assign(lattice_size, 0);
+    std::vector<size_t> cursor(n_colors, 0);
+    for (size_t i = 0; i < lattice_size; ++i) {
+        const uint16_t c = color_of_site[i];
+        sites_by_color_csr[sites_by_color_csr_off[c] + cursor[c]] = i;
+        ++cursor[c];
+    }
+}
+
+namespace {
+// Thread-safe Marsaglia sphere sampler using the per-thread Lehman RNG.
+// Avoids the std::mt19937 member `rng` (which is shared and not thread-safe).
+inline SpinVector gen_random_spin_lehman(double spin_l) {
+    SpinVector spin(3);
+    double u1, u2, s;
+    do {
+        u1 = 2.0 * random_double_lehman(0.0, 1.0) - 1.0;
+        u2 = 2.0 * random_double_lehman(0.0, 1.0) - 1.0;
+        s  = u1 * u1 + u2 * u2;
+    } while (s >= 1.0);
+    const double factor = 2.0 * std::sqrt(1.0 - s);
+    spin(0) = spin_l * factor * u1;
+    spin(1) = spin_l * factor * u2;
+    spin(2) = spin_l * (1.0 - 2.0 * s);
+    return spin;
+}
+
+inline SpinVector gaussian_spin_move_lehman(const SpinVector& current_spin,
+                                             double sigma, double spin_l) {
+    SpinVector perturbation = gen_random_spin_lehman(1.0) * sigma;
+    SpinVector new_spin = current_spin + perturbation;
+    const double norm = new_spin.norm();
+    if (norm < 1e-10) return current_spin;
+    return new_spin * (spin_l / norm);
+}
+} // namespace
+
+double StrainPhononLattice::metropolis_parallel(double temperature,
+                                                bool gaussian_move,
+                                                double sigma) {
+    if (n_colors == 0) return metropolis(temperature, gaussian_move, sigma);
+#ifdef _OPENMP
+    if (omp_get_max_threads() <= 1) return metropolis(temperature, gaussian_move, sigma);
+#else
+    return metropolis(temperature, gaussian_move, sigma);
+#endif
+    if (temperature <= 0) return 0.0;
+
+    const double beta = 1.0 / temperature;
+
+#ifdef _OPENMP
+    const int n_threads = omp_get_max_threads();
+#else
+    const int n_threads = 1;
+#endif
+    std::vector<size_t> per_thread_accepted(n_threads, 0);
+
+    for (size_t c = 0; c < n_colors; ++c) {
+        const size_t off_lo = sites_by_color_csr_off[c];
+        const size_t off_hi = sites_by_color_csr_off[c + 1];
+
+#ifdef _OPENMP
+        #pragma omp parallel
+#endif
+        {
+#ifdef _OPENMP
+            const int tid = omp_get_thread_num();
+#else
+            const int tid = 0;
+#endif
+            size_t local_accepted = 0;
+
+#ifdef _OPENMP
+            #pragma omp for schedule(static) nowait
+#endif
+            for (size_t off = off_lo; off < off_hi; ++off) {
+                const size_t site = sites_by_color_csr[off];
+
+                SpinVector new_spin;
+                if (gaussian_move) {
+                    new_spin = gaussian_spin_move_lehman(spins[site], sigma, spin_length);
+                } else {
+                    new_spin = gen_random_spin_lehman(spin_length);
+                }
+
+                const SpinVector old_spin = spins[site];
+                const double dE = site_energy_diff(new_spin, old_spin, site);
+                const double rand_uniform = random_double_lehman(0.0, 1.0);
+                const bool accept = (dE < 0.0) ||
+                                    (rand_uniform < std::exp(-beta * dE));
+                if (accept) {
+                    spins[site] = new_spin;
+                    ++local_accepted;
+                }
+            }
+            per_thread_accepted[tid] += local_accepted;
+        }
+    }
+
+    // Born-Oppenheimer: re-equilibrate strain to the new spin configuration.
+    // (Serial — strain is global, the elastic relaxation is a small fraction
+    // of total sweep time and can stay non-parallel for now.)
+    relax_strain(false);
+
+    size_t accepted = 0;
+    for (size_t a : per_thread_accepted) accepted += a;
+    return double(accepted) / double(lattice_size);
+}
+
+void StrainPhononLattice::overrelaxation_parallel() {
+    if (n_colors == 0) { overrelaxation(); return; }
+#ifdef _OPENMP
+    if (omp_get_max_threads() <= 1) { overrelaxation(); return; }
+#else
+    overrelaxation(); return;
+#endif
+
+    for (size_t c = 0; c < n_colors; ++c) {
+        const size_t off_lo = sites_by_color_csr_off[c];
+        const size_t off_hi = sites_by_color_csr_off[c + 1];
+#ifdef _OPENMP
+        #pragma omp parallel for schedule(static)
+#endif
+        for (size_t off = off_lo; off < off_hi; ++off) {
+            const size_t site = sites_by_color_csr[off];
+            SpinVector local_field = get_local_field(site);
+            const double norm_sq = local_field.dot(local_field);
+            if (norm_sq < 1e-20) continue;
+            const double proj = 2.0 * spins[site].dot(local_field) / norm_sq;
+            spins[site] = local_field * proj - spins[site];
+        }
+    }
+
     relax_strain(false);
 }
 
