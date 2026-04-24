@@ -515,6 +515,11 @@ add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_tr
 # HDF5 parallel-tempering writer smoke test (no MPI / GPU needed)
 add_optimized_executable(test_hdf5_pt src/test_hdf5_pt.cpp)
 
+# Monte-Carlo kernel micro-benchmark (sweeps/sec for each MC algorithm on
+# a few canonical models). Intentionally single-rank — meant for measuring
+# the local-update kernels in isolation.
+add_optimized_executable(bench_mc src/apps/bench_mc.cpp)
+
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
