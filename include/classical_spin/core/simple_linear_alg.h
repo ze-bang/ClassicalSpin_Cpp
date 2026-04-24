@@ -81,6 +81,35 @@ uint64_t lehman_next();
 double random_double_lehman(double min, double max);
 int random_int_lehman(int size);
 
+// splitmix64 finalizer — used everywhere we need to derive a deterministic
+// stream from (master_seed, key) with good avalanche properties.
+inline unsigned long long splitmix64(unsigned long long x) {
+    x += 0x9E3779B97F4A7C15ULL;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    return x ^ (x >> 31);
+}
+
+// Deterministically reseed the calling thread from the current master seed +
+// `key` (typically MPI rank, replica index, or another stream identifier).
+//
+// This is the **reproducible** alternative to seeding from
+// `std::chrono::system_clock::now()` inside parallel-tempering / temperature-
+// grid optimizers. Set the master seed once via `seed_lehman(master)` (or
+// leave it at its default), then call `seed_lehman_from_rank(rank)` from each
+// rank/thread before performing MC work.
+//
+// The same call also publishes a derived seed as the new master so that any
+// lazily-spawned worker thread inheriting `lehman_state == 0` will pick up a
+// distinct stream consistent with this rank.
+void seed_lehman_from_rank(unsigned long long key);
+
+// Derive a 64-bit seed from the current master seed + key without modifying
+// any thread-local or master state. Useful for seeding e.g. a separate
+// `std::mt19937` exchange-decision RNG with deterministic, rank-distinct
+// values.
+unsigned long long derive_seed_from_master(unsigned long long key);
+
 // Standard C++ random number generators
 inline double random_double(double min, double max, std::mt19937& gen) {
     std::uniform_real_distribution<double> dis(min, max);

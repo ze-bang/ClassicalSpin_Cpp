@@ -521,29 +521,32 @@ inline int attempt_replica_exchange(
     bool accepted = (rank < partner) ? (accept_int == 1) : (recv_accept == 1);
 
     if (accepted) {
-        // Exchange spin configurations
+        // Exchange spin configurations using a persistent thread_local buffer
+        // and MPI_Sendrecv_replace (one buffer instead of two).
         size_t buf_len = lat.lattice_size * lat.spin_dim;
-        vector<double> sendbuf(buf_len), recvbuf(buf_len);
+        thread_local vector<double> swap_buf;
+        if (swap_buf.size() < buf_len) swap_buf.resize(buf_len);
         for (size_t i = 0; i < lat.lattice_size; ++i)
             for (size_t j = 0; j < lat.spin_dim; ++j)
-                sendbuf[i * lat.spin_dim + j] = lat.spins[i](j);
-        MPI_Sendrecv(sendbuf.data(), buf_len, MPI_DOUBLE, partner, 1,
-                     recvbuf.data(), buf_len, MPI_DOUBLE, partner, 1,
-                     comm, MPI_STATUS_IGNORE);
+                swap_buf[i * lat.spin_dim + j] = lat.spins[i](j);
+        MPI_Sendrecv_replace(swap_buf.data(), buf_len, MPI_DOUBLE,
+                             partner, 1, partner, 1,
+                             comm, MPI_STATUS_IGNORE);
         for (size_t i = 0; i < lat.lattice_size; ++i)
             for (size_t j = 0; j < lat.spin_dim; ++j)
-                lat.spins[i](j) = recvbuf[i * lat.spin_dim + j];
+                lat.spins[i](j) = swap_buf[i * lat.spin_dim + j];
 
         // Exchange extra DOF (e.g. strain state) if the lattice provides them
         if constexpr (has_extra_dof<L>::value) {
             size_t extra_n = lat.extra_dof_size();
             if (extra_n > 0) {
-                vector<double> extra_send(extra_n), extra_recv(extra_n);
-                lat.pack_extra_dof(extra_send.data());
-                MPI_Sendrecv(extra_send.data(), extra_n, MPI_DOUBLE, partner, 3,
-                             extra_recv.data(), extra_n, MPI_DOUBLE, partner, 3,
-                             comm, MPI_STATUS_IGNORE);
-                lat.unpack_extra_dof(extra_recv.data());
+                thread_local vector<double> extra_buf;
+                if (extra_buf.size() < extra_n) extra_buf.resize(extra_n);
+                lat.pack_extra_dof(extra_buf.data());
+                MPI_Sendrecv_replace(extra_buf.data(), extra_n, MPI_DOUBLE,
+                                     partner, 3, partner, 3,
+                                     comm, MPI_STATUS_IGNORE);
+                lat.unpack_extra_dof(extra_buf.data());
             }
         }
     }
@@ -677,11 +680,12 @@ inline void parallel_tempering(
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    // Exchange-decision RNG (separate from lattice's MC RNG)
+    // Exchange-decision RNG (separate from lattice's MC RNG). Use a
+    // deterministic per-rank seed derived from the master seed instead of
+    // wall-clock so simulation runs are reproducible across invocations.
     std::mt19937 exchange_rng(
-        static_cast<unsigned>(
-            std::chrono::high_resolution_clock::now().time_since_epoch().count()
-            + rank * 12345));
+        static_cast<std::mt19937::result_type>(
+            derive_seed_from_master(static_cast<unsigned long long>(rank) + 1ULL)));
 
     double curr_Temp = temp[rank];
     double sigma     = 1000.0;
@@ -818,10 +822,11 @@ inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi_gradient(
     if (R == 2) { result.temperatures = {Tmin, Tmax};
                   result.acceptance_rates = {0.5}; result.converged = true; return result; }
 
+    // Deterministic per-rank exchange RNG (replaces wall-clock seed so
+    // temperature-grid optimization is reproducible).
     std::mt19937 exchange_rng(
-        static_cast<unsigned>(
-            std::chrono::high_resolution_clock::now().time_since_epoch().count()
-            + rank * 12345));
+        static_cast<std::mt19937::result_type>(
+            derive_seed_from_master(static_cast<unsigned long long>(rank) + 1ULL)));
 
     if (rank == 0) {
         cout << "=== Gradient-based Temperature Grid (MPI) ===" << endl;
@@ -907,25 +912,27 @@ inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi_gradient(
                 bool accepted = (rank < partner) ? (acc == 1) : (racc == 1);
                 if (accepted) {
                     size_t bl = lat.lattice_size * lat.spin_dim;
-                    vector<double> sb(bl), rb(bl);
+                    thread_local vector<double> sb_grad;
+                    if (sb_grad.size() < bl) sb_grad.resize(bl);
                     for (size_t i = 0; i < lat.lattice_size; ++i)
                         for (size_t j = 0; j < lat.spin_dim; ++j)
-                            sb[i * lat.spin_dim + j] = lat.spins[i](j);
-                    MPI_Sendrecv(sb.data(), bl, MPI_DOUBLE, partner, 2,
-                                 rb.data(), bl, MPI_DOUBLE, partner, 2,
-                                 comm, MPI_STATUS_IGNORE);
+                            sb_grad[i * lat.spin_dim + j] = lat.spins[i](j);
+                    MPI_Sendrecv_replace(sb_grad.data(), bl, MPI_DOUBLE,
+                                         partner, 2, partner, 2,
+                                         comm, MPI_STATUS_IGNORE);
                     for (size_t i = 0; i < lat.lattice_size; ++i)
                         for (size_t j = 0; j < lat.spin_dim; ++j)
-                            lat.spins[i](j) = rb[i * lat.spin_dim + j];
+                            lat.spins[i](j) = sb_grad[i * lat.spin_dim + j];
                     if constexpr (has_extra_dof<Lat>::value) {
                         size_t extra_n = lat.extra_dof_size();
                         if (extra_n > 0) {
-                            vector<double> es(extra_n), er(extra_n);
-                            lat.pack_extra_dof(es.data());
-                            MPI_Sendrecv(es.data(), extra_n, MPI_DOUBLE, partner, 3,
-                                         er.data(), extra_n, MPI_DOUBLE, partner, 3,
-                                         comm, MPI_STATUS_IGNORE);
-                            lat.unpack_extra_dof(er.data());
+                            thread_local vector<double> es_grad;
+                            if (es_grad.size() < extra_n) es_grad.resize(extra_n);
+                            lat.pack_extra_dof(es_grad.data());
+                            MPI_Sendrecv_replace(es_grad.data(), extra_n, MPI_DOUBLE,
+                                                 partner, 3, partner, 3,
+                                                 comm, MPI_STATUS_IGNORE);
+                            lat.unpack_extra_dof(es_grad.data());
                         }
                     }
                 }
@@ -1122,11 +1129,10 @@ inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
     if (R == 2) { result.temperatures = {Tmin, Tmax};
                   result.acceptance_rates = {0.5}; result.converged = true; return result; }
 
-    // Per-rank exchange RNG
+    // Per-rank exchange RNG (deterministic, derived from master seed).
     std::mt19937 exchange_rng(
-        static_cast<unsigned>(
-            std::chrono::high_resolution_clock::now().time_since_epoch().count()
-            + rank * 12345));
+        static_cast<std::mt19937::result_type>(
+            derive_seed_from_master(static_cast<unsigned long long>(rank) + 1ULL)));
 
     if (rank == 0) {
         cout << "=== Feedback-Optimised Temperature Grid (MPI) ===" << endl;
@@ -1188,27 +1194,29 @@ inline OptimizedTempGridResult generate_optimized_temperature_grid_mpi(
                 bool accepted = (rank < partner) ? (acc == 1) : (racc == 1);
                 if (accepted) {
                     size_t bl = lat.lattice_size * lat.spin_dim;
-                    vector<double> sb(bl), rb(bl);
+                    thread_local vector<double> sb_opt;
+                    if (sb_opt.size() < bl) sb_opt.resize(bl);
                     for (size_t i = 0; i < lat.lattice_size; ++i)
                         for (size_t j = 0; j < lat.spin_dim; ++j)
-                            sb[i * lat.spin_dim + j] = lat.spins[i](j);
-                    MPI_Sendrecv(sb.data(), bl, MPI_DOUBLE, partner, 2,
-                                 rb.data(), bl, MPI_DOUBLE, partner, 2,
-                                 comm, MPI_STATUS_IGNORE);
+                            sb_opt[i * lat.spin_dim + j] = lat.spins[i](j);
+                    MPI_Sendrecv_replace(sb_opt.data(), bl, MPI_DOUBLE,
+                                         partner, 2, partner, 2,
+                                         comm, MPI_STATUS_IGNORE);
                     for (size_t i = 0; i < lat.lattice_size; ++i)
                         for (size_t j = 0; j < lat.spin_dim; ++j)
-                            lat.spins[i](j) = rb[i * lat.spin_dim + j];
+                            lat.spins[i](j) = sb_opt[i * lat.spin_dim + j];
 
                     // Exchange extra DOF (e.g. strain) if available
                     if constexpr (has_extra_dof<L>::value) {
                         size_t extra_n = lat.extra_dof_size();
                         if (extra_n > 0) {
-                            vector<double> es(extra_n), er(extra_n);
-                            lat.pack_extra_dof(es.data());
-                            MPI_Sendrecv(es.data(), extra_n, MPI_DOUBLE, partner, 3,
-                                         er.data(), extra_n, MPI_DOUBLE, partner, 3,
-                                         comm, MPI_STATUS_IGNORE);
-                            lat.unpack_extra_dof(er.data());
+                            thread_local vector<double> es_opt;
+                            if (es_opt.size() < extra_n) es_opt.resize(extra_n);
+                            lat.pack_extra_dof(es_opt.data());
+                            MPI_Sendrecv_replace(es_opt.data(), extra_n, MPI_DOUBLE,
+                                                 partner, 3, partner, 3,
+                                                 comm, MPI_STATUS_IGNORE);
+                            lat.unpack_extra_dof(es_opt.data());
                         }
                     }
                 }

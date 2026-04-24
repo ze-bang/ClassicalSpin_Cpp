@@ -1440,16 +1440,17 @@ public:
                 }
                 
                 const double dE = site_energy_SU2_diff(new_spin, spins_SU2[i], i);
-                
-                // Branchless acceptance: avoid branch misprediction
-                const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+
+                // Acceptance: short-circuit for downhill moves (was bitwise `|`,
+                // which wastefully evaluated exp() even when dE <= 0).
+                const bool accept = (dE <= 0) || (rand_uniform < exp(-dE * inv_T));
                 if (accept) {
                     spins_SU2[i] = new_spin;
                     accepted++;
                 }
             }
         }
-        
+
         // Sweep SU(3) sublattice
         for (size_t batch_start = 0; batch_start < lattice_size_SU3; batch_start += BATCH_SIZE) {
             const size_t batch_end = std::min(batch_start + BATCH_SIZE, lattice_size_SU3);
@@ -1477,16 +1478,16 @@ public:
                 }
                 
                 const double dE = site_energy_SU3_diff(new_spin, spins_SU3[i], i);
-                
-                // Branchless acceptance
-                const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+
+                // Acceptance: logical OR for short-circuit (was bitwise).
+                const bool accept = (dE <= 0) || (rand_uniform < exp(-dE * inv_T));
                 if (accept) {
                     spins_SU3[i] = new_spin;
                     accepted++;
                 }
             }
         }
-        
+
         return double(accepted) / double(total_sites);
     }
 
@@ -1559,13 +1560,13 @@ public:
                     }
                     
                     const double dE = site_energy_SU2_diff(new_spin, spins_SU2[i], i);
-                    
-                    // Branchless acceptance
-                    const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+
+                    // Acceptance: logical OR (was bitwise).
+                    const bool accept = (dE <= 0) || (rand_uniform < exp(-dE * inv_T));
                     if (accept) {
                         spins_SU2[i] = new_spin;
                         accepted++;
-                        
+
                         // Invalidate cached fields for affected sites
                         if (has_mixed && use_field_caching) {
                             invalidate_fields_from_SU2_update(i);
@@ -1585,13 +1586,13 @@ public:
                     }
                     
                     const double dE = site_energy_SU3_diff(new_spin, spins_SU3[i], i);
-                    
-                    // Branchless acceptance
-                    const bool accept = (dE <= 0) | (rand_uniform < exp(-dE * inv_T));
+
+                    // Acceptance: logical OR (was bitwise).
+                    const bool accept = (dE <= 0) || (rand_uniform < exp(-dE * inv_T));
                     if (accept) {
                         spins_SU3[i] = new_spin;
                         accepted++;
-                        
+
                         // Invalidate cached fields for affected sites
                         if (has_mixed && use_field_caching) {
                             invalidate_fields_from_SU3_update(i);
@@ -2384,7 +2385,8 @@ public:
         // MixedLattice has a different interface (SU2+SU3, no single spins/lattice_size),
         // so we always use the inlined Katzgraber feedback; gradient optimizer not applied here.
         (void)use_gradient;
-        seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
+        // Deterministic per-rank seeding (replaces wall-clock).
+        seed_lehman_from_rank(static_cast<unsigned long long>(rank) + 1ULL);
         
         if (rank == 0) {
             cout << "=== Feedback-Optimized Temperature Grid (MixedLattice MPI) ===" << endl;
@@ -2471,37 +2473,39 @@ public:
                     bool accept = (rank < partner_rank) ? (accept_int == 1) : (recv_accept_int == 1);
                     
                     if (accept) {
-                        // Exchange SU2 spins
+                        // Exchange SU2 spins (persistent buffer + Sendrecv_replace)
                         size_t su2_size = spins_SU2.size() * 3;
-                        vector<double> send_su2(su2_size), recv_su2(su2_size);
+                        thread_local vector<double> su2_buf;
+                        if (su2_buf.size() < su2_size) su2_buf.resize(su2_size);
                         for (size_t i = 0; i < spins_SU2.size(); ++i) {
                             for (size_t j = 0; j < 3; ++j) {
-                                send_su2[i * 3 + j] = spins_SU2[i](j);
+                                su2_buf[i * 3 + j] = spins_SU2[i](j);
                             }
                         }
-                        MPI_Sendrecv(send_su2.data(), su2_size, MPI_DOUBLE, partner_rank, 2,
-                                    recv_su2.data(), su2_size, MPI_DOUBLE, partner_rank, 2,
-                                    comm, MPI_STATUS_IGNORE);
+                        MPI_Sendrecv_replace(su2_buf.data(), su2_size, MPI_DOUBLE,
+                                             partner_rank, 2, partner_rank, 2,
+                                             comm, MPI_STATUS_IGNORE);
                         for (size_t i = 0; i < spins_SU2.size(); ++i) {
                             for (size_t j = 0; j < 3; ++j) {
-                                spins_SU2[i](j) = recv_su2[i * 3 + j];
+                                spins_SU2[i](j) = su2_buf[i * 3 + j];
                             }
                         }
-                        
-                        // Exchange SU3 spins
+
+                        // Exchange SU3 spins (persistent buffer + Sendrecv_replace)
                         size_t su3_size = spins_SU3.size() * 8;
-                        vector<double> send_su3(su3_size), recv_su3(su3_size);
+                        thread_local vector<double> su3_buf;
+                        if (su3_buf.size() < su3_size) su3_buf.resize(su3_size);
                         for (size_t i = 0; i < spins_SU3.size(); ++i) {
                             for (size_t j = 0; j < 8; ++j) {
-                                send_su3[i * 8 + j] = spins_SU3[i](j);
+                                su3_buf[i * 8 + j] = spins_SU3[i](j);
                             }
                         }
-                        MPI_Sendrecv(send_su3.data(), su3_size, MPI_DOUBLE, partner_rank, 3,
-                                    recv_su3.data(), su3_size, MPI_DOUBLE, partner_rank, 3,
-                                    comm, MPI_STATUS_IGNORE);
+                        MPI_Sendrecv_replace(su3_buf.data(), su3_size, MPI_DOUBLE,
+                                             partner_rank, 3, partner_rank, 3,
+                                             comm, MPI_STATUS_IGNORE);
                         for (size_t i = 0; i < spins_SU3.size(); ++i) {
                             for (size_t j = 0; j < 8; ++j) {
-                                spins_SU3[i](j) = recv_su3[i * 8 + j];
+                                spins_SU3[i](j) = su3_buf[i * 8 + j];
                             }
                         }
                     }

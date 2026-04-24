@@ -22,15 +22,6 @@ thread_local unsigned __int128 lehman_state = 0;
 namespace {
 std::atomic<unsigned long long> lehman_master_seed{1ULL};
 
-// splitmix64 finalizer — used to mix (master, thread_id) into a per-thread
-// seed with good avalanche properties.
-inline unsigned long long splitmix64(unsigned long long x) {
-    x += 0x9E3779B97F4A7C15ULL;
-    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
-    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
-    return x ^ (x >> 31);
-}
-
 inline void lazy_seed_thread() {
 #ifdef _OPENMP
     const int tid = omp_get_thread_num();
@@ -227,6 +218,26 @@ double random_double_lehman(double min, double max) {
 
 int random_int_lehman(int size) {
     return lehman_next() % size;
+}
+
+void seed_lehman_from_rank(unsigned long long key) {
+    const unsigned long long master =
+        lehman_master_seed.load(std::memory_order_relaxed);
+    // Two independent mixes: one becomes the new published master so future
+    // lazily-seeded threads get a stream tied to this rank, the other is the
+    // local stream for the calling thread. Both are odd to keep the
+    // multiplicative state nonzero and well-conditioned.
+    const unsigned long long new_master = splitmix64(master ^ (key * 0x9E3779B97F4A7C15ULL));
+    const unsigned long long thread_seed = splitmix64(new_master + 1ULL);
+    lehman_master_seed.store(new_master | 1ULL, std::memory_order_relaxed);
+    lehman_state =
+        (static_cast<unsigned __int128>(thread_seed) << 1) | 1;
+}
+
+unsigned long long derive_seed_from_master(unsigned long long key) {
+    const unsigned long long master =
+        lehman_master_seed.load(std::memory_order_relaxed);
+    return splitmix64(master ^ (key * 0xD1B54A32D192ED03ULL));
 }
 
 // Norm functions for arrays of vectors

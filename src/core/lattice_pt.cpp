@@ -25,6 +25,10 @@
 #include <H5Cpp.h>
 #endif
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // ---- Lattice::parallel_tempering ----
     void Lattice::parallel_tempering(vector<double> temp, size_t n_anneal, size_t n_measure,
                            size_t overrelaxation_rate, size_t swap_rate, size_t probe_rate,
@@ -44,8 +48,12 @@
         MPI_Comm_rank(comm, &rank);
         MPI_Comm_size(comm, &size);
         
-        // Set random seed
-        seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 1000) * 2 + 1);
+        // Deterministic per-rank seeding: derive a distinct stream from the
+        // current master seed + MPI rank via splitmix64. This replaces the
+        // previous wall-clock seed which made simulations non-reproducible.
+        // Set the master seed once at process start with seed_lehman(seed)
+        // before calling parallel_tempering().
+        seed_lehman_from_rank(static_cast<unsigned long long>(rank) + 1ULL);
         
         double curr_Temp = temp[rank];
         double sigma = 1000.0;
@@ -385,7 +393,7 @@
                                    size_t n_anneal, size_t n_measure,
                                    double curr_accept, int swap_accept,
                                    size_t swap_rate, size_t overrelaxation_rate,
-                                   size_t probe_rate) {
+                                   size_t probe_rate, MPI_Comm comm) {
         // Compute local heat capacity per site using binning analysis
         // c_V = Var(E) / (T² N²) = Var(E/N) / T²
         double E_mean = std::accumulate(energies.begin(), energies.end(), 0.0) / energies.size();
@@ -400,11 +408,14 @@
         double curr_heat_capacity = var_E / (curr_Temp * curr_Temp * N2);
         double curr_dHeat = std::sqrt(var_E) / (curr_Temp * curr_Temp * N2);
         
-        // Gather to root
-        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(), 
-                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(), 
-                   1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        // Gather to root using the caller-provided communicator (was previously
+        // hardcoded to MPI_COMM_WORLD, which broke parallel-tempering inside a
+        // sub-communicator, e.g. parameter sweeps where each PT group is its
+        // own sub-comm).
+        MPI_Gather(&curr_heat_capacity, 1, MPI_DOUBLE, heat_capacity.data(),
+                   1, MPI_DOUBLE, 0, comm);
+        MPI_Gather(&curr_dHeat, 1, MPI_DOUBLE, dHeat.data(),
+                   1, MPI_DOUBLE, 0, comm);
         
         // Report
         double total_steps = n_anneal + n_measure;
@@ -422,11 +433,11 @@
                 filesystem::create_directories(dir_name);
             }
             // Ensure directory exists before other ranks proceed
-            MPI_Barrier(MPI_COMM_WORLD);
-            
+            MPI_Barrier(comm);
+
             // Check if this rank should write (supports FULL mode with sentinel -1)
             bool should_write = should_rank_write(rank, rank_to_write);
-            
+
             if (should_write) {
                 string rank_dir = dir_name + "/rank_" + std::to_string(rank);
                 // Each rank creates its own subdirectory (no race condition)
@@ -434,9 +445,9 @@
                 save_observables(rank_dir, energies, magnetizations);
                 save_spin_config(rank_dir + "/spins_T=" + std::to_string(curr_Temp) + ".txt");
             }
-            
+
             // Wait for all ranks to finish writing before rank 0 writes aggregated results
-            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Barrier(comm);
             
             // Root process saves heat capacity
             if (rank == 0) {
@@ -591,38 +602,75 @@
         
         // Store original spins
         SpinConfig original_spins = spins;
-        
-        // Use independent Lattice copies for parallel warmup
-        vector<Lattice> replica_lattices(R, *this);
+
+        // ----- Memory-light replica storage --------------------------------
+        // Old code allocated `vector<Lattice>(R, *this)`, which clones all of
+        // the per-site interaction tables (bilinear/trilinear matrices and
+        // tensors, partner lists, etc.) R times.  For typical PT runs (R~32-64
+        // replicas, L~10-12 lattice) that is hundreds of MB of duplicated
+        // read-only data.
+        //
+        // Since the lattice topology is identical across replicas, we instead
+        // keep `num_threads` working lattices (each thread gets its own
+        // mutable scratch state) and an array of R spin configurations.  Each
+        // OMP iteration grabs its thread-local lattice, swaps in the replica's
+        // spin config, runs the sweep(s), then swaps the spin config back out.
+        // ------------------------------------------------------------------
+        int num_threads = 1;
+        #ifdef _OPENMP
+        num_threads = std::max(1, omp_get_max_threads());
+        #endif
+        vector<Lattice> thread_lattices;
+        thread_lattices.reserve(num_threads);
+        for (int t = 0; t < num_threads; ++t) thread_lattices.emplace_back(*this);
+
+        vector<SpinConfig> replica_spins(R, original_spins);
         double sigma = 1000.0;  // For Gaussian moves
-        
+
+        auto run_on_replica = [&](size_t k, auto&& fn) {
+            int tid = 0;
+            #ifdef _OPENMP
+            tid = omp_get_thread_num();
+            #endif
+            Lattice& L = thread_lattices[tid];
+            std::swap(L.spins, replica_spins[k]);
+            fn(L);
+            std::swap(L.spins, replica_spins[k]);
+        };
+
         // Warmup phase: equilibrate each replica at its temperature
         cout << "Warming up " << R << " replicas";
         #ifdef _OPENMP
-        cout << " (parallel)";
+        cout << " (parallel, " << num_threads << " threads, "
+             << R << " replicas, "
+             << thread_lattices.size() << " thread-lattices)";
         #endif
         cout << "..." << endl;
-        
+
         #pragma omp parallel for schedule(dynamic)
         for (size_t k = 0; k < R; ++k) {
             double T_k = 1.0 / beta[k];
             double local_sigma = sigma;
-            #pragma omp critical
-            {
-                seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + k * 12345) * 2 + 1);
-            }
-            for (size_t i = 0; i < warmup_sweeps; ++i) {
-                replica_lattices[k].metropolis(T_k, gaussian_move, local_sigma);
-                if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
-                    replica_lattices[k].overrelaxation();
+            // Deterministic, replica-distinct seeding (replaces wall-clock).
+            // Each replica gets a stream derived from (master_seed, k).
+            seed_lehman_from_rank(static_cast<unsigned long long>(k) + 1ULL);
+            run_on_replica(k, [&](Lattice& L) {
+                for (size_t i = 0; i < warmup_sweeps; ++i) {
+                    L.metropolis(T_k, gaussian_move, local_sigma);
+                    if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                        L.overrelaxation();
+                    }
                 }
-            }
+            });
         }
-        
+
         // Cache energies
         vector<double> cached_energies(R);
+        #pragma omp parallel for schedule(static)
         for (size_t k = 0; k < R; ++k) {
-            cached_energies[k] = replica_lattices[k].total_energy(replica_lattices[k].spins);
+            run_on_replica(k, [&](Lattice& L) {
+                cached_energies[k] = L.total_energy(L.spins);
+            });
         }
         
         // ================================================================
@@ -655,39 +703,37 @@
                 for (size_t k = 0; k < R; ++k) {
                     double T_k = 1.0 / beta[k];
                     double local_sigma = sigma;
-                    replica_lattices[k].metropolis(T_k, gaussian_move, local_sigma);
-                    if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
-                        replica_lattices[k].overrelaxation();
-                    }
+                    run_on_replica(k, [&](Lattice& L) {
+                        L.metropolis(T_k, gaussian_move, local_sigma);
+                        if (overrelaxation_rate > 0 && sweep % overrelaxation_rate == 0) {
+                            L.overrelaxation();
+                        }
+                    });
                 }
-                
+
                 #pragma omp parallel for schedule(static)
                 for (size_t k = 0; k < R; ++k) {
-                    cached_energies[k] = replica_lattices[k].total_energy(replica_lattices[k].spins);
+                    run_on_replica(k, [&](Lattice& L) {
+                        cached_energies[k] = L.total_energy(L.spins);
+                    });
                 }
-                
-                // Attempt replica exchanges (checkerboard pattern)
+
+                // Attempt replica exchanges (checkerboard pattern).
+                // The exchange itself is now just a swap of spin configs and
+                // is intentionally serial — `replica_spins[e]` swaps are cheap
+                // and serializing avoids a critical section in the hot loop.
                 for (int parity = 0; parity <= 1; ++parity) {
-                    #pragma omp parallel for schedule(static)
                     for (size_t e = parity; e < R - 1; e += 2) {
                         double E_hot = cached_energies[e];
                         double E_cold = cached_energies[e + 1];
                         double dBeta = beta[e + 1] - beta[e];
                         double dE = E_cold - E_hot;
                         double delta = dBeta * dE;
-                        
-                        #pragma omp atomic
                         ++attempts[e];
-                        
                         if (delta >= 0 || random_double_lehman(0.0, 1.0) < std::exp(delta)) {
-                            #pragma omp atomic
                             ++accepts[e];
-                            
-                            #pragma omp critical
-                            {
-                                std::swap(replica_lattices[e].spins, replica_lattices[e + 1].spins);
-                                std::swap(cached_energies[e], cached_energies[e + 1]);
-                            }
+                            std::swap(replica_spins[e], replica_spins[e + 1]);
+                            std::swap(cached_energies[e], cached_energies[e + 1]);
                         }
                     }
                 }
@@ -775,16 +821,17 @@
             double local_sigma = sigma;
             vector<double> energy_series;
             energy_series.reserve(tau_samples);
-            
-            for (size_t i = 0; i < tau_samples; ++i) {
-                replica_lattices[k].metropolis(T_k, gaussian_move, local_sigma);
-                if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
-                    replica_lattices[k].overrelaxation();
+
+            run_on_replica(k, [&](Lattice& L) {
+                for (size_t i = 0; i < tau_samples; ++i) {
+                    L.metropolis(T_k, gaussian_move, local_sigma);
+                    if (overrelaxation_rate > 0 && i % overrelaxation_rate == 0) {
+                        L.overrelaxation();
+                    }
+                    energy_series.push_back(L.total_energy(L.spins));
                 }
-                energy_series.push_back(
-                    replica_lattices[k].total_energy(replica_lattices[k].spins));
-            }
-            
+            });
+
             // Compute autocorrelation time using Sokal's self-consistent window
             AutocorrelationResult acf = compute_autocorrelation(energy_series, 1);
             tau_int_values[k] = std::max(1.0, acf.tau_int);
@@ -917,8 +964,8 @@
                 overrelaxation_rate, target_acceptance, convergence_tol, comm, true);
         }
         
-        // Set random seed unique to each rank
-        seed_lehman((std::chrono::system_clock::now().time_since_epoch().count() + rank * 12345) * 2 + 1);
+        // Deterministic, rank-distinct seeding (replaces wall-clock).
+        seed_lehman_from_rank(static_cast<unsigned long long>(rank) + 1ULL);
         
         if (rank == 0) {
             cout << "=== Feedback-Optimized Temperature Grid (MPI) ===" << endl;
@@ -1024,22 +1071,23 @@
                     
                     // Exchange configurations if accepted
                     if (accept) {
-                        vector<double> send_buf(lattice_size * spin_dim);
-                        vector<double> recv_buf(lattice_size * spin_dim);
-                        
+                        size_t buf_len = lattice_size * spin_dim;
+                        thread_local vector<double> swap_buf;
+                        if (swap_buf.size() < buf_len) swap_buf.resize(buf_len);
+
                         for (size_t i = 0; i < lattice_size; ++i) {
                             for (size_t j = 0; j < spin_dim; ++j) {
-                                send_buf[i * spin_dim + j] = spins[i](j);
+                                swap_buf[i * spin_dim + j] = spins[i](j);
                             }
                         }
-                        
-                        MPI_Sendrecv(send_buf.data(), send_buf.size(), MPI_DOUBLE, partner_rank, 2,
-                                    recv_buf.data(), recv_buf.size(), MPI_DOUBLE, partner_rank, 2,
-                                    comm, MPI_STATUS_IGNORE);
-                        
+
+                        MPI_Sendrecv_replace(swap_buf.data(), buf_len, MPI_DOUBLE,
+                                             partner_rank, 2, partner_rank, 2,
+                                             comm, MPI_STATUS_IGNORE);
+
                         for (size_t i = 0; i < lattice_size; ++i) {
                             for (size_t j = 0; j < spin_dim; ++j) {
-                                spins[i](j) = recv_buf[i * spin_dim + j];
+                                spins[i](j) = swap_buf[i * spin_dim + j];
                             }
                         }
                     }

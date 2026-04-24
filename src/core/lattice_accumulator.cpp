@@ -67,12 +67,12 @@
         // Build cell displacement vectors and indices
         cell_displacement_vectors.resize(n_cell_displacements);
         cell_displacement_indices.resize(n_cell_displacements);
-        
+
         for (size_t dn1 = 0; dn1 < d1; ++dn1) {
             for (size_t dn2 = 0; dn2 < d2; ++dn2) {
                 for (size_t dn3 = 0; dn3 < d3; ++dn3) {
                     size_t idx = cell_displacement_index(dn1, dn2, dn3);
-                    cell_displacement_vectors[idx] = 
+                    cell_displacement_vectors[idx] =
                         double(dn1) * lattice_vectors[0] +
                         double(dn2) * lattice_vectors[1] +
                         double(dn3) * lattice_vectors[2];
@@ -80,10 +80,43 @@
                 }
             }
         }
-        
+
         // Store sublattice positions for computing full displacement vectors
         sublattice_positions_ = sublattice_positions;
-        
+
+        // Pre-compute displaced_cell_idx[disp_idx * n_cells + cell_i] = cell_j
+        // (PBC-shifted cell index). This lookup was previously rebuilt on every
+        // accumulate_*_correlations() call (~24 MB allocation per measurement on
+        // 12³ unit cells). Caching it here removes the allocation entirely from
+        // the measurement path; the table is purely geometric so it's correct
+        // to share across samples.
+        const size_t n_cells = n_cell_displacements;
+        displaced_cell_idx_cache.assign(n_cells * n_cells, 0);
+        for (size_t dn1 = 0; dn1 < d1; ++dn1) {
+            for (size_t dn2 = 0; dn2 < d2; ++dn2) {
+                for (size_t dn3 = 0; dn3 < d3; ++dn3) {
+                    const size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
+                    const size_t row_base = disp_idx * n_cells;
+                    for (size_t n1 = 0; n1 < d1; ++n1) {
+                        const size_t m1 = (n1 + dn1) % d1;
+                        for (size_t n2 = 0; n2 < d2; ++n2) {
+                            const size_t m2 = (n2 + dn2) % d2;
+                            for (size_t n3 = 0; n3 < d3; ++n3) {
+                                const size_t m3 = (n3 + dn3) % d3;
+                                const size_t cell_i = (n1 * d2 + n2) * d3 + n3;
+                                const size_t cell_j = (m1 * d2 + m2) * d3 + m3;
+                                displaced_cell_idx_cache[row_base + cell_i] = cell_j;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pre-allocate sublattice-resolved spin scratch buffer (filled per call
+        // by accumulate_spin_correlations).
+        spins_by_sub_buf.assign(n_sublattices * n_cells, Eigen::Vector3d::Zero());
+
         n_samples = 0;
         initialized = true;
     }
@@ -98,89 +131,67 @@
     void RealSpaceCorrelationAccumulator::accumulate_spin_correlations(
         const vector<Eigen::VectorXd>& spins,
         const function<size_t(size_t)>& /* site_to_sublattice */,
-        const function<array<size_t, 3>(size_t)>& /* site_to_cell */) 
+        const function<array<size_t, 3>(size_t)>& /* site_to_cell */)
     {
         if (!initialized) {
             throw std::runtime_error("RealSpaceCorrelationAccumulator not initialized");
         }
-        
-        size_t n_cells = dim1 * dim2 * dim3;
-        double inv_n_cells = 1.0 / double(n_cells);
-        
+
+        const size_t n_cells = dim1 * dim2 * dim3;
+        const double inv_n_cells = 1.0 / double(n_cells);
+
         // ========== PHASE 1: Pre-compute spin arrays organized by sublattice ==========
-        // spins_by_sub[sub][cell_idx] = 3-component spin vector
-        // This layout gives cache-friendly access for the correlation loops
-        vector<vector<Eigen::Vector3d>> spins_by_sub(n_sublattices, vector<Eigen::Vector3d>(n_cells));
-        vector<Eigen::Vector3d> M_sub(n_sublattices, Eigen::Vector3d::Zero());
-        
+        // spins_by_sub_buf[sub * n_cells + cell_idx] holds the 3-vec spin for
+        // (cell, sublattice). Reuses the persistent member buffer (was a fresh
+        // vector<vector<Eigen::Vector3d>> per call → ~MB of malloc traffic per
+        // measurement on a 12³ pyrochlore lattice).
+        if (spins_by_sub_buf.size() != n_sublattices * n_cells) {
+            spins_by_sub_buf.assign(n_sublattices * n_cells, Eigen::Vector3d::Zero());
+        }
+        Eigen::Vector3d* const S_buf = spins_by_sub_buf.data();
+
+        std::vector<Eigen::Vector3d> M_sub(n_sublattices, Eigen::Vector3d::Zero());
+
         for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
             for (size_t sub = 0; sub < n_sublattices; ++sub) {
-                size_t site = cell_idx * n_sublattices + sub;
+                const size_t site = cell_idx * n_sublattices + sub;
                 Eigen::Vector3d S = spins[site].head<3>();
-                spins_by_sub[sub][cell_idx] = S;
+                S_buf[sub * n_cells + cell_idx] = S;
                 M_sub[sub] += S;
             }
         }
-        
+
         // Finalize sublattice magnetizations
         for (size_t sub = 0; sub < n_sublattices; ++sub) {
             M_sub[sub] *= inv_n_cells;
             spin_mean_sum[sub] += M_sub[sub];
             spin_mean_sq_sum[sub] += M_sub[sub].cwiseProduct(M_sub[sub]);
         }
-        
-        // ========== PHASE 2: Pre-compute cell index lookup for displaced cells ==========
-        // displaced_cell[dn1][dn2][dn3][n1][n2][n3] would be 6D, too much memory
-        // Instead, precompute the 1D displacement of cell_idx under each (dn1,dn2,dn3)
-        // cell_j = displaced_cell_idx[cell_disp_idx][cell_i]
-        vector<vector<size_t>> displaced_cell_idx(n_cells, vector<size_t>(n_cells));
-        
-        for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
-            for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
-                for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
-                    size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
-                    for (size_t n1 = 0; n1 < dim1; ++n1) {
-                        for (size_t n2 = 0; n2 < dim2; ++n2) {
-                            for (size_t n3 = 0; n3 < dim3; ++n3) {
-                                size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
-                                size_t m1 = (n1 + dn1) % dim1;
-                                size_t m2 = (n2 + dn2) % dim2;
-                                size_t m3 = (n3 + dn3) % dim3;
-                                size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
-                                displaced_cell_idx[disp_idx][cell_i] = cell_j;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
+
+        // ========== PHASE 2: Use cached displacement lookup ==========
+        // displaced_cell_idx_cache[disp_idx * n_cells + cell_i] = cell_j
+        // (built once in initialize(); see lattice.h struct documentation).
+        const size_t* const disp_table = displaced_cell_idx_cache.data();
+
         // ========== PHASE 3: Accumulate correlations ==========
-        // Loop over sublattice pairs FIRST (outermost) for better cache locality
-        // since spins_by_sub is organized by sublattice
         for (size_t sub_i = 0; sub_i < n_sublattices; ++sub_i) {
-            const auto& S_sub_i = spins_by_sub[sub_i];  // Cache reference
-            
+            const Eigen::Vector3d* const S_sub_i = S_buf + sub_i * n_cells;
+
             for (size_t sub_j = sub_i; sub_j < n_sublattices; ++sub_j) {
-                const auto& S_sub_j = spins_by_sub[sub_j];  // Cache reference
-                size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
-                
-                // Loop over cell displacements
+                const Eigen::Vector3d* const S_sub_j = S_buf + sub_j * n_cells;
+                const size_t sub_pair_idx = sublattice_pair_index(sub_i, sub_j);
+
                 for (size_t cell_disp_idx = 0; cell_disp_idx < n_cells; ++cell_disp_idx) {
-                    const auto& disp_map = displaced_cell_idx[cell_disp_idx];
-                    
-                    // Accumulate 6 symmetric spin components
+                    const size_t* const disp_row = disp_table + cell_disp_idx * n_cells;
+
                     double corr_xx = 0.0, corr_xy = 0.0, corr_xz = 0.0;
                     double corr_yy = 0.0, corr_yz = 0.0, corr_zz = 0.0;
-                    
-                    // Average over all unit cells
+
                     for (size_t cell_i = 0; cell_i < n_cells; ++cell_i) {
-                        size_t cell_j = disp_map[cell_i];
-                        
+                        const size_t cell_j = disp_row[cell_i];
                         const Eigen::Vector3d& Si = S_sub_i[cell_i];
                         const Eigen::Vector3d& Sj = S_sub_j[cell_j];
-                        
-                        // Symmetric components: xx, xy, xz, yy, yz, zz
+
                         corr_xx += Si[0] * Sj[0];
                         corr_xy += 0.5 * (Si[0] * Sj[1] + Si[1] * Sj[0]);
                         corr_xz += 0.5 * (Si[0] * Sj[2] + Si[2] * Sj[0]);
@@ -188,10 +199,9 @@
                         corr_yz += 0.5 * (Si[1] * Sj[2] + Si[2] * Sj[1]);
                         corr_zz += Si[2] * Sj[2];
                     }
-                    
-                    // Normalize and store
-                    size_t base_idx = spin_corr_index(cell_disp_idx, sub_pair_idx, 0);
-                    array<double, 6> corr = {
+
+                    const size_t base_idx = spin_corr_index(cell_disp_idx, sub_pair_idx, 0);
+                    const array<double, 6> corr = {
                         corr_xx * inv_n_cells,
                         corr_xy * inv_n_cells,
                         corr_xz * inv_n_cells,
@@ -200,13 +210,13 @@
                         corr_zz * inv_n_cells
                     };
                     for (size_t c = 0; c < 6; ++c) {
-                        spin_corr_sum[base_idx + c] += corr[c];
+                        spin_corr_sum[base_idx + c]    += corr[c];
                         spin_corr_sq_sum[base_idx + c] += corr[c] * corr[c];
                     }
                 }
             }
         }
-        
+
         n_samples++;
     }
 
@@ -271,37 +281,19 @@
             bonds_by_cell_type[cell_idx][type].push_back(b);
         }
         
-        // ========== PHASE 4: Pre-compute cell displacement lookup ==========
-        // displaced_cell[disp_idx][cell_i] = cell_j (displaced cell index)
-        vector<vector<size_t>> displaced_cell(n_cells, vector<size_t>(n_cells));
-        for (size_t dn1 = 0; dn1 < dim1; ++dn1) {
-            for (size_t dn2 = 0; dn2 < dim2; ++dn2) {
-                for (size_t dn3 = 0; dn3 < dim3; ++dn3) {
-                    size_t disp_idx = cell_displacement_index(dn1, dn2, dn3);
-                    for (size_t n1 = 0; n1 < dim1; ++n1) {
-                        size_t m1 = (n1 + dn1) % dim1;
-                        for (size_t n2 = 0; n2 < dim2; ++n2) {
-                            size_t m2 = (n2 + dn2) % dim2;
-                            for (size_t n3 = 0; n3 < dim3; ++n3) {
-                                size_t m3 = (n3 + dn3) % dim3;
-                                size_t cell_i = (n1 * dim2 + n2) * dim3 + n3;
-                                size_t cell_j = (m1 * dim2 + m2) * dim3 + m3;
-                                displaced_cell[disp_idx][cell_i] = cell_j;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
+        // ========== PHASE 4: Use cached cell displacement lookup ==========
+        // displaced_cell_idx_cache built once in initialize() — was previously
+        // a fresh vector<vector<size_t>>(N,N) per call.
+        const size_t* const disp_table = displaced_cell_idx_cache.data();
+
         // ========== PHASE 5: Accumulate dimer-dimer correlations ==========
         // Restructure: loop over bond type pairs FIRST (fewer iterations)
         for (size_t type_mu = 0; type_mu < n_bond_types; ++type_mu) {
             for (size_t type_nu = 0; type_nu < n_bond_types; ++type_nu) {
-                
+
                 // Loop over cell displacements
                 for (size_t cell_disp_idx = 0; cell_disp_idx < n_cells; ++cell_disp_idx) {
-                    const auto& disp_map = displaced_cell[cell_disp_idx];
+                    const size_t* const disp_map = disp_table + cell_disp_idx * n_cells;
                     
                     // Correlations for each dimer component
                     array<double, 3> corr = {0.0, 0.0, 0.0};

@@ -196,7 +196,8 @@
 // ---- Lattice::molecular_dynamics_cpu ----
     void Lattice::molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            string out_dir, size_t save_interval,
-                           string method) {
+                           string method,
+                           size_t renorm_interval) {
 #ifndef HDF5_ENABLED
         std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
         std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
@@ -226,10 +227,31 @@
                 &site_positions, 10000);
         }
         
-        // Observer to save data at specified intervals
+        // Observer to save data + (optionally) project spins back to |S|=spin_length.
+        // The Landau-Lifshitz equation conserves |S| analytically, but explicit
+        // integrators (dopri5, rk4, ...) accumulate small norm-drift; projecting
+        // every N steps keeps the trajectory on the physical Bloch sphere with
+        // negligible cost (one sqrt per site per call).
         size_t step_count = 0;
         size_t save_count = 0;
+        const bool do_renorm = (renorm_interval > 0) && (spin_dim == 3);
         auto observer = [&](const ODEState& x, double t) {
+            if (do_renorm && (step_count > 0) && (step_count % renorm_interval == 0)) {
+                // Project to unit sphere of radius spin_length.
+                // Observer receives const&; the underlying buffer is owned by the
+                // outer `state` ODEState, which we know is the same memory while
+                // integrate_const/adaptive holds the internal stepper.
+                double* sx = const_cast<double*>(x.data());
+                const double sl = static_cast<double>(spin_length);
+                for (size_t i = 0; i < lattice_size; ++i) {
+                    double* p = sx + i * spin_dim;
+                    double n2 = p[0]*p[0] + p[1]*p[1] + p[2]*p[2];
+                    if (n2 > 0.0) {
+                        double s = sl / std::sqrt(n2);
+                        p[0] *= s; p[1] *= s; p[2] *= s;
+                    }
+                }
+            }
             if (step_count % save_interval == 0) {
                 // Compute magnetizations directly from flat state (zero allocation)
                 double M_local_arr[8] = {0};  // Max spin_dim
