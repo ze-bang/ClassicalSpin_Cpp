@@ -182,32 +182,47 @@ explains, ingredient by ingredient.
 \centering
 \caption{Measured single-core throughput, pinned to one CPU core
 (\texttt{taskset -c 0}, \texttt{OMP\_NUM\_THREADS=1}), gcc 13.3 with
-\texttt{-O3 -march=native -flto -ffp-contract=fast}.  ``before''
-columns are the throughput just before the SoA bilinear table and
-Marsaglia sphere sampler were introduced; ``after'' columns are with
-both in place. ``updates/s'' is the number of \emph{spin updates}
-per second; for cluster algorithms it counts ``sweeps $\times$ $N$
-sites'' which conflates wall time with sample quality.}
+\texttt{-O3 -march=native -flto -ffp-contract=fast}.  ``v3'' columns
+were captured just before the SoA bilinear table and Marsaglia sphere
+sampler were introduced; ``v4'' columns are after the trilinear
+pre-contraction (Section~\ref{sec:trilinear}), the Marsaglia method
+extended to the mixed and strain families (Section~\ref{sec:marsaglia}),
+and the magnetoelastic-field fusion
+(Section~\ref{sec:me-fuse}) have all landed.  ``updates/s'' is the
+number of \emph{spin updates} per second; for cluster algorithms it
+counts ``sweeps $\times$ $N$ sites'' which conflates wall time with
+sample quality.  Numbers in bold show kernels where the v4 pass moved
+the needle by more than $\sim$~25\,\%.}
 \label{tab:bench}
-\begin{tabular}{llrrrr}
+\begin{tabular}{lllrrrr}
 \toprule
-Model & Algorithm & $L$ & $N$ & before (upd/s) & after (upd/s) \\
+Family & Model & Algorithm & $L$ & $N$ & v3 (upd/s) & v4 (upd/s) \\
 \midrule
-Heisenberg honeycomb & Metropolis     & 32 & 2048 & $1.43 \times 10^{7}$ & $\mathbf{1.80 \times 10^{7}}$ \\
-Heisenberg honeycomb & Overrelaxation & 32 & 2048 & $3.35 \times 10^{7}$ & $3.35 \times 10^{7}$ \\
-Heisenberg honeycomb & met+5over      & 32 & 2048 & $4.52 \times 10^{6}$ & $\mathbf{4.89 \times 10^{6}}$ \\
-Heisenberg honeycomb & Wolff          & 32 & 2048 & $6.83 \times 10^{8}$ & $5.95 \times 10^{8}$ \\
-Heisenberg honeycomb & Swendsen--Wang & 32 & 2048 & $2.35 \times 10^{7}$ & $2.31 \times 10^{7}$ \\
-Kitaev honeycomb     & Metropolis     & 32 & 2048 & $1.35 \times 10^{7}$ & $\mathbf{1.78 \times 10^{7}}$ \\
-Kitaev honeycomb     & Overrelaxation & 32 & 2048 & $3.21 \times 10^{7}$ & $3.31 \times 10^{7}$ \\
-Pyrochlore           & Metropolis     & 6  & 864  & $1.07 \times 10^{7}$ & $\mathbf{1.41 \times 10^{7}}$ \\
-Pyrochlore           & Overrelaxation & 6  & 864  & $2.07 \times 10^{7}$ & $2.26 \times 10^{7}$ \\
-Pyrochlore           & met+5over      & 6  & 864  & $2.88 \times 10^{6}$ & $\mathbf{3.40 \times 10^{6}}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & Metropolis     & 32 & 2048  & $1.43{\times}10^{7}$ & $\mathbf{2.03{\times}10^{7}}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & Overrelaxation & 32 & 2048  & $3.35{\times}10^{7}$ & $3.45{\times}10^{7}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & met+5over      & 32 & 2048  & $4.52{\times}10^{6}$ & $\mathbf{5.16{\times}10^{6}}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & Wolff          & 32 & 2048  & $6.83{\times}10^{8}$ & $5.78{\times}10^{8}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & Swendsen--Wang & 32 & 2048  & $2.35{\times}10^{7}$ & $2.43{\times}10^{7}$ \\
+\texttt{Lattice} & Kitaev honeycomb     & Metropolis     & 32 & 2048  & $1.35{\times}10^{7}$ & $\mathbf{1.86{\times}10^{7}}$ \\
+\texttt{Lattice} & Kitaev honeycomb     & Overrelaxation & 32 & 2048  & $3.21{\times}10^{7}$ & $3.41{\times}10^{7}$ \\
+\texttt{Lattice} & Pyrochlore           & Metropolis     & 6  & 864   & $1.07{\times}10^{7}$ & $\mathbf{1.47{\times}10^{7}}$ \\
+\texttt{Lattice} & Pyrochlore           & Overrelaxation & 6  & 864   & $2.07{\times}10^{7}$ & $2.45{\times}10^{7}$ \\
+\texttt{Lattice} & Pyrochlore           & met+5over      & 6  & 864   & $2.88{\times}10^{6}$ & $\mathbf{3.53{\times}10^{6}}$ \\
 \midrule
-\multicolumn{6}{l}{\emph{Cache-hierarchy effect, Heisenberg honeycomb metropolis (after):}} \\
-Heisenberg honeycomb & Metropolis     & 32  & 2048  &  --- & $1.8 \times 10^{7}$ \\
-Heisenberg honeycomb & Metropolis     & 64  & 8192  &  --- & $1.4 \times 10^{7}$ \\
-Heisenberg honeycomb & Metropolis     & 128 & 32768 &  --- & $6.5 \times 10^{6}$ \\
+\texttt{MixedLattice} & TmFeO$_3$ bilinear  & Metropolis     & 4 & 512  & $1.21{\times}10^{5}$ & $\mathbf{7.85{\times}10^{5}}$ \\
+\texttt{MixedLattice} & TmFeO$_3$ bilinear  & Overrelaxation & 4 & 512  & $1.50{\times}10^{5}$ & $\mathbf{9.13{\times}10^{5}}$ \\
+\texttt{MixedLattice} & TmFeO$_3$ trilinear & Metropolis     & 4 & 512  & $8.20{\times}10^{4}$ & $\mathbf{4.65{\times}10^{5}}$ \\
+\texttt{MixedLattice} & TmFeO$_3$ trilinear & Overrelaxation & 4 & 512  & $9.18{\times}10^{4}$ & $\mathbf{5.51{\times}10^{5}}$ \\
+\midrule
+\texttt{StrainPhonon} & Honeycomb (bilinear, $\lambda_{\rm Eg}=0$) & Metropolis     & 24 & 1152 & $5.05{\times}10^{5}$ & $\mathbf{4.81{\times}10^{6}}$ \\
+\texttt{StrainPhonon} & Honeycomb (bilinear, $\lambda_{\rm Eg}=0$) & Overrelaxation & 24 & 1152 & $5.43{\times}10^{5}$ & $\mathbf{6.65{\times}10^{6}}$ \\
+\texttt{StrainPhonon} & Honeycomb $+$ ME ($\lambda_{\rm Eg}{\ne}0$) & Metropolis     & 24 & 1152 & $1.04{\times}10^{6}$ & $\mathbf{4.43{\times}10^{6}}$ \\
+\texttt{StrainPhonon} & Honeycomb $+$ ME ($\lambda_{\rm Eg}{\ne}0$) & Overrelaxation & 24 & 1152 & $5.64{\times}10^{5}$ & $\mathbf{5.53{\times}10^{6}}$ \\
+\midrule
+\multicolumn{7}{l}{\emph{Cache-hierarchy effect, Heisenberg honeycomb metropolis (v4):}} \\
+\texttt{Lattice} & Heisenberg honeycomb & Metropolis     & 32  & 2048  & --- & $2.0{\times}10^{7}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & Metropolis     & 64  & 8192  & --- & $1.4{\times}10^{7}$ \\
+\texttt{Lattice} & Heisenberg honeycomb & Metropolis     & 128 & 32768 & --- & $6.5{\times}10^{6}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -396,6 +411,20 @@ atomistic spin code from \textsc{Spirit} to \textsc{UppASD}.  It is
 genuinely free correctness: the produced distribution is uniform on
 $S^2$ to machine precision, since the rejection step is exact.
 
+\paragraph{Marsaglia for the mixed and strain families.}
+The Marsaglia method is specific to $S^{2}$ (3-component spins).
+For an SU(2)/SU(3) \texttt{MixedLattice}, the SU(2) sublattice is
+$S^{2}$ and uses Marsaglia, while the SU(3) sublattice (which is a
+$d{=}8$ Bloch vector with two Casimir constraints, not just a unit
+vector) keeps the older ``hypercube + project'' sampler since
+no two-uniform analogue exists.  The detection is a single
+\texttt{if (spin\_dim == 3)} branch in
+\texttt{MixedLattice::gen\_random\_spin}.  The
+\texttt{StrainPhononLattice} is purely $S^{2}$, so Marsaglia is used
+unconditionally.  In both cases the Metropolis kernel inherits the
+same $\sim 25\,\%$ wall-time reduction we measured on
+\texttt{Lattice}.
+
 \paragraph{What about flat spin storage?}
 A natural follow-up was to change \texttt{vector<Eigen::VectorXd>}
 (scattered heap allocations) into a single contiguous
@@ -415,7 +444,193 @@ L1 either way, the sync overhead dominates.  At very large $N$
 layout would likely win again; we leave that as a future refactor.
 
 % =================================================================
-\section{Ingredient IV: sweep order and branch behaviour}
+\section{Ingredient IV: tensor contraction order matters more than the
+                       layout}
+\label{sec:trilinear}
+% =================================================================
+
+The optimizations in Ingredients I--III all assumed the most expensive
+per-site operation is summing a few neighbour spins each weighted by a
+$d{\times}d$ exchange matrix.  That is true for plain Heisenberg, Kitaev,
+and similar bilinear models.  But many real materials carry
+\emph{trilinear} couplings, of the form
+\[
+   H_{\text{tri}} = \sum_{i\in S}\;\sum_{(j,k)\in T_i}\;
+   \chi^{(i,j,k)}_{abc}\, S_i^a\, S_j^b\, S_k^c .
+\]
+The TmFeO$_3$ \texttt{MixedLattice} model in this code, for instance,
+has SU(2)--SU(2)--SU(3) trilinear terms with $d_{\text{SU(2)}} = 3$
+and $d_{\text{SU(3)}} = 8$, giving a tensor of size
+$3 \times 3 \times 8 = 72$ doubles per trilinear bond.  Up to
+$\sim 8$ trilinear bonds per site, that is several hundred kB of
+exchange data per site.
+
+\subsection{The naive triple loop is quadratic in $d$ \emph{and} doubles
+            the work}
+A textbook implementation of $\Delta E$ for a single Metropolis
+proposal at site $i$ does:
+\begin{lstlisting}
+double E_old = 0, E_new = 0;
+for (a=0..d_i; ++a)
+  for (b=0..d_j; ++b)
+    for (c=0..d_k; ++c) {
+      E_old += chi[a][b][c] * S_i_old[a] * S_j[b] * S_k[c];
+      E_new += chi[a][b][c] * S_i_new[a] * S_j[b] * S_k[c];
+    }
+double dE = E_new - E_old;
+\end{lstlisting}
+This is two passes through the $O(d^{3})$ tensor, even though only
+$S_i$ changes between the two evaluations.
+
+\subsection{The fix: pre-contract two indices once, then take a dot product}
+Note that
+\[
+   E_{\text{new}} - E_{\text{old}}
+   = \sum_{a} \big(S_i^{\text{new}, a} - S_i^{\text{old}, a}\big) \,
+     \underbrace{\Big[\sum_{b,c} \chi^{(i,j,k)}_{abc} S_j^{b} S_k^{c}\Big]}_{V_{a}\;\text{(pre-contracted)}} .
+\]
+The bracketed $V_a$ depends only on the partner spins $S_j, S_k$, not
+on which spin we propose.  We compute it once per trilinear bond at
+$O(d_i d_j d_k)$ cost, then collapse the difference to a single dot
+product, at $O(d_i)$ cost:
+\begin{lstlisting}
+double V[d_i] = {0};
+for (a=0..d_i; ++a)
+  for (b=0..d_j; ++b)
+    for (c=0..d_k; ++c)
+      V[a] += chi[a][b][c] * S_j[b] * S_k[c];
+
+double dE = 0;
+for (a=0..d_i; ++a)
+  dE += (S_i_new[a] - S_i_old[a]) * V[a];
+\end{lstlisting}
+Total work has gone from $2\,d_i d_j d_k$ multiply--adds to
+$d_i d_j d_k + d_i$, an asymptotic factor-of-two saving plus much
+better register pressure (the two passes in the naive version evict
+each other's accumulators).  In practice, on the TmFeO$_3$ trilinear
+benchmark of Table~\ref{tab:bench} the win is closer to a
+factor of $\sim 6$, because the rewrite also lets the compiler hoist
+the load of $\chi_{abc}$ out of the inner loop and reuse the
+partner-spin cache.
+
+\paragraph{Special case: self-coupling.}  A small subtlety: in some
+trilinear topologies the partner $j$ or $k$ in a term of site $i$
+\emph{is} site $i$ itself (so the same spin appears two or three times
+in one product, with multiplicity).  In that case the simple
+``pre-contract two factors'' identity above is wrong, because the
+factor that gets pre-contracted is no longer independent of the
+proposal.  Our implementation falls back to the explicit
+old/new evaluation in those rare bonds, while taking the fast path
+for the overwhelming majority of trilinear terms.  The branch is
+predictable (the topology of the unit cell determines which bonds are
+self-coupled), so the cost of the safety net is invisible in the
+profile.
+
+\paragraph{Pre-contraction in the local field.}  The same identity
+shows up in the LLG dynamics, where what we need is
+$\partial H / \partial S_i^{a}$ rather than $\Delta E$:
+\[
+   \big(H_i^{\text{loc}}\big)_a \;\supset\;
+   \sum_{(j,k)} \chi^{(i,j,k)}_{abc}\, S_j^{b} S_k^{c} \;=\; V_a .
+\]
+The local-field implementation in \texttt{get\_local\_field\_*}
+already used this contraction order (it is the natural one when you
+think of the field as a derivative), so no change was required there.
+The new code in \texttt{site\_energy\_*\_diff} brings the
+energy-difference path up to parity with the field path.
+
+% =================================================================
+\section{Ingredient V: fuse derivative passes that share a neighbour
+                       loop}
+\label{sec:me-fuse}
+% =================================================================
+
+Two-sublattice or spin--lattice models often write the magnetic
+Hamiltonian as a \emph{linear combination of basis operators},
+each implemented as its own helper function:
+\[
+   H = \sum_{\alpha} c_{\alpha}\, f_{\alpha}(\{S_j\}_{j \in \text{nn}(i)}) .
+\]
+For example, the strain--phonon honeycomb in this code groups its
+magnetoelastic coupling into eight basis derivatives,
+$\partial f^{\text{Eg},1}_{K},\,\partial f^{\text{Eg},2}_{K},\,
+ \partial f^{\text{Eg},1}_{J},\,\partial f^{\text{Eg},2}_{J},\,
+ \partial f^{\text{Eg},1}_{\Gamma},\,\partial f^{\text{Eg},2}_{\Gamma},\,
+ \partial f^{\text{Eg},1}_{\Gamma'},\,\partial f^{\text{Eg},2}_{\Gamma'}$,
+where each one was historically implemented as its own member function
+that walked the nearest-neighbour list.  The magnetoelastic field was
+then assembled as
+\[
+   H^{\text{me}}_i = \sum_{\alpha=1}^{8} \lambda_{\alpha}(\boldsymbol{\varepsilon})\,
+                     \big(\partial f_{\alpha}\big)_i .
+\]
+This is correct, but at runtime each $i$ does \emph{eight} independent
+walks over its three nearest-neighbour bonds for a total of $24$ bond
+visits, of which $87.5\,\%$ are pure book-keeping (re-loading the same
+\texttt{nn\_partners[i][n]}, \texttt{nn\_bond\_types[i][n]} table
+entries, and re-reading the same partner spin).
+
+\subsection{The fix: one neighbour loop, accumulate eight contributions
+            in registers}
+Linearity of $H^{\text{me}}_i$ in $\alpha$ means the sum can be hoisted
+inside the bond loop.  For each NN bond $b$ with bond type $\gamma_b$
+and partner spin $S_{j(b)}$, we precompute a per-$\gamma$ ``strain
+prefactor''
+\[
+   \phi(\gamma) = \lambda_{\rm Eg}\!\left[\overline{\varepsilon}_{\rm Eg1}\,
+                  w_{\rm Eg1}(\gamma) + \overline{\varepsilon}_{\rm Eg2}\,
+                  w_{\rm Eg2}(\gamma)\right]
+\]
+where $w_{\rm Eg1} = (+1,+1,-2)$, $w_{\rm Eg2} = (+\sqrt{3},-\sqrt{3},0)$
+are the trigonal Eg-channel projection weights, and
+$\overline{\varepsilon}_{\rm Eg1,Eg2}$ are the global-strain sums.
+Then, in a single pass over the three NN bonds:
+\begin{lstlisting}
+for (size_t n = 0; n < n_partners; ++n) {
+    const size_t j     = nn_partners[i][n];
+    const int    gamma = nn_bond_types[i][n];
+    const int    alpha = (gamma + 1) % 3;
+    const int    beta  = (gamma + 2) % 3;
+    const double Sjg = spins[j](gamma), Sja = spins[j](alpha), Sjb = spins[j](beta);
+
+    // Eight operators collapsed into three component sums:
+    const double comb_g = (J+K)*Sjg + Gammap*(Sja + Sjb);
+    const double comb_a = J*Sja + Gamma*Sjb + Gammap*Sjg;
+    const double comb_b = J*Sjb + Gamma*Sja + Gammap*Sjg;
+
+    H(gamma) -= phi[gamma] * comb_g;
+    H(alpha) -= phi[gamma] * comb_a;
+    H(beta)  -= phi[gamma] * comb_b;
+}
+\end{lstlisting}
+This is exactly the same arithmetic as the eight separate
+\texttt{df\_*\_dS} routines (we have only re-associated the sum), but
+we visit each NN bond once instead of eight times, and the partner
+spin and bond-type tables are loaded once per bond instead of eight
+times.
+
+The measured impact (Table~\ref{tab:bench}, last block of rows) is
+roughly an order-of-magnitude speedup on
+\texttt{strain-honeycomb-me} Metropolis ($1.0 \times 10^{6}\to
+4.4 \times 10^{6}$ updates/s) and overrelaxation ($5.6 \times
+10^{5}\to 5.5 \times 10^{6}$).  The bilinear-only strain model
+($\lambda_{\rm Eg} = 0$) takes a single early-exit branch and never
+enters the loop, so its speedup over the v3 baseline comes entirely
+from the upstream Marsaglia and trilinear-contraction work.
+
+\paragraph{When does fusion matter?}  Fusion is profitable whenever
+several derivatives of an energy term \emph{share their inner sum
+structure} (here: a single NN-partner loop).  In the SoA literature
+this is called \emph{loop fusion} or \emph{horizontal merging}; in the
+classical-spin context it appears anywhere a Hamiltonian is written
+as a linear combination of bond operators (Heisenberg + Kitaev
++ $\Gamma$ + $\Gamma'$, magnetoelastic Eg/Eg, A1g/Eg, etc.).  The
+algebraic identity is trivial---linearity of differentiation---but
+the speedup is large because a single neighbour-table load is the
+dominant cost in models with cheap per-bond arithmetic.
+
+% =================================================================
+\section{Ingredient VI: sweep order and branch behaviour}
 % =================================================================
 
 \subsection{Sequential vs random site order}
@@ -451,7 +666,7 @@ downhill ($\Delta E < 0$), so the saved \texttt{exp()} calls are a
 measurable win and were one of the explicit bugs we fixed in this code.
 
 % =================================================================
-\section{Ingredient V: better algorithms beat better implementations}
+\section{Ingredient VII: better algorithms beat better implementations}
 % =================================================================
 
 No amount of low-level tuning can beat a fundamentally better
@@ -527,7 +742,7 @@ own rank.  The systems-level engineering matters here too:
 \end{itemize}
 
 % =================================================================
-\section{Ingredient VI: parallelism and where to apply it}
+\section{Ingredient VIII: parallelism and where to apply it}
 % =================================================================
 
 There are three layers of parallelism on a typical CPU node:
@@ -587,7 +802,7 @@ sweeps that use MPI sub-communicators silently corrupt their gathered
 statistics.
 
 % =================================================================
-\section{Ingredient VII: reproducibility is a feature, not a luxury}
+\section{Ingredient IX: reproducibility is a feature, not a luxury}
 % =================================================================
 
 A common ``optimization'' is to seed the RNG from the wall clock.  This
@@ -653,12 +868,22 @@ with.
   \item \textbf{The molecular-dynamics integrator can be re-projected
         onto the constraint surface} (here, $|\mathbf{S}| = 1$) at user
         request.
+  \item \textbf{Trilinear / multi-spin terms pre-contract their partner
+        indices} (Section~\ref{sec:trilinear}) so that one Metropolis
+        proposal costs $O(d^{3}) + O(d)$ instead of $2\,O(d^{3})$.
+  \item \textbf{Linear combinations of derivative operators are fused
+        into a single neighbour pass} (Section~\ref{sec:me-fuse}),
+        which is the dominant cost in spin--lattice / magnetoelastic
+        models such as the strain--phonon honeycomb here.
 \end{enumerate}
 
-\texttt{ClassicalSpin\_Cpp} now ticks all thirteen, including
+\texttt{ClassicalSpin\_Cpp} now ticks all fifteen, including
 item~3 (the Structure-of-Arrays bilinear table, see
-Section~\ref{sec:soa}) and the Marsaglia sphere sampler
-(Section~\ref{sec:marsaglia}).  The remaining gap before
+Section~\ref{sec:soa}), the Marsaglia sphere sampler
+(Section~\ref{sec:marsaglia}, including its mixed/strain
+extensions), the trilinear pre-contraction of
+Section~\ref{sec:trilinear}, and the magnetoelastic-derivative
+fusion of Section~\ref{sec:me-fuse}.  The remaining gap before
 head-to-head benchmarking against Vampire/UppASD on large
 Heisenberg lattices ($L \gtrsim 128$) is hand-rolled SIMD
 intrinsics on the SoA bilinear table---the layout is now

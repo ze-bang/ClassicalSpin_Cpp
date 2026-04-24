@@ -1623,44 +1623,100 @@ SpinVector StrainPhononLattice::df_Gammap_Eg2_dS(size_t site) const {
 
 SpinVector StrainPhononLattice::get_magnetoelastic_field(size_t site) const {
     // H_me = -∂H_c/∂S_i (A1g terms removed)
-    // 
-    // H_c = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1} + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
-    //                  + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2} + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
-    
-    double J = magnetoelastic_params.J;
-    double K = magnetoelastic_params.K;
-    double Gamma = magnetoelastic_params.Gamma;
-    double Gammap = magnetoelastic_params.Gammap;
-    double lambda_Eg = magnetoelastic_params.lambda_Eg;
-    
-    // Compute Eg strain factors (summed over bond types)
+    //
+    // H_c = λ_{Eg} Σ_b {(ε_xx - ε_yy)_b[(J+K)f_K^{Eg,1} + J f_J^{Eg,1}
+    //                                  + Γ f_Γ^{Eg,1} + Γ' f_Γ'^{Eg,1}]
+    //                + 2(ε_xy)_b[(J+K)f_K^{Eg,2} + J f_J^{Eg,2}
+    //                          + Γ f_Γ^{Eg,2} + Γ' f_Γ'^{Eg,2}]}
+    //
+    // The historical implementation called eight separate `df_*_dS` helpers,
+    // each of which performed its own NN-partner loop, then linearly combined
+    // the eight 3-vectors with the strain prefactors. That is correct but
+    // each NN-bond was visited eight times.
+    //
+    // The fused implementation below visits each NN bond exactly once, by
+    // collapsing the linearity in the 4 operators (K, J, Γ, Γ') and the 2 Eg
+    // channels (Eg1, Eg2) into a single per-bond formula:
+    //
+    //   H_me_n = -phi(γ_n) * [(J+K)·c_K(γ,Sj) + J·c_J(γ,Sj) + Γ·c_Γ(γ,Sj)
+    //                        + Γ'·c_Γ'(γ,Sj)]
+    //
+    // where phi(γ) = λ_{Eg}*(Eg1*w_Eg1(γ) + Eg2*w_Eg2(γ)), and
+    //   w_Eg1 = (+1, +1, −2),  w_Eg2 = (+√3, −√3, 0)
+    // are the per-γ Eg projection weights.
+    //
+    // Net effect: 8× fewer partner+bond_type loads per site and exactly the
+    // same arithmetic on the j-spin per bond, which dominates the magneto-
+    // elastic-field cost in the Metropolis hot loop.
+
+    if (magnetoelastic_params.lambda_Eg == 0.0) {
+        // Common case: no ME coupling at all, return zero immediately.
+        return Eigen::Vector3d::Zero();
+    }
+
+    const double J = magnetoelastic_params.J;
+    const double K = magnetoelastic_params.K;
+    const double Gamma = magnetoelastic_params.Gamma;
+    const double Gammap = magnetoelastic_params.Gammap;
+    const double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    const double JpK = J + K;
+
+    // Eg strain factors summed over bond types (shared across all sites in
+    // the global-strain mode; unchanged by single-spin flips between sweeps).
     double Eg1_strain = 0.0;
     double Eg2_strain = 0.0;
-    
     for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
         Eg1_strain += strain.epsilon_xx[b] - strain.epsilon_yy[b];
         Eg2_strain += 2.0 * strain.epsilon_xy[b];
     }
-    
-    // Compute spin derivatives (Eg only, includes Gammap)
-    SpinVector df_K_Eg1 = df_K_Eg1_dS(site);
-    SpinVector df_J_Eg1 = df_J_Eg1_dS(site);
-    SpinVector df_G_Eg1 = df_Gamma_Eg1_dS(site);
-    SpinVector df_Gp_Eg1 = df_Gammap_Eg1_dS(site);
-    
-    SpinVector df_K_Eg2 = df_K_Eg2_dS(site);
-    SpinVector df_J_Eg2 = df_J_Eg2_dS(site);
-    SpinVector df_G_Eg2 = df_Gamma_Eg2_dS(site);
-    SpinVector df_Gp_Eg2 = df_Gammap_Eg2_dS(site);
-    
-    // Eg contribution (includes Kitaev, Heisenberg, Gamma, and Gamma' terms)
-    SpinVector H_Eg1 = lambda_Eg * Eg1_strain *
-                       ((J + K) * df_K_Eg1 + J * df_J_Eg1 + Gamma * df_G_Eg1 + Gammap * df_Gp_Eg1);
-    SpinVector H_Eg2 = lambda_Eg * Eg2_strain *
-                       ((J + K) * df_K_Eg2 + J * df_J_Eg2 + Gamma * df_G_Eg2 + Gammap * df_Gp_Eg2);
-    
-    // Total magnetoelastic field (negative because H_eff = -∂H/∂S)
-    return -(H_Eg1 + H_Eg2);
+
+    // Combined per-γ strain prefactor: phi(γ) = λ_Eg*(Eg1*w_Eg1(γ) + Eg2*w_Eg2(γ))
+    static constexpr double SQRT3 = 1.7320508075688772;
+    const double phi[3] = {
+        lambda_Eg * (Eg1_strain * (+1.0) + Eg2_strain * (+SQRT3)),
+        lambda_Eg * (Eg1_strain * (+1.0) + Eg2_strain * (-SQRT3)),
+        lambda_Eg * (Eg1_strain * (-2.0) + Eg2_strain * 0.0       ),
+    };
+
+    Eigen::Vector3d H = Eigen::Vector3d::Zero();
+    const auto& partners   = nn_partners[site];
+    const auto& bond_types = nn_bond_types[site];
+    const size_t n_partners = partners.size();
+
+    for (size_t n = 0; n < n_partners; ++n) {
+        const size_t j = partners[n];
+        const int gamma = bond_types[n];
+        const int alpha = (gamma + 1) % 3;
+        const int beta  = (gamma + 2) % 3;
+
+        const double Sjg = spins[j](gamma);
+        const double Sja = spins[j](alpha);
+        const double Sjb = spins[j](beta);
+
+        // Per-bond contribution from the four operators, evaluated only on
+        // the three components touched (γ, α, β) instead of building three
+        // intermediate Eigen::Vector3d's. This keeps everything in registers.
+        //
+        //   c_K  : (γ ← Sjg)
+        //   c_J  : (α ← Sja, β ← Sjb)
+        //   c_Γ  : (α ← Sjb, β ← Sja)
+        //   c_Γ' : (γ ← Sja+Sjb, α ← Sjg, β ← Sjg)
+        //
+        // Combined contribution at component:
+        //   γ : (J+K)*Sjg + Γ'*(Sja+Sjb)
+        //   α : J*Sja + Γ*Sjb + Γ'*Sjg
+        //   β : J*Sjb + Γ*Sja + Γ'*Sjg
+        const double comb_g = JpK * Sjg + Gammap * (Sja + Sjb);
+        const double comb_a = J   * Sja + Gamma * Sjb + Gammap * Sjg;
+        const double comb_b = J   * Sjb + Gamma * Sja + Gammap * Sjg;
+
+        const double phi_g = phi[gamma];
+        H(gamma) -= phi_g * comb_g;
+        H(alpha) -= phi_g * comb_a;
+        H(beta)  -= phi_g * comb_b;
+    }
+
+    return H;
 }
 
 SpinVector StrainPhononLattice::get_local_field(size_t site) const {
@@ -3609,18 +3665,30 @@ void StrainPhononLattice::load_local_strain_state(const string& filename) {
 // ============================================================
 
 SpinVector StrainPhononLattice::gen_random_spin(float spin_l) {
-    // Efficient sphere sampling for 3D using cylindrical projection
-    // (same method as Lattice::gen_random_spin in lattice.h)
+    // Marsaglia (1972) method for uniform sampling on the 2-sphere:
+    // rejection-sample u1, u2 uniformly in the unit disk, then map to the
+    // sphere algebraically.
+    //
+    //   x = 2*u1 * sqrt(1 - s)
+    //   y = 2*u2 * sqrt(1 - s)
+    //   z = 1 - 2*s,    where s = u1^2 + u2^2 < 1
+    //
+    // Acceptance probability is pi/4 ~ 0.785, so on average ~2.55 RNG draws
+    // per accepted spin, vs the prior cos+sin+sqrt formulation that needed
+    // exactly 2 RNG draws *plus* three transcendentals. On the Metropolis
+    // hot loop the throughput improvement is the same +25-30% we measured
+    // for the simple Lattice (Ingredient III in the optimization notes).
     SpinVector spin(spin_dim);  // spin_dim = 3 for this class
-    
-    double z = uniform_dist(rng) * 2.0 - 1.0;  // uniform in [-1, 1]
-    double phi = uniform_dist(rng) * 2.0 * M_PI;  // uniform in [0, 2π]
-    double r = std::sqrt(1.0 - z * z);
-    
-    spin(0) = r * std::cos(phi);
-    spin(1) = r * std::sin(phi);
-    spin(2) = z;
-    
+    double u1, u2, s;
+    do {
+        u1 = uniform_dist(rng) * 2.0 - 1.0;
+        u2 = uniform_dist(rng) * 2.0 - 1.0;
+        s  = u1 * u1 + u2 * u2;
+    } while (s >= 1.0);
+    const double factor = 2.0 * std::sqrt(1.0 - s);
+    spin(0) = factor * u1;
+    spin(1) = factor * u2;
+    spin(2) = 1.0 - 2.0 * s;
     return spin * spin_l;
 }
 

@@ -405,24 +405,47 @@ public:
      */
     SpinVector gen_random_spin(float spin_l, size_t spin_dim) {
         SpinVector spin(spin_dim);
-        
+
         if (spin_dim == 3) {
-            double z = random_double_lehman(-1, 1);
-            double r = sqrt(1.0 - z*z);
-            double phi = random_double_lehman(0, 2*M_PI);
-            spin(0) = r * cos(phi);
-            spin(1) = r * sin(phi);
-            spin(2) = z;
+            // Marsaglia (1972) method for uniform sampling on the 2-sphere:
+            // rejection-sample u1, u2 uniformly in the unit disk, then map
+            // to the sphere algebraically.
+            //
+            //   x = 2*u1 * sqrt(1 - s)
+            //   y = 2*u2 * sqrt(1 - s)
+            //   z = 1 - 2*s,    where s = u1^2 + u2^2 < 1
+            //
+            // Acceptance probability is pi/4 ~ 0.785, so on average ~2.55
+            // RNG draws per accepted spin. Replaces the cos+sin+sqrt
+            // formulation: same distribution, no transcendental calls.
+            // For SU(2) Metropolis this is a few ns per proposed move and
+            // is shared between both species (called every accept/reject).
+            double u1, u2, s;
+            do {
+                u1 = 2.0 * random_double_lehman(0.0, 1.0) - 1.0;
+                u2 = 2.0 * random_double_lehman(0.0, 1.0) - 1.0;
+                s  = u1 * u1 + u2 * u2;
+            } while (s >= 1.0);
+            const double factor = 2.0 * std::sqrt(1.0 - s);
+            spin(0) = factor * u1;
+            spin(1) = factor * u2;
+            spin(2) = 1.0 - 2.0 * s;
         } else {
-            // General n-sphere sampling
-            double norm = 0.0;
-            for (size_t i = 0; i < spin_dim; ++i) {
-                spin(i) = random_double_lehman(-1, 1);
-                norm += spin(i) * spin(i);
-            }
-            spin /= sqrt(norm);
+            // General n-sphere sampling. For spin_dim==8 (SU(3)) the
+            // hypercube + reject-near-zero approach is fine; transcendental
+            // savings here would be negligible since the inner loop is d
+            // multiplies + 1 sqrt regardless.
+            double norm_sq = 0.0;
+            do {
+                norm_sq = 0.0;
+                for (size_t i = 0; i < spin_dim; ++i) {
+                    spin(i) = random_double_lehman(-1, 1);
+                    norm_sq += spin(i) * spin(i);
+                }
+            } while (norm_sq < 1e-10);
+            spin /= std::sqrt(norm_sq);
         }
-        
+
         return spin * spin_l;
     }
 
@@ -932,56 +955,115 @@ public:
             mixed_bilinear_energy += spin_diff.dot(mixed_bilinear_interaction_SU2[site_index][i] * spins_SU3[partner_idx]);
         }
         
-        // Trilinear SU(2)-SU(2)-SU(2) interactions
+        // Trilinear SU(2)-SU(2)-SU(2) interactions.
+        //
+        // For a single-spin Metropolis move at site i, the change in any
+        // trilinear term T_{abc} S^i_a S^j_b S^k_c is
+        //     dE = (S_new - S_old) . V,  V[a] = sum_{bc} T[a,b,c] S^j_b S^k_c
+        // when neither partner is site i. This collapses two O(d^3)
+        // monomial evaluations (old and new) into a single O(d^3)
+        // contraction plus an O(d) dot product -- the canonical
+        // tensor-network "contract first, project later" optimization.
+        // The rare self-coupling case (p1==i or p2==i) still needs the
+        // explicit old/new path because S^i appears in two or three slots.
         double trilinear_energy = 0.0;
         for (size_t i = 0; i < trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU2[site_index][i][1];
             const auto& T = trilinear_interaction_SU2[site_index][i];
-            const SpinVector& p1_old = (p1_idx == site_index) ? old_spin : spins_SU2[p1_idx];
-            const SpinVector& p1_new = (p1_idx == site_index) ? new_spin : spins_SU2[p1_idx];
-            const SpinVector& p2_old = (p2_idx == site_index) ? old_spin : spins_SU2[p2_idx];
-            const SpinVector& p2_new = (p2_idx == site_index) ? new_spin : spins_SU2[p2_idx];
+            const bool p1_self = (p1_idx == site_index);
+            const bool p2_self = (p2_idx == site_index);
 
-            double old_term = 0.0;
-            double new_term = 0.0;
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
-                        const double coeff = T[a](b, c);
-                        old_term += coeff * old_spin(a) * p1_old(b) * p2_old(c);
-                        new_term += coeff * new_spin(a) * p1_new(b) * p2_new(c);
+            if (!p1_self && !p2_self) {
+                // Fast path (the common case): pre-contract partners.
+                const SpinVector& p1 = spins_SU2[p1_idx];
+                const SpinVector& p2 = spins_SU2[p2_idx];
+                double dE_term = 0.0;
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    double Va = 0.0;
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        const double p1b = p1(b);
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            Va += Ta(b, c) * p1b * p2(c);
+                        }
+                    }
+                    dE_term += spin_diff(a) * Va;
+                }
+                trilinear_energy += dE_term;  // multiplicity == 1
+            } else {
+                // Slow path: a single-spin flip changes more than one slot
+                // of the trilinear monomial, so the full old/new evaluation
+                // is required and a multiplicity correction restores the
+                // unique-term counting expected by total_energy().
+                const SpinVector& p1_old = p1_self ? old_spin : spins_SU2[p1_idx];
+                const SpinVector& p1_new = p1_self ? new_spin : spins_SU2[p1_idx];
+                const SpinVector& p2_old = p2_self ? old_spin : spins_SU2[p2_idx];
+                const SpinVector& p2_new = p2_self ? new_spin : spins_SU2[p2_idx];
+
+                double old_term = 0.0;
+                double new_term = 0.0;
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU2; ++c) {
+                            const double coeff = Ta(b, c);
+                            old_term += coeff * old_spin(a) * p1_old(b) * p2_old(c);
+                            new_term += coeff * new_spin(a) * p1_new(b) * p2_new(c);
+                        }
                     }
                 }
+                const double multiplicity = 1.0 +
+                    (p1_self ? 1.0 : 0.0) + (p2_self ? 1.0 : 0.0);
+                trilinear_energy += (new_term - old_term) / multiplicity;
             }
-            const double multiplicity = 1.0 +
-                (p1_idx == site_index ? 1.0 : 0.0) +
-                (p2_idx == site_index ? 1.0 : 0.0);
-            trilinear_energy += (new_term - old_term) / multiplicity;
         }
-        
-        // Mixed trilinear SU(2)-SU(2)-SU(3) interactions
+
+        // Mixed trilinear SU(2)-SU(2)-SU(3) interactions.
+        // The SU(3) partner can never collide with an SU(2) site (different
+        // species), so only the SU(2) partner p1 may collide.
         double mixed_trilinear_energy = 0.0;
         for (size_t i = 0; i < mixed_trilinear_partners_SU2[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU2[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU2[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU2[site_index][i];
-            const SpinVector& p1_old = (p1_idx == site_index) ? old_spin : spins_SU2[p1_idx];
-            const SpinVector& p1_new = (p1_idx == site_index) ? new_spin : spins_SU2[p1_idx];
+            const bool p1_self = (p1_idx == site_index);
 
-            double old_term = 0.0;
-            double new_term = 0.0;
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        const double coeff = T[a](b, c);
-                        old_term += coeff * old_spin(a) * p1_old(b) * spins_SU3[p2_idx](c);
-                        new_term += coeff * new_spin(a) * p1_new(b) * spins_SU3[p2_idx](c);
+            if (!p1_self) {
+                // Fast path: pre-contract V[a] = sum_{bc} T[a,b,c] p1(b) p2(c).
+                const SpinVector& p1 = spins_SU2[p1_idx];
+                const SpinVector& p2 = spins_SU3[p2_idx];
+                double dE_term = 0.0;
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    double Va = 0.0;
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        const double p1b = p1(b);
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            Va += Ta(b, c) * p1b * p2(c);
+                        }
+                    }
+                    dE_term += spin_diff(a) * Va;
+                }
+                mixed_trilinear_energy += dE_term;  // multiplicity == 1
+            } else {
+                const SpinVector& p1_old = old_spin;
+                const SpinVector& p1_new = new_spin;
+                const SpinVector& p2 = spins_SU3[p2_idx];
+                double old_term = 0.0;
+                double new_term = 0.0;
+                for (size_t a = 0; a < spin_dim_SU2; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            const double coeff = Ta(b, c);
+                            old_term += coeff * old_spin(a) * p1_old(b) * p2(c);
+                            new_term += coeff * new_spin(a) * p1_new(b) * p2(c);
+                        }
                     }
                 }
+                mixed_trilinear_energy += (new_term - old_term) / 2.0;
             }
-            const double multiplicity = 1.0 + (p1_idx == site_index ? 1.0 : 0.0);
-            mixed_trilinear_energy += (new_term - old_term) / multiplicity;
         }
         
         return field_energy + onsite_energy + bilinear_energy + mixed_bilinear_energy + 
@@ -1014,53 +1096,82 @@ public:
             mixed_bilinear_energy += spin_diff.dot(mixed_bilinear_interaction_SU3[site_index][i] * spins_SU2[partner_idx]);
         }
         
-        // Trilinear SU(3)-SU(3)-SU(3) interactions
+        // Trilinear SU(3)-SU(3)-SU(3) interactions.
+        // See site_energy_SU2_diff for the algebra; the savings here are
+        // proportionally larger because spin_dim_SU3 = 8 (so a triple loop
+        // is 512 multiply-adds vs 27 for SU(2)).
         double trilinear_energy = 0.0;
         for (size_t i = 0; i < trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = trilinear_partners_SU3[site_index][i][1];
             const auto& T = trilinear_interaction_SU3[site_index][i];
-            const SpinVector& p1_old = (p1_idx == site_index) ? old_spin : spins_SU3[p1_idx];
-            const SpinVector& p1_new = (p1_idx == site_index) ? new_spin : spins_SU3[p1_idx];
-            const SpinVector& p2_old = (p2_idx == site_index) ? old_spin : spins_SU3[p2_idx];
-            const SpinVector& p2_new = (p2_idx == site_index) ? new_spin : spins_SU3[p2_idx];
+            const bool p1_self = (p1_idx == site_index);
+            const bool p2_self = (p2_idx == site_index);
 
-            double old_term = 0.0;
-            double new_term = 0.0;
-            for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                for (size_t b = 0; b < spin_dim_SU3; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        const double coeff = T[a](b, c);
-                        old_term += coeff * old_spin(a) * p1_old(b) * p2_old(c);
-                        new_term += coeff * new_spin(a) * p1_new(b) * p2_new(c);
+            if (!p1_self && !p2_self) {
+                const SpinVector& p1 = spins_SU3[p1_idx];
+                const SpinVector& p2 = spins_SU3[p2_idx];
+                double dE_term = 0.0;
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    double Va = 0.0;
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                        const double p1b = p1(b);
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            Va += Ta(b, c) * p1b * p2(c);
+                        }
+                    }
+                    dE_term += spin_diff(a) * Va;
+                }
+                trilinear_energy += dE_term;  // multiplicity == 1
+            } else {
+                const SpinVector& p1_old = p1_self ? old_spin : spins_SU3[p1_idx];
+                const SpinVector& p1_new = p1_self ? new_spin : spins_SU3[p1_idx];
+                const SpinVector& p2_old = p2_self ? old_spin : spins_SU3[p2_idx];
+                const SpinVector& p2_new = p2_self ? new_spin : spins_SU3[p2_idx];
+
+                double old_term = 0.0;
+                double new_term = 0.0;
+                for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < spin_dim_SU3; ++b) {
+                        for (size_t c = 0; c < spin_dim_SU3; ++c) {
+                            const double coeff = Ta(b, c);
+                            old_term += coeff * old_spin(a) * p1_old(b) * p2_old(c);
+                            new_term += coeff * new_spin(a) * p1_new(b) * p2_new(c);
+                        }
                     }
                 }
+                const double multiplicity = 1.0 +
+                    (p1_self ? 1.0 : 0.0) + (p2_self ? 1.0 : 0.0);
+                trilinear_energy += (new_term - old_term) / multiplicity;
             }
-            const double multiplicity = 1.0 +
-                (p1_idx == site_index ? 1.0 : 0.0) +
-                (p2_idx == site_index ? 1.0 : 0.0);
-            trilinear_energy += (new_term - old_term) / multiplicity;
         }
-        
-        // Mixed trilinear SU(3)-SU(2)-SU(2) interactions
+
+        // Mixed trilinear SU(3)-SU(2)-SU(2) interactions.
+        // SU(2) partners are on a different sublattice from the SU(3) site,
+        // so collisions are impossible; we always take the fast path.
         double mixed_trilinear_energy = 0.0;
         for (size_t i = 0; i < mixed_trilinear_partners_SU3[site_index].size(); ++i) {
             const size_t p1_idx = mixed_trilinear_partners_SU3[site_index][i][0];
             const size_t p2_idx = mixed_trilinear_partners_SU3[site_index][i][1];
             const auto& T = mixed_trilinear_interaction_SU3[site_index][i];
+            const SpinVector& p1 = spins_SU2[p1_idx];
+            const SpinVector& p2 = spins_SU2[p2_idx];
 
-            double old_term = 0.0;
-            double new_term = 0.0;
+            double dE_term = 0.0;
             for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                double Va = 0.0;
+                const auto& Ta = T[a];
                 for (size_t b = 0; b < spin_dim_SU2; ++b) {
+                    const double p1b = p1(b);
                     for (size_t c = 0; c < spin_dim_SU2; ++c) {
-                        const double coeff = T[a](b, c);
-                        old_term += coeff * old_spin(a) * spins_SU2[p1_idx](b) * spins_SU2[p2_idx](c);
-                        new_term += coeff * new_spin(a) * spins_SU2[p1_idx](b) * spins_SU2[p2_idx](c);
+                        Va += Ta(b, c) * p1b * p2(c);
                     }
                 }
+                dE_term += spin_diff(a) * Va;
             }
-            mixed_trilinear_energy += new_term - old_term;
+            mixed_trilinear_energy += dE_term;
         }
         
         return field_energy + onsite_energy + bilinear_energy + mixed_bilinear_energy + 
