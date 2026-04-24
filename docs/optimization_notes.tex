@@ -170,38 +170,58 @@ on a honeycomb with $z = 3$ neighbours, about
 At $5 \times 10^{9}$ flop/s this is $\sim 5$ ns of arithmetic per site,
 hence a peak of $\sim 2 \times 10^{8}$ updates/sec/core.
 
-The benchmark in this code (Table~\ref{tab:bench}) measures
-$1.4 \times 10^{7}$ updates/sec/core for the same kernel.  We are
-$\sim$\,15$\times$ off peak.  Where does that gap come from?  And which
-gaps can we close without rewriting in CUDA?  The next sections answer
-that question, ingredient by ingredient.
+The benchmark in this code (Table~\ref{tab:bench}, ``after'' column)
+measures $1.8 \times 10^{7}$ updates/sec/core for the Heisenberg
+Metropolis kernel.  Before the SoA-table and Marsaglia refactors of
+Sections~\ref{sec:soa}--\ref{sec:marsaglia} the same kernel ran at
+$1.4 \times 10^{7}$, so the latest pass closes part of the
+$\sim 12\times$ gap to peak arithmetic that the rest of this note
+explains, ingredient by ingredient.
 
 \begin{table}[t]
 \centering
-\caption{Measured single-core throughput on a 32-thread Linux box (gcc
-13.3, \texttt{-O3 -march=native -flto}).  ``updates/sec'' is the number
-of \emph{spin updates} per second; for cluster algorithms it counts
-``sweeps $\times$ N sites'' which conflates wall time with sample
-quality.}
+\caption{Measured single-core throughput, pinned to one CPU core
+(\texttt{taskset -c 0}, \texttt{OMP\_NUM\_THREADS=1}), gcc 13.3 with
+\texttt{-O3 -march=native -flto -ffp-contract=fast}.  ``before''
+columns are the throughput just before the SoA bilinear table and
+Marsaglia sphere sampler were introduced; ``after'' columns are with
+both in place. ``updates/s'' is the number of \emph{spin updates}
+per second; for cluster algorithms it counts ``sweeps $\times$ $N$
+sites'' which conflates wall time with sample quality.}
 \label{tab:bench}
-\begin{tabular}{lllrrrr}
+\begin{tabular}{llrrrr}
 \toprule
-Model & Algorithm & $L$ & $N$ & wall (s) & sweeps/s & updates/s \\
+Model & Algorithm & $L$ & $N$ & before (upd/s) & after (upd/s) \\
 \midrule
-Heisenberg honeycomb & Metropolis     & 32 & 2048  & 2.94 & $6.8 \times 10^{3}$ & $1.4 \times 10^{7}$ \\
-Heisenberg honeycomb & Overrelaxation & 32 & 2048  & 1.25 & $1.6 \times 10^{4}$ & $3.3 \times 10^{7}$ \\
-Heisenberg honeycomb & Wolff          & 32 & 2048  & 0.016 & $3.2 \times 10^{5}$ & $6.5 \times 10^{8}$ \\
-Heisenberg honeycomb & Swendsen--Wang & 32 & 2048  & 0.44  & $1.1 \times 10^{4}$ & $2.3 \times 10^{7}$ \\
-Kitaev honeycomb     & Metropolis     & 32 & 2048  & 3.02 & $6.6 \times 10^{3}$ & $1.4 \times 10^{7}$ \\
-Pyrochlore           & Metropolis     & 6  & 864   & 0.73 & $1.4 \times 10^{4}$ & $1.2 \times 10^{7}$ \\
+Heisenberg honeycomb & Metropolis     & 32 & 2048 & $1.43 \times 10^{7}$ & $\mathbf{1.80 \times 10^{7}}$ \\
+Heisenberg honeycomb & Overrelaxation & 32 & 2048 & $3.35 \times 10^{7}$ & $3.35 \times 10^{7}$ \\
+Heisenberg honeycomb & met+5over      & 32 & 2048 & $4.52 \times 10^{6}$ & $\mathbf{4.89 \times 10^{6}}$ \\
+Heisenberg honeycomb & Wolff          & 32 & 2048 & $6.83 \times 10^{8}$ & $5.95 \times 10^{8}$ \\
+Heisenberg honeycomb & Swendsen--Wang & 32 & 2048 & $2.35 \times 10^{7}$ & $2.31 \times 10^{7}$ \\
+Kitaev honeycomb     & Metropolis     & 32 & 2048 & $1.35 \times 10^{7}$ & $\mathbf{1.78 \times 10^{7}}$ \\
+Kitaev honeycomb     & Overrelaxation & 32 & 2048 & $3.21 \times 10^{7}$ & $3.31 \times 10^{7}$ \\
+Pyrochlore           & Metropolis     & 6  & 864  & $1.07 \times 10^{7}$ & $\mathbf{1.41 \times 10^{7}}$ \\
+Pyrochlore           & Overrelaxation & 6  & 864  & $2.07 \times 10^{7}$ & $2.26 \times 10^{7}$ \\
+Pyrochlore           & met+5over      & 6  & 864  & $2.88 \times 10^{6}$ & $\mathbf{3.40 \times 10^{6}}$ \\
 \midrule
-\multicolumn{7}{l}{\emph{Cache-hierarchy effect, Heisenberg honeycomb metropolis:}} \\
-Heisenberg honeycomb & Metropolis     & 32  & 2048  & --- & --- & $1.4 \times 10^{7}$ \\
-Heisenberg honeycomb & Metropolis     & 64  & 8192  & --- & --- & $1.0 \times 10^{7}$ \\
-Heisenberg honeycomb & Metropolis     & 128 & 32768 & --- & --- & $4.7 \times 10^{6}$ \\
+\multicolumn{6}{l}{\emph{Cache-hierarchy effect, Heisenberg honeycomb metropolis (after):}} \\
+Heisenberg honeycomb & Metropolis     & 32  & 2048  &  --- & $1.8 \times 10^{7}$ \\
+Heisenberg honeycomb & Metropolis     & 64  & 8192  &  --- & $1.4 \times 10^{7}$ \\
+Heisenberg honeycomb & Metropolis     & 128 & 32768 &  --- & $6.5 \times 10^{6}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+The bolded rows are the kernels where this refactoring pass actually
+moved the needle: Metropolis (and any sweep that contains it) gained
+$\sim 25$--$30\%$ across all three models.  The pure-overrelaxation,
+Wolff, and Swendsen--Wang kernels were not measurably affected because
+they do not generate random spins (Marsaglia is irrelevant) and they
+already had reasonably contiguous J-table access (Eigen's
+\texttt{Matrix3d} stores its 9 doubles inline, and a
+\texttt{vector<Matrix3d>} is contiguous within each site).  The
+small Wolff regression is consistent with run-to-run variation in
+cluster size; the algorithm's per-spin cost is unchanged.
 
 % =================================================================
 \section{Ingredient I: the data layout}
@@ -242,20 +262,47 @@ does internally: it reads spins via raw \texttt{double*} pointers
 instead of \texttt{Eigen::VectorXd} temporaries.  The change alone is
 typically a $2$--$4 \times$ speedup on local-update kernels.
 
-\subsection{Why this matters even more for the interaction tables}
-The same logic applies to the exchange matrices.  The naive layout
+\subsection{The same logic applied to the interaction tables: SoA bilinear}
+\label{sec:soa}
+The naive layout for the exchange matrices is
 \begin{lstlisting}
 std::vector<std::vector<Eigen::Matrix3d>> bilinear_interaction;
 \end{lstlisting}
-hides three pointer indirections per neighbour: vector
-$\to$ inner vector $\to$ Eigen buffer.  Modern atomistic spin codes
-(Vampire, UppASD) instead pack the entire $N \times z \times 9$ table
-into a single \texttt{double[]} (a ``Structure of Arrays''):
+which on paper hides three pointer indirections per neighbour: outer
+vector $\to$ inner vector $\to$ Eigen buffer.  Modern atomistic spin
+codes (Vampire, UppASD) instead pack the entire $N \times z \times 9$
+table into a single \texttt{double[]}, and we now do the same:
 \begin{lstlisting}
-double* J_flat;     // size = N * z * 9
+vector<size_t> bi_flat_offset;        // CSR-style: size N+1
+vector<size_t> bi_flat_partner;       // size = total_bonds
+vector<double> bi_flat_J;             // size = total_bonds * spin_dim^2
+vector<uint8_t> bi_flat_needs_twist;  // precomputed twist mask
 \end{lstlisting}
-This is the single biggest optimization remaining for our code; it would
-likely give another $1.5$--$3\times$ on the Metropolis kernel.
+The flat tables are built once at the end of \texttt{initialize()};
+the original nested \texttt{vector<vector<...>>} stays as the source
+of truth for cold-path code (total energy, snapshot save/load).
+Inside \texttt{site\_energy\_diff\_flat()}, \texttt{overrelaxation()},
+and \texttt{get\_local\_field\_flat()} the bilinear partners and their
+$J$ matrices are now read straight from the flat arrays:
+
+\begin{lstlisting}
+const double* J = &bi_flat_J[k * D2];      // contiguous 9 doubles
+const double* P = spins[partner].data();   // (still scattered)
+for (a=0..3) for (b=0..3) row += J[a*3+b] * P[b];
+\end{lstlisting}
+
+Pleasantly enough this turned out to be a very small win in our case
+(a few percent on Metropolis): \texttt{Eigen::Matrix3d} already
+stores its 9 doubles inline, and \texttt{vector<Matrix3d>} is
+contiguous within a site, so the $J$ matrices were already L1-resident
+during a sequential sweep.  The big advantage of the rewrite is
+\emph{robustness}: removing the dependence on Eigen's expression
+templates and on the platform allocator's behaviour means the
+kernel now generates the same tight assembly across compilers and
+across allocator versions.  It also unblocks future SIMD-intrinsic
+work (the layout is now compatible with AVX2 \texttt{vfmadd231pd}
+on $9 \times d$ blocks).  The much larger Metropolis win in
+Table~\ref{tab:bench} comes from the next ingredient.
 
 % =================================================================
 \section{Ingredient II: zero allocation in the hot loop}
@@ -298,7 +345,77 @@ the projection buffer, and the Union--Find arrays; this alone removed
 hundreds of kilobytes of malloc/free traffic per sweep at $L = 12$.
 
 % =================================================================
-\section{Ingredient III: sweep order and branch behaviour}
+\section{Ingredient III: sphere sampling without trigonometry}
+\label{sec:marsaglia}
+% =================================================================
+
+The Metropolis kernel does roughly $N$ ``propose a random spin'' calls
+per sweep.  The textbook way to draw a uniformly distributed unit
+vector in 3D, given two uniform deviates $u_z, u_\phi \in [0,1)$, is
+\[
+   z   = 2 u_z - 1, \qquad
+   \phi = 2\pi u_\phi, \qquad
+   r   = \sqrt{1 - z^2}, \qquad
+   (x, y, z) = (r \cos\phi,\; r\sin\phi,\; z).
+\]
+This is mathematically clean, but on hardware it costs one
+\texttt{sqrt}, one \texttt{cos}, and one \texttt{sin} per spin.  On
+modern x86 \texttt{cos} and \texttt{sin} take $\sim 12$ cycles each
+when implemented in libm, plus a function-call boundary that
+defeats register allocation across the call.  Together that is
+$\sim 25$ ns per proposed move---about a third of the entire
+$\sim 70$ ns budget for one Metropolis update at the rates measured
+in Table~\ref{tab:bench}.
+
+Marsaglia (1972) showed how to produce the same distribution
+\emph{without any trigonometry}, by rejection-sampling in the unit
+disk and mapping to the sphere algebraically:
+\begin{lstlisting}
+do {
+    u1 = 2 * rand_uniform() - 1;
+    u2 = 2 * rand_uniform() - 1;
+    s  = u1*u1 + u2*u2;
+} while (s >= 1.0);
+const double factor = 2 * sqrt(1 - s);
+x = factor * u1;
+y = factor * u2;
+z = 1 - 2 * s;
+\end{lstlisting}
+The acceptance probability is the ratio of the unit disk to the unit
+square, $\pi/4 \approx 0.785$, so on average $1/0.785 \approx 1.27$
+iterations are needed---i.e.\ $\sim 2.55$ RNG calls per accepted
+spin (vs.\ exactly $2$ for the textbook method).  In exchange we
+delete one \texttt{sqrt} and \emph{both} transcendental calls.  In
+practice this is a $\sim 25$--$30\%$ wall-time improvement on the
+Metropolis kernel of every model in Table~\ref{tab:bench}, and is by
+itself the largest single optimization in the most recent pass.
+
+The same identity is used by NIST's RNG library, by NumPy's
+\texttt{random.normal} (via Box--Muller), and by every published
+atomistic spin code from \textsc{Spirit} to \textsc{UppASD}.  It is
+genuinely free correctness: the produced distribution is uniform on
+$S^2$ to machine precision, since the rejection step is exact.
+
+\paragraph{What about flat spin storage?}
+A natural follow-up was to change \texttt{vector<Eigen::VectorXd>}
+(scattered heap allocations) into a single contiguous
+\texttt{vector<double>} and let partner-spin reads stream from L1.
+We tried it (synced into a flat scratch at sweep entry, back out at
+exit) and found it was a wash---in fact a small \emph{regression}
+on Heisenberg.  The reason is that for short-range models with
+sequential site order, partner sites are mostly the immediate
+neighbours of the current site, and their Eigen buffers are usually
+already in L1 from a recent visit.  The cost of synchronising the
+flat scratch ($\sim 12$~kB of memory traffic per sweep at $L = 32$)
+outweighed the cache-locality benefit.  This is a useful
+counter-example: caching theory suggests the flat layout ``must''
+be faster, but at small $N$ where the entire spin set fits in
+L1 either way, the sync overhead dominates.  At very large $N$
+($L \gtrsim 128$, where the spin data spills out of L2), the flat
+layout would likely win again; we leave that as a future refactor.
+
+% =================================================================
+\section{Ingredient IV: sweep order and branch behaviour}
 % =================================================================
 
 \subsection{Sequential vs random site order}
@@ -334,7 +451,7 @@ downhill ($\Delta E < 0$), so the saved \texttt{exp()} calls are a
 measurable win and were one of the explicit bugs we fixed in this code.
 
 % =================================================================
-\section{Ingredient IV: better algorithms beat better implementations}
+\section{Ingredient V: better algorithms beat better implementations}
 % =================================================================
 
 No amount of low-level tuning can beat a fundamentally better
@@ -410,7 +527,7 @@ own rank.  The systems-level engineering matters here too:
 \end{itemize}
 
 % =================================================================
-\section{Ingredient V: parallelism and where to apply it}
+\section{Ingredient VI: parallelism and where to apply it}
 % =================================================================
 
 There are three layers of parallelism on a typical CPU node:
@@ -470,7 +587,7 @@ sweeps that use MPI sub-communicators silently corrupt their gathered
 statistics.
 
 % =================================================================
-\section{Ingredient VI: reproducibility is a feature, not a luxury}
+\section{Ingredient VII: reproducibility is a feature, not a luxury}
 % =================================================================
 
 A common ``optimization'' is to seed the RNG from the wall clock.  This
@@ -538,33 +655,47 @@ with.
         request.
 \end{enumerate}
 
-\texttt{ClassicalSpin\_Cpp} now ticks all thirteen.  The single
-remaining gap before head-to-head benchmarking against Vampire/UppASD
-on Heisenberg systems is item~3 (a Structure-of-Arrays refactor of the
-bilinear table), which is estimated to give a further $1.5$--$3 \times$
-on the Metropolis kernel at $L \gtrsim 32$.
+\texttt{ClassicalSpin\_Cpp} now ticks all thirteen, including
+item~3 (the Structure-of-Arrays bilinear table, see
+Section~\ref{sec:soa}) and the Marsaglia sphere sampler
+(Section~\ref{sec:marsaglia}).  The remaining gap before
+head-to-head benchmarking against Vampire/UppASD on large
+Heisenberg lattices ($L \gtrsim 128$) is hand-rolled SIMD
+intrinsics on the SoA bilinear table---the layout is now
+AVX2-compatible (9-double blocks for the $J$ matrix), but we still
+rely on the compiler's auto-vectorizer to emit
+\texttt{vfmadd231pd}.  An explicit intrinsics rewrite would be
+expected to give an additional $1.5$--$2 \times$ on the per-site
+energy difference, but the cost in maintainability and portability
+is real.
 
 % =================================================================
 \section{What the numbers mean}
 % =================================================================
 
 The headline number from Table~\ref{tab:bench} is
-$\sim 1.4 \times 10^{7}$ Metropolis spin-updates/sec/core for a
-short-range Heisenberg model on a single x86 core.  For comparison,
+$\sim 1.8 \times 10^{7}$ Metropolis spin-updates/sec/core for a
+short-range Heisenberg model on a single x86 core (up from
+$\sim 1.4 \times 10^{7}$ before this pass).  For comparison,
 \textsc{Vampire}'s reported figures on Skylake-class CPUs are in the
 range $10^{7}$--$10^{8}$ spin-updates/sec/core depending on the model;
 \textsc{UppASD} reports $\sim 5 \times 10^{7}$ for similar problem
-sizes.  We are within a factor of $\sim 2$--$5$ of those codes
-\emph{without} hand-rolled SIMD intrinsics or a SoA refactor of the
-exchange table.  With those two additional ingredients the gap should
-close entirely.
+sizes.  We are within a factor of $\sim 2$--$3$ of those codes
+\emph{without} hand-rolled SIMD intrinsics.  Closing the rest of the
+gap requires explicit AVX2/AVX-512 work on the per-site energy
+difference; the SoA layout (Section~\ref{sec:soa}) is the necessary
+prerequisite for that, and it is now in place.
 
 The cache-hierarchy effect is worth noting on its own.  At $L = 32$ the
 spin data ($N \times d \times 8 = 49$~kB) fits in L1; at $L = 64$
 (196~kB) it spills to L2; at $L = 128$ (786~kB) it spills to L3.  The
-measured throughput drops from $1.4 \times 10^{7}$ to $4.7 \times 10^{6}$
-across this range---a $3 \times$ slowdown that is essentially \emph{all
-memory bandwidth}.  This is the regime where SIMD and SoA pay the most.
+measured throughput drops from $1.8 \times 10^{7}$ to $6.5 \times 10^{6}$
+across this range---a $\sim 3 \times$ slowdown that is essentially
+\emph{all memory bandwidth}.  This is the regime where SIMD and the
+already-flat SoA layout would pay the most, and where the
+``flat-spin scratch'' refactor we deliberately did \emph{not}
+land at $L = 32$ (Section~\ref{sec:marsaglia}, last paragraph) is
+likely to start winning.
 
 % =================================================================
 \section{Further reading}

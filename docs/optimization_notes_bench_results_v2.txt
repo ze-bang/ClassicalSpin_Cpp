@@ -1,0 +1,70 @@
+ClassicalSpin_Cpp Monte-Carlo benchmark
+  CXX threads (OpenMP): 1
+  Compiler hint:        gcc 13.3
+  Build type:           Release
+
+model                 algo           L    N         sweeps    rep         wall (s)      sweeps/s       updates/s    VmHWM (MB)
+------------------------------------------------------------------------------------------------------------------------------
+Initializing lattice with dimensions: 32 x 32 x 1
+Total sites: 2048
+Spin dimension: 3, Atoms per cell: 2
+Lattice initialization complete!
+Max bilinear interactions per site: 3
+Max trilinear interactions per site: 0
+heisenberg-honeycomb  metropolis     32   2048      20000     0          2.225e+00     8.990e+03       1.841e+07           8.1
+heisenberg-honeycomb  metropolis     32   2048      20000     1          2.264e+00     8.834e+03       1.809e+07           8.1
+heisenberg-honeycomb  metropolis     32   2048      20000     2          2.242e+00     8.922e+03       1.827e+07           8.1
+heisenberg-honeycomb  over           32   2048      20000     0          1.256e+00     1.593e+04       3.262e+07           8.1
+heisenberg-honeycomb  over           32   2048      20000     1          1.225e+00     1.632e+04       3.343e+07           8.1
+heisenberg-honeycomb  over           32   2048      20000     2          1.249e+00     1.602e+04       3.280e+07           8.1
+heisenberg-honeycomb  met+5over      32   2048      20000     0          8.311e+00     2.406e+03       4.928e+06           8.1
+heisenberg-honeycomb  met+5over      32   2048      20000     1          8.278e+00     2.416e+03       4.948e+06           8.1
+heisenberg-honeycomb  met+5over      32   2048      20000     2          8.552e+00     2.339e+03       4.790e+06           8.1
+heisenberg-honeycomb  wolff          32   2048      5000      0          2.017e-02     2.479e+05       5.077e+08           8.1
+heisenberg-honeycomb  wolff          32   2048      5000      1          1.965e-02     2.545e+05       5.211e+08           8.1
+heisenberg-honeycomb  wolff          32   2048      5000      2          1.892e-02     2.643e+05       5.414e+08           8.1
+heisenberg-honeycomb  swendsen_wang  32   2048      5000      0          4.640e-01     1.078e+04       2.207e+07           8.1
+heisenberg-honeycomb  swendsen_wang  32   2048      5000      1          4.500e-01     1.111e+04       2.275e+07           8.1
+heisenberg-honeycomb  swendsen_wang  32   2048      5000      2          4.567e-01     1.095e+04       2.242e+07           8.1
+Initializing lattice with dimensions: 32 x 32 x 1
+Total sites: 2048
+Spin dimension: 3, Atoms per cell: 2
+Lattice initialization complete!
+Max bilinear interactions per site: 3
+Max trilinear interactions per site: 0
+kitaev-honeycomb      metropolis     32   2048      20000     0          2.422e+00     8.257e+03       1.691e+07           8.3
+kitaev-honeycomb      metropolis     32   2048      20000     1          2.354e+00     8.495e+03       1.740e+07           8.3
+kitaev-honeycomb      metropolis     32   2048      20000     2          2.366e+00     8.452e+03       1.731e+07           8.3
+kitaev-honeycomb      over           32   2048      20000     0          1.251e+00     1.599e+04       3.275e+07           8.3
+kitaev-honeycomb      over           32   2048      20000     1          1.227e+00     1.630e+04       3.339e+07           8.3
+kitaev-honeycomb      over           32   2048      20000     2          1.242e+00     1.610e+04       3.298e+07           8.3
+kitaev-honeycomb      met+5over      32   2048      20000     0          8.561e+00     2.336e+03       4.784e+06           8.3
+kitaev-honeycomb      met+5over      32   2048      20000     1          9.062e+00     2.207e+03       4.520e+06           8.3
+kitaev-honeycomb      met+5over      32   2048      20000     2          8.947e+00     2.235e+03       4.578e+06           8.3
+kitaev-honeycomb      wolff          32   2048      5000      0          1.861e-02     2.687e+05       5.503e+08           8.3
+kitaev-honeycomb      wolff          32   2048      5000      1          1.747e-02     2.863e+05       5.863e+08           8.3
+kitaev-honeycomb      wolff          32   2048      5000      2          1.846e-02     2.709e+05       5.548e+08           8.3
+kitaev-honeycomb      swendsen_wang  32   2048      5000      0          2.660e-01     1.879e+04       3.849e+07           8.3
+kitaev-honeycomb      swendsen_wang  32   2048      5000      1          2.427e-01     2.060e+04       4.219e+07           8.3
+kitaev-honeycomb      swendsen_wang  32   2048      5000      2          2.361e-01     2.117e+04       4.336e+07           8.3
+Initializing lattice with dimensions: 6 x 6 x 6
+Total sites: 864
+Spin dimension: 3, Atoms per cell: 4
+Lattice initialization complete!
+Max bilinear interactions per site: 6
+Max trilinear interactions per site: 0
+pyrochlore            metropolis     6    864       10000     0          6.232e-01     1.605e+04       1.386e+07           8.3
+pyrochlore            metropolis     6    864       10000     1          6.399e-01     1.563e+04       1.350e+07           8.3
+pyrochlore            metropolis     6    864       10000     2          6.339e-01     1.577e+04       1.363e+07           8.3
+pyrochlore            over           6    864       10000     0          3.879e-01     2.578e+04       2.227e+07           8.3
+pyrochlore            over           6    864       10000     1          3.960e-01     2.525e+04       2.182e+07           8.3
+pyrochlore            over           6    864       10000     2          3.960e-01     2.525e+04       2.182e+07           8.3
+pyrochlore            met+5over      6    864       10000     0          4.794e+00     2.086e+03       1.802e+06           8.3
+pyrochlore            met+5over      6    864       10000     1          4.643e+00     2.154e+03       1.861e+06           8.3
+pyrochlore            met+5over      6    864       10000     2          4.037e+00     2.477e+03       2.140e+06           8.3
+pyrochlore            wolff          6    864       3000      0          9.695e-02     3.094e+04       2.674e+07           8.3
+pyrochlore            wolff          6    864       3000      1          9.022e-02     3.325e+04       2.873e+07           8.3
+pyrochlore            wolff          6    864       3000      2          9.690e-02     3.096e+04       2.675e+07           8.3
+pyrochlore            swendsen_wang  6    864       3000      0          2.310e-01     1.299e+04       1.122e+07           8.3
+pyrochlore            swendsen_wang  6    864       3000      1          2.420e-01     1.240e+04       1.071e+07           8.3
+pyrochlore            swendsen_wang  6    864       3000      2          2.315e-01     1.296e+04       1.119e+07           8.3
