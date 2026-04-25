@@ -1901,6 +1901,294 @@ SpinVector StrainPhononLattice::get_local_field(size_t site, double t) const {
     return H;
 }
 
+// ==========================================================================
+// HEAP-FREE RHS HOT-PATH VARIANTS (Ingredient XIV)
+// ==========================================================================
+// The non-`_v3` versions above all return `SpinVector` (= Eigen::VectorXd,
+// dynamic-size). Returning a 3-element VectorXd by value heap-allocates on
+// every call. Inside the parallel MD RHS this hammered the global allocator
+// under thread contention and was the dominant serial fraction for the
+// strain-honeycomb-bilin / -me modes (≤1.3× speed-up at 16 threads vs.
+// >7× for the local-strain variant which had more arithmetic per site to
+// amortise the allocs).
+//
+// The `_v3` variants below accumulate into a stack-allocated `Eigen::Vector3d&`
+// supplied by the caller and use `Eigen::Map<const Eigen::Matrix3d>` over
+// `nn_interaction[...].data()` so the matrix-vector products stay fixed-size
+// (no temporary heap VectorXd). The math is identical to the v0 versions —
+// `compute_*_v3(site, …, H)` followed by zeroing `H` first matches what the
+// non-_v3 version returns.
+
+void StrainPhononLattice::compute_magnetoelastic_field_v3(
+        size_t site, Eigen::Vector3d& H_out) const
+{
+    // Heap-free version of `get_magnetoelastic_field`. The per-bond formula
+    // (comb_g, comb_a, comb_b) is identical; we just write directly into
+    // H_out instead of returning a freshly-allocated SpinVector.
+    if (magnetoelastic_params.lambda_Eg == 0.0) return;
+
+    const double J = magnetoelastic_params.J;
+    const double K = magnetoelastic_params.K;
+    const double Gamma = magnetoelastic_params.Gamma;
+    const double Gammap = magnetoelastic_params.Gammap;
+    const double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    const double JpK = J + K;
+
+    double Eg1_strain = 0.0;
+    double Eg2_strain = 0.0;
+    for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+        Eg1_strain += strain.epsilon_xx[b] - strain.epsilon_yy[b];
+        Eg2_strain += 2.0 * strain.epsilon_xy[b];
+    }
+
+    static constexpr double SQRT3 = 1.7320508075688772;
+    const double phi[3] = {
+        lambda_Eg * (Eg1_strain * (+1.0) + Eg2_strain * (+SQRT3)),
+        lambda_Eg * (Eg1_strain * (+1.0) + Eg2_strain * (-SQRT3)),
+        lambda_Eg * (Eg1_strain * (-2.0) + Eg2_strain * 0.0       ),
+    };
+
+    const auto& partners   = nn_partners[site];
+    const auto& bond_types = nn_bond_types[site];
+    const size_t n_partners = partners.size();
+
+    for (size_t n = 0; n < n_partners; ++n) {
+        const size_t j = partners[n];
+        const int gamma = bond_types[n];
+        const int alpha = (gamma + 1) % 3;
+        const int beta  = (gamma + 2) % 3;
+
+        const double Sjg = spins[j](gamma);
+        const double Sja = spins[j](alpha);
+        const double Sjb = spins[j](beta);
+
+        const double comb_g = JpK * Sjg + Gammap * (Sja + Sjb);
+        const double comb_a = J   * Sja + Gamma * Sjb + Gammap * Sjg;
+        const double comb_b = J   * Sjb + Gamma * Sja + Gammap * Sjg;
+
+        const double phi_g = phi[gamma];
+        H_out(gamma) -= phi_g * comb_g;
+        H_out(alpha) -= phi_g * comb_a;
+        H_out(beta)  -= phi_g * comb_b;
+    }
+}
+
+void StrainPhononLattice::compute_local_magnetoelastic_field_v3(
+        size_t site, Eigen::Vector3d& H_out) const
+{
+    // Heap-free fused version of `get_local_magnetoelastic_field`. The
+    // existing implementation calls eight `df_*_dS` helpers, each of which
+    // allocates three SpinVectors internally and then linearly combines
+    // eight more SpinVectors — ≈11 heap-allocs per site per RHS. We collapse
+    // all of that into the same per-bond (comb_g, comb_a, comb_b) formula
+    // used by the global-strain version above, with a phi[γ] derived from
+    // the cell's local strain (instead of bond-summed strain). Math is
+    // identical; cost is one register-resident inner loop.
+    if (magnetoelastic_params.lambda_Eg == 0.0) return;
+
+    const double J = magnetoelastic_params.J;
+    const double K = magnetoelastic_params.K;
+    const double Gamma = magnetoelastic_params.Gamma;
+    const double Gammap = magnetoelastic_params.Gammap;
+    const double lambda_Eg = magnetoelastic_params.lambda_Eg;
+    const double JpK = J + K;
+
+    constexpr double nbpc = static_cast<double>(StrainState::N_BONDS);  // = 3
+
+    const size_t cell = site_to_cell_[site];
+    const auto& cs = cell_strains_[cell];
+    const double Eg1_strain = cs.epsilon_xx - cs.epsilon_yy;
+    const double Eg2_strain = 2.0 * cs.epsilon_xy;
+
+    static constexpr double SQRT3 = 1.7320508075688772;
+    const double phi[3] = {
+        nbpc * lambda_Eg * (Eg1_strain * (+1.0) + Eg2_strain * (+SQRT3)),
+        nbpc * lambda_Eg * (Eg1_strain * (+1.0) + Eg2_strain * (-SQRT3)),
+        nbpc * lambda_Eg * (Eg1_strain * (-2.0) + Eg2_strain * 0.0       ),
+    };
+
+    const auto& partners   = nn_partners[site];
+    const auto& bond_types = nn_bond_types[site];
+    const size_t n_partners = partners.size();
+
+    for (size_t n = 0; n < n_partners; ++n) {
+        const size_t j = partners[n];
+        const int gamma = bond_types[n];
+        const int alpha = (gamma + 1) % 3;
+        const int beta  = (gamma + 2) % 3;
+
+        const double Sjg = spins[j](gamma);
+        const double Sja = spins[j](alpha);
+        const double Sjb = spins[j](beta);
+
+        const double comb_g = JpK * Sjg + Gammap * (Sja + Sjb);
+        const double comb_a = J   * Sja + Gamma * Sjb + Gammap * Sjg;
+        const double comb_b = J   * Sjb + Gamma * Sja + Gammap * Sjg;
+
+        const double phi_g = phi[gamma];
+        H_out(gamma) -= phi_g * comb_g;
+        H_out(alpha) -= phi_g * comb_a;
+        H_out(beta)  -= phi_g * comb_b;
+    }
+}
+
+void StrainPhononLattice::compute_ring_exchange_field_v3(
+        size_t site, double t, Eigen::Vector3d& H_out) const
+{
+    // Heap-free version of `get_ring_exchange_field(site, t)`. Body is
+    // mechanically identical; we just accumulate into H_out instead of
+    // a local SpinVector return.
+    const double J7_eff = get_effective_J7(t);
+
+    if (std::abs(J7_eff) < 1e-12 || site_hexagons[site].empty()) {
+        return;
+    }
+
+    const double prefactor = -J7_eff / 6.0;
+
+    for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+        const auto& hex = hexagons[hex_idx];
+
+        Eigen::Vector3d dH = Eigen::Vector3d::Zero();
+
+        for (int shift = 0; shift < 6; ++shift) {
+            size_t pi = shift % 6;
+            size_t pj = (shift + 1) % 6;
+            size_t pk = (shift + 2) % 6;
+            size_t pl = (shift + 3) % 6;
+            size_t pm = (shift + 4) % 6;
+            size_t pn = (shift + 5) % 6;
+
+            const Eigen::Vector3d& Si = spins[hex[pi]];
+            const Eigen::Vector3d& Sj_perm = spins[hex[pj]];
+            const Eigen::Vector3d& Sk = spins[hex[pk]];
+            const Eigen::Vector3d& Sl = spins[hex[pl]];
+            const Eigen::Vector3d& Sm = spins[hex[pm]];
+            const Eigen::Vector3d& Sn = spins[hex[pn]];
+
+            double dij = Si.dot(Sj_perm);
+            double dik = Si.dot(Sk);
+            double dil = Si.dot(Sl);
+            double djk = Sj_perm.dot(Sk);
+            double djl = Sj_perm.dot(Sl);
+            double djm = Sj_perm.dot(Sm);
+            double dkl = Sk.dot(Sl);
+            double dkn = Sk.dot(Sn);
+            double dln = Sl.dot(Sn);
+            double dmn = Sm.dot(Sn);
+
+            int role = -1;
+            if (pos == pi) role = 0;
+            else if (pos == pj) role = 1;
+            else if (pos == pk) role = 2;
+            else if (pos == pl) role = 3;
+            else if (pos == pm) role = 4;
+            else if (pos == pn) role = 5;
+
+            if (role == 0) {
+                dH += 2.0 * Sj_perm * dkl * dmn;
+                dH += -6.0 * Sk * djl * dmn;
+                dH += 3.0 * Sl * djk * dmn;
+                dH += 3.0 * Sk * djm * dln;
+                dH += -Sl * djm * dkn;
+            }
+            else if (role == 1) {
+                dH += 2.0 * Si * dkl * dmn;
+                dH += -6.0 * Sl * dik * dmn;
+                dH += 3.0 * Sk * dil * dmn;
+                dH += 3.0 * Sm * dik * dln;
+                dH += -Sm * dil * dkn;
+            }
+            else if (role == 2) {
+                dH += 2.0 * Sl * dij * dmn;
+                dH += -6.0 * Si * djl * dmn;
+                dH += 3.0 * Sj_perm * dil * dmn;
+                dH += 3.0 * Si * djm * dln;
+                dH += -Sn * dil * djm;
+            }
+            else if (role == 3) {
+                dH += 2.0 * Sk * dij * dmn;
+                dH += -6.0 * Sj_perm * dik * dmn;
+                dH += 3.0 * Si * djk * dmn;
+                dH += 3.0 * Sn * dik * djm;
+                dH += -Si * djm * dkn;
+            }
+            else if (role == 4) {
+                dH += 2.0 * Sn * dij * dkl;
+                dH += -6.0 * Sn * dik * djl;
+                dH += 3.0 * Sn * dil * djk;
+                dH += 3.0 * Sj_perm * dik * dln;
+                dH += -Sj_perm * dil * dkn;
+            }
+            else if (role == 5) {
+                dH += 2.0 * Sm * dij * dkl;
+                dH += -6.0 * Sm * dik * djl;
+                dH += 3.0 * Sm * dil * djk;
+                dH += 3.0 * Sl * dik * djm;
+                dH += -Sk * dil * djm;
+            }
+        }
+
+        H_out += prefactor * dH;
+    }
+}
+
+void StrainPhononLattice::compute_local_field_v3(
+        size_t site, double t, Eigen::Vector3d& H_out) const
+{
+    // Heap-free version of `get_local_field(site, t)` — the dominant per-RHS
+    // hot path for `ode_system` and the stochastic Heun integrator. We
+    // (i) write directly into the caller's stack `H_out`, (ii) view the
+    // exchange interaction matrices as fixed-size `Eigen::Map<const
+    // Eigen::Matrix3d>` so MatrixXd*Vector3d does not heap-alloc a temporary
+    // dynamic VectorXd, and (iii) call the `_v3` variants of the ME and ring
+    // exchange helpers so no intermediate SpinVector ever materialises.
+    H_out = field[site];
+
+    // NN exchange
+    {
+        const auto& partners = nn_partners[site];
+        const auto& mats     = nn_interaction[site];
+        const size_t n = partners.size();
+        for (size_t k = 0; k < n; ++k) {
+            Eigen::Map<const Eigen::Matrix3d> M(mats[k].data());
+            H_out.noalias() -= M * spins[partners[k]];
+        }
+    }
+
+    // 2nd NN
+    {
+        const auto& partners = j2_partners[site];
+        const auto& mats     = j2_interaction[site];
+        const size_t n = partners.size();
+        for (size_t k = 0; k < n; ++k) {
+            Eigen::Map<const Eigen::Matrix3d> M(mats[k].data());
+            H_out.noalias() -= M * spins[partners[k]];
+        }
+    }
+
+    // 3rd NN
+    {
+        const auto& partners = j3_partners[site];
+        const auto& mats     = j3_interaction[site];
+        const size_t n = partners.size();
+        for (size_t k = 0; k < n; ++k) {
+            Eigen::Map<const Eigen::Matrix3d> M(mats[k].data());
+            H_out.noalias() -= M * spins[partners[k]];
+        }
+    }
+
+    // Time-dependent ring exchange
+    compute_ring_exchange_field_v3(site, t, H_out);
+
+    // Magnetoelastic coupling (dispatch to local or global strain)
+    if (use_local_strain_) {
+        compute_local_magnetoelastic_field_v3(site, H_out);
+    } else {
+        compute_magnetoelastic_field_v3(site, H_out);
+    }
+}
+
 // ============================================================
 // EQUATIONS OF MOTION
 // ============================================================
@@ -1979,97 +2267,196 @@ void StrainPhononLattice::strain_derivatives(
 void StrainPhononLattice::ode_system(const ODEState& x, ODEState& dxdt, double t) {
     const size_t spin_offset = spin_dim * lattice_size;
 
-    // Sync spins from the integrator state vector. We overwrite in place
-    // (no save/restore): the next sub-evaluation will resync from its own
-    // `x`, and the outer loop in `integrate_*` re-syncs `spins` from the
-    // committed `state` after each step. Same is true of `strain` /
-    // `cell_strains_` below — we removed the save/restore copies that
-    // dominated heap traffic on every RHS call (≈ 6 × N_cells doubles
-    // malloc'd + freed per local-strain RHS).
-    for (size_t i = 0; i < lattice_size; ++i) {
-        const size_t idx = i * spin_dim;
-        const_cast<StrainPhononLattice*>(this)->spins[i] =
-            Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
-    }
-
-    const_cast<StrainPhononLattice*>(this)->current_time = t;
+    // ─────────────────────────────────────────────────────────────────────
+    // Persistent OpenMP region (Ingredient XIV)
+    // ─────────────────────────────────────────────────────────────────────
+    // The legacy code opened two `omp parallel for` regions per RHS call
+    // (one for spin sync, one for spin EOM). For the cheap
+    // strain-honeycomb-bilin / -me variants the per-RHS work is only
+    // ~300 µs at L=24, so those two team start-ups cost ~50% of the
+    // wall time and the loop barely scaled past 1.3× on 16 threads. We
+    // now open ONE parallel region that wraps both per-site loops, with
+    // a single barrier between them, and use the heap-free
+    // `compute_local_field_v3` helper inside the EOM loop so no
+    // SpinVector / VectorXd is heap-allocated per site per RHS.
+    //
+    // The serial preamble between the two loops (strain sync, ME / J7
+    // strain forces) runs in a `single` block so only one thread does
+    // it but all threads share the implicit barrier on `single` exit.
+    auto* self = const_cast<StrainPhononLattice*>(this);
+    self->current_time = t;
 
     if (use_local_strain_) {
         // ── LOCAL STRAIN PATH ──
         // State: [spins..., cell_0(6), cell_1(6), ..., cell_{N-1}(6)]
+#ifdef _OPENMP
+        #pragma omp parallel if(lattice_size >= 64)
+        {
+            // (1) Sync spins from x[]
+            #pragma omp for schedule(static) nowait
+            for (size_t i = 0; i < lattice_size; ++i) {
+                const size_t idx = i * spin_dim;
+                self->spins[i] = Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
+            }
 
-        // Sync per-cell strain in place (no `vector` copy/restore).
+            // (2) Sync per-cell strain in place — single-thread serial.
+            // `nowait` on (1) avoids one barrier; `single` provides its own.
+            #pragma omp single
+            {
+                for (size_t c = 0; c < N_cells_; ++c) {
+                    cell_strains_[c].from_array(
+                        &x[spin_offset + c * CellStrain::N_DOF]);
+                }
+            }
+
+            // (3) Spin EOM — fully parallel, heap-free per site.
+            #pragma omp for schedule(static) nowait
+            for (size_t i = 0; i < lattice_size; ++i) {
+                const size_t idx = i * spin_dim;
+                Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
+                Eigen::Vector3d H;
+                compute_local_field_v3(i, t, H);
+                Eigen::Vector3d dSdt = spin_derivative(Si, H);
+                dxdt[idx]   = dSdt(0);
+                dxdt[idx+1] = dSdt(1);
+                dxdt[idx+2] = dSdt(2);
+            }
+
+            // (4) Local strain EOM — serial (cell-to-cell coupling would
+            // need its own colouring; at N_cells ~ 10² the cost is small
+            // next to the parallelised spin EOM).
+            #pragma omp single
+            {
+                local_strain_derivatives(t, rhs_dcell_dt_scratch_);
+                for (size_t c = 0; c < N_cells_; ++c) {
+                    rhs_dcell_dt_scratch_[c].to_array(
+                        &dxdt[spin_offset + c * CellStrain::N_DOF]);
+                }
+            }
+        }
+#else
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t idx = i * spin_dim;
+            self->spins[i] = Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
+        }
         for (size_t c = 0; c < N_cells_; ++c) {
             cell_strains_[c].from_array(&x[spin_offset + c * CellStrain::N_DOF]);
         }
-
-        // Spin EOM (get_local_field dispatches to local ME field)
         for (size_t i = 0; i < lattice_size; ++i) {
             const size_t idx = i * spin_dim;
             Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
-            SpinVector H = get_local_field(i, t);
+            Eigen::Vector3d H;
+            compute_local_field_v3(i, t, H);
             Eigen::Vector3d dSdt = spin_derivative(Si, H);
-            dxdt[idx] = dSdt(0);
+            dxdt[idx]   = dSdt(0);
             dxdt[idx+1] = dSdt(1);
             dxdt[idx+2] = dSdt(2);
         }
-
-        // Local strain EOM — write into the pre-allocated scratch buffer
-        // instead of materializing a fresh `vector<CellStrain>` per RHS.
         local_strain_derivatives(t, rhs_dcell_dt_scratch_);
         for (size_t c = 0; c < N_cells_; ++c) {
             rhs_dcell_dt_scratch_[c].to_array(&dxdt[spin_offset + c * CellStrain::N_DOF]);
         }
+#endif
     } else {
         // ── GLOBAL STRAIN PATH ──
         // State: [spins..., StrainState(18)]
-        //
-        // The legacy code copied `strain` into a local, mutated
-        // `this->strain`, then restored. Strain is just 18 doubles so the
-        // copy cost is small, but `dH_deps_*` and `get_magnetoelastic_field`
-        // both read `this->strain`, so we still need to keep it in sync —
-        // we just stop saving/restoring (next RHS overwrites it; outer
-        // integrate_* loop resyncs after each committed step).
         StrainState eps;
         eps.from_array(&x[spin_offset]);
-        const_cast<StrainPhononLattice*>(this)->strain = eps;
+        self->strain = eps;
 
-        // Compute ME + J7 strain forces
+        // Strain force scratch shared across the parallel region.
         double dH_deps_xx_arr[StrainState::N_BONDS];
         double dH_deps_yy_arr[StrainState::N_BONDS];
         double dH_deps_xy_arr[StrainState::N_BONDS];
+        StrainState deps_dt;
+
+#ifdef _OPENMP
+        #pragma omp parallel if(lattice_size >= 64)
+        {
+            // (1) Sync spins from x[]
+            #pragma omp for schedule(static) nowait
+            for (size_t i = 0; i < lattice_size; ++i) {
+                const size_t idx = i * spin_dim;
+                self->spins[i] = Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
+            }
+
+            // (2) Strain forces — serial, only 18 bonds.
+            #pragma omp single
+            {
+                for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                    dH_deps_xx_arr[b] = dH_deps_xx(b);
+                    dH_deps_yy_arr[b] = dH_deps_yy(b);
+                    dH_deps_xy_arr[b] = dH_deps_xy(b);
+                }
+                double dJ7_deps_xx_arr[StrainState::N_BONDS];
+                double dJ7_deps_yy_arr[StrainState::N_BONDS];
+                double dJ7_deps_xy_arr[StrainState::N_BONDS];
+                get_dJ7_deps(dJ7_deps_xx_arr, dJ7_deps_yy_arr, dJ7_deps_xy_arr);
+                const double E_ring = get_ring_exchange_normalized();
+                for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                    dH_deps_xx_arr[b] += dJ7_deps_xx_arr[b] * E_ring;
+                    dH_deps_yy_arr[b] += dJ7_deps_yy_arr[b] * E_ring;
+                    dH_deps_xy_arr[b] += dJ7_deps_xy_arr[b] * E_ring;
+                }
+            }
+
+            // (3) Spin EOM — fully parallel, heap-free per site.
+            #pragma omp for schedule(static) nowait
+            for (size_t i = 0; i < lattice_size; ++i) {
+                const size_t idx = i * spin_dim;
+                Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
+                Eigen::Vector3d H;
+                compute_local_field_v3(i, t, H);
+                Eigen::Vector3d dSdt = spin_derivative(Si, H);
+                dxdt[idx]   = dSdt(0);
+                dxdt[idx+1] = dSdt(1);
+                dxdt[idx+2] = dSdt(2);
+            }
+
+            // (4) Global strain EOM (18 doubles — serial).
+            #pragma omp single
+            {
+                strain_derivatives(eps, t,
+                                   dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr,
+                                   deps_dt);
+                deps_dt.to_array(&dxdt[spin_offset]);
+            }
+        }
+#else
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t idx = i * spin_dim;
+            self->spins[i] = Eigen::Vector3d(x[idx], x[idx+1], x[idx+2]);
+        }
         for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
             dH_deps_xx_arr[b] = dH_deps_xx(b);
             dH_deps_yy_arr[b] = dH_deps_yy(b);
             dH_deps_xy_arr[b] = dH_deps_xy(b);
         }
-
-        double dJ7_deps_xx_arr[StrainState::N_BONDS];
-        double dJ7_deps_yy_arr[StrainState::N_BONDS];
-        double dJ7_deps_xy_arr[StrainState::N_BONDS];
-        get_dJ7_deps(dJ7_deps_xx_arr, dJ7_deps_yy_arr, dJ7_deps_xy_arr);
-        double E_ring = get_ring_exchange_normalized();
-        for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
-            dH_deps_xx_arr[b] += dJ7_deps_xx_arr[b] * E_ring;
-            dH_deps_yy_arr[b] += dJ7_deps_yy_arr[b] * E_ring;
-            dH_deps_xy_arr[b] += dJ7_deps_xy_arr[b] * E_ring;
+        {
+            double dJ7_deps_xx_arr[StrainState::N_BONDS];
+            double dJ7_deps_yy_arr[StrainState::N_BONDS];
+            double dJ7_deps_xy_arr[StrainState::N_BONDS];
+            get_dJ7_deps(dJ7_deps_xx_arr, dJ7_deps_yy_arr, dJ7_deps_xy_arr);
+            const double E_ring = get_ring_exchange_normalized();
+            for (size_t b = 0; b < StrainState::N_BONDS; ++b) {
+                dH_deps_xx_arr[b] += dJ7_deps_xx_arr[b] * E_ring;
+                dH_deps_yy_arr[b] += dJ7_deps_yy_arr[b] * E_ring;
+                dH_deps_xy_arr[b] += dJ7_deps_xy_arr[b] * E_ring;
+            }
         }
-
-        // Spin EOM
         for (size_t i = 0; i < lattice_size; ++i) {
             const size_t idx = i * spin_dim;
             Eigen::Vector3d Si(x[idx], x[idx+1], x[idx+2]);
-            SpinVector H = get_local_field(i, t);
+            Eigen::Vector3d H;
+            compute_local_field_v3(i, t, H);
             Eigen::Vector3d dSdt = spin_derivative(Si, H);
-            dxdt[idx] = dSdt(0);
+            dxdt[idx]   = dSdt(0);
             dxdt[idx+1] = dSdt(1);
             dxdt[idx+2] = dSdt(2);
         }
-
-        // Global strain EOM
-        StrainState deps_dt;
         strain_derivatives(eps, t, dH_deps_xx_arr, dH_deps_yy_arr, dH_deps_xy_arr, deps_dt);
         deps_dt.to_array(&dxdt[spin_offset]);
+#endif
     }
 }
 
@@ -2572,9 +2959,13 @@ void StrainPhononLattice::integrate_langevin(double dt, double t_start, double t
             }
         }
 
-        // -- Spin sLLG (get_local_field already dispatches ME field) --
+        // -- Spin sLLG (heap-free + parallel, see Ingredient XIV) --
+#ifdef _OPENMP
+        #pragma omp parallel for schedule(static) if(lattice_size >= 64)
+#endif
         for (size_t i = 0; i < lattice_size; ++i) {
-            SpinVector H = get_local_field(i, time);
+            Eigen::Vector3d H;
+            compute_local_field_v3(i, time, H);
             out_spin_deriv[i] = spin_rhs(spins[i], H, xi_noise[i]);
         }
     };
@@ -3909,22 +4300,29 @@ double StrainPhononLattice::metropolis_parallel(double temperature,
 #else
     const int n_threads = 1;
 #endif
-    std::vector<size_t> per_thread_accepted(n_threads, 0);
+    // Cache-line padded counters to avoid false sharing.
+    struct alignas(64) PaddedAccept { size_t v = 0; char pad[64 - sizeof(size_t)]; };
+    std::vector<PaddedAccept> per_thread_accepted(n_threads);
 
-    for (size_t c = 0; c < n_colors; ++c) {
-        const size_t off_lo = sites_by_color_csr_off[c];
-        const size_t off_hi = sites_by_color_csr_off[c + 1];
-
+    // PERSISTENT OpenMP region across all colours: one fork/join per
+    // sweep with #pragma omp barrier between colour passes. For
+    // strain-honeycomb with hexagon ring exchange (n_colors = 6) this
+    // collapses 6 team-creation costs into 1 — significant for the
+    // small sweep sizes typical of MC equilibration on this lattice.
 #ifdef _OPENMP
-        #pragma omp parallel
+    #pragma omp parallel
 #endif
-        {
+    {
 #ifdef _OPENMP
-            const int tid = omp_get_thread_num();
+        const int tid = omp_get_thread_num();
 #else
-            const int tid = 0;
+        const int tid = 0;
 #endif
-            size_t local_accepted = 0;
+        size_t local_accepted = 0;
+
+        for (size_t c = 0; c < n_colors; ++c) {
+            const size_t off_lo = sites_by_color_csr_off[c];
+            const size_t off_hi = sites_by_color_csr_off[c + 1];
 
 #ifdef _OPENMP
             #pragma omp for schedule(static) nowait
@@ -3949,17 +4347,22 @@ double StrainPhononLattice::metropolis_parallel(double temperature,
                     ++local_accepted;
                 }
             }
-            per_thread_accepted[tid] += local_accepted;
+#ifdef _OPENMP
+            #pragma omp barrier
+#endif
         }
-    }
+
+        per_thread_accepted[tid].v += local_accepted;
+    } // end omp parallel
 
     // Born-Oppenheimer: re-equilibrate strain to the new spin configuration.
-    // (Serial — strain is global, the elastic relaxation is a small fraction
-    // of total sweep time and can stay non-parallel for now.)
+    // Serial (the elastic relaxation is global and inherently a serial
+    // linear solve); kept once-per-sweep at the end to bound the Amdahl
+    // ceiling for this family.
     relax_strain(false);
 
     size_t accepted = 0;
-    for (size_t a : per_thread_accepted) accepted += a;
+    for (auto& a : per_thread_accepted) accepted += a.v;
     return double(accepted) / double(lattice_size);
 }
 
@@ -3971,21 +4374,30 @@ void StrainPhononLattice::overrelaxation_parallel() {
     overrelaxation(); return;
 #endif
 
-    for (size_t c = 0; c < n_colors; ++c) {
-        const size_t off_lo = sites_by_color_csr_off[c];
-        const size_t off_hi = sites_by_color_csr_off[c + 1];
+    // PERSISTENT OpenMP region across all colours.
 #ifdef _OPENMP
-        #pragma omp parallel for schedule(static)
+    #pragma omp parallel
 #endif
-        for (size_t off = off_lo; off < off_hi; ++off) {
-            const size_t site = sites_by_color_csr[off];
-            SpinVector local_field = get_local_field(site);
-            const double norm_sq = local_field.dot(local_field);
-            if (norm_sq < 1e-20) continue;
-            const double proj = 2.0 * spins[site].dot(local_field) / norm_sq;
-            spins[site] = local_field * proj - spins[site];
+    {
+        for (size_t c = 0; c < n_colors; ++c) {
+            const size_t off_lo = sites_by_color_csr_off[c];
+            const size_t off_hi = sites_by_color_csr_off[c + 1];
+#ifdef _OPENMP
+            #pragma omp for schedule(static) nowait
+#endif
+            for (size_t off = off_lo; off < off_hi; ++off) {
+                const size_t site = sites_by_color_csr[off];
+                SpinVector local_field = get_local_field(site);
+                const double norm_sq = local_field.dot(local_field);
+                if (norm_sq < 1e-20) continue;
+                const double proj = 2.0 * spins[site].dot(local_field) / norm_sq;
+                spins[site] = local_field * proj - spins[site];
+            }
+#ifdef _OPENMP
+            #pragma omp barrier
+#endif
         }
-    }
+    } // end omp parallel
 
     relax_strain(false);
 }

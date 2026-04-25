@@ -28,6 +28,10 @@
 
 #include <boost/numeric/odeint.hpp>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // ---- Lattice::landau_lifshitz_flat ----
     void Lattice::landau_lifshitz_flat(const double* state_flat, double* dsdt_flat, double t) const {
         // Drive-field envelope: factor1, factor2 depend only on `t`, not on
@@ -48,8 +52,18 @@
                             std::cos(field_drive_freq * dt2);
         }
 
+        // The per-site RHS only writes dsdt_flat[i*spin_dim..(i+1)*spin_dim)
+        // and only reads state_flat[partner*spin_dim..] for partners of site i.
+        // No two iterations share a write slot, so the loop is embarrassingly
+        // parallel — one #pragma omp parallel for over sites scales linearly
+        // up to memory bandwidth. This is the dominant cost for spectroscopy
+        // / pump-probe runs (which stack ~10^4–10^6 RHS calls per integrator
+        // step × N_steps).
         if (spin_dim == 3) {
             // SU(2): Standard cross product dS/dt = H × S
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static) if(lattice_size >= 64)
+#endif
             for (size_t i = 0; i < lattice_size; ++i) {
                 const size_t idx = i * 3;
 
@@ -94,6 +108,9 @@
             // hand-rolled `cross_prod_SU3_flat` evaluates only the 54 non-zero
             // entries directly, fully inlined, with no Eigen alloc; on the
             // SU(3) RHS this is roughly an order of magnitude faster.
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static) if(lattice_size >= 64)
+#endif
             for (size_t site = 0; site < lattice_size; ++site) {
                 const size_t idx = site * 8;
 
@@ -107,7 +124,10 @@
                 cross_prod_SU3_flat(H, S, &dsdt_flat[idx], /*accumulate=*/false);
             }
         } else {
-            // General case: use cross_product function (fallback)
+            // General case: use cross_product function (fallback). Eigen
+            // expression-template returns allocate small heap buffers, so
+            // we keep this serial; the fast paths above cover all
+            // production models.
             for (size_t i = 0; i < lattice_size; ++i) {
                 const size_t idx = i * spin_dim;
 

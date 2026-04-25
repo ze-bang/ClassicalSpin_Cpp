@@ -1785,22 +1785,32 @@ public:
 #else
         const int n_threads = 1;
 #endif
-        std::vector<size_t> per_thread_accepted(n_threads, 0);
+        // Cache-line padded per-thread counters: avoid false sharing of
+        // adjacent counter slots in the final reduction.
+        struct alignas(64) PaddedAccept { size_t v = 0; char pad[64 - sizeof(size_t)]; };
+        std::vector<PaddedAccept> per_thread_accepted(n_threads);
 
-        // -------------------------- SU(2) pass --------------------------
-        for (size_t c = 0; c < n_colors_SU2; ++c) {
-            const size_t off_lo = sites_by_color_csr_off_SU2[c];
-            const size_t off_hi = sites_by_color_csr_off_SU2[c + 1];
+        // PERSISTENT OpenMP region wrapping BOTH the SU(2) and SU(3) colour
+        // passes — one fork/join per sweep, with #pragma omp barrier
+        // between every colour boundary. For a TmFeO3 mixed lattice this
+        // collapses (n_colors_SU2 + n_colors_SU3) team-creation costs (each
+        // ~few µs) into one. At small L this was the dominant per-sweep
+        // overhead for the parallel kernel.
 #ifdef _OPENMP
-            #pragma omp parallel
+        #pragma omp parallel
 #endif
-            {
+        {
 #ifdef _OPENMP
-                const int tid = omp_get_thread_num();
+            const int tid = omp_get_thread_num();
 #else
-                const int tid = 0;
+            const int tid = 0;
 #endif
-                size_t local_accepted = 0;
+            size_t local_accepted = 0;
+
+            // -------------------------- SU(2) pass --------------------------
+            for (size_t c = 0; c < n_colors_SU2; ++c) {
+                const size_t off_lo = sites_by_color_csr_off_SU2[c];
+                const size_t off_hi = sites_by_color_csr_off_SU2[c + 1];
 #ifdef _OPENMP
                 #pragma omp for schedule(static) nowait
 #endif
@@ -1826,24 +1836,15 @@ public:
                         ++local_accepted;
                     }
                 }
-                per_thread_accepted[tid] += local_accepted;
+#ifdef _OPENMP
+                #pragma omp barrier
+#endif
             }
-        }
 
-        // -------------------------- SU(3) pass --------------------------
-        for (size_t c = 0; c < n_colors_SU3; ++c) {
-            const size_t off_lo = sites_by_color_csr_off_SU3[c];
-            const size_t off_hi = sites_by_color_csr_off_SU3[c + 1];
-#ifdef _OPENMP
-            #pragma omp parallel
-#endif
-            {
-#ifdef _OPENMP
-                const int tid = omp_get_thread_num();
-#else
-                const int tid = 0;
-#endif
-                size_t local_accepted = 0;
+            // -------------------------- SU(3) pass --------------------------
+            for (size_t c = 0; c < n_colors_SU3; ++c) {
+                const size_t off_lo = sites_by_color_csr_off_SU3[c];
+                const size_t off_hi = sites_by_color_csr_off_SU3[c + 1];
 #ifdef _OPENMP
                 #pragma omp for schedule(static) nowait
 #endif
@@ -1869,12 +1870,16 @@ public:
                         ++local_accepted;
                     }
                 }
-                per_thread_accepted[tid] += local_accepted;
+#ifdef _OPENMP
+                #pragma omp barrier
+#endif
             }
-        }
+
+            per_thread_accepted[tid].v += local_accepted;
+        } // end omp parallel
 
         size_t accepted = 0;
-        for (size_t a : per_thread_accepted) accepted += a;
+        for (auto& a : per_thread_accepted) accepted += a.v;
         return double(accepted) / double(total_sites);
     }
 
@@ -1899,41 +1904,53 @@ public:
         overrelaxation(); return;
 #endif
 
-        // -------------------------- SU(2) pass --------------------------
-        for (size_t c = 0; c < n_colors_SU2; ++c) {
-            const size_t off_lo = sites_by_color_csr_off_SU2[c];
-            const size_t off_hi = sites_by_color_csr_off_SU2[c + 1];
+        // PERSISTENT OpenMP region wrapping both sublattices.
 #ifdef _OPENMP
-            #pragma omp parallel for schedule(static)
+        #pragma omp parallel
 #endif
-            for (size_t off = off_lo; off < off_hi; ++off) {
-                const size_t i = sites_by_color_csr_SU2[off];
-                SpinVector local_field = get_local_field_SU2(i);
-                const double norm = local_field.squaredNorm();
-                if (norm > 1e-12) {
-                    const double proj = 2.0 * spins_SU2[i].dot(local_field) / norm;
-                    spins_SU2[i] = local_field * proj - spins_SU2[i];
+        {
+            // -------------------------- SU(2) pass --------------------------
+            for (size_t c = 0; c < n_colors_SU2; ++c) {
+                const size_t off_lo = sites_by_color_csr_off_SU2[c];
+                const size_t off_hi = sites_by_color_csr_off_SU2[c + 1];
+#ifdef _OPENMP
+                #pragma omp for schedule(static) nowait
+#endif
+                for (size_t off = off_lo; off < off_hi; ++off) {
+                    const size_t i = sites_by_color_csr_SU2[off];
+                    SpinVector local_field = get_local_field_SU2(i);
+                    const double norm = local_field.squaredNorm();
+                    if (norm > 1e-12) {
+                        const double proj = 2.0 * spins_SU2[i].dot(local_field) / norm;
+                        spins_SU2[i] = local_field * proj - spins_SU2[i];
+                    }
                 }
+#ifdef _OPENMP
+                #pragma omp barrier
+#endif
             }
-        }
 
-        // -------------------------- SU(3) pass --------------------------
-        for (size_t c = 0; c < n_colors_SU3; ++c) {
-            const size_t off_lo = sites_by_color_csr_off_SU3[c];
-            const size_t off_hi = sites_by_color_csr_off_SU3[c + 1];
+            // -------------------------- SU(3) pass --------------------------
+            for (size_t c = 0; c < n_colors_SU3; ++c) {
+                const size_t off_lo = sites_by_color_csr_off_SU3[c];
+                const size_t off_hi = sites_by_color_csr_off_SU3[c + 1];
 #ifdef _OPENMP
-            #pragma omp parallel for schedule(static)
+                #pragma omp for schedule(static) nowait
 #endif
-            for (size_t off = off_lo; off < off_hi; ++off) {
-                const size_t i = sites_by_color_csr_SU3[off];
-                SpinVector local_field = get_local_field_SU3(i);
-                const double norm = local_field.squaredNorm();
-                if (norm > 1e-12) {
-                    const double proj = 2.0 * spins_SU3[i].dot(local_field) / norm;
-                    spins_SU3[i] = local_field * proj - spins_SU3[i];
+                for (size_t off = off_lo; off < off_hi; ++off) {
+                    const size_t i = sites_by_color_csr_SU3[off];
+                    SpinVector local_field = get_local_field_SU3(i);
+                    const double norm = local_field.squaredNorm();
+                    if (norm > 1e-12) {
+                        const double proj = 2.0 * spins_SU3[i].dot(local_field) / norm;
+                        spins_SU3[i] = local_field * proj - spins_SU3[i];
+                    }
                 }
+#ifdef _OPENMP
+                #pragma omp barrier
+#endif
             }
-        }
+        } // end omp parallel
     }
 
     /**

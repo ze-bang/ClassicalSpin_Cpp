@@ -78,6 +78,7 @@ struct CliArgs {
     long   rhs    = 0;       // measured RHS calls (default per model)
     long   warmup = 0;
     int    repeats = 3;
+    int    threads = 0;       // 0 = leave at OMP_NUM_THREADS / OpenMP default
     bool   csv = false;
     bool   help = false;
 };
@@ -102,6 +103,7 @@ CliArgs parse_args(int argc, char** argv) {
         else if (eat("--rhs",    a.rhs))    {}
         else if (eat("--warmup", a.warmup)) {}
         else if (eat("--repeats", a.repeats)){}
+        else if (eat("--threads", a.threads)){}
         else { cerr << "unknown arg: " << s << "\n"; a.help = true; }
     }
     return a;
@@ -118,6 +120,7 @@ void print_help() {
 "  --rhs=<int>                           measured RHS calls\n"
 "  --warmup=<int>                        warmup RHS calls\n"
 "  --repeats=<int>                       timed repeats\n"
+"  --threads=<int>                       OpenMP threads (0 = OMP default)\n"
 "  --csv                                 CSV output\n"
 "  -h, --help                            this help\n";
 }
@@ -139,11 +142,12 @@ struct BenchRow {
     double wall_sec;
     double rhs_per_sec;
     double site_updates_per_sec;
+    int    threads;
 };
 
 void print_header(bool csv) {
     if (csv) {
-        cout << "family,model,L,N,rhs_calls,repeat,wall_s,rhs_per_s,site_updates_per_s\n";
+        cout << "family,model,L,N,rhs_calls,repeat,wall_s,rhs_per_s,site_updates_per_s,threads\n";
     } else {
         cout << left
              << setw(8)  << "family"
@@ -156,8 +160,9 @@ void print_header(bool csv) {
              << setw(12) << "wall (s)"
              << setw(14) << "rhs/s"
              << setw(16) << "siteupd/s"
+             << setw(6)  << "thr"
              << "\n";
-        cout << string(110, '-') << "\n";
+        cout << string(115, '-') << "\n";
     }
 }
 
@@ -166,7 +171,8 @@ void print_row(const BenchRow& r, bool csv) {
         cout << r.family << "," << r.model << "," << r.L
              << "," << r.lattice_size << "," << r.rhs_calls << "," << r.repeat
              << "," << std::scientific << std::setprecision(6) << r.wall_sec
-             << "," << r.rhs_per_sec << "," << r.site_updates_per_sec << "\n";
+             << "," << r.rhs_per_sec << "," << r.site_updates_per_sec
+             << "," << r.threads << "\n";
     } else {
         cout << left
              << setw(8)  << r.family
@@ -179,6 +185,7 @@ void print_row(const BenchRow& r, bool csv) {
              << setw(12) << r.wall_sec
              << setw(14) << r.rhs_per_sec
              << setw(16) << r.site_updates_per_sec
+             << setw(6)  << std::defaultfloat << r.threads
              << "\n";
     }
 }
@@ -400,6 +407,10 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+#ifdef _OPENMP
+    if (args.threads > 0) omp_set_num_threads(args.threads);
+#endif
+
     int n_threads = 1;
 #ifdef _OPENMP
     n_threads = omp_get_max_threads();
@@ -445,6 +456,7 @@ int main(int argc, char** argv) {
                 r.wall_sec = dt;
                 r.rhs_per_sec = double(n) / dt;
                 r.site_updates_per_sec = double(n) * double(r.lattice_size) / dt;
+                r.threads = n_threads;
                 print_row(r, args.csv);
                 std::cout.flush();
             }
@@ -485,6 +497,7 @@ int main(int argc, char** argv) {
                 r.wall_sec = dt;
                 r.rhs_per_sec = double(n) / dt;
                 r.site_updates_per_sec = double(n) * double(N) / dt;
+                r.threads = n_threads;
                 print_row(r, args.csv);
                 std::cout.flush();
             }
@@ -524,6 +537,7 @@ int main(int argc, char** argv) {
                 r.wall_sec = dt;
                 r.rhs_per_sec = double(n) / dt;
                 r.site_updates_per_sec = double(n) * double(r.lattice_size) / dt;
+                r.threads = n_threads;
                 print_row(r, args.csv);
                 std::cout.flush();
             }

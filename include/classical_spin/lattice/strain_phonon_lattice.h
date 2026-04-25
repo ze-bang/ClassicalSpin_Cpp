@@ -803,6 +803,21 @@ public:
     
     SpinVector get_ring_exchange_field(size_t site) const;
     SpinVector get_ring_exchange_field(size_t site, double t) const;  // Time-dependent version
+
+    /**
+     * Heap-free RHS-hot-path variants. These accumulate the contribution into
+     * `H_out` (an already-zeroed Eigen::Vector3d on the caller's stack) instead
+     * of returning a SpinVector (= Eigen::VectorXd) by value, which would heap-
+     * allocate a 3-element dynamic vector on every call. In the parallel MD
+     * RHS this allocation hammered the global allocator under thread
+     * contention and was the dominant serial fraction for the strain-honeycomb
+     * bilin/me modes. The math is identical to the SpinVector-returning
+     * versions, just rewritten to write into stack scratch.
+     */
+    void compute_magnetoelastic_field_v3(size_t site, Eigen::Vector3d& H_out) const;
+    void compute_local_magnetoelastic_field_v3(size_t site, Eigen::Vector3d& H_out) const;
+    void compute_ring_exchange_field_v3(size_t site, double t, Eigen::Vector3d& H_out) const;
+    void compute_local_field_v3(size_t site, double t, Eigen::Vector3d& H_out) const;
     
     // ============================================================
     // EQUATIONS OF MOTION

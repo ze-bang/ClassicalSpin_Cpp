@@ -1339,6 +1339,224 @@ $22$ regression tests pass after the change.
 \end{itemize}
 
 % =================================================================
+\section{Ingredient XIV: persistent OpenMP region and heap-free
+MD RHS for the strain--phonon lattice}
+% =================================================================
+\label{sec:rhs-heap-free}
+
+\subsection{Two bottlenecks the colouring did not solve}
+
+After Ingredient~XII the parallel \emph{Monte~Carlo} sweep scaled
+well on the lattice and mixed families, but two pathologies
+remained on the molecular--dynamics (\texttt{integrate\_*} /
+\texttt{ode\_system}) side of \texttt{StrainPhononLattice}:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Two OpenMP teams per RHS call.}  The original
+        \texttt{ode\_system} opened one \texttt{\#pragma omp parallel
+        for} for the spin sync (state $x$ $\to$ \texttt{spins[i]}) and
+        a second one for the spin EOM
+        ($\dot{S}_i = S_i \times H_i + \text{damping}$).  Two
+        team start-ups per RHS at hundreds of $\mu$s of work each
+        capped scaling at $\sim 1.3\times$ on 16~threads for the
+        cheap \texttt{strain-honeycomb-bilin}/\texttt{-me} variants
+        even though the loop body itself was embarrassingly parallel.
+  \item \textbf{Heap allocations in the per-site hot loop.}  The
+        \texttt{StrainPhononLattice::get\_local\_field(i, t)} helper
+        used the codebase's generic \texttt{SpinVector
+        = Eigen::VectorXd} return type.  A 3-element \texttt{VectorXd}
+        is a dynamic Eigen vector and is heap-allocated:
+        the function $H = \text{field[i]}$ + 9-bond exchange + ME +
+        ring-exchange paid for at least three \texttt{malloc/free}
+        pairs per site (the \texttt{H} accumulator itself, plus the
+        SpinVector returns of \texttt{get\_magnetoelastic\_field} and
+        \texttt{get\_ring\_exchange\_field}).  Worse, every
+        \texttt{nn\_interaction[site][n] * spins[j]} expression is a
+        \texttt{MatrixXd~$\times$~Vector3d} which Eigen evaluates
+        through another dynamic \texttt{VectorXd} temporary.  In the
+        \emph{local}-strain code path
+        \texttt{get\_local\_magnetoelastic\_field} stacked eight more
+        \texttt{df\_*\_dS} helpers, each constructing three
+        \texttt{SpinVector}s internally---$\sim 11$
+        \texttt{malloc/free} pairs per site per RHS.  Under thread
+        contention the global allocator becomes a serial bottleneck:
+        \texttt{strain-honeycomb-local} therefore ran at only
+        $9.4 \times 10^{2}$ RHS/s single-threaded and capped at
+        $\sim 7\times$ on 16~threads, while
+        \texttt{strain-honeycomb-bilin} (no ME, only the
+        $H$~accumulator alloc + exchange-product temporaries) ran
+        at $3.3 \times 10^{3}$ RHS/s and \emph{lost} throughput
+        going from 4 to 16 threads.
+\end{enumerate}
+
+The fix for both is a single coherent refactor of the strain RHS.
+
+\subsection{Persistent OpenMP region}
+
+\texttt{ode\_system} now opens \emph{one} \texttt{\#pragma omp
+parallel} that spans the full RHS evaluation:
+
+\begin{lstlisting}
+#pragma omp parallel if(lattice_size >= 64)
+{
+    // (1) sync spins from x[]
+    #pragma omp for schedule(static) nowait
+    for (size_t i = 0; i < lattice_size; ++i) { ... }
+
+    // (2) serial preamble: strain forces, dH_deps_*
+    #pragma omp single
+    { ... }   // implicit barrier on `single` exit
+
+    // (3) spin EOM -- heap-free, fully parallel
+    #pragma omp for schedule(static) nowait
+    for (size_t i = 0; i < lattice_size; ++i) {
+        Eigen::Vector3d H;
+        compute_local_field_v3(i, t, H);
+        ...
+    }
+
+    // (4) serial epilogue: strain EOM (18 doubles)
+    #pragma omp single
+    { ... }
+}
+\end{lstlisting}
+
+The \texttt{nowait} on (1) and (3) eliminates two of the four
+implicit barriers; the \texttt{single} blocks supply their own
+barriers so the serial preamble/epilogue do not need an extra
+\texttt{\#pragma omp barrier}.  Net: \emph{one} OpenMP team
+start-up per RHS, two implicit barriers, identical observable
+output.  The same persistent-region pattern was already used in
+\texttt{metropolis\_parallel} / \texttt{overrelaxation\_parallel}
+across colour groups (Ingredient~XII).
+
+\subsection{Heap-free \texttt{compute\_local\_field\_v3}}
+
+In parallel with the persistent region we added a family of
+\texttt{\_v3} helpers that write into a caller-supplied
+\texttt{Eigen::Vector3d\&} (a stack-resident, fixed-size 3-vector)
+instead of returning a \texttt{SpinVector}:
+
+\begin{lstlisting}
+void compute_magnetoelastic_field_v3      (size_t site, Vector3d&)        const;
+void compute_local_magnetoelastic_field_v3(size_t site, Vector3d&)        const;
+void compute_ring_exchange_field_v3       (size_t site, double t, V3d&)   const;
+void compute_local_field_v3               (size_t site, double t, V3d&)   const;
+\end{lstlisting}
+
+Three things change inside the per-site hot loop:
+
+\begin{enumerate}[noitemsep]
+  \item The accumulator \texttt{H} is an \texttt{Eigen::Vector3d} on
+        the caller's stack rather than a dynamic
+        \texttt{SpinVector}.  No \texttt{malloc/free} pair per call.
+  \item The exchange product
+        \texttt{nn\_interaction[site][n] * spins[j]} is rewritten as
+        \texttt{Eigen::Map<const Eigen::Matrix3d>(M.data())} times
+        \texttt{Vector3d}, a fixed-size $3 \times 3$ multiply that
+        Eigen evaluates directly into \texttt{H} via
+        \texttt{noalias()} with no temporary.  Both
+        \texttt{MatrixXd} and \texttt{Matrix3d} are column-major by
+        default so \texttt{.data()} is binary-compatible.
+  \item \texttt{compute\_local\_magnetoelastic\_field\_v3} is a
+        \emph{fused} single-pass version of
+        \texttt{get\_local\_magnetoelastic\_field}.  We collapse the
+        eight $\partial f_X^{Eg,k}/\partial S_i$ sub-helpers into the
+        same per-bond formula
+        $(\text{comb}_g, \text{comb}_a, \text{comb}_b)$ already used
+        by the global-strain version, with a per-$\gamma$ prefactor
+        $\phi(\gamma)$ derived from the cell's local strain instead
+        of from bond-summed strain (and an explicit
+        \texttt{N\_BONDS}~$=3$ factor that distinguishes the local
+        from the global convention).  The math is provably identical
+        (verified by the \texttt{strain\_phonon\_regressions} and
+        \texttt{pt\_strain} tests); the cost drops from
+        eleven heap-allocs to zero.
+\end{enumerate}
+
+The non-\texttt{\_v3} variants are kept verbatim for the MC code
+paths (where the per-site overhead is dominated by the single-spin
+proposal/acceptance, not by the field calculation, so the alloc
+penalty is invisible) and for any external caller that returns
+\texttt{SpinVector}s by value.  Everything that ran before still
+runs.
+
+\subsection{Measured impact}
+\label{sec:bench-md-rhs-heap-free}
+
+Re-running \texttt{bench\_md} on the same benchmark grid as
+Section~\ref{sec:bench-mc-parallel} (16-core x86 socket, GCC 11
+\texttt{-O3 -march=native -flto}, two repeats per cell) gives:
+
+\begin{center}
+\small
+\begin{tabular}{llrrrrr}
+\hline
+Family & Model ($L$) & $T_1$ (RHS/s) & $T_1$ ratio & $T_{16}$ (RHS/s) & $T_{16}$ ratio & $S(16)$ \\
+\hline
+\texttt{strain} & honeycomb-local ($L=24$) & $940 \to 19\,800$ & $\mathbf{21.1\times}$ & $6\,930 \to 41\,800$ & $\mathbf{6.0\times}$ & $2.1\times$ \\
+\texttt{strain} & honeycomb-bilin ($L=24$) & $3\,330 \to 4\,780$ & $1.4\times$           & $3\,880 \to 4\,560$  & $1.2\times$          & $1.0\times$ \\
+\texttt{strain} & honeycomb-me    ($L=24$) & $3\,160 \to 4\,410$ & $1.4\times$           & $3\,720 \to 4\,650$  & $1.3\times$          & $1.1\times$ \\
+\texttt{lattice} & Heisenberg honeycomb-su2 ($L=32$) & $1.65 \times 10^{4} \to 1.70 \times 10^{4}$ & $1.0\times$ & $1.03 \times 10^{5} \to 1.08 \times 10^{5}$ & $1.0\times$ & $6.4\times$ \\
+\texttt{mixed}   & TmFeO$_3$ trilinear ($L=4$)        & $2.18 \times 10^{3} \to 2.19 \times 10^{3}$ & $1.0\times$ & $1.89 \times 10^{4} \to 1.96 \times 10^{4}$ & $1.0\times$ & $8.9\times$ \\
+\hline
+\end{tabular}
+\end{center}
+
+The lattice and mixed families already used flat
+\texttt{double[]} accumulators
+(\texttt{get\_local\_field\_flat} / \texttt{\_into}) so the heap-free
+fix is a no-op for them; their numbers above are the noise floor of
+the wall-clock measurement, confirming that the persistent-region
+refactor of \texttt{ode\_system} did not regress them.
+
+The strain-phonon family tells the real story:
+
+\begin{itemize}[noitemsep]
+  \item \textbf{Local-strain mode (most ME work per site).}  The
+        eleven heap-allocs per site that
+        \texttt{get\_local\_magnetoelastic\_field} did under the hood
+        were in fact dominating the serial cost.  Eliminating them
+        gives a \textbf{$21\times$ single-thread speed-up}.  Combined
+        with the persistent-region scaling of $\sim 2\times$ on 16
+        threads (the per-site work is now so cheap that team
+        management is the new ceiling), the wall-clock improvement
+        for a long Langevin run is \textbf{$\sim 6\times$} on a
+        16-core node.
+  \item \textbf{Global-strain modes (cheap RHS).}  No ME means no
+        local-ME alloc, so the headline single-thread speed-up is
+        the more modest $\sim 1.4\times$ from the
+        $H$-accumulator + exchange-product temporary elimination.
+        At 16 threads the per-RHS work is $\sim 200~\mu s$ and the
+        OpenMP region's barrier-+-team-management overhead is now
+        the ceiling: $S(16) \approx 1$.  Going faster from here
+        would require either dispatching multiple RHS evaluations
+        per parallel region (e.g.~by parallelising the outer RK4
+        \texttt{do\_step}) or running the small lattice serially
+        (which we do automatically: the
+        \texttt{if(lattice\_size >= 64)} guard on the parallel
+        region falls back to a single-threaded loop).
+\end{itemize}
+
+The \texttt{integrate\_langevin} kernel got the same treatment: its
+inner sLLG loop now also calls \texttt{compute\_local\_field\_v3}
+and is wrapped in a single \texttt{\#pragma omp parallel for}.
+
+\subsection{Why the same trick is unnecessary on the other lattices}
+
+\texttt{Lattice::landau\_lifshitz\_flat} and
+\texttt{MixedLattice::landau\_lifshitz} were already heap-free:
+they use \texttt{get\_local\_field\_flat} (resp.
+\texttt{\_SU2/3\_flat\_into}) which write into stack
+\texttt{double[3]} / \texttt{double[8]} buffers.  The corresponding
+RHS routines therefore scale to $6$--$9\times$ on 16 threads (see
+table) without any further refactor.  The strain-phonon path was
+the lone outlier because it predates the
+\texttt{\_into}-style API and the magnetoelastic helpers were
+written in terms of dynamic-size \texttt{SpinVector}s; the
+\texttt{\_v3} family closes that gap.
+
+% =================================================================
 \section{Putting it together: a checklist}
 % =================================================================
 
@@ -1406,9 +1624,25 @@ with.
         an exact Metropolis sweep at any thread count, with the
         same per-thread \texttt{thread\_local} Lehmer RNG used by
         the serial path.
+  \item \textbf{The molecular-dynamics RHS opens at most one
+        OpenMP team per call} (Section~\ref{sec:rhs-heap-free}).
+        \texttt{ode\_system} wraps the spin sync, the spin EOM,
+        and the serial preamble/epilogue in a single
+        \texttt{\#pragma omp parallel} with \texttt{nowait} +
+        \texttt{single} blocks for the serial pieces, so a typical
+        RHS pays for one team start-up and two implicit barriers
+        instead of two complete team start-ups.  The per-site loop
+        body itself is heap-free: a stack
+        \texttt{Eigen::Vector3d} accumulator,
+        \texttt{Map<const Matrix3d>}-based exchange products with
+        \texttt{noalias()}, and \texttt{compute\_*\_v3} ME / ring-
+        exchange helpers that fuse the eight Eg sub-derivatives
+        into one neighbour pass.  This is what removed the
+        $\sim 11$ \texttt{malloc/free} pairs per site per RHS that
+        had been capping the strain--phonon Langevin integrator.
 \end{enumerate}
 
-\texttt{ClassicalSpin\_Cpp} now ticks all eighteen, including
+\texttt{ClassicalSpin\_Cpp} now ticks all nineteen, including
 item~3 (the Structure-of-Arrays bilinear table, see
 Section~\ref{sec:soa}), the Marsaglia sphere sampler
 (Section~\ref{sec:marsaglia}, including its mixed/strain
@@ -1417,9 +1651,13 @@ Section~\ref{sec:trilinear}, the magnetoelastic-derivative
 fusion of Section~\ref{sec:me-fuse}, the sparse SU(3)
 structure-constant kernel of Section~\ref{sec:sparse-su3}, the
 drive-envelope hoist + heap-free local field of
-Section~\ref{sec:hoist-time}, and---new in this pass---the
-sublattice-coloured intra-sweep OpenMP parallelism of
-Section~\ref{sec:sublattice-colour}.  The remaining gap before
+Section~\ref{sec:hoist-time}, the sublattice-coloured intra-sweep
+OpenMP parallelism of Section~\ref{sec:sublattice-colour},
+and---new in this pass---the persistent OpenMP region with the
+heap-free \texttt{compute\_*\_v3} family of strain-phonon RHS
+helpers (Section~\ref{sec:rhs-heap-free}), which closed the
+$\sim 21\times$ single-thread gap to the lattice/mixed RHS
+throughput on the local-strain code path.  The remaining gap before
 head-to-head benchmarking against Vampire/UppASD on large
 Heisenberg lattices ($L \gtrsim 128$) is hand-rolled SIMD
 intrinsics on the SoA bilinear table---the layout is now

@@ -28,6 +28,10 @@
 
 #include <boost/numeric/odeint.hpp>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // ---- MixedLattice::set_pulse_SU2 ----
     void MixedLattice::set_pulse_SU2(const vector<SpinVector>& field_in1, double t_B1,
                       const vector<SpinVector>& field_in2, double t_B2,
@@ -237,13 +241,19 @@
             drive_envelopes_SU3(t, su3_f1, su3_f2);
         }
 
-        // SU(2) dynamics: dS/dt = H × S (cross product for spin-1/2)
+        // SU(2) dynamics: dS/dt = H × S (cross product for spin-1/2).
+        // Each site only writes its own dsdt slot and only reads neighbour
+        // spins from `state`, so the loop is embarrassingly parallel — one
+        // #pragma omp parallel for over sites scales linearly. The
+        // `H` stack buffer is firstprivate so each thread has its own.
         if (spin_dim_SU2 == 3) {
-            double H[3];
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static) if(lattice_size_SU2 >= 64)
+#endif
             for (size_t site = 0; site < lattice_size_SU2; ++site) {
                 const size_t idx = site * spin_dim_SU2;
 
-                // Heap-free local-field write into a stack buffer.
+                double H[3];
                 get_local_field_SU2_flat_into(site, state, offset_SU3,
                                               su2_f1, su2_f2, H);
 
@@ -284,10 +294,16 @@
         // `cross_prod_SU3_flat`, which evaluates only the non-zero terms
         // directly — fully inlined, no heap allocation.
         if (spin_dim_SU3 == 8) {
-            double H[8];
+            // Embarrassingly parallel over SU(3) sites: each iteration
+            // writes dsdt[idx..idx+8) and only reads neighbour spins from
+            // `state`. `H` is stack-local per thread.
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static) if(lattice_size_SU3 >= 64)
+#endif
             for (size_t site = 0; site < lattice_size_SU3; ++site) {
                 const size_t idx = offset_SU3 + site * spin_dim_SU3;
 
+                double H[8];
                 get_local_field_SU3_flat_into(site, state, offset_SU3,
                                               su3_f1, su3_f2, H);
 
