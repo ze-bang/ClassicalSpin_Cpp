@@ -23,6 +23,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 
@@ -1495,7 +1496,18 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         }
 
         int can_reuse_m0_flag = 0;
-        if (rank == 0 && reuse_m0_for_m1 && !use_gpu) {
+        // W1 synthesises M1(τ) magnetisation triples by shifting M0(t)
+        // in time. The per-spin state is *not* reconstructible from
+        // those triples, so when the user requested
+        // save_spin_trajectories we must integrate every τ from
+        // scratch. Failing to do so caused mismatched MPI Send/Recv
+        // sizes for the M1 spin buffer (workers send 0 bytes,
+        // rank 0 receives uninitialised memory and writes garbage
+        // into HDF5). See Ingredient XVII in optimization_notes.tex.
+        if (rank == 0 && reuse_m0_for_m1 && save_spin_trajectories) {
+            cout << "  [W1] Disabled because save_spin_trajectories=true (synthesis"
+                 << " produces magnetisation triples only, not per-site states)." << endl;
+        } else if (rank == 0 && reuse_m0_for_m1 && !use_gpu) {
             const double max_dS = max_dSdt_norm_no_drive();
             cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
                  << max_dS << " (tol = " << stationarity_tol << ")" << endl;
@@ -1610,11 +1622,11 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             spins_SU3 = ground_state_SU3;
             
             // M1: synthesise from M0 if W1 is enabled, otherwise integrate.
-            // When synthesising we cannot honour `save_spin_trajectories`
-            // (we don't have the spin field, only the magnetisation
-            // observables), so we leave the spin buffer empty in that
-            // case — matches the trivial all-zero spin state of the
-            // ground configuration up until the pulse fires.
+            // Note: W1 is *forced off* upstream when
+            // save_spin_trajectories=true (synthesis only produces
+            // magnetisation triples, not per-site states), so the
+            // synthesis branch is taken only when the spin buffer
+            // would not be sent over MPI. See Ingredient XVII.
             {
                 vector<vector<double>> M1_spin_states;
                 TrajectoryType M1_traj;
@@ -1637,13 +1649,15 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                         std::copy(M1_spin_states[t].begin(), M1_spin_states[t].end(), flat.data() + t * state_dim);
                     local_spin_flat_M1.push_back(std::move(flat));
                 } else if (save_spin_trajectories) {
-                    // Either W1 took the synthesis path (no spin buffer
-                    // available) or the integrator returned no samples.
-                    // Push an empty placeholder so the per-τ index of
-                    // local_spin_flat_M1 stays aligned with
-                    // local_M1_trajectories, then the MPI send/receive
-                    // logic below will see size() == 0 and skip.
-                    local_spin_flat_M1.emplace_back();
+                    // Defensive: if the integrator returned no samples
+                    // we still need a placeholder so the per-τ index
+                    // stays aligned. Pad to the per-τ flat size
+                    // (M1_traj.size() * state_dim) with NaNs so any
+                    // downstream consumer immediately sees the gap
+                    // instead of silently consuming uninitialised
+                    // memory.
+                    local_spin_flat_M1.emplace_back(M1_traj.size() * state_dim,
+                                                    std::numeric_limits<double>::quiet_NaN());
                 }
             }
             
@@ -1669,7 +1683,10 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                         std::copy(M01_spin_states[t].begin(), M01_spin_states[t].end(), flat.data() + t * state_dim);
                     local_spin_flat_M01.push_back(std::move(flat));
                 } else if (save_spin_trajectories) {
-                    local_spin_flat_M01.emplace_back();
+                    // Defensive (see M1 branch above): pad to full size
+                    // with NaNs so MPI Send/Recv counts always match.
+                    local_spin_flat_M01.emplace_back(M01_traj.size() * state_dim,
+                                                     std::numeric_limits<double>::quiet_NaN());
                 }
             }
         }

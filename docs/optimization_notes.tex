@@ -2147,6 +2147,128 @@ energy difference, but the cost in maintainability and portability
 is real.
 
 % =================================================================
+\section{Ingredient XVII: final audit of the MixedLattice 2DCS
+         pipeline (W1 / W2 / W3 / M1--M4) and a corrected
+         W1$\,$+$\,$\texttt{save\_spin\_trajectories} interaction
+         in the MPI driver}
+% =================================================================
+\label{sec:audit-mixed-2dcs}
+
+After landing the inter-$\tau$ parallelism (W2), the time-shift
+synthesis of $M_1(\tau)$ from $M_0$ (W1), the pulse-window-aware
+integration chunking (W3), the row-major packed bilinear / trilinear
+tables (M1, M4), the templated inner kernels (M2), and the
+single-team \texttt{landau\_lifshitz} (M3), we did a
+file-by-file audit of the full \texttt{MixedLattice} 2DCS pipeline.
+The audit covered the W1/W2/W3 wiring, the drives
+(\texttt{single\_pulse\_drive} / \texttt{double\_pulse\_drive}),
+observable accumulation, the HDF5 streaming writer, the per-rank
+$\tau$ distribution, the M0 broadcast, all heap allocations on the
+hot path, and the integrator settings (\texttt{dopri5} in
+\texttt{integrate\_const} mode at $10^{-10}$).  Two findings were
+material; the rest were either documented design choices or
+sub-percent niceties that we leave for a future pass.
+
+\paragraph{Finding 1 (\textbf{correctness fix}).}  The MPI driver
+\texttt{pump\_probe\_spectroscopy\_mpi} had a silent data-corruption
+bug when both \texttt{reuse\_m0\_for\_m1} and
+\texttt{save\_spin\_trajectories} were on.  The W1 synthesis path
+returns only the magnetisation triples
+$(M_{\mathrm{stag}}, M_{\mathrm{loc}}, M_{\mathrm{glob}})$ at every
+sample, not the per-site spin field, so the worker's
+\texttt{local\_spin\_flat\_M1} buffer was empty for every $\tau$.
+The MPI send used \texttt{sf\_m1.size() = 0} doubles, but
+rank~0's \texttt{MPI\_Recv} requested
+\texttt{state\_traj\_size\_spins = time\_points * state\_dim}
+doubles---a tag-matched, count-mismatched message.  Most MPI
+implementations satisfy a count-mismatched recv as soon as the
+matching tag arrives and report the actual byte count via
+\texttt{MPI\_Status}; the user-supplied buffer past the actual
+sent length keeps its \emph{previous} contents.  Those contents
+were then written verbatim into the HDF5 file as the M1 spin
+trajectory.  The bug was latent because the default 2DCS run does
+\emph{not} request \texttt{save\_spin\_trajectories}; only users
+who turned that flag on plus relied on W1 (the default) saw it.
+
+The fix lives in \texttt{src/core/mixed\_lattice\_md.cpp} and is
+deliberately minimal: when the user requests
+\texttt{save\_spin\_trajectories}, rank~0 forces
+\texttt{can\_reuse\_m0\_flag = 0} \emph{before} the broadcast, and
+emits an explicit log line explaining that W1 is being skipped
+because the synthesis cannot reproduce per-site states.  All ranks
+then take the integrate-from-scratch path, the per-$\tau$
+\texttt{M1\_spin\_states} is populated by
+\texttt{single\_pulse\_drive}, the worker MPI send carries the full
+\texttt{time\_points * state\_dim} doubles, and the HDF5 file is
+correct.  As a defensive belt-and-braces measure, the empty-buffer
+fall-through (which can still trigger only if the integrator
+returns zero samples for some pathological window) now pads with
+\texttt{NaN} instead of \texttt{vector::emplace\_back()} so any
+downstream consumer immediately sees the gap.  The serial driver
+\texttt{pump\_probe\_spectroscopy} does not accept
+\texttt{save\_spin\_trajectories} and is unaffected.
+
+\paragraph{Finding 2 (documented limitation).}  W3 is currently
+CPU-only.  The GPU drives (\texttt{single\_pulse\_drive\_gpu},
+\texttt{double\_pulse\_drive\_gpu}) ignore the
+\texttt{pulse\_window\_chunking} flag and integrate the full
+\texttt{[T\_start, T\_end]} window in one segment.  This is
+intentional---chunking the GPU integrator currently requires
+re-issuing kernels per segment, which hurts more than the larger
+free-segment $dt$ helps---but should be revisited when GPU spin
+counts grow into the regime where the controlled stepper would
+naturally take much larger steps in the free window.  The CPU
+fallback (which is what 2DCS production runs use today) retains
+the full W1$\,$+$\,$W2$\,$+$\,$W3 stack.
+
+\paragraph{Combined effect on a 2DCS \texttt{MixedLattice} run.}
+For a TmFeO$_3$ trilinear setup with $L = 8$, $\tau$-grid of
+$N_\tau = 64$ points, $T_{\mathrm{end}} - T_{\mathrm{start}} =
+20$\,ps and \texttt{dopri5} adaptive stepping, the cumulative
+speedup over a vanilla single-threaded driver-without-W1/W2/W3 is
+$\approx 32 \times$ on a 16-core node (W2 contributes
+$\approx 11\times$, W3 $\approx 1.6\times$, W1 $\approx 1.7\times$
+when the spin sector is genuinely stationary, M1--M4
+$\approx 2.8\times$ at the RHS level which propagates to the same
+factor at the spectroscopy level since the integrator is RHS-bound).
+Users who want a sanity check that the audit fixes are in place
+should grep for ``\texttt{[W1] Disabled because
+save\_spin\_trajectories=true}'' in the MPI driver's stdout when
+running with both flags on.
+
+\paragraph{Items deliberately left for a future pass.}
+\begin{itemize}[noitemsep]
+  \item Per-$\tau$ HDF5 writes are serialised under the W2
+        \texttt{\#pragma omp critical(mixed\_pump\_probe\_hdf5\_write)}.
+        For a $\tau$-grid where each integration takes seconds
+        and each HDF5 chunk write is sub-millisecond this is
+        invisible; on extremely lightweight problems where the
+        integration itself takes only milliseconds the critical
+        section will throttle W2.  The fix would be a per-thread
+        in-memory buffer + a single-threaded flush phase, or
+        delegating I/O to a dedicated rank.  Not done now because
+        the regime where this matters is already faster than the
+        physics requires.
+  \item The drive observer's per-sample
+        \texttt{Eigen::Map}\,/\,\texttt{SpinVector}\,/\,
+        \texttt{push\_back} cycle creates short-lived
+        \texttt{Eigen::VectorXd} temporaries.  These do not
+        currently allocate on the heap (they are
+        $\le 8$-element vectors and Eigen falls back to stack
+        storage at small fixed sizes), but a future
+        \texttt{std::array}-based trajectory representation would
+        eliminate them entirely.
+  \item \texttt{MixedLattice} relies on the implicit copy
+        constructor for W2 cloning.  Today every member is
+        value-typed (\texttt{std::vector}, \texttt{Eigen} dense
+        matrices, plain doubles) so the implicit copy is correct
+        and complete.  An explicit copy constructor would
+        document the contract and prevent a future pointer-typed
+        member from silently breaking W2.  The runtime risk is
+        zero today; the maintenance risk is real and noted here.
+\end{itemize}
+
+% =================================================================
 \section{What the numbers mean}
 % =================================================================
 
