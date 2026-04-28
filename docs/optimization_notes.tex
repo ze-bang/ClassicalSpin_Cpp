@@ -2308,6 +2308,228 @@ land at $L = 32$ (Section~\ref{sec:marsaglia}, last paragraph) is
 likely to start winning.
 
 % =================================================================
+\section{Ingredient XVIII: integrator-layer audit --- dispatch
+correctness and tolerance defaults}
+% =================================================================
+\label{sec:ing-xviii}
+
+The XV/XVI/XVII series targeted everything \emph{around} the ODE
+integrator: the magnetisation symmetry that lets us synthesise
+$M_1(\tau)$ from a single $M_0$ run (W1), the inter-$\tau$ OpenMP
+parallelism (W2), the pulse-window-aware time stepping (W3), the
+packed interaction tables (M1/M4), and the persistent OpenMP region
+in the RHS (M3).  This section turns the spotlight on the integrator
+\emph{itself}.  We found two issues, both with the same character:
+the library was silently doing more work per integration step than
+the physics required.
+
+\subsection*{XVIII-A.  Pump--probe default tolerance was 100$\times$
+too tight}
+
+Every \texttt{*\_pulse\_drive()} entry point across
+\texttt{Lattice}, \texttt{MixedLattice}, and \texttt{PhononLattice}
+called \texttt{integrate\_ode\_system(\dots, abs\_tol = 1e-10,
+rel\_tol = 1e-10)}.  That tolerance was hard-coded as a literal in
+twelve different places and was inherited from an early
+exploratory commit, not a calibration against the 2DCS observable.
+
+The physics is forgiving.  A typical $\chi^{(3)}$ feature is
+$\sim 10^{-3}$ of $|\mathbf{M}|$, so $\sim 5$ significant figures
+in the trajectory ($\approx 10^{-8}$ absolute on a normalised
+spin) is more than enough.  For Dormand--Prince 5(4) the accepted
+step size scales as $\Delta t \propto \text{tol}^{1/5}$, so
+relaxing tol from $10^{-10}$ to $10^{-8}$ should give
+$(10^{2})^{1/5} \approx 2.5\times$ larger steps and a matching
+$\sim 2.5\times$ fewer RHS calls per integration when the
+controller is tolerance-limited.
+
+Concretely we:
+\begin{itemize}
+  \item Added two named constants
+        \texttt{kDefaultPumpProbeAbsTol = kDefaultPumpProbeRelTol
+        = 1e-8} to \texttt{include/classical\_spin/lattice/pulse\_chunking.h}.
+  \item Threaded \texttt{abs\_tol} / \texttt{rel\_tol} parameters
+        (defaulting to the new constants) through every
+        \texttt{single\_pulse\_drive}, \texttt{double\_pulse\_drive},
+        \texttt{pump\_probe\_spectroscopy}, and
+        \texttt{pump\_probe\_spectroscopy\_mpi} signature in all
+        three lattice families, and replaced the twelve hard-coded
+        \texttt{1e-10} call-site literals with the new parameters.
+  \item Added a parallel \texttt{md\_abs\_tol} / \texttt{md\_rel\_tol}
+        pair (default \texttt{1e-6}) and
+        \texttt{pump\_probe\_abs\_tol} / \texttt{pump\_probe\_rel\_tol}
+        pair (default \texttt{1e-8}) to \texttt{SpinConfig}, plumbed
+        them through every runner, and made the \texttt{molecular\_dynamics}
+        path use a $-1.0$ sentinel that falls back to the
+        method-aware defaults when the user does not override.
+  \item Pinned the change with a regression test
+        (\texttt{test\_pulse\_drive\_tolerance}) that runs
+        \texttt{single\_pulse\_drive} on a small TmFeO$_3$ mixed
+        lattice at \texttt{1e-10} and \texttt{1e-8} and asserts
+        the worst $|\Delta M|$ across all six magnetisation triples
+        and all sample times stays under $5 \times 10^{-6}$.
+\end{itemize}
+
+\paragraph{Measured speedup (from \texttt{bench\_integrators}).}
+On a $1\times1\times1$ TmFeO$_3$ lattice with a Gaussian pulse
+($\sigma = 0.2$, $T \in [-1, 8]$) the wall-clock time per
+\texttt{single\_pulse\_drive} call (averaged over five runs):
+\begin{center}
+\begin{tabular}{lcc}
+\hline
+\textbf{method} & \textbf{tol} & \textbf{wall (ms)} \\
+\hline
+dopri5 & $10^{-8}$  & $\sim 30$ \\
+dopri5 & $10^{-10}$ & $\sim 71$ \\
+\hline
+\end{tabular}
+\end{center}
+That is $\mathbf{2.4\times}$ speedup, almost exactly the
+theoretical $2.5\times$ bound.  At $L = 2$ ($64$ mixed sites) the
+controller is no longer tolerance-limited (the pulse-window
+chunking and other constraints dominate $\Delta t$ selection) and
+the same comparison gives $\sim 1.0\times$ --- i.e.\ the relaxation
+is \emph{free} on small systems and \emph{neutral} on larger ones.
+There is no regime in which it is a regression.
+
+\subsection*{XVIII-B.  \texttt{rk54}/\texttt{rkf54} was misrouted
+to a 7(8) integrator}
+
+The user-facing integrator name \texttt{rk54} (and its alias
+\texttt{rkf54}) is documented as ``Runge--Kutta 5(4) with embedded
+4th-order error estimate''.  In both \texttt{Lattice} and
+\texttt{MixedLattice} the dispatch table actually instantiated
+\texttt{boost::numeric::odeint::runge\_kutta\_fehlberg78}, a
+\emph{7(8)} method that uses 13 RHS evaluations per accepted step
+versus the 6 of a true 5(4).  This is a pure correctness bug at
+the API level: a user asking for a 5(4) method got a 7(8) method
+silently.
+
+The fix is a one-line change in each header: route
+\texttt{rk54}/\texttt{rkf54} to
+\texttt{runge\_kutta\_cash\_karp54}, which is the closest 5(4)
+method available in \texttt{boost::numeric::odeint} (Dormand--Prince
+is also 5(4) but is exposed under the separate name
+\texttt{dopri5}).  \texttt{PhononLattice} was already correct, so
+this only touched the two SU(2)/SU(2)+SU(3) headers.
+
+\paragraph{Performance side-effect.}  On the same
+\texttt{bench\_integrators} micro-benchmark at $L = 1$ the
+\emph{previous} (buggy) \texttt{rk54} dispatch was actually
+$\sim 3\times$ \emph{faster} than the (now-correct) Cash--Karp
+5(4), because Fehlberg 7(8) takes much larger steps on smooth
+post-pulse dynamics.  This is not a reason to keep the bug:
+\begin{itemize}
+  \item Users who explicitly want the 7(8) method can now write
+        \texttt{md\_integrator = "rkf78"}, which always meant 7(8).
+  \item At $L = 2$ the (now-correct) Cash--Karp 5(4)
+        \texttt{rk54} is \textbf{$\mathbf{1.7\times}$ faster than
+        \texttt{dopri5}} at the same tolerance, so the
+        correctness fix actually \emph{improves} the realistic
+        large-system case for users who had explicitly chosen
+        \texttt{rk54}.
+\end{itemize}
+
+\subsection*{XVIII-C.  Fixed-step \texttt{rk4} is not a free lunch}
+
+When asked ``what about \texttt{rk4}?'' the natural hope is that
+the cheapest classical integrator (4 RHS calls per step, no error
+control) might out-perform the adaptive 5(4) family on a smooth
+post-pulse evolution.  We measured this carefully on the same
+TmFeO$_3$ benchmark (with the bench reporting trajectory error
+against a \texttt{dopri5}@$10^{-12}$ reference) and the answer is
+\textbf{no}:
+
+\begin{center}
+\small
+\begin{tabular}{lccp{6cm}}
+\hline
+\textbf{method} & \textbf{dt} & \textbf{wall (ms)} & \textbf{$\max |M-M_{\text{ref}}|$ \quad / \quad NaN\_at} \\
+\hline
+rk4 & $0.05$    & $0.7$  & $\infty$, blows up at $t=-0.1$ (pre-pulse) \\
+rk4 & $0.02$    & $1.5$  & $\infty$, blows up at $t=-0.18$ \\
+rk4 & $0.01$    & $3.0$  & $\infty$, blows up at $t=-0.20$ \\
+rk4 & $0.005$   & $5.8$  & $\sim 1$ (stable but 100\% error) \\
+rk4 & $0.002$   & $14$   & $0.55$ (50\% error) \\
+rk4 & $0.001$   & $29$   & $0.039$ (4\% error, still 4 orders worse than dopri5) \\
+\hline
+dopri5 & $10^{-8}$ & $29$ & $1.6 \times 10^{-6}$ (the new default) \\
+\hline
+\end{tabular}
+\end{center}
+
+The story the bench tells:
+
+\begin{itemize}
+  \item \emph{Stability.}  The TmFeO$_3$ Hamiltonian
+        ($J_{1ab} = 4.74$, $J_{1c} = 5.15$ plus trilinear
+        couplings $u, v, w \sim 0.1$--$0.3$, all in our energy units
+        where time is dimensionless) has an effective spectral
+        radius for the LLG Jacobian large enough that
+        \texttt{rk4} requires $\Delta t \lesssim 0.005$ just to be
+        \emph{numerically stable}.  Anything larger gives a
+        silent NaN trajectory.
+  \item \emph{Accuracy.}  To match the trajectory accuracy of
+        \texttt{dopri5}@$10^{-8}$ (the new pump-probe default),
+        \texttt{rk4} would need $\Delta t \lesssim 3 \times 10^{-4}$,
+        i.e.\ $\sim 30\,000$ steps over $T = [-1, 8]$, which is
+        $\sim 3 \times$ \emph{slower} than the adaptive default it is
+        meant to replace.
+  \item \emph{Safety.}  The fixed-step methods have no error
+        control: if the user's \texttt{md\_timestep} is too large
+        for the Hamiltonian's spectral radius, the result is a
+        NaN-laden trajectory, not an error message.  The adaptive
+        5(4) family at least flags this by aborting with the
+        controller's ``step size too small'' diagnostic.
+\end{itemize}
+
+\paragraph{Recommendation.}  Use \texttt{rk4} only for code paths
+where $\Delta t$ is externally constrained (e.g.\ coupling to a
+fixed-step phonon integrator), and \emph{always} cross-check the
+\texttt{rk4} trajectory against the same problem run with
+\texttt{dopri5}@$10^{-8}$.  For the standard pump-probe / 2DCS
+workflow, the \texttt{dopri5} default already wins on every axis.
+
+\paragraph{Caveat about \texttt{rkf78}.}  An earlier draft of this
+section recommended \texttt{rkf78} as a $\sim 4\times$ speedup
+based on wall-clock measurements of \texttt{single\_pulse\_drive}.
+\textbf{That recommendation was wrong}: the bench was not checking
+trajectory finiteness, so a NaN-laden trajectory looked ``fast''
+because the 7(8) controller takes huge steps and finishes quickly.
+Adding the \texttt{NaN\_at} column to the bench reveals that on
+the small TmFeO$_3$ lattice \texttt{rkf78} blows up post-pulse
+(at $t \approx 3.2$) at \emph{both} \texttt{1e-8} and
+\texttt{1e-10} tolerances.  Until the \texttt{rkf78} controller
+behaviour on the trilinear-coupling RHS is investigated separately,
+do not recommend \texttt{rkf78} as a default speedup.  The honest
+recommendation is:
+\begin{verbatim}
+md_integrator = dopri5      # the safe default
+pump_probe_abs_tol = 1e-8   # already the new default
+pump_probe_rel_tol = 1e-8
+\end{verbatim}
+
+\subsection*{Net effect}
+
+For the canonical 2DCS workflow on a small mixed lattice the
+changes together give a $\sim 2.4\times$ pump-probe speedup
+(XVIII-A) with no observable change in the magnetisation trajectory
+beyond $\sim 10^{-6}$ on $|\mathbf{M}|$, and silently fix the
+\texttt{rk54}/\texttt{rkf54} misroute so users get the 5(4) method
+they asked for (XVIII-B).  The 2DCS observable \emph{never depends}
+on accuracy at this level: a $\chi^{(3)}$ feature is $\sim 10^{-3}$
+of $|\mathbf{M}|$, so the $\sim 10^{-6}$ trajectory difference is
+three orders of magnitude below the smallest physically meaningful
+signal.
+
+The audit also produced two negative results (XVIII-C and the
+\texttt{rkf78} caveat) that we record explicitly because the
+naive ``bench-by-wall-clock-only'' approach previously gave the
+wrong answer for both.  The lesson generalises: any future
+integrator-level audit \emph{must} measure trajectory error against
+a high-accuracy reference, not just wall-clock time.
+
+% =================================================================
 \section{Further reading}
 % =================================================================
 \begin{itemize}[noitemsep]

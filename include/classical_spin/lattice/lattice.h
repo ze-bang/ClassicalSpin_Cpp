@@ -5,6 +5,7 @@
 #include "simple_linear_alg.h"
 #include "hdf5_io.h"
 #include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
+#include "classical_spin/lattice/pulse_chunking.h"  // W3 segments + Ingredient XVIII tols
 #include <vector>
 #include <functional>
 #include <random>
@@ -4027,15 +4028,21 @@ private:
                 );
             }
         } else if (method == "rk54" || method == "rkf54") {
-            // Runge-Kutta-Fehlberg 5(4) adaptive method
+            // Aliased to Cash-Karp 5(4): Boost.Odeint does not ship a
+            // separate runge_kutta_fehlberg54 stepper, and these names
+            // were previously routed to runge_kutta_fehlberg78 by
+            // mistake — i.e. configurations specifying "rkf54" were
+            // silently running a 7(8) method (~13 RHS calls per step
+            // instead of ~6). Cash-Karp 5(4) is the natural same-order
+            // replacement and matches the comment / config doc claim.
             if (use_adaptive) {
                 odeint::integrate_adaptive(
-                    odeint::make_controlled<odeint::runge_kutta_fehlberg78<ODEState>>(abs_tol, rel_tol),
+                    odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
                     system_func, state, T_start, T_end, dt_step, observer
                 );
             } else {
                 odeint::integrate_const(
-                    odeint::make_controlled<odeint::runge_kutta_fehlberg78<ODEState>>(abs_tol, rel_tol),
+                    odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
                     system_func, state, T_start, T_end, dt_step, observer
                 );
             }
@@ -4276,7 +4283,10 @@ public:
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
-                           string method = "dopri5", bool use_gpu = false);
+                           string method = "dopri5", bool use_gpu = false,
+                           // Ingredient XVIII: MD tolerance overrides. Negative
+                           // values fall back to get_integration_tolerances(method).
+                           double abs_tol = -1.0, double rel_tol = -1.0);
 
     /**
      * Run molecular dynamics simulation using Boost.Odeint (CPU implementation)
@@ -4296,7 +4306,8 @@ public:
     void molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
                            string method = "dopri5",
-                           size_t renorm_interval = 0);
+                           size_t renorm_interval = 0,
+                           double abs_tol = -1.0, double rel_tol = -1.0);
 
 #if defined(CUDA_ENABLED) && defined(__CUDACC__)
     /**
@@ -4959,7 +4970,11 @@ public:
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
                string method = "dopri5", bool use_gpu = false,
-               bool pulse_window_chunking = true);
+               bool pulse_window_chunking = true,
+               // Ingredient XVIII: defaults moved from hard-coded
+               // 1e-10 to 1e-8 (≈2.5× fewer dopri5 steps per call).
+               double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+               double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     /**
      * Molecular dynamics with two-pulse field
@@ -4976,7 +4991,9 @@ public:
                    double pulse_amp, double pulse_width, double pulse_freq,
                    double T_start, double T_end, double step_size,
                    string method = "dopri5", bool use_gpu = false,
-                   bool pulse_window_chunking = true);
+                   bool pulse_window_chunking = true,
+                   double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                   double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     // ============================================================
     // 2DCS / pump-probe optimisation helpers
@@ -5066,6 +5083,9 @@ public:
                                  bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                  string dir_name = "spectroscopy", string method = "dopri5",
                                  bool use_gpu = false,
+                                 // Below: defaults for new tail args appended at the
+                                 // bottom of the param list. Old call sites compile
+                                 // unchanged; runners/configs may override.
                                  // W1: synthesise M1(τ) by time-shifting M0 instead of integrating.
                                  //   Auto-disabled at runtime if max ‖dS/dt‖_∞ > stationarity_tol.
                                  bool reuse_m0_for_m1 = true,
@@ -5073,7 +5093,10 @@ public:
                                  // W2: outer OpenMP threads for the τ loop. 0 = use all available.
                                  int outer_omp_threads = 0,
                                  // W3: pulse-window-aware chunked integration of single/double_pulse_drive.
-                                 bool pulse_window_chunking = true);
+                                 bool pulse_window_chunking = true,
+                                 // Ingredient XVIII: pump-probe ODE tolerances.
+                                 double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                 double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     /**
      * MPI-parallelized pump-probe spectroscopy
@@ -5116,7 +5139,9 @@ public:
                                      // (W2 is replaced by MPI tau-distribution at this level.)
                                      bool reuse_m0_for_m1 = true,
                                      double stationarity_tol = 1e-6,
-                                     bool pulse_window_chunking = true);
+                                     bool pulse_window_chunking = true,
+                                     double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                     double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     // Note: GPU-accelerated methods use the modular GPU implementation in lattice_gpu.cuh/cu
     // For C++ compilation, use_gpu parameter will automatically fallback to CPU implementation.

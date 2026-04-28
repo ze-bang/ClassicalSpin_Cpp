@@ -84,7 +84,7 @@ struct SpinConfig {
     //   rk2/midpoint- Runge-Kutta 2nd order / modified midpoint
     //   rk4         - Classic Runge-Kutta 4th order (good balance, fixed step)
     //   rk5/rkck54  - Cash-Karp 5(4) adaptive (good for smooth problems)
-    //   rk54/rkf54  - Runge-Kutta-Fehlberg 5(4) adaptive (equivalent to rkck54)
+    //   rk54/rkf54  - alias for Cash-Karp 5(4) (Boost has no fehlberg54 stepper)
     //   dopri5      - Dormand-Prince 5(4) adaptive (default, recommended)
     //   rk78/rkf78  - Runge-Kutta-Fehlberg 7(8) (high accuracy, expensive)
     //   bulirsch_stoer/bs - Bulirsch-Stoer (very high accuracy, expensive)
@@ -92,6 +92,26 @@ struct SpinConfig {
     //   adams_moulton/am   - Adams-Bashforth-Moulton predictor-corrector (more accurate multistep)
     string md_integrator = "dopri5";
     bool use_gpu = false;
+
+    // ----------------------------------------------------------------
+    // Adaptive ODE tolerances (Ingredient XVIII).
+    //
+    // The previous defaults were a hard-coded 1e-10 inside the
+    // pump-probe / 2DCS drivers and 1e-6 inside the MD driver. The
+    // 1e-10 spectroscopy default was overkill: typical 2DCS responses
+    // are ~10⁻³ of |M|, so ~5 significant figures in the trajectory
+    // (≈ 10⁻⁸ abs) is more than the analysis needs. With dopri5 the
+    // accepted step size scales as dt ∝ tol^{1/5}, so relaxing
+    // tol from 1e-10 to 1e-8 gives ~2.5× larger steps and a
+    // matching ~2.5× fewer RHS calls per integration.
+    //
+    // Users can restore tighter tolerances per-run via the params
+    // file (`pump_probe_abs_tol = 1e-10`, `pump_probe_rel_tol = 1e-10`).
+    // ----------------------------------------------------------------
+    double md_abs_tol = 1e-6;            ///< abs tol for run_molecular_dynamics
+    double md_rel_tol = 1e-6;            ///< rel tol for run_molecular_dynamics
+    double pump_probe_abs_tol = 1e-8;    ///< abs tol for *_pulse_drive (2DCS / pump-probe)
+    double pump_probe_rel_tol = 1e-8;    ///< rel tol for *_pulse_drive (2DCS / pump-probe)
     
     // Parallel tempering parameters
     size_t num_replicas = 8;

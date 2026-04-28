@@ -512,6 +512,11 @@ add_optimized_executable(test_strain_phonon_regressions src/apps/test_strain_pho
 # Regression tests for mixed SU2-SU3 trilinear bookkeeping
 add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_trilinear_regressions.cpp)
 
+# Regression test for Ingredient XVIII: pulse-drive trajectories at
+# the new 1e-8 default must agree with the legacy 1e-10 reference to
+# physics tolerance (~ 5e-6 on the magnetisation observable).
+add_optimized_executable(test_pulse_drive_tolerance src/apps/test_pulse_drive_tolerance.cpp)
+
 # HDF5 parallel-tempering writer smoke test (no MPI / GPU needed)
 add_optimized_executable(test_hdf5_pt src/test_hdf5_pt.cpp)
 
@@ -525,9 +530,17 @@ add_optimized_executable(bench_mc src/apps/bench_mc.cpp)
 # bench_mc but for the time-evolution side of the library.
 add_optimized_executable(bench_md src/apps/bench_md.cpp)
 
+# Integrator-level micro-benchmark for Ingredient XVIII (pump-probe
+# default tolerance relaxation + rk54 dispatch fix). Times
+# single_pulse_drive() on a small TmFeO3 mixed lattice across method
+# and tolerance combinations and prints speedup ratios.
+add_optimized_executable(bench_integrators src/apps/bench_integrators.cpp)
+
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
+    add_test(NAME pulse_drive_tolerance COMMAND test_pulse_drive_tolerance)
+    set_tests_properties(pulse_drive_tolerance PROPERTIES TIMEOUT 120)
     add_test(NAME hdf5_pt_writer_smoke COMMAND test_hdf5_pt)
     set_tests_properties(hdf5_pt_writer_smoke PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

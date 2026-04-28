@@ -64,6 +64,7 @@
 #include "unitcell_builders.h"
 #include "simple_linear_alg.h"
 #include "kitaev_bonds.h"
+#include "classical_spin/lattice/pulse_chunking.h"  // Ingredient XVIII tols + W3 helper
 #include <vector>
 #include <array>
 #include <functional>
@@ -1265,7 +1266,10 @@ public:
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir = "", size_t save_interval = 100,
-                           string method = "dopri5");
+                           string method = "dopri5",
+                           // Ingredient XVIII: MD tolerance overrides. Negative
+                           // values fall back to the legacy method-aware defaults.
+                           double abs_tol = -1.0, double rel_tol = -1.0);
     
     // ============================================================
     // MONTE CARLO METHODS (consistent with Lattice / StrainPhononLattice)
@@ -1406,7 +1410,10 @@ public:
                                      double T_start, double T_end, double step_size,
                                      const string& method = "dopri5",
                                      // W3: pulse-window-aware chunked integration.
-                                     bool pulse_window_chunking = true);
+                                     bool pulse_window_chunking = true,
+                                     // Ingredient XVIII: pump-probe ODE tolerances.
+                                     double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                     double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
     
     /**
      * Double pulse THz drive (pump + probe)
@@ -1431,7 +1438,9 @@ public:
                                      double pulse_amp, double pulse_width, double pulse_freq,
                                      double T_start, double T_end, double step_size,
                                      const string& method = "dopri5",
-                                     bool pulse_window_chunking = true);
+                                     bool pulse_window_chunking = true,
+                                     double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                     double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
     
     /**
      * Complete 2D coherent spectroscopy (2DCS) workflow
@@ -1470,7 +1479,9 @@ public:
                                 bool reuse_m0_for_m1 = true,
                                 double stationarity_tol = 1e-6,
                                 int outer_omp_threads = 0,
-                                bool pulse_window_chunking = true);
+                                bool pulse_window_chunking = true,
+                                double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     /**
      * MPI-parallelized 2DCS spectroscopy
@@ -1484,7 +1495,9 @@ public:
                                     const string& method = "dopri5",
                                     bool reuse_m0_for_m1 = true,
                                     double stationarity_tol = 1e-6,
-                                    bool pulse_window_chunking = true);
+                                    bool pulse_window_chunking = true,
+                                    double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                    double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     // ------------------------------------------------------------------
     // W1 (time-translation) helpers — see lattice.h doc.

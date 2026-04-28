@@ -119,4 +119,20 @@ constexpr double kPulseWindowSigmas = 6.0;
 /// abs/rel tolerances, so the observable trajectory is unchanged.
 constexpr double kFreeDtFactor = 20.0;
 
+/// Default abs/rel tolerances for the pump-probe / 2DCS pulse drivers.
+///
+/// Historically these were hard-coded to 1e-10 in every
+/// `*_pulse_drive` function across the three lattice families. That
+/// is far tighter than the 2DCS observable needs:
+///   - Typical χ³ responses are ~10⁻³ of |M|, so ~5 significant
+///     figures in the trajectory (≈ 10⁻⁸ absolute) is plenty.
+///   - dopri5's accepted step scales as dt ∝ tol^{1/5}; relaxing
+///     tol from 1e-10 to 1e-8 gives ~100^{1/5} ≈ 2.5× larger steps,
+///     i.e. ~2.5× fewer RHS calls per integration.
+///   - The new SpinConfig fields `pump_probe_abs_tol` /
+///     `pump_probe_rel_tol` let users restore 1e-10 (or tighten
+///     further) on a per-run basis.
+constexpr double kDefaultPumpProbeAbsTol = 1e-8;
+constexpr double kDefaultPumpProbeRelTol = 1e-8;
+
 }  // namespace classical_spin_pulse_chunking

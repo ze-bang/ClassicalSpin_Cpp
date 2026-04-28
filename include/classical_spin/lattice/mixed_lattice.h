@@ -3705,14 +3705,18 @@ public:
                 );
             }
         } else if (method == "rk54" || method == "rkf54") {
+            // Aliased to Cash-Karp 5(4): see Lattice::integrate_ode_system
+            // for the rationale (Boost has no fehlberg54 stepper; the
+            // previous fehlberg78 wiring was a copy-paste bug that
+            // silently doubled the per-step cost).
             if (use_adaptive) {
                 odeint::integrate_adaptive(
-                    odeint::make_controlled<odeint::runge_kutta_fehlberg78<ODEState>>(abs_tol, rel_tol),
+                    odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
                     system_func, state, T_start, T_end, dt_step, observer
                 );
             } else {
                 odeint::integrate_const(
-                    odeint::make_controlled<odeint::runge_kutta_fehlberg78<ODEState>>(abs_tol, rel_tol),
+                    odeint::make_controlled<odeint::runge_kutta_cash_karp54<ODEState>>(abs_tol, rel_tol),
                     system_func, state, T_start, T_end, dt_step, observer
                 );
             }
@@ -4459,7 +4463,11 @@ public:
                // W3: pulse-window-aware chunked integration. The pulse
                // window is built from max(σ_SU2, σ_SU3) so we never
                // under-resolve either drive envelope.
-               bool pulse_window_chunking = true) {
+               bool pulse_window_chunking = true,
+               // Ingredient XVIII: pump-probe ODE tolerances (default 1e-8;
+               // previously hard-coded 1e-10).
+               double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+               double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -4544,11 +4552,11 @@ public:
             for (const auto& seg : segments) {
                 integrate_ode_system(system_func, state,
                                      seg.t0, seg.t1, seg.dt_init,
-                                     observer, method, false, 1e-10, 1e-10);
+                                     observer, method, false, abs_tol, rel_tol);
             }
         } else {
             integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
+                                observer, method, false, abs_tol, rel_tol);
         }
 
         // Reset pulse
@@ -4571,7 +4579,9 @@ public:
                double T_start, double T_end, double step_size,
                const string& method = "dopri5", bool use_gpu = false,
                vector<vector<double>>* spin_state_out = nullptr,
-               bool pulse_window_chunking = true) {
+               bool pulse_window_chunking = true,
+               double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+               double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -4655,11 +4665,11 @@ public:
             for (const auto& seg : segments) {
                 integrate_ode_system(system_func, state,
                                      seg.t0, seg.t1, seg.dt_init,
-                                     observer, method, false, 1e-10, 1e-10);
+                                     observer, method, false, abs_tol, rel_tol);
             }
         } else {
             integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
+                                observer, method, false, abs_tol, rel_tol);
         }
 
         // Reset pulse
@@ -4673,7 +4683,11 @@ public:
      */
     void molecular_dynamics(double T_start, double T_end, double dt_initial,
                            const string& out_dir = "", size_t save_interval = 100,
-                           const string& method = "dopri5", bool use_gpu = false);
+                           const string& method = "dopri5", bool use_gpu = false,
+                           // Ingredient XVIII: MD tolerance overrides. Negative
+                           // values fall back to get_integration_tolerances(method)
+                           // so legacy callers keep their existing 1e-6 (or 1e-8 for BS).
+                           double abs_tol = -1.0, double rel_tol = -1.0);
 
     /**
      * CPU implementation of molecular dynamics
@@ -4681,7 +4695,8 @@ public:
      */
     void molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            const string& out_dir = "", size_t save_interval = 100,
-                           const string& method = "dopri5");
+                           const string& method = "dopri5",
+                           double abs_tol = -1.0, double rel_tol = -1.0);
 
     /**
      * Print lattice information
@@ -4794,7 +4809,9 @@ public:
                                  bool reuse_m0_for_m1 = true,
                                  double stationarity_tol = 1e-6,
                                  int outer_omp_threads = 0,
-                                 bool pulse_window_chunking = true);
+                                 bool pulse_window_chunking = true,
+                                 double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                 double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
     /**
      * MPI-parallelized pump-probe spectroscopy for mixed lattice
@@ -4819,7 +4836,9 @@ public:
                                      bool save_spin_trajectories = false,
                                      bool reuse_m0_for_m1 = true,
                                      double stationarity_tol = 1e-6,
-                                     bool pulse_window_chunking = true);
+                                     bool pulse_window_chunking = true,
+                                     double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
+                                     double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
 
 // ============================================================
 // GPU Implementation Section

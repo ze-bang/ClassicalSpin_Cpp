@@ -1548,7 +1548,8 @@ void PhononLattice::integrate_ode_system(
 
 void PhononLattice::molecular_dynamics(
     double T_start, double T_end, double dt_initial,
-    string out_dir, size_t save_interval, string method) 
+    string out_dir, size_t save_interval, string method,
+    double abs_tol_in, double rel_tol_in) 
 {
 #ifndef HDF5_ENABLED
     std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
@@ -1693,9 +1694,15 @@ void PhononLattice::molecular_dynamics(
         this->ode_system(x, dxdt, t);
     };
     
-    // Integrate using selected method
-    double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
-    double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
+    // Integrate using selected method.
+    // User overrides win when positive; otherwise fall back to the
+    // method-aware defaults (1e-6, or 1e-8 for Bulirsch-Stoer).
+    double abs_tol = (abs_tol_in > 0.0)
+        ? abs_tol_in
+        : ((method == "bulirsch_stoer") ? 1e-8 : 1e-6);
+    double rel_tol = (rel_tol_in > 0.0)
+        ? rel_tol_in
+        : ((method == "bulirsch_stoer") ? 1e-8 : 1e-6);
     integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
                         observer, method, true, abs_tol, rel_tol);
     
@@ -2453,7 +2460,8 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
     double polarization, double t_B,
     double pulse_amp, double pulse_width, double pulse_freq,
     double T_start, double T_end, double step_size, const string& method,
-    bool pulse_window_chunking) {
+    bool pulse_window_chunking,
+    double abs_tol, double rel_tol) {
     
     // Set up single pulse
     drive_params.E0_1 = pulse_amp;
@@ -2531,11 +2539,11 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
         for (const auto& seg : segments) {
             integrate_ode_system(system_func, state,
                                  seg.t0, seg.t1, seg.dt_init,
-                                 observer, method, false, 1e-10, 1e-10);
+                                 observer, method, false, abs_tol, rel_tol);
         }
     } else {
         integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                            observer, method, false, 1e-10, 1e-10);
+                            observer, method, false, abs_tol, rel_tol);
     }
 
     // Reset drive
@@ -2549,7 +2557,8 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
     double polarization_2, double t_B_2,
     double pulse_amp, double pulse_width, double pulse_freq,
     double T_start, double T_end, double step_size, const string& method,
-    bool pulse_window_chunking) {
+    bool pulse_window_chunking,
+    double abs_tol, double rel_tol) {
     
     // Set up pump (pulse 1)
     drive_params.E0_1 = pulse_amp;
@@ -2632,11 +2641,11 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
         for (const auto& seg : segments) {
             integrate_ode_system(system_func, state,
                                  seg.t0, seg.t1, seg.dt_init,
-                                 observer, method, false, 1e-10, 1e-10);
+                                 observer, method, false, abs_tol, rel_tol);
         }
     } else {
         integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                            observer, method, false, 1e-10, 1e-10);
+                            observer, method, false, abs_tol, rel_tol);
     }
 
     // Reset drive
@@ -2722,7 +2731,8 @@ void PhononLattice::pump_probe_spectroscopy(
     bool reuse_m0_for_m1,
     double stationarity_tol,
     int outer_omp_threads,
-    bool pulse_window_chunking) {
+    bool pulse_window_chunking,
+    double abs_tol, double rel_tol) {
     
     std::filesystem::create_directories(dir_name);
     
@@ -2761,7 +2771,7 @@ void PhononLattice::pump_probe_spectroscopy(
     auto M0_trajectory = single_pulse_drive(polarization, 0.0,
                                             pulse_amp, pulse_width, pulse_freq,
                                             T_start, T_end, T_step, method,
-                                            pulse_window_chunking);
+                                            pulse_window_chunking, abs_tol, rel_tol);
     
     spins = ground_state;
     phonons = ground_phonons;
@@ -2847,7 +2857,7 @@ void PhononLattice::pump_probe_spectroscopy(
                 M1_trajectories[i] = single_pulse_drive(polarization, current_tau,
                                                        pulse_amp, pulse_width, pulse_freq,
                                                        T_start, T_end, T_step, method,
-                                                       pulse_window_chunking);
+                                                       pulse_window_chunking, abs_tol, rel_tol);
             }
 
             spins = ground_state;
@@ -2856,7 +2866,7 @@ void PhononLattice::pump_probe_spectroscopy(
             M01_trajectories[i] = double_pulse_drive(polarization, 0.0, polarization, current_tau,
                                                      pulse_amp, pulse_width, pulse_freq,
                                                      T_start, T_end, T_step, method,
-                                                     pulse_window_chunking);
+                                                     pulse_window_chunking, abs_tol, rel_tol);
         }
     } else {
 #ifdef _OPENMP
@@ -2883,7 +2893,7 @@ void PhononLattice::pump_probe_spectroscopy(
                         polarization, current_tau,
                         pulse_amp, pulse_width, pulse_freq,
                         T_start, T_end, T_step, method,
-                        pulse_window_chunking);
+                        pulse_window_chunking, abs_tol, rel_tol);
                 }
 
                 local_lat.spins = ground_state;
@@ -2892,7 +2902,7 @@ void PhononLattice::pump_probe_spectroscopy(
                     polarization, 0.0, polarization, current_tau,
                     pulse_amp, pulse_width, pulse_freq,
                     T_start, T_end, T_step, method,
-                    pulse_window_chunking);
+                    pulse_window_chunking, abs_tol, rel_tol);
             }
         }
 #endif
@@ -3100,7 +3110,8 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
     const string& dir_name, const string& method,
     bool reuse_m0_for_m1,
     double stationarity_tol,
-    bool pulse_window_chunking) {
+    bool pulse_window_chunking,
+    double abs_tol, double rel_tol) {
     
     int rank, mpi_size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -3195,7 +3206,7 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         M0_trajectory = single_pulse_drive(polarization, 0.0,
                                            pulse_amp, pulse_width, pulse_freq,
                                            T_start, T_end, T_step, method,
-                                           pulse_window_chunking);
+                                           pulse_window_chunking, abs_tol, rel_tol);
         spins = ground_state;
         phonons = ground_phonons;
     }
@@ -3272,7 +3283,7 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
             my_M1_trajectories[i] = single_pulse_drive(polarization, current_tau,
                                                        pulse_amp, pulse_width, pulse_freq,
                                                        T_start, T_end, T_step, method,
-                                                       pulse_window_chunking);
+                                                       pulse_window_chunking, abs_tol, rel_tol);
         }
         
         spins = ground_state;
@@ -3280,7 +3291,7 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         my_M01_trajectories[i] = double_pulse_drive(polarization, 0.0, polarization, current_tau,
                                                     pulse_amp, pulse_width, pulse_freq,
                                                     T_start, T_end, T_step, method,
-                                                    pulse_window_chunking);
+                                                    pulse_window_chunking, abs_tol, rel_tol);
     }
     
     MPI_Barrier(MPI_COMM_WORLD);

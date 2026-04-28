@@ -134,6 +134,18 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "md_integrator" || key == "integrator") {
                 config.md_integrator = value;
             }
+            else if (key == "md_abs_tol") {
+                config.md_abs_tol = stod(value);
+            }
+            else if (key == "md_rel_tol") {
+                config.md_rel_tol = stod(value);
+            }
+            else if (key == "pump_probe_abs_tol") {
+                config.pump_probe_abs_tol = stod(value);
+            }
+            else if (key == "pump_probe_rel_tol") {
+                config.pump_probe_rel_tol = stod(value);
+            }
             else if (key == "use_gpu" || key == "gpu") {
                 config.use_gpu = parse_bool(value);
             }

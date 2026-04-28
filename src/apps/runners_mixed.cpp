@@ -322,7 +322,10 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const SpinConfig& confi
             trial_dir,
             config.md_save_interval,
             config.md_integrator,
-            config.use_gpu
+            config.use_gpu,
+            // Ingredient XVIII: MD tolerance overrides (default 1e-6 if unset).
+            config.md_abs_tol,
+            config.md_rel_tol
         );
         
         cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
@@ -967,7 +970,10 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             // Ingredient XV (W1/W3 — W2 replaced by MPI here):
             config.reuse_m0_for_m1,
             config.stationarity_tol,
-            config.pulse_window_chunking
+            config.pulse_window_chunking,
+            // Ingredient XVIII: pump-probe ODE tolerances (default 1e-8).
+            config.pump_probe_abs_tol,
+            config.pump_probe_rel_tol
         );
         
     } else {
@@ -1076,7 +1082,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 config.reuse_m0_for_m1,
                 config.stationarity_tol,
                 config.pump_probe_omp_threads,
-                config.pulse_window_chunking
+                config.pulse_window_chunking,
+                config.pump_probe_abs_tol,
+                config.pump_probe_rel_tol
             );
             
             cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;

@@ -319,17 +319,21 @@
 // ---- Lattice::molecular_dynamics ----
     void Lattice::molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir, size_t save_interval,
-                           string method, bool use_gpu) {
+                           string method, bool use_gpu,
+                           double abs_tol, double rel_tol) {
         if (use_gpu) {
 #ifdef CUDA_ENABLED
+            (void) abs_tol; (void) rel_tol;
             molecular_dynamics_gpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
 #else
             std::cerr << "Warning: GPU support not available (compiled without CUDA_ENABLED)." << endl;
             std::cerr << "Falling back to CPU implementation." << endl;
-            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method,
+                                   /*renorm_interval=*/0, abs_tol, rel_tol);
 #endif
         } else {
-            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method,
+                                   /*renorm_interval=*/0, abs_tol, rel_tol);
         }
     }
 
@@ -337,7 +341,8 @@
     void Lattice::molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            string out_dir, size_t save_interval,
                            string method,
-                           size_t renorm_interval) {
+                           size_t renorm_interval,
+                           double abs_tol_in, double rel_tol_in) {
 #ifndef HDF5_ENABLED
         std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
         std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
@@ -435,9 +440,15 @@
             this->ode_system(x, dxdt, t);
         };
         
-        // Integrate using selected method
-        double abs_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
-        double rel_tol = (method == "bulirsch_stoer") ? 1e-8 : 1e-6;
+        // Integrate using selected method.
+        // User overrides win when positive; otherwise fall back to the
+        // method-aware defaults (1e-6, or 1e-8 for Bulirsch-Stoer).
+        double abs_tol = (abs_tol_in > 0.0)
+            ? abs_tol_in
+            : ((method == "bulirsch_stoer") ? 1e-8 : 1e-6);
+        double rel_tol = (rel_tol_in > 0.0)
+            ? rel_tol_in
+            : ((method == "bulirsch_stoer") ? 1e-8 : 1e-6);
         integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
                             observer, method, true, abs_tol, rel_tol);
         
@@ -484,7 +495,8 @@
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
                string method, bool use_gpu,
-               bool pulse_window_chunking) {
+               bool pulse_window_chunking,
+               double abs_tol, double rel_tol) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -555,11 +567,11 @@
                 step_size, ck::kFreeDtFactor);
             for (const auto& seg : segments) {
                 integrate_ode_system(system_func, state, seg.t0, seg.t1, seg.dt_init,
-                                    observer, method, false, 1e-10, 1e-10);
+                                    observer, method, false, abs_tol, rel_tol);
             }
         } else {
             integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
+                                observer, method, false, abs_tol, rel_tol);
         }
         
         // Note: Lattice::spins remains unchanged - only ODEState evolved
@@ -579,7 +591,8 @@
                    double pulse_amp, double pulse_width, double pulse_freq,
                    double T_start, double T_end, double step_size,
                    string method, bool use_gpu,
-                   bool pulse_window_chunking) {
+                   bool pulse_window_chunking,
+                   double abs_tol, double rel_tol) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -647,11 +660,11 @@
                 step_size, ck::kFreeDtFactor);
             for (const auto& seg : segments) {
                 integrate_ode_system(system_func, state, seg.t0, seg.t1, seg.dt_init,
-                                    observer, method, false, 1e-10, 1e-10);
+                                    observer, method, false, abs_tol, rel_tol);
             }
         } else {
             integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                                observer, method, false, 1e-10, 1e-10);
+                                observer, method, false, abs_tol, rel_tol);
         }
         
         // Note: Lattice::spins remains unchanged - only ODEState evolved
@@ -677,7 +690,8 @@
                                  bool reuse_m0_for_m1,
                                  double stationarity_tol,
                                  int outer_omp_threads,
-                                 bool pulse_window_chunking) {
+                                 bool pulse_window_chunking,
+                                 double abs_tol, double rel_tol) {
         
         std::filesystem::create_directories(dir_name);
         
@@ -713,7 +727,7 @@
         if (use_gpu) cout << "  Using GPU acceleration" << endl;
         auto M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
                                    T_start, T_end, T_step, method, use_gpu,
-                                   pulse_window_chunking);
+                                   pulse_window_chunking, abs_tol, rel_tol);
         
         // ----- W1: capture ground-state magnetisations and decide whether
         //       it is safe to synthesise M1(τ) from M0 by time-shift -----
@@ -820,7 +834,7 @@
                     cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
                     M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
                                                       T_start, T_end, T_step, method, use_gpu,
-                                                      pulse_window_chunking);
+                                                      pulse_window_chunking, abs_tol, rel_tol);
                 }
 
                 spins = ground_state;
@@ -828,7 +842,7 @@
                 auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
                                                 pulse_amp, pulse_width, pulse_freq,
                                                 T_start, T_end, T_step, method, use_gpu,
-                                                pulse_window_chunking);
+                                                pulse_window_chunking, abs_tol, rel_tol);
 
 #ifdef HDF5_ENABLED
                 writer.write_tau_trajectory(i, current_tau, M1_trajectory, M01_trajectory);
@@ -864,7 +878,7 @@
                         M1_trajectory = local_lat.single_pulse_drive(
                             field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
                             T_start, T_end, T_step, method, /*use_gpu=*/false,
-                            pulse_window_chunking);
+                            pulse_window_chunking, abs_tol, rel_tol);
                     }
 
                     local_lat.spins = ground_state;
@@ -872,7 +886,7 @@
                         field_in, 0.0, field_in, current_tau,
                         pulse_amp, pulse_width, pulse_freq,
                         T_start, T_end, T_step, method, /*use_gpu=*/false,
-                        pulse_window_chunking);
+                        pulse_window_chunking, abs_tol, rel_tol);
 
 #ifdef HDF5_ENABLED
                     #pragma omp critical(pump_probe_hdf5_write)
@@ -921,7 +935,8 @@
                                      bool use_gpu,
                                      bool reuse_m0_for_m1,
                                      double stationarity_tol,
-                                     bool pulse_window_chunking) {
+                                     bool pulse_window_chunking,
+                                     double abs_tol, double rel_tol) {
         
         int rank, mpi_size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -987,7 +1002,7 @@
         if (rank == 0) {
             M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
                                                T_start, T_end, T_step, method, use_gpu,
-                                               pulse_window_chunking);
+                                               pulse_window_chunking, abs_tol, rel_tol);
         }
         
         // Restore ground state
@@ -1111,7 +1126,7 @@
                 spins = ground_state;
                 M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
                                        T_start, T_end, T_step, method, use_gpu,
-                                       pulse_window_chunking);
+                                       pulse_window_chunking, abs_tol, rel_tol);
             }
             local_M1_trajectories.push_back(std::move(M1_trajectory));
 
@@ -1122,7 +1137,7 @@
             auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
                                             pulse_amp, pulse_width, pulse_freq,
                                             T_start, T_end, T_step, method, use_gpu,
-                                            pulse_window_chunking);
+                                            pulse_window_chunking, abs_tol, rel_tol);
             local_M01_trajectories.push_back(std::move(M01_trajectory));
         }
         

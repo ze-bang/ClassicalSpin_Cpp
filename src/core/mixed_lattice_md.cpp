@@ -118,8 +118,15 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         field_drive_SU2[0] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
         field_drive_SU2[1] = SpinVector::Zero(N_atoms_SU2 * spin_dim_SU2);
         
+        // Guard MPI_Comm_rank with MPI_Initialized so that non-MPI
+        // callers (regression tests, single-rank drivers compiled
+        // without mpirun) do not abort at MPI_Comm_rank's "called
+        // before MPI_INIT" check. When MPI was never initialised we
+        // are by definition rank 0 in a 1-process world.
         int mpi_rank = 0;
-        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+        int mpi_inited = 0;
+        MPI_Initialized(&mpi_inited);
+        if (mpi_inited) MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
         
         for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
             // B_local = F^T * B_global (field transforms covariantly: B^(i) = F_i^T B^(0))
@@ -184,8 +191,13 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         field_drive_SU3[0] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
         field_drive_SU3[1] = SpinVector::Zero(N_atoms_SU3 * spin_dim_SU3);
         
+        // See set_pulse_SU2: guard MPI rank query with MPI_Initialized
+        // so non-MPI callers (regression tests, plain single-rank
+        // execution without mpirun) work without aborting.
         int mpi_rank = 0;
-        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+        int mpi_inited = 0;
+        MPI_Initialized(&mpi_inited);
+        if (mpi_inited) MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
         
         for (size_t atom = 0; atom < N_atoms_SU3; ++atom) {
             // B_local = F^T * B_global (field transforms covariantly: B^(i) = F_i^T B^(0))
@@ -861,24 +873,28 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
 // ---- MixedLattice::molecular_dynamics ----
     void MixedLattice::molecular_dynamics(double T_start, double T_end, double dt_initial,
                            const string& out_dir, size_t save_interval,
-                           const string& method, bool use_gpu) {
+                           const string& method, bool use_gpu,
+                           double abs_tol, double rel_tol) {
         if (use_gpu) {
 #ifdef CUDA_ENABLED
+            // GPU path does not yet expose tolerance overrides; ignore.
+            (void) abs_tol; (void) rel_tol;
             molecular_dynamics_gpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
 #else
             std::cerr << "Warning: GPU support not available (compiled without CUDA_ENABLED)." << endl;
             std::cerr << "Falling back to CPU implementation." << endl;
-            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method, abs_tol, rel_tol);
 #endif
         } else {
-            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method);
+            molecular_dynamics_cpu(T_start, T_end, dt_initial, out_dir, save_interval, method, abs_tol, rel_tol);
         }
     }
 
 // ---- MixedLattice::molecular_dynamics_cpu ----
     void MixedLattice::molecular_dynamics_cpu(double T_start, double T_end, double dt_initial,
                            const string& out_dir, size_t save_interval,
-                           const string& method) {
+                           const string& method,
+                           double abs_tol, double rel_tol) {
 #ifndef HDF5_ENABLED
         std::cerr << "Error: HDF5 support is required for molecular dynamics output." << endl;
         std::cerr << "Please rebuild with -DHDF5_ENABLED flag and HDF5 libraries." << endl;
@@ -971,9 +987,17 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         };
         
         // Integrate using selected method
-        auto [abs_tol, rel_tol] = get_integration_tolerances(method);
+        // Apply user override if both tolerances are positive; otherwise
+        // fall back to the legacy method-aware defaults (1e-6 / 1e-8 BS).
+        double effective_abs_tol = abs_tol;
+        double effective_rel_tol = rel_tol;
+        if (effective_abs_tol <= 0.0 || effective_rel_tol <= 0.0) {
+            auto [a, r] = get_integration_tolerances(method);
+            if (effective_abs_tol <= 0.0) effective_abs_tol = a;
+            if (effective_rel_tol <= 0.0) effective_rel_tol = r;
+        }
         integrate_ode_system(system_func, state, T_start, T_end, dt_initial,
-                            observer, method, true, abs_tol, rel_tol);
+                            observer, method, true, effective_abs_tol, effective_rel_tol);
         
         // Note: MixedLattice::spins_SU2 and spins_SU3 remain unchanged (initial configuration preserved)
         // The evolved state is stored in the ODEState 'state' variable
@@ -1073,7 +1097,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                  bool reuse_m0_for_m1,
                                  double stationarity_tol,
                                  int outer_omp_threads,
-                                 bool pulse_window_chunking) {
+                                 bool pulse_window_chunking,
+                                 double abs_tol, double rel_tol) {
         
         std::filesystem::create_directories(dir_name);
         
@@ -1120,7 +1145,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                    T_start, T_end, T_step, method, use_gpu, nullptr,
-                                   pulse_window_chunking);
+                                   pulse_window_chunking, abs_tol, rel_tol);
 
         // ----- W1: capture ground-state magnetisation triples and decide
         //       whether it is safe to synthesise M1(τ) from M0 by time
@@ -1247,7 +1272,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                         T_start, T_end, T_step, method, use_gpu, nullptr,
-                                        pulse_window_chunking);
+                                        pulse_window_chunking, abs_tol, rel_tol);
                 }
 
                 spins_SU2 = ground_state_SU2;
@@ -1258,7 +1283,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                          pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                          pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                          T_start, T_end, T_step, method, use_gpu, nullptr,
-                                         pulse_window_chunking);
+                                         pulse_window_chunking, abs_tol, rel_tol);
 
 #ifdef HDF5_ENABLED
                 writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj);
@@ -1290,7 +1315,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                             T_start, T_end, T_step, method, /*use_gpu=*/false, nullptr,
-                            pulse_window_chunking);
+                            pulse_window_chunking, abs_tol, rel_tol);
                     }
 
                     local_lat.spins_SU2 = ground_state_SU2;
@@ -1301,7 +1326,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                         T_start, T_end, T_step, method, /*use_gpu=*/false, nullptr,
-                        pulse_window_chunking);
+                        pulse_window_chunking, abs_tol, rel_tol);
 
 #ifdef HDF5_ENABLED
                     #pragma omp critical(mixed_pump_probe_hdf5_write)
@@ -1354,7 +1379,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                      bool save_spin_trajectories,
                                      bool reuse_m0_for_m1,
                                      double stationarity_tol,
-                                     bool pulse_window_chunking) {
+                                     bool pulse_window_chunking,
+                                     double abs_tol, double rel_tol) {
         
         int rank, mpi_size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -1438,7 +1464,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                                T_start, T_end, T_step, method, use_gpu,
                                                save_spin_trajectories ? &M0_spin_states : nullptr,
-                                               pulse_window_chunking);
+                                               pulse_window_chunking, abs_tol, rel_tol);
             if (save_spin_trajectories && !M0_spin_states.empty()) {
                 size_t n_t = M0_spin_states.size();
                 M0_spin_flat.resize(n_t * state_dim);
@@ -1639,7 +1665,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                         T_start, T_end, T_step, method, use_gpu,
                                         save_spin_trajectories ? &M1_spin_states : nullptr,
-                                        pulse_window_chunking);
+                                        pulse_window_chunking, abs_tol, rel_tol);
                 }
                 local_M1_trajectories.push_back(M1_traj);
                 if (save_spin_trajectories && !M1_spin_states.empty()) {
@@ -1674,7 +1700,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                          pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                          T_start, T_end, T_step, method, use_gpu,
                                          save_spin_trajectories ? &M01_spin_states : nullptr,
-                                         pulse_window_chunking);
+                                         pulse_window_chunking, abs_tol, rel_tol);
                 local_M01_trajectories.push_back(M01_traj);
                 if (save_spin_trajectories && !M01_spin_states.empty()) {
                     size_t n_t = M01_spin_states.size();
