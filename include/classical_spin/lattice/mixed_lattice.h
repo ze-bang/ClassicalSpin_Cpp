@@ -5,6 +5,7 @@
 #include "simple_linear_alg.h"
 #include "classical_spin/core/spin_config.h"  // For should_rank_write
 #include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
+#include "classical_spin/lattice/pulse_chunking.h"  // W3: pulse-window chunking helper
 #include <vector>
 #include <functional>
 #include <random>
@@ -4278,7 +4279,11 @@ public:
                double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
                double T_start, double T_end, double step_size,
                const string& method = "dopri5", bool use_gpu = false,
-               vector<vector<double>>* spin_state_out = nullptr) {
+               vector<vector<double>>* spin_state_out = nullptr,
+               // W3: pulse-window-aware chunked integration. The pulse
+               // window is built from max(σ_SU2, σ_SU3) so we never
+               // under-resolve either drive envelope.
+               bool pulse_window_chunking = true) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -4347,11 +4352,29 @@ public:
                 }
             }
         };
-        
-        // Integrate
-        integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                            observer, method, false, 1e-10, 1e-10);
-        
+
+        // ---- W3: pulse-window-aware chunked integration ------------------
+        // Ensure we observe at the end of every chunk so the trajectory
+        // grid stays exactly the same as the unchunked path.
+        if (pulse_window_chunking) {
+            namespace ck = classical_spin_pulse_chunking;
+            const double sigma = std::max(pulse_width_SU2, pulse_width_SU3);
+            const auto segments = ck::build_pulse_segments(
+                T_start, T_end,
+                /*pulse_centers=*/ {t_B},
+                /*window=*/ ck::kPulseWindowSigmas * sigma,
+                /*T_step=*/ step_size,
+                /*free_dt_factor=*/ ck::kFreeDtFactor);
+            for (const auto& seg : segments) {
+                integrate_ode_system(system_func, state,
+                                     seg.t0, seg.t1, seg.dt_init,
+                                     observer, method, false, 1e-10, 1e-10);
+            }
+        } else {
+            integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                                observer, method, false, 1e-10, 1e-10);
+        }
+
         // Reset pulse
         reset_pulse();
         
@@ -4371,7 +4394,8 @@ public:
                double pulse_amp_SU3, double pulse_width_SU3, double pulse_freq_SU3,
                double T_start, double T_end, double step_size,
                const string& method = "dopri5", bool use_gpu = false,
-               vector<vector<double>>* spin_state_out = nullptr) {
+               vector<vector<double>>* spin_state_out = nullptr,
+               bool pulse_window_chunking = true) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -4441,11 +4465,27 @@ public:
                 }
             }
         };
-        
-        // Integrate
-        integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                            observer, method, false, 1e-10, 1e-10);
-        
+
+        // ---- W3: pulse-window-aware chunked integration ------------------
+        if (pulse_window_chunking) {
+            namespace ck = classical_spin_pulse_chunking;
+            const double sigma = std::max(pulse_width_SU2, pulse_width_SU3);
+            const auto segments = ck::build_pulse_segments(
+                T_start, T_end,
+                /*pulse_centers=*/ {t_B_1, t_B_2},
+                /*window=*/ ck::kPulseWindowSigmas * sigma,
+                /*T_step=*/ step_size,
+                /*free_dt_factor=*/ ck::kFreeDtFactor);
+            for (const auto& seg : segments) {
+                integrate_ode_system(system_func, state,
+                                     seg.t0, seg.t1, seg.dt_init,
+                                     observer, method, false, 1e-10, 1e-10);
+            }
+        } else {
+            integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                                observer, method, false, 1e-10, 1e-10);
+        }
+
         // Reset pulse
         reset_pulse();
         
@@ -4491,12 +4531,78 @@ public:
         cout << "=================================" << endl;
     }
 
+    // ------------------------------------------------------------------
+    // W1 (time-translation) helpers — see Ingredient XV in
+    // docs/optimization_notes.tex.
+    //
+    // The single-pulse drive trajectory M_1(τ; t) of a deterministic
+    // LLG flow that starts from a stationary initial state is just the
+    // time-shifted single-pulse-applied-at-t=0 trajectory:
+    //
+    //     M_1(τ; t) = M_pulse(t − τ)
+    //
+    // (where M_pulse is the trajectory produced by `single_pulse_drive`
+    // with t_B = 0). The same identity reduces M_0(τ; t) to the *no-drive*
+    // trajectory of a stationary configuration, which is itself constant
+    // in time. We exploit this by computing only M_pulse once per (M_0,
+    // first pulse) pair and synthesising every M_1(τ) from it.
+    //
+    // The synthesis is only safe when:
+    //   1. langevin_temperature == 0  (deterministic LLG).
+    //   2. The initial state is stationary, i.e. max_t |dS/dt|_∞ < tol
+    //      with the drive disabled. We expose `max_dSdt_norm_no_drive()`
+    //      so the driver can verify this at runtime.
+    // ------------------------------------------------------------------
+    using PumpProbeTrajectory =
+        vector<pair<double, pair<array<SpinVector, 3>, array<SpinVector, 3>>>>;
+
+    /**
+     * Sample max ||dS/dt||_∞ across both sublattices over the
+     * current configuration with the pulse drive disabled. Returns a
+     * bound that is < tol iff the configuration is a (numerical)
+     * stationary point of the deterministic LLG flow.
+     *
+     * This is W1's runtime safety guard: the spectroscopy driver
+     * skips the M_1 → time-shift synthesis whenever the bound exceeds
+     * `stationarity_tol`, falling back to the explicit single-pulse
+     * integration. We never silently produce a wrong trajectory.
+     */
+    double max_dSdt_norm_no_drive() const;
+
+    /**
+     * Build M_1(τ; t) by time-shifting an M_pulse trajectory captured
+     * with t_B = 0:  M_1(τ; t)[i] = M_pulse((t_i − τ)). Indices outside
+     * the M_pulse window are filled with the stationary ground-state
+     * magnetisation `M_ground` (M_pulse asymptotes to M_ground far
+     * from the pulse window).
+     *
+     * @param M_pulse_trajectory  Output of single_pulse_drive(t_B = 0)
+     *                            covering [T_start − τ_max, T_end].
+     * @param M_ground            Stationary magnetisation.
+     * @param tau                 Delay τ (the pulse fires at t = τ).
+     * @param T_start, T_end, T_step  Output grid (same as M_pulse cadence).
+     */
+    PumpProbeTrajectory synthesize_M1_from_M0(
+        const PumpProbeTrajectory& M_pulse_trajectory,
+        const pair<array<SpinVector, 3>, array<SpinVector, 3>>& M_ground,
+        double tau,
+        double T_start, double T_end, double T_step) const;
+
     /**
      * Complete pump-probe nonlinear spectroscopy workflow for mixed lattice
      * Handles both SU(2) and SU(3) sublattices with consistent nomenclature
      * 
      * NOTE: Ground state should be prepared beforehand via simulated_annealing()
      *       or loaded from file before calling this method.
+     *
+     * Optional W1/W2/W3 controls:
+     *   reuse_m0_for_m1       — opt in to time-translation synthesis of
+     *                           M_1 trajectories. Auto-disabled if the
+     *                           runtime stationarity guard fails.
+     *   stationarity_tol      — guard threshold on max ||dS/dt||_∞.
+     *   outer_omp_threads     — OpenMP team size for the τ loop. <= 0
+     *                           leaves it to the runtime / env.
+     *   pulse_window_chunking — pass-through to single_/double_pulse_drive.
      */
     void pump_probe_spectroscopy(const vector<SpinVector>& field_in_SU2,
                                  const vector<SpinVector>& field_in_SU3,
@@ -4508,13 +4614,20 @@ public:
                                  size_t n_anneal = 1000,
                                  bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                  string dir_name = "spectroscopy_mixed",
-                                 string method = "dopri5", bool use_gpu = false);
+                                 string method = "dopri5", bool use_gpu = false,
+                                 bool reuse_m0_for_m1 = true,
+                                 double stationarity_tol = 1e-6,
+                                 int outer_omp_threads = 0,
+                                 bool pulse_window_chunking = true);
 
     /**
      * MPI-parallelized pump-probe spectroscopy for mixed lattice
      * 
      * Distributes tau delay values across MPI ranks for parallel computation.
      * Each rank computes a subset of tau values, then rank 0 gathers and writes results.
+     *
+     * W2 (inter-τ parallelism) is provided here by MPI; the new W1/W3
+     * controls behave like the serial driver above.
      */
     void pump_probe_spectroscopy_mpi(const vector<SpinVector>& field_in_SU2,
                                      const vector<SpinVector>& field_in_SU3,
@@ -4527,7 +4640,10 @@ public:
                                      bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                      string dir_name = "spectroscopy_mixed",
                                      string method = "dopri5", bool use_gpu = false,
-                                     bool save_spin_trajectories = false);
+                                     bool save_spin_trajectories = false,
+                                     bool reuse_m0_for_m1 = true,
+                                     double stationarity_tol = 1e-6,
+                                     bool pulse_window_chunking = true);
 
 // ============================================================
 // GPU Implementation Section

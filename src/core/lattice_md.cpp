@@ -17,6 +17,7 @@
  */
 
 #include "classical_spin/lattice/lattice.h"
+#include "classical_spin/lattice/pulse_chunking.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +26,8 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <utility>
+#include <vector>
 
 #include <boost/numeric/odeint.hpp>
 
@@ -225,6 +228,94 @@
         landau_lifshitz_flat(x.data(), dxdt.data(), t);
     }
 
+// ============================================================
+// 2DCS / pump-probe optimisation helpers (Ingredient XV).
+// ============================================================
+
+// ---- Lattice::max_dSdt_norm_no_drive ----
+    double Lattice::max_dSdt_norm_no_drive() const {
+        // Compute one RHS evaluation with the drive amplitude forced to
+        // zero. We then return the L_infinity norm of dS/dt — i.e. the
+        // worst-case per-component derivative across the lattice.
+        //
+        // This is the W1 eligibility check: if the loaded configuration
+        // is a true equilibrium of the deterministic LLG flow then this
+        // norm is essentially zero (modulo floating-point round-off).
+        // Otherwise the would-be M1(τ) trajectory contains real
+        // unperturbed dynamics that the time-shift trick cannot recover.
+        //
+        // We deliberately call landau_lifshitz_flat through a
+        // const_cast because the current API mutates `field_drive_amp`
+        // around the call but logically does not change the lattice.
+        // The mutation is restored before this function returns, so the
+        // observable state is identical on entry and exit.
+        const size_t state_size = lattice_size * spin_dim;
+        ODEState state(state_size);
+        ODEState dsdt(state_size);
+
+        // Pack current spins into the flat state buffer.
+        for (size_t i = 0; i < lattice_size; ++i) {
+            for (size_t d = 0; d < spin_dim; ++d) {
+                state[i * spin_dim + d] = spins[i](d);
+            }
+        }
+
+        Lattice* self = const_cast<Lattice*>(this);
+        const double saved_amp = self->field_drive_amp;
+        self->field_drive_amp = 0.0;
+        try {
+            self->landau_lifshitz_flat(state.data(), dsdt.data(), 0.0);
+        } catch (...) {
+            self->field_drive_amp = saved_amp;
+            throw;
+        }
+        self->field_drive_amp = saved_amp;
+
+        double max_norm = 0.0;
+        for (size_t i = 0; i < state_size; ++i) {
+            const double v = std::abs(dsdt[i]);
+            if (v > max_norm) max_norm = v;
+        }
+        return max_norm;
+    }
+
+// ---- Lattice::synthesize_M1_from_M0 ----
+    Lattice::PumpProbeTrajectory Lattice::synthesize_M1_from_M0(
+        const PumpProbeTrajectory& M0_trajectory,
+        const array<SpinVector, 3>& M_ground,
+        double tau, double T_step) const {
+        PumpProbeTrajectory M1;
+        M1.reserve(M0_trajectory.size());
+        if (M0_trajectory.empty()) return M1;
+
+        // The reference trajectory M0 was integrated on the grid
+        // {T_start, T_start + T_step, ..., T_end} (give or take a
+        // tiny ε from the controlled stepper). For each output sample
+        // (t_i, M0_i) we want
+        //
+        //   M1(t_i) = M_ground            if t_i < tau + T_start_M0
+        //           = M0(t_i - tau)       otherwise
+        //
+        // and we look up M0(t_i - tau) by index = round((t_i - tau - T_start) / T_step).
+        const double T_start_M0 = M0_trajectory.front().first;
+        const double tau_threshold = tau + T_start_M0;
+        const ptrdiff_t n = static_cast<ptrdiff_t>(M0_trajectory.size());
+
+        for (const auto& [t_i, mag_i] : M0_trajectory) {
+            (void) mag_i;  // Only the time grid is needed from M0.
+            if (t_i < tau_threshold) {
+                M1.push_back({t_i, M_ground});
+            } else {
+                const double rel = (t_i - tau - T_start_M0) / T_step;
+                ptrdiff_t idx = static_cast<ptrdiff_t>(std::lround(rel));
+                if (idx < 0) idx = 0;
+                if (idx >= n) idx = n - 1;
+                M1.push_back({t_i, M0_trajectory[static_cast<size_t>(idx)].second});
+            }
+        }
+        return M1;
+    }
+
 // ---- Lattice::molecular_dynamics ----
     void Lattice::molecular_dynamics(double T_start, double T_end, double dt_initial,
                            string out_dir, size_t save_interval,
@@ -392,7 +483,8 @@
                const vector<SpinVector>& field_in, double t_B, 
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
-               string method, bool use_gpu) {
+               string method, bool use_gpu,
+               bool pulse_window_chunking) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -420,7 +512,10 @@
             this->ode_system(x, dxdt, t);
         };
         
-        // Observer to collect magnetization at regular intervals
+        // Observer to collect magnetization at regular intervals.
+        // Self-gates so it works correctly across W3 segment boundaries
+        // even though each chunk is integrated by an independent
+        // `integrate_ode_system` call.
         double last_save_time = T_start;
         auto observer = [&](const ODEState& x, double t) {
             if (t - last_save_time >= step_size - 1e-10 || t >= T_end - 1e-10) {
@@ -446,9 +541,26 @@
             }
         };
         
-        // Integrate (state was initialized from spins earlier)
-        integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                            observer, method, false, 1e-10, 1e-10);
+        // W3: chunk integration around pulse window so the controlled
+        // stepper can grow its dt in the free-evolution segments. With
+        // chunking disabled we integrate the whole [T_start, T_end]
+        // with a single dt hint (= step_size), preserving legacy
+        // behaviour bit-for-bit.
+        namespace ck = classical_spin_pulse_chunking;
+        if (pulse_window_chunking) {
+            const auto segments = ck::build_pulse_segments(
+                T_start, T_end,
+                {t_B},
+                ck::kPulseWindowSigmas * pulse_width,
+                step_size, ck::kFreeDtFactor);
+            for (const auto& seg : segments) {
+                integrate_ode_system(system_func, state, seg.t0, seg.t1, seg.dt_init,
+                                    observer, method, false, 1e-10, 1e-10);
+            }
+        } else {
+            integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                                observer, method, false, 1e-10, 1e-10);
+        }
         
         // Note: Lattice::spins remains unchanged - only ODEState evolved
         
@@ -466,7 +578,8 @@
                    const vector<SpinVector>& field_in_2, double t_B_2,
                    double pulse_amp, double pulse_width, double pulse_freq,
                    double T_start, double T_end, double step_size,
-                   string method, bool use_gpu) {
+                   string method, bool use_gpu,
+                   bool pulse_window_chunking) {
         
         if (use_gpu) {
 #ifdef CUDA_ENABLED
@@ -521,9 +634,25 @@
             }
         };
         
-        // Integrate (state was initialized from spins earlier)
-        integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                            observer, method, false, 1e-10, 1e-10);
+        // W3: same pulse-window chunking story as single_pulse_drive,
+        // except the active windows are built around BOTH pulse centres.
+        // build_pulse_segments() will merge them automatically when the
+        // two windows overlap (small τ).
+        namespace ck = classical_spin_pulse_chunking;
+        if (pulse_window_chunking) {
+            const auto segments = ck::build_pulse_segments(
+                T_start, T_end,
+                {t_B_1, t_B_2},
+                ck::kPulseWindowSigmas * pulse_width,
+                step_size, ck::kFreeDtFactor);
+            for (const auto& seg : segments) {
+                integrate_ode_system(system_func, state, seg.t0, seg.t1, seg.dt_init,
+                                    observer, method, false, 1e-10, 1e-10);
+            }
+        } else {
+            integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                                observer, method, false, 1e-10, 1e-10);
+        }
         
         // Note: Lattice::spins remains unchanged - only ODEState evolved
         
@@ -544,7 +673,11 @@
                                  size_t n_anneal,
                                  bool T_zero_quench, size_t quench_sweeps,
                                  string dir_name, string method,
-                                 bool use_gpu) {
+                                 bool use_gpu,
+                                 bool reuse_m0_for_m1,
+                                 double stationarity_tol,
+                                 int outer_omp_threads,
+                                 bool pulse_window_chunking) {
         
         std::filesystem::create_directories(dir_name);
         
@@ -557,6 +690,10 @@
         cout << "  Frequency: " << pulse_freq << endl;
         cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
         cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
+        cout << "Optimisations: W1(reuse_m0_for_m1=" << (reuse_m0_for_m1 ? "on" : "off")
+             << ", tol=" << stationarity_tol << "), "
+             << "W2(outer_omp_threads=" << outer_omp_threads << "), "
+             << "W3(pulse_window_chunking=" << (pulse_window_chunking ? "on" : "off") << ")" << endl;
         
         // Use current spin configuration as ground state (assumed pre-loaded)
         cout << "\n[1/3] Using current configuration as ground state..." << endl;
@@ -575,7 +712,41 @@
         cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
         if (use_gpu) cout << "  Using GPU acceleration" << endl;
         auto M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
-                                   T_start, T_end, T_step, method, use_gpu);
+                                   T_start, T_end, T_step, method, use_gpu,
+                                   pulse_window_chunking);
+        
+        // ----- W1: capture ground-state magnetisations and decide whether
+        //       it is safe to synthesise M1(τ) from M0 by time-shift -----
+        // Re-pin spins to the (clean) ground state because the M0
+        // integration left them untouched, but use_gpu paths can alias.
+        spins = ground_state;
+        const SpinVector M_ground_local     = magnetization_local();
+        const SpinVector M_ground_antiferro = magnetization_local_antiferro();
+        const SpinVector M_ground_global    = magnetization_global();
+        const array<SpinVector, 3> M_ground_arr = {
+            M_ground_antiferro, M_ground_local, M_ground_global
+        };
+
+        bool can_reuse_m0 = false;
+        if (reuse_m0_for_m1 && !use_gpu) {
+            // The W1 trick is only correct when the unperturbed LLG
+            // evolution from t = T_start to t = τ + T_start leaves the
+            // configuration unchanged. We test that by checking
+            // ‖dS/dt‖_∞ at the loaded ground state with the drive
+            // disabled. (GPU path keeps spins in device memory, so the
+            // host-side check is not representative — disable W1 there.)
+            const double max_dS = max_dSdt_norm_no_drive();
+            cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
+                 << max_dS << " (tol = " << stationarity_tol << ")" << endl;
+            if (max_dS <= stationarity_tol) {
+                can_reuse_m0 = true;
+                cout << "  [W1] Ground state is stationary — synthesising M1(τ) from M0 by time-shift." << endl;
+            } else {
+                cout << "  [W1] Ground state NOT stationary — falling back to fresh M1 integration each τ." << endl;
+            }
+        } else if (reuse_m0_for_m1 && use_gpu) {
+            cout << "  [W1] Skipping (GPU path: stationarity check is host-only)." << endl;
+        }
         
         // Step 3: Delay time scan
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
@@ -600,34 +771,125 @@
         writer.write_reference_trajectory(M0_trajectory);
 #endif
         
-        double current_tau = tau_start;
-        for (int i = 0; i < tau_steps; ++i) {
-            cout << "\n--- Delay time " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
-            
-            // Restore ground state for each scan point
-            spins = ground_state;
-            
-            // M1: Probe pulse only at time tau
-            cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
-            auto M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
-                                       T_start, T_end, T_step, method, use_gpu);
-            
-            // Restore ground state again
-            spins = ground_state;
-            
-            // M01: Pump at t=0 + Probe at t=tau
-            cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
-            auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
-                                            pulse_amp, pulse_width, pulse_freq,
-                                            T_start, T_end, T_step, method, use_gpu);
-            
-            // Write this tau step immediately and release memory
-#ifdef HDF5_ENABLED
-            writer.write_tau_trajectory(i, current_tau, M1_trajectory, M01_trajectory);
-#endif
-            
-            current_tau += tau_step;
+        // ----- W2: outer OpenMP parallelism over τ -----
+        // Each thread owns a deep clone of *this so that:
+        //   - the per-thread pulse buffers (field_drive, t_pulse, ...)
+        //     do not race with neighbouring threads;
+        //   - the per-thread `spins` buffer can be reset to the ground
+        //     state independently;
+        //   - inner OMP regions inside landau_lifshitz_flat collapse to
+        //     serial calls (no nested teams under the default
+        //     OMP_NESTED=false), so total CPU usage stays constant
+        //     instead of exploding.
+        //
+        // The HDF5 writer is single-threaded, so all writes go inside
+        // an `omp critical` block. The 2DCS workload is heavily
+        // compute-bound (each τ launches an LLG integration over
+        // (T_end-T_start)/T_step ≈ 10⁴–10⁶ steps), so the critical
+        // section is utterly amortised.
+        //
+        // Disabling W2 (outer_omp_threads == 1, or OpenMP unavailable)
+        // collapses the loop to a plain serial for-each.
+        int n_outer = 1;
+#ifdef _OPENMP
+        if (outer_omp_threads <= 0) {
+            n_outer = std::max(1, omp_get_max_threads());
+        } else {
+            n_outer = outer_omp_threads;
         }
+        n_outer = std::min(n_outer, std::max(1, tau_steps));
+        // Disable OpenMP nested parallelism so per-thread RHS calls
+        // (#pragma omp parallel for inside landau_lifshitz_flat) become
+        // serial — otherwise the outer τ loop and inner site loop
+        // multiply, oversubscribing the CPU.
+        const int saved_max_active = omp_get_max_active_levels();
+        omp_set_max_active_levels(1);
+#endif
+
+        if (n_outer <= 1) {
+            // Serial path — preserves bit-for-bit legacy ordering when W2 disabled.
+            double current_tau = tau_start;
+            for (int i = 0; i < tau_steps; ++i) {
+                cout << "\n--- Delay time " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
+
+                PumpProbeTrajectory M1_trajectory;
+                if (can_reuse_m0) {
+                    M1_trajectory = synthesize_M1_from_M0(M0_trajectory, M_ground_arr, current_tau, T_step);
+                } else {
+                    spins = ground_state;
+                    cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
+                    M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
+                                                      T_start, T_end, T_step, method, use_gpu,
+                                                      pulse_window_chunking);
+                }
+
+                spins = ground_state;
+                cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
+                auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
+                                                pulse_amp, pulse_width, pulse_freq,
+                                                T_start, T_end, T_step, method, use_gpu,
+                                                pulse_window_chunking);
+
+#ifdef HDF5_ENABLED
+                writer.write_tau_trajectory(i, current_tau, M1_trajectory, M01_trajectory);
+#endif
+                current_tau += tau_step;
+            }
+        } else {
+#ifdef _OPENMP
+            cout << "  [W2] Distributing " << tau_steps << " τ points across "
+                 << n_outer << " OpenMP threads..." << endl;
+#endif
+#ifdef _OPENMP
+            #pragma omp parallel num_threads(n_outer)
+#endif
+            {
+                // Per-thread deep clone — each thread now has its own
+                // pulse buffers, spins, and Gilbert damping. The clone
+                // shares immutable interaction tables (Eigen handles
+                // ref-counted storage internally for vector<Matrix>).
+                Lattice local_lat(*this);
+                local_lat.spins = ground_state;
+
+#ifdef _OPENMP
+                #pragma omp for schedule(dynamic, 1)
+#endif
+                for (int i = 0; i < tau_steps; ++i) {
+                    const double current_tau = tau_start + i * tau_step;
+                    PumpProbeTrajectory M1_trajectory;
+                    if (can_reuse_m0) {
+                        M1_trajectory = synthesize_M1_from_M0(M0_trajectory, M_ground_arr, current_tau, T_step);
+                    } else {
+                        local_lat.spins = ground_state;
+                        M1_trajectory = local_lat.single_pulse_drive(
+                            field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
+                            T_start, T_end, T_step, method, /*use_gpu=*/false,
+                            pulse_window_chunking);
+                    }
+
+                    local_lat.spins = ground_state;
+                    auto M01_trajectory = local_lat.double_pulse_drive(
+                        field_in, 0.0, field_in, current_tau,
+                        pulse_amp, pulse_width, pulse_freq,
+                        T_start, T_end, T_step, method, /*use_gpu=*/false,
+                        pulse_window_chunking);
+
+#ifdef HDF5_ENABLED
+                    #pragma omp critical(pump_probe_hdf5_write)
+                    {
+                        writer.write_tau_trajectory(i, current_tau, M1_trajectory, M01_trajectory);
+                    }
+#else
+                    (void) M1_trajectory;
+                    (void) M01_trajectory;
+#endif
+                }
+            }
+        }
+
+#ifdef _OPENMP
+        omp_set_max_active_levels(saved_max_active);
+#endif
         
 #ifdef HDF5_ENABLED
         writer.close();
@@ -656,7 +918,10 @@
                                      size_t n_anneal,
                                      bool T_zero_quench, size_t quench_sweeps,
                                      string dir_name, string method,
-                                     bool use_gpu) {
+                                     bool use_gpu,
+                                     bool reuse_m0_for_m1,
+                                     double stationarity_tol,
+                                     bool pulse_window_chunking) {
         
         int rank, mpi_size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -721,12 +986,80 @@
         vector<pair<double, array<SpinVector, 3>>> M0_trajectory;
         if (rank == 0) {
             M0_trajectory = single_pulse_drive(field_in, 0.0, pulse_amp, pulse_width, pulse_freq,
-                                               T_start, T_end, T_step, method, use_gpu);
+                                               T_start, T_end, T_step, method, use_gpu,
+                                               pulse_window_chunking);
         }
         
         // Restore ground state
         spins = ground_state;
-        
+
+        // ----- W1: stationarity check on rank 0, broadcast decision + M0 -----
+        // Each worker rank can synthesise M1(τ) only if it has the M0
+        // trajectory and knows the ground-state magnetisations. We
+        // broadcast both from rank 0 so the worker ranks can skip the
+        // M1 integration entirely (≈ 2× speedup on the per-rank work).
+        const SpinVector M_ground_local     = magnetization_local();
+        const SpinVector M_ground_antiferro = magnetization_local_antiferro();
+        const SpinVector M_ground_global    = magnetization_global();
+        const array<SpinVector, 3> M_ground_arr = {
+            M_ground_antiferro, M_ground_local, M_ground_global
+        };
+
+        int can_reuse_m0_flag = 0;  // MPI requires int for Bcast; 0 = false, 1 = true
+        if (rank == 0 && reuse_m0_for_m1 && !use_gpu) {
+            const double max_dS = max_dSdt_norm_no_drive();
+            cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
+                 << max_dS << " (tol = " << stationarity_tol << ")" << endl;
+            if (max_dS <= stationarity_tol) {
+                can_reuse_m0_flag = 1;
+                cout << "  [W1] Ground state is stationary — synthesising M1(τ) from M0 by time-shift." << endl;
+            } else {
+                cout << "  [W1] Ground state NOT stationary — falling back to fresh M1 integration each τ." << endl;
+            }
+        } else if (rank == 0 && reuse_m0_for_m1 && use_gpu) {
+            cout << "  [W1] Skipping (GPU path: stationarity check is host-only)." << endl;
+        }
+        MPI_Bcast(&can_reuse_m0_flag, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        const bool can_reuse_m0 = (can_reuse_m0_flag != 0);
+
+        // Broadcast M0 trajectory to all worker ranks so they can synthesise M1.
+        // (Skipped when W1 is disabled — saves an O(time_points · spin_dim) Bcast.)
+        unsigned long long m0_time_points_ull = 0;
+        if (can_reuse_m0 && rank == 0) {
+            m0_time_points_ull = static_cast<unsigned long long>(M0_trajectory.size());
+        }
+        if (can_reuse_m0) {
+            MPI_Bcast(&m0_time_points_ull, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+            const size_t m0_npts = static_cast<size_t>(m0_time_points_ull);
+            const size_t per_pt = 1 + 3 * spin_dim;  // time + 3 SpinVectors
+            vector<double> m0_buf(m0_npts * per_pt);
+            if (rank == 0) {
+                for (size_t i = 0; i < m0_npts; ++i) {
+                    const auto& [t, M] = M0_trajectory[i];
+                    m0_buf[i * per_pt] = t;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            m0_buf[i * per_pt + 1 + m * spin_dim + d] = M[m](d);
+                        }
+                    }
+                }
+            }
+            MPI_Bcast(m0_buf.data(), static_cast<int>(m0_buf.size()), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            if (rank != 0) {
+                M0_trajectory.assign(m0_npts, {0.0, {SpinVector::Zero(spin_dim),
+                                                     SpinVector::Zero(spin_dim),
+                                                     SpinVector::Zero(spin_dim)}});
+                for (size_t i = 0; i < m0_npts; ++i) {
+                    M0_trajectory[i].first = m0_buf[i * per_pt];
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim; ++d) {
+                            M0_trajectory[i].second[m](d) = m0_buf[i * per_pt + 1 + m * spin_dim + d];
+                        }
+                    }
+                }
+            }
+        }
+
         // Step 3: Distribute tau values across ranks
         if (rank == 0) {
             cout << "\n[3/4] Distributing tau delays across " << mpi_size << " ranks..." << endl;
@@ -769,23 +1102,28 @@
             
             cout << "[Rank " << rank << "] Computing tau[" << global_idx << "] = " << current_tau 
                  << " (" << (idx+1) << "/" << my_tau_indices.size() << ")" << endl;
-            
-            // Restore ground state
+
+            // M1: synthesise from M0 if W1 is enabled, otherwise integrate fresh.
+            PumpProbeTrajectory M1_trajectory;
+            if (can_reuse_m0) {
+                M1_trajectory = synthesize_M1_from_M0(M0_trajectory, M_ground_arr, current_tau, T_step);
+            } else {
+                spins = ground_state;
+                M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
+                                       T_start, T_end, T_step, method, use_gpu,
+                                       pulse_window_chunking);
+            }
+            local_M1_trajectories.push_back(std::move(M1_trajectory));
+
+            // Restore ground state for the M01 integration.
             spins = ground_state;
-            
-            // M1: Probe pulse only at time tau
-            auto M1_trajectory = single_pulse_drive(field_in, current_tau, pulse_amp, pulse_width, pulse_freq,
-                                       T_start, T_end, T_step, method, use_gpu);
-            local_M1_trajectories.push_back(M1_trajectory);
-            
-            // Restore ground state again
-            spins = ground_state;
-            
+
             // M01: Pump at t=0 + Probe at t=tau
             auto M01_trajectory = double_pulse_drive(field_in, 0.0, field_in, current_tau,
                                             pulse_amp, pulse_width, pulse_freq,
-                                            T_start, T_end, T_step, method, use_gpu);
-            local_M01_trajectories.push_back(M01_trajectory);
+                                            T_start, T_end, T_step, method, use_gpu,
+                                            pulse_window_chunking);
+            local_M01_trajectories.push_back(std::move(M01_trajectory));
         }
         
         // Synchronize before gathering

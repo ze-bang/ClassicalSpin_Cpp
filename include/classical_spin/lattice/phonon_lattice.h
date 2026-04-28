@@ -1404,7 +1404,9 @@ public:
     MagTrajectory single_pulse_drive(double polarization, double t_B,
                                      double pulse_amp, double pulse_width, double pulse_freq,
                                      double T_start, double T_end, double step_size,
-                                     const string& method = "dopri5");
+                                     const string& method = "dopri5",
+                                     // W3: pulse-window-aware chunked integration.
+                                     bool pulse_window_chunking = true);
     
     /**
      * Double pulse THz drive (pump + probe)
@@ -1428,7 +1430,8 @@ public:
                                      double polarization_2, double t_B_2,
                                      double pulse_amp, double pulse_width, double pulse_freq,
                                      double T_start, double T_end, double step_size,
-                                     const string& method = "dopri5");
+                                     const string& method = "dopri5",
+                                     bool pulse_window_chunking = true);
     
     /**
      * Complete 2D coherent spectroscopy (2DCS) workflow
@@ -1461,8 +1464,14 @@ public:
                                 double tau_start, double tau_end, double tau_step,
                                 double T_start, double T_end, double T_step,
                                 const string& dir_name = "spectroscopy",
-                                const string& method = "dopri5");
-    
+                                const string& method = "dopri5",
+                                // W1/W2/W3 controls. Same semantics as
+                                // Lattice::pump_probe_spectroscopy.
+                                bool reuse_m0_for_m1 = true,
+                                double stationarity_tol = 1e-6,
+                                int outer_omp_threads = 0,
+                                bool pulse_window_chunking = true);
+
     /**
      * MPI-parallelized 2DCS spectroscopy
      * Distributes tau values across MPI ranks
@@ -1472,7 +1481,40 @@ public:
                                     double tau_start, double tau_end, double tau_step,
                                     double T_start, double T_end, double T_step,
                                     const string& dir_name = "spectroscopy",
-                                    const string& method = "dopri5");
+                                    const string& method = "dopri5",
+                                    bool reuse_m0_for_m1 = true,
+                                    double stationarity_tol = 1e-6,
+                                    bool pulse_window_chunking = true);
+
+    // ------------------------------------------------------------------
+    // W1 (time-translation) helpers — see lattice.h doc.
+    // ------------------------------------------------------------------
+    using PumpProbeTrajectory = MagTrajectory;
+
+    /**
+     * Maximum |dS/dt|_∞ across the spin sector with the THz drive
+     * disabled. Returns a runtime stationarity bound for W1.
+     *
+     * Note: we deliberately ignore the phonon-sector RHS here, because
+     * a non-zero phonon velocity at t = T_start does NOT block the W1
+     * synthesis as long as the *spin* sector returns to the same
+     * trajectory shape after the pulse. Phonons couple to spins only
+     * through `spin_phonon_params`, so a quiet spin sector with a noisy
+     * phonon initial condition would still violate the synthesis. To
+     * keep it simple and conservative, we report only the spin part —
+     * users with non-stationary phonons should pass
+     * `reuse_m0_for_m1 = false` explicitly.
+     */
+    double max_dSdt_norm_no_drive() const;
+
+    /**
+     * Time-shift M_pulse (t_B = 0 trajectory) by τ to obtain M_1(τ).
+     * Pre-pulse samples are filled with M_ground.
+     */
+    PumpProbeTrajectory synthesize_M1_from_M0(
+        const PumpProbeTrajectory& M_pulse_trajectory,
+        const std::array<Eigen::Vector3d, 4>& M_ground,
+        double tau, double T_step) const;
     
     // ============================================================
     // I/O

@@ -29,11 +29,16 @@
  */
 
 #include "classical_spin/lattice/phonon_lattice.h"
+#include "classical_spin/lattice/pulse_chunking.h"
 #include <fstream>
 #include <iomanip>
 #include <memory>
 #include <filesystem>
 #include <mpi.h>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #ifdef HDF5_ENABLED
 #include <H5Cpp.h>
@@ -2447,7 +2452,8 @@ void PhononLattice::save_positions(const string& filename) const {
 PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
     double polarization, double t_B,
     double pulse_amp, double pulse_width, double pulse_freq,
-    double T_start, double T_end, double step_size, const string& method) {
+    double T_start, double T_end, double step_size, const string& method,
+    bool pulse_window_chunking) {
     
     // Set up single pulse
     drive_params.E0_1 = pulse_amp;
@@ -2513,10 +2519,25 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
         }
     };
     
-    // Integrate
-    integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                        observer, method, false, 1e-10, 1e-10);
-    
+    // ---- W3: pulse-window-aware chunked integration ------------------
+    if (pulse_window_chunking) {
+        namespace ck = classical_spin_pulse_chunking;
+        const auto segments = ck::build_pulse_segments(
+            T_start, T_end,
+            /*pulse_centers=*/ {t_B},
+            /*window=*/ ck::kPulseWindowSigmas * pulse_width,
+            /*T_step=*/ step_size,
+            /*free_dt_factor=*/ ck::kFreeDtFactor);
+        for (const auto& seg : segments) {
+            integrate_ode_system(system_func, state,
+                                 seg.t0, seg.t1, seg.dt_init,
+                                 observer, method, false, 1e-10, 1e-10);
+        }
+    } else {
+        integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                            observer, method, false, 1e-10, 1e-10);
+    }
+
     // Reset drive
     drive_params.E0_1 = 0.0;
     
@@ -2527,7 +2548,8 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
     double polarization_1, double t_B_1,
     double polarization_2, double t_B_2,
     double pulse_amp, double pulse_width, double pulse_freq,
-    double T_start, double T_end, double step_size, const string& method) {
+    double T_start, double T_end, double step_size, const string& method,
+    bool pulse_window_chunking) {
     
     // Set up pump (pulse 1)
     drive_params.E0_1 = pulse_amp;
@@ -2598,10 +2620,25 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
         }
     };
     
-    // Integrate
-    integrate_ode_system(system_func, state, T_start, T_end, step_size,
-                        observer, method, false, 1e-10, 1e-10);
-    
+    // ---- W3: pulse-window-aware chunked integration ------------------
+    if (pulse_window_chunking) {
+        namespace ck = classical_spin_pulse_chunking;
+        const auto segments = ck::build_pulse_segments(
+            T_start, T_end,
+            /*pulse_centers=*/ {t_B_1, t_B_2},
+            /*window=*/ ck::kPulseWindowSigmas * pulse_width,
+            /*T_step=*/ step_size,
+            /*free_dt_factor=*/ ck::kFreeDtFactor);
+        for (const auto& seg : segments) {
+            integrate_ode_system(system_func, state,
+                                 seg.t0, seg.t1, seg.dt_init,
+                                 observer, method, false, 1e-10, 1e-10);
+        }
+    } else {
+        integrate_ode_system(system_func, state, T_start, T_end, step_size,
+                            observer, method, false, 1e-10, 1e-10);
+    }
+
     // Reset drive
     drive_params.E0_1 = 0.0;
     drive_params.E0_2 = 0.0;
@@ -2609,12 +2646,83 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
     return trajectory;
 }
 
+// ============================================================
+// 2DCS / pump-probe optimisation helpers (Ingredient XV).
+// Mirror of the Lattice / MixedLattice helpers; see lattice_md.cpp
+// for the full prose.
+// ============================================================
+
+double PhononLattice::max_dSdt_norm_no_drive() const {
+    // Build the current state (spins + phonons), evaluate ode_system
+    // with the drive disabled, then return ‖dS/dt‖_∞ over the spin
+    // subset only. The spin degrees of freedom are stored in the first
+    // `lattice_size * spin_dim` slots of the flat state buffer; the
+    // remaining 10 entries are the phonon DOFs (Q's and V's), which we
+    // intentionally exclude from the bound (see header doc for why).
+    ODEState state = spins_to_state();
+    ODEState dsdt(state_size, 0.0);
+
+    PhononLattice* self = const_cast<PhononLattice*>(this);
+    const double saved_E0_1 = self->drive_params.E0_1;
+    const double saved_E0_2 = self->drive_params.E0_2;
+    self->drive_params.E0_1 = 0.0;
+    self->drive_params.E0_2 = 0.0;
+    try {
+        self->ode_system(state, dsdt, 0.0);
+    } catch (...) {
+        self->drive_params.E0_1 = saved_E0_1;
+        self->drive_params.E0_2 = saved_E0_2;
+        throw;
+    }
+    self->drive_params.E0_1 = saved_E0_1;
+    self->drive_params.E0_2 = saved_E0_2;
+
+    const size_t spin_count = lattice_size * spin_dim;
+    double max_norm = 0.0;
+    for (size_t i = 0; i < spin_count; ++i) {
+        const double a = std::abs(dsdt[i]);
+        if (a > max_norm) max_norm = a;
+    }
+    return max_norm;
+}
+
+PhononLattice::PumpProbeTrajectory PhononLattice::synthesize_M1_from_M0(
+    const PumpProbeTrajectory& M_pulse_trajectory,
+    const std::array<Eigen::Vector3d, 4>& M_ground,
+    double tau, double T_step) const {
+    PumpProbeTrajectory M1;
+    M1.reserve(M_pulse_trajectory.size());
+    if (M_pulse_trajectory.empty()) return M1;
+
+    const double T_start_M0 = M_pulse_trajectory.front().first;
+    const double tau_threshold = tau + T_start_M0;
+    const ptrdiff_t n = static_cast<ptrdiff_t>(M_pulse_trajectory.size());
+
+    for (const auto& [t_i, mag_i] : M_pulse_trajectory) {
+        (void) mag_i;
+        if (t_i < tau_threshold) {
+            M1.push_back({t_i, M_ground});
+        } else {
+            const double rel = (t_i - tau - T_start_M0) / T_step;
+            ptrdiff_t idx = static_cast<ptrdiff_t>(std::lround(rel));
+            if (idx < 0) idx = 0;
+            if (idx >= n) idx = n - 1;
+            M1.push_back({t_i, M_pulse_trajectory[static_cast<size_t>(idx)].second});
+        }
+    }
+    return M1;
+}
+
 void PhononLattice::pump_probe_spectroscopy(
     double polarization,
     double pulse_amp, double pulse_width, double pulse_freq,
     double tau_start, double tau_end, double tau_step,
     double T_start, double T_end, double T_step,
-    const string& dir_name, const string& method) {
+    const string& dir_name, const string& method,
+    bool reuse_m0_for_m1,
+    double stationarity_tol,
+    int outer_omp_threads,
+    bool pulse_window_chunking) {
     
     std::filesystem::create_directories(dir_name);
     
@@ -2628,8 +2736,11 @@ void PhononLattice::pump_probe_spectroscopy(
     cout << "  Polarization: " << polarization << " rad" << endl;
     cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
     cout << "Integration time: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
+    cout << "Optimisations: W1(reuse_m0_for_m1=" << (reuse_m0_for_m1 ? "on" : "off")
+         << ", tol=" << stationarity_tol << "), "
+         << "W2(outer_omp_threads=" << outer_omp_threads << "), "
+         << "W3(pulse_window_chunking=" << (pulse_window_chunking ? "on" : "off") << ")" << endl;
     
-    // Use current configuration as ground state
     cout << "\n[1/3] Using current configuration as ground state..." << endl;
     double E_ground = energy_density();
     SpinVector M_ground = magnetization_local();
@@ -2637,67 +2748,160 @@ void PhononLattice::pump_probe_spectroscopy(
     cout << "  Ground state: E/N = " << E_ground << ", |M| = " << M_ground.norm() << endl;
     cout << "  Global magnetization: " << M_ground_global.transpose() << endl;
     
-    // Set the ordering pattern from current (equilibrated) configuration
     set_ordering_pattern();
     cout << "  Ordering pattern captured from ground state" << endl;
     
-    // Save initial configuration
     save_positions(dir_name + "/positions.txt");
     save_spin_config(dir_name + "/spins_initial.txt");
     
-    // Backup ground state
     SpinConfig ground_state = spins;
     PhononState ground_phonons = phonons;
     
-    // Step 2: Reference single-pulse dynamics (pump at t=0)
     cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
-    auto M0_trajectory = single_pulse_drive(polarization, 0.0, 
+    auto M0_trajectory = single_pulse_drive(polarization, 0.0,
                                             pulse_amp, pulse_width, pulse_freq,
-                                            T_start, T_end, T_step, method);
+                                            T_start, T_end, T_step, method,
+                                            pulse_window_chunking);
     
-    // Restore ground state
     spins = ground_state;
     phonons = ground_phonons;
-    
-    // Step 3: Delay time scan
+
+    // ----- W1: capture ground-state magnetisation observables in the
+    //       same layout the observer in single_pulse_drive uses:
+    //       slot 0 = M_antiferro, 1 = M_local, 2 = M_global,
+    //       3 = (O_custom, 0, 0).
+    std::array<Eigen::Vector3d, 4> M_ground_arr = {
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()
+    };
+    {
+        Eigen::Vector3d Ml = Eigen::Vector3d::Zero();
+        Eigen::Vector3d Ma = Eigen::Vector3d::Zero();
+        Eigen::Vector3d Mg = Eigen::Vector3d::Zero();
+        double Oc = 0.0;
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t atom = i % N_atoms;
+            const double sign = afm_sublattice_signs[atom];
+            const Eigen::Vector3d S = spins[i];
+            Ml += S;
+            const Eigen::Vector3d S_global = sublattice_frames[atom] * S;
+            Ma += sign * S_global;
+            Mg += S_global;
+            if (has_ordering_pattern) Oc += S.dot(ordering_pattern[i]);
+        }
+        Ml /= double(lattice_size);
+        Ma /= double(lattice_size);
+        Mg /= double(lattice_size);
+        Oc /= double(lattice_size);
+        M_ground_arr = { Ma, Ml, Mg, Eigen::Vector3d(Oc, 0.0, 0.0) };
+    }
+
+    bool can_reuse_m0 = false;
+    if (reuse_m0_for_m1) {
+        const double max_dS = max_dSdt_norm_no_drive();
+        cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
+             << max_dS << " (tol = " << stationarity_tol << ")" << endl;
+        if (max_dS <= stationarity_tol) {
+            can_reuse_m0 = true;
+            cout << "  [W1] Spin sector is stationary — synthesising M1(τ) from M0 by time-shift." << endl;
+        } else {
+            cout << "  [W1] Spin sector NOT stationary — falling back to fresh M1 integration each τ." << endl;
+        }
+    }
+
     int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
     cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
     
-    // Store all trajectories
-    vector<MagTrajectory> M1_trajectories;
-    vector<MagTrajectory> M01_trajectories;
-    vector<double> tau_values;
-    
-    M1_trajectories.reserve(tau_steps);
-    M01_trajectories.reserve(tau_steps);
-    tau_values.reserve(tau_steps);
-    
-    double current_tau = tau_start;
-    for (int i = 0; i < tau_steps; ++i) {
-        cout << "\n--- Delay time " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
-        
-        tau_values.push_back(current_tau);
-        
-        // M1: Probe pulse only at time tau
-        spins = ground_state;
-        phonons = ground_phonons;
-        cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
-        auto M1_trajectory = single_pulse_drive(polarization, current_tau,
-                                                pulse_amp, pulse_width, pulse_freq,
-                                                T_start, T_end, T_step, method);
-        M1_trajectories.push_back(M1_trajectory);
-        
-        // M01: Pump at t=0 + Probe at t=tau
-        spins = ground_state;
-        phonons = ground_phonons;
-        cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
-        auto M01_trajectory = double_pulse_drive(polarization, 0.0, polarization, current_tau,
-                                                 pulse_amp, pulse_width, pulse_freq,
-                                                 T_start, T_end, T_step, method);
-        M01_trajectories.push_back(M01_trajectory);
-        
-        current_tau += tau_step;
+    vector<MagTrajectory> M1_trajectories(tau_steps);
+    vector<MagTrajectory> M01_trajectories(tau_steps);
+    vector<double> tau_values(tau_steps);
+    for (int i = 0; i < tau_steps; ++i) tau_values[i] = tau_start + i * tau_step;
+
+    // ----- W2: outer OpenMP parallelism over τ -----
+    int n_outer = 1;
+#ifdef _OPENMP
+    if (outer_omp_threads <= 0) {
+        n_outer = std::max(1, omp_get_max_threads());
+    } else {
+        n_outer = outer_omp_threads;
     }
+    n_outer = std::min(n_outer, std::max(1, tau_steps));
+    const int saved_max_active = omp_get_max_active_levels();
+    omp_set_max_active_levels(1);
+#else
+    (void) outer_omp_threads;
+#endif
+
+    if (n_outer <= 1) {
+        for (int i = 0; i < tau_steps; ++i) {
+            const double current_tau = tau_values[i];
+            cout << "\n--- Delay time " << (i+1) << "/" << tau_steps
+                 << ": tau = " << current_tau << " ---" << endl;
+
+            if (can_reuse_m0) {
+                M1_trajectories[i] = synthesize_M1_from_M0(M0_trajectory, M_ground_arr, current_tau, T_step);
+            } else {
+                spins = ground_state;
+                phonons = ground_phonons;
+                cout << "  Computing M1 (probe at tau=" << current_tau << ")..." << endl;
+                M1_trajectories[i] = single_pulse_drive(polarization, current_tau,
+                                                       pulse_amp, pulse_width, pulse_freq,
+                                                       T_start, T_end, T_step, method,
+                                                       pulse_window_chunking);
+            }
+
+            spins = ground_state;
+            phonons = ground_phonons;
+            cout << "  Computing M01 (pump at 0 + probe at tau=" << current_tau << ")..." << endl;
+            M01_trajectories[i] = double_pulse_drive(polarization, 0.0, polarization, current_tau,
+                                                     pulse_amp, pulse_width, pulse_freq,
+                                                     T_start, T_end, T_step, method,
+                                                     pulse_window_chunking);
+        }
+    } else {
+#ifdef _OPENMP
+        cout << "  [W2] Distributing " << tau_steps << " τ points across "
+             << n_outer << " OpenMP threads..." << endl;
+        #pragma omp parallel num_threads(n_outer)
+        {
+            // PhononLattice has only value-typed members → the implicit
+            // copy ctor is a full deep clone. Each thread owns its own
+            // spins, phonons, drive_params, ordering_pattern, RNG, etc.
+            PhononLattice local_lat(*this);
+            local_lat.spins = ground_state;
+            local_lat.phonons = ground_phonons;
+
+            #pragma omp for schedule(dynamic, 1)
+            for (int i = 0; i < tau_steps; ++i) {
+                const double current_tau = tau_values[i];
+                if (can_reuse_m0) {
+                    M1_trajectories[i] = synthesize_M1_from_M0(M0_trajectory, M_ground_arr, current_tau, T_step);
+                } else {
+                    local_lat.spins = ground_state;
+                    local_lat.phonons = ground_phonons;
+                    M1_trajectories[i] = local_lat.single_pulse_drive(
+                        polarization, current_tau,
+                        pulse_amp, pulse_width, pulse_freq,
+                        T_start, T_end, T_step, method,
+                        pulse_window_chunking);
+                }
+
+                local_lat.spins = ground_state;
+                local_lat.phonons = ground_phonons;
+                M01_trajectories[i] = local_lat.double_pulse_drive(
+                    polarization, 0.0, polarization, current_tau,
+                    pulse_amp, pulse_width, pulse_freq,
+                    T_start, T_end, T_step, method,
+                    pulse_window_chunking);
+            }
+        }
+#endif
+    }
+
+#ifdef _OPENMP
+    omp_set_max_active_levels(saved_max_active);
+#endif
+
     
 #ifdef HDF5_ENABLED
     // Write to HDF5
@@ -2893,7 +3097,10 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
     double pulse_amp, double pulse_width, double pulse_freq,
     double tau_start, double tau_end, double tau_step,
     double T_start, double T_end, double T_step,
-    const string& dir_name, const string& method) {
+    const string& dir_name, const string& method,
+    bool reuse_m0_for_m1,
+    double stationarity_tol,
+    bool pulse_window_chunking) {
     
     int rank, mpi_size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -2901,7 +3108,6 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
     
     std::filesystem::create_directories(dir_name);
     
-    // Calculate total tau steps
     int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
     
     if (rank == 0) {
@@ -2916,9 +3122,11 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
         cout << "Total delay points: " << tau_steps << endl;
         cout << "Tau points per rank: ~" << (tau_steps + mpi_size - 1) / mpi_size << endl;
+        cout << "Optimisations: W1(reuse_m0_for_m1=" << (reuse_m0_for_m1 ? "on" : "off")
+             << ", tol=" << stationarity_tol << "), "
+             << "W3(pulse_window_chunking=" << (pulse_window_chunking ? "on" : "off") << ")" << endl;
     }
     
-    // Use current configuration as ground state
     double E_ground = energy_density();
     if (rank == 0) {
         cout << "\n[1/4] Using current configuration as ground state..." << endl;
@@ -2927,22 +3135,106 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         save_spin_config(dir_name + "/spins_initial.txt");
     }
     
-    // Backup ground state
+    // Set ordering pattern from current config on every rank so that
+    // local M0 / M1 / M01 observers compute identical custom O.
+    set_ordering_pattern();
+
     SpinConfig ground_state = spins;
     PhononState ground_phonons = phonons;
+
+    // ----- W1: capture ground-state magnetisation observables on
+    //       every rank (cheap and identical), then have rank 0 evaluate
+    //       the stationarity guard and broadcast the verdict. -----
+    std::array<Eigen::Vector3d, 4> M_ground_arr = {
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()
+    };
+    {
+        Eigen::Vector3d Ml = Eigen::Vector3d::Zero();
+        Eigen::Vector3d Ma = Eigen::Vector3d::Zero();
+        Eigen::Vector3d Mg = Eigen::Vector3d::Zero();
+        double Oc = 0.0;
+        for (size_t i = 0; i < lattice_size; ++i) {
+            const size_t atom = i % N_atoms;
+            const double sign = afm_sublattice_signs[atom];
+            const Eigen::Vector3d S = spins[i];
+            Ml += S;
+            const Eigen::Vector3d S_global = sublattice_frames[atom] * S;
+            Ma += sign * S_global;
+            Mg += S_global;
+            if (has_ordering_pattern) Oc += S.dot(ordering_pattern[i]);
+        }
+        Ml /= double(lattice_size);
+        Ma /= double(lattice_size);
+        Mg /= double(lattice_size);
+        Oc /= double(lattice_size);
+        M_ground_arr = { Ma, Ml, Mg, Eigen::Vector3d(Oc, 0.0, 0.0) };
+    }
+
+    int can_reuse_m0 = 0;
+    if (reuse_m0_for_m1) {
+        if (rank == 0) {
+            const double max_dS = max_dSdt_norm_no_drive();
+            cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
+                 << max_dS << " (tol = " << stationarity_tol << ")" << endl;
+            can_reuse_m0 = (max_dS <= stationarity_tol) ? 1 : 0;
+        }
+        MPI_Bcast(&can_reuse_m0, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (rank == 0) {
+            if (can_reuse_m0) {
+                cout << "  [W1] Spin sector is stationary — M1(τ) will be synthesised from M0." << endl;
+            } else {
+                cout << "  [W1] Spin sector NOT stationary — every rank will integrate fresh M1." << endl;
+            }
+        }
+    }
     
-    // Compute M0 on rank 0
     MagTrajectory M0_trajectory;
     if (rank == 0) {
         cout << "\n[2/4] Computing reference trajectory (M0)..." << endl;
         M0_trajectory = single_pulse_drive(polarization, 0.0,
                                            pulse_amp, pulse_width, pulse_freq,
-                                           T_start, T_end, T_step, method);
+                                           T_start, T_end, T_step, method,
+                                           pulse_window_chunking);
         spins = ground_state;
         phonons = ground_phonons;
     }
+
+    // If we will synthesise M1 from M0 on remote ranks, broadcast M0.
+    // The trajectory is a flat (n_times) × (1 time + 4·3 doubles) packed
+    // buffer; cheap compared to one full integration.
+    if (can_reuse_m0) {
+        int n_times = (rank == 0) ? static_cast<int>(M0_trajectory.size()) : 0;
+        MPI_Bcast(&n_times, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        const int stride = 1 + 4 * 3;  // t + 4 Vector3d
+        vector<double> buf(static_cast<size_t>(n_times) * stride, 0.0);
+        if (rank == 0) {
+            for (int t = 0; t < n_times; ++t) {
+                buf[t * stride + 0] = M0_trajectory[t].first;
+                for (int k = 0; k < 4; ++k) {
+                    for (int d = 0; d < 3; ++d) {
+                        buf[t * stride + 1 + k * 3 + d] = M0_trajectory[t].second[k](d);
+                    }
+                }
+            }
+        }
+        MPI_Bcast(buf.data(), static_cast<int>(buf.size()), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        if (rank != 0) {
+            M0_trajectory.assign(static_cast<size_t>(n_times),
+                                 {0.0, {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+                                        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()}});
+            for (int t = 0; t < n_times; ++t) {
+                M0_trajectory[t].first = buf[t * stride + 0];
+                for (int k = 0; k < 4; ++k) {
+                    M0_trajectory[t].second[k] = Eigen::Vector3d(
+                        buf[t * stride + 1 + k * 3 + 0],
+                        buf[t * stride + 1 + k * 3 + 1],
+                        buf[t * stride + 1 + k * 3 + 2]);
+                }
+            }
+        }
+    }
     
-    // Distribute tau values across ranks
     vector<int> tau_counts(mpi_size), tau_offsets(mpi_size);
     int base_count = tau_steps / mpi_size;
     int remainder = tau_steps % mpi_size;
@@ -2959,7 +3251,6 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         cout << "\n[3/4] Parallel delay scan..." << endl;
     }
     
-    // Each rank computes its subset of tau values
     vector<double> my_tau_values(my_count);
     vector<MagTrajectory> my_M1_trajectories(my_count);
     vector<MagTrajectory> my_M01_trajectories(my_count);
@@ -2972,19 +3263,24 @@ void PhononLattice::pump_probe_spectroscopy_mpi(
         cout << "[Rank " << rank << "] tau = " << current_tau 
              << " (" << (i+1) << "/" << my_count << ")" << endl;
         
-        // M1: Probe only
-        spins = ground_state;
-        phonons = ground_phonons;
-        my_M1_trajectories[i] = single_pulse_drive(polarization, current_tau,
-                                                   pulse_amp, pulse_width, pulse_freq,
-                                                   T_start, T_end, T_step, method);
+        if (can_reuse_m0) {
+            my_M1_trajectories[i] = synthesize_M1_from_M0(M0_trajectory, M_ground_arr,
+                                                          current_tau, T_step);
+        } else {
+            spins = ground_state;
+            phonons = ground_phonons;
+            my_M1_trajectories[i] = single_pulse_drive(polarization, current_tau,
+                                                       pulse_amp, pulse_width, pulse_freq,
+                                                       T_start, T_end, T_step, method,
+                                                       pulse_window_chunking);
+        }
         
-        // M01: Pump + Probe
         spins = ground_state;
         phonons = ground_phonons;
         my_M01_trajectories[i] = double_pulse_drive(polarization, 0.0, polarization, current_tau,
                                                     pulse_amp, pulse_width, pulse_freq,
-                                                    T_start, T_end, T_step, method);
+                                                    T_start, T_end, T_step, method,
+                                                    pulse_window_chunking);
     }
     
     MPI_Barrier(MPI_COMM_WORLD);

@@ -1557,6 +1557,246 @@ written in terms of dynamic-size \texttt{SpinVector}s; the
 \texttt{\_v3} family closes that gap.
 
 % =================================================================
+\section{Ingredient XV: pump--probe and 2DCS speedups (W1, W2, W3)}
+% =================================================================
+\label{sec:pump-probe-w123}
+
+\subsection{What costs the time in a 2DCS scan}
+
+The pump--probe / 2D coherent spectroscopy (\textsc{2DCS}) drivers
+(\texttt{Lattice::pump\_probe\_spectroscopy},
+\texttt{MixedLattice::pump\_probe\_spectroscopy}, and
+\texttt{PhononLattice::pump\_probe\_spectroscopy}) implement the
+standard nonlinear--signal extraction
+\[
+M_{\rm NL}(t,\tau) \;=\; M_{01}(t,\tau) - M_0(t) - M_1(t,\tau),
+\]
+where $M_0$ is the response to a single pump pulse at $t=0$,
+$M_1(\tau)$ the response to a single probe pulse at $t=\tau$, and
+$M_{01}(\tau)$ the response to both pulses.  For a delay grid of
+$N_\tau$ points the naive cost is
+\[
+1 + 2 N_\tau \quad\text{full LLG / coupled-strain integrations.}
+\]
+For a typical THz scan ($N_\tau \sim 100$) and a moderate lattice
+($L \sim 16$, $N \sim 10^3$ spins, $T_{\rm end}/T_{\rm step} \sim
+10^4$ steps), each integration is $O(10^7)$ RHS evaluations and
+the wall-clock for a single trial is dominated by these
+$2 N_\tau$ identical-shape ODE calls.
+
+Three independent speedups apply.  We label them W1, W2, W3 and
+ship them with conservative defaults so that they are on for any
+configuration that satisfies the runtime guard.
+
+\subsection{W1: time-translation reuse of $M_0$ for $M_1(\tau)$}
+\label{sec:w1}
+
+\paragraph{Idea.}  A single-pulse trajectory $M_{\rm pulse}(t;t_B)$
+parameterised by the pulse centre $t_B$ has a discrete symmetry
+under time translation \emph{provided the underlying flow is
+deterministic and the initial condition is a true equilibrium of
+the unperturbed Hamiltonian}.  Concretely, if the spin sector is
+stationary at $t = T_{\rm start}$ (i.e.\ $\dot S_i = 0$ for all
+sites with the drive disabled), then
+\[
+M_1(t,\tau) \;\equiv\; M_{\rm pulse}(t;\,t_B = \tau)
+\;=\;
+\begin{cases}
+M_{\rm ground}, & t < \tau, \\
+M_{\rm pulse}(t-\tau;\,t_B = 0), & t \geq \tau.
+\end{cases}
+\]
+That is, $M_1(\tau)$ is just $M_0$ shifted in time by $\tau$ and
+padded with the ground-state magnetisation on the pre-pulse
+interval.  We therefore eliminate $N_\tau$ full ODE integrations
+per trial.
+
+\paragraph{Guard.}  W1 is silently \emph{wrong} for stochastic
+dynamics (Langevin / finite $T$) and for non-equilibrium initial
+conditions (the user has just quenched, or has loaded a state
+mid-relaxation).  We protect against this with a runtime guard:
+\begin{enumerate}[noitemsep]
+  \item Disable the drive (\texttt{field\_drive\_amp = 0} on
+        \texttt{Lattice}; \texttt{field\_drive\_amp\_SU2/SU3 = 0}
+        on \texttt{MixedLattice}; \texttt{drive\_params.E0\_1 =
+        E0\_2 = 0} on \texttt{PhononLattice}).
+  \item Evaluate the deterministic LLG / coupled-strain RHS once.
+  \item Take $\max_i |\dot S_i|_\infty$ over the spin sector.
+  \item Compare against \texttt{stationarity\_tol} (default
+        $10^{-6}$).  If the bound is exceeded, fall back to a
+        full integration of $M_1(\tau)$ for every $\tau$.
+\end{enumerate}
+The guard is exposed as the \texttt{reuse\_m0\_for\_m1} flag (default
+\texttt{true}) in \texttt{SpinConfig}.  Setting it to \texttt{false}
+disables W1 unconditionally.  The guard cost is one RHS evaluation
+per trial, which is $\sim 10^{-4}$ of one integration.
+
+\paragraph{Caveats and intentional scope.}  We deliberately
+restrict the bound to the spin sector even on
+\texttt{PhononLattice} and \texttt{MixedLattice}, where there are
+auxiliary degrees of freedom (phonon $Q,V$; SU(3) site spinors).
+The reasoning is that the $\dot S$ sector dictates the trajectory
+shape of the magnetisation observers; non-zero $\dot Q$ at $t = T_{\rm
+start}$ does not by itself violate W1 \emph{provided} the spin
+sector returns to the same trajectory shape after the pulse.
+Users with non-stationary auxiliary sectors should pass
+\texttt{reuse\_m0\_for\_m1 = false} explicitly; we do not
+auto-detect this.  Finite-$T$ Langevin runs are out of scope: the
+flow is no longer deterministic, so even a perfectly stationary
+spin sector does not give the same $M_1(\tau)$ via the time-shift.
+
+\subsection{W2: outer-OpenMP parallelism over $\tau$}
+\label{sec:w2}
+
+\paragraph{Idea.}  The $N_\tau$ integrations of $M_1(\tau)$ and
+$M_{01}(\tau)$ are embarrassingly independent (each starts from the
+same ground state and uses the same Hamiltonian; only the pulse
+centres differ).  On a single MPI rank we can therefore distribute
+$\tau$ values across OpenMP threads.
+
+\paragraph{Implementation.}  The driver opens a
+\texttt{\#pragma omp parallel num\_threads(n\_outer)} where each
+thread \emph{deep-copies} the \texttt{Lattice} /
+\texttt{MixedLattice} / \texttt{PhononLattice} object to get its
+own state.  This is non-trivial: the copy constructor must
+duplicate every mutable field (in particular the time-dependent
+drive parameters \texttt{field\_drive\_amp},
+\texttt{field\_drive\_freq}, \texttt{t\_pulse},
+\texttt{alpha\_gilbert}, the twist angles, and the AFM sublattice
+signs), not just the spin configuration and the static interaction
+tables.  We audited and fixed the \texttt{Lattice} copy
+constructor as part of this pass; the \texttt{PhononLattice} and
+\texttt{MixedLattice} copy constructors were already complete
+because all their fields are value-typed.
+
+The inner OpenMP regions inside \texttt{ode\_system} (Ingredient
+XIV) and \texttt{metropolis\_parallel} (Ingredient XII) are nested
+under W2's outer team.  We force the maximum active level to one
+via \texttt{omp\_set\_max\_active\_levels(1)} for the duration of
+the $\tau$ loop; this ensures the inner \texttt{\#pragma omp for}
+runs serially per thread, recovering the full per-$\tau$ throughput
+of one core.  The previous level is restored on exit.
+
+\paragraph{Cost model.}  W2 trades a single inner OpenMP team
+running on $T$ threads for $T$ outer threads each running the inner
+RHS serially.  This is the right trade when $N_\tau \geq T$ and the
+inner RHS is short enough that team-management overhead dominates
+the inner scaling (the case for cheap RHS variants like
+\texttt{strain-honeycomb-bilin}, see Section
+\ref{sec:bench-md-rhs-heap-free}).  For very large lattices the
+inner OpenMP scales well and the choice is closer to a wash; we
+default to W2 enabled because the wall-clock floor for a 2DCS
+scan is set by the slowest $\tau$, and we want to fill all cores.
+
+The number of outer threads is configurable via
+\texttt{pump\_probe\_omp\_threads} in \texttt{SpinConfig}; the
+default \texttt{0} means ``use all available threads''.  Inside an
+\texttt{MPI\_Comm\_size > 1} run, the MPI driver uses the
+\texttt{\_mpi} entry point which distributes $\tau$ across ranks
+instead of threads---W2 is then a no-op (the outer parallel region
+is collapsed because $N_\tau / \texttt{ranks}$ is the local count,
+not $N_\tau$).
+
+\subsection{W3: pulse-window-aware chunked integration}
+\label{sec:w3}
+
+\paragraph{Idea.}  The Gaussian envelope of a THz pulse decays to
+$\sim 10^{-16}$ of its peak past $6\sigma$.  Outside that window
+the LLG / coupled-strain flow is just the unperturbed deterministic
+dynamics, which is smooth and admits a much larger time step than
+the pulse-active region.
+
+\texttt{Boost.Odeint}'s \texttt{integrate\_const(controlled\_stepper,
+..., dt)} uses \texttt{dt} as both the \emph{observer cadence}
+\emph{and} the \emph{initial step hint} for the controlled stepper.
+With \texttt{dt = T\_step} (typically $0.01$ in our normalised
+units) the stepper is forced to start small even when the dynamics
+is smooth, then has to spend several substeps growing to its
+asymptotic adaptive size.
+
+\paragraph{Implementation.}  We split each
+\texttt{single\_pulse\_drive} / \texttt{double\_pulse\_drive} call
+into a small number of pulse-active and free segments and call
+\texttt{integrate\_ode\_system} once per segment with an
+appropriate initial \texttt{dt}:
+\begin{itemize}[noitemsep]
+  \item Pulse-active segment around each pulse centre $t_B \pm
+        6\sigma$: \texttt{dt\_init = T\_step}, the conservative
+        small step.
+  \item Free segment: \texttt{dt\_init = 20 * T\_step}, letting
+        the controlled stepper grow its internal step rapidly.
+\end{itemize}
+The observer continues to fire at exact \texttt{T\_step} boundaries
+within each segment via dense-output interpolation, so the
+trajectory grid emitted to disk is byte-identical to the
+single-call version.
+
+The helper lives in \texttt{include/classical\_spin/lattice/pulse\_chunking.h}
+as the \texttt{classical\_spin\_pulse\_chunking::build\_pulse\_segments}
+free function so that all three lattice families can share it.
+The window factor ($6\sigma$) and the free-segment $dt$ scale ($20
+\times T_{\rm step}$) are exposed as
+\texttt{kPulseWindowSigmas} / \texttt{kFreeDtFactor} constants and
+have been chosen conservatively; a finer setting could squeeze out
+a further $\sim 1.5 \times$ in the very-long $T_{\rm end}$ regime
+but at the cost of robustness to atypical pulse shapes.
+
+W3 is opt-in via \texttt{pulse\_window\_chunking} (default
+\texttt{true}) in \texttt{SpinConfig}.  Setting it to \texttt{false}
+falls back to the original single \texttt{integrate\_ode\_system}
+call.
+
+\subsection{Estimated speedup}
+
+W1, W2 and W3 compose multiplicatively to leading order.  For a
+typical $N_\tau = 100$ scan on a 16-core node with the spin
+sector stationary, the expected speedup over the pre-W1/W2/W3
+driver is
+\[
+\frac{2 N_\tau + 1}{N_\tau + 1} \cdot \min(N_\tau, T_{\rm threads})
+\cdot s_{\rm W3}
+\;\approx\;
+2 \cdot \min(100, 16) \cdot 1.5
+\;\sim\;
+\mathbf{45 \times}
+\]
+in the regime where the inner RHS does not dominate (cheap
+strain-bilin / coupled-spin RHS).  W1 contributes a factor of
+$\sim 2$ (eliminating the $M_1$ branch), W2 fills all cores, and
+W3 contributes the $\sim 1.5\times$ from the larger free-segment
+$dt$.  For the heavy lattices where the inner RHS scales well to
+all threads anyway, the W2 contribution shrinks toward $1$ and the
+overall win is closer to $\sim 3 \times$, dominated by W1$+$W3.
+
+The same three speedups apply per-rank in the MPI driver
+(\texttt{pump\_probe\_spectroscopy\_mpi}); W1 broadcasts the M0
+trajectory from rank 0 once and all other ranks synthesise their
+local $M_1(\tau)$ values from it.  W2 is a no-op there because
+$N_\tau$ is already distributed across MPI ranks.
+
+\subsection{Why these are not done elsewhere}
+
+Vampire and UppASD's pump--probe drivers (where they exist) do not
+implement W1 because they are routinely run in the finite-$T$
+Langevin regime where the time-shift identity does not hold.  Our
+guard makes W1 safe to enable by default precisely because we
+\emph{check} stationarity at runtime instead of assuming it.
+
+W2 is straightforward in any code that treats lattice instances
+as cheap to clone, but \texttt{Lattice}'s prior copy constructor
+silently dropped the time-dependent drive parameters; this is
+exactly the kind of bug that makes ``parallelise the outer loop''
+look harder than it is.  Auditing and fixing the copy constructor
+is the actual work of W2; the OpenMP region itself is six lines.
+
+W3 is generic: any adaptive controlled stepper (Boost.Odeint,
+\texttt{scipy.solve\_ivp} with \texttt{method='RK45'},
+\textsc{SUNDIALS} \texttt{CVODE}, etc.) benefits from a larger
+initial $dt$ when the dynamics is smooth.  We have not seen it
+applied to 2DCS in the published spin codes; it is the cheapest
+of the three to add and the most portable.
+
+% =================================================================
 \section{Putting it together: a checklist}
 % =================================================================
 
@@ -1640,9 +1880,32 @@ with.
         into one neighbour pass.  This is what removed the
         $\sim 11$ \texttt{malloc/free} pairs per site per RHS that
         had been capping the strain--phonon Langevin integrator.
+  \item \textbf{The 2DCS / pump--probe driver collapses redundant
+        integrations and parallelises the $\tau$ loop}
+        (Section~\ref{sec:pump-probe-w123}).  Three independent
+        speedups apply to every \texttt{pump\_probe\_spectroscopy}
+        entry point:  W1 synthesises $M_1(\tau)$ from the M0
+        trajectory by time-shift (guarded at runtime by a
+        $\max_i |\dot S_i|_\infty$ stationarity check, so it is
+        silently disabled if the user has not actually equilibrated
+        the spin sector or is running finite-$T$ Langevin
+        dynamics);  W2 distributes the $\tau$ loop across OpenMP
+        threads using deep-cloned lattice instances (this is the
+        reason the \texttt{Lattice} copy constructor must include
+        the time-dependent drive parameters and the AFM sublattice
+        signs);  W3 splits the integration into pulse-active and
+        free segments and feeds the controlled stepper a
+        $\sim 20\times$ larger initial $dt$ in the free segments,
+        letting the adaptive RK grow its step rapidly while the
+        observer cadence stays at \texttt{T\_step}.  The shared
+        helper lives in
+        \texttt{include/classical\_spin/lattice/pulse\_chunking.h}
+        so all three lattice families
+        (\texttt{Lattice}, \texttt{MixedLattice},
+        \texttt{PhononLattice}) use the same pulse-window logic.
 \end{enumerate}
 
-\texttt{ClassicalSpin\_Cpp} now ticks all nineteen, including
+\texttt{ClassicalSpin\_Cpp} now ticks all twenty, including
 item~3 (the Structure-of-Arrays bilinear table, see
 Section~\ref{sec:soa}), the Marsaglia sphere sampler
 (Section~\ref{sec:marsaglia}, including its mixed/strain

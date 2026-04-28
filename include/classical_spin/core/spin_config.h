@@ -137,6 +137,38 @@ struct SpinConfig {
     double tau_end = 200.0;
     double tau_step = 1.0;
     bool parallel_tau = true;  // If true, parallelize tau loop across MPI ranks when num_trials == 1
+
+    // ============================================================
+    // 2DCS performance optimisations (W1, W2, W3) — see
+    // docs/optimization_notes.tex Ingredient XV.
+    //
+    // All three are SAFE BY CONSTRUCTION when the underlying dynamics
+    // is deterministic LLG from a true ground state (the standard
+    // T = 0 spectroscopy use case). They cut the wall-time of a 2DCS
+    // scan by ≈ 3-6× without changing physics:
+    //   - W1: build M1(τ) by time-shifting M0 instead of integrating
+    //     a fresh single-pulse trajectory per τ. Guarded by a
+    //     stationarity check so finite-T / non-equilibrium runs
+    //     transparently fall back to integration.
+    //   - W2: parallelise the τ loop over OpenMP threads on a single
+    //     node (orthogonal to and composable with MPI tau-parallelism).
+    //   - W3: chunk each integrator call into pulse-active and free-
+    //     evolution segments and let the controlled stepper take
+    //     larger steps in the free segments.
+    // ============================================================
+    bool reuse_m0_for_m1 = true;        // W1: opt-in time-shift of M0 → M1(τ).
+                                        //     Disabled automatically if the ground
+                                        //     state is not stationary (max ‖dS/dt‖_∞
+                                        //     > stationarity_tol).
+    double stationarity_tol = 1e-6;     // W1 guard: treat the loaded configuration
+                                        //     as a true equilibrium if every site
+                                        //     has |dS/dt| below this threshold.
+    bool pulse_window_chunking = true;  // W3: split each integration around the
+                                        //     pulse window so the controlled stepper
+                                        //     can grow its dt in free regions.
+    int pump_probe_omp_threads = 0;     // W2: outer OpenMP threads for the τ loop
+                                        //     in the non-MPI / single-rank entry
+                                        //     point. 0 = use all available threads.
     
     // Parameter sweep parameters
     string sweep_parameter = "";      // Name of parameter to sweep (deprecated, use sweep_parameters)

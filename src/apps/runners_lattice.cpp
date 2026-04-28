@@ -758,7 +758,11 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
             config.overrelaxation_rate,
             trial_dir,
             config.md_integrator,
-            config.use_gpu
+            config.use_gpu,
+            // Ingredient XV (W1/W3 — W2 replaced by MPI here):
+            config.reuse_m0_for_m1,
+            config.stationarity_tol,
+            config.pulse_window_chunking
         );
         
     } else {
@@ -839,7 +843,12 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
                 config.overrelaxation_rate,
                 trial_dir,
                 config.md_integrator,
-                config.use_gpu
+                config.use_gpu,
+                // Ingredient XV (W1/W2/W3):
+                config.reuse_m0_for_m1,
+                config.stationarity_tol,
+                config.pump_probe_omp_threads,
+                config.pulse_window_chunking
             );
             
             cout << "[Rank " << rank << "] Trial " << trial << " 2DCS spectroscopy completed!" << endl;

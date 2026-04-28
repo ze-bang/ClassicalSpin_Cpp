@@ -241,6 +241,18 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "parallel_tau") {
                 config.parallel_tau = parse_bool(value);
             }
+            else if (key == "reuse_m0_for_m1") {
+                config.reuse_m0_for_m1 = parse_bool(value);
+            }
+            else if (key == "stationarity_tol") {
+                config.stationarity_tol = stod(value);
+            }
+            else if (key == "pulse_window_chunking") {
+                config.pulse_window_chunking = parse_bool(value);
+            }
+            else if (key == "pump_probe_omp_threads") {
+                config.pump_probe_omp_threads = stoi(value);
+            }
             else if (key == "sweep_parameter") {
                 config.sweep_parameter = value;
                 // For backward compatibility, also populate new arrays

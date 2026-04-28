@@ -470,7 +470,11 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
                 pulse_amp, pulse_width, pulse_freq,
                 tau_start, tau_end, tau_step,
                 config.md_time_start, config.md_time_end, config.md_timestep,
-                trial_dir, config.md_integrator
+                trial_dir, config.md_integrator,
+                // Ingredient XV (W1/W3 — W2 replaced by MPI here):
+                config.reuse_m0_for_m1,
+                config.stationarity_tol,
+                config.pulse_window_chunking
             );
         } else {
             // Single-rank version
@@ -479,7 +483,12 @@ void run_2dcs_phonon(PhononLattice& lattice, const SpinConfig& config, int rank,
                 pulse_amp, pulse_width, pulse_freq,
                 tau_start, tau_end, tau_step,
                 config.md_time_start, config.md_time_end, config.md_timestep,
-                trial_dir, config.md_integrator
+                trial_dir, config.md_integrator,
+                // Ingredient XV (W1/W2/W3):
+                config.reuse_m0_for_m1,
+                config.stationarity_tol,
+                config.pump_probe_omp_threads,
+                config.pulse_window_chunking
             );
         }
         

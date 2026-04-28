@@ -981,9 +981,21 @@ public:
 
     /**
      * Copy constructor
+     *
+     * IMPORTANT: this copies the *full* configurable state of the lattice,
+     * including the time-dependent drive parameters and Gilbert damping.
+     * Earlier revisions left `field_drive`, `t_pulse`, `field_drive_*`,
+     * `alpha_gilbert`, `twist_angles`, and `afm_sublattice_signs`
+     * default-initialised, which silently broke MD / 2DCS workflows on
+     * cloned lattices (set_pulse() would touch a zero-sized Eigen vector
+     * and crash, and copies forgot the user-set damping). Keeping the
+     * copy faithful is also a precondition for the OpenMP τ-loop in
+     * Lattice::pump_probe_spectroscopy (Ingredient XV / W2): each thread
+     * needs its own fully-functional clone with its own pulse buffers.
      */
     Lattice(const Lattice& other)
         : unit_cell(other.unit_cell),
+          lattice_type(other.lattice_type),
           spin_dim(other.spin_dim),
           N_atoms(other.N_atoms),
           dim1(other.dim1),
@@ -999,6 +1011,8 @@ public:
           trilinear_interaction(other.trilinear_interaction),
           bilinear_partners(other.bilinear_partners),
           trilinear_partners(other.trilinear_partners),
+          sublattice_frames(other.sublattice_frames),
+          afm_sublattice_signs(other.afm_sublattice_signs),
           num_bi(other.num_bi),
           num_tri(other.num_tri),
           bi_flat_offset(other.bi_flat_offset),
@@ -1013,10 +1027,16 @@ public:
           n_colors(other.n_colors),
           twist_matrices(other.twist_matrices),
           rotation_axis(other.rotation_axis),
+          twist_angles(other.twist_angles),
           bilinear_wrap_dir(other.bilinear_wrap_dir),
           boundary_sites_per_dim(other.boundary_sites_per_dim),
           boundary_thickness(other.boundary_thickness),
-          sublattice_frames(other.sublattice_frames)
+          field_drive(other.field_drive),
+          t_pulse(other.t_pulse),
+          field_drive_amp(other.field_drive_amp),
+          field_drive_freq(other.field_drive_freq),
+          field_drive_width(other.field_drive_width),
+          alpha_gilbert(other.alpha_gilbert)
     {}
 
     // ============================================================
@@ -4938,19 +4958,68 @@ public:
                const vector<SpinVector>& field_in, double t_B, 
                double pulse_amp, double pulse_width, double pulse_freq,
                double T_start, double T_end, double step_size,
-               string method = "dopri5", bool use_gpu = false);
+               string method = "dopri5", bool use_gpu = false,
+               bool pulse_window_chunking = true);
 
     /**
      * Molecular dynamics with two-pulse field
      * Returns magnetization trajectory without I/O
      * @param use_gpu Enable GPU acceleration
+     * @param pulse_window_chunking If true, split the integration into
+     *        pre-pulse / pulse-active / inter-pulse / post-pulse segments
+     *        and let the controlled stepper grow its dt in the free
+     *        regions (W3 in optimization_notes.tex Ingredient XV).
      */
     vector<pair<double, array<SpinVector, 3>>> double_pulse_drive(
                    const vector<SpinVector>& field_in_1, double t_B_1,
                    const vector<SpinVector>& field_in_2, double t_B_2,
                    double pulse_amp, double pulse_width, double pulse_freq,
                    double T_start, double T_end, double step_size,
-                   string method = "dopri5", bool use_gpu = false);
+                   string method = "dopri5", bool use_gpu = false,
+                   bool pulse_window_chunking = true);
+
+    // ============================================================
+    // 2DCS / pump-probe optimisation helpers
+    // (see docs/optimization_notes.tex Ingredient XV).
+    // ============================================================
+
+    /**
+     * Trajectory type used by pump_probe spectroscopy and synthesis
+     * helpers — one (time, [M_antiferro, M_local, M_global]) sample.
+     */
+    using PumpProbeTrajectory = vector<pair<double, array<SpinVector, 3>>>;
+
+    /**
+     * W1 guard: peak ‖dS/dt‖_∞ over the lattice with the time-dependent
+     * drive disabled. Used to decide whether the current configuration
+     * is close enough to a stationary point that synthesising
+     * M1(τ) = T_τ M0 is safe (i.e. that the unperturbed evolution
+     * between t = T_start and t = τ is identically zero).
+     *
+     * O(lattice_size); allocates a single ODEState/dsdt pair.
+     */
+    double max_dSdt_norm_no_drive() const;
+
+    /**
+     * W1: synthesise the single-probe trajectory M1(τ) at delay τ from
+     * the reference single-pulse trajectory M0 by time-translation.
+     *
+     *   M1(t, τ) = { M_ground            if t < τ + T_start
+     *              { M0(t - τ)           otherwise
+     *
+     * Pre-condition: the unperturbed evolution between T_start and τ is
+     * trivial (i.e. the loaded configuration is a true equilibrium of
+     * the LLG flow with no drive). The caller is responsible for
+     * checking max_dSdt_norm_no_drive() ≤ tol before invoking this
+     * helper; otherwise the synthesised trajectory will silently miss
+     * any free precession that would otherwise occur.
+     *
+     * The synthesised trajectory mirrors M0's time grid exactly.
+     */
+    PumpProbeTrajectory synthesize_M1_from_M0(
+        const PumpProbeTrajectory& M0_trajectory,
+        const array<SpinVector, 3>& M_ground,
+        double tau, double T_step) const;
 
     /**
      * Complete pump-probe nonlinear spectroscopy workflow
@@ -4996,7 +5065,15 @@ public:
                                  size_t n_anneal = 1000,
                                  bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                  string dir_name = "spectroscopy", string method = "dopri5",
-                                 bool use_gpu = false);
+                                 bool use_gpu = false,
+                                 // W1: synthesise M1(τ) by time-shifting M0 instead of integrating.
+                                 //   Auto-disabled at runtime if max ‖dS/dt‖_∞ > stationarity_tol.
+                                 bool reuse_m0_for_m1 = true,
+                                 double stationarity_tol = 1e-6,
+                                 // W2: outer OpenMP threads for the τ loop. 0 = use all available.
+                                 int outer_omp_threads = 0,
+                                 // W3: pulse-window-aware chunked integration of single/double_pulse_drive.
+                                 bool pulse_window_chunking = true);
 
     /**
      * MPI-parallelized pump-probe spectroscopy
@@ -5034,7 +5111,12 @@ public:
                                      size_t n_anneal = 1000,
                                      bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                      string dir_name = "spectroscopy", string method = "dopri5",
-                                     bool use_gpu = false);
+                                     bool use_gpu = false,
+                                     // W1 + W3 also apply per-rank in the MPI driver.
+                                     // (W2 is replaced by MPI tau-distribution at this level.)
+                                     bool reuse_m0_for_m1 = true,
+                                     double stationarity_tol = 1e-6,
+                                     bool pulse_window_chunking = true);
 
     // Note: GPU-accelerated methods use the modular GPU implementation in lattice_gpu.cuh/cu
     // For C++ compilation, use_gpu parameter will automatically fallback to CPU implementation.

@@ -832,6 +832,76 @@
 #endif // HDF5_ENABLED
     }
 
+// ============================================================
+// 2DCS / pump-probe optimisation helpers (Ingredient XV).
+// Mirror of the Lattice helpers; see lattice_md.cpp for full prose.
+// ============================================================
+
+// ---- MixedLattice::max_dSdt_norm_no_drive ----
+    double MixedLattice::max_dSdt_norm_no_drive() const {
+        // Pack spins -> flat state, evaluate landau_lifshitz with both
+        // SU(2) and SU(3) drive amplitudes pinned to zero, restore the
+        // amplitudes, then return ‖dS/dt‖_∞. Used by W1 to verify the
+        // current configuration is a (numerical) stationary point of
+        // the deterministic flow before we synthesise M1(τ) by
+        // time-shifting M_pulse.
+        ODEState state = spins_to_state();
+        ODEState dsdt(state.size(), 0.0);
+
+        MixedLattice* self = const_cast<MixedLattice*>(this);
+        const double saved_amp_SU2 = self->field_drive_amp_SU2;
+        const double saved_amp_SU3 = self->field_drive_amp_SU3;
+        self->field_drive_amp_SU2 = 0.0;
+        self->field_drive_amp_SU3 = 0.0;
+        try {
+            self->landau_lifshitz(state, dsdt, 0.0);
+        } catch (...) {
+            self->field_drive_amp_SU2 = saved_amp_SU2;
+            self->field_drive_amp_SU3 = saved_amp_SU3;
+            throw;
+        }
+        self->field_drive_amp_SU2 = saved_amp_SU2;
+        self->field_drive_amp_SU3 = saved_amp_SU3;
+
+        double max_norm = 0.0;
+        for (double v : dsdt) {
+            const double a = std::abs(v);
+            if (a > max_norm) max_norm = a;
+        }
+        return max_norm;
+    }
+
+// ---- MixedLattice::synthesize_M1_from_M0 ----
+    MixedLattice::PumpProbeTrajectory MixedLattice::synthesize_M1_from_M0(
+        const PumpProbeTrajectory& M_pulse_trajectory,
+        const pair<array<SpinVector, 3>, array<SpinVector, 3>>& M_ground,
+        double tau,
+        double T_start, double T_end, double T_step) const {
+        (void) T_start;
+        (void) T_end;
+        PumpProbeTrajectory M1;
+        M1.reserve(M_pulse_trajectory.size());
+        if (M_pulse_trajectory.empty()) return M1;
+
+        const double T_start_M0 = M_pulse_trajectory.front().first;
+        const double tau_threshold = tau + T_start_M0;
+        const ptrdiff_t n = static_cast<ptrdiff_t>(M_pulse_trajectory.size());
+
+        for (const auto& [t_i, mag_i] : M_pulse_trajectory) {
+            (void) mag_i;
+            if (t_i < tau_threshold) {
+                M1.push_back({t_i, M_ground});
+            } else {
+                const double rel = (t_i - tau - T_start_M0) / T_step;
+                ptrdiff_t idx = static_cast<ptrdiff_t>(std::lround(rel));
+                if (idx < 0) idx = 0;
+                if (idx >= n) idx = n - 1;
+                M1.push_back({t_i, M_pulse_trajectory[static_cast<size_t>(idx)].second});
+            }
+        }
+        return M1;
+    }
+
 // ---- MixedLattice::pump_probe_spectroscopy ----
     void MixedLattice::pump_probe_spectroscopy(const vector<SpinVector>& field_in_SU2,
                                  const vector<SpinVector>& field_in_SU3,
@@ -843,7 +913,11 @@
                                  size_t n_anneal,
                                  bool T_zero_quench, size_t quench_sweeps,
                                  string dir_name,
-                                 string method, bool use_gpu) {
+                                 string method, bool use_gpu,
+                                 bool reuse_m0_for_m1,
+                                 double stationarity_tol,
+                                 int outer_omp_threads,
+                                 bool pulse_window_chunking) {
         
         std::filesystem::create_directories(dir_name);
         
@@ -856,6 +930,10 @@
              << ", freq=" << pulse_freq_SU3 << endl;
         cout << "Delay scan: " << tau_start << " → " << tau_end << " (step: " << tau_step << ")" << endl;
         cout << "Integration: " << T_start << " → " << T_end << " (step: " << T_step << ")" << endl;
+        cout << "Optimisations: W1(reuse_m0_for_m1=" << (reuse_m0_for_m1 ? "on" : "off")
+             << ", tol=" << stationarity_tol << "), "
+             << "W2(outer_omp_threads=" << outer_omp_threads << "), "
+             << "W3(pulse_window_chunking=" << (pulse_window_chunking ? "on" : "off") << ")" << endl;
         
         // Use current spin configuration as ground state (assumed pre-loaded)
         cout << "\n[1/3] Using current configuration as ground state..." << endl;
@@ -885,8 +963,67 @@
         auto M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                   T_start, T_end, T_step, method, use_gpu);
-        
+                                   T_start, T_end, T_step, method, use_gpu, nullptr,
+                                   pulse_window_chunking);
+
+        // ----- W1: capture ground-state magnetisation triples and decide
+        //       whether it is safe to synthesise M1(τ) from M0 by time
+        //       shift. Use the time-zero observer sample of M0 (which
+        //       was taken before the pulse fires for the t_B=0
+        //       integration only if T_start < 0; otherwise re-derive
+        //       from the now-restored ground state below). For safety
+        //       we always reset spins to the backup and re-evaluate.
+        spins_SU2 = ground_state_SU2;
+        spins_SU3 = ground_state_SU3;
+
+        // Build the magnetisation triples that will be returned for
+        // every "before-pulse" sample of M_1(τ). We mirror exactly the
+        // observer logic inside single_pulse_drive (compute_*_from_flat).
+        pair<array<SpinVector, 3>, array<SpinVector, 3>> M_ground_pair;
+        {
+            ODEState gs_state = spins_to_state();
+            double M_SU2_local_arr[8] = {0};
+            double M_SU2_antiferro_arr[8] = {0};
+            double M_SU2_global_arr[8] = {0};
+            compute_sublattice_magnetizations_from_flat(gs_state.data(), 0,
+                lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
+            compute_magnetization_global_SU2_from_flat(gs_state.data(), M_SU2_global_arr);
+            compute_magnetization_staggered_SU2_from_flat(gs_state.data(), M_SU2_antiferro_arr);
+
+            double M_SU3_local_arr[8] = {0};
+            double M_SU3_antiferro_arr[8] = {0};
+            double M_SU3_global_arr[8] = {0};
+            compute_sublattice_magnetizations_from_flat(gs_state.data(), lattice_size_SU2 * spin_dim_SU2,
+                lattice_size_SU3, spin_dim_SU3, M_SU3_local_arr, M_SU3_antiferro_arr);
+            compute_magnetization_global_SU3_from_flat(gs_state.data(), M_SU3_global_arr);
+
+            M_ground_pair.first = {
+                Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2),
+                Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2),
+                Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2)
+            };
+            M_ground_pair.second = {
+                Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3),
+                Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3),
+                Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3)
+            };
+        }
+
+        bool can_reuse_m0 = false;
+        if (reuse_m0_for_m1 && !use_gpu) {
+            const double max_dS = max_dSdt_norm_no_drive();
+            cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
+                 << max_dS << " (tol = " << stationarity_tol << ")" << endl;
+            if (max_dS <= stationarity_tol) {
+                can_reuse_m0 = true;
+                cout << "  [W1] Ground state is stationary — synthesising M1(τ) from M0 by time-shift." << endl;
+            } else {
+                cout << "  [W1] Ground state NOT stationary — falling back to fresh M1 integration each τ." << endl;
+            }
+        } else if (reuse_m0_for_m1 && use_gpu) {
+            cout << "  [W1] Skipping (GPU path: stationarity check is host-only)." << endl;
+        }
+
         // Step 3: Delay time scan
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
         cout << "\n[3/3] Scanning delay times (" << tau_steps << " steps)..." << endl;
@@ -917,42 +1054,117 @@
         // Write reference trajectory
         writer.write_reference_trajectory(M0_trajectory);
 #endif
-        
-        double current_tau = tau_start;
-        for (int i = 0; i < tau_steps; ++i) {
-            cout << "\n--- Delay " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
-            
-            // Restore ground state
-            spins_SU2 = ground_state_SU2;
-            spins_SU3 = ground_state_SU3;
-            
-            // M1: Probe pulse only at tau
-            cout << "  Computing M1 (probe at tau)..." << endl;
-            auto M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
-                                pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                T_start, T_end, T_step, method, use_gpu);
-            
-            // Restore ground state
-            spins_SU2 = ground_state_SU2;
-            spins_SU3 = ground_state_SU3;
-            
-            // M01: Pump at 0 + Probe at tau
-            cout << "  Computing M01 (pump + probe)..." << endl;
-            auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
-                                     field_in_SU2, field_in_SU3, current_tau,
-                                     pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                     pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                     T_start, T_end, T_step, method, use_gpu);
-            
-            // Write this tau step immediately and release memory
-#ifdef HDF5_ENABLED
-            writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj);
-#endif
-            
-            current_tau += tau_step;
+
+        // ----- W2: outer OpenMP parallelism over τ -----
+        // Each thread owns a deep clone of *this. The implicit
+        // copy ctor is sufficient because every member is value-typed
+        // (vector<...>, Eigen::VectorXd, plain doubles). No Lattice-style
+        // shallow ctor here.
+        int n_outer = 1;
+#ifdef _OPENMP
+        if (outer_omp_threads <= 0) {
+            n_outer = std::max(1, omp_get_max_threads());
+        } else {
+            n_outer = outer_omp_threads;
         }
-        
+        n_outer = std::min(n_outer, std::max(1, tau_steps));
+        const int saved_max_active = omp_get_max_active_levels();
+        omp_set_max_active_levels(1);
+#else
+        (void) outer_omp_threads;
+#endif
+
+        if (n_outer <= 1) {
+            double current_tau = tau_start;
+            for (int i = 0; i < tau_steps; ++i) {
+                cout << "\n--- Delay " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
+
+                TrajectoryType M1_traj;
+                if (can_reuse_m0) {
+                    M1_traj = synthesize_M1_from_M0(M0_trajectory, M_ground_pair, current_tau,
+                                                    T_start, T_end, T_step);
+                } else {
+                    spins_SU2 = ground_state_SU2;
+                    spins_SU3 = ground_state_SU3;
+                    cout << "  Computing M1 (probe at tau)..." << endl;
+                    M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
+                                        pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                        pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                        T_start, T_end, T_step, method, use_gpu, nullptr,
+                                        pulse_window_chunking);
+                }
+
+                spins_SU2 = ground_state_SU2;
+                spins_SU3 = ground_state_SU3;
+                cout << "  Computing M01 (pump + probe)..." << endl;
+                auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
+                                         field_in_SU2, field_in_SU3, current_tau,
+                                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                         T_start, T_end, T_step, method, use_gpu, nullptr,
+                                         pulse_window_chunking);
+
+#ifdef HDF5_ENABLED
+                writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj);
+#endif
+                current_tau += tau_step;
+            }
+        } else {
+#ifdef _OPENMP
+            cout << "  [W2] Distributing " << tau_steps << " τ points across "
+                 << n_outer << " OpenMP threads..." << endl;
+            #pragma omp parallel num_threads(n_outer)
+            {
+                MixedLattice local_lat(*this);
+                local_lat.spins_SU2 = ground_state_SU2;
+                local_lat.spins_SU3 = ground_state_SU3;
+
+                #pragma omp for schedule(dynamic, 1)
+                for (int i = 0; i < tau_steps; ++i) {
+                    const double current_tau = tau_start + i * tau_step;
+                    TrajectoryType M1_traj;
+                    if (can_reuse_m0) {
+                        M1_traj = synthesize_M1_from_M0(M0_trajectory, M_ground_pair, current_tau,
+                                                        T_start, T_end, T_step);
+                    } else {
+                        local_lat.spins_SU2 = ground_state_SU2;
+                        local_lat.spins_SU3 = ground_state_SU3;
+                        M1_traj = local_lat.single_pulse_drive(
+                            field_in_SU2, field_in_SU3, current_tau,
+                            pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                            pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                            T_start, T_end, T_step, method, /*use_gpu=*/false, nullptr,
+                            pulse_window_chunking);
+                    }
+
+                    local_lat.spins_SU2 = ground_state_SU2;
+                    local_lat.spins_SU3 = ground_state_SU3;
+                    auto M01_traj = local_lat.double_pulse_drive(
+                        field_in_SU2, field_in_SU3, 0.0,
+                        field_in_SU2, field_in_SU3, current_tau,
+                        pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                        pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                        T_start, T_end, T_step, method, /*use_gpu=*/false, nullptr,
+                        pulse_window_chunking);
+
+#ifdef HDF5_ENABLED
+                    #pragma omp critical(mixed_pump_probe_hdf5_write)
+                    {
+                        writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj);
+                    }
+#else
+                    (void) M1_traj;
+                    (void) M01_traj;
+#endif
+                }
+            }
+#endif
+        }
+
+#ifdef _OPENMP
+        omp_set_max_active_levels(saved_max_active);
+#endif
+
 #ifdef HDF5_ENABLED
         writer.close();
         cout << "\n[Complete] All data written incrementally to: " << hdf5_file << endl;
@@ -963,7 +1175,7 @@
         // Restore ground state at end
         spins_SU2 = ground_state_SU2;
         spins_SU3 = ground_state_SU3;
-        
+
         cout << "\n==========================================" << endl;
         cout << "Pump-Probe Spectroscopy Complete!" << endl;
         cout << "Output directory: " << dir_name << endl;
@@ -983,7 +1195,10 @@
                                      bool T_zero_quench, size_t quench_sweeps,
                                      string dir_name,
                                      string method, bool use_gpu,
-                                     bool save_spin_trajectories) {
+                                     bool save_spin_trajectories,
+                                     bool reuse_m0_for_m1,
+                                     double stationarity_tol,
+                                     bool pulse_window_chunking) {
         
         int rank, mpi_size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -1066,7 +1281,8 @@
                                                pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                                pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                                T_start, T_end, T_step, method, use_gpu,
-                                               save_spin_trajectories ? &M0_spin_states : nullptr);
+                                               save_spin_trajectories ? &M0_spin_states : nullptr,
+                                               pulse_window_chunking);
             if (save_spin_trajectories && !M0_spin_states.empty()) {
                 size_t n_t = M0_spin_states.size();
                 M0_spin_flat.resize(n_t * state_dim);
@@ -1082,7 +1298,118 @@
         // Restore ground state
         spins_SU2 = ground_state_SU2;
         spins_SU3 = ground_state_SU3;
-        
+
+        // ----- W1: rank-0 stationarity check + decision broadcast -----
+        // Mirror of Lattice::pump_probe_spectroscopy_mpi: every worker
+        // rank gets the same can_reuse_m0 verdict so they all branch
+        // consistently when synthesising M1.
+        pair<array<SpinVector, 3>, array<SpinVector, 3>> M_ground_pair;
+        M_ground_pair.first  = { SpinVector::Zero(spin_dim_SU2),
+                                 SpinVector::Zero(spin_dim_SU2),
+                                 SpinVector::Zero(spin_dim_SU2) };
+        M_ground_pair.second = { SpinVector::Zero(spin_dim_SU3),
+                                 SpinVector::Zero(spin_dim_SU3),
+                                 SpinVector::Zero(spin_dim_SU3) };
+        {
+            ODEState gs_state = spins_to_state();
+            double M_SU2_local_arr[8] = {0};
+            double M_SU2_antiferro_arr[8] = {0};
+            double M_SU2_global_arr[8] = {0};
+            compute_sublattice_magnetizations_from_flat(gs_state.data(), 0,
+                lattice_size_SU2, spin_dim_SU2, M_SU2_local_arr, M_SU2_antiferro_arr);
+            compute_magnetization_global_SU2_from_flat(gs_state.data(), M_SU2_global_arr);
+            compute_magnetization_staggered_SU2_from_flat(gs_state.data(), M_SU2_antiferro_arr);
+
+            double M_SU3_local_arr[8] = {0};
+            double M_SU3_antiferro_arr[8] = {0};
+            double M_SU3_global_arr[8] = {0};
+            compute_sublattice_magnetizations_from_flat(gs_state.data(), lattice_size_SU2 * spin_dim_SU2,
+                lattice_size_SU3, spin_dim_SU3, M_SU3_local_arr, M_SU3_antiferro_arr);
+            compute_magnetization_global_SU3_from_flat(gs_state.data(), M_SU3_global_arr);
+
+            M_ground_pair.first = {
+                Eigen::Map<Eigen::VectorXd>(M_SU2_antiferro_arr, spin_dim_SU2),
+                Eigen::Map<Eigen::VectorXd>(M_SU2_local_arr, spin_dim_SU2) / double(lattice_size_SU2),
+                Eigen::Map<Eigen::VectorXd>(M_SU2_global_arr, spin_dim_SU2)
+            };
+            M_ground_pair.second = {
+                Eigen::Map<Eigen::VectorXd>(M_SU3_antiferro_arr, spin_dim_SU3) / double(lattice_size_SU3),
+                Eigen::Map<Eigen::VectorXd>(M_SU3_local_arr, spin_dim_SU3) / double(lattice_size_SU3),
+                Eigen::Map<Eigen::VectorXd>(M_SU3_global_arr, spin_dim_SU3)
+            };
+        }
+
+        int can_reuse_m0_flag = 0;
+        if (rank == 0 && reuse_m0_for_m1 && !use_gpu) {
+            const double max_dS = max_dSdt_norm_no_drive();
+            cout << "  [W1 guard] max |dS/dt|_inf at ground state = "
+                 << max_dS << " (tol = " << stationarity_tol << ")" << endl;
+            if (max_dS <= stationarity_tol) {
+                can_reuse_m0_flag = 1;
+                cout << "  [W1] Ground state is stationary — synthesising M1(τ) from M0 by time-shift." << endl;
+            } else {
+                cout << "  [W1] Ground state NOT stationary — falling back to fresh M1 integration each τ." << endl;
+            }
+        } else if (rank == 0 && reuse_m0_for_m1 && use_gpu) {
+            cout << "  [W1] Skipping (GPU path: stationarity check is host-only)." << endl;
+        }
+        MPI_Bcast(&can_reuse_m0_flag, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        const bool can_reuse_m0 = (can_reuse_m0_flag != 0);
+
+        // Broadcast M0 trajectory to all worker ranks so they can synthesise M1.
+        unsigned long long m0_npts_ull = 0;
+        if (can_reuse_m0 && rank == 0) {
+            m0_npts_ull = static_cast<unsigned long long>(M0_trajectory.size());
+        }
+        if (can_reuse_m0) {
+            MPI_Bcast(&m0_npts_ull, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+            const size_t m0_npts = static_cast<size_t>(m0_npts_ull);
+            const size_t per_pt = 1 + 3 * spin_dim_SU2 + 3 * spin_dim_SU3;
+            vector<double> m0_buf(m0_npts * per_pt);
+            if (rank == 0) {
+                for (size_t i = 0; i < m0_npts; ++i) {
+                    const auto& [t, mag] = M0_trajectory[i];
+                    m0_buf[i * per_pt] = t;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                            m0_buf[i * per_pt + 1 + m * spin_dim_SU2 + d] = mag.first[m](d);
+                        }
+                    }
+                    const size_t su3_off = 1 + 3 * spin_dim_SU2;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                            m0_buf[i * per_pt + su3_off + m * spin_dim_SU3 + d] = mag.second[m](d);
+                        }
+                    }
+                }
+            }
+            MPI_Bcast(m0_buf.data(), static_cast<int>(m0_buf.size()), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            if (rank != 0) {
+                M0_trajectory.assign(m0_npts, {0.0, {{SpinVector::Zero(spin_dim_SU2),
+                                                      SpinVector::Zero(spin_dim_SU2),
+                                                      SpinVector::Zero(spin_dim_SU2)},
+                                                     {SpinVector::Zero(spin_dim_SU3),
+                                                      SpinVector::Zero(spin_dim_SU3),
+                                                      SpinVector::Zero(spin_dim_SU3)}}});
+                for (size_t i = 0; i < m0_npts; ++i) {
+                    M0_trajectory[i].first = m0_buf[i * per_pt];
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                            M0_trajectory[i].second.first[m](d) =
+                                m0_buf[i * per_pt + 1 + m * spin_dim_SU2 + d];
+                        }
+                    }
+                    const size_t su3_off = 1 + 3 * spin_dim_SU2;
+                    for (int m = 0; m < 3; ++m) {
+                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                            M0_trajectory[i].second.second[m](d) =
+                                m0_buf[i * per_pt + su3_off + m * spin_dim_SU3 + d];
+                        }
+                    }
+                }
+            }
+        }
+
         // Distribute tau values
         if (rank == 0) {
             cout << "\n[3/4] Distributing tau delays across " << mpi_size << " ranks..." << endl;
@@ -1127,14 +1454,26 @@
             spins_SU2 = ground_state_SU2;
             spins_SU3 = ground_state_SU3;
             
-            // M1: Probe at tau
+            // M1: synthesise from M0 if W1 is enabled, otherwise integrate.
+            // When synthesising we cannot honour `save_spin_trajectories`
+            // (we don't have the spin field, only the magnetisation
+            // observables), so we leave the spin buffer empty in that
+            // case — matches the trivial all-zero spin state of the
+            // ground configuration up until the pulse fires.
             {
                 vector<vector<double>> M1_spin_states;
-                auto M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
-                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
-                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                    T_start, T_end, T_step, method, use_gpu,
-                                    save_spin_trajectories ? &M1_spin_states : nullptr);
+                TrajectoryType M1_traj;
+                if (can_reuse_m0) {
+                    M1_traj = synthesize_M1_from_M0(M0_trajectory, M_ground_pair, current_tau,
+                                                    T_start, T_end, T_step);
+                } else {
+                    M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
+                                        pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
+                                        pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
+                                        T_start, T_end, T_step, method, use_gpu,
+                                        save_spin_trajectories ? &M1_spin_states : nullptr,
+                                        pulse_window_chunking);
+                }
                 local_M1_trajectories.push_back(M1_traj);
                 if (save_spin_trajectories && !M1_spin_states.empty()) {
                     size_t n_t = M1_spin_states.size();
@@ -1143,6 +1482,12 @@
                         std::copy(M1_spin_states[t].begin(), M1_spin_states[t].end(), flat.data() + t * state_dim);
                     local_spin_flat_M1.push_back(std::move(flat));
                 } else if (save_spin_trajectories) {
+                    // Either W1 took the synthesis path (no spin buffer
+                    // available) or the integrator returned no samples.
+                    // Push an empty placeholder so the per-τ index of
+                    // local_spin_flat_M1 stays aligned with
+                    // local_M1_trajectories, then the MPI send/receive
+                    // logic below will see size() == 0 and skip.
                     local_spin_flat_M1.emplace_back();
                 }
             }
@@ -1159,7 +1504,8 @@
                                          pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                          pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                          T_start, T_end, T_step, method, use_gpu,
-                                         save_spin_trajectories ? &M01_spin_states : nullptr);
+                                         save_spin_trajectories ? &M01_spin_states : nullptr,
+                                         pulse_window_chunking);
                 local_M01_trajectories.push_back(M01_traj);
                 if (save_spin_trajectories && !M01_spin_states.empty()) {
                     size_t n_t = M01_spin_states.size();
