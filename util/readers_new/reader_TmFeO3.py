@@ -123,7 +123,8 @@ ENERGY_LINE_COLORS = {
     'e1': 'cyan',
     'e2': 'magenta',
     'e2-e1': 'yellow',
-    'qAFM': 'lime'
+    'qAFM': 'lime',
+    'qFM': 'orange'
 }
 
 
@@ -1534,57 +1535,122 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 plt.tight_layout()
                 plt.savefig(os.path.join(dir, "apodization_window_debug.pdf"), dpi=100)
                 plt.close(fig_apod)
-            print(f"    Saved: apodization_window_debug.pdf")
+                print(f"    Saved: apodization_window_debug.pdf")
         
-        # Helper function for 2D FFT analysis (optimized with caching)
+        # =====================================================================
+        # 2D-FFT helpers (Ingredient XIX)
+        # =====================================================================
+        # Caches keep BOTH complex spectra and magnitudes:
+        #   _cfft_cache[key] -> complex 2D FFT (after fftshift + ω_τ flip)
+        #   _fft_cache[key]  -> magnitude    (lazy-derived from _cfft_cache[key])
+        #
+        # Caching the complex spectrum (instead of just |·|) lets us synthesise
+        # any *linear* combination of components (the λ-mode mixtures below) by
+        # one weighted sum + one |·|, instead of building the time-domain combo
+        # and re-running fft2.  This saves ~20 fft2 calls per 2DCS analysis on
+        # the SU(3) lattice.
+        _cfft_cache = {}
         _fft_cache = {}
-        
+
+        def _apodize_filter(data):
+            """Filter to t >= t_cutoff and apply mean subtraction + apodization."""
+            data_filtered = data[..., t0_idx:]
+            # Mean subtraction across the full (tau, t) grid (matches axis=None
+            # behaviour of np.mean) — preserved per-component for batched arrays.
+            mean_axes = (-2, -1)
+            data_dynamic = data_filtered - data_filtered.mean(axis=mean_axes, keepdims=True)
+            if apod_window is not None:
+                data_dynamic = data_dynamic * apod_window  # broadcasts across batch
+            return data_dynamic
+
+        def _fft2_shift(data_dynamic, axes=(-2, -1)):
+            """Run fft2+fftshift on the trailing two axes (uses scipy when available)."""
+            if _USE_SCIPY_FFT:
+                cFFT = _scipy_fft.fft2(data_dynamic, axes=axes, workers=-1)
+                cFFT = _scipy_fft.fftshift(cFFT, axes=axes)
+            else:
+                cFFT = np.fft.fft2(data_dynamic, axes=axes)
+                cFFT = np.fft.fftshift(cFFT, axes=axes)
+            return cFFT
+
+        def _flip_omega_tau(arr):
+            """Flip axis -2 (ω_τ) to correct for τ → T = −τ sign convention."""
+            return arr[..., ::-1, :]
+
         def compute_2d_fft(data, cache_key=None):
-            """Compute 2D FFT with proper shifting and apodization (only t > t_cutoff).
-            
-            Uses scipy.fft for better performance and supports caching.
-            
+            """Compute |2D FFT| with apodization, caching the complex spectrum.
+
+            Uses scipy.fft (workers=-1) when available.
+
             Input shape: (n_tau, n_t)
-            Output shape: (n_tau, n_t_positive) after fftshift, so:
+            Output shape: (n_tau, n_t_positive) after fftshift+ω_τ-flip, so:
               - axis 0 (rows) = ω_τ  →  y-axis in imshow(origin='lower')
               - axis 1 (cols) = ω_t  →  x-axis in imshow(origin='lower')
-            
-            Frequency grids (omega_tau, omega_t) are both fftshift-ed to
-            ascending order, matching the array index order.
-            
-            Nyquist frequencies:
-              ω_τ,Nyq = π / dτ  (angular),  f_τ,Nyq = 1/(2·dτ) (regular)
-              ω_t,Nyq = π / dt  (angular),  f_t,Nyq = 1/(2·dt) (regular)
+
+            The ω_τ axis is flipped after fftshift to convert simulation
+            τ ∈ [−τ_max, 0] to physical delay T = −τ ∈ [0, τ_max].
             """
             if cache_key is not None and cache_key in _fft_cache:
                 return _fft_cache[cache_key]
-            
-            # Filter to t >= t_cutoff  (skip the probe pulse region)
-            data_filtered = data[:, t0_idx:]
-            data_dynamic = data_filtered - data_filtered.mean()
-            # Apodization window to reduce spectral leakage
-            if apod_window is not None:
-                data_dynamic = data_dynamic * apod_window
-            # 2D FFT
-            if _USE_SCIPY_FFT:
-                data_FF = _scipy_fft.fftshift(_scipy_fft.fft2(data_dynamic, workers=-1))
-            else:
-                data_FF = np.fft.fftshift(np.fft.fft2(data_dynamic))
-            # Magnitude spectrum.
-            # Flip axis-0 (ω_τ) to correct for τ → T = −τ sign convention:
-            # simulation τ ∈ [−τ_max, 0] but physical delay T = −τ ∈ [0, τ_max],
-            # so the conjugate variable ω_T = −ω_τ, i.e. the spectrum is flipped.
-            result = np.abs(data_FF)[::-1, :]
-            
-            # Cache result
+            if cache_key is not None and cache_key in _cfft_cache:
+                mag = np.abs(_cfft_cache[cache_key])
+                _fft_cache[cache_key] = mag
+                return mag
+
+            data_dynamic = _apodize_filter(data)
+            cFFT = _flip_omega_tau(_fft2_shift(data_dynamic))
+            mag = np.abs(cFFT)
             if cache_key is not None:
-                _fft_cache[cache_key] = result
-            
-            return result
-        
+                _cfft_cache[cache_key] = cFFT
+                _fft_cache[cache_key] = mag
+            return mag
+
+        def batch_compute_2d_fft(data_3d, key_prefix):
+            """Batched fft2 over the leading axis: data_3d has shape
+            (n_components, n_tau, n_t).  Returns the per-component magnitude
+            spectra as a list, and stores the complex spectra in _cfft_cache
+            under keys '{key_prefix}_{c}' for c=0..n_components-1.
+
+            One scipy.fft.fft2 with axes=(-2,-1), workers=-1 is much faster
+            than calling compute_2d_fft in a loop because (a) FFT planning
+            is amortised, (b) thread fan-out is over the whole batch, and
+            (c) Python-level overhead is paid once.
+            """
+            data_dynamic = _apodize_filter(data_3d)
+            cFFT = _flip_omega_tau(_fft2_shift(data_dynamic))
+            mags = np.abs(cFFT)
+            # Store per-component slices in cache (cheap: views, not copies).
+            for c in range(data_3d.shape[0]):
+                ck = f'{key_prefix}_{c}'
+                _cfft_cache[ck] = cFFT[c]
+                _fft_cache[ck] = mags[c]
+            return [mags[c] for c in range(data_3d.shape[0])]
+
+        def compute_2d_fft_combo(combos):
+            """Magnitude of a linear combination of cached complex spectra.
+
+            ``combos`` is a list of ``(weight, cache_key)`` pairs.  Returns
+            ``|sum_i w_i * cFFT[key_i]|`` — exactly equivalent to building
+            ``sum_i w_i * x_i`` in the time domain and running compute_2d_fft
+            on that, because all of {filter, mean-subtract, apodize, fft2,
+            fftshift, ω_τ-flip} are linear.  Falls back to None if any key
+            is missing (caller should then build the combo in the time
+            domain and call compute_2d_fft).
+            """
+            cffts = []
+            for w, k in combos:
+                if k not in _cfft_cache:
+                    return None
+                cffts.append((w, _cfft_cache[k]))
+            acc = cffts[0][0] * cffts[0][1]
+            for w, c in cffts[1:]:
+                acc = acc + w * c
+            return np.abs(acc)
+
         def clear_fft_cache():
-            """Clear the FFT cache to free memory."""
+            """Clear the FFT caches to free memory."""
             _fft_cache.clear()
+            _cfft_cache.clear()
         
         # =====================================================================
         # Process SU(2) sublattice
@@ -1594,28 +1660,35 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             M0_SU2 = f['/reference/M_global_SU2'][:]
             spin_dim_SU2 = M0_SU2.shape[1]
             length = len(M0_SU2[:, 0])
-            
-            # Initialize arrays for all components
+
+            # Pre-allocate (spin_dim, n_tau, n_t) arrays.  The M0/M1/M01 component
+            # buffers are only consumed downstream when save_intermediates=True;
+            # skipping them saves 3 × spin_dim × n_tau × n_t doubles of RAM
+            # (~10 GB at production scale).
             M_NL_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
-            M0_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
-            M1_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
-            M01_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
-            
-            for i, tau_val in enumerate(tau_values):
+            if save_intermediates:
+                M0_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+                M1_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+                M01_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+            else:
+                M0_comp_SU2 = None
+                M1_comp_SU2 = None
+                M01_comp_SU2 = None
+
+            # Vectorise the per-tau loop: one transpose then one slice per array
+            # replaces an inner ``for comp in range(spin_dim_SU2)`` loop.
+            M0_SU2_T = M0_SU2.T  # (spin_dim, n_t_M0)
+            n_t_M0 = M0_SU2_T.shape[1]
+            for i in range(tau_step):
                 tau_group = f[f'/tau_scan/tau_{i}']
-                M1_SU2 = tau_group['M1_global_SU2'][:]
-                M01_SU2 = tau_group['M01_global_SU2'][:]
-                
-                for comp in range(spin_dim_SU2):
-                    M0 = M0_SU2[:, comp]
-                    M1 = M1_SU2[:, comp]
-                    M01 = M01_SU2[:, comp]
-                    
-                    min_len = min(len(M0), len(M1), len(M01), length)
-                    M_NL_SU2[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
-                    M0_comp_SU2[comp, i, :min_len] = M0[:min_len]
-                    M1_comp_SU2[comp, i, :min_len] = M1[:min_len]
-                    M01_comp_SU2[comp, i, :min_len] = M01[:min_len]
+                M1_T = tau_group['M1_global_SU2'][:].T   # (spin_dim, n_t)
+                M01_T = tau_group['M01_global_SU2'][:].T
+                n = min(n_t_M0, M1_T.shape[1], M01_T.shape[1], length)
+                M_NL_SU2[:, i, :n] = M01_T[:, :n] - M0_SU2_T[:, :n] - M1_T[:, :n]
+                if save_intermediates:
+                    M0_comp_SU2[:, i, :n] = M0_SU2_T[:, :n]
+                    M1_comp_SU2[:, i, :n] = M1_T[:, :n]
+                    M01_comp_SU2[:, i, :n] = M01_T[:, :n]
             
             # =====================================================================
             # DEBUG: Plot time evolution with windowing applied (SU2)
@@ -1712,70 +1785,70 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     plt.tight_layout()
                     plt.savefig(os.path.join(dir, "windowed_time_evolution_SU2_debug.pdf"), dpi=100)
                     plt.close(fig_wind)
-                print(f"    Saved: windowed_time_evolution_SU2_debug.pdf")
+                    print(f"    Saved: windowed_time_evolution_SU2_debug.pdf")
             
             # Process individual signals (M0, M1, M01) - only if save_intermediates is True
             if save_intermediates:
                 for sig_name, sig_components in [('M0_SU2', M0_comp_SU2), ('M1_SU2', M1_comp_SU2), ('M01_SU2', M01_comp_SU2)]:
                     print(f"    Processing {sig_name}...")
-                    
-                    # Pre-compute all FFTs with caching
-                    sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
-                                   for comp in range(spin_dim_SU2)]
-                    
-                    # Create debug plot
+                    # Batched fft2 over the spin_dim axis (one scipy.fft call,
+                    # caches per-component complex spectra for combo reuse).
+                    sig_comp_FFs = batch_compute_2d_fft(sig_components, sig_name)
+
                     n_rows = min(spin_dim_SU2, 3)
-                    fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
-                    if n_rows == 1:
-                        axes_sig = axes_sig.reshape(1, -1)
-                    
+
+                    # Always save per-component FFTs to disk.
                     for comp in range(n_rows):
-                        sig_comp = sig_components[comp]
                         label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
-                        
-                        # Time domain plot
-                        ax_time = axes_sig[comp, 0]
-                        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                            ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                        ax_time.set_xlabel('Time index')
-                        ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
-                        ax_time.set_title(f'{label}-component (time domain)')
-                        ax_time.legend(fontsize=6)
-                        ax_time.grid(True, alpha=0.3)
-                        
-                        # 2D time-tau plot
-                        ax_2d = axes_sig[comp, 1]
-                        im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
-                                          extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
-                        ax_2d.set_xlabel('Time index')
-                        ax_2d.set_ylabel('τ')
-                        ax_2d.set_title(f'{label}-component (τ, t)')
-                        plt.colorbar(im, ax=ax_2d)
-                        
-                        # Frequency domain plot (use cached FFT)
-                        sig_comp_FF = sig_comp_FFs[comp]
-                        ax_freq = axes_sig[comp, 2]
-                        im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                                  norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                        ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                        ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                        ax_freq.set_title(f'{label}-component (freq domain)')
-                        if omega_t_window is not None:
-                            ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                        if omega_tau_window is not None:
-                            ax_freq.set_ylim(omega_tau_window)
-                        # Add energy level reference lines
-                        if energy_levels_mev:
-                            add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                        plt.colorbar(im_freq, ax=ax_freq)
-                        
-                        _save_spectrum(os.path.join(dir, f"{sig_name}_FF_{label}"), sig_comp_FF)
-                    
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
-                    plt.clf()
-                    plt.close()
-                    
+                        _save_spectrum(os.path.join(dir, f"{sig_name}_FF_{label}"), sig_comp_FFs[comp])
+
+                    # Heavy debug PDF (3×3 subplots).  Skipped under --skip-plots.
+                    if not skip_plots:
+                        fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 4*n_rows))
+                        if n_rows == 1:
+                            axes_sig = axes_sig.reshape(1, -1)
+
+                        for comp in range(n_rows):
+                            sig_comp = sig_components[comp]
+                            label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
+
+                            ax_time = axes_sig[comp, 0]
+                            for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                                ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                            ax_time.set_xlabel('Time index')
+                            ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
+                            ax_time.set_title(f'{label}-component (time domain)')
+                            ax_time.legend(fontsize=6)
+                            ax_time.grid(True, alpha=0.3)
+
+                            ax_2d = axes_sig[comp, 1]
+                            im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                              extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+                            ax_2d.set_xlabel('Time index')
+                            ax_2d.set_ylabel('τ')
+                            ax_2d.set_title(f'{label}-component (τ, t)')
+                            plt.colorbar(im, ax=ax_2d)
+
+                            sig_comp_FF = sig_comp_FFs[comp]
+                            ax_freq = axes_sig[comp, 2]
+                            im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                                      norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                            ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                            ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                            ax_freq.set_title(f'{label}-component (freq domain)')
+                            if omega_t_window is not None:
+                                ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
+                            if omega_tau_window is not None:
+                                ax_freq.set_ylim(omega_tau_window)
+                            if energy_levels_mev:
+                                add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                            plt.colorbar(im_freq, ax=ax_freq)
+
+                        plt.tight_layout()
+                        plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"))
+                        plt.clf()
+                        plt.close()
+
                     # Main spectrum plot (z-component for SU2) - use cached FFT
                     z_idx = 2 if spin_dim_SU2 > 2 else 0
                     sig_z_FF = sig_comp_FFs[z_idx]  # Reuse cached FFT
@@ -1806,10 +1879,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # M_NL analysis for SU2
             print("    Processing M_NL_SU2...")
             n_rows = min(spin_dim_SU2, 3)
-            
-            # Pre-compute all M_NL FFTs with caching
-            M_NL_SU2_FFs = [compute_2d_fft(M_NL_SU2[comp], cache_key=f'M_NL_SU2_{comp}') 
-                           for comp in range(spin_dim_SU2)]
+            # Batched fft2 over the spin_dim axis (caches complex spectra so
+            # the SU(2) x-component is reusable in λ-combo synthesis below).
+            M_NL_SU2_FFs = batch_compute_2d_fft(M_NL_SU2, 'M_NL_SU2')
             
             # Save individual component FFTs
             for comp in range(min(spin_dim_SU2, len(component_labels_SU2))):
@@ -1904,28 +1976,32 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             M0_SU3 = f['/reference/M_global_SU3'][:]
             spin_dim_SU3 = M0_SU3.shape[1]
             length = len(M0_SU3[:, 0])
-            
-            # Initialize arrays for all components
+
+            # Pre-allocate (spin_dim, n_tau, n_t) arrays.  M0/M1/M01 component
+            # buffers are only used in save_intermediates branches below.
             M_NL_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
-            M0_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
-            M1_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
-            M01_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
-            
-            for i, tau_val in enumerate(tau_values):
+            if save_intermediates:
+                M0_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+                M1_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+                M01_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+            else:
+                M0_comp_SU3 = None
+                M1_comp_SU3 = None
+                M01_comp_SU3 = None
+
+            # Vectorise the per-tau loop (drops inner ``for comp in range(8)``).
+            M0_SU3_T = M0_SU3.T  # (spin_dim, n_t_M0)
+            n_t_M0 = M0_SU3_T.shape[1]
+            for i in range(tau_step):
                 tau_group = f[f'/tau_scan/tau_{i}']
-                M1_SU3 = tau_group['M1_global_SU3'][:]
-                M01_SU3 = tau_group['M01_global_SU3'][:]
-                
-                for comp in range(spin_dim_SU3):
-                    M0 = M0_SU3[:, comp]
-                    M1 = M1_SU3[:, comp]
-                    M01 = M01_SU3[:, comp]
-                    
-                    min_len = min(len(M0), len(M1), len(M01), length)
-                    M_NL_SU3[comp, i, :min_len] = M01[:min_len] - M0[:min_len] - M1[:min_len]
-                    M0_comp_SU3[comp, i, :min_len] = M0[:min_len]
-                    M1_comp_SU3[comp, i, :min_len] = M1[:min_len]
-                    M01_comp_SU3[comp, i, :min_len] = M01[:min_len]
+                M1_T = tau_group['M1_global_SU3'][:].T   # (spin_dim, n_t)
+                M01_T = tau_group['M01_global_SU3'][:].T
+                n = min(n_t_M0, M1_T.shape[1], M01_T.shape[1], length)
+                M_NL_SU3[:, i, :n] = M01_T[:, :n] - M0_SU3_T[:, :n] - M1_T[:, :n]
+                if save_intermediates:
+                    M0_comp_SU3[:, i, :n] = M0_SU3_T[:, :n]
+                    M1_comp_SU3[:, i, :n] = M1_T[:, :n]
+                    M01_comp_SU3[:, i, :n] = M01_T[:, :n]
             
             # =====================================================================
             # DEBUG: Plot time evolution with windowing applied (SU3)
@@ -2022,69 +2098,70 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     plt.tight_layout()
                     plt.savefig(os.path.join(dir, "windowed_time_evolution_SU3_debug.pdf"), dpi=100)
                     plt.close(fig_wind)
-                print(f"    Saved: windowed_time_evolution_SU3_debug.pdf")
+                    print(f"    Saved: windowed_time_evolution_SU3_debug.pdf")
             
             # Process individual signals (M0, M1, M01) - only if save_intermediates is True
             if save_intermediates:
                 for sig_name, sig_components in [('M0_SU3', M0_comp_SU3), ('M1_SU3', M1_comp_SU3), ('M01_SU3', M01_comp_SU3)]:
                     print(f"    Processing {sig_name}...")
-                    
-                    # Pre-compute all FFTs with caching
-                    sig_comp_FFs = [compute_2d_fft(sig_components[comp], cache_key=f'{sig_name}_{comp}') 
-                                   for comp in range(spin_dim_SU3)]
-                    
-                    # Create debug plot
+                    # Batched fft2 over the 8 SU(3) components (one scipy.fft
+                    # call, caches per-component complex spectra so the λ-mode
+                    # mixtures below cost only weighted sums + |·|).
+                    sig_comp_FFs = batch_compute_2d_fft(sig_components, sig_name)
+
                     n_rows = min(spin_dim_SU3, 8)
-                    fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
-                    if n_rows == 1:
-                        axes_sig = axes_sig.reshape(1, -1)
-                    
+
+                    # Always save per-component FFTs.
                     for comp in range(n_rows):
-                        sig_comp = sig_components[comp]
                         label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
-                        
-                        # Time domain plot
-                        ax_time = axes_sig[comp, 0]
-                        for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                            ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                        ax_time.set_xlabel('Time index')
-                        ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
-                        ax_time.set_title(f'{label}-component (time domain)')
-                        ax_time.legend(fontsize=6)
-                        ax_time.grid(True, alpha=0.3)
-                        
-                        # 2D time-tau plot
-                        ax_2d = axes_sig[comp, 1]
-                        im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
-                                          extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
-                        ax_2d.set_xlabel('Time index')
-                        ax_2d.set_ylabel('τ')
-                        ax_2d.set_title(f'{label}-component (τ, t)')
-                        plt.colorbar(im, ax=ax_2d)
-                        
-                        # Frequency domain plot (use cached FFT)
-                        sig_comp_FF = sig_comp_FFs[comp]
-                        ax_freq = axes_sig[comp, 2]
-                        im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                                  norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                        ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                        ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                        ax_freq.set_title(f'{label}-component (freq domain)')
-                        if omega_t_window is not None:
-                            ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                        if omega_tau_window is not None:
-                            ax_freq.set_ylim(omega_tau_window)
-                        # Add energy level reference lines
-                        if energy_levels_mev:
-                            add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                        plt.colorbar(im_freq, ax=ax_freq)
-                        
-                        _save_spectrum(os.path.join(dir, f"{sig_name}_FF_{label}"), sig_comp_FF)
-                    
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"), dpi=100)
-                    plt.close(fig_sig)  # Explicitly close figure
-                    
+                        _save_spectrum(os.path.join(dir, f"{sig_name}_FF_{label}"), sig_comp_FFs[comp])
+
+                    # Heavy debug PDF (8×3 subplots).  Skipped under --skip-plots.
+                    if not skip_plots:
+                        fig_sig, axes_sig = plt.subplots(n_rows, 3, figsize=(15, 3*n_rows))
+                        if n_rows == 1:
+                            axes_sig = axes_sig.reshape(1, -1)
+
+                        for comp in range(n_rows):
+                            sig_comp = sig_components[comp]
+                            label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
+
+                            ax_time = axes_sig[comp, 0]
+                            for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                                ax_time.plot(sig_comp[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                            ax_time.set_xlabel('Time index')
+                            ax_time.set_ylabel(f'${sig_name}_{{{label}}}$')
+                            ax_time.set_title(f'{label}-component (time domain)')
+                            ax_time.legend(fontsize=6)
+                            ax_time.grid(True, alpha=0.3)
+
+                            ax_2d = axes_sig[comp, 1]
+                            im = ax_2d.imshow(sig_comp, origin='lower', aspect='auto', cmap='RdBu_r',
+                                              extent=[0, sig_comp.shape[1], tau[0], tau[-1]])
+                            ax_2d.set_xlabel('Time index')
+                            ax_2d.set_ylabel('τ')
+                            ax_2d.set_title(f'{label}-component (τ, t)')
+                            plt.colorbar(im, ax=ax_2d)
+
+                            sig_comp_FF = sig_comp_FFs[comp]
+                            ax_freq = axes_sig[comp, 2]
+                            im_freq = ax_freq.imshow(sig_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                                      norm=_get_norm(sig_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                            ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                            ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                            ax_freq.set_title(f'{label}-component (freq domain)')
+                            if omega_t_window is not None:
+                                ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
+                            if omega_tau_window is not None:
+                                ax_freq.set_ylim(omega_tau_window)
+                            if energy_levels_mev:
+                                add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                            plt.colorbar(im_freq, ax=ax_freq)
+
+                        plt.tight_layout()
+                        plt.savefig(os.path.join(dir, f"{sig_name}_components_debug.pdf"), dpi=100)
+                        plt.close(fig_sig)
+
                     # Total spectrum (sum over cached FFTs - no recomputation needed)
                     sig_total_FF = sum(sig_comp_FFs)
                     _save_spectrum(os.path.join(dir, f"{sig_name}_FF"), sig_total_FF)
@@ -2114,10 +2191,8 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # M_NL analysis for SU3
             print("    Processing M_NL_SU3...")
             n_rows = min(spin_dim_SU3, 8)
-            
-            # Pre-compute all M_NL FFTs with caching
-            M_NL_SU3_FFs = [compute_2d_fft(M_NL_SU3[comp], cache_key=f'M_NL_SU3_{comp}') 
-                           for comp in range(spin_dim_SU3)]
+            # Batched fft2 over the 8 SU(3) components.
+            M_NL_SU3_FFs = batch_compute_2d_fft(M_NL_SU3, 'M_NL_SU3')
             
             # Save individual component FFTs
             for comp in range(min(spin_dim_SU3, len(component_labels_SU3))):
@@ -2210,83 +2285,97 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # =====================================================================
             if save_intermediates and spin_dim_SU3 >= 8:
                 print("    Processing λ5 + λ7 mode (equal weight)...")
-                
+
                 # Equal weights for λ5 and λ7 combination
                 LAMBDA5_WEIGHT = 1.0
                 LAMBDA7_WEIGHT = 1.0
-                
-                # Combine λ5 (index 4) and λ7 (index 6) in time domain before FFT (equal weight)
-                M_NL_lambda57 = LAMBDA5_WEIGHT * M_NL_SU3[4] + LAMBDA7_WEIGHT * M_NL_SU3[6]
-                M0_lambda57 = LAMBDA5_WEIGHT * M0_comp_SU3[4] + LAMBDA7_WEIGHT * M0_comp_SU3[6]
-                M1_lambda57 = LAMBDA5_WEIGHT * M1_comp_SU3[4] + LAMBDA7_WEIGHT * M1_comp_SU3[6]
-                M01_lambda57 = LAMBDA5_WEIGHT * M01_comp_SU3[4] + LAMBDA7_WEIGHT * M01_comp_SU3[6]
-                
-                # Create debug plot for λ5 + λ7
-                fig_l57, axes_l57 = plt.subplots(2, 3, figsize=(15, 8))
-                
-                # Row 0: M_NL (λ5 + λ7)
-                # Time domain
-                ax_time = axes_l57[0, 0]
-                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                    ax_time.plot(M_NL_lambda57[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                ax_time.set_xlabel('Time index')
-                ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
-                ax_time.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$ (time domain)')
-                ax_time.legend(fontsize=6)
-                ax_time.grid(True, alpha=0.3)
-                
-                # 2D time-tau plot
-                ax_2d = axes_l57[0, 1]
-                im = ax_2d.imshow(M_NL_lambda57, origin='lower', aspect='auto', cmap='RdBu_r',
-                                  extent=[0, M_NL_lambda57.shape[1], tau[0], tau[-1]])
-                ax_2d.set_xlabel('Time index')
-                ax_2d.set_ylabel('τ')
-                ax_2d.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$ (τ, t)')
-                plt.colorbar(im, ax=ax_2d)
-                
-                # Frequency domain
-                M_NL_lambda57_FF = compute_2d_fft(M_NL_lambda57)
-                ax_freq = axes_l57[0, 2]
-                im_freq = ax_freq.imshow(M_NL_lambda57_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_lambda57_FF, norm_type),
-                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
-                if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                if omega_tau_window is not None:
-                    ax_freq.set_ylim(omega_tau_window)
-                # Add energy level reference lines
-                if energy_levels_mev:
-                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                plt.colorbar(im_freq, ax=ax_freq)
-                
-                # Row 1: Individual M0, M1, M01 spectra for λ5 + λ7
-                M0_lambda57_FF = compute_2d_fft(M0_lambda57)
-                M1_lambda57_FF = compute_2d_fft(M1_lambda57)
-                M01_lambda57_FF = compute_2d_fft(M01_lambda57)
-                
-                for idx, (name, data_FF) in enumerate([('M0', M0_lambda57_FF), ('M1', M1_lambda57_FF), ('M01', M01_lambda57_FF)]):
-                    ax = axes_l57[1, idx]
-                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                   norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                    ax.set_xlabel('$\\omega_t$ (THz)')
-                    ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax.set_title(f'${name}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
+
+                # FFT spectra (linearity: synthesise from cached complex
+                # FFTs of the individual SU(3) components — no new fft2
+                # calls needed when the per-sig batch was already done).
+                M_NL_lambda57_FF = compute_2d_fft_combo([
+                    (LAMBDA5_WEIGHT, 'M_NL_SU3_4'),
+                    (LAMBDA7_WEIGHT, 'M_NL_SU3_6'),
+                ])
+                if M_NL_lambda57_FF is None:  # cache miss → fall back
+                    M_NL_lambda57 = LAMBDA5_WEIGHT * M_NL_SU3[4] + LAMBDA7_WEIGHT * M_NL_SU3[6]
+                    M_NL_lambda57_FF = compute_2d_fft(M_NL_lambda57)
+                def _combo_l57(prefix):
+                    return compute_2d_fft_combo([
+                        (LAMBDA5_WEIGHT, f'{prefix}_4'),
+                        (LAMBDA7_WEIGHT, f'{prefix}_6'),
+                    ])
+                M0_lambda57_FF = _combo_l57('M0_SU3')
+                if M0_lambda57_FF is None:
+                    M0_lambda57 = LAMBDA5_WEIGHT * M0_comp_SU3[4] + LAMBDA7_WEIGHT * M0_comp_SU3[6]
+                    M0_lambda57_FF = compute_2d_fft(M0_lambda57)
+                M1_lambda57_FF = _combo_l57('M1_SU3')
+                if M1_lambda57_FF is None:
+                    M1_lambda57 = LAMBDA5_WEIGHT * M1_comp_SU3[4] + LAMBDA7_WEIGHT * M1_comp_SU3[6]
+                    M1_lambda57_FF = compute_2d_fft(M1_lambda57)
+                M01_lambda57_FF = _combo_l57('M01_SU3')
+                if M01_lambda57_FF is None:
+                    M01_lambda57 = LAMBDA5_WEIGHT * M01_comp_SU3[4] + LAMBDA7_WEIGHT * M01_comp_SU3[6]
+                    M01_lambda57_FF = compute_2d_fft(M01_lambda57)
+
+                # Debug PDF (heavy: 6 subplots).  Skipped under --skip-plots
+                # since the spectrum data is saved unconditionally below.
+                if not skip_plots:
+                    M_NL_lambda57 = LAMBDA5_WEIGHT * M_NL_SU3[4] + LAMBDA7_WEIGHT * M_NL_SU3[6]
+                    fig_l57, axes_l57 = plt.subplots(2, 3, figsize=(15, 8))
+
+                    # Row 0: M_NL (λ5 + λ7)
+                    ax_time = axes_l57[0, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(M_NL_lambda57[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
+                    ax_time.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$ (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+
+                    ax_2d = axes_l57[0, 1]
+                    im = ax_2d.imshow(M_NL_lambda57, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, M_NL_lambda57.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'{LAMBDA5_WEIGHT}$\\lambda_5$ + {LAMBDA7_WEIGHT}$\\lambda_7$ (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+
+                    ax_freq = axes_l57[0, 2]
+                    im_freq = ax_freq.imshow(M_NL_lambda57_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm=_get_norm(M_NL_lambda57_FF, norm_type),
+                                              extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                    ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
-                        ax.set_ylim(omega_tau_window)
-                    # Add energy level reference lines
+                        ax_freq.set_ylim(omega_tau_window)
                     if energy_levels_mev:
-                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im, ax=ax)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, "M_NL_lambda57_debug.pdf"), dpi=100)
-                plt.close(fig_l57)
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+
+                    for idx, (name, data_FF) in enumerate([('M0', M0_lambda57_FF), ('M1', M1_lambda57_FF), ('M01', M01_lambda57_FF)]):
+                        ax = axes_l57[1, idx]
+                        im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                       norm=_get_norm(data_FF, norm_type),
+                                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                        ax.set_xlabel('$\\omega_t$ (THz)')
+                        ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                        ax.set_title(f'${name}$ ({LAMBDA5_WEIGHT}$\\lambda_5$+{LAMBDA7_WEIGHT}$\\lambda_7$)')
+                        if omega_t_window is not None:
+                            ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        if omega_tau_window is not None:
+                            ax.set_ylim(omega_tau_window)
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im, ax=ax)
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, "M_NL_lambda57_debug.pdf"), dpi=100)
+                    plt.close(fig_l57)
                 
                 # Save data
                 _save_spectrum(os.path.join(dir, "M_NL_lambda57_FF"), M_NL_lambda57_FF)
@@ -2327,83 +2416,92 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # λ2 + λ5 combined mode (equal weight)
             if save_intermediates and spin_dim_SU3 >= 8:
                 print("    Processing λ2 + λ5 mode (equal weight)...")
-                
-                # Equal weights for λ2 and λ5 combination
+
                 LAMBDA2_WEIGHT_25 = 1.0
                 LAMBDA5_WEIGHT_25 = 1.0
-                
-                # Combine λ2 (index 1) and λ5 (index 4) in time domain before FFT (equal weight)
-                M_NL_lambda25 = LAMBDA2_WEIGHT_25 * M_NL_SU3[1] + LAMBDA5_WEIGHT_25 * M_NL_SU3[4]
-                M0_lambda25 = LAMBDA2_WEIGHT_25 * M0_comp_SU3[1] + LAMBDA5_WEIGHT_25 * M0_comp_SU3[4]
-                M1_lambda25 = LAMBDA2_WEIGHT_25 * M1_comp_SU3[1] + LAMBDA5_WEIGHT_25 * M1_comp_SU3[4]
-                M01_lambda25 = LAMBDA2_WEIGHT_25 * M01_comp_SU3[1] + LAMBDA5_WEIGHT_25 * M01_comp_SU3[4]
-                
-                # Create debug plot for λ2 + λ5
-                fig_l25, axes_l25 = plt.subplots(2, 3, figsize=(15, 8))
-                
-                # Row 0: M_NL (λ2 + λ5)
-                # Time domain
-                ax_time = axes_l25[0, 0]
-                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                    ax_time.plot(M_NL_lambda25[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                ax_time.set_xlabel('Time index')
-                ax_time.set_ylabel(f'$M_{{NL}}$ ($\\lambda_2$+$\\lambda_5$)')
-                ax_time.set_title(f'$\\lambda_2$ + $\\lambda_5$ (time domain)')
-                ax_time.legend(fontsize=6)
-                ax_time.grid(True, alpha=0.3)
-                
-                # 2D time-tau plot
-                ax_2d = axes_l25[0, 1]
-                im = ax_2d.imshow(M_NL_lambda25, origin='lower', aspect='auto', cmap='RdBu_r',
-                                  extent=[0, M_NL_lambda25.shape[1], tau[0], tau[-1]])
-                ax_2d.set_xlabel('Time index')
-                ax_2d.set_ylabel('τ')
-                ax_2d.set_title(f'$\\lambda_2$ + $\\lambda_5$ (τ, t)')
-                plt.colorbar(im, ax=ax_2d)
-                
-                # Frequency domain
-                M_NL_lambda25_FF = compute_2d_fft(M_NL_lambda25)
-                ax_freq = axes_l25[0, 2]
-                im_freq = ax_freq.imshow(M_NL_lambda25_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_lambda25_FF, norm_type),
-                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                ax_freq.set_title(f'$M_{{NL}}$ ($\\lambda_2$+$\\lambda_5$)')
-                if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                if omega_tau_window is not None:
-                    ax_freq.set_ylim(omega_tau_window)
-                # Add energy level reference lines
-                if energy_levels_mev:
-                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                plt.colorbar(im_freq, ax=ax_freq)
-                
-                # Row 1: Individual M0, M1, M01 spectra for λ2 + λ5
-                M0_lambda25_FF = compute_2d_fft(M0_lambda25)
-                M1_lambda25_FF = compute_2d_fft(M1_lambda25)
-                M01_lambda25_FF = compute_2d_fft(M01_lambda25)
-                
-                for idx, (name, data_FF) in enumerate([('M0', M0_lambda25_FF), ('M1', M1_lambda25_FF), ('M01', M01_lambda25_FF)]):
-                    ax = axes_l25[1, idx]
-                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                   norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                    ax.set_xlabel('$\\omega_t$ (THz)')
-                    ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax.set_title(f'${name}$ ($\\lambda_2$+$\\lambda_5$)')
+
+                # FFT spectra (linearity: combine cached complex FFTs).
+                M_NL_lambda25_FF = compute_2d_fft_combo([
+                    (LAMBDA2_WEIGHT_25, 'M_NL_SU3_1'),
+                    (LAMBDA5_WEIGHT_25, 'M_NL_SU3_4'),
+                ])
+                if M_NL_lambda25_FF is None:
+                    M_NL_lambda25 = LAMBDA2_WEIGHT_25 * M_NL_SU3[1] + LAMBDA5_WEIGHT_25 * M_NL_SU3[4]
+                    M_NL_lambda25_FF = compute_2d_fft(M_NL_lambda25)
+                def _combo_l25(prefix):
+                    return compute_2d_fft_combo([
+                        (LAMBDA2_WEIGHT_25, f'{prefix}_1'),
+                        (LAMBDA5_WEIGHT_25, f'{prefix}_4'),
+                    ])
+                M0_lambda25_FF = _combo_l25('M0_SU3')
+                if M0_lambda25_FF is None:
+                    M0_lambda25 = LAMBDA2_WEIGHT_25 * M0_comp_SU3[1] + LAMBDA5_WEIGHT_25 * M0_comp_SU3[4]
+                    M0_lambda25_FF = compute_2d_fft(M0_lambda25)
+                M1_lambda25_FF = _combo_l25('M1_SU3')
+                if M1_lambda25_FF is None:
+                    M1_lambda25 = LAMBDA2_WEIGHT_25 * M1_comp_SU3[1] + LAMBDA5_WEIGHT_25 * M1_comp_SU3[4]
+                    M1_lambda25_FF = compute_2d_fft(M1_lambda25)
+                M01_lambda25_FF = _combo_l25('M01_SU3')
+                if M01_lambda25_FF is None:
+                    M01_lambda25 = LAMBDA2_WEIGHT_25 * M01_comp_SU3[1] + LAMBDA5_WEIGHT_25 * M01_comp_SU3[4]
+                    M01_lambda25_FF = compute_2d_fft(M01_lambda25)
+
+                # Debug PDF (heavy: 6 subplots).  Skipped under --skip-plots.
+                if not skip_plots:
+                    M_NL_lambda25 = LAMBDA2_WEIGHT_25 * M_NL_SU3[1] + LAMBDA5_WEIGHT_25 * M_NL_SU3[4]
+                    fig_l25, axes_l25 = plt.subplots(2, 3, figsize=(15, 8))
+
+                    ax_time = axes_l25[0, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(M_NL_lambda25[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'$M_{{NL}}$ ($\\lambda_2$+$\\lambda_5$)')
+                    ax_time.set_title(f'$\\lambda_2$ + $\\lambda_5$ (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+
+                    ax_2d = axes_l25[0, 1]
+                    im = ax_2d.imshow(M_NL_lambda25, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, M_NL_lambda25.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'$\\lambda_2$ + $\\lambda_5$ (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+
+                    ax_freq = axes_l25[0, 2]
+                    im_freq = ax_freq.imshow(M_NL_lambda25_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm=_get_norm(M_NL_lambda25_FF, norm_type),
+                                              extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                    ax_freq.set_title(f'$M_{{NL}}$ ($\\lambda_2$+$\\lambda_5$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
-                        ax.set_ylim(omega_tau_window)
-                    # Add energy level reference lines
+                        ax_freq.set_ylim(omega_tau_window)
                     if energy_levels_mev:
-                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im, ax=ax)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, "M_NL_lambda25_debug.pdf"), dpi=100)
-                plt.close(fig_l25)
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+
+                    for idx, (name, data_FF) in enumerate([('M0', M0_lambda25_FF), ('M1', M1_lambda25_FF), ('M01', M01_lambda25_FF)]):
+                        ax = axes_l25[1, idx]
+                        im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                       norm=_get_norm(data_FF, norm_type),
+                                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                        ax.set_xlabel('$\\omega_t$ (THz)')
+                        ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                        ax.set_title(f'${name}$ ($\\lambda_2$+$\\lambda_5$)')
+                        if omega_t_window is not None:
+                            ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        if omega_tau_window is not None:
+                            ax.set_ylim(omega_tau_window)
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im, ax=ax)
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, "M_NL_lambda25_debug.pdf"), dpi=100)
+                    plt.close(fig_l25)
                 
                 # Save data
                 _save_spectrum(os.path.join(dir, "M_NL_lambda25_FF"), M_NL_lambda25_FF)
@@ -2444,84 +2542,95 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # λ2 + λ5 + λ7 combined mode
             if save_intermediates and spin_dim_SU3 >= 8:
                 print("    Processing λ2 + λ5 + λ7 mode (equal weight)...")
-                
-                # Equal weights for λ2, λ5 and λ7 combination
+
                 LAMBDA2_WEIGHT = 1.0
                 LAMBDA5_WEIGHT_257 = 1.0
                 LAMBDA7_WEIGHT_257 = 1.0
-                
-                # Combine λ2 (index 1), λ5 (index 4) and λ7 (index 6) in time domain before FFT (equal weight)
-                M_NL_lambda257 = LAMBDA2_WEIGHT * M_NL_SU3[1] + LAMBDA5_WEIGHT_257 * M_NL_SU3[4] + LAMBDA7_WEIGHT_257 * M_NL_SU3[6]
-                M0_lambda257 = LAMBDA2_WEIGHT * M0_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M0_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M0_comp_SU3[6]
-                M1_lambda257 = LAMBDA2_WEIGHT * M1_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M1_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M1_comp_SU3[6]
-                M01_lambda257 = LAMBDA2_WEIGHT * M01_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M01_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M01_comp_SU3[6]
-                
-                # Create debug plot for λ2 + λ5 + λ7
-                fig_l257, axes_l257 = plt.subplots(2, 3, figsize=(15, 8))
-                
-                # Row 0: M_NL (λ2 + λ5 + λ7)
-                # Time domain
-                ax_time = axes_l257[0, 0]
-                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                    ax_time.plot(M_NL_lambda257[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                ax_time.set_xlabel('Time index')
-                ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
-                ax_time.set_title(f'{LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$ (time domain)')
-                ax_time.legend(fontsize=6)
-                ax_time.grid(True, alpha=0.3)
-                
-                # 2D time-tau plot
-                ax_2d = axes_l257[0, 1]
-                im = ax_2d.imshow(M_NL_lambda257, origin='lower', aspect='auto', cmap='RdBu_r',
-                                  extent=[0, M_NL_lambda257.shape[1], tau[0], tau[-1]])
-                ax_2d.set_xlabel('Time index')
-                ax_2d.set_ylabel('τ')
-                ax_2d.set_title(f'{LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$ (τ, t)')
-                plt.colorbar(im, ax=ax_2d)
-                
-                # Frequency domain
-                M_NL_lambda257_FF = compute_2d_fft(M_NL_lambda257)
-                ax_freq = axes_l257[0, 2]
-                im_freq = ax_freq.imshow(M_NL_lambda257_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_lambda257_FF, norm_type),
-                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
-                if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                if omega_tau_window is not None:
-                    ax_freq.set_ylim(omega_tau_window)
-                # Add energy level reference lines
-                if energy_levels_mev:
-                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                plt.colorbar(im_freq, ax=ax_freq)
-                
-                # Row 1: Individual M0, M1, M01 spectra for λ2 + λ5 + λ7
-                M0_lambda257_FF = compute_2d_fft(M0_lambda257)
-                M1_lambda257_FF = compute_2d_fft(M1_lambda257)
-                M01_lambda257_FF = compute_2d_fft(M01_lambda257)
-                
-                for idx, (name, data_FF) in enumerate([('M0', M0_lambda257_FF), ('M1', M1_lambda257_FF), ('M01', M01_lambda257_FF)]):
-                    ax = axes_l257[1, idx]
-                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                   norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                    ax.set_xlabel('$\\omega_t$ (THz)')
-                    ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+
+                # FFT spectra (linearity: combine cached complex FFTs).
+                M_NL_lambda257_FF = compute_2d_fft_combo([
+                    (LAMBDA2_WEIGHT, 'M_NL_SU3_1'),
+                    (LAMBDA5_WEIGHT_257, 'M_NL_SU3_4'),
+                    (LAMBDA7_WEIGHT_257, 'M_NL_SU3_6'),
+                ])
+                if M_NL_lambda257_FF is None:
+                    M_NL_lambda257 = LAMBDA2_WEIGHT * M_NL_SU3[1] + LAMBDA5_WEIGHT_257 * M_NL_SU3[4] + LAMBDA7_WEIGHT_257 * M_NL_SU3[6]
+                    M_NL_lambda257_FF = compute_2d_fft(M_NL_lambda257)
+                def _combo_l257(prefix):
+                    return compute_2d_fft_combo([
+                        (LAMBDA2_WEIGHT, f'{prefix}_1'),
+                        (LAMBDA5_WEIGHT_257, f'{prefix}_4'),
+                        (LAMBDA7_WEIGHT_257, f'{prefix}_6'),
+                    ])
+                M0_lambda257_FF = _combo_l257('M0_SU3')
+                if M0_lambda257_FF is None:
+                    M0_lambda257 = LAMBDA2_WEIGHT * M0_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M0_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M0_comp_SU3[6]
+                    M0_lambda257_FF = compute_2d_fft(M0_lambda257)
+                M1_lambda257_FF = _combo_l257('M1_SU3')
+                if M1_lambda257_FF is None:
+                    M1_lambda257 = LAMBDA2_WEIGHT * M1_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M1_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M1_comp_SU3[6]
+                    M1_lambda257_FF = compute_2d_fft(M1_lambda257)
+                M01_lambda257_FF = _combo_l257('M01_SU3')
+                if M01_lambda257_FF is None:
+                    M01_lambda257 = LAMBDA2_WEIGHT * M01_comp_SU3[1] + LAMBDA5_WEIGHT_257 * M01_comp_SU3[4] + LAMBDA7_WEIGHT_257 * M01_comp_SU3[6]
+                    M01_lambda257_FF = compute_2d_fft(M01_lambda257)
+
+                # Debug PDF (heavy: 6 subplots).  Skipped under --skip-plots.
+                if not skip_plots:
+                    M_NL_lambda257 = LAMBDA2_WEIGHT * M_NL_SU3[1] + LAMBDA5_WEIGHT_257 * M_NL_SU3[4] + LAMBDA7_WEIGHT_257 * M_NL_SU3[6]
+                    fig_l257, axes_l257 = plt.subplots(2, 3, figsize=(15, 8))
+
+                    ax_time = axes_l257[0, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(M_NL_lambda257[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+                    ax_time.set_title(f'{LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$ (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+
+                    ax_2d = axes_l257[0, 1]
+                    im = ax_2d.imshow(M_NL_lambda257, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, M_NL_lambda257.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'{LAMBDA2_WEIGHT}$\\lambda_2$ + {LAMBDA5_WEIGHT_257}$\\lambda_5$ + {LAMBDA7_WEIGHT_257}$\\lambda_7$ (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+
+                    ax_freq = axes_l257[0, 2]
+                    im_freq = ax_freq.imshow(M_NL_lambda257_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm=_get_norm(M_NL_lambda257_FF, norm_type),
+                                              extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                    ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
-                        ax.set_ylim(omega_tau_window)
-                    # Add energy level reference lines
+                        ax_freq.set_ylim(omega_tau_window)
                     if energy_levels_mev:
-                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im, ax=ax)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, "M_NL_lambda257_debug.pdf"), dpi=100)
-                plt.close(fig_l257)
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+
+                    for idx, (name, data_FF) in enumerate([('M0', M0_lambda257_FF), ('M1', M1_lambda257_FF), ('M01', M01_lambda257_FF)]):
+                        ax = axes_l257[1, idx]
+                        im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                       norm=_get_norm(data_FF, norm_type),
+                                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                        ax.set_xlabel('$\\omega_t$ (THz)')
+                        ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                        ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT}$\\lambda_2$+{LAMBDA5_WEIGHT_257}$\\lambda_5$+{LAMBDA7_WEIGHT_257}$\\lambda_7$)')
+                        if omega_t_window is not None:
+                            ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        if omega_tau_window is not None:
+                            ax.set_ylim(omega_tau_window)
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im, ax=ax)
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, "M_NL_lambda257_debug.pdf"), dpi=100)
+                    plt.close(fig_l257)
                 
                 # Save data
                 _save_spectrum(os.path.join(dir, "M_NL_lambda257_FF"), M_NL_lambda257_FF)
@@ -2562,84 +2671,96 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # λ2 + λ7 + x component combined mode
             if save_intermediates and spin_dim_SU3 >= 8 and M_NL_SU2 is not None and M_NL_SU2.shape[0] >= 1:
                 print("    Processing λ2 + λ7 + x component mode (equal weight)...")
-                
-                # Equal weights for λ2, λ7 and x combination
+
                 LAMBDA2_WEIGHT_27x = 1.0
                 LAMBDA7_WEIGHT_27x = 1.0
                 X_WEIGHT_27x = 1.0
-                
-                # Combine λ2 (index 1), λ7 (index 6) from SU3 and x (index 0) from SU2 in time domain before FFT
-                M_NL_lambda27x = LAMBDA2_WEIGHT_27x * M_NL_SU3[1] + LAMBDA7_WEIGHT_27x * M_NL_SU3[6] + X_WEIGHT_27x * M_NL_SU2[0]
-                M0_lambda27x = LAMBDA2_WEIGHT_27x * M0_comp_SU3[1] + LAMBDA7_WEIGHT_27x * M0_comp_SU3[6] + X_WEIGHT_27x * M0_comp_SU2[0]
-                M1_lambda27x = LAMBDA2_WEIGHT_27x * M1_comp_SU3[1] + LAMBDA7_WEIGHT_27x * M1_comp_SU3[6] + X_WEIGHT_27x * M1_comp_SU2[0]
-                M01_lambda27x = LAMBDA2_WEIGHT_27x * M01_comp_SU3[1] + LAMBDA7_WEIGHT_27x * M01_comp_SU3[6] + X_WEIGHT_27x * M01_comp_SU2[0]
-                
-                # Create debug plot for λ2 + λ7 + x
-                fig_l27x, axes_l27x = plt.subplots(2, 3, figsize=(15, 8))
-                
-                # Row 0: M_NL (λ2 + λ7 + x)
-                # Time domain
-                ax_time = axes_l27x[0, 0]
-                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                    ax_time.plot(M_NL_lambda27x[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                ax_time.set_xlabel('Time index')
-                ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x}$\\lambda_2$+{LAMBDA7_WEIGHT_27x}$\\lambda_7$+{X_WEIGHT_27x}$S_x$)')
-                ax_time.set_title(f'{LAMBDA2_WEIGHT_27x}$\\lambda_2$ + {LAMBDA7_WEIGHT_27x}$\\lambda_7$ + {X_WEIGHT_27x}$S_x$ (time domain)')
-                ax_time.legend(fontsize=6)
-                ax_time.grid(True, alpha=0.3)
-                
-                # 2D time-tau plot
-                ax_2d = axes_l27x[0, 1]
-                im = ax_2d.imshow(M_NL_lambda27x, origin='lower', aspect='auto', cmap='RdBu_r',
-                                  extent=[0, M_NL_lambda27x.shape[1], tau[0], tau[-1]])
-                ax_2d.set_xlabel('Time index')
-                ax_2d.set_ylabel('τ')
-                ax_2d.set_title(f'{LAMBDA2_WEIGHT_27x}$\\lambda_2$ + {LAMBDA7_WEIGHT_27x}$\\lambda_7$ + {X_WEIGHT_27x}$S_x$ (τ, t)')
-                plt.colorbar(im, ax=ax_2d)
-                
-                # Frequency domain
-                M_NL_lambda27x_FF = compute_2d_fft(M_NL_lambda27x)
-                ax_freq = axes_l27x[0, 2]
-                im_freq = ax_freq.imshow(M_NL_lambda27x_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_lambda27x_FF, norm_type),
-                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x}$\\lambda_2$+{LAMBDA7_WEIGHT_27x}$\\lambda_7$+{X_WEIGHT_27x}$S_x$)')
-                if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                if omega_tau_window is not None:
-                    ax_freq.set_ylim(omega_tau_window)
-                # Add energy level reference lines
-                if energy_levels_mev:
-                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                plt.colorbar(im_freq, ax=ax_freq)
-                
-                # Row 1: Individual M0, M1, M01 spectra for λ2 + λ7 + x
-                M0_lambda27x_FF = compute_2d_fft(M0_lambda27x)
-                M1_lambda27x_FF = compute_2d_fft(M1_lambda27x)
-                M01_lambda27x_FF = compute_2d_fft(M01_lambda27x)
-                
-                for idx, (name, data_FF) in enumerate([('M0', M0_lambda27x_FF), ('M1', M1_lambda27x_FF), ('M01', M01_lambda27x_FF)]):
-                    ax = axes_l27x[1, idx]
-                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                   norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                    ax.set_xlabel('$\\omega_t$ (THz)')
-                    ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT_27x}$\\lambda_2$+{LAMBDA7_WEIGHT_27x}$\\lambda_7$+{X_WEIGHT_27x}$S_x$)')
+
+                # FFT spectra (linearity: combine cached complex FFTs across
+                # both sublattices).
+                M_NL_lambda27x_FF = compute_2d_fft_combo([
+                    (LAMBDA2_WEIGHT_27x, 'M_NL_SU3_1'),
+                    (LAMBDA7_WEIGHT_27x, 'M_NL_SU3_6'),
+                    (X_WEIGHT_27x, 'M_NL_SU2_0'),
+                ])
+                if M_NL_lambda27x_FF is None:
+                    M_NL_lambda27x = LAMBDA2_WEIGHT_27x * M_NL_SU3[1] + LAMBDA7_WEIGHT_27x * M_NL_SU3[6] + X_WEIGHT_27x * M_NL_SU2[0]
+                    M_NL_lambda27x_FF = compute_2d_fft(M_NL_lambda27x)
+                def _combo_l27x(p3, p2):
+                    return compute_2d_fft_combo([
+                        (LAMBDA2_WEIGHT_27x, f'{p3}_1'),
+                        (LAMBDA7_WEIGHT_27x, f'{p3}_6'),
+                        (X_WEIGHT_27x, f'{p2}_0'),
+                    ])
+                M0_lambda27x_FF = _combo_l27x('M0_SU3', 'M0_SU2')
+                if M0_lambda27x_FF is None:
+                    M0_lambda27x = LAMBDA2_WEIGHT_27x * M0_comp_SU3[1] + LAMBDA7_WEIGHT_27x * M0_comp_SU3[6] + X_WEIGHT_27x * M0_comp_SU2[0]
+                    M0_lambda27x_FF = compute_2d_fft(M0_lambda27x)
+                M1_lambda27x_FF = _combo_l27x('M1_SU3', 'M1_SU2')
+                if M1_lambda27x_FF is None:
+                    M1_lambda27x = LAMBDA2_WEIGHT_27x * M1_comp_SU3[1] + LAMBDA7_WEIGHT_27x * M1_comp_SU3[6] + X_WEIGHT_27x * M1_comp_SU2[0]
+                    M1_lambda27x_FF = compute_2d_fft(M1_lambda27x)
+                M01_lambda27x_FF = _combo_l27x('M01_SU3', 'M01_SU2')
+                if M01_lambda27x_FF is None:
+                    M01_lambda27x = LAMBDA2_WEIGHT_27x * M01_comp_SU3[1] + LAMBDA7_WEIGHT_27x * M01_comp_SU3[6] + X_WEIGHT_27x * M01_comp_SU2[0]
+                    M01_lambda27x_FF = compute_2d_fft(M01_lambda27x)
+
+                # Debug PDF (heavy: 6 subplots).  Skipped under --skip-plots.
+                if not skip_plots:
+                    M_NL_lambda27x = LAMBDA2_WEIGHT_27x * M_NL_SU3[1] + LAMBDA7_WEIGHT_27x * M_NL_SU3[6] + X_WEIGHT_27x * M_NL_SU2[0]
+                    fig_l27x, axes_l27x = plt.subplots(2, 3, figsize=(15, 8))
+
+                    ax_time = axes_l27x[0, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(M_NL_lambda27x[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x}$\\lambda_2$+{LAMBDA7_WEIGHT_27x}$\\lambda_7$+{X_WEIGHT_27x}$S_x$)')
+                    ax_time.set_title(f'{LAMBDA2_WEIGHT_27x}$\\lambda_2$ + {LAMBDA7_WEIGHT_27x}$\\lambda_7$ + {X_WEIGHT_27x}$S_x$ (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+
+                    ax_2d = axes_l27x[0, 1]
+                    im = ax_2d.imshow(M_NL_lambda27x, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, M_NL_lambda27x.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'{LAMBDA2_WEIGHT_27x}$\\lambda_2$ + {LAMBDA7_WEIGHT_27x}$\\lambda_7$ + {X_WEIGHT_27x}$S_x$ (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+
+                    ax_freq = axes_l27x[0, 2]
+                    im_freq = ax_freq.imshow(M_NL_lambda27x_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm=_get_norm(M_NL_lambda27x_FF, norm_type),
+                                              extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                    ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x}$\\lambda_2$+{LAMBDA7_WEIGHT_27x}$\\lambda_7$+{X_WEIGHT_27x}$S_x$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
-                        ax.set_ylim(omega_tau_window)
-                    # Add energy level reference lines
+                        ax_freq.set_ylim(omega_tau_window)
                     if energy_levels_mev:
-                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im, ax=ax)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, "M_NL_lambda27x_debug.pdf"), dpi=100)
-                plt.close(fig_l27x)
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+
+                    for idx, (name, data_FF) in enumerate([('M0', M0_lambda27x_FF), ('M1', M1_lambda27x_FF), ('M01', M01_lambda27x_FF)]):
+                        ax = axes_l27x[1, idx]
+                        im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                       norm=_get_norm(data_FF, norm_type),
+                                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                        ax.set_xlabel('$\\omega_t$ (THz)')
+                        ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                        ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT_27x}$\\lambda_2$+{LAMBDA7_WEIGHT_27x}$\\lambda_7$+{X_WEIGHT_27x}$S_x$)')
+                        if omega_t_window is not None:
+                            ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        if omega_tau_window is not None:
+                            ax.set_ylim(omega_tau_window)
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im, ax=ax)
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, "M_NL_lambda27x_debug.pdf"), dpi=100)
+                    plt.close(fig_l27x)
                 
                 # Save data
                 _save_spectrum(os.path.join(dir, "M_NL_lambda27x_FF"), M_NL_lambda27x_FF)
@@ -2680,84 +2801,95 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # λ2 - 0.2*λ7 + x component combined mode (custom weights)
             if save_intermediates and spin_dim_SU3 >= 8 and M_NL_SU2 is not None and M_NL_SU2.shape[0] >= 1:
                 print("    Processing λ2 - 0.2*λ7 + x component mode (custom weights)...")
-                
-                # Custom weights for λ2, λ7 and x combination
+
                 LAMBDA2_WEIGHT_27x_v2 = 1.0
                 LAMBDA7_WEIGHT_27x_v2 = 0.2
                 X_WEIGHT_27x_v2 = 1.6
-                
-                # Combine λ2 (index 1), λ7 (index 6) from SU3 and x (index 0) from SU2 in time domain before FFT
-                M_NL_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M_NL_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M_NL_SU3[6] + X_WEIGHT_27x_v2 * M_NL_SU2[0]
-                M0_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M0_comp_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M0_comp_SU3[6] + X_WEIGHT_27x_v2 * M0_comp_SU2[0]
-                M1_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M1_comp_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M1_comp_SU3[6] + X_WEIGHT_27x_v2 * M1_comp_SU2[0]
-                M01_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M01_comp_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M01_comp_SU3[6] + X_WEIGHT_27x_v2 * M01_comp_SU2[0]
-                
-                # Create debug plot for λ2 - 0.2*λ7 + x
-                fig_l27x_v2, axes_l27x_v2 = plt.subplots(2, 3, figsize=(15, 8))
-                
-                # Row 0: M_NL (λ2 - 0.2*λ7 + x)
-                # Time domain
-                ax_time = axes_l27x_v2[0, 0]
-                for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
-                    ax_time.plot(M_NL_lambda27x_v2[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
-                ax_time.set_xlabel('Time index')
-                ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x_v2}$\\lambda_2${LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$+{X_WEIGHT_27x_v2}$S_x$)')
-                ax_time.set_title(f'{LAMBDA2_WEIGHT_27x_v2}$\\lambda_2$ {LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$ + {X_WEIGHT_27x_v2}$S_x$ (time domain)')
-                ax_time.legend(fontsize=6)
-                ax_time.grid(True, alpha=0.3)
-                
-                # 2D time-tau plot
-                ax_2d = axes_l27x_v2[0, 1]
-                im = ax_2d.imshow(M_NL_lambda27x_v2, origin='lower', aspect='auto', cmap='RdBu_r',
-                                  extent=[0, M_NL_lambda27x_v2.shape[1], tau[0], tau[-1]])
-                ax_2d.set_xlabel('Time index')
-                ax_2d.set_ylabel('τ')
-                ax_2d.set_title(f'{LAMBDA2_WEIGHT_27x_v2}$\\lambda_2$ {LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$ + {X_WEIGHT_27x_v2}$S_x$ (τ, t)')
-                plt.colorbar(im, ax=ax_2d)
-                
-                # Frequency domain
-                M_NL_lambda27x_v2_FF = compute_2d_fft(M_NL_lambda27x_v2)
-                ax_freq = axes_l27x_v2[0, 2]
-                im_freq = ax_freq.imshow(M_NL_lambda27x_v2_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                          norm=_get_norm(M_NL_lambda27x_v2_FF, norm_type),
-                                          extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                ax_freq.set_xlabel('$\\omega_t$ (THz)')
-                ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x_v2}$\\lambda_2${LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$+{X_WEIGHT_27x_v2}$S_x$)')
-                if omega_t_window is not None:
-                    ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
-                if omega_tau_window is not None:
-                    ax_freq.set_ylim(omega_tau_window)
-                # Add energy level reference lines
-                if energy_levels_mev:
-                    add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
-                plt.colorbar(im_freq, ax=ax_freq)
-                
-                # Row 1: Individual M0, M1, M01 spectra for λ2 - 0.2*λ7 + x
-                M0_lambda27x_v2_FF = compute_2d_fft(M0_lambda27x_v2)
-                M1_lambda27x_v2_FF = compute_2d_fft(M1_lambda27x_v2)
-                M01_lambda27x_v2_FF = compute_2d_fft(M01_lambda27x_v2)
-                
-                for idx, (name, data_FF) in enumerate([('M0', M0_lambda27x_v2_FF), ('M1', M1_lambda27x_v2_FF), ('M01', M01_lambda27x_v2_FF)]):
-                    ax = axes_l27x_v2[1, idx]
-                    im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
-                                   norm=_get_norm(data_FF, norm_type),
-                                   extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
-                    ax.set_xlabel('$\\omega_t$ (THz)')
-                    ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT_27x_v2}$\\lambda_2${LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$+{X_WEIGHT_27x_v2}$S_x$)')
+
+                # FFT spectra (linearity: combine cached complex FFTs).
+                M_NL_lambda27x_v2_FF = compute_2d_fft_combo([
+                    (LAMBDA2_WEIGHT_27x_v2, 'M_NL_SU3_1'),
+                    (LAMBDA7_WEIGHT_27x_v2, 'M_NL_SU3_6'),
+                    (X_WEIGHT_27x_v2, 'M_NL_SU2_0'),
+                ])
+                if M_NL_lambda27x_v2_FF is None:
+                    M_NL_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M_NL_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M_NL_SU3[6] + X_WEIGHT_27x_v2 * M_NL_SU2[0]
+                    M_NL_lambda27x_v2_FF = compute_2d_fft(M_NL_lambda27x_v2)
+                def _combo_l27x_v2(p3, p2):
+                    return compute_2d_fft_combo([
+                        (LAMBDA2_WEIGHT_27x_v2, f'{p3}_1'),
+                        (LAMBDA7_WEIGHT_27x_v2, f'{p3}_6'),
+                        (X_WEIGHT_27x_v2, f'{p2}_0'),
+                    ])
+                M0_lambda27x_v2_FF = _combo_l27x_v2('M0_SU3', 'M0_SU2')
+                if M0_lambda27x_v2_FF is None:
+                    M0_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M0_comp_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M0_comp_SU3[6] + X_WEIGHT_27x_v2 * M0_comp_SU2[0]
+                    M0_lambda27x_v2_FF = compute_2d_fft(M0_lambda27x_v2)
+                M1_lambda27x_v2_FF = _combo_l27x_v2('M1_SU3', 'M1_SU2')
+                if M1_lambda27x_v2_FF is None:
+                    M1_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M1_comp_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M1_comp_SU3[6] + X_WEIGHT_27x_v2 * M1_comp_SU2[0]
+                    M1_lambda27x_v2_FF = compute_2d_fft(M1_lambda27x_v2)
+                M01_lambda27x_v2_FF = _combo_l27x_v2('M01_SU3', 'M01_SU2')
+                if M01_lambda27x_v2_FF is None:
+                    M01_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M01_comp_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M01_comp_SU3[6] + X_WEIGHT_27x_v2 * M01_comp_SU2[0]
+                    M01_lambda27x_v2_FF = compute_2d_fft(M01_lambda27x_v2)
+
+                # Debug PDF (heavy: 6 subplots).  Skipped under --skip-plots.
+                if not skip_plots:
+                    M_NL_lambda27x_v2 = LAMBDA2_WEIGHT_27x_v2 * M_NL_SU3[1] + LAMBDA7_WEIGHT_27x_v2 * M_NL_SU3[6] + X_WEIGHT_27x_v2 * M_NL_SU2[0]
+                    fig_l27x_v2, axes_l27x_v2 = plt.subplots(2, 3, figsize=(15, 8))
+
+                    ax_time = axes_l27x_v2[0, 0]
+                    for tau_idx in range(0, len(tau), max(1, len(tau) // 5)):
+                        ax_time.plot(M_NL_lambda27x_v2[tau_idx, :], label=f'τ={tau[tau_idx]:.2f}', alpha=0.7)
+                    ax_time.set_xlabel('Time index')
+                    ax_time.set_ylabel(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x_v2}$\\lambda_2${LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$+{X_WEIGHT_27x_v2}$S_x$)')
+                    ax_time.set_title(f'{LAMBDA2_WEIGHT_27x_v2}$\\lambda_2$ {LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$ + {X_WEIGHT_27x_v2}$S_x$ (time domain)')
+                    ax_time.legend(fontsize=6)
+                    ax_time.grid(True, alpha=0.3)
+
+                    ax_2d = axes_l27x_v2[0, 1]
+                    im = ax_2d.imshow(M_NL_lambda27x_v2, origin='lower', aspect='auto', cmap='RdBu_r',
+                                      extent=[0, M_NL_lambda27x_v2.shape[1], tau[0], tau[-1]])
+                    ax_2d.set_xlabel('Time index')
+                    ax_2d.set_ylabel('τ')
+                    ax_2d.set_title(f'{LAMBDA2_WEIGHT_27x_v2}$\\lambda_2$ {LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$ + {X_WEIGHT_27x_v2}$S_x$ (τ, t)')
+                    plt.colorbar(im, ax=ax_2d)
+
+                    ax_freq = axes_l27x_v2[0, 2]
+                    im_freq = ax_freq.imshow(M_NL_lambda27x_v2_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                              norm=_get_norm(M_NL_lambda27x_v2_FF, norm_type),
+                                              extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                    ax_freq.set_xlabel('$\\omega_t$ (THz)')
+                    ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                    ax_freq.set_title(f'$M_{{NL}}$ ({LAMBDA2_WEIGHT_27x_v2}$\\lambda_2${LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$+{X_WEIGHT_27x_v2}$S_x$)')
                     if omega_t_window is not None:
-                        ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
-                        ax.set_ylim(omega_tau_window)
-                    # Add energy level reference lines
+                        ax_freq.set_ylim(omega_tau_window)
                     if energy_levels_mev:
-                        add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
-                    plt.colorbar(im, ax=ax)
-                
-                plt.tight_layout()
-                plt.savefig(os.path.join(dir, "M_NL_lambda27x_v2_debug.pdf"), dpi=100)
-                plt.close(fig_l27x_v2)
+                        add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
+                    plt.colorbar(im_freq, ax=ax_freq)
+
+                    for idx, (name, data_FF) in enumerate([('M0', M0_lambda27x_v2_FF), ('M1', M1_lambda27x_v2_FF), ('M01', M01_lambda27x_v2_FF)]):
+                        ax = axes_l27x_v2[1, idx]
+                        im = ax.imshow(data_FF, origin='lower', aspect='auto', cmap='gnuplot2',
+                                       norm=_get_norm(data_FF, norm_type),
+                                       extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
+                        ax.set_xlabel('$\\omega_t$ (THz)')
+                        ax.set_ylabel('$\\omega_{\\tau}$ (THz)')
+                        ax.set_title(f'${name}$ ({LAMBDA2_WEIGHT_27x_v2}$\\lambda_2${LAMBDA7_WEIGHT_27x_v2:+.1f}$\\lambda_7$+{X_WEIGHT_27x_v2}$S_x$)')
+                        if omega_t_window is not None:
+                            ax.set_xlim(omega_t_window[0], omega_t_window[1])
+                        if omega_tau_window is not None:
+                            ax.set_ylim(omega_tau_window)
+                        if energy_levels_mev:
+                            add_energy_level_lines(ax, energy_levels_mev, omega_t_window)
+                        plt.colorbar(im, ax=ax)
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(dir, "M_NL_lambda27x_v2_debug.pdf"), dpi=100)
+                    plt.close(fig_l27x_v2)
                 
                 # Save data
                 _save_spectrum(os.path.join(dir, "M_NL_lambda27x_v2_FF"), M_NL_lambda27x_v2_FF)
@@ -3415,6 +3547,8 @@ Examples:
                         help='Tm e2 energy level in meV (e.g., 5.34 meV = 1.29 THz)')
     parser.add_argument('--kc', type=float, default=None,
                         help='Fe Kc anisotropy energy in meV (e.g., 3.76 meV = 0.91 THz AFM gap)')
+    parser.add_argument('--qfm', type=float, default=None,
+                        help='Fe qFM magnon frequency in meV (e.g., 1.59 meV = 0.384 THz)')
     
     # Interactive mode
     parser.add_argument('--interactive', '-i', action='store_true',
@@ -3427,8 +3561,24 @@ Examples:
     # Reload components option
     parser.add_argument('--reload-components', '--from-components', action='store_true',
                         help='Load component FFTs from cache and recompute composite spectra (faster than full calculation)')
-    
+
+    # Performance flags (Ingredient XIX)
+    parser.add_argument('--skip-plots', action='store_true',
+                        help='Skip all matplotlib figure generation (save NPY spectra only).  '
+                             'Roughly 100-300x faster than the default plotting path on large 2DCS jobs.')
+    parser.add_argument('--save-intermediates', dest='save_intermediates', action='store_true', default=True,
+                        help='Compute and save M0/M1/M01 component spectra and λ-mode mixtures (default: True)')
+    parser.add_argument('--no-save-intermediates', dest='save_intermediates', action='store_false',
+                        help='Skip M0/M1/M01 components — only compute the M_NL aggregates.  '
+                             'Use this for fast scans when only the nonlinear response is needed.')
+    parser.add_argument('--fast', action='store_true',
+                        help='Convenience: equivalent to --skip-plots --no-save-intermediates.  '
+                             'Bare-minimum aggregate spectra only, sub-second on the nocouple_ctrl benchmark.')
+
     args = parser.parse_args()
+    if args.fast:
+        args.skip_plots = True
+        args.save_intermediates = False
     
     input_path = args.path
     analysis_type = args.analysis_type
@@ -3454,7 +3604,7 @@ Examples:
     
     # Build energy levels dictionary if any are specified
     energy_levels_mev = None
-    if analysis_type == '2dcs' and (args.e1 or args.e2 or args.kc):
+    if analysis_type == '2dcs' and (args.e1 or args.e2 or args.kc or args.qfm):
         energy_levels_mev = {}
         if args.e1 is not None:
             energy_levels_mev['e1'] = args.e1
@@ -3465,6 +3615,8 @@ Examples:
                 energy_levels_mev['e2-e1'] = args.e2 - args.e1
         if args.kc is not None:
             energy_levels_mev['qAFM'] = args.kc
+        if args.qfm is not None:
+            energy_levels_mev['qFM'] = args.qfm
         print(f"  Energy levels: {energy_levels_mev}")
     
     if analysis_type == 'md':
@@ -3486,10 +3638,12 @@ Examples:
                 print("\nReloading component FFTs and recomputing composites...")
             else:
                 print("\nRunning 2DCS analysis...")
-            results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm, 
+            results = read_2DCS_combined_hdf5(filepath, omega_t_window, omega_tau_window, args.norm,
                                               window_type=args.window, energy_levels_mev=energy_levels_mev,
                                               load_from_cache=args.load_results,
-                                              reload_components=args.reload_components)
+                                              reload_components=args.reload_components,
+                                              skip_plots=args.skip_plots,
+                                              save_intermediates=args.save_intermediates)
             print(f"Results keys: {list(results.keys())}")
     else:
         print(f"Unknown analysis type: {analysis_type}")

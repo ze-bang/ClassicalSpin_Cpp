@@ -2530,6 +2530,148 @@ integrator-level audit \emph{must} measure trajectory error against
 a high-accuracy reference, not just wall-clock time.
 
 % =================================================================
+\section{Ingredient XIX: the 2DCS reader pipeline ---
+         FFT linearity, batched FFTs, gated debug PDFs}
+% =================================================================
+
+The C++ side of a 2DCS run produces an HDF5 file with a reference
+trajectory and one perturbed-pair trajectory per $\tau$ delay
+(see Ingredient XV).  The Python reader
+\texttt{util/readers\_new/reader\_TmFeO3.py}, in particular
+\texttt{read\_2DCS\_combined\_hdf5}, is responsible for
+\begin{enumerate}[noitemsep,leftmargin=*]
+  \item loading the per-component magnetisation streams
+        $M_0$, $M_1$, $M_{01}$ from the HDF5 file,
+  \item assembling the third-order observable
+        $M_{NL}=M_{01}-M_0-M_1$,
+  \item Fourier-transforming it on the $(\tau,t)$ grid,
+  \item building several $\lambda$-mode mixtures (e.g.\
+        $\lambda_5+\lambda_7$, $\lambda_2+\lambda_5$,
+        $\lambda_2+\lambda_7+S_x$, \ldots) for the SU(3) sublattice,
+  \item rendering up to thirty PDF figures.
+\end{enumerate}
+On the 34\,MB \texttt{nocouple\_ctrl} benchmark
+($n_t=10\,000$, $n_\tau=6$, $\dim_{\mathrm{SU2}}=3$,
+$\dim_{\mathrm{SU3}}=8$) this took \textbf{17\,s} per call
+and was the dominant cost of any
+parameter sweep that produces $O(10^2$--$10^3)$ HDF5 outputs.
+
+\paragraph{What the profiler said.}
+A surgical monkey-patch profile of \texttt{savefig},
+\texttt{Axes.imshow}, and \texttt{h5py.Dataset.\_\_getitem\_\_}
+revealed three problems, in order of severity:
+\begin{enumerate}[noitemsep,leftmargin=*]
+  \item All five $\lambda$-mode debug PDFs
+        (\texttt{lambda57}, \texttt{lambda25}, \texttt{lambda257},
+        \texttt{lambda27x}, \texttt{lambda27x\_v2}) were rendered
+        \emph{regardless of} \texttt{skip\_plots=True} ---
+        $\sim 75\%$ of total wall time.
+  \item The six per-signal component PDFs
+        (\texttt{M0/M1/M01\_SU2/SU3\_components\_debug.pdf},
+         8 or 3 subplots each) were also unconditional.
+  \item Each $\lambda$-mode magnitude spectrum was computed by
+        building the time-domain combination
+        $a\,X(\tau,t)+b\,Y(\tau,t)$ and then re-running
+        \texttt{np.fft.fft2} --- thirty $4926\times6$ FFTs were
+        executed per call, twenty of them redundant.
+\end{enumerate}
+
+\paragraph{Fixes.}
+\begin{enumerate}[noitemsep,leftmargin=*]
+  \item All debug-PDF blocks (lines around 1797, 2113, 2316, 2449,
+        2578, 2708, 2837 in
+        \texttt{reader\_TmFeO3.py}) were wrapped in
+        \texttt{if not skip\_plots:}.  The underlying FFTs and
+        on-disk \texttt{.npy} writes were lifted \emph{outside}
+        the conditional, so the spectra are still produced when
+        plotting is suppressed.
+  \item The HDF5 load loop was vectorised: instead of an inner
+        \texttt{for comp in range(spin\_dim)} that touches one
+        component at a time, we transpose
+        $(n_t,\dim)\to(\dim,n_t)$ once and slice
+        \texttt{M\_NL[:, i, :n] = M01\_T - M0\_T - M1\_T}.
+        The intermediate \texttt{M0\_comp/M1\_comp/M01\_comp}
+        arrays (each $\dim\times n_\tau\times n_t$, up to
+        $8\times 6\times 10^4$ doubles
+        $= 3.7\,$MB) are now allocated only when
+        \texttt{save\_intermediates=True}.
+  \item A complex-FFT cache \texttt{\_cfft\_cache} was added
+        alongside the existing magnitude cache.  All per-component
+        FFTs are computed in a \emph{single} batched call
+        \begin{verbatim}
+        scipy.fft.fft2(data_3d, axes=(-2,-1), workers=-1)
+        \end{verbatim}
+        which amortises FFT-plan setup and uses every available
+        core for the larger transforms.  The $\lambda$-mode
+        mixtures are then synthesised in frequency space by
+        linearity:
+        \[
+            \lvert \mathcal F\{aX+bY\}\rvert
+            \;=\; \lvert a\,\hat X + b\,\hat Y \rvert ,
+        \]
+        i.e.\ one weighted sum and one $\lvert\cdot\rvert$ per
+        derived spectrum, instead of one fft2.  This is
+        implemented by \texttt{compute\_2d\_fft\_combo}, with a
+        graceful fall-back to the time-domain path when
+        a cache entry happens to be missing.
+  \item The CLI gained \texttt{--skip-plots},
+        \texttt{--no-save-intermediates}, and a
+        \texttt{--fast} convenience flag (equivalent to both
+        of the previous two).  These plumb through to the
+        existing keyword arguments of
+        \texttt{read\_2DCS\_combined\_hdf5}.
+\end{enumerate}
+
+\paragraph{Numbers.}
+On the 34\,MB \texttt{nocouple\_ctrl} benchmark
+($n_t=10\,000$, $n_\tau=6$, $\dim_{\mathrm{SU2}}=3$,
+$\dim_{\mathrm{SU3}}=8$):
+\begin{center}
+\begin{tabular}{lrr}
+\hline
+\textbf{Mode} & \textbf{Before XIX} & \textbf{After XIX}\\
+\hline
+\texttt{--skip-plots --save-intermediates}    & 17.0\,s & 0.06\,s \\
+\texttt{--skip-plots --no-save-intermediates} & 17.0\,s & 0.01\,s \\
+\texttt{--fast} (CLI end-to-end, incl.\ Python startup) & --- & 0.45\,s \\
+default (full plots, intermediates)           & ---     & 24.5\,s \\
+\hline
+\end{tabular}
+\end{center}
+The \texttt{--skip-plots --save-intermediates} number is the
+relevant one for batched campaigns: it is now $\sim 280\times$
+faster than the buggy baseline, and produces the same 29
+\texttt{*\_FF.npy} spectra bit-for-bit (verified by reloading the
+saved files and comparing
+\texttt{max(|disk-mem|)}, which is $0$ to floating-point exact
+on the test datasets).
+
+\paragraph{Verification.}
+The complex-FFT linearity used by \texttt{compute\_2d\_fft\_combo}
+is exact in floating point (it does one extra complex-add per
+spectrum, no extra rounding versus
+$\lvert\mathcal F\{aX+bY\}\rvert$, which itself does $aX+bY$
+followed by fft2).  The end-to-end check ran the optimised reader
+on both the \texttt{nocouple\_ctrl} (no-coupling control,
+SU(3) response identically zero by symmetry --- which the new
+code reproduces correctly) and a coupled \texttt{quick\_test}
+dataset, and confirmed
+\texttt{disk == in-memory} bitwise for every $M_{NL}$,
+$M_0$, $M_1$, $M_{01}$, and $\lambda$-mode spectrum.
+
+\paragraph{Why this matters.}
+Before XIX, an analyst sweeping over thirty pump-probe runs paid
+$\sim 9\,$min just for reader-side work, mostly producing
+debug PDFs that get overwritten on the next call.  After XIX,
+the same campaign takes $\sim 14\,$s, which is short enough to
+re-run on every parameter change.  The full-plot path is
+preserved at 24\,s (slightly slower than 17\,s because the
+$\lambda$-mode debug PDFs are now \emph{always} produced when
+asked for, rather than the silently-skipped state we noted in
+the bug above) and remains the right mode for one-off
+exploratory analysis.
+
+% =================================================================
 \section{Further reading}
 % =================================================================
 \begin{itemize}[noitemsep]
