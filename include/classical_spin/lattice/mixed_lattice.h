@@ -172,6 +172,34 @@ public:
     vector<vector<array<size_t, 2>>> mixed_trilinear_partners_SU2;             // (SU(2), SU(3)) partner pairs
     vector<vector<array<size_t, 2>>> mixed_trilinear_partners_SU3;             // (SU(2), SU(2)) partner pairs
 
+    // ============================================================
+    // PACKED INTERACTION BUFFERS (SoA, row-major, double*)
+    // ============================================================
+    // Mirror data already in {bilinear,trilinear,mixed_*}_interaction_*
+    // but laid out as one contiguous double[] per site, row-major in
+    // (a,b) for bilinear and (a,b,c) for trilinear. This:
+    //   - removes the vector<MatrixXd> pointer-chase per bond,
+    //   - flips the inner-loop stride from column-major MatrixXd
+    //     (stride = rows) to unit-stride row-major (stride = 1),
+    //   - lets the compiler vectorize and unroll fixed-size kernels
+    //     (3x3, 3x8, 8x8, 3x3x3, 3x3x8, 8x3x3, 8x8x8) used by the
+    //     SU(2)/SU(3) MD RHS.
+    // Built once in build_packed_interaction_buffers() at the end of the
+    // constructor; the original SpinMatrix / SpinTensor3 storage is kept
+    // for the MC code path and any rebuild operations.
+    //
+    // Layout per site (n indexes bonds at this site):
+    //   bilinear_packed_*[site][n*da*db + a*db + b]
+    //   trilinear_packed_*[site][n*da*db*dc + (a*db + b)*dc + c]
+    vector<vector<double>> bilinear_packed_SU2;             // da=db=spin_dim_SU2
+    vector<vector<double>> bilinear_packed_SU3;             // da=db=spin_dim_SU3
+    vector<vector<double>> mixed_bilinear_packed_SU2;       // da=spin_dim_SU2, db=spin_dim_SU3
+    vector<vector<double>> mixed_bilinear_packed_SU3;       // da=spin_dim_SU3, db=spin_dim_SU2
+    vector<vector<double>> trilinear_packed_SU2;            // da=db=dc=spin_dim_SU2
+    vector<vector<double>> trilinear_packed_SU3;            // da=db=dc=spin_dim_SU3
+    vector<vector<double>> mixed_trilinear_packed_SU2;      // da=db=spin_dim_SU2, dc=spin_dim_SU3
+    vector<vector<double>> mixed_trilinear_packed_SU3;      // da=spin_dim_SU3, db=dc=spin_dim_SU2
+
     // Sublattice frame transformations
     vector<SpinMatrix> sublattice_frames_SU2;  // Frame transformations for SU(2) sublattices
     vector<SpinMatrix> sublattice_frames_SU3;  // Frame transformations for SU(3) sublattices
@@ -395,6 +423,10 @@ public:
         // Metropolis / over-relaxation sweeps. See header doc on
         // color_of_site_SU{2,3} for the edge-set we use.
         build_color_partition();
+
+        // Pack {bi,tri}linear interaction tensors into row-major double[]
+        // buffers used by the MD hot path (see field declarations).
+        build_packed_interaction_buffers();
 
         cout << "Mixed lattice initialization complete!" << endl;
         cout << "SU(2) - Max bilinear: " << num_bi_SU2 << ", Max trilinear: " << num_tri_SU2 << endl;
@@ -768,6 +800,150 @@ public:
         }
 
         cout << "Mixed interactions built successfully!" << endl;
+    }
+
+    // ============================================================
+    // PACKED INTERACTION BUFFER BUILDER
+    // ============================================================
+    /**
+     * Pack the bilinear / trilinear / mixed interaction tensors into
+     * contiguous row-major double[] buffers used by the MD hot path
+     * (`get_local_field_*_flat_into`).
+     *
+     * Layout (per site, n indexes the bond):
+     *   bilinear_packed_*[site][n*da*db + a*db + b]              = J^n(a,b)
+     *   trilinear_packed_*[site][n*da*db*dc + (a*db + b)*dc + c] = T^n[a](b,c)
+     *
+     * The original `bilinear_interaction_*`, `trilinear_interaction_*`,
+     * `mixed_*_interaction_*` storage is preserved (used by MC code path
+     * and for any rebuilds). Only one rebuild call is required after the
+     * full interaction graph is set; in our setup that is at the end of
+     * the `MixedLattice` constructor (after `build_color_partition()`).
+     *
+     * Idempotent and safe to call again after the user mutates the
+     * interaction tables (e.g. via `set_*` helpers); cost is O(total
+     * coupling tensor entries), trivially ~ms even for large lattices.
+     */
+    void build_packed_interaction_buffers() {
+        const size_t d2 = spin_dim_SU2;
+        const size_t d3 = spin_dim_SU3;
+        const size_t d22  = d2 * d2;
+        const size_t d23  = d2 * d3;
+        const size_t d33  = d3 * d3;
+        const size_t d222 = d22 * d2;
+        const size_t d223 = d22 * d3;   // SU2-SU2-SU3 mixed trilinear (from SU2 side)
+        const size_t d322 = d3 * d22;   // SU3-SU2-SU2 mixed trilinear (from SU3 side)
+        const size_t d333 = d33 * d3;
+
+        bilinear_packed_SU2.assign(lattice_size_SU2, {});
+        mixed_bilinear_packed_SU2.assign(lattice_size_SU2, {});
+        trilinear_packed_SU2.assign(lattice_size_SU2, {});
+        mixed_trilinear_packed_SU2.assign(lattice_size_SU2, {});
+
+        bilinear_packed_SU3.assign(lattice_size_SU3, {});
+        mixed_bilinear_packed_SU3.assign(lattice_size_SU3, {});
+        trilinear_packed_SU3.assign(lattice_size_SU3, {});
+        mixed_trilinear_packed_SU3.assign(lattice_size_SU3, {});
+
+        // ---- SU(2) sublattice ----
+        for (size_t site = 0; site < lattice_size_SU2; ++site) {
+            // Bilinear SU(2)-SU(2): J(a,b)
+            const size_t n_bi = bilinear_interaction_SU2[site].size();
+            bilinear_packed_SU2[site].assign(n_bi * d22, 0.0);
+            for (size_t n = 0; n < n_bi; ++n) {
+                const auto& J = bilinear_interaction_SU2[site][n];
+                double* p = bilinear_packed_SU2[site].data() + n * d22;
+                for (size_t a = 0; a < d2; ++a)
+                    for (size_t b = 0; b < d2; ++b)
+                        p[a * d2 + b] = J(a, b);
+            }
+            // Mixed bilinear SU(2)-SU(3): J(a,c)
+            const size_t n_mb = mixed_bilinear_interaction_SU2[site].size();
+            mixed_bilinear_packed_SU2[site].assign(n_mb * d23, 0.0);
+            for (size_t n = 0; n < n_mb; ++n) {
+                const auto& J = mixed_bilinear_interaction_SU2[site][n];
+                double* p = mixed_bilinear_packed_SU2[site].data() + n * d23;
+                for (size_t a = 0; a < d2; ++a)
+                    for (size_t c = 0; c < d3; ++c)
+                        p[a * d3 + c] = J(a, c);
+            }
+            // Trilinear SU(2)-SU(2)-SU(2): T[a](b,c)
+            const size_t n_tri = trilinear_interaction_SU2[site].size();
+            trilinear_packed_SU2[site].assign(n_tri * d222, 0.0);
+            for (size_t n = 0; n < n_tri; ++n) {
+                const auto& T = trilinear_interaction_SU2[site][n];
+                double* p = trilinear_packed_SU2[site].data() + n * d222;
+                for (size_t a = 0; a < d2; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < d2; ++b)
+                        for (size_t c = 0; c < d2; ++c)
+                            p[(a * d2 + b) * d2 + c] = Ta(b, c);
+                }
+            }
+            // Mixed trilinear SU(2)-SU(2)-SU(3): T[a](b,c)
+            const size_t n_mtri = mixed_trilinear_interaction_SU2[site].size();
+            mixed_trilinear_packed_SU2[site].assign(n_mtri * d223, 0.0);
+            for (size_t n = 0; n < n_mtri; ++n) {
+                const auto& T = mixed_trilinear_interaction_SU2[site][n];
+                double* p = mixed_trilinear_packed_SU2[site].data() + n * d223;
+                for (size_t a = 0; a < d2; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < d2; ++b)
+                        for (size_t c = 0; c < d3; ++c)
+                            p[(a * d2 + b) * d3 + c] = Ta(b, c);
+                }
+            }
+        }
+
+        // ---- SU(3) sublattice ----
+        for (size_t site = 0; site < lattice_size_SU3; ++site) {
+            // Bilinear SU(3)-SU(3): J(a,b)
+            const size_t n_bi = bilinear_interaction_SU3[site].size();
+            bilinear_packed_SU3[site].assign(n_bi * d33, 0.0);
+            for (size_t n = 0; n < n_bi; ++n) {
+                const auto& J = bilinear_interaction_SU3[site][n];
+                double* p = bilinear_packed_SU3[site].data() + n * d33;
+                for (size_t a = 0; a < d3; ++a)
+                    for (size_t b = 0; b < d3; ++b)
+                        p[a * d3 + b] = J(a, b);
+            }
+            // Mixed bilinear SU(3)-SU(2): J(a,b) with a in SU3, b in SU2
+            const size_t n_mb = mixed_bilinear_interaction_SU3[site].size();
+            mixed_bilinear_packed_SU3[site].assign(n_mb * d3 * d2, 0.0);
+            for (size_t n = 0; n < n_mb; ++n) {
+                const auto& J = mixed_bilinear_interaction_SU3[site][n];
+                double* p = mixed_bilinear_packed_SU3[site].data() + n * d3 * d2;
+                for (size_t a = 0; a < d3; ++a)
+                    for (size_t b = 0; b < d2; ++b)
+                        p[a * d2 + b] = J(a, b);
+            }
+            // Trilinear SU(3)-SU(3)-SU(3): T[a](b,c)
+            const size_t n_tri = trilinear_interaction_SU3[site].size();
+            trilinear_packed_SU3[site].assign(n_tri * d333, 0.0);
+            for (size_t n = 0; n < n_tri; ++n) {
+                const auto& T = trilinear_interaction_SU3[site][n];
+                double* p = trilinear_packed_SU3[site].data() + n * d333;
+                for (size_t a = 0; a < d3; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < d3; ++b)
+                        for (size_t c = 0; c < d3; ++c)
+                            p[(a * d3 + b) * d3 + c] = Ta(b, c);
+                }
+            }
+            // Mixed trilinear SU(3)-SU(2)-SU(2): T[a](b,c), a in SU3, b,c in SU2
+            const size_t n_mtri = mixed_trilinear_interaction_SU3[site].size();
+            mixed_trilinear_packed_SU3[site].assign(n_mtri * d322, 0.0);
+            for (size_t n = 0; n < n_mtri; ++n) {
+                const auto& T = mixed_trilinear_interaction_SU3[site][n];
+                double* p = mixed_trilinear_packed_SU3[site].data() + n * d322;
+                for (size_t a = 0; a < d3; ++a) {
+                    const auto& Ta = T[a];
+                    for (size_t b = 0; b < d2; ++b)
+                        for (size_t c = 0; c < d2; ++c)
+                            p[(a * d2 + b) * d2 + c] = Ta(b, c);
+                }
+            }
+        }
     }
 
     // ============================================================

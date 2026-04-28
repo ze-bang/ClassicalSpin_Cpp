@@ -32,6 +32,83 @@
 #include <omp.h>
 #endif
 
+namespace {
+// =============================================================
+// Specialized inner kernels for MixedLattice MD local field.
+// Operate on flat row-major packed buffers (see
+// MixedLattice::build_packed_interaction_buffers).
+//
+//   bilinear_kernel<Da,Db>(J, s, H):
+//       H[a] += sum_{b=0..Db-1} J[a*Db + b] * s[b],   for a=0..Da-1
+//
+//   trilinear_kernel<Da,Db,Dc>(T, s1, s2, H):
+//       H[a] += sum_{b,c} T[(a*Db+b)*Dc + c] * s1[b] * s2[c]
+//
+// Compile-time dimensions let the compiler fully unroll and vectorize
+// the canonical 3x3 / 3x8 / 8x8 / 3x3x3 / 3x3x8 / 8x3x3 / 8x8x8 cases.
+// Generic-dim fallbacks at the bottom handle non-standard SU(N).
+// =============================================================
+template <size_t Da, size_t Db>
+inline void bilinear_kernel(const double* __restrict J,
+                            const double* __restrict s,
+                            double* __restrict H) {
+    for (size_t a = 0; a < Da; ++a) {
+        double acc = 0.0;
+        const double* __restrict Ja = J + a * Db;
+        for (size_t b = 0; b < Db; ++b) acc += Ja[b] * s[b];
+        H[a] += acc;
+    }
+}
+
+template <size_t Da, size_t Db, size_t Dc>
+inline void trilinear_kernel(const double* __restrict T,
+                             const double* __restrict s1,
+                             const double* __restrict s2,
+                             double* __restrict H) {
+    // Loop nest: a outer, b middle, c inner-most.
+    //   - inner stride is unit (T row-major in c)
+    //   - s1[b] is hoisted out of the c loop as a scalar
+    //   - s2[c] is reused across b for fixed a (cache-friendly)
+    for (size_t a = 0; a < Da; ++a) {
+        double acc = 0.0;
+        for (size_t b = 0; b < Db; ++b) {
+            const double s1b = s1[b];
+            const double* __restrict Tab = T + (a * Db + b) * Dc;
+            for (size_t c = 0; c < Dc; ++c) acc += Tab[c] * s1b * s2[c];
+        }
+        H[a] += acc;
+    }
+}
+
+inline void bilinear_kernel_dyn(const double* __restrict J,
+                                const double* __restrict s,
+                                double* __restrict H,
+                                size_t da, size_t db) {
+    for (size_t a = 0; a < da; ++a) {
+        double acc = 0.0;
+        const double* Ja = J + a * db;
+        for (size_t b = 0; b < db; ++b) acc += Ja[b] * s[b];
+        H[a] += acc;
+    }
+}
+
+inline void trilinear_kernel_dyn(const double* __restrict T,
+                                 const double* __restrict s1,
+                                 const double* __restrict s2,
+                                 double* __restrict H,
+                                 size_t da, size_t db, size_t dc) {
+    for (size_t a = 0; a < da; ++a) {
+        double acc = 0.0;
+        for (size_t b = 0; b < db; ++b) {
+            const double s1b = s1[b];
+            const double* Tab = T + (a * db + b) * dc;
+            for (size_t c = 0; c < dc; ++c) acc += Tab[c] * s1b * s2[c];
+        }
+        H[a] += acc;
+    }
+}
+}  // namespace
+
 // ---- MixedLattice::set_pulse_SU2 ----
     void MixedLattice::set_pulse_SU2(const vector<SpinVector>& field_in1, double t_B1,
                       const vector<SpinVector>& field_in2, double t_B2,
@@ -241,99 +318,138 @@
             drive_envelopes_SU3(t, su3_f1, su3_f2);
         }
 
-        // SU(2) dynamics: dS/dt = H × S (cross product for spin-1/2).
-        // Each site only writes its own dsdt slot and only reads neighbour
-        // spins from `state`, so the loop is embarrassingly parallel — one
-        // #pragma omp parallel for over sites scales linearly. The
-        // `H` stack buffer is firstprivate so each thread has its own.
-        if (spin_dim_SU2 == 3) {
+        const bool fast_su2 = (spin_dim_SU2 == 3);
+        const bool fast_su3 = (spin_dim_SU3 == 8);
+
+        // -------------------- Hot path: both species standard --------------------
+        // Single persistent OpenMP team per RHS call wrapping both SU(2) and
+        // SU(3) site loops (writes to disjoint dsdt slices, reads only state).
+        // Saves one team start-up and one barrier per RHS vs the previous
+        // two-region layout. `nowait` on the SU(2) loop lets faster threads
+        // start the SU(3) work while stragglers finish SU(2). See
+        // optimization_notes.tex Ingredient XVI.
+        if (fast_su2 && fast_su3) {
+            const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
 #ifdef _OPENMP
-            #pragma omp parallel for schedule(static) if(lattice_size_SU2 >= 64)
+            #pragma omp parallel if(total_sites >= 64)
 #endif
-            for (size_t site = 0; site < lattice_size_SU2; ++site) {
-                const size_t idx = site * spin_dim_SU2;
-
-                double H[3];
-                get_local_field_SU2_flat_into(site, state, offset_SU3,
-                                              su2_f1, su2_f2, H);
-
-                dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
-                dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
-                dsdt[idx + 2] = H[0] * state[idx + 1] - H[1] * state[idx + 0];
-
-                // Gilbert damping: dS/dt += (alpha/|S|) * S × (S × H)
-                // S × (S × H) = S(S·H) - H|S|^2  (BAC-CAB identity)
-                if (alpha_gilbert != 0.0) {
-                    const double Sx = state[idx + 0], Sy = state[idx + 1], Sz = state[idx + 2];
-                    const double S2 = Sx*Sx + Sy*Sy + Sz*Sz;
-                    const double SdotH = Sx*H[0] + Sy*H[1] + Sz*H[2];
-                    const double inv_S = (S2 > 0.0) ? alpha_gilbert / std::sqrt(S2) : 0.0;
-                    dsdt[idx + 0] += inv_S * (Sx * SdotH - H[0] * S2);
-                    dsdt[idx + 1] += inv_S * (Sy * SdotH - H[1] * S2);
-                    dsdt[idx + 2] += inv_S * (Sz * SdotH - H[2] * S2);
-                }
-            }
-        } else {
-            // General case: would need proper SU(N) structure constants for
-            // non-spin-1/2 SU(2) sublattice (rare); leave RHS = 0 for safety,
-            // matching the previous behaviour.
-            for (size_t site = 0; site < lattice_size_SU2; ++site) {
-                const size_t idx = site * spin_dim_SU2;
-                for (size_t j = 0; j < spin_dim_SU2; ++j) {
-                    dsdt[idx + j] = 0.0;
-                }
-            }
-        }
-
-        // SU(3) dynamics: dS/dt = f_ijk H_j S_k − Γ_i (S_i − S_i^eq)
-        //
-        // The textbook contraction is an 8×8×8 triple-loop per site that
-        // multiplies by the Gell-Mann structure constants. Those constants
-        // are extremely sparse (only 9 unique non-zero (a<b<c) triples,
-        // i.e. 54 of 512 entries non-zero), so we route through
-        // `cross_prod_SU3_flat`, which evaluates only the non-zero terms
-        // directly — fully inlined, no heap allocation.
-        if (spin_dim_SU3 == 8) {
-            // Embarrassingly parallel over SU(3) sites: each iteration
-            // writes dsdt[idx..idx+8) and only reads neighbour spins from
-            // `state`. `H` is stack-local per thread.
+            {
 #ifdef _OPENMP
-            #pragma omp parallel for schedule(static) if(lattice_size_SU3 >= 64)
+                #pragma omp for schedule(static) nowait
 #endif
-            for (size_t site = 0; site < lattice_size_SU3; ++site) {
-                const size_t idx = offset_SU3 + site * spin_dim_SU3;
+                for (size_t site = 0; site < lattice_size_SU2; ++site) {
+                    const size_t idx = site * 3;
 
-                double H[8];
-                get_local_field_SU3_flat_into(site, state, offset_SU3,
-                                              su3_f1, su3_f2, H);
+                    double H[3];
+                    get_local_field_SU2_flat_into(site, state, offset_SU3,
+                                                  su2_f1, su2_f2, H);
 
-                cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
+                    dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
+                    dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
+                    dsdt[idx + 2] = H[0] * state[idx + 1] - H[1] * state[idx + 0];
 
-                // Bloch damping: −Γ_i (n^i − n^i_eq).
-                for (size_t i = 0; i < 8; ++i) {
-                    if (damping_rates_SU3(i) != 0.0) {
-                        dsdt[idx + i] -= damping_rates_SU3(i) *
-                            (state[idx + i] - equilibrium_SU3[site](i));
+                    // Gilbert damping: dS/dt += (alpha/|S|) * S × (S × H)
+                    //   S × (S × H) = S(S·H) - H|S|^2  (BAC-CAB)
+                    if (alpha_gilbert != 0.0) {
+                        const double Sx = state[idx + 0], Sy = state[idx + 1], Sz = state[idx + 2];
+                        const double S2 = Sx*Sx + Sy*Sy + Sz*Sz;
+                        const double SdotH = Sx*H[0] + Sy*H[1] + Sz*H[2];
+                        const double inv_S = (S2 > 0.0) ? alpha_gilbert / std::sqrt(S2) : 0.0;
+                        dsdt[idx + 0] += inv_S * (Sx * SdotH - H[0] * S2);
+                        dsdt[idx + 1] += inv_S * (Sy * SdotH - H[1] * S2);
+                        dsdt[idx + 2] += inv_S * (Sz * SdotH - H[2] * S2);
                     }
                 }
-            }
-        } else {
-            // General-d SU(N) fallback for non-standard cases (rarely used).
-            const auto& f = get_SU3_structure();
-            for (size_t site = 0; site < lattice_size_SU3; ++site) {
-                const size_t idx = offset_SU3 + site * spin_dim_SU3;
-                SpinVector H = get_local_field_SU3_flat(site, state, offset_SU3, t);
-                for (size_t i = 0; i < spin_dim_SU3; ++i) {
-                    double dSdt_i = 0.0;
-                    for (size_t j = 0; j < spin_dim_SU3; ++j) {
-                        for (size_t k = 0; k < spin_dim_SU3; ++k) {
-                            dSdt_i += f[i](j, k) * H(j) * state[idx + k];
+
+#ifdef _OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                    const size_t idx = offset_SU3 + site * 8;
+
+                    double H[8];
+                    get_local_field_SU3_flat_into(site, state, offset_SU3,
+                                                  su3_f1, su3_f2, H);
+
+                    // SU(3) dynamics use sparse Gell-Mann f-symbols (only 9
+                    // non-zero (a<b<c) triples instead of 8^3 = 512 entries).
+                    cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
+
+                    // Bloch damping: −Γ_i (n^i − n^i_eq).
+                    for (size_t i = 0; i < 8; ++i) {
+                        if (damping_rates_SU3(i) != 0.0) {
+                            dsdt[idx + i] -= damping_rates_SU3(i) *
+                                (state[idx + i] - equilibrium_SU3[site](i));
                         }
                     }
-                    if (damping_rates_SU3(i) != 0.0) {
-                        dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - equilibrium_SU3[site](i));
+                }
+            } // end omp parallel
+        } else {
+            // -------------------- Generic / fallback paths --------------------
+            // Used only for non-standard SU(N) dimensions; not in the hot path.
+            if (fast_su2) {
+#ifdef _OPENMP
+                #pragma omp parallel for schedule(static) if(lattice_size_SU2 >= 64)
+#endif
+                for (size_t site = 0; site < lattice_size_SU2; ++site) {
+                    const size_t idx = site * 3;
+                    double H[3];
+                    get_local_field_SU2_flat_into(site, state, offset_SU3,
+                                                  su2_f1, su2_f2, H);
+                    dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
+                    dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
+                    dsdt[idx + 2] = H[0] * state[idx + 1] - H[1] * state[idx + 0];
+                    if (alpha_gilbert != 0.0) {
+                        const double Sx = state[idx + 0], Sy = state[idx + 1], Sz = state[idx + 2];
+                        const double S2 = Sx*Sx + Sy*Sy + Sz*Sz;
+                        const double SdotH = Sx*H[0] + Sy*H[1] + Sz*H[2];
+                        const double inv_S = (S2 > 0.0) ? alpha_gilbert / std::sqrt(S2) : 0.0;
+                        dsdt[idx + 0] += inv_S * (Sx * SdotH - H[0] * S2);
+                        dsdt[idx + 1] += inv_S * (Sy * SdotH - H[1] * S2);
+                        dsdt[idx + 2] += inv_S * (Sz * SdotH - H[2] * S2);
                     }
-                    dsdt[idx + i] = dSdt_i;
+                }
+            } else {
+                for (size_t site = 0; site < lattice_size_SU2; ++site) {
+                    const size_t idx = site * spin_dim_SU2;
+                    for (size_t j = 0; j < spin_dim_SU2; ++j) dsdt[idx + j] = 0.0;
+                }
+            }
+
+            if (fast_su3) {
+#ifdef _OPENMP
+                #pragma omp parallel for schedule(static) if(lattice_size_SU3 >= 64)
+#endif
+                for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                    const size_t idx = offset_SU3 + site * 8;
+                    double H[8];
+                    get_local_field_SU3_flat_into(site, state, offset_SU3,
+                                                  su3_f1, su3_f2, H);
+                    cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
+                    for (size_t i = 0; i < 8; ++i) {
+                        if (damping_rates_SU3(i) != 0.0) {
+                            dsdt[idx + i] -= damping_rates_SU3(i) *
+                                (state[idx + i] - equilibrium_SU3[site](i));
+                        }
+                    }
+                }
+            } else {
+                const auto& f = get_SU3_structure();
+                for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                    const size_t idx = offset_SU3 + site * spin_dim_SU3;
+                    SpinVector H = get_local_field_SU3_flat(site, state, offset_SU3, t);
+                    for (size_t i = 0; i < spin_dim_SU3; ++i) {
+                        double dSdt_i = 0.0;
+                        for (size_t j = 0; j < spin_dim_SU3; ++j) {
+                            for (size_t k = 0; k < spin_dim_SU3; ++k) {
+                                dSdt_i += f[i](j, k) * H(j) * state[idx + k];
+                            }
+                        }
+                        if (damping_rates_SU3(i) != 0.0) {
+                            dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - equilibrium_SU3[site](i));
+                        }
+                        dsdt[idx + i] = dSdt_i;
+                    }
                 }
             }
         }
@@ -343,91 +459,112 @@
     // Heap-free, drive-hoisted variant of `get_local_field_SU2_flat`. Writes
     // the full local field directly into the caller-supplied
     // `H[0..spin_dim_SU2-1]`, accepting pre-computed envelope factors so the
-    // two `exp + cos` math calls per pulse are not repeated per site. This
-    // is the form used by `landau_lifshitz`; it eliminates one
-    // `Eigen::VectorXd` heap allocation per site per RHS call (≈ N_sites
-    // `malloc/free` pairs).
+    // two `exp + cos` math calls per pulse are not repeated per site.
+    //
+    // Hot path (spin_dim_SU2==3, spin_dim_SU3==8) uses flat row-major
+    // packed buffers + compile-time-sized inline kernels (no MatrixXd
+    // pointer chase, unit-stride inner loop, vectorizable). Generic
+    // SU(N) shapes fall through to runtime-dim kernels.
     void MixedLattice::get_local_field_SU2_flat_into(
         size_t site, const ODEState& state, size_t offset_SU3,
         double drive_factor1, double drive_factor2,
         double* __restrict H) const {
-        const size_t idx = site * spin_dim_SU2;
+        const size_t d2 = spin_dim_SU2;
+        const size_t d3 = spin_dim_SU3;
+        const size_t idx = site * d2;
         const double* __restrict field0 = field_SU2[site].data();
-        for (size_t a = 0; a < spin_dim_SU2; ++a) H[a] = -field0[a];
+        for (size_t a = 0; a < d2; ++a) H[a] = -field0[a];
 
-        // Onsite: 2*A*S
+        // Onsite: 2*A*S. A is a small SpinMatrix (3x3 in the hot case);
+        // accumulate a *= 2 hoist by doubling at the end.
         const auto& A = onsite_interaction_SU2[site];
-        for (size_t a = 0; a < spin_dim_SU2; ++a) {
+        for (size_t a = 0; a < d2; ++a) {
             double acc = 0.0;
-            for (size_t b = 0; b < spin_dim_SU2; ++b) {
+            for (size_t b = 0; b < d2; ++b) {
                 acc += A(a, b) * state[idx + b];
             }
             H[a] += 2.0 * acc;
         }
 
-        // Bilinear SU(2)-SU(2)
+        const bool fast = (d2 == 3 && d3 == 8);
+
+        // ---- Bilinear SU(2)-SU(2): packed J(a,b), row-major ----
         const auto& bp_SU2 = bilinear_partners_SU2[site];
-        const auto& bi_SU2 = bilinear_interaction_SU2[site];
-        for (size_t n = 0; n < bp_SU2.size(); ++n) {
-            const size_t partner_idx = bp_SU2[n] * spin_dim_SU2;
-            const auto& J = bi_SU2[n];
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                double acc = 0.0;
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    acc += J(a, b) * state[partner_idx + b];
+        const size_t n_bi = bp_SU2.size();
+        if (n_bi != 0) {
+            const double* __restrict Jbase = bilinear_packed_SU2[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_bi; ++n) {
+                    const double* __restrict S = &state[bp_SU2[n] * 3];
+                    bilinear_kernel<3, 3>(Jbase + n * 9, S, H);
                 }
-                H[a] += acc;
+            } else {
+                const size_t stride = d2 * d2;
+                for (size_t n = 0; n < n_bi; ++n) {
+                    const double* __restrict S = &state[bp_SU2[n] * d2];
+                    bilinear_kernel_dyn(Jbase + n * stride, S, H, d2, d2);
+                }
             }
         }
 
-        // Mixed bilinear SU(2)-SU(3)
+        // ---- Mixed bilinear SU(2)-SU(3): packed J(a,c) ----
         const auto& mbp = mixed_bilinear_partners_SU2[site];
-        const auto& mbi = mixed_bilinear_interaction_SU2[site];
-        for (size_t n = 0; n < mbp.size(); ++n) {
-            const size_t partner_idx = offset_SU3 + mbp[n] * spin_dim_SU3;
-            const auto& J = mbi[n];
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                double acc = 0.0;
-                for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                    acc += J(a, c) * state[partner_idx + c];
+        const size_t n_mb = mbp.size();
+        if (n_mb != 0) {
+            const double* __restrict Jbase = mixed_bilinear_packed_SU2[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_mb; ++n) {
+                    const double* __restrict S = &state[offset_SU3 + mbp[n] * 8];
+                    bilinear_kernel<3, 8>(Jbase + n * 24, S, H);
                 }
-                H[a] += acc;
+            } else {
+                const size_t stride = d2 * d3;
+                for (size_t n = 0; n < n_mb; ++n) {
+                    const double* __restrict S = &state[offset_SU3 + mbp[n] * d3];
+                    bilinear_kernel_dyn(Jbase + n * stride, S, H, d2, d3);
+                }
             }
         }
 
-        // Trilinear SU(2)-SU(2)-SU(2): T[a](b,c) * S1[b] * S2[c]
+        // ---- Trilinear SU(2)-SU(2)-SU(2): packed T(a,b,c) ----
         const auto& tp_SU2 = trilinear_partners_SU2[site];
-        const auto& ti_SU2 = trilinear_interaction_SU2[site];
-        for (size_t n = 0; n < tp_SU2.size(); ++n) {
-            const size_t p1_idx = tp_SU2[n][0] * spin_dim_SU2;
-            const size_t p2_idx = tp_SU2[n][1] * spin_dim_SU2;
-            const auto& T = ti_SU2[n];
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                double temp = 0.0;
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
-                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
-                    }
+        const size_t n_tri = tp_SU2.size();
+        if (n_tri != 0) {
+            const double* __restrict Tbase = trilinear_packed_SU2[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_tri; ++n) {
+                    const double* __restrict S1 = &state[tp_SU2[n][0] * 3];
+                    const double* __restrict S2 = &state[tp_SU2[n][1] * 3];
+                    trilinear_kernel<3, 3, 3>(Tbase + n * 27, S1, S2, H);
                 }
-                H[a] += temp;
+            } else {
+                const size_t stride = d2 * d2 * d2;
+                for (size_t n = 0; n < n_tri; ++n) {
+                    const double* __restrict S1 = &state[tp_SU2[n][0] * d2];
+                    const double* __restrict S2 = &state[tp_SU2[n][1] * d2];
+                    trilinear_kernel_dyn(Tbase + n * stride, S1, S2, H, d2, d2, d2);
+                }
             }
         }
 
-        // Mixed trilinear SU(2)-SU(2)-SU(3)
+        // ---- Mixed trilinear SU(2)-SU(2)-SU(3): packed T(a,b,c) ----
         const auto& mtp = mixed_trilinear_partners_SU2[site];
-        const auto& mti = mixed_trilinear_interaction_SU2[site];
-        for (size_t n = 0; n < mtp.size(); ++n) {
-            const size_t p1_idx = mtp[n][0] * spin_dim_SU2;
-            const size_t p2_idx = offset_SU3 + mtp[n][1] * spin_dim_SU3;
-            const auto& T = mti[n];
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
-                double temp = 0.0;
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
-                    }
+        const size_t n_mtri = mtp.size();
+        if (n_mtri != 0) {
+            const double* __restrict Tbase = mixed_trilinear_packed_SU2[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_mtri; ++n) {
+                    const double* __restrict S1 = &state[mtp[n][0] * 3];
+                    const double* __restrict S2 = &state[offset_SU3 + mtp[n][1] * 8];
+                    trilinear_kernel<3, 3, 8>(Tbase + n * 72, S1, S2, H);
                 }
-                H[a] += temp;
+            } else {
+                const size_t stride = d2 * d2 * d3;
+                for (size_t n = 0; n < n_mtri; ++n) {
+                    const double* __restrict S1 = &state[mtp[n][0] * d2];
+                    const double* __restrict S2 = &state[offset_SU3 + mtp[n][1] * d3];
+                    trilinear_kernel_dyn(Tbase + n * stride, S1, S2, H, d2, d2, d3);
+                }
             }
         }
 
@@ -435,9 +572,9 @@
         // caller checking before invoking; here we just trust the factors.
         if (drive_factor1 != 0.0 || drive_factor2 != 0.0) {
             const size_t atom = site % N_atoms_SU2;
-            const double* fd0 = field_drive_SU2[0].data() + atom * spin_dim_SU2;
-            const double* fd1 = field_drive_SU2[1].data() + atom * spin_dim_SU2;
-            for (size_t a = 0; a < spin_dim_SU2; ++a) {
+            const double* fd0 = field_drive_SU2[0].data() + atom * d2;
+            const double* fd1 = field_drive_SU2[1].data() + atom * d2;
+            for (size_t a = 0; a < d2; ++a) {
                 H[a] -= fd0[a] * drive_factor1 + fd1[a] * drive_factor2;
             }
         }
@@ -531,91 +668,109 @@
         size_t site, const ODEState& state, size_t offset_SU3,
         double drive_factor1, double drive_factor2,
         double* __restrict H) const {
-        const size_t idx = offset_SU3 + site * spin_dim_SU3;
+        const size_t d2 = spin_dim_SU2;
+        const size_t d3 = spin_dim_SU3;
+        const size_t idx = offset_SU3 + site * d3;
         const double* __restrict field0 = field_SU3[site].data();
-        for (size_t a = 0; a < spin_dim_SU3; ++a) H[a] = -field0[a];
+        for (size_t a = 0; a < d3; ++a) H[a] = -field0[a];
 
         // Onsite: 2*A*S
         const auto& A = onsite_interaction_SU3[site];
-        for (size_t a = 0; a < spin_dim_SU3; ++a) {
+        for (size_t a = 0; a < d3; ++a) {
             double acc = 0.0;
-            for (size_t b = 0; b < spin_dim_SU3; ++b) {
+            for (size_t b = 0; b < d3; ++b) {
                 acc += A(a, b) * state[idx + b];
             }
             H[a] += 2.0 * acc;
         }
 
-        // Bilinear SU(3)-SU(3)
+        const bool fast = (d2 == 3 && d3 == 8);
+
+        // ---- Bilinear SU(3)-SU(3): packed J(a,b) ----
         const auto& bp_SU3 = bilinear_partners_SU3[site];
-        const auto& bi_SU3 = bilinear_interaction_SU3[site];
-        for (size_t n = 0; n < bp_SU3.size(); ++n) {
-            const size_t partner_idx = offset_SU3 + bp_SU3[n] * spin_dim_SU3;
-            const auto& J = bi_SU3[n];
-            for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                double acc = 0.0;
-                for (size_t b = 0; b < spin_dim_SU3; ++b) {
-                    acc += J(a, b) * state[partner_idx + b];
+        const size_t n_bi = bp_SU3.size();
+        if (n_bi != 0) {
+            const double* __restrict Jbase = bilinear_packed_SU3[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_bi; ++n) {
+                    const double* __restrict S = &state[offset_SU3 + bp_SU3[n] * 8];
+                    bilinear_kernel<8, 8>(Jbase + n * 64, S, H);
                 }
-                H[a] += acc;
+            } else {
+                const size_t stride = d3 * d3;
+                for (size_t n = 0; n < n_bi; ++n) {
+                    const double* __restrict S = &state[offset_SU3 + bp_SU3[n] * d3];
+                    bilinear_kernel_dyn(Jbase + n * stride, S, H, d3, d3);
+                }
             }
         }
 
-        // Mixed bilinear SU(3)-SU(2)
+        // ---- Mixed bilinear SU(3)-SU(2): packed J(a,b) ----
         const auto& mbp = mixed_bilinear_partners_SU3[site];
-        const auto& mbi = mixed_bilinear_interaction_SU3[site];
-        for (size_t n = 0; n < mbp.size(); ++n) {
-            const size_t partner_idx = mbp[n] * spin_dim_SU2;
-            const auto& J = mbi[n];
-            for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                double acc = 0.0;
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    acc += J(a, b) * state[partner_idx + b];
+        const size_t n_mb = mbp.size();
+        if (n_mb != 0) {
+            const double* __restrict Jbase = mixed_bilinear_packed_SU3[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_mb; ++n) {
+                    const double* __restrict S = &state[mbp[n] * 3];
+                    bilinear_kernel<8, 3>(Jbase + n * 24, S, H);
                 }
-                H[a] += acc;
+            } else {
+                const size_t stride = d3 * d2;
+                for (size_t n = 0; n < n_mb; ++n) {
+                    const double* __restrict S = &state[mbp[n] * d2];
+                    bilinear_kernel_dyn(Jbase + n * stride, S, H, d3, d2);
+                }
             }
         }
 
-        // Trilinear SU(3)-SU(3)-SU(3)
+        // ---- Trilinear SU(3)-SU(3)-SU(3): packed T(a,b,c) ----
         const auto& tp_SU3 = trilinear_partners_SU3[site];
-        const auto& ti_SU3 = trilinear_interaction_SU3[site];
-        for (size_t n = 0; n < tp_SU3.size(); ++n) {
-            const size_t p1_idx = offset_SU3 + tp_SU3[n][0] * spin_dim_SU3;
-            const size_t p2_idx = offset_SU3 + tp_SU3[n][1] * spin_dim_SU3;
-            const auto& T = ti_SU3[n];
-            for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                double temp = 0.0;
-                for (size_t b = 0; b < spin_dim_SU3; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
-                    }
+        const size_t n_tri = tp_SU3.size();
+        if (n_tri != 0) {
+            const double* __restrict Tbase = trilinear_packed_SU3[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_tri; ++n) {
+                    const double* __restrict S1 = &state[offset_SU3 + tp_SU3[n][0] * 8];
+                    const double* __restrict S2 = &state[offset_SU3 + tp_SU3[n][1] * 8];
+                    trilinear_kernel<8, 8, 8>(Tbase + n * 512, S1, S2, H);
                 }
-                H[a] += temp;
+            } else {
+                const size_t stride = d3 * d3 * d3;
+                for (size_t n = 0; n < n_tri; ++n) {
+                    const double* __restrict S1 = &state[offset_SU3 + tp_SU3[n][0] * d3];
+                    const double* __restrict S2 = &state[offset_SU3 + tp_SU3[n][1] * d3];
+                    trilinear_kernel_dyn(Tbase + n * stride, S1, S2, H, d3, d3, d3);
+                }
             }
         }
 
-        // Mixed trilinear SU(3)-SU(2)-SU(2)
+        // ---- Mixed trilinear SU(3)-SU(2)-SU(2): packed T(a,b,c) ----
         const auto& mtp = mixed_trilinear_partners_SU3[site];
-        const auto& mti = mixed_trilinear_interaction_SU3[site];
-        for (size_t n = 0; n < mtp.size(); ++n) {
-            const size_t p1_idx = mtp[n][0] * spin_dim_SU2;
-            const size_t p2_idx = mtp[n][1] * spin_dim_SU2;
-            const auto& T = mti[n];
-            for (size_t a = 0; a < spin_dim_SU3; ++a) {
-                double temp = 0.0;
-                for (size_t b = 0; b < spin_dim_SU2; ++b) {
-                    for (size_t c = 0; c < spin_dim_SU2; ++c) {
-                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
-                    }
+        const size_t n_mtri = mtp.size();
+        if (n_mtri != 0) {
+            const double* __restrict Tbase = mixed_trilinear_packed_SU3[site].data();
+            if (fast) {
+                for (size_t n = 0; n < n_mtri; ++n) {
+                    const double* __restrict S1 = &state[mtp[n][0] * 3];
+                    const double* __restrict S2 = &state[mtp[n][1] * 3];
+                    trilinear_kernel<8, 3, 3>(Tbase + n * 72, S1, S2, H);
                 }
-                H[a] += temp;
+            } else {
+                const size_t stride = d3 * d2 * d2;
+                for (size_t n = 0; n < n_mtri; ++n) {
+                    const double* __restrict S1 = &state[mtp[n][0] * d2];
+                    const double* __restrict S2 = &state[mtp[n][1] * d2];
+                    trilinear_kernel_dyn(Tbase + n * stride, S1, S2, H, d3, d2, d2);
+                }
             }
         }
 
         if (drive_factor1 != 0.0 || drive_factor2 != 0.0) {
             const size_t atom = site % N_atoms_SU3;
-            const double* fd0 = field_drive_SU3[0].data() + atom * spin_dim_SU3;
-            const double* fd1 = field_drive_SU3[1].data() + atom * spin_dim_SU3;
-            for (size_t a = 0; a < spin_dim_SU3; ++a) {
+            const double* fd0 = field_drive_SU3[0].data() + atom * d3;
+            const double* fd1 = field_drive_SU3[1].data() + atom * d3;
+            for (size_t a = 0; a < d3; ++a) {
                 H[a] -= fd0[a] * drive_factor1 + fd1[a] * drive_factor2;
             }
         }

@@ -1797,6 +1797,197 @@ applied to 2DCS in the published spin codes; it is the cheapest
 of the three to add and the most portable.
 
 % =================================================================
+\section{Ingredient XVI: packed row-major interaction tables and
+         specialized inner kernels for the mixed-lattice MD RHS
+         (M1--M4)}
+\label{sec:packed-mixed-rhs}
+% =================================================================
+
+\texttt{MixedLattice}'s molecular-dynamics RHS
+(\texttt{landau\_lifshitz}, called by Boost.Odeint inside RK4 / RK45
+steps and ultimately by every $M_0$ and $M_1$ trajectory of the 2DCS
+driver of Section~\ref{sec:pump-probe-w123}) is the throughput
+bottleneck for any TmFeO$_3$-class run with the trilinear coupling
+turned on.  Four small refactors (M1--M4) take it from $\sim 2.2 \times
+10^3$ to $\sim 6.1 \times 10^3$ RHS/s at one thread on the same 16-core
+benchmark socket --- a $2.8\times$ single-thread speedup on the
+\texttt{tmfeo3-trilinear} model --- without changing any physics and
+without touching the Monte-Carlo code path.
+
+\subsection{The starting picture}
+
+Before this pass, \texttt{get\_local\_field\_SU2\_flat\_into} already
+wrote into a stack \texttt{double[3]} buffer (Ingredient~XIV);
+likewise SU(3) wrote into \texttt{double[8]}.  The drive envelope was
+already hoisted (Ingredient~VII).  But the inner trilinear loop was
+literally
+\begin{verbatim}
+const auto& T = ti_SU2[n];                        // vector<MatrixXd>
+for (size_t a = 0; a < spin_dim_SU2; ++a) {
+    double temp = 0.0;
+    for (size_t b = 0; b < spin_dim_SU2; ++b)
+        for (size_t c = 0; c < spin_dim_SU2; ++c)
+            temp += T[a](b, c) * state[p1+b] * state[p2+c];
+    H[a] += temp;
+}
+\end{verbatim}
+which has \emph{three} compounding defects:
+\begin{enumerate}[noitemsep]
+  \item \textbf{Pointer-chase per $a$.}  \texttt{SpinTensor3} is
+        \texttt{std::vector<Eigen::MatrixXd>}, so \texttt{T[a]} is a
+        \texttt{vector::operator[]} followed by an indirect load of
+        \texttt{MatrixXd::m\_data}.
+  \item \textbf{Wrong-stride access.}  \texttt{Eigen::MatrixXd} is
+        column-major by default, but the innermost loop strides $c$
+        fastest.  Each \texttt{T[a](b,c)} access therefore strides by
+        \texttt{rows} doubles ($3$ or $8$) instead of unit stride,
+        defeating prefetch and SIMD load coalescing.
+  \item \textbf{Dimension is dynamic.}  The inner triple loop has
+        runtime trip counts and cannot be unrolled or autovectorized
+        by the compiler.
+\end{enumerate}
+The exact same three defects affect the bilinear branch.  And the
+\texttt{landau\_lifshitz} dispatch opens \emph{two} OpenMP parallel
+regions per call --- one over SU(2) sites, one over SU(3) sites.
+
+\subsection{M1 + M4: pack everything into row-major \texttt{double[]}}
+
+We add eight new per-site flat buffers to \texttt{MixedLattice}:
+\begin{verbatim}
+vector<vector<double>> bilinear_packed_SU2;       // (a,b) row-major
+vector<vector<double>> bilinear_packed_SU3;
+vector<vector<double>> mixed_bilinear_packed_SU2;
+vector<vector<double>> mixed_bilinear_packed_SU3;
+vector<vector<double>> trilinear_packed_SU2;      // (a,b,c) row-major
+vector<vector<double>> trilinear_packed_SU3;
+vector<vector<double>> mixed_trilinear_packed_SU2;
+vector<vector<double>> mixed_trilinear_packed_SU3;
+\end{verbatim}
+The layout per site is
+\[
+  T^{n}_{abc}
+  \;=\;
+  \texttt{trilinear\_packed[site]}
+  \bigl[
+    n \cdot d_a d_b d_c
+    + (a \cdot d_b + b) \cdot d_c
+    + c
+  \bigr]
+\]
+i.e.~contiguous and row-major in $(a,b,c)$.  These buffers are built
+once at the end of the constructor, after the original
+\texttt{vector<vector<SpinTensor3>>} graph has been assembled, by a
+new \texttt{build\_packed\_interaction\_buffers()} method.  The
+original storage is kept untouched for the Monte-Carlo path
+(\texttt{site\_energy\_diff}, \texttt{total\_energy}, \dots) so M1 +
+M4 are a pure addition.
+
+\subsection{M2: compile-time-sized inner kernels}
+
+With the data packed, the inner kernels become
+\begin{verbatim}
+template<size_t Da, size_t Db, size_t Dc>
+inline void trilinear_kernel(const double* __restrict T,
+                             const double* __restrict s1,
+                             const double* __restrict s2,
+                             double* __restrict H) {
+    for (size_t a = 0; a < Da; ++a) {
+        double acc = 0.0;
+        for (size_t b = 0; b < Db; ++b) {
+            const double s1b = s1[b];
+            const double* Tab = T + (a*Db + b)*Dc;
+            for (size_t c = 0; c < Dc; ++c) acc += Tab[c]*s1b*s2[c];
+        }
+        H[a] += acc;
+    }
+}
+\end{verbatim}
+and the bilinear analog \texttt{bilinear\_kernel<Da, Db>} takes a
+single neighbour spin.  The hot path
+($\texttt{spin\_dim\_SU2} = 3$, $\texttt{spin\_dim\_SU3} = 8$)
+instantiates the compiler-known cases
+\texttt{<3,3,3>} (27 FMAs), \texttt{<3,3,8>} (72 FMAs),
+\texttt{<8,3,3>} (72 FMAs), \texttt{<8,8,8>} (512 FMAs);
+GCC at \texttt{-O3 -march=native} fully unrolls these into AVX2 FMA
+chains.  A runtime-dim fallback (\texttt{trilinear\_kernel\_dyn},
+\texttt{bilinear\_kernel\_dyn}) preserves correctness for
+non-standard SU($N$) dimensions.
+
+\subsection{M3: single OpenMP team per RHS}
+
+\texttt{landau\_lifshitz} now wraps both site loops in a single
+\texttt{\#pragma omp parallel} region:
+\begin{verbatim}
+const size_t total_sites = lattice_size_SU2 + lattice_size_SU3;
+#pragma omp parallel if(total_sites >= 64)
+{
+    #pragma omp for schedule(static) nowait
+    for (size_t site = 0; site < lattice_size_SU2; ++site) { ... }
+    #pragma omp for schedule(static)
+    for (size_t site = 0; site < lattice_size_SU3; ++site) { ... }
+}
+\end{verbatim}
+The \texttt{nowait} on the SU(2) loop lets fast threads start SU(3)
+work while stragglers finish SU(2).  Each RHS now pays for one team
+start-up + one barrier instead of two of each.  The fallback for
+non-standard SU($N$) shapes still uses two separate parallel regions.
+
+\subsection{Measured impact}
+
+Re-running \texttt{bench\_md} on the same 16-core x86 socket as
+Section~\ref{sec:bench-md-rhs-heap-free} (GCC 11
+\texttt{-O3 -march=native -flto}, three repeats per cell):
+
+\begin{center}
+\small
+\begin{tabular}{llrrrrr}
+\hline
+Family & Model ($L$) & $T_1$ (RHS/s) & $T_1$ ratio & $T_{16}$ (RHS/s) & $T_{16}$ ratio & $S(16)$ \\
+\hline
+\texttt{mixed} & TmFeO$_3$ trilinear ($L=4$) & $2.19 \times 10^{3} \to 6.10 \times 10^{3}$ & $\mathbf{2.79\times}$ & $1.96 \times 10^{4} \to 4.27 \times 10^{4}$ & $\mathbf{2.18\times}$ & $7.0\times$ \\
+\texttt{mixed} & TmFeO$_3$ bilinear  ($L=4$) & --- $\to 7.07 \times 10^{3}$ & ---                & --- $\to 4.83 \times 10^{4}$ & ---                & $6.8\times$ \\
+\texttt{mixed} & TmFeO$_3$ driven    ($L=4$) & --- $\to 7.03 \times 10^{3}$ & ---                & --- $\to 4.67 \times 10^{4}$ & ---                & $6.6\times$ \\
+\texttt{mixed} & TmFeO$_3$ trilinear ($L=8$) & --- $\to 3.49 \times 10^{2}$ & ---                & --- $\to 3.50 \times 10^{3}$ & ---                & $10.0\times$ \\
+\hline
+\end{tabular}
+\end{center}
+
+The trilinear single-thread number went from $2.19 \times 10^{3}$ to
+$6.10 \times 10^{3}$ RHS/s --- a $\mathbf{2.79\times}$ speedup.  The
+strong-scaling factor at 16 threads dropped from $8.9\times$ to
+$7.0\times$, which is the expected consequence of making the per-RHS
+work cheaper (Amdahl): the OpenMP overhead is now a larger fraction
+of the per-call budget on the small $L=4$ benchmark.  At $L=8$ the
+team-management cost is amortized over more sites and the scaling
+recovers to $10\times$ on 16 cores.  The bilinear and driven models
+both gain similarly (the M4 packing flips the same column-major bug
+in their inner loop) and now run at $\sim 7 \times 10^{3}$ RHS/s
+single-threaded --- about $1.5\times$ over the old common case.
+
+\subsection{Why this win was sitting on the table}
+
+The Monte-Carlo $\Delta E$ path (\texttt{site\_energy\_*\_diff})
+already used the natural ``pre-contract partners then dot with
+\texttt{spin\_diff}'' factorisation (item~14 of the checklist), but
+that pre-contraction lives in MC code and is a fundamentally
+different numerical trick: it factors the $\Delta E$ formula
+algebraically.  The MD RHS does the \emph{same arithmetic} as before
+M1--M4, just on a memory layout that the compiler can vectorize.
+The MC and MD paths share the original
+\texttt{vector<vector<SpinTensor3>>} as the source of truth for the
+coupling tensors; M1 + M4 add a parallel SoA copy used only by the
+MD hot path.
+
+There is no analogous packed-trilinear table in
+\texttt{Lattice::get\_local\_field\_flat} either.  That code already
+ships the packed-bilinear (\texttt{bi\_flat\_J} + offsets, item~3 of
+the checklist) but its trilinear branch still runs the
+\texttt{T[a](b,c)} pattern with the same column-major access bug; a
+follow-up pass can apply the same M1+M2 treatment there.  This is
+deferred to keep the present change scoped to the
+\texttt{MixedLattice} ODE that the user asked about.
+
+% =================================================================
 \section{Putting it together: a checklist}
 % =================================================================
 
@@ -1903,6 +2094,30 @@ with.
         so all three lattice families
         (\texttt{Lattice}, \texttt{MixedLattice},
         \texttt{PhononLattice}) use the same pulse-window logic.
+  \item \textbf{Bilinear and trilinear interaction tensors are
+        packed row-major in the MD RHS and consumed by
+        compile-time-sized inner kernels}
+        (Section~\ref{sec:packed-mixed-rhs}).  The Eigen
+        \texttt{MatrixXd} default storage is column-major and the
+        natural inner loop strides $c$ fastest, so
+        \texttt{T[a](b,c) * S[b] * S[c]} pays both a
+        \texttt{vector<MatrixXd>} pointer chase per $a$ and a
+        non-unit stride per $c$.  We pack the trilinear and
+        bilinear couplings (and their mixed SU(2)--SU(3) partners)
+        into a single \texttt{double[]} per site at the end of
+        the constructor and dispatch through templated
+        \texttt{trilinear\_kernel<Da,Db,Dc>} /
+        \texttt{bilinear\_kernel<Da,Db>} kernels for the canonical
+        $3\times3\times3$, $3\times3\times8$, $8\times3\times3$,
+        $8\times8\times8$, $3\times3$, $3\times8$, $8\times3$,
+        $8\times8$ shapes; the compiler unrolls these into AVX2
+        FMA chains.  Combined with merging the SU(2) and SU(3)
+        parallel regions of \texttt{landau\_lifshitz} into a
+        single \texttt{\#pragma omp parallel} (item~18 already
+        applies to the strain RHS; this extends it to mixed),
+        TmFeO$_3$ trilinear MD throughput goes from
+        $2.2 \times 10^{3}$ to $6.1 \times 10^{3}$ RHS/s on one
+        thread ($\mathbf{2.8\times}$).
 \end{enumerate}
 
 \texttt{ClassicalSpin\_Cpp} now ticks all twenty, including
