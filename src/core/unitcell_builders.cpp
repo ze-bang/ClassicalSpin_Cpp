@@ -457,33 +457,22 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double chi_orbit3_scale = config.get_param("chi_orbit3_scale", 1.0);  // d=3.357 Å
     const double chi_orbit4_scale = config.get_param("chi_orbit4_scale", 1.0);  // d=3.711 Å
     // =========================================================================
-    // Anisotropy-modulation trilinear coupling: λ^a_Tm · S^b_Fe · S^c_Fe
+    // On-site anisotropy-modulation trilinear: λ^a_Tm · S^b_Fe · S^c_Fe
+    //   (tmfeo3_notes.tex Eq. Honsite, App. app:trilineartable, app:codecorrespondence)
     // =========================================================================
-    // From tmfeo3_notes.tex Eq.10: key mechanism for qFM-linked 2DCS peaks.
-    // A1+ sector (mirror-even Tm operators): λ1, λ3, λ8 couple to (S_z² - S_x²)
-    //   → projects to I_{A1}^Fe = G_z² - F_x² at q=0
-    // A2+ sector (mirror-odd Tm operators): λ4, λ6 couple to S_x·S_z
-    //   → projects to I_{A2}^Fe = F_x·G_z at q=0
-    // Inversion constraint: chi-type bonds carry full W, chi_inv-type bonds
-    //   have A2+ components (v4, v6) sign-flipped.
-    // Convention: H += Σ_abc K[a](b,c) S_Fe^a S_Fe^b λ_Tm^c (on-site Fe bilinear)
-    //   u-params give coefficient of (S_z²-S_x²)·λ^a, v-params give coeff of 2·S_x·S_z·λ^a
-    const double u1 = config.get_param("u1", 0.0);   // λ1 (A1+) aniso-mod coupling
-    const double u3 = config.get_param("u3", 0.0);   // λ3 (A1+) aniso-mod coupling
-    const double u8 = config.get_param("u8", 0.0);   // λ8 (A1+) aniso-mod coupling
-    const double v4 = config.get_param("v4", 0.0);   // λ4 (A2+) aniso-mod coupling
-    const double v6 = config.get_param("v6", 0.0);   // λ6 (A2+) aniso-mod coupling
-    // =========================================================================
-    // General on-site trilinear Fe bilinear channels (tmfeo3_notes.tex §5.3)
-    // =========================================================================
-    // The full on-site trilinear has 5 Tm-even channels × 6 symmetric Fe bilinears
-    // = 30 independent parameters per orbit. The u/v shorthand above covers only
-    // the Γ2-dominant channels (S_z²-S_x² and S_x·S_z). These general params
-    // ADD to the u/v base, enabling the full symmetric Fe quadrupole tensor:
-    //   H_aniso = Σ_a W_a^{bc} λ^a S^b S^c  (a ∈ {1,3,4,6,8}; bc symmetric)
-    // Naming: W{channel}_{bilinear}, e.g. W1_yy couples λ1 to S_y².
-    // Params here are VALUES placed in K[b](c, a_idx) (and symmetrized in bc).
-    // Diagonal (bb): effective coupling = W * S_b².  Off-diag (bc): eff = 2W * S_b S_c.
+    // For each Tm-even Gell-Mann channel a ∈ {1,3,4,6,8} (column index in T):
+    //   H_bond += Σ_{bc} W{a}_{bc} · S_Fe^b · S_Fe^c · λ_Tm^a   (bc symmetric)
+    // The 6 symmetric Fe bilinear entries are W{a}_{xx,yy,zz,xy,xz,yz}.
+    // Inversion-paired bonds (chi_inv) carry η_P(a)·W{a}: A1+ (a∈{1,3,8}) keep
+    // the same sign, A2+ (a∈{4,6}) flip — see build_W_general(sign_A2) below.
+    //
+    // The pre-existing u/v shorthand parameters (u1,u3,u8,v4,v6,w1,w3,w8,w4,w6)
+    // were Γ2-projection convenience aliases that have been removed; set the
+    // corresponding W{a}_{bc} / V{a}_{bc} entries directly:
+    //   u_n → W{n}_zz = +u_n, W{n}_xx = -u_n   (a∈{1,3,8})
+    //   v_n → W{n}_xz = +v_n                    (a∈{4,6})
+    //   w_n → V{n}_zz = +w_n, V{n}_xx = -w_n   (a∈{1,3,8})
+    //   w_n → V{n}_xz = +w_n                    (a∈{4,6})
     struct TrilinearChannel {
         double xx, yy, zz, xy, xz, yz;
     };
@@ -492,16 +481,14 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     struct AntiTrilinearChannel {
         double xy, xz, yz;
     };
-    auto read_tri_ch = [&](const std::string& pfx, double u_zzmxx, double v_xz) -> TrilinearChannel {
-        // u_zzmxx from old u-param: adds +u to zz, -u to xx
-        // v_xz from old v-param: adds +v to xz
+    auto read_tri_ch = [&](const std::string& pfx) -> TrilinearChannel {
         return {
-            config.get_param(pfx + "_xx", 0.0) - u_zzmxx,   // S_x² coupling
-            config.get_param(pfx + "_yy", 0.0),               // S_y² coupling
-            config.get_param(pfx + "_zz", 0.0) + u_zzmxx,    // S_z² coupling
-            config.get_param(pfx + "_xy", 0.0),               // S_x S_y coupling
-            config.get_param(pfx + "_xz", 0.0) + v_xz,       // S_x S_z coupling
-            config.get_param(pfx + "_yz", 0.0)                // S_y S_z coupling
+            config.get_param(pfx + "_xx", 0.0),
+            config.get_param(pfx + "_yy", 0.0),
+            config.get_param(pfx + "_zz", 0.0),
+            config.get_param(pfx + "_xy", 0.0),
+            config.get_param(pfx + "_xz", 0.0),
+            config.get_param(pfx + "_yz", 0.0)
         };
     };
     auto read_anti_ch = [&](const std::string& pfx) -> AntiTrilinearChannel {
@@ -511,11 +498,11 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
             config.get_param(pfx + "_Ayz", 0.0)    // [S_y S'_z - S_z S'_y] coupling
         };
     };
-    TrilinearChannel W1_ch = read_tri_ch("W1", u1, 0.0);  // λ1 (A1+)
-    TrilinearChannel W3_ch = read_tri_ch("W3", u3, 0.0);  // λ3 (A1+)
-    TrilinearChannel W4_ch = read_tri_ch("W4", 0.0, v4);   // λ4 (A2+)
-    TrilinearChannel W6_ch = read_tri_ch("W6", 0.0, v6);   // λ6 (A2+)
-    TrilinearChannel W8_ch = read_tri_ch("W8", u8, 0.0);  // λ8 (A1+)
+    TrilinearChannel W1_ch = read_tri_ch("W1");  // λ1 (A1+)
+    TrilinearChannel W3_ch = read_tri_ch("W3");  // λ3 (A1+)
+    TrilinearChannel W4_ch = read_tri_ch("W4");  // λ4 (A2+)
+    TrilinearChannel W6_ch = read_tri_ch("W6");  // λ6 (A2+)
+    TrilinearChannel W8_ch = read_tri_ch("W8");  // λ8 (A1+)
     // Orbit-dependent on-site trilinear scaling (analogous to chi_orbit_scale)
     const double W_orbit1_scale = config.get_param("W_orbit1_scale", 1.0);
     const double W_orbit2_scale = config.get_param("W_orbit2_scale", 1.0);
@@ -523,26 +510,20 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double W_orbit4_scale = config.get_param("W_orbit4_scale", 1.0);
     // =========================================================================
     // Inter-site anisotropy-modulation trilinear: λ^a_Tm · S^b_{Fe_i} · S^c_{Fe_i'}
+    //   (tmfeo3_notes.tex Eq. Hinter)
     // =========================================================================
-    // From tmfeo3_notes.tex Eq.11: extends aniso-mod to inter-site Fe bilinears.
-    // Same A1+/A2+ sector decomposition as on-site, but the two Fe legs sit on
-    // DIFFERENT sublattice sites (c-axis NN pairs: Fe0↔Fe3, Fe1↔Fe2).
-    // Key physics: the on-site A2+ channel (v4,v6) cancels at q=0 for paired
-    //   chi/chi_inv bonds, but the inter-site A2+ channel (w4,w6) does NOT—
+    // The two Fe legs sit on DIFFERENT sublattice sites (c-axis NN pairs:
+    // Fe0↔Fe3, Fe1↔Fe2). The (b,c) Fe bilinear is no longer constrained to be
+    // symmetric, so V splits into a symmetric tensor V{a}_{xx,...,yz} and an
+    // antisymmetric tensor V{a}_A{xy,xz,yz}.
+    // Key physics: the on-site A2+ channel (W4,W6) cancels at q=0 for paired
+    //   chi/chi_inv bonds, but the inter-site A2+ channel (V4,V6) does NOT —
     //   providing an escape route for λ4/λ6 excitations at zone center.
-    // Convention: H += Σ V[a](b,c) S_{Fe_i}^a S_{Fe_i'}^b λ_{Tm_j}^c
-    //   w-params couple to the same bilinear forms as u/v but across Fe-Fe NN pairs.
-    const double w1 = config.get_param("w1", 0.0);   // λ1 (A1+) inter-site aniso-mod
-    const double w3 = config.get_param("w3", 0.0);   // λ3 (A1+) inter-site aniso-mod
-    const double w8 = config.get_param("w8", 0.0);   // λ8 (A1+) inter-site aniso-mod
-    const double w4 = config.get_param("w4", 0.0);   // λ4 (A2+) inter-site aniso-mod
-    const double w6 = config.get_param("w6", 0.0);   // λ6 (A2+) inter-site aniso-mod
-    // General inter-site channels (additive with w-params, same structure as on-site)
-    TrilinearChannel V1_ch = read_tri_ch("V1", w1, 0.0);
-    TrilinearChannel V3_ch = read_tri_ch("V3", w3, 0.0);
-    TrilinearChannel V4_ch = read_tri_ch("V4", 0.0, w4);
-    TrilinearChannel V6_ch = read_tri_ch("V6", 0.0, w6);
-    TrilinearChannel V8_ch = read_tri_ch("V8", w8, 0.0);
+    TrilinearChannel V1_ch = read_tri_ch("V1");
+    TrilinearChannel V3_ch = read_tri_ch("V3");
+    TrilinearChannel V4_ch = read_tri_ch("V4");
+    TrilinearChannel V6_ch = read_tri_ch("V6");
+    TrilinearChannel V8_ch = read_tri_ch("V8");
     // Antisymmetric inter-site channels: DM-like Fe bilinear × Tm Gell-Mann
     // VA{n}_A{ab}: couples (S_i^a S_{i'}^b - S_i^b S_{i'}^a) to λ_n
     AntiTrilinearChannel VA1_ch = read_anti_ch("V1");  // λ1 (A1+)
@@ -1034,7 +1015,7 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     // H_aniso = Σ K[a](b,c) S_source^a S_partner1^b λ_partner2^c
     // where source=Fe_i, partner1=Fe_i (same site, offset1=0), partner2=Tm_j
     // Uses the same Fe-Tm bond list as the bilinear chi coupling.
-    // chi-type bonds: full W tensor; chi_inv-type bonds: A2+ (v4,v6) flipped.
+    // chi-type bonds: full W tensor; chi_inv-type bonds: A2+ (W4, W6) flipped.
     // Shared helpers for building trilinear SpinTensor3 from TrilinearChannel
     auto fill_channel = [](SpinTensor3& T, int c_idx, const TrilinearChannel& ch, double sign) {
         T[0](0, c_idx) = sign * ch.xx;
@@ -1156,17 +1137,18 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     //   Fe1 → Fe2 @ (0,0,0) and (0,0,1)
     //   Fe2 → Fe1 @ (0,0,0) and (0,0,-1)
     //   Fe3 → Fe0 @ (0,0,0) and (0,0,-1)
-    if (w1 != 0.0 || w3 != 0.0 || w8 != 0.0 || w4 != 0.0 || w6 != 0.0
-        || V1_ch.xx != 0.0 || V1_ch.yy != 0.0 || V1_ch.xy != 0.0 || V1_ch.yz != 0.0
-        || V3_ch.xx != 0.0 || V3_ch.yy != 0.0 || V3_ch.xy != 0.0 || V3_ch.yz != 0.0
-        || V4_ch.xx != 0.0 || V4_ch.yy != 0.0 || V4_ch.xy != 0.0 || V4_ch.yz != 0.0
-        || V6_ch.xx != 0.0 || V6_ch.yy != 0.0 || V6_ch.xy != 0.0 || V6_ch.yz != 0.0
-        || V8_ch.xx != 0.0 || V8_ch.yy != 0.0 || V8_ch.xy != 0.0 || V8_ch.yz != 0.0
-        || VA1_ch.xy != 0.0 || VA1_ch.xz != 0.0 || VA1_ch.yz != 0.0
-        || VA3_ch.xy != 0.0 || VA3_ch.xz != 0.0 || VA3_ch.yz != 0.0
-        || VA4_ch.xy != 0.0 || VA4_ch.xz != 0.0 || VA4_ch.yz != 0.0
-        || VA6_ch.xy != 0.0 || VA6_ch.xz != 0.0 || VA6_ch.yz != 0.0
-        || VA8_ch.xy != 0.0 || VA8_ch.xz != 0.0 || VA8_ch.yz != 0.0) {
+    auto tri_ch_nonzero = [](const TrilinearChannel& c) {
+        return c.xx != 0.0 || c.yy != 0.0 || c.zz != 0.0
+            || c.xy != 0.0 || c.xz != 0.0 || c.yz != 0.0;
+    };
+    auto anti_ch_nonzero = [](const AntiTrilinearChannel& c) {
+        return c.xy != 0.0 || c.xz != 0.0 || c.yz != 0.0;
+    };
+    if (tri_ch_nonzero(V1_ch) || tri_ch_nonzero(V3_ch) || tri_ch_nonzero(V4_ch)
+        || tri_ch_nonzero(V6_ch) || tri_ch_nonzero(V8_ch)
+        || anti_ch_nonzero(VA1_ch) || anti_ch_nonzero(VA3_ch)
+        || anti_ch_nonzero(VA4_ch) || anti_ch_nonzero(VA6_ch)
+        || anti_ch_nonzero(VA8_ch)) {
         // Reuse fill_channel and fill_anti_channel from on-site (captured above)
         auto build_V_general = [&](double sign_A2) -> SpinTensor3 {
             SpinTensor3 V(3);

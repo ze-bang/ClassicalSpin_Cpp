@@ -88,16 +88,18 @@ Lattice make_lattice() {
     config.set_param("e1", 0.0);
     config.set_param("e2", 0.0);
 
-    config.set_param("u1", 0.31);
-    config.set_param("u3", -0.22);
-    config.set_param("u8", 0.17);
-    config.set_param("v4", 0.29);
-    config.set_param("v6", -0.11);
-    config.set_param("w1", 0.13);
-    config.set_param("w3", 0.07);
-    config.set_param("w8", -0.19);
-    config.set_param("w4", 0.23);
-    config.set_param("w6", 0.05);
+    // On-site W (a∈{1,3,4,6,8}). u_n→W{n}_zz=+u_n, W{n}_xx=−u_n; v_n→W{n}_xz=+v_n.
+    config.set_param("W1_zz",  0.31);  config.set_param("W1_xx", -0.31);   // u1 = 0.31
+    config.set_param("W3_zz", -0.22);  config.set_param("W3_xx",  0.22);   // u3 = -0.22
+    config.set_param("W8_zz",  0.17);  config.set_param("W8_xx", -0.17);   // u8 = 0.17
+    config.set_param("W4_xz",  0.29);                                       // v4 = 0.29
+    config.set_param("W6_xz", -0.11);                                       // v6 = -0.11
+    // Inter-site V. w_n→V{n}_zz=+w_n, V{n}_xx=−w_n (A1+); V{n}_xz=+w_n (A2+).
+    config.set_param("V1_zz",  0.13);  config.set_param("V1_xx", -0.13);   // w1 = 0.13
+    config.set_param("V3_zz",  0.07);  config.set_param("V3_xx", -0.07);   // w3 = 0.07
+    config.set_param("V8_zz", -0.19);  config.set_param("V8_xx",  0.19);   // w8 = -0.19
+    config.set_param("V4_xz",  0.23);                                       // w4 = 0.23
+    config.set_param("V6_xz",  0.05);                                       // w6 = 0.05
     config.spin_length = 1.0f;
     config.spin_length_su3 = 1.0f;
 

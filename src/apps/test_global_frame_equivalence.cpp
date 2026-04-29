@@ -102,29 +102,26 @@ SpinConfig make_config(double field_strength) {
     config.set_param("chi_orbit3_scale", 0.88);
     config.set_param("chi_orbit4_scale", 0.54);
 
-    // On-site W shorthands (u/v) + extra channels
-    config.set_param("u1", 0.31);
-    config.set_param("u3", -0.22);
-    config.set_param("u8", 0.17);
-    config.set_param("v4", 0.29);
-    config.set_param("v6", -0.11);
-    config.set_param("W1_xy", 0.05);
-    config.set_param("W1_yz", -0.07);
-    config.set_param("W3_xz", 0.04);
-    config.set_param("W4_yy", 0.06);
-    config.set_param("W6_xx", -0.03);
-    config.set_param("W8_yz", 0.02);
+    // On-site W (a∈{1,3,4,6,8}). Mix of A1+ diagonal (xx/zz pair) and off-diagonal entries.
+    config.set_param("W1_zz",  0.31);  config.set_param("W1_xx", -0.31);
+    config.set_param("W1_xy",  0.05);  config.set_param("W1_yz", -0.07);
+    config.set_param("W3_zz", -0.22);  config.set_param("W3_xx",  0.22);
+    config.set_param("W3_xz",  0.04);
+    config.set_param("W8_zz",  0.17);  config.set_param("W8_xx", -0.17);
+    config.set_param("W8_yz",  0.02);
+    config.set_param("W4_xz",  0.29);  config.set_param("W4_yy",  0.06);
+    config.set_param("W6_xz", -0.11);  config.set_param("W6_xx", -0.03);
     config.set_param("W_orbit1_scale", 0.95);
     config.set_param("W_orbit2_scale", 1.10);
     config.set_param("W_orbit3_scale", 1.02);
     config.set_param("W_orbit4_scale", 0.85);
 
-    // Inter-site V shorthands (w/wA) + extras
-    config.set_param("w1", 0.13);
-    config.set_param("w3", 0.07);
-    config.set_param("w8", -0.19);
-    config.set_param("w4", 0.23);
-    config.set_param("w6", 0.05);
+    // Inter-site V: symmetric (V{n}_{xx..yz}) + antisymmetric (V{n}_A{xy,xz,yz}).
+    config.set_param("V1_zz",  0.13);  config.set_param("V1_xx", -0.13);
+    config.set_param("V3_zz",  0.07);  config.set_param("V3_xx", -0.07);
+    config.set_param("V8_zz", -0.19);  config.set_param("V8_xx",  0.19);
+    config.set_param("V4_xz",  0.23);
+    config.set_param("V6_xz",  0.05);
     config.set_param("V1_Axy", 0.08);
     config.set_param("V3_Ayz", -0.04);
     config.set_param("V4_Axz", 0.06);
