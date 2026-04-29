@@ -589,22 +589,54 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     const double Jtm_8 = config.get_param("Jtm_8", 0.0);
     const double h = config.field_strength;
     
-    // Global-frame mode: all sublattice frames are identity, no eta transformation
-    // on exchange matrices.  Spins live in the lab frame; the Γ₂ AFM pattern
-    // appears explicitly as sign differences among sublattice spin vectors.
-    // This is a pure basis change and does not alter the physics.
+    // Global-frame mode: a pure basis change for the *Fe* sector.
+    //
+    //   use_global_frame = 0 (default, "local frame"):
+    //       Fe spins stored in local sublattice frames.  Fe-Fe exchange is
+    //       conjugated by diag(η_i)/diag(η_j); Fe Zeeman is rotated to
+    //       diag(η_i)·h_lab per site.  Fe-Tm chi/W/V are written in the
+    //       canonical local-frame form (same tensor at every Fe site, modulo
+    //       the chi/chi_inv inversion-parity flip on the Tm side; see notes
+    //       §"Space-group action on local-frame Fe and Tm operators").
+    //
+    //   use_global_frame = 1 ("global Fe frame"):
+    //       Fe spins stored in the laboratory Cartesian frame.  Fe-Fe exchange
+    //       and Fe Zeeman are kept in lab form (no η).  Fe-Tm chi/W/V must
+    //       additionally be premultiplied by diag(η_i) on the Fe row(s) per
+    //       *source* Fe site, because the local-frame chi values defined above
+    //       implicitly absorb the Fe sublattice rotation R_i = diag(η_i).
+    //
+    // Tm always lives in its sublattice-dependent local CEF basis: the three
+    // low-energy CEF states are not closed under arbitrary global SO(3)
+    // rotations (notes §"Why local frames are necessary"), so the Tm
+    // sublattice frames R_µ = μ_act⁻¹·D_µ·μ_act and the per-sublattice Tm
+    // Zeeman projection are set unconditionally below.
     const bool use_global_frame = (config.get_param("use_global_frame", 0.0) != 0.0);
-    
+
     // Use TmFeO3_Fe and TmFeO3_Tm classes from unitcell.h (already have structure)
     TmFeO3_Fe Fe_atoms(3);
     TmFeO3_Tm Tm_atoms(8);
-    
-    // Local frame transformation (following molecular_dynamic_TmFeO3.cpp exactly)
-    std::array<std::array<double, 3>, 4> eta = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
-    
+
+    // Pbnm sublattice signs (always the canonical local-frame definition).
+    const std::array<std::array<double, 3>, 4> eta_pbnm = {{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
+    const std::array<std::array<double, 3>, 4> eta_id   = {{{1, 1, 1}, {1, 1, 1},  {1, 1, 1},  {1, 1, 1}}};
+
+    // η used to rotate Fe-Fe exchange / Fe Zeeman / etc. into the *stored*
+    // Fe frame.  In local mode this is the Pbnm pattern; in global mode it
+    // is the identity (Fe stays in lab frame).
+    const auto& eta = use_global_frame ? eta_id : eta_pbnm;
+
+    // η applied to the Fe row(s) of the Fe-Tm chi / W / V tensors per source
+    // Fe sublattice.  In local mode the chi/W/V values are the canonical
+    // local-frame form (same at every site), so no extra row scaling is
+    // needed.  In global mode the same canonical chi/W/V values must be
+    // rotated back to lab frame on the Fe side: chi_stored = diag(η_pbnm[i])·chi_local,
+    // W_stored[a](b,c) = η_pbnm[i]^a · η_pbnm[i]^b · W_local[a](b,c),
+    // V_stored[a](b,c) = η_pbnm[i]^a · η_pbnm[i']^b · V_local[a](b,c).
+    const auto& eta_FeTm = use_global_frame ? eta_pbnm : eta_id;
+
     if (use_global_frame) {
-        // Override: all eta = identity, all Fe sublattice frames = identity
-        eta = {{{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}};
+        // All Fe sublattice frames = identity (Fe stored in lab Cartesian).
         SpinMatrix id3 = SpinMatrix::Identity(3, 3);
         for (int i = 0; i < 4; ++i) Fe_atoms.set_sublattice_frame(id3, i);
     }
@@ -713,19 +745,26 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     Fe_atoms.set_onsite_interaction(K_mat, 2);
     Fe_atoms.set_onsite_interaction(K_mat, 3);
     
-    // External magnetic field
-    Eigen::Vector3d field;
-    field << config.field_direction[0] * h,
-             config.field_direction[1] * h,
-             config.field_direction[2] * h;
-    Fe_atoms.set_field(field, 0);
-    Fe_atoms.set_field(field, 1);
-    Fe_atoms.set_field(field, 2);
-    Fe_atoms.set_field(field, 3);
-    
+    // External magnetic field — projected into the *stored* Fe frame per site.
+    //   H_Zee = -h_lab · S^(g) = -h_lab · R_i · S^(stored) = -(R_i^T · h_lab) · S^(stored)
+    // For diagonal R_i = diag(η[i]) this is just per-component sign flips.  In
+    // local-frame mode (eta = eta_pbnm) the field becomes sublattice-dependent;
+    // in global-frame mode (eta = eta_id) every Fe site sees the same h_lab.
+    {
+        Eigen::Vector3d h_lab;
+        h_lab << config.field_direction[0] * h,
+                 config.field_direction[1] * h,
+                 config.field_direction[2] * h;
+        for (int i = 0; i < 4; ++i) {
+            Eigen::Vector3d field_i;
+            for (int a = 0; a < 3; ++a) field_i(a) = eta[i][a] * h_lab(a);
+            Fe_atoms.set_field(field_i, i);
+        }
+    }
+
     // Set Bertaut G-mode AFM sublattice signs for orthoferrite: (+,-,+,-)
     Fe_atoms.set_afm_sublattice_signs({1.0, -1.0, 1.0, -1.0});
-    
+
     const double tm_alpha_scale = config.get_param("tm_alpha_scale", 1.0);
     const double tm_beta_scale = config.get_param("tm_beta_scale", 1.0);
     double alpha = e1 * tm_alpha_scale;
@@ -745,27 +784,32 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
     // Active generators carrying magnetic moment: λ_2 (idx 1), λ_5 (idx 4), λ_7 (idx 6)
     // Frame F_i = μ_act^{-1} D_i μ_act in the active subspace transforms
     // local SU(3) spins to a global frame where M_α = g_J Σ_a μ_{αa} (F^T S)_a
-    // Pbnm sublattice signs (same as Fe): η = {(+,+,+), (+,-,-), (-,+,-), (-,-,+)}
-    if (!use_global_frame)
+    //
+    // The Pbnm sublattice signs used to construct R_act are *independent* of
+    // use_global_frame: the truncated Tm qutrit lives in its sublattice
+    // CEF basis in both modes (notes §"Why local frames are necessary"), and
+    // R_µ is what relates that internal basis to global Cartesian J components.
+    // Both R_µ and the per-sublattice Tm Zeeman projection are therefore set
+    // unconditionally below.
     {
         Eigen::Matrix3d mu_act;
         mu_act << mu_2x, mu_5x, mu_7x,
                   mu_2y, mu_5y, mu_7y,
                   mu_2z, mu_5z, mu_7z;
-        
+
         double mu_det = mu_act.determinant();
         if (std::abs(mu_det) > 1e-12) {
             Eigen::Matrix3d mu_act_inv = mu_act.inverse();
             const int active_idx[3] = {1, 4, 6};
-            
+
             for (int sub = 0; sub < 4; ++sub) {
                 Eigen::Matrix3d D = Eigen::Matrix3d::Zero();
-                D(0,0) = eta[sub][0];
-                D(1,1) = eta[sub][1];
-                D(2,2) = eta[sub][2];
-                
+                D(0,0) = eta_pbnm[sub][0];
+                D(1,1) = eta_pbnm[sub][1];
+                D(2,2) = eta_pbnm[sub][2];
+
                 Eigen::Matrix3d R_act = mu_act_inv * D * mu_act;
-                
+
                 SpinMatrix frame = SpinMatrix::Identity(8, 8);
                 for (int a = 0; a < 3; ++a) {
                     for (int b = 0; b < 3; ++b) {
@@ -774,21 +818,21 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
                 }
                 Tm_atoms.set_sublattice_frame(frame, sub);
             }
-            
+
             // Add Zeeman field from external magnetic field
-            // B_a^(i) = g_ratio * Σ_α η_{iα} μ_{αa} h_α  (sublattice-dependent projection)
+            // B_a^(i) = g_ratio * Σ_α η_pbnm[i][α] μ_{αa} h_α  (sublattice-dependent projection)
             // g_ratio = g_Tm/g_Fe scales Tm Zeeman relative to Fe for the same physical field
             if (h != 0.0 && config.field_direction.size() >= 3) {
                 Eigen::Vector3d h_vec;
                 h_vec << config.field_direction[0] * h,
                          config.field_direction[1] * h,
                          config.field_direction[2] * h;
-                
+
                 for (int sub = 0; sub < 4; ++sub) {
                     for (int a = 0; a < 3; ++a) {
                         double B_a = 0.0;
                         for (int al = 0; al < 3; ++al) {
-                            B_a += eta[sub][al] * mu_act(al, a) * h_vec(al);
+                            B_a += eta_pbnm[sub][al] * mu_act(al, a) * h_vec(al);
                         }
                         Tm_atoms.field[sub](active_idx[a]) += g_ratio_tm * B_a;
                     }
@@ -871,7 +915,18 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         Eigen::MatrixXd chi_inv_o3 = chi_orbit3_scale * chi_inv;
         Eigen::MatrixXd chi_o4 = chi_orbit4_scale * chi;
         Eigen::MatrixXd chi_inv_o4 = chi_orbit4_scale * chi_inv;
-        
+
+        // Per-source-Fe row rescaling: chi_stored_{αa} = η_FeTm[fe_src][α] · chi_{αa}.
+        // In local-frame mode (eta_FeTm == identity) this is a no-op; in
+        // global-frame mode (eta_FeTm == Pbnm) the canonical local-frame chi is
+        // rotated back to lab frame on the Fe row.
+        auto set_chi = [&](const Eigen::MatrixXd& M, size_t fe_src, size_t tm_dst,
+                           const Eigen::Vector3i& off) {
+            Eigen::MatrixXd M_scaled = M;
+            for (int a = 0; a < 3; ++a) M_scaled.row(a) *= eta_FeTm[fe_src][a];
+            mixed_uc.set_mixed_bilinear(M_scaled, fe_src, tm_dst, off);
+        };
+
         // Convention: set_mixed_bilinear(J, source=Fe_idx, partner=Tm_idx, offset)
         //   offset = Tm_cell - Fe_cell (added to Fe cell to find partner Tm cell)
         //
@@ -896,81 +951,81 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         // Fe site 0 — 8 nearest Tm neighbors
         // =====================================================================
         // Orbit 1 (d=0.497): E  -> Fe0-Tm3@(-1,0,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o1, 0, 3, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_o1, 0, 3, Eigen::Vector3i(-1, 0, 0));
         // Orbit 1 (d=0.497): I  -> Fe0-Tm0@(0,0,0)   chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o1, 0, 0, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_inv_o1, 0, 0, Eigen::Vector3i(0, 0, 0));
         // Orbit 2 (d=0.545): E  -> Fe0-Tm2@(0,0,0)   chi
-        mixed_uc.set_mixed_bilinear(chi_o2, 0, 2, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_o2, 0, 2, Eigen::Vector3i(0, 0, 0));
         // Orbit 2 (d=0.545): I  -> Fe0-Tm1@(-1,0,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o2, 0, 1, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_inv_o2, 0, 1, Eigen::Vector3i(-1, 0, 0));
         // Orbit 3 (d=0.582): E  -> Fe0-Tm1@(0,0,0)   chi
-        mixed_uc.set_mixed_bilinear(chi_o3, 0, 1, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_o3, 0, 1, Eigen::Vector3i(0, 0, 0));
         // Orbit 3 (d=0.582): I  -> Fe0-Tm2@(-1,0,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o3, 0, 2, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_inv_o3, 0, 2, Eigen::Vector3i(-1, 0, 0));
         // Orbit 4 (d=0.624): E  -> Fe0-Tm0@(0,-1,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o4, 0, 0, Eigen::Vector3i(0, -1, 0));
+        set_chi(chi_o4, 0, 0, Eigen::Vector3i(0, -1, 0));
         // Orbit 4 (d=0.624): I  -> Fe0-Tm3@(-1,1,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o4, 0, 3, Eigen::Vector3i(-1, 1, 0));
+        set_chi(chi_inv_o4, 0, 3, Eigen::Vector3i(-1, 1, 0));
 
         // =====================================================================
         // Fe site 1 — 8 nearest Tm neighbors
         // =====================================================================
         // Orbit 1 (d=0.497): S2   -> Fe1-Tm2@(0,0,0)   chi
-        mixed_uc.set_mixed_bilinear(chi_o1, 1, 2, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_o1, 1, 2, Eigen::Vector3i(0, 0, 0));
         // Orbit 1 (d=0.497): S2I  -> Fe1-Tm1@(0,-1,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o1, 1, 1, Eigen::Vector3i(0, -1, 0));
+        set_chi(chi_inv_o1, 1, 1, Eigen::Vector3i(0, -1, 0));
         // Orbit 2 (d=0.545): S2I  -> Fe1-Tm0@(0,-1,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o2, 1, 0, Eigen::Vector3i(0, -1, 0));
+        set_chi(chi_inv_o2, 1, 0, Eigen::Vector3i(0, -1, 0));
         // Orbit 2 (d=0.545): S2   -> Fe1-Tm3@(0,0,0)   chi
-        mixed_uc.set_mixed_bilinear(chi_o2, 1, 3, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_o2, 1, 3, Eigen::Vector3i(0, 0, 0));
         // Orbit 3 (d=0.582): S2   -> Fe1-Tm0@(1,-1,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o3, 1, 0, Eigen::Vector3i(1, -1, 0));
+        set_chi(chi_o3, 1, 0, Eigen::Vector3i(1, -1, 0));
         // Orbit 3 (d=0.582): S2I  -> Fe1-Tm3@(-1,0,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o3, 1, 3, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_inv_o3, 1, 3, Eigen::Vector3i(-1, 0, 0));
         // Orbit 4 (d=0.624): S2   -> Fe1-Tm1@(0,0,0)   chi
-        mixed_uc.set_mixed_bilinear(chi_o4, 1, 1, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_o4, 1, 1, Eigen::Vector3i(0, 0, 0));
         // Orbit 4 (d=0.624): S2I  -> Fe1-Tm2@(0,-1,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o4, 1, 2, Eigen::Vector3i(0, -1, 0));
+        set_chi(chi_inv_o4, 1, 2, Eigen::Vector3i(0, -1, 0));
 
         // =====================================================================
         // Fe site 2 — 8 nearest Tm neighbors
         // =====================================================================
         // Orbit 1 (d=0.497): S1S2I -> Fe2-Tm2@(0,0,-1)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o1, 2, 2, Eigen::Vector3i(0, 0, -1));
+        set_chi(chi_inv_o1, 2, 2, Eigen::Vector3i(0, 0, -1));
         // Orbit 1 (d=0.497): S1S2  -> Fe2-Tm1@(0,-1,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o1, 2, 1, Eigen::Vector3i(0, -1, 0));
+        set_chi(chi_o1, 2, 1, Eigen::Vector3i(0, -1, 0));
         // Orbit 2 (d=0.545): S1S2  -> Fe2-Tm0@(0,-1,-1) chi
-        mixed_uc.set_mixed_bilinear(chi_o2, 2, 0, Eigen::Vector3i(0, -1, -1));
+        set_chi(chi_o2, 2, 0, Eigen::Vector3i(0, -1, -1));
         // Orbit 2 (d=0.545): S1S2I -> Fe2-Tm3@(0,0,0)   chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o2, 2, 3, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_inv_o2, 2, 3, Eigen::Vector3i(0, 0, 0));
         // Orbit 3 (d=0.582): S1S2I -> Fe2-Tm0@(1,-1,-1) chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o3, 2, 0, Eigen::Vector3i(1, -1, -1));
+        set_chi(chi_inv_o3, 2, 0, Eigen::Vector3i(1, -1, -1));
         // Orbit 3 (d=0.582): S1S2  -> Fe2-Tm3@(-1,0,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o3, 2, 3, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_o3, 2, 3, Eigen::Vector3i(-1, 0, 0));
         // Orbit 4 (d=0.624): S1S2I -> Fe2-Tm1@(0,0,0)   chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o4, 2, 1, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_inv_o4, 2, 1, Eigen::Vector3i(0, 0, 0));
         // Orbit 4 (d=0.624): S1S2  -> Fe2-Tm2@(0,-1,-1) chi
-        mixed_uc.set_mixed_bilinear(chi_o4, 2, 2, Eigen::Vector3i(0, -1, -1));
+        set_chi(chi_o4, 2, 2, Eigen::Vector3i(0, -1, -1));
 
         // =====================================================================
         // Fe site 3 — 8 nearest Tm neighbors
         // =====================================================================
         // Orbit 1 (d=0.497): S1I -> Fe3-Tm3@(-1,0,0)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o1, 3, 3, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_inv_o1, 3, 3, Eigen::Vector3i(-1, 0, 0));
         // Orbit 1 (d=0.497): S1  -> Fe3-Tm0@(0,0,-1)  chi
-        mixed_uc.set_mixed_bilinear(chi_o1, 3, 0, Eigen::Vector3i(0, 0, -1));
+        set_chi(chi_o1, 3, 0, Eigen::Vector3i(0, 0, -1));
         // Orbit 2 (d=0.545): S1I -> Fe3-Tm2@(0,0,-1)  chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o2, 3, 2, Eigen::Vector3i(0, 0, -1));
+        set_chi(chi_inv_o2, 3, 2, Eigen::Vector3i(0, 0, -1));
         // Orbit 2 (d=0.545): S1  -> Fe3-Tm1@(-1,0,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o2, 3, 1, Eigen::Vector3i(-1, 0, 0));
+        set_chi(chi_o2, 3, 1, Eigen::Vector3i(-1, 0, 0));
         // Orbit 3 (d=0.582): S1I -> Fe3-Tm1@(0,0,0)   chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o3, 3, 1, Eigen::Vector3i(0, 0, 0));
+        set_chi(chi_inv_o3, 3, 1, Eigen::Vector3i(0, 0, 0));
         // Orbit 3 (d=0.582): S1  -> Fe3-Tm2@(-1,0,-1)  chi
-        mixed_uc.set_mixed_bilinear(chi_o3, 3, 2, Eigen::Vector3i(-1, 0, -1));
+        set_chi(chi_o3, 3, 2, Eigen::Vector3i(-1, 0, -1));
         // Orbit 4 (d=0.624): S1I -> Fe3-Tm0@(0,-1,-1) chi_inv
-        mixed_uc.set_mixed_bilinear(chi_inv_o4, 3, 0, Eigen::Vector3i(0, -1, -1));
+        set_chi(chi_inv_o4, 3, 0, Eigen::Vector3i(0, -1, -1));
         // Orbit 4 (d=0.624): S1  -> Fe3-Tm3@(-1,1,0)  chi
-        mixed_uc.set_mixed_bilinear(chi_o4, 3, 3, Eigen::Vector3i(-1, 1, 0));
+        set_chi(chi_o4, 3, 3, Eigen::Vector3i(-1, 1, 0));
     }
     
     // =========================================================================
@@ -1030,50 +1085,63 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         SpinTensor3 W_chi_inv_o3 = scale_tensor3(W_chi_inv_base, W_orbit3_scale);
         SpinTensor3 W_chi_o4 = scale_tensor3(W_chi_base, W_orbit4_scale);
         SpinTensor3 W_chi_inv_o4 = scale_tensor3(W_chi_inv_base, W_orbit4_scale);
-        
+
+        // Per-source-Fe row rescaling: W_stored[a](b,c) = η_FeTm[i]^a · η_FeTm[i]^b · W[a](b,c)
+        // (both Fe legs sit on the same site i for on-site W).
+        auto set_W = [&](const SpinTensor3& W, size_t fe_src, size_t fe_p1,
+                         size_t tm_dst, const Eigen::Vector3i& off1,
+                         const Eigen::Vector3i& off2) {
+            SpinTensor3 W_scaled(W.size());
+            for (size_t a = 0; a < W.size(); ++a) {
+                W_scaled[a] = W[a];
+                for (int b = 0; b < 3; ++b) W_scaled[a].row(b) *= eta_FeTm[fe_src][a] * eta_FeTm[fe_p1][b];
+            }
+            mixed_uc.set_mixed_trilinear(W_scaled, fe_src, fe_p1, tm_dst, off1, off2);
+        };
+
         // Set trilinear on the same 32 Fe-Tm bonds as the bilinear chi coupling.
         // source=Fe_i, partner1=Fe_i (offset1=0,0,0), partner2=Tm_j (offset2 from bond list)
         // Bond order follows bilinear: orbit 1,1, 2,2, 3,3, 4,4 per Fe site
-        
+
         // Fe site 0
-        mixed_uc.set_mixed_trilinear(W_chi_o1,     0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o2,     0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o3,     0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o4,     0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
-        
+        set_W(W_chi_o1,     0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_inv_o1, 0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_o2,     0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_inv_o2, 0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_o3,     0, 0, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_inv_o3, 0, 0, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_o4,     0, 0, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        set_W(W_chi_inv_o4, 0, 0, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
+
         // Fe site 1
-        mixed_uc.set_mixed_trilinear(W_chi_o1,     1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o2,     1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o3,     1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o4,     1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        
+        set_W(W_chi_o1,     1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_inv_o1, 1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        set_W(W_chi_inv_o2, 1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        set_W(W_chi_o2,     1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_o3,     1, 1, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, 0));
+        set_W(W_chi_inv_o3, 1, 1, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_o4,     1, 1, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_inv_o4, 1, 1, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+
         // Fe site 2
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_o1,     2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o2,     2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_o3,     2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o4,     2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
-        
+        set_W(W_chi_inv_o1, 2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        set_W(W_chi_o1,     2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, 0));
+        set_W(W_chi_o2,     2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        set_W(W_chi_inv_o2, 2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_inv_o3, 2, 2, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(1, -1, -1));
+        set_W(W_chi_o3,     2, 2, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_inv_o4, 2, 2, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_o4,     2, 2, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+
         // Fe site 3
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o1, 3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o1,     3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o2, 3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_o2,     3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o3, 3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
-        mixed_uc.set_mixed_trilinear(W_chi_o3,     3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_inv_o4, 3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
-        mixed_uc.set_mixed_trilinear(W_chi_o4,     3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
+        set_W(W_chi_inv_o1, 3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_o1,     3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        set_W(W_chi_inv_o2, 3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, -1));
+        set_W(W_chi_o2,     3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, 0));
+        set_W(W_chi_inv_o3, 3, 3, 1, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, 0, 0));
+        set_W(W_chi_o3,     3, 3, 2, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 0, -1));
+        set_W(W_chi_inv_o4, 3, 3, 0, Eigen::Vector3i(0,0,0), Eigen::Vector3i(0, -1, -1));
+        set_W(W_chi_o4,     3, 3, 3, Eigen::Vector3i(0,0,0), Eigen::Vector3i(-1, 1, 0));
     }
     
     // =========================================================================
@@ -1144,12 +1212,20 @@ MixedUnitCell build_tmfeo3(const SpinConfig& config) {
         };
         
         // Macro-like lambda to set inter-site trilinear for one Fe-Tm bond
-        // with both c-axis Fe NN offsets
+        // with both c-axis Fe NN offsets.  Per-source/partner Fe row scaling:
+        //   V_stored[a](b,c) = η_FeTm[fe_src]^a · η_FeTm[fe_partner]^b · V[a](b,c)
+        // (no-op in local-frame mode; rotates back to lab Fe in global mode).
         auto set_inter = [&](const SpinTensor3& V, int fe_src, int tm_dst,
                              const Eigen::Vector3i& tm_off) {
             const auto& nn = c_nn[fe_src];
-            mixed_uc.set_mixed_trilinear(V, fe_src, nn.partner, tm_dst, nn.off0, tm_off);
-            mixed_uc.set_mixed_trilinear(V, fe_src, nn.partner, tm_dst, nn.off1, tm_off);
+            SpinTensor3 V_scaled(V.size());
+            for (size_t a = 0; a < V.size(); ++a) {
+                V_scaled[a] = V[a];
+                for (int b = 0; b < 3; ++b)
+                    V_scaled[a].row(b) *= eta_FeTm[fe_src][a] * eta_FeTm[nn.partner][b];
+            }
+            mixed_uc.set_mixed_trilinear(V_scaled, fe_src, nn.partner, tm_dst, nn.off0, tm_off);
+            mixed_uc.set_mixed_trilinear(V_scaled, fe_src, nn.partner, tm_dst, nn.off1, tm_off);
         };
         
         // Fe site 0 — 8 bonds (same Fe-Tm topology as bilinear/on-site trilinear)
