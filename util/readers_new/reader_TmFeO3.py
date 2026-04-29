@@ -1355,8 +1355,12 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             elif 'pulse_width_SU2' in f['/metadata'].attrs:
                 pulse_width = float(f['/metadata'].attrs['pulse_width_SU2'])
         
-        # Compute time cutoff: skip the probe pulse region (probe is centered at t=0)
-        # We wait pulse_window_sigma * pulse_width after probe center before FFT
+        # Compute time cutoff: excludes only the FIRST pulse (centered at t=0),
+        # i.e. M0's lone pulse / M01's first pulse / what we informally call the
+        # "pump" in C++ convention.  The SECOND pulse fires at t = current_tau
+        # and stays inside the FFT window for any |τ| > pulse_window_sigma·σ —
+        # that is exactly the χ³ rephasing/non-rephasing signal we want to
+        # Fourier-resolve in (ω_τ, ω_t).  See audit C2.
         t_cutoff = pulse_window_sigma * pulse_width
         t_valid_idx = np.where(times > t_cutoff)[0]
         if len(t_valid_idx) > 0:
@@ -1455,7 +1459,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             taper_len_tau = int(alpha * n_tau / 2)
             if taper_len_tau > 0:
                 taper = 0.5 * (1 + np.cos(np.pi * np.arange(taper_len_tau) / taper_len_tau))
+                # Symmetric taper on BOTH τ edges so a centred [-τ_max, +τ_max]
+                # grid does not leak from the +τ side (audit C1).
                 window_tau[:taper_len_tau] = taper[::-1]
+                window_tau[-taper_len_tau:] = taper
             apod_window = np.outer(window_tau, window_t)
             print(f"  Applying Tukey apodization (α={alpha:.2f}, taper={100*alpha/2:.0f}%)")
             print(f"    t window: {window_t[0]:.4f} at t={times_positive[0]:.1f} → {window_t[-1]:.4f} at t={times_positive[-1]:.1f}")

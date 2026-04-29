@@ -2672,6 +2672,144 @@ the bug above) and remains the right mode for one-off
 exploratory analysis.
 
 % =================================================================
+\section{Ingredient XX: 2DCS pulse-chunking grid alignment and
+envelope-window correctness}
+% =================================================================
+
+Ingredient~XV (W3) introduced \texttt{build\_pulse\_segments} so the
+pump--probe and 2DCS drivers integrate the unperturbed dynamics with
+a much larger \texttt{dt} hint outside the pulse-active window.
+Ingredient~XVII later forced the observer cadence to be exactly
+\texttt{T\_step} in every chunk, after a long-running rank-$K$
+segfault was traced back to the chunked path producing trajectory
+lengths that depended on the pulse positions.  The ``MPI 2DCS audit''
+in this section closes two further sharp edges that survived
+that fix.
+
+\subsection*{Audit B1 -- segment endpoints must lie on the
+\texttt{T\_step} grid}
+
+Boost.Odeint's
+\texttt{integrate\_const(controlled\_stepper,~system,~state,
+$t_0$,~$t_1$,~$\Delta t$,~observer)} (the path used by every
+controlled stepper -- \texttt{dopri5}, \texttt{rkck54},
+\texttt{rkf78}, \texttt{bs}) advances the state by $\Delta t$
+chunks while $\text{time} + \Delta t \le t_1$, fires a final
+observer at the largest $t_0 + N\,\Delta t \le t_1$, and
+\emph{drops the trailing remainder} $t_1 - (t_0 + N\,\Delta t)$
+without integrating it.  The next chunk in the W3 driver then
+re-enters \texttt{integrate\_const} with $t_\text{start} = t_1$
+but the state in memory is still at $t_0 + N\,\Delta t$.  At every
+seam where $(t_1 - t_0)$ is not an integer multiple of
+\texttt{T\_step} the trajectory therefore loses up to \texttt{T\_step}
+of integration time and silently propagates from a stale state.
+For canonical TmFeO3 production runs (\texttt{T\_step}~=~0.01 with
+\texttt{pump\_width}~=~0.4 or 0.5 and \texttt{tau\_step}~=~0.1) all
+$\pm 6\sigma$ window endpoints, the merged window edges, and the
+clamps at $T_\text{start},\,T_\text{end}$ are exact integer
+multiples of \texttt{T\_step}, so the bug is invisible.  Any user
+who picks
+\texttt{pulse\_width}~=~0.45 or \texttt{tau\_step}~=~0.013 walks into
+it without warning.
+
+The fix is local to \texttt{include/classical\_spin/lattice/pulse\_chunking.h}:
+\texttt{build\_pulse\_segments} now snaps every candidate window
+endpoint and the global $T_\text{end}$ to the nearest
+$T_\text{start} + k\,\texttt{T\_step}$ before the merge sort, and
+asserts at the bottom of the function that every seam is contiguous
+on the grid and every chunk length is an integer $\times$
+\texttt{T\_step}.  The snap is symmetric and at most
+$\texttt{T\_step}/2$, so the chunking still captures the requested
+$\sim 6\sigma$ envelope, and for currently-shipped configs the
+output of \texttt{build\_pulse\_segments} is bit-identical to the
+old function.
+
+A new pure-header regression test
+\texttt{src/apps/test\_pulse\_chunking\_alignment.cpp} (registered
+as \texttt{pulse\_chunking\_alignment} in CMake) exercises seven
+cases -- canonical aligned, overlapping windows, misaligned
+\texttt{pulse\_width}, misaligned \texttt{current\_tau}, misaligned
+$T_\text{end}$, pulse outside window, and three degenerate inputs --
+and verifies in each case that segments are on-grid, contiguous,
+and that pulse centres stay inside an active region.
+
+\subsection*{Audit B2 -- the documented $6\sigma$ window only
+captures $e^{-9}$, not $10^{-16}$}
+
+The drive envelope used by every \texttt{*\_pulse\_drive} RHS is
+\[
+  f(\Delta t) \;=\; A \, \exp\!\Bigl(-\bigl(\Delta t / (2\sigma)\bigr)^{2}\Bigr)
+              \, \cos(\omega \, \Delta t)
+\]
+where \texttt{field\_drive\_width\_*} plays the role of $\sigma$ in
+this expression.  Note the factor of two in the denominator: this
+parameter is \emph{not} the standard Gaussian $\sigma$ but rather
+$\sigma_\text{eff}/\sqrt{2}$.  At
+$\Delta t = \texttt{kPulseWindowSigmas}\,\sigma$ the envelope
+amplitude is
+\[
+  f(\Delta t) / A \;=\; \exp\!\bigl(-\texttt{kPulseWindowSigmas}^{2}/4\bigr).
+\]
+The pre-audit value $\texttt{kPulseWindowSigmas} = 6$ therefore gave
+$\exp(-9) \approx 1.2 \times 10^{-4}$ -- four decimal places, not
+the sixteen claimed by the surrounding header comment.  We bump
+$\texttt{kPulseWindowSigmas}$ to $9$, giving
+$\exp(-81/4) \approx 1.6 \times 10^{-9}$ -- nine decimal places,
+genuinely below any practical 2DCS noise floor and consistent with
+the original intent of the W3 hint.  The active window grows by
+$50\%$, but only inside the (small) pulse-active regions, so the
+free-segment $20\times$ \texttt{dt}-hint still dominates the W3
+speedup; \texttt{test\_pulse\_drive\_tolerance} continues to pass at
+its 5e-6 magnetisation ceiling.
+
+\subsection*{Audit C1 -- symmetric Tukey window on the $\tau$ axis}
+
+\texttt{util/readers\_new/reader\_TmFeO3.py} ships seven
+apodization windows (Gaussian, exponential, Hann, Hamming, Blackman,
+Tukey, cosine).  Six of them taper symmetrically around $\tau = 0$
+via $|\tau|/\max|\tau|$.  The Tukey branch tapered only the $-\tau$
+edge, leaking from the $+\tau$ side of any centred grid.  We mirror
+the taper onto both edges so the window is symmetric and matches
+the rest of the family.  This affected only users who chose
+\texttt{window\_type='tukey'}; all other windows were already
+correct.
+
+\subsection*{Audit C2 -- clarifying the pump/probe cutoff comment}
+
+The reader's $t > t_\text{cutoff}$ filter (\texttt{t\_cutoff
+= pulse\_window\_sigma * pulse\_width}, default $5\sigma$) excludes
+the \emph{first} pulse (always centred at $t = 0$ in the C++
+convention used by \texttt{single\_pulse\_drive} and
+\texttt{double\_pulse\_drive}).  The original comment described it
+as ``skip the probe pulse region (probe is centered at t=0)'',
+which is backwards from the standard 2DCS naming where the first
+pulse is the pump.  More importantly the comment failed to mention
+the \emph{second} pulse at $t = \tau$, which deliberately stays
+inside the FFT window because that is exactly the
+$\chi^{(3)}$ rephasing/non-rephasing signal we want to Fourier-resolve.
+The math was already correct; we just rewrote the comment so the
+next reader does not get confused into shifting the cutoff.
+
+\subsection*{Things that look unusual but are correct}
+
+\begin{itemize}[noitemsep]
+\item \textbf{\texttt{\_flip\_omega\_tau}} (\texttt{reader\_TmFeO3.py}).
+The reverse-on-axis-$-2$ operation implements the convention
+$T \equiv -\tau$ for the displayed delay axis.  For an even
+$n_\tau$ this is exact; for the canonical odd
+$n_\tau = 2001$ ($\tau \in [-100, +100]$ at step $0.1$) it is off
+by one bin in $\omega_\tau$, well below the resolution at which we
+identify peaks.
+
+\item \textbf{Boost \texttt{integrate\_const} drops the trailing
+remainder of $[T_\text{start}, T_\text{end}]$} when
+$(T_\text{end} - T_\text{start})/T_\text{step}$ is not an integer.
+The audit B1 snap fixes this at the outer level too: $T_\text{end}$
+is now snapped down to the largest grid point $\le T_\text{end}$
+before any chunk is built.
+\end{itemize}
+
+% =================================================================
 \section{Further reading}
 % =================================================================
 \begin{itemize}[noitemsep]

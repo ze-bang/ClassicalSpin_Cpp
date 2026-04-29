@@ -6,10 +6,14 @@
  * StrainPhononLattice. See docs/optimization_notes.tex Ingredient XV
  * (W3) for the full rationale; the executive summary is:
  *
- *   - The Gaussian envelope of a THz / RF pulse decays to ~10⁻¹⁶ of
- *     its peak amplitude past 6σ. Outside that window the LLG (or
- *     coupled spin-strain / phonon) flow is just the unperturbed
- *     deterministic dynamics.
+ *   - The pulse envelope used by every *_pulse_drive() RHS is
+ *     exp(−(Δt/(2σ))²) × cos(ω·Δt) (note the factor of 2 in the
+ *     denominator — `field_drive_width_*` is *not* the standard
+ *     Gaussian σ but rather σ_eff/√2).  At Δt = kPulseWindowSigmas·σ
+ *     the envelope is exp(−kPulseWindowSigmas²/4); for the default
+ *     value 9 this is ≈ 1.6 × 10⁻⁹, well below any realistic 2DCS
+ *     noise floor.  Outside the window the LLG / coupled flow is the
+ *     unperturbed deterministic dynamics.
  *   - Boost.Odeint's `integrate_const(controlled_stepper, ..., dt)`
  *     uses `dt` as both the *observer cadence* and the *initial step
  *     hint* for the controlled stepper. With dt = T_step (typically
@@ -21,6 +25,20 @@
  *     its internal step rapidly. The observer keeps firing at exact
  *     T_step boundaries within each segment via interpolation, so
  *     the trajectory grid is unchanged.
+ *   - **Grid alignment (audit B1).**  Boost's `integrate_const` for
+ *     the controlled-stepper category advances the state in dt-sized
+ *     chunks while `time + dt ≤ end_time`, leaves the state at the
+ *     largest `start + N·dt ≤ end_time`, and **drops** the trailing
+ *     remainder.  If a segment endpoint were not a multiple of
+ *     T_step the next segment would re-enter `integrate_const` with
+ *     a stale state at every seam, biasing the χ³ response.  We
+ *     therefore *snap* every candidate segment endpoint to the
+ *     T_step grid before merging, and assert at the bottom that
+ *     every (seg.t1 − seg.t0) is an integer multiple of T_step.
+ *     For configs whose σ and τ are already multiples of T_step
+ *     (the canonical TmFeO3 production runs) this is a no-op; for
+ *     drifted configs it converts a silent precision loss into a
+ *     correct (slightly shifted) integration window.
  *
  * The helper is purely temporal — it is a pure function of the
  * pulse centres, the integration window, and T_step. It does not
@@ -31,6 +49,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
+#include <cmath>
 #include <utility>
 #include <vector>
 
@@ -56,7 +76,8 @@ struct Segment {
  *                        free segments (typically kFreeDtFactor).
  * @return                Ordered list of segments {t0, t1, dt_init}
  *                        with t0 < t1 and contiguous (segments[i+1].t0
- *                        == segments[i].t1).
+ *                        == segments[i].t1).  Every segment endpoint
+ *                        lies on the T_start + k·T_step grid (audit B1).
  */
 inline std::vector<Segment> build_pulse_segments(
     double T_start,
@@ -68,12 +89,29 @@ inline std::vector<Segment> build_pulse_segments(
 {
     std::vector<Segment> segments;
     if (T_end <= T_start) return segments;
+    if (T_step <= 0.0) return segments;
+
+    // Snap an absolute time to the nearest T_start + k·T_step boundary.
+    // Symmetric round → at most T_step/2 off the requested time.  Used to
+    // align every candidate window endpoint and the global T_end so each
+    // chunk is an exact integer × T_step long (see audit B1).
+    auto snap = [&](double t) -> double {
+        const double k = std::round((t - T_start) / T_step);
+        return T_start + k * T_step;
+    };
+
+    // Snap T_end *down* to the largest grid point ≤ T_end.  This is the
+    // length the integrator can actually cover with `integrate_const`
+    // without dropping a trailing sub-T_step remainder.
+    const double T_end_snapped = T_start +
+        std::floor((T_end - T_start) / T_step + 1e-9) * T_step;
+    if (T_end_snapped <= T_start) return segments;
 
     std::vector<std::pair<double, double>> windows;
     windows.reserve(pulse_centers.size());
     for (double tc : pulse_centers) {
-        double w0 = std::max(T_start, tc - window);
-        double w1 = std::min(T_end,   tc + window);
+        double w0 = std::max(T_start, snap(tc - window));
+        double w1 = std::min(T_end_snapped, snap(tc + window));
         if (w0 < w1) windows.emplace_back(w0, w1);
     }
     std::sort(windows.begin(), windows.end());
@@ -101,18 +139,38 @@ inline std::vector<Segment> build_pulse_segments(
         segments.push_back({w0, w1, active_dt});
         cursor = w1;
     }
-    if (cursor < T_end) {
-        const double seg_len = T_end - cursor;
+    if (cursor < T_end_snapped) {
+        const double seg_len = T_end_snapped - cursor;
         const double dt_hint = std::min(free_dt_raw, seg_len);
-        segments.push_back({cursor, T_end, dt_hint});
+        segments.push_back({cursor, T_end_snapped, dt_hint});
+    }
+
+    // Defence-in-depth: every seam is contiguous, on the T_step grid,
+    // and every chunk length is an integer × T_step.  Compiled out in
+    // release builds via assert(); in debug a violation indicates a bug
+    // in the snapping logic above (not a user-config issue).
+    const double tol = 1e-9 * std::max(1.0, std::abs(T_end - T_start));
+    for (size_t i = 0; i < segments.size(); ++i) {
+        if (i + 1 < segments.size()) {
+            assert(std::abs(segments[i].t1 - segments[i + 1].t0) <= tol);
+        }
+        const double k = (segments[i].t1 - segments[i].t0) / T_step;
+        assert(std::abs(k - std::round(k)) <= 1e-6);
     }
     return segments;
 }
 
 /// Half-width of each pulse-active region as a multiple of the
-/// Gaussian σ. 6 σ captures > 99.9999% of the envelope, well below
-/// any practical 2DCS noise floor.
-constexpr double kPulseWindowSigmas = 6.0;
+/// `field_drive_width_*` parameter σ.
+///
+/// IMPORTANT: the drive envelope is `exp(−(Δt/(2σ))²)` (see
+/// drive_envelopes_SU* in mixed_lattice_md.cpp), i.e. σ here is
+/// σ_eff/√2 of the standard Gaussian.  At Δt = kPulseWindowSigmas·σ
+/// the envelope amplitude is `exp(−kPulseWindowSigmas²/4)`; for
+/// kPulseWindowSigmas = 9 that is ≈ 1.6 × 10⁻⁹.  Audit B2: the old
+/// value of 6 only got us `exp(−9) ≈ 10⁻⁴`, which is far above what
+/// the comment claimed.
+constexpr double kPulseWindowSigmas = 9.0;
 
 /// Multiplicative factor for the dt-hint in free segments. 20× is
 /// conservative — the controlled stepper still enforces the

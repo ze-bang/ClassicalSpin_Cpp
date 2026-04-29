@@ -521,6 +521,11 @@ add_optimized_executable(test_global_frame_equivalence src/apps/test_global_fram
 # physics tolerance (~ 5e-6 on the magnetisation observable).
 add_optimized_executable(test_pulse_drive_tolerance src/apps/test_pulse_drive_tolerance.cpp)
 
+# Regression test for Ingredient XX (audit B1): pulse_chunking helper
+# must snap every segment endpoint to the T_step grid so Boost's
+# `integrate_const` never drops a sub-T_step remainder at a seam.
+add_optimized_executable(test_pulse_chunking_alignment src/apps/test_pulse_chunking_alignment.cpp)
+
 # HDF5 parallel-tempering writer smoke test (no MPI / GPU needed)
 add_optimized_executable(test_hdf5_pt src/test_hdf5_pt.cpp)
 
@@ -546,6 +551,8 @@ if(BUILD_TESTING)
     add_test(NAME global_frame_equivalence COMMAND test_global_frame_equivalence)
     add_test(NAME pulse_drive_tolerance COMMAND test_pulse_drive_tolerance)
     set_tests_properties(pulse_drive_tolerance PROPERTIES TIMEOUT 120)
+    add_test(NAME pulse_chunking_alignment COMMAND test_pulse_chunking_alignment)
+    set_tests_properties(pulse_chunking_alignment PROPERTIES TIMEOUT 30)
     add_test(NAME hdf5_pt_writer_smoke COMMAND test_hdf5_pt)
     set_tests_properties(hdf5_pt_writer_smoke PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
