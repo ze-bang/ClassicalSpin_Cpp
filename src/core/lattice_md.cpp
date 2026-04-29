@@ -553,11 +553,12 @@
             }
         };
         
-        // W3: chunk integration around pulse window so the controlled
-        // stepper can grow its dt in the free-evolution segments. With
-        // chunking disabled we integrate the whole [T_start, T_end]
-        // with a single dt hint (= step_size), preserving legacy
-        // behaviour bit-for-bit.
+        // W3: chunk integration around pulse windows.  We MUST pass
+        // `step_size` (not seg.dt_init) so that integrate_const fires
+        // the observer at the same cadence in every segment.  Otherwise
+        // the trajectory length depends on the pulse positions, which
+        // breaks the fixed-size MPI buffers in pump_probe_spectroscopy_mpi
+        // (worker traj shorter than M0 traj → out-of-bounds → segfault).
         namespace ck = classical_spin_pulse_chunking;
         if (pulse_window_chunking) {
             const auto segments = ck::build_pulse_segments(
@@ -566,7 +567,7 @@
                 ck::kPulseWindowSigmas * pulse_width,
                 step_size, ck::kFreeDtFactor);
             for (const auto& seg : segments) {
-                integrate_ode_system(system_func, state, seg.t0, seg.t1, seg.dt_init,
+                integrate_ode_system(system_func, state, seg.t0, seg.t1, step_size,
                                     observer, method, false, abs_tol, rel_tol);
             }
         } else {
@@ -650,7 +651,8 @@
         // W3: same pulse-window chunking story as single_pulse_drive,
         // except the active windows are built around BOTH pulse centres.
         // build_pulse_segments() will merge them automatically when the
-        // two windows overlap (small τ).
+        // two windows overlap (small τ).  Pass `step_size` (not
+        // seg.dt_init) — see single_pulse_drive() for the MPI rationale.
         namespace ck = classical_spin_pulse_chunking;
         if (pulse_window_chunking) {
             const auto segments = ck::build_pulse_segments(
@@ -659,7 +661,7 @@
                 ck::kPulseWindowSigmas * pulse_width,
                 step_size, ck::kFreeDtFactor);
             for (const auto& seg : segments) {
-                integrate_ode_system(system_func, state, seg.t0, seg.t1, seg.dt_init,
+                integrate_ode_system(system_func, state, seg.t0, seg.t1, step_size,
                                     observer, method, false, abs_tol, rel_tol);
             }
         } else {
@@ -1314,10 +1316,43 @@
             return traj;
         };
         
+        // ---- Bounds-safe pad/clamp helpers (mirror MixedLattice fix) ----
+        // Different tau values can produce trajectories that differ by ±1
+        // sample (when tau is not a multiple of step_size, or when pulse
+        // windows merge for small |tau|).  Pad/clamp to `time_points` so
+        // (a) the HDF5 dataset shape is uniform across tau groups and
+        // (b) MPI Send/Recv with fixed `traj_size` never overflows the
+        // worker's local trajectory buffer.
+        auto pad_to_time_points = [&](TrajectoryType& traj) {
+            if (traj.size() == time_points) return;
+            if (traj.size() > time_points) { traj.resize(time_points); return; }
+            const size_t old_n = traj.size();
+            const double t_last = old_n > 0 ? traj.back().first : T_start;
+            traj.resize(time_points);
+            for (size_t t = old_n; t < time_points; ++t) {
+                traj[t].first = t_last + T_step * static_cast<double>(t - old_n + 1);
+                array<SpinVector, 3> zero = {SpinVector::Zero(spin_dim),
+                                              SpinVector::Zero(spin_dim),
+                                              SpinVector::Zero(spin_dim)};
+                traj[t].second = zero;
+            }
+        };
+
         // First: rank 0 writes its own local results immediately
         if (rank == 0) {
             for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
                 int tau_idx = my_tau_indices[idx];
+                if (local_M1_trajectories[idx].size() != time_points ||
+                    local_M01_trajectories[idx].size() != time_points) {
+                    std::cerr << "[2dcs MPI] rank=0 tau_idx=" << tau_idx
+                              << " trajectory length mismatch: M1="
+                              << local_M1_trajectories[idx].size()
+                              << " M01=" << local_M01_trajectories[idx].size()
+                              << " expected=" << time_points
+                              << " — padding to keep HDF5 shape uniform.\n";
+                }
+                pad_to_time_points(local_M1_trajectories[idx]);
+                pad_to_time_points(local_M01_trajectories[idx]);
                 write_tau_to_hdf5(tau_idx, local_M1_trajectories[idx], local_M01_trajectories[idx]);
             }
             cout << "  Rank 0 local trajectories written (" << my_tau_indices.size() << " tau points)." << endl;
@@ -1370,29 +1405,38 @@
                         break;
                     }
                 }
-                
-                // Serialize M1
-                for (size_t t = 0; t < time_points; ++t) {
-                    size_t offset = t * data_per_point;
-                    M1_buffer[offset] = local_M1_trajectories[local_idx][t].first;
-                    for (int m = 0; m < 3; ++m) {
-                        for (size_t d = 0; d < spin_dim; ++d) {
-                            M1_buffer[offset + 1 + m * spin_dim + d] = local_M1_trajectories[local_idx][t].second[m](d);
+
+                // Bounds-safe serialization (see MixedLattice for rationale).
+                auto serialize = [&](const TrajectoryType& traj, vector<double>& buf,
+                                     const char* tag) {
+                    const size_t actual_n = traj.size();
+                    const size_t copy_n   = std::min(actual_n, time_points);
+                    if (actual_n != time_points) {
+                        std::cerr << "[2dcs MPI] rank=" << rank
+                                  << " tau_idx=" << tau_idx
+                                  << " " << tag << " trajectory length mismatch: "
+                                  << "actual=" << actual_n
+                                  << " expected=" << time_points
+                                  << " — clamping + zero-padding.\n";
+                    }
+                    for (size_t t = 0; t < copy_n; ++t) {
+                        size_t offset = t * data_per_point;
+                        buf[offset] = traj[t].first;
+                        for (int m = 0; m < 3; ++m) {
+                            for (size_t d = 0; d < spin_dim; ++d) {
+                                buf[offset + 1 + m * spin_dim + d] = traj[t].second[m](d);
+                            }
                         }
                     }
-                }
-                
-                // Serialize M01
-                for (size_t t = 0; t < time_points; ++t) {
-                    size_t offset = t * data_per_point;
-                    M01_buffer[offset] = local_M01_trajectories[local_idx][t].first;
-                    for (int m = 0; m < 3; ++m) {
-                        for (size_t d = 0; d < spin_dim; ++d) {
-                            M01_buffer[offset + 1 + m * spin_dim + d] = local_M01_trajectories[local_idx][t].second[m](d);
-                        }
+                    if (copy_n < time_points) {
+                        std::fill(buf.begin() + copy_n * data_per_point,
+                                  buf.end(), 0.0);
                     }
-                }
-                
+                };
+
+                serialize(local_M1_trajectories[local_idx],  M1_buffer,  "M1");
+                serialize(local_M01_trajectories[local_idx], M01_buffer, "M01");
+
                 MPI_Send(M1_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx, MPI_COMM_WORLD);
                 MPI_Send(M01_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx + 1, MPI_COMM_WORLD);
             }

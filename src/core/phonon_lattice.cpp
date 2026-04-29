@@ -2528,6 +2528,9 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
     };
     
     // ---- W3: pulse-window-aware chunked integration ------------------
+    // Pass `step_size` (not seg.dt_init) so observer cadence is uniform
+    // across all segments — required for MPI buffer-size correctness in
+    // pump_probe_spectroscopy_mpi.  See mixed_lattice.h for full notes.
     if (pulse_window_chunking) {
         namespace ck = classical_spin_pulse_chunking;
         const auto segments = ck::build_pulse_segments(
@@ -2538,7 +2541,7 @@ PhononLattice::MagTrajectory PhononLattice::single_pulse_drive(
             /*free_dt_factor=*/ ck::kFreeDtFactor);
         for (const auto& seg : segments) {
             integrate_ode_system(system_func, state,
-                                 seg.t0, seg.t1, seg.dt_init,
+                                 seg.t0, seg.t1, step_size,
                                  observer, method, false, abs_tol, rel_tol);
         }
     } else {
@@ -2630,6 +2633,7 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
     };
     
     // ---- W3: pulse-window-aware chunked integration ------------------
+    // See single_pulse_drive() — uniform observer cadence required.
     if (pulse_window_chunking) {
         namespace ck = classical_spin_pulse_chunking;
         const auto segments = ck::build_pulse_segments(
@@ -2640,7 +2644,7 @@ PhononLattice::MagTrajectory PhononLattice::double_pulse_drive(
             /*free_dt_factor=*/ ck::kFreeDtFactor);
         for (const auto& seg : segments) {
             integrate_ode_system(system_func, state,
-                                 seg.t0, seg.t1, seg.dt_init,
+                                 seg.t0, seg.t1, step_size,
                                  observer, method, false, abs_tol, rel_tol);
         }
     } else {

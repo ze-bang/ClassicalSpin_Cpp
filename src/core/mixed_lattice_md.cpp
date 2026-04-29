@@ -1955,10 +1955,60 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             return traj;
         };
         
+        // Helper: resize a trajectory to exactly `time_points` so every
+        // tau group in the HDF5 file has the same dataset shape (analysis
+        // tools assume a regular (n_tau, n_t, ...) grid).  Padding uses
+        // zeros for the magnetisation entries and extrapolates the time
+        // axis at uniform `T_step` so the FFT grid stays regular.
+        auto pad_to_time_points = [&](TrajectoryType& traj) {
+            if (traj.size() == time_points) return;
+            if (traj.size() > time_points) {
+                traj.resize(time_points);
+                return;
+            }
+            const size_t old_n = traj.size();
+            const double t_last = old_n > 0 ? traj.back().first : T_start;
+            traj.resize(time_points);
+            for (size_t t = old_n; t < time_points; ++t) {
+                traj[t].first = t_last + T_step * static_cast<double>(t - old_n + 1);
+                array<SpinVector, 3> zero_su2 = {SpinVector::Zero(spin_dim_SU2),
+                                                  SpinVector::Zero(spin_dim_SU2),
+                                                  SpinVector::Zero(spin_dim_SU2)};
+                array<SpinVector, 3> zero_su3 = {SpinVector::Zero(spin_dim_SU3),
+                                                  SpinVector::Zero(spin_dim_SU3),
+                                                  SpinVector::Zero(spin_dim_SU3)};
+                traj[t].second = {zero_su2, zero_su3};
+            }
+        };
+
+        auto pad_spin_flat = [&](vector<double>& sf) {
+            if (sf.size() == state_traj_size_spins) return;
+            if (sf.size() > state_traj_size_spins) {
+                sf.resize(state_traj_size_spins);
+                return;
+            }
+            sf.resize(state_traj_size_spins, 0.0);
+        };
+
         // First: rank 0 writes its own local results immediately
         if (rank == 0) {
             for (size_t idx = 0; idx < my_tau_indices.size(); ++idx) {
                 int tau_idx = my_tau_indices[idx];
+                if (local_M1_trajectories[idx].size() != time_points ||
+                    local_M01_trajectories[idx].size() != time_points) {
+                    std::cerr << "[mixed_2dcs MPI] rank=0 tau_idx=" << tau_idx
+                              << " trajectory length mismatch: M1="
+                              << local_M1_trajectories[idx].size()
+                              << " M01=" << local_M01_trajectories[idx].size()
+                              << " expected=" << time_points
+                              << " — padding to keep HDF5 shape uniform.\n";
+                }
+                pad_to_time_points(local_M1_trajectories[idx]);
+                pad_to_time_points(local_M01_trajectories[idx]);
+                if (save_spin_trajectories) {
+                    if (idx < local_spin_flat_M1.size())  pad_spin_flat(local_spin_flat_M1[idx]);
+                    if (idx < local_spin_flat_M01.size()) pad_spin_flat(local_spin_flat_M01[idx]);
+                }
                 const vector<double>* sp_m1 = save_spin_trajectories && idx < local_spin_flat_M1.size()
                                               ? &local_spin_flat_M1[idx] : nullptr;
                 const vector<double>* sp_m01 = save_spin_trajectories && idx < local_spin_flat_M01.size()
@@ -2034,56 +2084,100 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                         break;
                     }
                 }
-                
-                // Serialize M1
-                for (size_t t = 0; t < time_points; ++t) {
-                    size_t offset = t * data_per_point;
-                    M1_buffer[offset] = local_M1_trajectories[local_idx][t].first;
-                    for (int m = 0; m < 3; ++m) {
-                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                            M1_buffer[offset + 1 + m * spin_dim_SU2 + d] = 
-                                local_M1_trajectories[local_idx][t].second.first[m](d);
+
+                // ------------------------------------------------------------
+                // Bounds-safe serialization.
+                //
+                // `time_points` is broadcast from rank 0's M0_trajectory size.
+                // A worker's M1 / M01 trajectory length can in principle
+                // differ by ±1 sample because the integrator's segment
+                // boundaries (tau ± window, etc.) are not always exact
+                // multiples of step_size — e.g. when tau_step is not a
+                // multiple of md_timestep, or when two pulse windows merge
+                // for small |tau|.
+                //
+                // Without the clamp + pad below, accessing
+                // local_M*_trajectories[local_idx][t] for t == size() is
+                // undefined behaviour and was the source of the rank-K
+                // segfault observed in pump_probe_spectroscopy_mpi (see
+                // job 11092211 post-mortem).
+                // ------------------------------------------------------------
+                auto serialize = [&](const TrajectoryType& traj, vector<double>& buf,
+                                     const char* tag) {
+                    const size_t actual_n = traj.size();
+                    const size_t copy_n   = std::min(actual_n, time_points);
+                    if (actual_n != time_points) {
+                        std::cerr << "[mixed_2dcs MPI] rank=" << rank
+                                  << " tau_idx=" << tau_idx
+                                  << " " << tag << " trajectory length mismatch: "
+                                  << "actual=" << actual_n
+                                  << " expected=" << time_points
+                                  << " — clamping + zero-padding remainder.\n";
+                    }
+                    for (size_t t = 0; t < copy_n; ++t) {
+                        size_t offset = t * data_per_point;
+                        buf[offset] = traj[t].first;
+                        for (int m = 0; m < 3; ++m) {
+                            for (size_t d = 0; d < spin_dim_SU2; ++d) {
+                                buf[offset + 1 + m * spin_dim_SU2 + d] =
+                                    traj[t].second.first[m](d);
+                            }
+                        }
+                        size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
+                        for (int m = 0; m < 3; ++m) {
+                            for (size_t d = 0; d < spin_dim_SU3; ++d) {
+                                buf[su3_offset + m * spin_dim_SU3 + d] =
+                                    traj[t].second.second[m](d);
+                            }
                         }
                     }
-                    size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
-                    for (int m = 0; m < 3; ++m) {
-                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                            M1_buffer[su3_offset + m * spin_dim_SU3 + d] = 
-                                local_M1_trajectories[local_idx][t].second.second[m](d);
-                        }
+                    // Zero-pad any trailing samples that the worker did not
+                    // produce so the receiver still gets `traj_size` doubles.
+                    if (copy_n < time_points) {
+                        std::fill(buf.begin() + copy_n * data_per_point,
+                                  buf.end(), 0.0);
                     }
-                }
-                
-                // Serialize M01
-                for (size_t t = 0; t < time_points; ++t) {
-                    size_t offset = t * data_per_point;
-                    M01_buffer[offset] = local_M01_trajectories[local_idx][t].first;
-                    for (int m = 0; m < 3; ++m) {
-                        for (size_t d = 0; d < spin_dim_SU2; ++d) {
-                            M01_buffer[offset + 1 + m * spin_dim_SU2 + d] = 
-                                local_M01_trajectories[local_idx][t].second.first[m](d);
-                        }
-                    }
-                    size_t su3_offset = offset + 1 + 3 * spin_dim_SU2;
-                    for (int m = 0; m < 3; ++m) {
-                        for (size_t d = 0; d < spin_dim_SU3; ++d) {
-                            M01_buffer[su3_offset + m * spin_dim_SU3 + d] = 
-                                local_M01_trajectories[local_idx][t].second.second[m](d);
-                        }
-                    }
-                }
-                
+                };
+
+                serialize(local_M1_trajectories[local_idx],  M1_buffer,  "M1");
+                serialize(local_M01_trajectories[local_idx], M01_buffer, "M01");
+
                 MPI_Send(M1_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx, MPI_COMM_WORLD);
                 MPI_Send(M01_buffer.data(), traj_size, MPI_DOUBLE, 0, 2 * tau_idx + 1, MPI_COMM_WORLD);
                 
-                // Send spin state trajectories if enabled
+                // Send spin state trajectories if enabled.  Pad/truncate
+                // these the same way so the receiver's fixed-size buffer
+                // is always satisfied.
                 if (save_spin_trajectories) {
                     const vector<double>& sf_m1 = local_spin_flat_M1[local_idx];
                     const vector<double>& sf_m01 = local_spin_flat_M01[local_idx];
-                    MPI_Send(sf_m1.data(), static_cast<int>(sf_m1.size()), MPI_DOUBLE, 0,
-                             2 * tau_steps + 2 * tau_idx, MPI_COMM_WORLD);
-                    MPI_Send(sf_m01.data(), static_cast<int>(sf_m01.size()), MPI_DOUBLE, 0,
-                             2 * tau_steps + 2 * tau_idx + 1, MPI_COMM_WORLD);
+
+                    auto send_spin = [&](const vector<double>& sf, int tag) {
+                        if (sf.size() == state_traj_size_spins) {
+                            MPI_Send(sf.data(),
+                                     static_cast<int>(state_traj_size_spins),
+                                     MPI_DOUBLE, 0, tag, MPI_COMM_WORLD);
+                        } else {
+                            // Re-pack into a padded/truncated buffer.
+                            vector<double> padded(state_traj_size_spins, 0.0);
+                            const size_t copy_n = std::min(sf.size(),
+                                                           state_traj_size_spins);
+                            std::copy(sf.begin(), sf.begin() + copy_n,
+                                      padded.begin());
+                            std::cerr << "[mixed_2dcs MPI] rank=" << rank
+                                      << " tau_idx=" << tau_idx
+                                      << " spin-state length mismatch: "
+                                      << "actual=" << sf.size()
+                                      << " expected=" << state_traj_size_spins
+                                      << " — padded.\n";
+                            MPI_Send(padded.data(),
+                                     static_cast<int>(state_traj_size_spins),
+                                     MPI_DOUBLE, 0, tag, MPI_COMM_WORLD);
+                        }
+                    };
+
+                    send_spin(sf_m1,  2 * tau_steps + 2 * tau_idx);
+                    send_spin(sf_m01, 2 * tau_steps + 2 * tau_idx + 1);
                 }
             }
         }

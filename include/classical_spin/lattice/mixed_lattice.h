@@ -4538,8 +4538,23 @@ public:
         };
 
         // ---- W3: pulse-window-aware chunked integration ------------------
-        // Ensure we observe at the end of every chunk so the trajectory
-        // grid stays exactly the same as the unchunked path.
+        // The chunking partitions [T_start, T_end] into pulse-active and
+        // free segments.  We pass `step_size` (NOT seg.dt_init) to every
+        // chunk so `integrate_const(controlled_stepper, ..., dt)` fires
+        // the observer at the *same* fixed cadence in every segment.
+        //
+        // Why this matters: integrate_const treats `dt` as the observer
+        // cadence.  If we passed the larger `seg.dt_init` (= 20*step_size)
+        // in free segments, the observer would only fire every 0.4 ps
+        // there, producing a trajectory whose length depends on the
+        // pulse positions.  In the MPI 2DCS driver the rank-0 reference
+        // M0 has one pulse at t=0, while workers have pulses at {0, τ}.
+        // Different τ values then yield different trajectory lengths,
+        // and rank 0's MPI Send/Recv (sized from M0) overflows the
+        // worker buffer → segfault.  Using `step_size` everywhere
+        // restores a uniform cadence.  The marginal W3 speedup of
+        // skipping observer ticks in free regions is given up in
+        // exchange for predictable, MPI-safe trajectory lengths.
         if (pulse_window_chunking) {
             namespace ck = classical_spin_pulse_chunking;
             const double sigma = std::max(pulse_width_SU2, pulse_width_SU3);
@@ -4551,7 +4566,7 @@ public:
                 /*free_dt_factor=*/ ck::kFreeDtFactor);
             for (const auto& seg : segments) {
                 integrate_ode_system(system_func, state,
-                                     seg.t0, seg.t1, seg.dt_init,
+                                     seg.t0, seg.t1, step_size,
                                      observer, method, false, abs_tol, rel_tol);
             }
         } else {
@@ -4653,6 +4668,9 @@ public:
         };
 
         // ---- W3: pulse-window-aware chunked integration ------------------
+        // See single_pulse_drive() for the rationale on passing
+        // `step_size` (not `seg.dt_init`) — uniform observer cadence is
+        // required for MPI buffer-size correctness in the 2DCS driver.
         if (pulse_window_chunking) {
             namespace ck = classical_spin_pulse_chunking;
             const double sigma = std::max(pulse_width_SU2, pulse_width_SU3);
@@ -4664,7 +4682,7 @@ public:
                 /*free_dt_factor=*/ ck::kFreeDtFactor);
             for (const auto& seg : segments) {
                 integrate_ode_system(system_func, state,
-                                     seg.t0, seg.t1, seg.dt_init,
+                                     seg.t0, seg.t1, step_size,
                                      observer, method, false, abs_tol, rel_tol);
             }
         } else {
