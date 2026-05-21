@@ -442,10 +442,24 @@ SpinMatrix tmfeo3_induced_su3_frame(const Eigen::Matrix3d& mu_act,
     // with lambda_active = (lambda_2, lambda_5, lambda_7).
     // The local->global induced action on the active SU(3) triplet is
     //   lambda_global = F_mu lambda_local,
-    //   F_mu = mu_act^{-1} R_mu mu_act.
+    //   F_mu = mu_act^{-1} R_xyz mu_act.
     // The coherence partners (lambda_1, lambda_4, lambda_6) must carry the
     // same 3x3 action so each |E_a><E_b| pair has one bulk character, while
     // the diagonal population channels (lambda_3, lambda_8) remain invariant.
+    //
+    // Physical justification (non-Kramers derivation):
+    //   Tm^3+ is non-Kramers (J=6 integer), so time reversal squares to +1
+    //   and the three CEF eigenstates |1>,|2>,|3> can be chosen real.
+    //   The four Tm sublattices are related by proper C_2 rotations (Pbnm
+    //   coset reps), which act as real orthogonal matrices V_{g_i} on the
+    //   3-level subspace via rho -> V rho V^T (real V).
+    //   Under this action, V_{jj'} V_{kk'} multiplies both Re(rho_{j'k'})
+    //   and Im(rho_{j'k'}) identically, so:
+    //     F_i^E = F_i^M = mu_act^{-1} D_i mu_act
+    //   for all four sublattices.  The A1+/A2+ inversion-parity distinction
+    //   (lambda_1 vs lambda_{4,6}) affects external-coupling signs (the W
+    //   inv flag) but NOT the proper-rotation frame, which sees all
+    //   off-diagonal pairs identically.
     constexpr int active_im[3] = {1, 4, 6};
     constexpr int active_re[3] = {0, 3, 5};
 
