@@ -834,7 +834,24 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
     }
 
     const bool save_spin_traj = (config.get_param("save_spin_trajectories", 0.0) > 0.5);
-    
+
+    // Load tabulated pump pulse if specified.
+    // This sets lattice.tabulated_pulse_{times,values,sigma} and later causes
+    // drive_envelopes_SU2/SU3 to use linear interpolation instead of Gaussian.
+    // The effective width/frequency override the config values so that the
+    // pulse-window chunking window correctly covers the tabulated pulse.
+    double effective_pump_width = config.pump_width;
+    double effective_pump_frequency = config.pump_frequency;
+    double effective_pump_width_su3 = local_pump_width_su3;
+    double effective_pump_frequency_su3 = local_pump_frequency_su3;
+    if (!config.pump_table_file.empty()) {
+        lattice.load_tabulated_pulse(config.pump_table_file);
+        effective_pump_width     = lattice.tabulated_pulse_sigma;
+        effective_pump_frequency = 0.0;  // frequency is encoded in the table
+        effective_pump_width_su3     = lattice.tabulated_pulse_sigma;
+        effective_pump_frequency_su3 = 0.0;
+    }
+
     if (use_tau_parallel) {
         // Single trial, parallelize over tau values
         string trial_dir = config.output_dir + "/sample_0";
@@ -948,11 +965,11 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             field_dirs_su2,
             field_dirs_su3,
             config.pump_amplitude,
-            config.pump_width,
-            config.pump_frequency,
+            effective_pump_width,
+            effective_pump_frequency,
             local_pump_amplitude_su3,
-            local_pump_width_su3,
-            local_pump_frequency_su3,
+            effective_pump_width_su3,
+            effective_pump_frequency_su3,
             config.tau_start,
             config.tau_end,
             config.tau_step,
@@ -1060,11 +1077,11 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 field_dirs_su2,
                 field_dirs_su3,
                 config.pump_amplitude,
-                config.pump_width,
-                config.pump_frequency,
+                effective_pump_width,
+                effective_pump_frequency,
                 local_pump_amplitude_su3,
-                local_pump_width_su3,
-                local_pump_frequency_su3,
+                effective_pump_width_su3,
+                effective_pump_frequency_su3,
                 config.tau_start,
                 config.tau_end,
                 config.tau_step,

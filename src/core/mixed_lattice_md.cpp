@@ -259,26 +259,127 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
     // Hoisted out of the per-site loop so that the two exp + cos calls
     // happen once per RHS evaluation instead of once per site.
     void MixedLattice::drive_envelopes_SU2(double t, double& factor1, double& factor2) const {
-        const double dt1 = t - t_pulse_SU2[0];
-        const double dt2 = t - t_pulse_SU2[1];
-        factor1 = field_drive_amp_SU2 *
-                  std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU2), 2)) *
-                  std::cos(field_drive_freq_SU2 * dt1);
-        factor2 = field_drive_amp_SU2 *
-                  std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU2), 2)) *
-                  std::cos(field_drive_freq_SU2 * dt2);
+        if (!tabulated_pulse_times.empty()) {
+            // Tabulated mode: linear interpolation, returns 0 outside data range
+            const double dt1 = t - t_pulse_SU2[0];
+            const double dt2 = t - t_pulse_SU2[1];
+            factor1 = field_drive_amp_SU2 * interp_tabulated_pulse(dt1);
+            factor2 = field_drive_amp_SU2 * interp_tabulated_pulse(dt2);
+        } else {
+            const double dt1 = t - t_pulse_SU2[0];
+            const double dt2 = t - t_pulse_SU2[1];
+            factor1 = field_drive_amp_SU2 *
+                      std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU2), 2)) *
+                      std::cos(field_drive_freq_SU2 * dt1);
+            factor2 = field_drive_amp_SU2 *
+                      std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU2), 2)) *
+                      std::cos(field_drive_freq_SU2 * dt2);
+        }
     }
 
 // ---- MixedLattice::drive_envelopes_SU3 ----
     void MixedLattice::drive_envelopes_SU3(double t, double& factor1, double& factor2) const {
-        const double dt1 = t - t_pulse_SU3[0];
-        const double dt2 = t - t_pulse_SU3[1];
-        factor1 = field_drive_amp_SU3 *
-                  std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU3), 2)) *
-                  std::cos(field_drive_freq_SU3 * dt1);
-        factor2 = field_drive_amp_SU3 *
-                  std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU3), 2)) *
-                  std::cos(field_drive_freq_SU3 * dt2);
+        if (!tabulated_pulse_times.empty()) {
+            // Tabulated mode: same table shared with SU2 (same physical pulse)
+            const double dt1 = t - t_pulse_SU3[0];
+            const double dt2 = t - t_pulse_SU3[1];
+            factor1 = field_drive_amp_SU3 * interp_tabulated_pulse(dt1);
+            factor2 = field_drive_amp_SU3 * interp_tabulated_pulse(dt2);
+        } else {
+            const double dt1 = t - t_pulse_SU3[0];
+            const double dt2 = t - t_pulse_SU3[1];
+            factor1 = field_drive_amp_SU3 *
+                      std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU3), 2)) *
+                      std::cos(field_drive_freq_SU3 * dt1);
+            factor2 = field_drive_amp_SU3 *
+                      std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU3), 2)) *
+                      std::cos(field_drive_freq_SU3 * dt2);
+        }
+    }
+
+// ---- MixedLattice::interp_tabulated_pulse (private helper) ----
+    // Linear interpolation of the normalized tabulated pulse at offset `dt`
+    // from the pulse center.  Returns 0 outside the data range.
+    double MixedLattice::interp_tabulated_pulse(double dt) const {
+        if (tabulated_pulse_times.empty()) return 0.0;
+        if (dt <= tabulated_pulse_times.front() || dt >= tabulated_pulse_times.back()) return 0.0;
+        // Binary search for the bracketing interval
+        auto it = std::lower_bound(tabulated_pulse_times.begin(), tabulated_pulse_times.end(), dt);
+        size_t idx = static_cast<size_t>(it - tabulated_pulse_times.begin());
+        const double t0 = tabulated_pulse_times[idx - 1];
+        const double t1 = tabulated_pulse_times[idx];
+        const double v0 = tabulated_pulse_values[idx - 1];
+        const double v1 = tabulated_pulse_values[idx];
+        return v0 + (v1 - v0) * (dt - t0) / (t1 - t0);
+    }
+
+// ---- MixedLattice::load_tabulated_pulse ----
+    void MixedLattice::load_tabulated_pulse(const std::string& filename) {
+        tabulated_pulse_times.clear();
+        tabulated_pulse_values.clear();
+        tabulated_pulse_sigma = 0.0;
+
+        std::ifstream f(filename);
+        if (!f.is_open()) {
+            throw std::runtime_error("load_tabulated_pulse: cannot open \"" + filename + "\"");
+        }
+
+        std::string line;
+        while (std::getline(f, line)) {
+            // Strip comments and blank lines
+            const auto comment_pos = line.find('#');
+            if (comment_pos != std::string::npos) line.erase(comment_pos);
+            if (line.empty()) continue;
+            // Accept comma- or whitespace-separated columns
+            for (char& c : line) { if (c == ',') c = ' '; }
+            std::istringstream ss(line);
+            double t_val, e_val;
+            if (ss >> t_val >> e_val) {
+                tabulated_pulse_times.push_back(t_val);
+                tabulated_pulse_values.push_back(e_val);
+            }
+        }
+
+        if (tabulated_pulse_times.size() < 2) {
+            throw std::runtime_error("load_tabulated_pulse: fewer than 2 data points in \"" + filename + "\"");
+        }
+
+        // Center time axis at the peak (same convention as Efield_plot.py)
+        double e_max = 0.0;
+        size_t idx_peak = 0;
+        for (size_t i = 0; i < tabulated_pulse_values.size(); ++i) {
+            if (std::abs(tabulated_pulse_values[i]) > e_max) {
+                e_max = std::abs(tabulated_pulse_values[i]);
+                idx_peak = i;
+            }
+        }
+        const double t_peak = tabulated_pulse_times[idx_peak];
+        for (double& tv : tabulated_pulse_times) tv -= t_peak;
+
+        // Normalize so max|E| = 1 (amplitude scaling is then handled by field_drive_amp_SU2/SU3)
+        for (double& ev : tabulated_pulse_values) ev /= e_max;
+
+        // Compute effective σ for pulse-window chunking.
+        // We use: σ = max|dt| / kPulseWindowSigmas so that
+        // kPulseWindowSigmas * σ exactly covers the full data range.
+        constexpr double kPulseWindowSigmas = 9.0;
+        const double max_extent = std::max(
+            std::abs(tabulated_pulse_times.front()),
+            std::abs(tabulated_pulse_times.back()));
+        tabulated_pulse_sigma = max_extent / kPulseWindowSigmas;
+
+        int mpi_rank = 0;
+        int mpi_inited = 0;
+        MPI_Initialized(&mpi_inited);
+        if (mpi_inited) MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+        if (mpi_rank == 0) {
+            std::cout << "Tabulated pulse loaded: " << filename << "\n"
+                      << "  Points: " << tabulated_pulse_times.size()
+                      << "  t range: [" << tabulated_pulse_times.front()
+                      << ", " << tabulated_pulse_times.back() << "] ps\n"
+                      << "  Effective sigma: " << tabulated_pulse_sigma << " ps" << std::endl;
+        }
     }
 
 // ---- MixedLattice::drive_field_SU2_at_time ----

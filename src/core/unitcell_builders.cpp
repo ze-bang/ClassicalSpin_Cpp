@@ -589,6 +589,16 @@ void apply_tmfeo3_fe_sector(TmFeO3_Fe& Fe_atoms, const SpinConfig& config) {
     K_mat(2, 2) = Kc;
     for (int i = 0; i < 4; ++i) Fe_atoms.set_onsite_interaction(K_mat, i);
 
+    // AFM sublattice signs for Bertaut staggered observables in the LAB frame.
+    // TmFeO3_Fe ctor installs non-trivial Bertaut sublattice frames
+    //   R_0 = diag(+,+,+), R_1 = diag(+,-,-), R_2 = diag(-,+,-), R_3 = diag(-,-,+),
+    // under which the four sites' lab-frame magnetizations transform as the four
+    // 1-D representations of mmm.  In Γ_2 (Fx, Cy, Gz) the lab Sz pattern is
+    // (+, -, +, -), so the correct staggered weights to project out the G_z
+    // (qAFM) order parameter—and its δG_y partner—are sign(R_μ)_zz themselves:
+    //   site 0:+1,  site 1:-1,  site 2:+1,  site 3:-1.
+    Fe_atoms.set_afm_sublattice_signs({+1.0, -1.0, +1.0, -1.0});
+
     // External Zeeman field in lab Cartesian.
         Eigen::Vector3d h_lab;
         h_lab << config.field_direction[0] * h,
@@ -727,10 +737,10 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
 // -----------------------------------------------------------------------------
 
 // 16 Fe-Tm inversion-related bond pairs = 4 orbits * 4 pairs/orbit.
-// For each pair, the odd bond is the inversion-related partner of the even
-// bond. The on-site W A2+ channels (lambda_4, lambda_6) therefore enter with
-// opposite signs on the two bonds, while the A1+ channels (lambda_1, lambda_3,
-// lambda_8) are identical.
+// The same Fe-Tm topology is used for both the linear chi term and the on-site
+// trilinear W term. For each pair, the odd bond is the inversion-related
+// partner of the even bond. The mirror-odd Tm channels therefore pick up the
+// opposite sign on the odd bond, while the mirror-even channels do not.
 struct FeTmBond {
     int fe;               // Fe sublattice index
     int tm;               // Tm sublattice index
@@ -770,8 +780,34 @@ const std::array<FeTmBondPair, 16>& fe_tm_w_bond_pairs() {
 }
 
 void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& config) {
+    struct BilinearChannel {
+        double x, y, z;
+    };
+
     struct TrilinearChannel {
         double xx, yy, zz, xy, xz, yz;
+    };
+
+    const BilinearChannel chi2_ch = {
+        config.get_param("chi2x", 0.0),
+        config.get_param("chi2y", 0.0),
+        config.get_param("chi2z", 0.0)
+    };
+    const BilinearChannel chi5_ch = {
+        config.get_param("chi5x", 0.0),
+        config.get_param("chi5y", 0.0),
+        config.get_param("chi5z", 0.0)
+    };
+    const BilinearChannel chi7_ch = {
+        config.get_param("chi7x", 0.0),
+        config.get_param("chi7y", 0.0),
+        config.get_param("chi7z", 0.0)
+    };
+    const double chi_orbit_scale[4] = {
+        config.get_param("chi_orbit1_scale", 1.0),
+        config.get_param("chi_orbit2_scale", 1.0),
+        config.get_param("chi_orbit3_scale", 1.0),
+        config.get_param("chi_orbit4_scale", 1.0)
     };
 
     // Legacy shorthand used in tracked TmFeO3 configs:
@@ -799,6 +835,9 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         return channel.xx != 0.0 || channel.yy != 0.0 || channel.zz != 0.0
             || channel.xy != 0.0 || channel.xz != 0.0 || channel.yz != 0.0;
     };
+    auto bilinear_ch_nonzero = [](const BilinearChannel& channel) {
+        return channel.x != 0.0 || channel.y != 0.0 || channel.z != 0.0;
+    };
 
     const TrilinearChannel W1_ch = read_tri_ch("W1", u1, 0.0);
     const TrilinearChannel W3_ch = read_tri_ch("W3", u3, 0.0);
@@ -811,6 +850,20 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         config.get_param("W_orbit2_scale", 1.0),
         config.get_param("W_orbit3_scale", 1.0),
         config.get_param("W_orbit4_scale", 1.0)
+    };
+
+    auto build_chi = [&](double sign_57) {
+        SpinMatrix tensor = SpinMatrix::Zero(3, 8);
+        tensor(0, 1) = chi2_ch.x;
+        tensor(1, 1) = chi2_ch.y;
+        tensor(2, 1) = chi2_ch.z;
+        tensor(0, 4) = sign_57 * chi5_ch.x;
+        tensor(1, 4) = sign_57 * chi5_ch.y;
+        tensor(2, 4) = sign_57 * chi5_ch.z;
+        tensor(0, 6) = sign_57 * chi7_ch.x;
+        tensor(1, 6) = sign_57 * chi7_ch.y;
+        tensor(2, 6) = sign_57 * chi7_ch.z;
+        return tensor;
     };
 
     auto fill_channel = [](SpinTensor3& tensor, int lambda_index,
@@ -832,8 +885,33 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         }
         return out;
     };
+    auto scale_matrix = [](const SpinMatrix& matrix, double scale) {
+        return scale * matrix;
+    };
 
     const auto& bond_pairs = fe_tm_w_bond_pairs();
+
+    // Linear Fe-Tm term:
+    //   H_chi = sum_{(i,mu)} S_i^a chi_{ab} lambda_mu^b.
+    // The live TmFeO3 parameterization keeps only the time-odd Tm channels
+    // {lambda_2, lambda_5, lambda_7}. lambda_2 is inversion-even, while
+    // lambda_5/lambda_7 flip sign on the inversion-related partner.
+    const bool any_chi = bilinear_ch_nonzero(chi2_ch)
+                      || bilinear_ch_nonzero(chi5_ch)
+                      || bilinear_ch_nonzero(chi7_ch);
+    if (any_chi) {
+        const SpinMatrix chi_even_base = build_chi(+1.0);
+        const SpinMatrix chi_odd_base = build_chi(-1.0);
+        for (const auto& pair : bond_pairs) {
+            const double orbit_scale = chi_orbit_scale[pair.orbit - 1];
+            mixed_uc.set_mixed_bilinear(
+                scale_matrix(chi_even_base, orbit_scale),
+                pair.even.fe, pair.even.tm, pair.even.off);
+            mixed_uc.set_mixed_bilinear(
+                scale_matrix(chi_odd_base, orbit_scale),
+                pair.odd.fe, pair.odd.tm, pair.odd.off);
+        }
+    }
 
     // On-site Fe-Fe-Tm term:
     //   H_W = sum_{(i,mu)} lambda_mu^(n) W_n^{ab} S_i^a S_i^b.

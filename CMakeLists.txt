@@ -514,7 +514,7 @@ add_optimized_executable(test_strain_phonon_regressions src/apps/test_strain_pho
 # sum rule, the explicit channel expansion, the absence of any linear-in-ε
 # exchange-striction term, force/energy consistency on both the spin and
 # phonon sides, and one-bond C_3 invariance.
-add_optimized_executable(test_e1_phonon_regressions src/apps/test_e1_phonon_regressions.cpp)
+# add_optimized_executable(test_e1_phonon_regressions src/apps/test_e1_phonon_regressions.cpp)  # TODO: source not in git
 
 # Regression tests for mixed SU2-SU3 trilinear bookkeeping
 add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_trilinear_regressions.cpp)
@@ -565,7 +565,7 @@ add_optimized_executable(bench_integrators src/apps/bench_integrators.cpp)
 
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
-    add_test(NAME e1_phonon_regressions COMMAND test_e1_phonon_regressions)
+    # add_test(NAME e1_phonon_regressions COMMAND test_e1_phonon_regressions)  # TODO: source not in git
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
     add_test(NAME global_frame_equivalence COMMAND test_global_frame_equivalence)
     add_test(NAME fe_global_frame_equivalence COMMAND test_fe_global_frame_equivalence)

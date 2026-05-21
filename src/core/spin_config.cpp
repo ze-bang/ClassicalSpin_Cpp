@@ -226,6 +226,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "auto_su3_pump") {
                 config.auto_su3_pump = (value == "true" || value == "1");
             }
+            else if (key == "pump_table_file") {
+                config.pump_table_file = value;
+            }
             else if (key == "probe_amplitude") {
                 config.probe_amplitude = stod(value);
             }

@@ -251,6 +251,15 @@ public:
     double field_drive_freq_SU3;              // Pulse frequency for SU(3)
     double field_drive_width_SU3;             // Pulse width (Gaussian) for SU(3)
 
+    // Tabulated (experimental) pulse — loaded by load_tabulated_pulse().
+    // When non-empty, drive_envelopes_SU2/SU3 use linear interpolation instead
+    // of the Gaussian model.  Times are centered at the pulse peak (ps); values
+    // are normalized so that max|E| = 1.  tabulated_pulse_sigma is the
+    // Gaussian-equivalent σ = max_extent / kPulseWindowSigmas used for chunking.
+    std::vector<double> tabulated_pulse_times;   // Centered time axis (ps)
+    std::vector<double> tabulated_pulse_values;  // Normalized E-field values
+    double tabulated_pulse_sigma = 0.0;          // Effective σ for pulse-window chunking
+
     // SU(2) Gilbert damping: dS/dt += (alpha/|S|) * S × (S × H)
     double alpha_gilbert = 0.0;
 
@@ -3584,6 +3593,12 @@ public:
      */
     void drive_envelopes_SU2(double t, double& factor1, double& factor2) const;
     void drive_envelopes_SU3(double t, double& factor1, double& factor2) const;
+    double interp_tabulated_pulse(double dt) const;
+
+    /// Load a two-column text/CSV file (time_ps, E_field) as the pump pulse.
+    /// The time axis is shifted so the peak is at t=0; the amplitude is
+    /// normalized to max|E|=1.  Sets tabulated_pulse_sigma for chunking.
+    void load_tabulated_pulse(const std::string& filename);
 
     /**
      * Convert spin configurations to flat state vector
