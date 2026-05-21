@@ -46,80 +46,56 @@ void build_phonon_params(const SpinConfig& config,
     
     // Six-spin ring exchange on hexagonal plaquettes
     sp_params.J7 = config.get_param("J7", 0.0);
+    // Scalar quadratic E1 modulation of ring exchange:
+    //   J7_eff = J7 + lambda_E1_J7_0 * |epsilon|^2.
+    // Negative lambda_E1_J7_0 makes J7 decrease under E1 driving.
+    sp_params.lambda_E1_J7_0 = config.get_param("lambda_E1_J7_0",
+                                      config.get_param("lambda_J7_0", 0.0));
     
-    // Spin-phonon coupling strengths
-    sp_params.lambda_E1 = config.get_param("lambda_E1", config.get_param("lambda_xy", 0.0));
-    sp_params.lambda_E2 = config.get_param("lambda_E2", 0.0);
-    sp_params.lambda_A1 = config.get_param("lambda_A1", config.get_param("lambda_R", 0.0));
-    
-    // Time-dependent spin-phonon coupling parameters
-    // Mode: 0 = constant (default), 1 = window
-    double time_mode = config.get_param("lambda_time_mode", 0.0);
+    // E1 magnetoelastic couplings: one isotropic (λ_X,0) and one
+    // anisotropic (λ_X,2) coefficient per exchange channel X ∈ {J, K, Γ, Γ'}.
+    // The leading symmetry-allowed E1 coupling is quadratic in ε; see
+    // δX_γ(ε) = λ_X,0 (ε_x²+ε_y²) + λ_X,2 [(ε_x²-ε_y²) cos2θ_γ + 2ε_x ε_y sin2θ_γ].
+    sp_params.lambda_E1_J_0      = config.get_param("lambda_E1_J_0",      config.get_param("lambda_J_0",      0.0));
+    sp_params.lambda_E1_J_2      = config.get_param("lambda_E1_J_2",      config.get_param("lambda_J_2",      0.0));
+    sp_params.lambda_E1_K_0      = config.get_param("lambda_E1_K_0",      config.get_param("lambda_K_0",      0.0));
+    sp_params.lambda_E1_K_2      = config.get_param("lambda_E1_K_2",      config.get_param("lambda_K_2",      0.0));
+    sp_params.lambda_E1_Gamma_0  = config.get_param("lambda_E1_Gamma_0",  config.get_param("lambda_Gamma_0",  0.0));
+    sp_params.lambda_E1_Gamma_2  = config.get_param("lambda_E1_Gamma_2",  config.get_param("lambda_Gamma_2",  0.0));
+    sp_params.lambda_E1_Gammap_0 = config.get_param("lambda_E1_Gammap_0", config.get_param("lambda_Gammap_0", 0.0));
+    sp_params.lambda_E1_Gammap_2 = config.get_param("lambda_E1_Gammap_2", config.get_param("lambda_Gammap_2", 0.0));
+
+    // Time-dependent E1 magnetoelastic scaling (single multiplicative
+    // factor on all 8 quadratic coefficients).
+    const double time_mode = config.get_param("lambda_time_mode", 0.0);
     td_sp_params.mode = (time_mode > 0.5) ? "window" : "constant";
-    
-    // Window function parameters for E1 mode
     td_sp_params.t_start_E1 = config.get_param("lambda_E1_t_start", 0.0);
-    td_sp_params.t_end_E1 = config.get_param("lambda_E1_t_end", 1e30);
-    td_sp_params.lambda_E1_target = config.get_param("lambda_E1_target", sp_params.lambda_E1);
-    
-    // Window function parameters for E2 mode
-    td_sp_params.t_start_E2 = config.get_param("lambda_E2_t_start", 0.0);
-    td_sp_params.t_end_E2 = config.get_param("lambda_E2_t_end", 1e30);
-    td_sp_params.lambda_E2_target = config.get_param("lambda_E2_target", sp_params.lambda_E2);
-    
-    // Window function parameters for A1 mode
-    td_sp_params.t_start_A1 = config.get_param("lambda_A1_t_start", 0.0);
-    td_sp_params.t_end_A1 = config.get_param("lambda_A1_t_end", 1e30);
-    td_sp_params.lambda_A1_target = config.get_param("lambda_A1_target", sp_params.lambda_A1);
-    
-    // E1 Phonon parameters
-    ph_params.omega_E1 = config.get_param("omega_E1", config.get_param("omega_E", 1.0));
-    ph_params.gamma_E1 = config.get_param("gamma_E1", config.get_param("gamma_E", 0.1));
-    ph_params.lambda_E1 = config.get_param("lambda_E1_quartic", config.get_param("lambda_E", 0.0));
-    
-    // E2 Phonon parameters (Raman active, not directly THz driven)
-    ph_params.omega_E2 = config.get_param("omega_E2", 0.8);
-    ph_params.gamma_E2 = config.get_param("gamma_E2", 0.1);
-    ph_params.lambda_E2 = config.get_param("lambda_E2_quartic", 0.0);
-    
-    // A1 Phonon parameters
-    ph_params.omega_A1 = config.get_param("omega_A1", config.get_param("omega_A", 0.5));
-    ph_params.gamma_A1 = config.get_param("gamma_A1", config.get_param("gamma_A", 0.05));
-    ph_params.lambda_A1 = config.get_param("lambda_A1_quartic", config.get_param("lambda_A", 0.0));
-    
-    // Three-phonon coupling
-    ph_params.g3_E1A1 = config.get_param("g3_E1A1", config.get_param("g3", 0.0));
-    ph_params.g3_E2A1 = config.get_param("g3_E2A1", 0.0);
-    ph_params.g3_E1E2 = config.get_param("g3_E1E2", 0.0);  // E1-E2 bilinear coupling
-    ph_params.Z_star = config.get_param("Z_star", 1.0);  // Effective charge (E1 is IR active)
-    
-    // Drive parameters (pulse 1 - pump) - only drives E1 mode
-    dr_params.E0_1 = config.pump_amplitude;
+    td_sp_params.t_end_E1   = config.get_param("lambda_E1_t_end",   1e30);
+    td_sp_params.e1_coupling_scale_target =
+        config.get_param("lambda_E1_target", 1.0);
+
+    // Zone-center E1 phonon parameters: ω_E1, γ_E1, optional quartic
+    // self-coupling λ (ε²)²/4, and effective charge Z_E1*.
+    ph_params.omega_E1          = config.get_param("omega_E1",          config.get_param("omega_E", 1.0));
+    ph_params.gamma_E1          = config.get_param("gamma_E1",          config.get_param("gamma_E", 0.1));
+    ph_params.lambda_E1_quartic = config.get_param("lambda_E1_quartic", config.get_param("lambda_E", 0.0));
+    ph_params.Z_star            = config.get_param("Z_star", 1.0);
+
+    // Drive parameters (pulse 1 - pump) - couples linearly to ε via -Z*·E·ε
+    dr_params.E0_1    = config.pump_amplitude;
     dr_params.omega_1 = config.pump_frequency > 0 ? config.pump_frequency : ph_params.omega_E1;
-    dr_params.t_1 = config.pump_time;
+    dr_params.t_1     = config.pump_time;
     dr_params.sigma_1 = config.pump_width;
-    dr_params.phi_1 = config.get_param("pump_phase", 0.0);
+    dr_params.phi_1   = config.get_param("pump_phase", 0.0);
     dr_params.theta_1 = config.get_param("pump_polarization", 0.0);
-    
-    // Drive parameters (pulse 2 - probe) - only drives E1 mode
-    dr_params.E0_2 = config.probe_amplitude;
+
+    // Drive parameters (pulse 2 - probe)
+    dr_params.E0_2    = config.probe_amplitude;
     dr_params.omega_2 = config.probe_frequency > 0 ? config.probe_frequency : ph_params.omega_E1;
-    dr_params.t_2 = config.probe_time;
+    dr_params.t_2     = config.probe_time;
     dr_params.sigma_2 = config.probe_width;
-    dr_params.phi_2 = config.get_param("probe_phase", 0.0);
+    dr_params.phi_2   = config.get_param("probe_phase", 0.0);
     dr_params.theta_2 = config.get_param("probe_polarization", 0.0);
-    
-    // Drive strength per bond type for E1 (IR active): relative scaling of the THz field
-    // Default: 1.0 (full strength). Set to 0 to disable, or any value to scale.
-    dr_params.drive_strength_E1[0] = config.get_param("drive_strength_0", 1.0);  // x-bond
-    dr_params.drive_strength_E1[1] = config.get_param("drive_strength_1", 1.0);  // y-bond
-    dr_params.drive_strength_E1[2] = config.get_param("drive_strength_2", 1.0);  // z-bond
-    
-    // Drive strength per bond type for E2 (Raman active): allows artificial E2 driving
-    // Default: 0.0 (E2 is not IR active). Set to non-zero to drive E2 phonon.
-    dr_params.drive_strength_E2[0] = config.get_param("drive_strength_E2_0", 0.0);  // x-bond
-    dr_params.drive_strength_E2[1] = config.get_param("drive_strength_E2_1", 0.0);  // y-bond
-    dr_params.drive_strength_E2[2] = config.get_param("drive_strength_E2_2", 0.0);  // z-bond
 }
 
 /**
@@ -182,12 +158,7 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
         cout << "Running spin-phonon molecular dynamics on PhononLattice..." << endl;
         cout << "Number of trials: " << config.num_trials << endl;
         cout << "MPI ranks: " << size << endl;
-        cout << "E1 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E1[0]
-             << ", y=" << lattice.drive_params.drive_strength_E1[1]
-             << ", z=" << lattice.drive_params.drive_strength_E1[2] << endl;
-        cout << "E2 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E2[0]
-             << ", y=" << lattice.drive_params.drive_strength_E2[1]
-             << ", z=" << lattice.drive_params.drive_strength_E2[2] << endl;
+        cout << "Zone-center E1 effective charge Z* = " << lattice.phonon_params.Z_star << endl;
     }
     
     // Distribute trials across MPI ranks
@@ -245,32 +216,60 @@ void run_molecular_dynamics_phonon(PhononLattice& lattice, const SpinConfig& con
         
         // Save initial spin configuration before time evolution
         lattice.save_spin_config(trial_dir + "/initial_spins.txt");
-        
-        // Run spin-phonon MD
-        if (rank == 0) {
-            cout << "Starting spin-phonon dynamics..." << endl;
-            cout << "Time range: " << config.md_time_start << " -> " << config.md_time_end << endl;
-            cout << "Timestep: " << config.md_timestep << endl;
-            cout << "Integration method: " << config.md_integrator << endl;
+
+        // Decide between deterministic MD and Langevin based on T.
+        const double langevin_T_md = config.get_param("langevin_temperature", 0.0);
+        const bool use_langevin = (langevin_T_md > 0.0);
+
+        if (use_langevin) {
+            lattice.langevin_temperature = langevin_T_md;
+            if (lattice.alpha_gilbert <= 0.0)
+                lattice.alpha_gilbert = config.get_param("alpha_gilbert", 0.01);
+            if (rank == 0) {
+                cout << "Starting Langevin dynamics (qualitative spin thermostat):" << endl;
+                cout << "  T (k_B T) = " << langevin_T_md
+                     << ", alpha_gilbert = " << lattice.alpha_gilbert << endl;
+                cout << "  Time range: " << config.md_time_start
+                     << " -> " << config.md_time_end << endl;
+                cout << "  Fixed timestep: " << config.md_timestep << endl;
+            }
+            const uint64_t seed = static_cast<uint64_t>(
+                config.get_param("langevin_seed", 0.0));
+            lattice.integrate_langevin(
+                config.md_time_start,
+                config.md_time_end,
+                config.md_timestep,
+                trial_dir,
+                config.md_save_interval,
+                seed
+            );
+        } else {
+            // Deterministic spin-phonon MD
+            if (rank == 0) {
+                cout << "Starting spin-phonon dynamics..." << endl;
+                cout << "Time range: " << config.md_time_start
+                     << " -> " << config.md_time_end << endl;
+                cout << "Timestep: " << config.md_timestep << endl;
+                cout << "Integration method: " << config.md_integrator << endl;
+            }
+            lattice.molecular_dynamics(
+                config.md_time_start,
+                config.md_time_end,
+                config.md_timestep,
+                trial_dir,
+                config.md_save_interval,
+                config.md_integrator,
+                config.md_abs_tol,
+                config.md_rel_tol
+            );
         }
-        
-        lattice.molecular_dynamics(
-            config.md_time_start,
-            config.md_time_end,
-            config.md_timestep,
-            trial_dir,
-            config.md_save_interval,
-            config.md_integrator,
-            config.md_abs_tol,
-            config.md_rel_tol
-        );
-        
+
         lattice.print_state();
         cout << "[Rank " << rank << "] Trial " << trial << " completed." << endl;
     }
-    
+
     MPI_Barrier(MPI_COMM_WORLD);
-    
+
     if (rank == 0) {
         cout << "PhononLattice spin-phonon dynamics completed (" << config.num_trials << " trials)." << endl;
     }
@@ -289,12 +288,7 @@ void run_pump_probe_phonon(PhononLattice& lattice, const SpinConfig& config, int
         cout << "  Pump frequency: " << config.pump_frequency << endl;
         cout << "  Pump time: " << config.pump_time << endl;
         cout << "  Pump width: " << config.pump_width << endl;
-        cout << "  E1 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E1[0]
-             << ", y=" << lattice.drive_params.drive_strength_E1[1]
-             << ", z=" << lattice.drive_params.drive_strength_E1[2] << endl;
-        cout << "  E2 drive strength per bond type: x=" << lattice.drive_params.drive_strength_E2[0]
-             << ", y=" << lattice.drive_params.drive_strength_E2[1]
-             << ", z=" << lattice.drive_params.drive_strength_E2[2] << endl;
+        cout << "  Zone-center E1 effective charge Z* = " << lattice.phonon_params.Z_star << endl;
     }
     
     // Distribute trials across MPI ranks

@@ -51,21 +51,38 @@ void run_simulated_annealing(Lattice& lattice, const SpinConfig& config, int ran
         if (trial > 0) {
             lattice.init_random();
         }
-        
-        lattice.simulated_annealing(
-            config.T_start,
-            config.T_end,
-            config.annealing_steps,
-            config.overrelaxation_rate,
-            config.use_twist_boundary,
-            config.gaussian_move,
-            config.cooling_rate,
-            trial_dir,
-            config.save_observables,
-            config.T_zero,
-            config.n_deterministics,
-            config.twist_sweep_count
-        );
+
+        // Optionally load an initial spin configuration; with annealing_steps == 0
+        // this collapses to a plain energy evaluation of the loaded state.
+        if (!config.initial_spin_config.empty()) {
+            if (rank == 0) {
+                cout << "Loading initial spin configuration from "
+                     << config.initial_spin_config << endl;
+            }
+            lattice.load_spin_config(config.initial_spin_config);
+        }
+
+        if (config.annealing_steps == 0) {
+            if (rank == 0) {
+                cout << "annealing_steps == 0: skipping SA, just evaluating energy."
+                     << endl;
+            }
+        } else {
+            lattice.simulated_annealing(
+                config.T_start,
+                config.T_end,
+                config.annealing_steps,
+                config.overrelaxation_rate,
+                config.use_twist_boundary,
+                config.gaussian_move,
+                config.cooling_rate,
+                trial_dir,
+                config.save_observables,
+                config.T_zero,
+                config.n_deterministics,
+                config.twist_sweep_count
+            );
+        }
         
         // Save final configuration
         lattice.save_positions(trial_dir + "/positions.txt");

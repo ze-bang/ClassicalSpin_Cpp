@@ -1,60 +1,58 @@
 /**
  * @file phonon_lattice.h
- * @brief Spin-phonon coupled honeycomb lattice
- * 
- * This implements a honeycomb lattice with:
- * - Generic NN, 2nd NN, and 3rd NN spin-spin interactions (bilinear matrix form)
- * - Sublattice-dependent 2nd NN coupling (J2_A for sublattice A, J2_B for sublattice B)
- * - Three phonon modes: E1 (Qx_E1, Qy_E1), E2 (Qx_E2, Qy_E2), and A1 (Q_A1)
- * - Three-phonon coupling: g3_E1A1 * (Qx_E1² + Qy_E1²) * Q_A1 + g3_E2A1 * (Qx_E2² + Qy_E2²) * Q_A1
- * - E1-E2 bilinear coupling: g3_E1E2 * (Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
- * - Spin-phonon E1 coupling: λ_E1 * [Qx_E1*(SxSz + SzSx) + Qy_E1*(SySz + SzSy)]
- * - Spin-phonon E2 coupling: λ_E2 * [Qx_E2*(SxSx - SySy) + Qy_E2*(SxSy - SySx)]
- * - Spin-phonon A1 coupling: λ_A1 * Q_A1 * (Si·Sj)
- * - THz drive coupling to E1 mode (E1 is IR active, driven by default)
- * - Optional drive coupling to E2 mode (E2 is Raman active, driven when drive_strength_E2 > 0)
- * 
- * COORDINATE FRAMES:
- * -----------------
- * The spin Hamiltonian (Kitaev-Heisenberg-Γ-Γ') is defined in a LOCAL Kitaev frame
- * where the Kitaev exchange has a simple diagonal form on each bond type. The exchange
- * matrices are then TRANSFORMED to the GLOBAL Cartesian frame using:
- *   J_global = R * J_local * R^T
- * 
- * where R is the Kitaev local-to-global rotation matrix with columns:
- *   x' = (1, 1, -2)/√6
- *   y' = (-1, 1, 0)/√2  
- *   z' = (1, 1, 1)/√3
- * 
- * This means spins are stored and evolved in the GLOBAL Cartesian frame, while the
- * physical Kitaev model parameters (J, K, Γ, Γ') are specified in the standard form.
- * 
+ * @brief Spin-phonon coupled honeycomb lattice (NCTO E1 magnetoelastic model)
+ *
+ * Implements the in-plane E1 magnetoelastic model for Na2Co2TeO6 derived from
+ * symmetry under the full hexagonal C6 of the honeycomb layer. See
+ * docs/tmfeo3_notes.tex (or the standalone "Leading-order E1 magnetoelastic
+ * coupling in NCTO" memo) for the full derivation. The model contains:
+ *
+ *   - Standard J–K–Γ–Γ' nearest-neighbour spin Hamiltonian (with optional 2nd
+ *     and 3rd NN Heisenberg, sublattice-dependent J2, and 6-spin ring exchange).
+ *   - A SINGLE zone-center two-component E1 optical-strain coordinate
+ *         ε = (ε_x, ε_y)
+ *     with conjugate velocities (V_x, V_y). Total phonon DOF = 4.
+ *   - Symmetry-allowed leading magnetoelastic coupling, which is QUADRATIC in
+ *     ε (a linear coupling is forbidden by the full C6 symmetry once the bond
+ *     bilinears are summed):
+ *         δX_γ(ε) = λ_{X,0}(ε_x²+ε_y²)
+ *                 + λ_{X,2}[(ε_x²-ε_y²)cos(2θ_γ)
+ *                           + 2 ε_x ε_y sin(2θ_γ)]
+ *     for X ∈ {J, K, Γ, Γ'} and bond-axis angles θ_x=0, θ_y=2π/3, θ_z=4π/3.
+ *   - Single global polar THz drive coupling linearly to the E1 coordinate:
+ *         H_drive = -Z* [E_x(t) ε_x + E_y(t) ε_y].
+ *
  * Hamiltonian:
- * H = H_spin + H_phonon + H_sp-ph + H_drive
- * 
- * H_spin = Σ_<ij> Si · J1_global · Sj + Σ_<<ij>>_A J2_A Si·Sj + Σ_<<ij>>_B J2_B Si·Sj
- *        + Σ_<<<ij>>> Si · J3 · Sj - Σ_i B · Si
- *   (NN J1_global = R * J1_local * R^T, where J1_local is bond-dependent Kitaev-Heisenberg-Γ-Γ')
- *   (2nd and 3rd NN are isotropic Heisenberg, invariant under rotation)
- * 
- * H_phonon = (1/2)(Vx_E1² + Vy_E1²) + (1/2)ω_E1²(Qx_E1² + Qy_E1²) + (λ_E1/4)(Qx_E1² + Qy_E1²)²
- *          + (1/2)(Vx_E2² + Vy_E2²) + (1/2)ω_E2²(Qx_E2² + Qy_E2²) + (λ_E2/4)(Qx_E2² + Qy_E2²)²
- *          + (1/2)V_A1² + (1/2)ω_A1²*Q_A1² + (λ_A1/4)*Q_A1⁴
- *          + g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
- *          + g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
- * 
- * H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)    // E1 coupling (global frame)
- *                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
- *                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)    // E2 coupling (global frame)
- *                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
- *                 + λ_A1 * Q_A1  * (Si · Sj)]                  // A1 coupling (invariant)
- * 
- * H_drive = -E_x(t)*strength_E1*Qx_E1 - E_y(t)*strength_E1*Qy_E1   (E1: IR active)
- *         - E_x(t)*strength_E2*Qx_E2 - E_y(t)*strength_E2*Qy_E2   (E2: optional drive)
- * 
- * Equations of motion (Euler-Lagrange):
- * - Spins: dS/dt = S × H_eff (LLG with optional Gilbert damping)
- * - Phonons: d²Q/dt² = -∂H/∂Q - γ*dQ/dt
+ *
+ *   H = H_spin + H_E1 + H_drive + H_sp-ph
+ *
+ *   H_spin   = Σ_<ij>γ Si · J1_global · Sj + Σ_<<ij>>_A J2_A Si·Sj
+ *              + Σ_<<ij>>_B J2_B Si·Sj + Σ_<<<ij>>> J3 Si·Sj
+ *              + H_7  - Σ_i B·S_i
+ *
+ *   H_E1     = (1/2)(V_x² + V_y²) + (1/2) ω_E1² (ε_x² + ε_y²)
+ *              + (λ_E1_quartic / 4) (ε_x² + ε_y²)²
+ *
+ *   H_drive  = -Z* [E_x(t) ε_x + E_y(t) ε_y]
+ *
+ *   H_sp-ph  = Σ_<ij>γ Σ_X δX_γ(ε) O_{ij,γ}^{(X)}
+ *              + λ_{J7,0}(ε_x²+ε_y²) R_7
+ *              where R_7 is the ring-exchange operator without the J7 prefactor.
+ *
+ * COORDINATE FRAMES
+ * -----------------
+ * The exchange matrix J^{(γ)} is defined in the LOCAL Kitaev frame and the
+ * δX_γ(ε) modulation rides on those local-frame coefficients. Spins are stored
+ * and evolved in the GLOBAL Cartesian frame; the spin–phonon coupling is
+ * computed by first rotating the spins back to the local Kitaev frame, applying
+ * the modulated J^{(γ)}, and rotating the resulting effective field back to the
+ * global frame.
+ *
+ * Equations of motion (Euler–Lagrange):
+ *   - Spins:  dS/dt = S × H_eff  (LLG, optional Gilbert damping)
+ *   - E1:     d²ε_a/dt² = -ω_E1² ε_a - λ_E1_quartic (ε_x²+ε_y²) ε_a
+ *                          - γ_E1 dε_a/dt - ∂H_sp-ph/∂ε_a + Z* E_a(t)
+ *             (a = x, y; uniform zone-center field).
  */
 
 #ifndef PHONON_LATTICE_H
@@ -76,6 +74,7 @@
 #include <iomanip>
 #include <complex>
 #include <cmath>
+#include <cstdint>
 #include <ctime>
 #include <numeric>
 #include <algorithm>
@@ -108,225 +107,120 @@ using std::function;
 using std::array;
 
 /**
- * Phonon state for the spin-phonon model (per-bond-type)
- * 
- * Each phonon mode now has separate coordinates for each bond type (0=x-bond, 1=y-bond, 2=z-bond):
- * E1 mode: 2-component × 3 bond types (Qx_E1_b, Qy_E1_b for b=0,1,2) - IR active
- * E2 mode: 2-component × 3 bond types (Qx_E2_b, Qy_E2_b for b=0,1,2) - Raman active
- * A1 mode: 1-component × 3 bond types (Q_A1_b for b=0,1,2) - Raman active
- * 
- * Total: (2+2+1) × 3 = 15 coordinates + 15 velocities = 30 DOF
+ * Zone-center E1 phonon state.
+ *
+ * The E1 optical strain field is a single in-plane two-component coordinate
+ * ε = (Q_x, Q_y) with conjugate velocities (V_x, V_y). Total DOF = 4.
+ *
+ * Layout in the flat ODE buffer: [Q_x, Q_y, V_x, V_y].
  */
 struct PhononState {
-    static constexpr size_t N_BONDS = 3;  // Number of bond types (x=0, y=1, z=2)
-    
-    // E1 mode (infrared active, 2-component per bond type)
-    double Q_x_E1[N_BONDS] = {0.0, 0.0, 0.0};   // x-component of E1 for each bond type
-    double Q_y_E1[N_BONDS] = {0.0, 0.0, 0.0};   // y-component of E1 for each bond type
-    
-    // E2 mode (Raman active, 2-component per bond type)
-    double Q_x_E2[N_BONDS] = {0.0, 0.0, 0.0};   // x-component of E2 for each bond type
-    double Q_y_E2[N_BONDS] = {0.0, 0.0, 0.0};   // y-component of E2 for each bond type
-    
-    // A1 mode (Raman active, 1-component per bond type)
-    double Q_A1[N_BONDS] = {0.0, 0.0, 0.0};     // A1 for each bond type
-    
-    // Velocities (dQ/dt) for each bond type
-    double V_x_E1[N_BONDS] = {0.0, 0.0, 0.0};   // dQx_E1/dt
-    double V_y_E1[N_BONDS] = {0.0, 0.0, 0.0};   // dQy_E1/dt
-    double V_x_E2[N_BONDS] = {0.0, 0.0, 0.0};   // dQx_E2/dt
-    double V_y_E2[N_BONDS] = {0.0, 0.0, 0.0};   // dQy_E2/dt
-    double V_A1[N_BONDS] = {0.0, 0.0, 0.0};     // dQ_A1/dt
-    
-    // Total DOF: (2+2+1) coordinates × 3 bond types × 2 (coords + velocities) = 30
-    static constexpr size_t N_DOF = 30;
-    
-    // Pack to flat array: 
-    // [Qx_E1_0, Qx_E1_1, Qx_E1_2, Qy_E1_0, Qy_E1_1, Qy_E1_2, 
-    //  Qx_E2_0, Qx_E2_1, Qx_E2_2, Qy_E2_0, Qy_E2_1, Qy_E2_2,
-    //  Q_A1_0, Q_A1_1, Q_A1_2,
-    //  Vx_E1_0, Vx_E1_1, Vx_E1_2, Vy_E1_0, Vy_E1_1, Vy_E1_2,
-    //  Vx_E2_0, Vx_E2_1, Vx_E2_2, Vy_E2_0, Vy_E2_1, Vy_E2_2,
-    //  V_A1_0, V_A1_1, V_A1_2]
+    // Zone-center E1 coordinates and velocities
+    double Q_x_E1 = 0.0;
+    double Q_y_E1 = 0.0;
+    double V_x_E1 = 0.0;
+    double V_y_E1 = 0.0;
+
+    static constexpr size_t N_DOF = 4;
+
     void to_array(double* arr) const {
-        size_t idx = 0;
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_x_E1[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_y_E1[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_x_E2[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_y_E2[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = Q_A1[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_x_E1[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_y_E1[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_x_E2[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_y_E2[b];
-        for (size_t b = 0; b < N_BONDS; ++b) arr[idx++] = V_A1[b];
+        arr[0] = Q_x_E1;
+        arr[1] = Q_y_E1;
+        arr[2] = V_x_E1;
+        arr[3] = V_y_E1;
     }
-    
-    // Unpack from flat array
+
     void from_array(const double* arr) {
-        size_t idx = 0;
-        for (size_t b = 0; b < N_BONDS; ++b) Q_x_E1[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) Q_y_E1[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) Q_x_E2[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) Q_y_E2[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) Q_A1[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) V_x_E1[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) V_y_E1[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) V_x_E2[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) V_y_E2[b] = arr[idx++];
-        for (size_t b = 0; b < N_BONDS; ++b) V_A1[b] = arr[idx++];
+        Q_x_E1 = arr[0];
+        Q_y_E1 = arr[1];
+        V_x_E1 = arr[2];
+        V_y_E1 = arr[3];
     }
-    
-    // Kinetic energy (unit mass) - sum over all bond types
+
+    /// Kinetic energy of the E1 mode (unit mass).
     double kinetic_energy() const {
-        double T = 0.0;
-        for (size_t b = 0; b < N_BONDS; ++b) {
-            T += V_x_E1[b]*V_x_E1[b] + V_y_E1[b]*V_y_E1[b];
-            T += V_x_E2[b]*V_x_E2[b] + V_y_E2[b]*V_y_E2[b];
-            T += V_A1[b]*V_A1[b];
-        }
-        return 0.5 * T;
+        return 0.5 * (V_x_E1 * V_x_E1 + V_y_E1 * V_y_E1);
     }
-    
-    // E1 amplitude for specific bond type
-    double E1_amplitude(size_t bond_type) const {
-        return std::sqrt(Q_x_E1[bond_type]*Q_x_E1[bond_type] + Q_y_E1[bond_type]*Q_y_E1[bond_type]);
-    }
-    
-    // E1 total amplitude (sum over bond types)
+
+    /// |ε| = sqrt(Q_x² + Q_y²).
     double E1_amplitude() const {
-        double amp_sq = 0.0;
-        for (size_t b = 0; b < N_BONDS; ++b) {
-            amp_sq += Q_x_E1[b]*Q_x_E1[b] + Q_y_E1[b]*Q_y_E1[b];
-        }
-        return std::sqrt(amp_sq);
-    }
-    
-    // E2 amplitude for specific bond type
-    double E2_amplitude(size_t bond_type) const {
-        return std::sqrt(Q_x_E2[bond_type]*Q_x_E2[bond_type] + Q_y_E2[bond_type]*Q_y_E2[bond_type]);
-    }
-    
-    // E2 total amplitude (sum over bond types)
-    double E2_amplitude() const {
-        double amp_sq = 0.0;
-        for (size_t b = 0; b < N_BONDS; ++b) {
-            amp_sq += Q_x_E2[b]*Q_x_E2[b] + Q_y_E2[b]*Q_y_E2[b];
-        }
-        return std::sqrt(amp_sq);
-    }
-    
-    // A1 amplitude for specific bond type
-    double A1_amplitude(size_t bond_type) const {
-        return std::abs(Q_A1[bond_type]);
-    }
-    
-    // A1 total amplitude
-    double A1_amplitude() const {
-        double amp_sq = 0.0;
-        for (size_t b = 0; b < N_BONDS; ++b) {
-            amp_sq += Q_A1[b]*Q_A1[b];
-        }
-        return std::sqrt(amp_sq);
+        return std::sqrt(Q_x_E1 * Q_x_E1 + Q_y_E1 * Q_y_E1);
     }
 };
 
 /**
- * Phonon parameters
+ * E1 phonon parameters.
  */
 struct PhononParams {
-    // E1 mode (IR active, 2-component)
-    double omega_E1 = 1.0;   // E1 mode frequency
-    double gamma_E1 = 0.1;   // E1 mode damping
-    double lambda_E1 = 0.0;  // E1 mode quartic coefficient
-    
-    // E2 mode (Raman active, 2-component)
-    double omega_E2 = 0.8;   // E2 mode frequency
-    double gamma_E2 = 0.1;   // E2 mode damping
-    double lambda_E2 = 0.0;  // E2 mode quartic coefficient
-    
-    // A1 mode (Raman active, 1-component)
-    double omega_A1 = 0.5;   // A1 mode frequency
-    double gamma_A1 = 0.05;  // A1 mode damping
-    double lambda_A1 = 0.0;  // A1 mode quartic coefficient
-    
-    // Three-phonon coupling: g3_E1A1 * (Qx_E1² + Qy_E1²) * Q_A1
-    //                      + g3_E2A1 * (Qx_E2² + Qy_E2²) * Q_A1
-    double g3_E1A1 = 0.0;   // E1-A1 cubic coupling
-    double g3_E2A1 = 0.0;   // E2-A1 cubic coupling
-    
-    // E1-E2 bilinear coupling: g3_E1E2 * (Qx_E1 * Qx_E2 + Qy_E1 * Qy_E2)
-    double g3_E1E2 = 0.0;   // E1-E2 bilinear coupling
-    
-    // THz coupling strength (only E1 is IR active)
-    double Z_star = 1.0;    // Effective charge for E(t) coupling to E1
+    double omega_E1 = 1.0;          ///< E1 mode frequency ω_E1
+    double gamma_E1 = 0.1;          ///< E1 mode damping γ_E1
+    double lambda_E1_quartic = 0.0; ///< Optional quartic self-coupling λ (ε²)²/4
+    double Z_star = 1.0;            ///< Effective charge for E(t) coupling
 };
 
 /**
- * Spin-phonon coupling parameters
- * 
- * Uses Kitaev-Heisenberg-Γ-Γ' model with bond-dependent exchange:
- * H_spin = Σ_<ij>_γ Si · J_γ · Sj  where γ ∈ {x, y, z} is the bond type
- * 
- * The exchange matrices are defined in the LOCAL Kitaev frame and then
- * transformed to the GLOBAL Cartesian frame using:
- *   J_global = R * J_local * R^T
- * 
- * where R is the Kitaev local-to-global rotation matrix:
- *   R = [[1/√6, -1/√2, 1/√3],      (columns are local x', y', z' in global coords)
- *        [1/√6,  1/√2, 1/√3],
- *        [-2/√6,  0,   1/√3]]
- * 
- * Local frame Kitaev model:
- *   Jx (x-bond): K on x'x', Γ on y'z'/z'y', Γ' on x'y'/x'z'  
- *   Jy (y-bond): K on y'y', Γ on x'z'/z'x', Γ' on x'y'/y'z'
- *   Jz (z-bond): K on z'z', Γ on x'y'/y'x', Γ' on x'z'/y'z'
- * 
- * Spin-phonon coupling form on each bond <ij> (in LOCAL frame):
- *   λ_E1 * Qx_E1 * (Si_x'*Sj_z' + Si_z'*Sj_x') + λ_E1 * Qy_E1 * (Si_y'*Sj_z' + Si_z'*Sj_y')  [E1 coupling]
- * + λ_E2 * Qx_E2 * (Si_x'*Sj_x' - Si_y'*Sj_y') + λ_E2 * Qy_E2 * (Si_x'*Sj_y' - Si_y'*Sj_x')  [E2 coupling]
- * + λ_A1 * Q_A1  * (Si · Sj)                                                                  [A1 coupling]
+ * Spin Hamiltonian + leading E1 magnetoelastic coupling parameters.
+ *
+ * Spin Hamiltonian: bond-dependent J–K–Γ–Γ' on the honeycomb nearest neighbours,
+ * plus optional sublattice-dependent J2, J3, ring-exchange J7, and Zeeman field.
+ * The exchange matrices are defined in the LOCAL Kitaev frame and rotated to the
+ * GLOBAL Cartesian frame for spin storage:  J_global = R · J_local · Rᵀ.
+ *
+ * E1 magnetoelastic coupling (in the LOCAL Kitaev frame):
+ *   H_sp-ph = Σ_<ij>_γ Σ_X δX_γ(ε) O_{ij,γ}^{(X)},  X ∈ {J, K, Γ, Γ'}
+ *   δX_γ(ε) = λ_{X,0} (ε_x² + ε_y²)
+ *           + λ_{X,2} [(ε_x² - ε_y²) cos(2θ_γ) + 2 ε_x ε_y sin(2θ_γ)]
+ * with bond-axis angles θ_x = 0, θ_y = 2π/3, θ_z = 4π/3 (i.e.
+ * cos(2θ_γ) = (1, -1/2, -1/2) and sin(2θ_γ) = (0, -√3/2, +√3/2)).
+ *
+ * Linear-in-ε exchange-striction terms are FORBIDDEN by the full C6 symmetry
+ * of the ideal honeycomb layer, so the leading symmetry-allowed coupling is
+ * quadratic in ε (see docs/tmfeo3_notes.tex).
  */
 struct SpinPhononCouplingParams {
     // Kitaev-Heisenberg-Γ-Γ' parameters (Songvilay defaults)
-    double J = -0.1;       // Heisenberg coupling
-    double K = -9.0;       // Kitaev coupling
-    double Gamma = 1.8;    // Γ (off-diagonal symmetric) 
-    double Gammap = 0.3;   // Γ' (off-diagonal asymmetric)
-    
+    double J = -0.1;       ///< Heisenberg coupling
+    double K = -9.0;       ///< Kitaev coupling
+    double Gamma = 1.8;    ///< Γ (off-diagonal symmetric)
+    double Gammap = 0.3;   ///< Γ' (off-diagonal asymmetric)
+
     // 2nd NN exchange (isotropic Heisenberg, sublattice-dependent)
-    double J2_A = 0.3;     // 2nd NN coupling on sublattice A
-    double J2_B = 0.3;     // 2nd NN coupling on sublattice B
-    
+    double J2_A = 0.3;
+    double J2_B = 0.3;
+
     // 3rd NN exchange (isotropic Heisenberg)
     double J3 = 0.9;
-    
+
     // Six-spin ring exchange on hexagonal plaquettes
     double J7 = 0.0;
-    
-    // Spin-phonon coupling strengths (in LOCAL Kitaev frame)
-    double lambda_E1 = 0.0;  // E1 coupling: Qx_E1*(Sx'Sz'+Sz'Sx') + Qy_E1*(Sy'Sz'+Sz'Sy')
-    double lambda_E2 = 0.0;  // E2 coupling: Qx_E2*(Sx'Sx'-Sy'Sy') + Qy_E2*(Sx'Sy'-Sy'Sx')
-    double lambda_A1 = 0.0;  // A1 coupling: Q_A1*(Si·Sj)
-    
-    // Kitaev rotation / local-exchange helpers live in kitaev_bonds.h so
-    // PhononLattice and StrainPhononLattice can't drift again. Only the
-    // class-specific frame choice (global for PhononLattice, local for
-    // StrainPhononLattice) is kept here.
+    // Scalar quadratic E1 modulation of ring exchange:
+    //   J7_eff(ε) = J7 + lambda_E1_J7_0 (ε_x² + ε_y²).
+    // Set lambda_E1_J7_0 < 0 when the E1 distortion should decrease J7.
+    double lambda_E1_J7_0 = 0.0;
 
-    /// Get the Kitaev local-to-global rotation matrix R. Kept as a static
-    /// member for backwards compatibility with existing call sites.
+    // Quadratic E1 exchange-modulation coefficients δX_γ(ε):
+    //   λ_{X,0} multiplies the rotational invariant ε_x² + ε_y²
+    //   λ_{X,2} multiplies the bond-dependent rank-2 piece
+    double lambda_E1_J_0      = 0.0;
+    double lambda_E1_J_2      = 0.0;
+    double lambda_E1_K_0      = 0.0;
+    double lambda_E1_K_2      = 0.0;
+    double lambda_E1_Gamma_0  = 0.0;
+    double lambda_E1_Gamma_2  = 0.0;
+    double lambda_E1_Gammap_0 = 0.0;
+    double lambda_E1_Gammap_2 = 0.0;
+
+    /// Kitaev local-to-global rotation matrix R.
     static SpinMatrix get_kitaev_rotation() {
         return classical_spin::kitaev::kitaev_rotation();
     }
 
-    /// Transform exchange matrix from the local Kitaev frame to the global
-    /// Cartesian frame: J_global = R · J_local · Rᵀ.
+    /// Transform local-frame exchange matrix to the global frame.
     static SpinMatrix to_global_frame(const SpinMatrix& J_local) {
         return classical_spin::kitaev::to_global_frame(J_local);
     }
 
-    // Build bond-dependent exchange matrices in LOCAL Kitaev frame.
+    // Bond-dependent exchange matrices in the LOCAL Kitaev frame.
     SpinMatrix get_Jx_local() const {
         return classical_spin::kitaev::make_Jx_local(J, K, Gamma, Gammap);
     }
@@ -337,8 +231,7 @@ struct SpinPhononCouplingParams {
         return classical_spin::kitaev::make_Jz_local(J, K, Gamma, Gammap);
     }
 
-    // Build bond-dependent exchange matrices in GLOBAL Cartesian frame.
-    // Used for spin dynamics since spins are stored in the global frame.
+    // Bond-dependent exchange matrices in the GLOBAL Cartesian frame.
     SpinMatrix get_Jx() const { return to_global_frame(get_Jx_local()); }
     SpinMatrix get_Jy() const { return to_global_frame(get_Jy_local()); }
     SpinMatrix get_Jz() const { return to_global_frame(get_Jz_local()); }
@@ -350,160 +243,71 @@ struct SpinPhononCouplingParams {
 };
 
 /**
- * Time-dependent spin-phonon coupling parameters
- * 
- * Allows the spin-phonon coupling strengths (λ_E1, λ_E2, λ_A1) to be time-dependent.
- * Default mode is "constant" which uses the values from SpinPhononCouplingParams.
- * 
- * Available modes:
- * - "constant": λ(t) = λ (from SpinPhononCouplingParams, default)
- * - "window": λ(t) = λ_target for t_start <= t <= t_end, λ_static otherwise
- * 
- * Each mode (E1, E2, A1) can have independent window parameters.
+ * Time-dependent multiplicative scale on the E1 magnetoelastic coupling.
+ *
+ * Multiplies all eight quadratic E1 coupling coefficients (λ_{X,0}, λ_{X,2})
+ * by a time-dependent factor s(t):
+ *   - mode == "constant" (default):  s(t) = 1
+ *   - mode == "window"            :  s(t) = e1_coupling_scale_target for
+ *                                    t_start_E1 ≤ t ≤ t_end_E1, else 1.
+ *
+ * The model in the LaTeX notes uses a constant coupling, so the default leaves
+ * the physics unchanged. The window option is provided for protocol-style
+ * pump–probe experiments where the magnetoelastic coupling is briefly
+ * suppressed or enhanced by an external knob.
  */
 struct TimeDependentSpinPhononParams {
-    // Mode selection: "constant" or "window"
     std::string mode = "constant";
-    
-    // Window function parameters for E1 mode
-    double t_start_E1 = 0.0;       // Time at which E1 coupling changes to target
-    double t_end_E1 = 1e30;        // Time at which E1 coupling reverts to static
-    double lambda_E1_target = 0.0; // Value of λ_E1 inside the window
-    
-    // Window function parameters for E2 mode
-    double t_start_E2 = 0.0;       // Time at which E2 coupling changes to target
-    double t_end_E2 = 1e30;        // Time at which E2 coupling reverts to static
-    double lambda_E2_target = 0.0; // Value of λ_E2 inside the window
-    
-    // Window function parameters for A1 mode
-    double t_start_A1 = 0.0;       // Time at which A1 coupling changes to target
-    double t_end_A1 = 1e30;        // Time at which A1 coupling reverts to static
-    double lambda_A1_target = 0.0; // Value of λ_A1 inside the window
-    
-    /**
-     * Get effective λ_E1 at time t
-     */
-    double get_lambda_E1(double t, double lambda_E1_static) const {
-        if (mode == "constant") {
-            return lambda_E1_static;
-        } else if (mode == "window") {
-            return (t >= t_start_E1 && t <= t_end_E1) ? lambda_E1_target : lambda_E1_static;
+
+    double t_start_E1 = 0.0;
+    double t_end_E1   = 1e30;
+    double e1_coupling_scale_target = 1.0;
+
+    /// Multiplicative scale applied to all 8 quadratic E1 coefficients at time t.
+    double get_e1_coupling_scale(double t) const {
+        if (mode == "window" && t >= t_start_E1 && t <= t_end_E1) {
+            return e1_coupling_scale_target;
         }
-        return lambda_E1_static;  // fallback
-    }
-    
-    /**
-     * Get effective λ_E2 at time t
-     */
-    double get_lambda_E2(double t, double lambda_E2_static) const {
-        if (mode == "constant") {
-            return lambda_E2_static;
-        } else if (mode == "window") {
-            return (t >= t_start_E2 && t <= t_end_E2) ? lambda_E2_target : lambda_E2_static;
-        }
-        return lambda_E2_static;  // fallback
-    }
-    
-    /**
-     * Get effective λ_A1 at time t
-     */
-    double get_lambda_A1(double t, double lambda_A1_static) const {
-        if (mode == "constant") {
-            return lambda_A1_static;
-        } else if (mode == "window") {
-            return (t >= t_start_A1 && t <= t_end_A1) ? lambda_A1_target : lambda_A1_static;
-        }
-        return lambda_A1_static;  // fallback
+        return 1.0;
     }
 };
 
 /**
- * THz drive parameters (two-pulse)
+ * Two-pulse polar THz drive on the E1 phonon coordinate.
+ *
+ *   E_a(t) = Σ_{n=1,2} E0_n · exp[-(t-t_n)²/(2 σ_n²)] · cos[ω_n(t-t_n)+φ_n] · ê_n,
+ *
+ * where ê_n = (cos θ_n, sin θ_n) is the in-plane polarization of pulse n. This
+ * polar field couples linearly to the zone-center E1 coordinate via
+ *   H_drive = -Z* [E_x(t) ε_x + E_y(t) ε_y].
  */
 struct DriveParams {
-    // Pulse 1
-    double E0_1 = 0.0;      // Amplitude
-    double omega_1 = 1.0;   // Frequency
-    double t_1 = 0.0;       // Center time
-    double sigma_1 = 1.0;   // Gaussian width
-    double phi_1 = 0.0;     // Phase
-    double theta_1 = 0.0;   // Polarization angle (0 = x, π/2 = y)
-    
-    // Pulse 2
-    double E0_2 = 0.0;
+    // Pulse 1 (pump)
+    double E0_1    = 0.0;
+    double omega_1 = 1.0;
+    double t_1     = 0.0;
+    double sigma_1 = 1.0;
+    double phi_1   = 0.0;
+    double theta_1 = 0.0;  ///< Polarization angle (0 = x, π/2 = y)
+
+    // Pulse 2 (probe)
+    double E0_2    = 0.0;
     double omega_2 = 1.0;
-    double t_2 = 0.0;
+    double t_2     = 0.0;
     double sigma_2 = 1.0;
-    double phi_2 = 0.0;
+    double phi_2   = 0.0;
     double theta_2 = 0.0;
-    
-    // Drive strength per bond type for E1 mode (IR active, default 1.0 for all)
-    // drive_strength_E1[b] scales the E-field driving E1 for bond type b
-    double drive_strength_E1[PhononState::N_BONDS] = {1.0, 1.0, 1.0};
-    
-    // Drive strength per bond type for E2 mode (default 0.0 - E2 is Raman active, not IR active)
-    // Set to non-zero to artificially drive E2 phonon (e.g., for Raman excitation modeling)
-    double drive_strength_E2[PhononState::N_BONDS] = {0.0, 0.0, 0.0};
-    
-    // Backward compatible alias for E1 drive strength
-    double* drive_strength = drive_strength_E1;
-    
-    // Compute E-field components at time t for E1 drive (IR active)
-    // Scales by drive_strength_E1[bond_type]
-    void E_field(double t, double& Ex, double& Ey, size_t bond_type) const {
-        double strength = drive_strength_E1[bond_type];
-        
-        double dt1 = t - t_1;
-        double dt2 = t - t_2;
-        
-        double env1 = std::exp(-0.5 * dt1*dt1 / (sigma_1*sigma_1));
-        double osc1 = std::cos(omega_1 * dt1 + phi_1);
-        double E1 = E0_1 * env1 * osc1;
-        
-        double env2 = std::exp(-0.5 * dt2*dt2 / (sigma_2*sigma_2));
-        double osc2 = std::cos(omega_2 * dt2 + phi_2);
-        double E2 = E0_2 * env2 * osc2;
-        
-        Ex = strength * (E1 * std::cos(theta_1) + E2 * std::cos(theta_2));
-        Ey = strength * (E1 * std::sin(theta_1) + E2 * std::sin(theta_2));
-    }
-    
-    // Backward compatible: compute E-field without bond type (uses strength = 1.0)
+
+    /// Compute the in-plane THz field components at time t.
     void E_field(double t, double& Ex, double& Ey) const {
-        double dt1 = t - t_1;
-        double dt2 = t - t_2;
-        
-        double env1 = std::exp(-0.5 * dt1*dt1 / (sigma_1*sigma_1));
-        double osc1 = std::cos(omega_1 * dt1 + phi_1);
-        double E1 = E0_1 * env1 * osc1;
-        
-        double env2 = std::exp(-0.5 * dt2*dt2 / (sigma_2*sigma_2));
-        double osc2 = std::cos(omega_2 * dt2 + phi_2);
-        double E2 = E0_2 * env2 * osc2;
-        
+        const double dt1 = t - t_1;
+        const double dt2 = t - t_2;
+        const double env1 = std::exp(-0.5 * dt1 * dt1 / (sigma_1 * sigma_1));
+        const double env2 = std::exp(-0.5 * dt2 * dt2 / (sigma_2 * sigma_2));
+        const double E1 = E0_1 * env1 * std::cos(omega_1 * dt1 + phi_1);
+        const double E2 = E0_2 * env2 * std::cos(omega_2 * dt2 + phi_2);
         Ex = E1 * std::cos(theta_1) + E2 * std::cos(theta_2);
         Ey = E1 * std::sin(theta_1) + E2 * std::sin(theta_2);
-    }
-    
-    // Compute E-field components at time t for E2 drive
-    // Scales by drive_strength_E2[bond_type]
-    // E2 is normally Raman active (not IR), but this allows artificial driving
-    void E_field_E2(double t, double& Ex, double& Ey, size_t bond_type) const {
-        double strength = drive_strength_E2[bond_type];
-        
-        double dt1 = t - t_1;
-        double dt2 = t - t_2;
-        
-        double env1 = std::exp(-0.5 * dt1*dt1 / (sigma_1*sigma_1));
-        double osc1 = std::cos(omega_1 * dt1 + phi_1);
-        double E1 = E0_1 * env1 * osc1;
-        
-        double env2 = std::exp(-0.5 * dt2*dt2 / (sigma_2*sigma_2));
-        double osc2 = std::cos(omega_2 * dt2 + phi_2);
-        double E2 = E0_2 * env2 * osc2;
-        
-        Ex = strength * (E1 * std::cos(theta_1) + E2 * std::cos(theta_2));
-        Ey = strength * (E1 * std::sin(theta_1) + E2 * std::sin(theta_2));
     }
 };
 
@@ -525,13 +329,13 @@ using PL_ThermodynamicObservables  = mc::ThermodynamicObservables;
 using PL_OptimizedTempGridResult   = mc::OptimizedTempGridResult;
 
 /**
- * PhononLattice: Honeycomb lattice with spin-phonon coupling
- * 
+ * PhononLattice: honeycomb lattice with E1 zone-center magnetoelastic coupling.
+ *
  * Degrees of freedom:
- * - N_spin = 2 * dim1 * dim2 * dim3 classical spins (honeycomb, spin_dim = 3)
- * - 10 global phonon DOF: (Qx_E1, Qy_E1, Qx_E2, Qy_E2, Q_A1, Vx_E1, Vy_E1, Vx_E2, Vy_E2, V_A1)
- * 
- * Total ODE state size: 3 * N_spin + 10
+ *   - N_spin = N_atoms · dim1 · dim2 · dim3 classical spins (spin_dim = 3)
+ *   - 4 zone-center E1 phonon DOF: (Q_x, Q_y, V_x, V_y)
+ *
+ * Total ODE state size: spin_dim · N_spin + 4.
  */
 class PhononLattice {
 public:
@@ -585,7 +389,19 @@ public:
     
     // LLG damping
     double alpha_gilbert = 0.0;
-    
+
+    // Langevin thermostat (spins). When > 0 and integrate_langevin() is
+    // invoked, a per-step Gaussian noise field with σ = sqrt(2 α k_B T / (|S| dt))
+    // is added to H_eff at each spin during integration. Phonons are evolved
+    // deterministically (E1 phonon thermal noise neglected at this stage).
+    double langevin_temperature = 0.0;
+
+    // External "noise field" used by integrate_langevin(): one 3-vector per
+    // site, regenerated at every Langevin time step and added to H_eff in
+    // ode_system() when use_langevin_noise == true.
+    vector<Eigen::Vector3d> langevin_noise;
+    bool use_langevin_noise = false;
+
     // ODE state size
     size_t state_size;
     
@@ -655,43 +471,24 @@ public:
                        const DriveParams& dr_params);
     
     /**
-     * Set time-dependent spin-phonon coupling parameters
+     * Set time-dependent E1 magnetoelastic scale parameters.
      */
     void set_time_dependent_spin_phonon(const TimeDependentSpinPhononParams& td_params) {
         time_dep_spin_phonon_params = td_params;
         if (td_params.mode != "constant") {
-            std::cout << "Time-dependent spin-phonon coupling enabled (mode: " 
+            std::cout << "Time-dependent E1 magnetoelastic scaling enabled (mode: "
                       << td_params.mode << ")" << std::endl;
             if (td_params.mode == "window") {
-                std::cout << "  E1: λ=" << td_params.lambda_E1_target 
-                          << " for t∈[" << td_params.t_start_E1 << ", " << td_params.t_end_E1 << "]" << std::endl;
-                std::cout << "  E2: λ=" << td_params.lambda_E2_target 
-                          << " for t∈[" << td_params.t_start_E2 << ", " << td_params.t_end_E2 << "]" << std::endl;
-                std::cout << "  A1: λ=" << td_params.lambda_A1_target 
-                          << " for t∈[" << td_params.t_start_A1 << ", " << td_params.t_end_A1 << "]" << std::endl;
+                std::cout << "  E1 scale = " << td_params.e1_coupling_scale_target
+                          << " for t∈[" << td_params.t_start_E1
+                          << ", " << td_params.t_end_E1 << "]" << std::endl;
             }
         }
     }
-    
-    /**
-     * Get effective λ_E1 at time t
-     */
-    double get_lambda_E1(double t) const {
-        return time_dep_spin_phonon_params.get_lambda_E1(t, spin_phonon_params.lambda_E1);
-    }
-    
-    /**
-     * Get effective λ_E2 at time t
-     */
-    double get_lambda_E2(double t) const {
-        return time_dep_spin_phonon_params.get_lambda_E2(t, spin_phonon_params.lambda_E2);
-    }
-    
-    /**
-     * Get effective λ_A1 at time t
-     */
-    double get_lambda_A1(double t) const {
-        return time_dep_spin_phonon_params.get_lambda_A1(t, spin_phonon_params.lambda_A1);
+
+    /// Multiplicative scale on the 8 quadratic E1 coefficients at time t.
+    double get_e1_coupling_scale(double t) const {
+        return time_dep_spin_phonon_params.get_e1_coupling_scale(t);
     }
     
     /**
@@ -701,6 +498,189 @@ public:
         for (size_t i = 0; i < lattice_size; ++i) {
             field[i] = B;
         }
+    }
+
+    /**
+     * Add site-resolved pinning fields from a text file.
+     *
+     * Format: site Bx By Bz, with optional '#' comments.  The fields are added
+     * on top of the current uniform field, so call set_field() first.
+     */
+    void add_pinning_fields_from_file(const string& filename) {
+        if (filename.empty()) return;
+        ifstream in(filename);
+        if (!in) {
+            throw std::runtime_error("Cannot open pinning field file: " + filename);
+        }
+
+        string line;
+        size_t line_no = 0;
+        size_t n_loaded = 0;
+        while (std::getline(in, line)) {
+            ++line_no;
+            const size_t hash = line.find('#');
+            if (hash != string::npos) line = line.substr(0, hash);
+            std::istringstream iss(line);
+            size_t site;
+            double bx, by, bz;
+            if (!(iss >> site >> bx >> by >> bz)) {
+                continue;
+            }
+            if (site >= lattice_size) {
+                throw std::runtime_error(
+                    "Pinning field site index out of range at line " +
+                    std::to_string(line_no) + " in " + filename);
+            }
+            field[site](0) += bx;
+            field[site](1) += by;
+            field[site](2) += bz;
+            ++n_loaded;
+        }
+        cout << "Loaded " << n_loaded << " site-resolved pinning fields from "
+             << filename << endl;
+    }
+
+    /**
+     * Apply quenched nearest-neighbour exchange disorder from a text file.
+     *
+     * Format: site partner scale, with optional '#' comments.  Each row should
+     * refer to one unique NN bond.  The full 3x3 exchange matrix on that bond is
+     * multiplied by scale and the reverse directed entry is updated by the same
+     * transpose convention.  This perturbs the Hamiltonian without templating a
+     * spin direction.
+     */
+    void apply_nn_exchange_disorder_from_file(const string& filename) {
+        if (filename.empty()) return;
+        ifstream in(filename);
+        if (!in) {
+            throw std::runtime_error("Cannot open NN exchange disorder file: " + filename);
+        }
+
+        auto find_neighbor_index = [&](size_t site, size_t partner) -> size_t {
+            for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+                if (nn_partners[site][n] == partner) {
+                    return n;
+                }
+            }
+            throw std::runtime_error(
+                "NN exchange disorder references non-NN bond " +
+                std::to_string(site) + " " + std::to_string(partner) +
+                " in " + filename);
+        };
+
+        string line;
+        size_t line_no = 0;
+        size_t n_loaded = 0;
+        while (std::getline(in, line)) {
+            ++line_no;
+            const size_t hash = line.find('#');
+            if (hash != string::npos) line = line.substr(0, hash);
+            std::istringstream iss(line);
+            size_t site, partner;
+            double scale;
+            if (!(iss >> site >> partner >> scale)) {
+                continue;
+            }
+            if (site >= lattice_size || partner >= lattice_size) {
+                throw std::runtime_error(
+                    "NN exchange disorder site index out of range at line " +
+                    std::to_string(line_no) + " in " + filename);
+            }
+            if (!(scale > 0.0)) {
+                throw std::runtime_error(
+                    "NN exchange disorder scale must be positive at line " +
+                    std::to_string(line_no) + " in " + filename);
+            }
+
+            const size_t n_forward = find_neighbor_index(site, partner);
+            const size_t n_reverse = find_neighbor_index(partner, site);
+            nn_interaction[site][n_forward] *= scale;
+            nn_interaction[partner][n_reverse] *= scale;
+            ++n_loaded;
+        }
+        cout << "Applied " << n_loaded << " NN exchange disorder bond scalings from "
+             << filename << endl;
+    }
+
+    /**
+     * Apply additive, channel-resolved quenched NN exchange disorder.
+     *
+     * Format: site partner dJ dK dGamma dGammap, with optional '#' comments.
+     * The increments are interpreted in the local Kitaev channel basis for the
+     * corresponding NN bond type, transformed to the global frame used by
+     * PhononLattice, and added to the stored exchange matrix.  This allows
+     * physically sharper tests such as K-only or Γ-only bond disorder without
+     * applying a spin-direction pinning field.
+     */
+    void apply_nn_exchange_channel_disorder_from_file(const string& filename) {
+        if (filename.empty()) return;
+        ifstream in(filename);
+        if (!in) {
+            throw std::runtime_error("Cannot open NN exchange channel disorder file: " + filename);
+        }
+
+        auto find_neighbor_index = [&](size_t site, size_t partner) -> size_t {
+            for (size_t n = 0; n < nn_partners[site].size(); ++n) {
+                if (nn_partners[site][n] == partner) {
+                    return n;
+                }
+            }
+            throw std::runtime_error(
+                "NN exchange channel disorder references non-NN bond " +
+                std::to_string(site) + " " + std::to_string(partner) +
+                " in " + filename);
+        };
+
+        auto channel_matrix = [](int bond_type, double dJ, double dK,
+                                 double dGamma, double dGammap) -> SpinMatrix {
+            SpinPhononCouplingParams delta_params;
+            delta_params.J = dJ;
+            delta_params.K = dK;
+            delta_params.Gamma = dGamma;
+            delta_params.Gammap = dGammap;
+
+            SpinMatrix local = SpinMatrix::Zero(3, 3);
+            if (bond_type == 0) {
+                local = delta_params.get_Jx_local();
+            } else if (bond_type == 1) {
+                local = delta_params.get_Jy_local();
+            } else if (bond_type == 2) {
+                local = delta_params.get_Jz_local();
+            } else {
+                throw std::runtime_error("Invalid NN bond type in channel disorder");
+            }
+            return SpinPhononCouplingParams::to_global_frame(local);
+        };
+
+        string line;
+        size_t line_no = 0;
+        size_t n_loaded = 0;
+        while (std::getline(in, line)) {
+            ++line_no;
+            const size_t hash = line.find('#');
+            if (hash != string::npos) line = line.substr(0, hash);
+            std::istringstream iss(line);
+            size_t site, partner;
+            double dJ, dK, dGamma, dGammap;
+            if (!(iss >> site >> partner >> dJ >> dK >> dGamma >> dGammap)) {
+                continue;
+            }
+            if (site >= lattice_size || partner >= lattice_size) {
+                throw std::runtime_error(
+                    "NN exchange channel disorder site index out of range at line " +
+                    std::to_string(line_no) + " in " + filename);
+            }
+
+            const size_t n_forward = find_neighbor_index(site, partner);
+            const size_t n_reverse = find_neighbor_index(partner, site);
+            const int bond_type = nn_bond_types[site][n_forward];
+            const SpinMatrix dM = channel_matrix(bond_type, dJ, dK, dGamma, dGammap);
+            nn_interaction[site][n_forward] += dM;
+            nn_interaction[partner][n_reverse] += dM.transpose();
+            ++n_loaded;
+        }
+        cout << "Applied " << n_loaded << " NN exchange channel disorder increments from "
+             << filename << endl;
     }
     
     /**
@@ -807,66 +787,17 @@ public:
     // ============================================================
     
     /**
-     * Compute local energy for a spin at a given site
-     * E = -B·S + Σ_j S^T J_ij S_j (for NN, 2nd NN, 3rd NN)
-     *   + spin-phonon coupling terms
-     * 
-     * Note: This counts the full bond energy for each neighbor, so summing
-     * site_energy over all sites will double-count pair interactions.
-     * Use total_energy() for the correctly counted total energy.
+     * Compute local energy contribution for a hypothetical spin at @a site.
+     *
+     * Includes Zeeman, full nearest-neighbour bond energies (with the E1
+     * quadratic exchange modulation δX_γ(ε) folded into the local-frame
+     * exchange matrix), and 2nd / 3rd NN couplings. Ring exchange is NOT
+     * included here; for the correctly counted total energy use
+     * total_energy().
+     *
+     * Implemented out-of-line so we can reuse the namespaced E1 helpers.
      */
-    double site_energy(const Eigen::Vector3d& spin_here, size_t site) const {
-        double E = -spin_here.dot(field[site]);
-        
-        // Spin-phonon coupling parameters
-        double l_E1 = spin_phonon_params.lambda_E1;
-        double l_E2 = spin_phonon_params.lambda_E2;
-        double l_A1 = spin_phonon_params.lambda_A1;
-        
-        // NN interactions (includes spin-phonon coupling)
-        for (size_t n = 0; n < nn_partners[site].size(); ++n) {
-            size_t j = nn_partners[site][n];
-            const Eigen::Vector3d& Sj = spins[j];
-            int bond_type = nn_bond_types[site][n];
-            
-            // Get phonon coordinates for this bond type
-            double Qx_E1 = phonons.Q_x_E1[bond_type];
-            double Qy_E1 = phonons.Q_y_E1[bond_type];
-            double Qx_E2 = phonons.Q_x_E2[bond_type];
-            double Qy_E2 = phonons.Q_y_E2[bond_type];
-            double Q_A1 = phonons.Q_A1[bond_type];
-            
-            // Pure spin-spin interaction
-            E += spin_here.dot(nn_interaction[site][n] * Sj);
-            
-            // Spin-phonon coupling: E1 terms
-            // λ_E1 * Qx_E1 * (Si_x * Sj_z + Si_z * Sj_x)
-            E += l_E1 * Qx_E1 * (spin_here(0) * Sj(2) + spin_here(2) * Sj(0));
-            // λ_E1 * Qy_E1 * (Si_y * Sj_z + Si_z * Sj_y)
-            E += l_E1 * Qy_E1 * (spin_here(1) * Sj(2) + spin_here(2) * Sj(1));
-            
-            // Spin-phonon coupling: E2 terms
-            // λ_E2 * Qx_E2 * (Si_x * Sj_x - Si_y * Sj_y)
-            E += l_E2 * Qx_E2 * (spin_here(0) * Sj(0) - spin_here(1) * Sj(1));
-            // λ_E2 * Qy_E2 * (Si_x * Sj_y - Si_y * Sj_x)
-            E += l_E2 * Qy_E2 * (spin_here(0) * Sj(1) - spin_here(1) * Sj(0));
-            
-            // Spin-phonon coupling: A1 term
-            // λ_A1 * Q_A1 * (Si · Sj)
-            E += l_A1 * Q_A1 * spin_here.dot(Sj);
-        }
-        // 2nd NN interactions
-        for (size_t n = 0; n < j2_partners[site].size(); ++n) {
-            size_t j = j2_partners[site][n];
-            E += spin_here.dot(j2_interaction[site][n] * spins[j]);
-        }
-        // 3rd NN interactions
-        for (size_t n = 0; n < j3_partners[site].size(); ++n) {
-            size_t j = j3_partners[site][n];
-            E += spin_here.dot(j3_interaction[site][n] * spins[j]);
-        }
-        return E;
-    }
+    double site_energy(const Eigen::Vector3d& spin_here, size_t site) const;
     
     /**
      * Compute energy difference for a proposed spin flip (optimized for Metropolis)
@@ -898,26 +829,20 @@ public:
      *                       + cyclic permutations of (i,j,k,l,m,n)]
      */
     double ring_exchange_energy() const;
+    /// Ring-exchange operator R_7, defined by H_7 = J7_eff * R_7.
+    double ring_exchange_normalized() const;
     
     /**
-     * Phonon energy (kinetic + potential + cubic coupling)
-     * 
-     * E_ph = (1/2)(Vx_E1² + Vy_E1²) + (1/2)ω_E1²(Qx_E1² + Qy_E1²) + (λ_E1/4)(Qx_E1² + Qy_E1²)²
-     *      + (1/2)(Vx_E2² + Vy_E2²) + (1/2)ω_E2²(Qx_E2² + Qy_E2²) + (λ_E2/4)(Qx_E2² + Qy_E2²)²
-     *      + (1/2)V_A1² + (1/2)ω_A1²*Q_A1² + (λ_A1/4)*Q_A1⁴
-     *      + g3_E1A1*(Qx_E1² + Qy_E1²)*Q_A1 + g3_E2A1*(Qx_E2² + Qy_E2²)*Q_A1
-     *      + g3_E1E2*(Qx_E1*Qx_E2 + Qy_E1*Qy_E2)
+     * E1 phonon energy (kinetic + harmonic potential + optional quartic):
+     *   E_ph = (1/2)(V_x² + V_y²)
+     *        + (1/2) ω_E1² (ε_x² + ε_y²)
+     *        + (λ_E1_quartic / 4) (ε_x² + ε_y²)².
      */
     double phonon_energy() const;
-    
+
     /**
-     * Spin-phonon coupling energy
-     * 
-     * H_sp-ph = Σ_<ij> [λ_E1 * Qx_E1 * (Si_x*Sj_z + Si_z*Sj_x)   // E1 coupling
-     *                 + λ_E1 * Qy_E1 * (Si_y*Sj_z + Si_z*Sj_y)
-     *                 + λ_E2 * Qx_E2 * (Si_x*Sj_x - Si_y*Sj_y)   // E2 coupling
-     *                 + λ_E2 * Qy_E2 * (Si_x*Sj_y - Si_y*Sj_x)
-     *                 + λ_A1 * Q_A1  * (Si · Sj)]                 // A1 coupling
+     * E1 magnetoelastic coupling energy (quadratic in ε):
+     *   H_sp-ph = Σ_<ij>γ Σ_X δX_γ(ε) O_{ij,γ}^{(X)}, X ∈ {J, K, Γ, Γ'}.
      */
     double spin_phonon_energy() const;
     
@@ -939,35 +864,21 @@ public:
     // DERIVATIVES FOR EQUATIONS OF MOTION
     // ============================================================
     
-    /**
-     * Compute ∂H_sp-ph/∂Qx_E1 for a specific bond type
-     * @param bond_type Bond type (0=x, 1=y, 2=z)
-     */
-    double dH_dQx_E1(size_t bond_type) const;
-    
-    /**
-     * Compute ∂H_sp-ph/∂Qy_E1 for a specific bond type
-     * @param bond_type Bond type (0=x, 1=y, 2=z)
-     */
-    double dH_dQy_E1(size_t bond_type) const;
-    
-    /**
-     * Compute ∂H_sp-ph/∂Qx_E2 for a specific bond type
-     * @param bond_type Bond type (0=x, 1=y, 2=z)
-     */
-    double dH_dQx_E2(size_t bond_type) const;
-    
-    /**
-     * Compute ∂H_sp-ph/∂Qy_E2 for a specific bond type
-     * @param bond_type Bond type (0=x, 1=y, 2=z)
-     */
-    double dH_dQy_E2(size_t bond_type) const;
-    
-    /**
-     * Compute ∂H_sp-ph/∂Q_A1 for a specific bond type
-     * @param bond_type Bond type (0=x, 1=y, 2=z)
-     */
-    double dH_dQ_A1(size_t bond_type) const;
+    /// ∂H_sp-ph/∂ε_x for the zone-center E1 coordinate.
+    double dH_dQx_E1() const;
+    /// ∂H_sp-ph/∂ε_y for the zone-center E1 coordinate.
+    double dH_dQy_E1() const;
+    /// Effective ring exchange under the scalar quadratic E1 distortion.
+    double effective_J7(double qx, double qy) const {
+        return spin_phonon_params.J7 +
+               spin_phonon_params.lambda_E1_J7_0 * (qx * qx + qy * qy);
+    }
+    double dJ7_dQx_E1(double qx, double /*qy*/) const {
+        return 2.0 * spin_phonon_params.lambda_E1_J7_0 * qx;
+    }
+    double dJ7_dQy_E1(double /*qx*/, double qy) const {
+        return 2.0 * spin_phonon_params.lambda_E1_J7_0 * qy;
+    }
     
     /**
      * Compute ring exchange contribution to effective field on spin at given site
@@ -978,6 +889,7 @@ public:
      * ring exchange term with respect to that spin.
      */
     SpinVector get_ring_exchange_field(size_t site) const;
+    SpinVector get_ring_exchange_field(size_t site, double qx, double qy) const;
     
     /**
      * Compute effective field on spin i (for spin EOM)
@@ -991,34 +903,20 @@ public:
     // ============================================================
     
     /**
-     * Phonon EOM derivatives (per-bond-type)
-     * 
-     * Each mode now has separate coordinates for each bond type (b=0,1,2).
-     * 
-     * E1 mode (IR active, THz driven, per bond type b):
-     *   dQx_E1_b/dt = Vx_E1_b
-     *   dVx_E1_b/dt = -ω_E1² Qx_E1_b - λ_E1 (Qx_E1_b²+Qy_E1_b²) Qx_E1_b 
-     *              - 2*g3_E1A1*Qx_E1_b*Q_A1_b - γ_E1*Vx_E1_b - ∂H_sp-ph/∂Qx_E1_b + Z*Ex(t)
-     * 
-     * E2 mode (Raman active, per bond type b):
-     *   Similar structure...
-     * 
-     * A1 mode (Raman active, per bond type b):
-     *   Similar structure...
-     * 
-     * @param ph Input phonon state
-     * @param t Current time
-     * @param dH_dQx_E1 Array of ∂H/∂Qx_E1 for each bond type [3]
-     * @param dH_dQy_E1 Array of ∂H/∂Qy_E1 for each bond type [3]
-     * @param dH_dQx_E2 Array of ∂H/∂Qx_E2 for each bond type [3]
-     * @param dH_dQy_E2 Array of ∂H/∂Qy_E2 for each bond type [3]
-     * @param dH_dQ_A1 Array of ∂H/∂Q_A1 for each bond type [3]
-     * @param dph_dt Output phonon derivatives
+     * E1 phonon EOM derivatives (zone-center, IR-driven):
+     *   dε_x/dt = V_x
+     *   dV_x/dt = -ω_E1² ε_x - λ_E1_quartic (ε_x²+ε_y²) ε_x
+     *             - γ_E1 V_x - ∂H_sp-ph/∂ε_x + Z* E_x(t)
+     * (and the same for the y-component).
+     *
+     * @param ph         Input phonon state
+     * @param t          Current time
+     * @param dHsp_dQx   ∂H_sp-ph/∂ε_x evaluated for the current spin config
+     * @param dHsp_dQy   ∂H_sp-ph/∂ε_y evaluated for the current spin config
+     * @param dph_dt     Output phonon derivatives
      */
     void phonon_derivatives(const PhononState& ph, double t,
-                           const double* dH_dQx_E1, const double* dH_dQy_E1,
-                           const double* dH_dQx_E2, const double* dH_dQy_E2,
-                           const double* dH_dQ_A1,
+                           double dHsp_dQx, double dHsp_dQy,
                            PhononState& dph_dt) const;
     
     /**
@@ -1028,14 +926,20 @@ public:
     void ode_system(const ODEState& x, ODEState& dxdt, double t);
     
     /**
-     * Spin derivative (LLG equation)
-     * dS/dt = S × H_eff + α S × (S × H_eff)
+     * Spin derivative (LLG equation, Landau-Lifshitz form).
+     *   dS/dt = S × H_eff − α/|S| · S × (S × H_eff)
+     * The damping term has a MINUS sign so that energy decreases under
+     * α > 0 (the term −α S × (S × H) drives S towards H).
+     * NOTE: prior to this fix the sign was +, which made damping pump energy
+     * INTO the spin sector instead of dissipating it — a latent bug that
+     * was masked by all production runs using α = 0. Sign now matches
+     * StrainPhononLattice::spin_derivative.
      */
     Eigen::Vector3d spin_derivative(const Eigen::Vector3d& S, 
                                     const Eigen::Vector3d& H_eff) const {
         Eigen::Vector3d dSdt = S.cross(H_eff);
         if (alpha_gilbert > 0) {
-            dSdt += alpha_gilbert * S.cross(S.cross(H_eff)) / spin_length;
+            dSdt -= alpha_gilbert * S.cross(S.cross(H_eff)) / spin_length;
         }
         return dSdt;
     }
@@ -1195,25 +1099,9 @@ public:
         return result;
     }
     
-    /**
-     * E1 phonon amplitude
-     */
+    /// |ε| for the E1 zone-center coordinate.
     double E1_amplitude() const {
         return phonons.E1_amplitude();
-    }
-    
-    /**
-     * E2 phonon amplitude
-     */
-    double E2_amplitude() const {
-        return phonons.E2_amplitude();
-    }
-    
-    /**
-     * A1 phonon amplitude
-     */
-    double A1_amplitude() const {
-        return phonons.A1_amplitude();
     }
 
     // ============================================================
@@ -1270,6 +1158,35 @@ public:
                            // Ingredient XVIII: MD tolerance overrides. Negative
                            // values fall back to the legacy method-aware defaults.
                            double abs_tol = -1.0, double rel_tol = -1.0);
+
+    /**
+     * Stochastic spin-Langevin dynamics (qualitative thermal-decay mode).
+     *
+     * Iterates fixed-step RK4 (with the Boost.Odeint adaptive error control
+     * disabled) while injecting a per-step Gaussian noise field on every
+     * spin so the effective field becomes
+     *     H_eff_total = H_eff + ξ_i,
+     *     ξ_i ~ N(0, σ_spin² I_3),  σ_spin = sqrt(2 α k_B T / (|S| dt)).
+     *
+     * The noise is held constant across the four RK4 sub-stages of a single
+     * macro step (Euler-Maruyama-on-a-step approximation). This is exact
+     * only in the dt → 0 limit but produces qualitatively correct thermal
+     * decay statistics for moderate dt and is sufficient for observing
+     * spin-state hopping (3Q ↔ ZZ) at finite T. Phonons evolve
+     * deterministically; their thermal noise is neglected (justified by the
+     * symmetry-protected ε_BO = 0).
+     *
+     * @param t_start          start time
+     * @param t_end            end time
+     * @param dt               fixed time step
+     * @param output_dir       directory for trajectory output (HDF5 + text)
+     * @param save_every       save observables every N steps
+     * @param seed             RNG seed; if 0, uses random_device
+     */
+    void integrate_langevin(double t_start, double t_end, double dt,
+                            const string& output_dir = "",
+                            size_t save_every = 100,
+                            uint64_t seed = 0);
     
     // ============================================================
     // MONTE CARLO METHODS (consistent with Lattice / StrainPhononLattice)
@@ -1338,26 +1255,16 @@ public:
     void deterministic_sweep(size_t num_sweeps);
     
     /**
-     * Relax phonon coordinates to equilibrium for current spin configuration.
-     * 
-     * Finds the static equilibrium Q values that minimize the total energy
-     * for fixed spins. This should be called after simulated annealing and
-     * before molecular dynamics to ensure a proper steady state.
-     * 
-     * The equilibrium satisfies (for each mode):
-     * E1: ω_E1² Qx_E1 + λ_E1 (Qx_E1²+Qy_E1²) Qx_E1 + 2 g3_E1A1 Qx_E1 Q_A1 + ∂H_sp/∂Qx_E1 = 0
-     *     ω_E1² Qy_E1 + λ_E1 (Qx_E1²+Qy_E1²) Qy_E1 + 2 g3_E1A1 Qy_E1 Q_A1 + ∂H_sp/∂Qy_E1 = 0
-     * E2: ω_E2² Qx_E2 + λ_E2 (Qx_E2²+Qy_E2²) Qx_E2 + 2 g3_E2A1 Qx_E2 Q_A1 + ∂H_sp/∂Qx_E2 = 0
-     *     ω_E2² Qy_E2 + λ_E2 (Qx_E2²+Qy_E2²) Qy_E2 + 2 g3_E2A1 Qy_E2 Q_A1 + ∂H_sp/∂Qy_E2 = 0
-     * A1: ω_A1² Q_A1 + λ_A1 Q_A1³ + g3_E1A1 (Qx_E1²+Qy_E1²) 
-     *     + g3_E2A1 (Qx_E2²+Qy_E2²) + ∂H_sp/∂Q_A1 = 0
-     * 
-     * Uses damped dynamics to find equilibrium (overdamped relaxation).
-     * 
-     * @param tol         Convergence tolerance for |dQ/dt|
-     * @param max_iter    Maximum relaxation iterations
-     * @param damping     Damping coefficient for overdamped dynamics
-     * @return true if converged, false if max_iter reached
+     * Relax the zone-center E1 coordinate to its static equilibrium for the
+     * current spin configuration. The equilibrium satisfies
+     *
+     *   ω_E1² ε_a + λ_E1_quartic (ε_x²+ε_y²) ε_a + ∂H_sp-ph/∂ε_a = 0,
+     *   a = x, y.
+     *
+     * @param tol      convergence tolerance for the residual
+     * @param max_iter maximum Newton iterations
+     * @param damping  damped Newton step size (1.0 = full Newton)
+     * @return true on convergence, false if @c max_iter is exhausted.
      */
     bool relax_phonons(double tol = 1e-8, size_t max_iter = 10000, double damping = 1.0);
     
@@ -1547,12 +1454,9 @@ public:
     
     void print_state() const {
         cout << "=== PhononLattice State ===" << endl;
-        cout << "E1: Qx=" << phonons.Q_x_E1 << ", Qy=" << phonons.Q_y_E1 
-             << ", Vx=" << phonons.V_x_E1 << ", Vy=" << phonons.V_y_E1 << endl;
-        cout << "E2: Qx=" << phonons.Q_x_E2 << ", Qy=" << phonons.Q_y_E2 
-             << ", Vx=" << phonons.V_x_E2 << ", Vy=" << phonons.V_y_E2 << endl;
-        cout << "A1: Q=" << phonons.Q_A1 << ", V=" << phonons.V_A1 << endl;
-        cout << "E1 amplitude: " << E1_amplitude() << ", E2 amplitude: " << E2_amplitude() << endl;
+        cout << "E1: Qx=" << phonons.Q_x_E1 << ", Qy=" << phonons.Q_y_E1
+             << ", Vx=" << phonons.V_x_E1 << ", Vy=" << phonons.V_y_E1
+             << ", |ε|=" << E1_amplitude() << endl;
         cout << "Magnetization: " << magnetization_local().transpose() << endl;
         cout << "Staggered M: " << magnetization_local_antiferro().transpose() << endl;
         cout << "Energy: " << energy_density() << " per site" << endl;

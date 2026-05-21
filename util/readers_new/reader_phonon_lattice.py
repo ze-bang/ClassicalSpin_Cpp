@@ -591,10 +591,16 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
         elif '/phonon_trajectory/Q_A1' in f:
             Q_A1 = f['/phonon_trajectory/Q_A1'][:]
             Q_A1_0 = Q_A1_1 = Q_A1_2 = Q_A1 / 3.0
-        else:
+        elif '/phonon_trajectory/QR' in f:
             # Legacy naming
             Q_A1 = f['/phonon_trajectory/QR'][:]
             Q_A1_0 = Q_A1_1 = Q_A1_2 = Q_A1 / 3.0
+        else:
+            # E1-only PhononLattice trajectories do not contain an A1 mode.
+            # Keep a zero-valued channel so downstream readers can use the
+            # same returned dictionary shape for old and new files.
+            Q_A1 = np.zeros_like(Qx_E1)
+            Q_A1_0 = Q_A1_1 = Q_A1_2 = np.zeros_like(Qx_E1)
         
         energy = f['/phonon_trajectory/energy'][:]
         
@@ -663,7 +669,8 @@ def read_MD_phonon(dir, order_parameter_func=None, use_spin_deviation=True):
             if V_A1 is not None:
                 V_A1_0 = V_A1_1 = V_A1_2 = V_A1 / 3.0
             else:
-                V_A1_0 = V_A1_1 = V_A1_2 = None
+                V_A1 = np.zeros_like(Qx_E1)
+                V_A1_0 = V_A1_1 = V_A1_2 = np.zeros_like(Qx_E1)
         
         # Read metadata
         metadata = {}

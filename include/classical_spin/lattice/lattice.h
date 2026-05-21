@@ -545,6 +545,13 @@ public:
     array<vector<size_t>, 3> boundary_sites_per_dim;     // Sites near boundaries
     array<size_t, 3> boundary_thickness;                 // Layers affected by twist
 
+    // Adaptive step-size and acceptance counters for twist Metropolis (one per dim).
+    // Target acceptance ≈ 0.5; step is rescaled every twist_step_adapt_window proposals.
+    array<double, 3> twist_step       = {0.5, 0.5, 0.5};
+    array<size_t, 3> twist_n_attempt  = {0, 0, 0};
+    array<size_t, 3> twist_n_accept   = {0, 0, 0};
+    static constexpr size_t twist_step_adapt_window = 50;
+
     // Time-dependent field for molecular dynamics
     array<SpinVector, 2> field_drive; // Two pulse components
     array<double, 2> t_pulse;         // Pulse center times
@@ -3371,6 +3378,22 @@ public:
      *   - Occasional random global moves (10% probability) to escape local minima
      */
     size_t metropolis_twist_sweep(double T);
+
+    /**
+     * Deterministic relaxation of the twist angles at T = 0.
+     * For each dimension d with Ld > 1, performs a 1-D golden-section line
+     * search in the twist angle θ_d that minimizes the boundary-bond energy.
+     * The bracket is initialized around the current angle with width ±π and
+     * iteratively shrunk; runs `n_passes` sweeps over the dimensions.
+     *
+     * This is the SOTA companion to `metropolis_twist_sweep` for the
+     * deterministic (T = 0) phase: at zero temperature the boundary energy
+     * is a smooth 1-D function of θ_d, so line minimization converges in
+     * O(log(1/tol)) evaluations and resolves incommensurate ordering
+     * wave-vectors that would be locked to the discrete grid n/L by
+     * standard PBC.
+     */
+    void relax_twist_angles(size_t n_passes = 4, double tol = 1e-10);
     
     /**
      * Extract axis-angle representation from rotation matrix

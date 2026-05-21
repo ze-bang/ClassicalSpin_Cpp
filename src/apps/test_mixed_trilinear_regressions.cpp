@@ -72,7 +72,7 @@ Eigen::VectorXd normalized_vector(const std::vector<double>& components, double 
     return vec * (length / norm);
 }
 
-Lattice make_lattice() {
+SpinConfig make_base_config() {
     SpinConfig config;
     config.field_strength = 0.0;
 
@@ -87,24 +87,67 @@ Lattice make_lattice() {
     config.set_param("D2", 0.0);
     config.set_param("e1", 0.0);
     config.set_param("e2", 0.0);
+    config.spin_length = 1.0f;
+    config.spin_length_su3 = 1.0f;
 
+    return config;
+}
+
+void set_reference_symmetric_tensor_terms(SpinConfig& config) {
     // On-site W (a∈{1,3,4,6,8}). u_n→W{n}_zz=+u_n, W{n}_xx=−u_n; v_n→W{n}_xz=+v_n.
     config.set_param("W1_zz",  0.31);  config.set_param("W1_xx", -0.31);   // u1 = 0.31
     config.set_param("W3_zz", -0.22);  config.set_param("W3_xx",  0.22);   // u3 = -0.22
     config.set_param("W8_zz",  0.17);  config.set_param("W8_xx", -0.17);   // u8 = 0.17
     config.set_param("W4_xz",  0.29);                                       // v4 = 0.29
     config.set_param("W6_xz", -0.11);                                       // v6 = -0.11
-    // Inter-site V. w_n→V{n}_zz=+w_n, V{n}_xx=−w_n (A1+); V{n}_xz=+w_n (A2+).
-    config.set_param("V1_zz",  0.13);  config.set_param("V1_xx", -0.13);   // w1 = 0.13
-    config.set_param("V3_zz",  0.07);  config.set_param("V3_xx", -0.07);   // w3 = 0.07
-    config.set_param("V8_zz", -0.19);  config.set_param("V8_xx",  0.19);   // w8 = -0.19
-    config.set_param("V4_xz",  0.23);                                       // w4 = 0.23
-    config.set_param("V6_xz",  0.05);                                       // w6 = 0.05
-    config.spin_length = 1.0f;
-    config.spin_length_su3 = 1.0f;
+}
 
-    MixedUnitCell mixed_uc = build_tmfeo3(config);
+void set_reference_shorthand_terms(SpinConfig& config) {
+    config.set_param("u1",  0.31);
+    config.set_param("u3", -0.22);
+    config.set_param("u8",  0.17);
+    config.set_param("v4",  0.29);
+    config.set_param("v6", -0.11);
+}
+
+SpinConfig make_tensor_config() {
+    SpinConfig config = make_base_config();
+    set_reference_symmetric_tensor_terms(config);
+    return config;
+}
+
+SpinConfig make_tensor_reference_config() {
+    SpinConfig config = make_base_config();
+    set_reference_symmetric_tensor_terms(config);
+    return config;
+}
+
+SpinConfig make_shorthand_config() {
+    SpinConfig config = make_base_config();
+    set_reference_shorthand_terms(config);
+    return config;
+}
+
+MixedUnitCell make_mixed_unit_cell(const SpinConfig& config) {
+    return build_tmfeo3(config);
+}
+
+Lattice make_lattice_from_config(const SpinConfig& config,
+                                 size_t* bilinear_count = nullptr,
+                                 size_t* trilinear_count = nullptr) {
+    MixedUnitCell mixed_uc = make_mixed_unit_cell(config);
+    if (bilinear_count != nullptr) {
+        *bilinear_count = mixed_uc.bilinear_SU2_SU3.size();
+    }
+    if (trilinear_count != nullptr) {
+        *trilinear_count = mixed_uc.trilinear_SU2_SU3.size();
+    }
+
     return Lattice(mixed_uc, 1, 1, 1, config.spin_length, config.spin_length_su3);
+}
+
+Lattice make_lattice() {
+    return make_lattice_from_config(make_tensor_config());
 }
 
 void assign_deterministic_spins(Lattice& lattice) {
@@ -125,6 +168,23 @@ void assign_deterministic_spins(Lattice& lattice) {
     }
 }
 
+void assign_uniform_q0_spins(Lattice& lattice) {
+    const Eigen::VectorXd spin = normalized_vector({1.0, 0.0, 1.0}, lattice.spin_length_SU2);
+    for (size_t site = 0; site < lattice.lattice_size_SU2; ++site) {
+        lattice.spins_SU2[site] = spin;
+    }
+    for (size_t site = 0; site < lattice.lattice_size_SU3; ++site) {
+        lattice.spins_SU3[site] = Eigen::VectorXd::Zero(lattice.spin_dim_SU3);
+    }
+}
+
+void set_active_w_orbit(SpinConfig& config, int orbit) {
+    config.set_param("W_orbit1_scale", orbit == 1 ? 1.0 : 0.0);
+    config.set_param("W_orbit2_scale", orbit == 2 ? 1.0 : 0.0);
+    config.set_param("W_orbit3_scale", orbit == 3 ? 1.0 : 0.0);
+    config.set_param("W_orbit4_scale", orbit == 4 ? 1.0 : 0.0);
+}
+
 bool check_total_energy_flat_consistency(Lattice& lattice, std::ostream& out) {
     const double energy = lattice.total_energy();
     auto state = lattice.spins_to_state();
@@ -134,6 +194,134 @@ bool check_total_energy_flat_consistency(Lattice& lattice, std::ostream& out) {
         out << "[FAIL] total_energy and total_energy_flat disagree: E=" << energy
             << ", E_flat=" << flat_energy << "\n";
         return false;
+    }
+
+    return true;
+}
+
+bool check_w_only_builder_surface(std::ostream& out) {
+    MixedUnitCell mixed_uc = make_mixed_unit_cell(make_tensor_reference_config());
+
+    if (!mixed_uc.bilinear_SU2_SU3.empty()) {
+        out << "[FAIL] W-only builder emitted unexpected mixed bilinear terms: "
+            << mixed_uc.bilinear_SU2_SU3.size() << "\n";
+        return false;
+    }
+    if (mixed_uc.trilinear_SU2_SU3.size() != 32) {
+        out << "[FAIL] W-only builder emitted " << mixed_uc.trilinear_SU2_SU3.size()
+            << " mixed trilinears instead of 32\n";
+        return false;
+    }
+
+    for (const auto& entry : mixed_uc.trilinear_SU2_SU3) {
+        const size_t source = static_cast<size_t>(entry.first);
+        const MixedTrilinear& term = entry.second;
+        if (source != term.partner1) {
+            out << "[FAIL] Found non-onsite mixed trilinear at Fe source " << source
+                << " with partner1=" << term.partner1 << "\n";
+            return false;
+        }
+        if ((term.offset1.array() != 0).any()) {
+            out << "[FAIL] Found nonzero Fe-leg offset in W-only builder at Fe source "
+                << source << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool check_shorthand_equivalence(std::ostream& out) {
+    size_t tensor_bilinear_count = 0;
+    size_t tensor_trilinear_count = 0;
+    size_t shorthand_bilinear_count = 0;
+    size_t shorthand_trilinear_count = 0;
+
+    Lattice tensor_lattice = make_lattice_from_config(
+        make_tensor_reference_config(), &tensor_bilinear_count, &tensor_trilinear_count);
+    Lattice shorthand_lattice = make_lattice_from_config(
+        make_shorthand_config(), &shorthand_bilinear_count, &shorthand_trilinear_count);
+
+    if (tensor_bilinear_count != 0 || shorthand_bilinear_count != 0) {
+        out << "[FAIL] W-only builder emitted unexpected mixed bilinears during shorthand test"
+            << " (tensor=" << tensor_bilinear_count
+            << ", shorthand=" << shorthand_bilinear_count << ")\n";
+        return false;
+    }
+    if (tensor_trilinear_count == 0 || shorthand_trilinear_count == 0) {
+        out << "[FAIL] Mixed trilinear builder returned no trilinear terms"
+            << " (tensor=" << tensor_trilinear_count
+            << ", shorthand=" << shorthand_trilinear_count << ")\n";
+        return false;
+    }
+    if (tensor_trilinear_count != shorthand_trilinear_count) {
+        out << "[FAIL] Tensor/shorthand trilinear counts differ: tensor="
+            << tensor_trilinear_count << ", shorthand=" << shorthand_trilinear_count << "\n";
+        return false;
+    }
+
+    assign_deterministic_spins(tensor_lattice);
+    assign_deterministic_spins(shorthand_lattice);
+
+    const double tensor_energy = tensor_lattice.total_energy();
+    const double shorthand_energy = shorthand_lattice.total_energy();
+    if (!nearly_equal(tensor_energy, shorthand_energy, kAbsTol, kRelTol)) {
+        out << "[FAIL] Tensor/shorthand total energies differ: tensor=" << tensor_energy
+            << ", shorthand=" << shorthand_energy << "\n";
+        return false;
+    }
+
+    for (size_t site = 0; site < tensor_lattice.lattice_size_SU2; ++site) {
+        const auto tensor_field = tensor_lattice.get_local_field_SU2(site);
+        const auto shorthand_field = shorthand_lattice.get_local_field_SU2(site);
+        if (!vector_nearly_equal(tensor_field, shorthand_field, kAbsTol, kRelTol)) {
+            out << "[FAIL] Tensor/shorthand SU2 local field mismatch at site " << site << "\n";
+            return false;
+        }
+    }
+
+    for (size_t site = 0; site < tensor_lattice.lattice_size_SU3; ++site) {
+        const auto tensor_field = tensor_lattice.get_local_field_SU3(site);
+        const auto shorthand_field = shorthand_lattice.get_local_field_SU3(site);
+        if (!vector_nearly_equal(tensor_field, shorthand_field, kAbsTol, kRelTol)) {
+            out << "[FAIL] Tensor/shorthand SU3 local field mismatch at site " << site << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool check_mirror_odd_inversion_pairing(std::ostream& out) {
+    struct OddChannelCase {
+        const char* param_name;
+        Eigen::Index lambda_index;
+    };
+    const OddChannelCase odd_cases[] = {
+        {"W4_xz", 3},
+        {"W6_xz", 5}
+    };
+
+    for (const auto& odd_case : odd_cases) {
+        for (int orbit = 1; orbit <= 4; ++orbit) {
+            SpinConfig config = make_base_config();
+            config.set_param(odd_case.param_name, 1.0);
+            set_active_w_orbit(config, orbit);
+
+            Lattice lattice = make_lattice_from_config(config);
+            assign_uniform_q0_spins(lattice);
+
+            for (size_t site = 0; site < lattice.lattice_size_SU3; ++site) {
+                const auto field = lattice.get_local_field_SU3(site);
+                if (!nearly_equal(field(odd_case.lambda_index), 0.0, kAbsTol, kRelTol)) {
+                    out << "[FAIL] Odd W channel " << odd_case.param_name
+                        << " does not cancel on Tm site " << site
+                        << " for orbit " << orbit
+                        << ": field=" << field(odd_case.lambda_index) << "\n";
+                    return false;
+                }
+            }
+        }
     }
 
     return true;
@@ -295,6 +483,15 @@ int main() {
     Lattice lattice = make_lattice();
     assign_deterministic_spins(lattice);
 
+    if (!check_w_only_builder_surface(std::cout)) {
+        return 1;
+    }
+    if (!check_shorthand_equivalence(std::cout)) {
+        return 1;
+    }
+    if (!check_mirror_odd_inversion_pairing(std::cout)) {
+        return 1;
+    }
     if (!check_state_roundtrip(lattice, std::cout)) {
         return 1;
     }
@@ -311,6 +508,6 @@ int main() {
         return 1;
     }
 
-    std::cout << "[PASS] Mixed trilinear and LLG regression checks\n";
+    std::cout << "[PASS] On-site W builder and LLG regression checks\n";
     return 0;
 }

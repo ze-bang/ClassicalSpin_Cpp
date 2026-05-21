@@ -22,8 +22,11 @@
  *       projected Tm Zeeman.  Tm always lives in its CEF local basis
  *       in a single direct storage convention.
  *
- *   * `apply_tmfeo3_fe_tm_couplings(mixed_uc, config)`         - chi (Fe-Tm
- *       bilinear) only. All 32 chi-bonds are enumerated explicitly.
+ *   * `apply_tmfeo3_fe_tm_couplings(mixed_uc, config)`         - the on-site
+ *       mixed Fe-Fe-Tm trilinear W only. The Fe-Tm bonds are stored as 16
+ *       explicit even/odd inversion pairs so the A2+ channels on the odd
+ *       bonds are guaranteed to be related to their even partners by the
+ *       required inversion sign flip.
  */
 
 #include "classical_spin/core/unitcell_builders.h"
@@ -709,91 +712,147 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
 // Fe-Tm couplings (only used by build_tmfeo3, not by the standalone builders)
 // -----------------------------------------------------------------------------
 
-// 32 Fe-Tm chi-bonds = 4 orbits * 8 bonds/orbit (notes appendix:bondtable).
-// orbit in {1,2,3,4}; type 0 = chi (E-coset), type 1 = chi_inv (I-coset).
+// 16 Fe-Tm inversion-related bond pairs = 4 orbits * 4 pairs/orbit.
+// For each pair, the odd bond is the inversion-related partner of the even
+// bond. The on-site W A2+ channels (lambda_4, lambda_6) therefore enter with
+// opposite signs on the two bonds, while the A1+ channels (lambda_1, lambda_3,
+// lambda_8) are identical.
 struct FeTmBond {
     int fe;               // Fe sublattice index
     int tm;               // Tm sublattice index
-    int orbit;            // 1..4 (selects chi_orbit scale)
-    int type;             // 0 = chi, 1 = chi_inv
     Eigen::Vector3i off;  // cell offset (Tm cell - Fe cell)
 };
 
-const std::array<FeTmBond, 32>& fe_tm_chi_bonds() {
-    static const std::array<FeTmBond, 32> kBonds = {{
-        // Fe0 (z = 1/2) -- 8 bonds
-        {0, 3, 1, 0, { -1,  0,  0}}, {0, 0, 1, 1, {  0,  0,  0}},
-        {0, 2, 2, 0, {  0,  0,  0}}, {0, 1, 2, 1, { -1,  0,  0}},
-        {0, 1, 3, 0, {  0,  0,  0}}, {0, 2, 3, 1, { -1,  0,  0}},
-        {0, 0, 4, 0, {  0, -1,  0}}, {0, 3, 4, 1, { -1,  1,  0}},
-        // Fe1 (z = 1/2) -- 8 bonds
-        {1, 2, 1, 0, {  0,  0,  0}}, {1, 1, 1, 1, {  0, -1,  0}},
-        {1, 3, 2, 0, {  0,  0,  0}}, {1, 0, 2, 1, {  0, -1,  0}},
-        {1, 0, 3, 0, {  1, -1,  0}}, {1, 3, 3, 1, { -1,  0,  0}},
-        {1, 1, 4, 0, {  0,  0,  0}}, {1, 2, 4, 1, {  0, -1,  0}},
-        // Fe2 (z = 0)   -- 8 bonds
-        {2, 1, 1, 0, {  0, -1,  0}}, {2, 2, 1, 1, {  0,  0, -1}},
-        {2, 0, 2, 0, {  0, -1, -1}}, {2, 3, 2, 1, {  0,  0,  0}},
-        {2, 3, 3, 0, { -1,  0,  0}}, {2, 0, 3, 1, {  1, -1, -1}},
-        {2, 2, 4, 0, {  0, -1, -1}}, {2, 1, 4, 1, {  0,  0,  0}},
-        // Fe3 (z = 0)   -- 8 bonds
-        {3, 0, 1, 0, {  0,  0, -1}}, {3, 3, 1, 1, { -1,  0,  0}},
-        {3, 1, 2, 0, { -1,  0,  0}}, {3, 2, 2, 1, {  0,  0, -1}},
-        {3, 2, 3, 0, { -1,  0, -1}}, {3, 1, 3, 1, {  0,  0,  0}},
-        {3, 3, 4, 0, { -1,  1,  0}}, {3, 0, 4, 1, {  0, -1, -1}}
+struct FeTmBondPair {
+    int orbit;                 // 1..4 (selects W_orbit scale)
+    FeTmBond even;             // E/S1/S2/S1S2 coset representative
+    FeTmBond odd;              // inversion-related partner in I/S1I/S2I/S1S2I coset
+};
+
+const std::array<FeTmBondPair, 16>& fe_tm_w_bond_pairs() {
+    static const std::array<FeTmBondPair, 16> kPairs = {{
+        // Fe0 (z = 1/2)
+        {1, {0, 3, { -1,  0,  0}}, {0, 0, {  0,  0,  0}}},
+        {2, {0, 2, {  0,  0,  0}}, {0, 1, { -1,  0,  0}}},
+        {3, {0, 1, {  0,  0,  0}}, {0, 2, { -1,  0,  0}}},
+        {4, {0, 0, {  0, -1,  0}}, {0, 3, { -1,  1,  0}}},
+        // Fe1 (z = 1/2)
+        {1, {1, 2, {  0,  0,  0}}, {1, 1, {  0, -1,  0}}},
+        {2, {1, 3, {  0,  0,  0}}, {1, 0, {  0, -1,  0}}},
+        {3, {1, 0, {  1, -1,  0}}, {1, 3, { -1,  0,  0}}},
+        {4, {1, 1, {  0,  0,  0}}, {1, 2, {  0, -1,  0}}},
+        // Fe2 (z = 0)
+        {1, {2, 1, {  0, -1,  0}}, {2, 2, {  0,  0, -1}}},
+        {2, {2, 0, {  0, -1, -1}}, {2, 3, {  0,  0,  0}}},
+        {3, {2, 3, { -1,  0,  0}}, {2, 0, {  1, -1, -1}}},
+        {4, {2, 2, {  0, -1, -1}}, {2, 1, {  0,  0,  0}}},
+        // Fe3 (z = 0)
+        {1, {3, 0, {  0,  0, -1}}, {3, 3, { -1,  0,  0}}},
+        {2, {3, 1, { -1,  0,  0}}, {3, 2, {  0,  0, -1}}},
+        {3, {3, 2, { -1,  0, -1}}, {3, 1, {  0,  0,  0}}},
+        {4, {3, 3, { -1,  1,  0}}, {3, 0, {  0, -1, -1}}}
     }};
-    return kBonds;
+    return kPairs;
 }
 
 void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& config) {
-    // ----- chi (linear Fe-Tm coupling) -----
-    const double chi2x = config.get_param("chi2x", 0.0);
-    const double chi2y = config.get_param("chi2y", 0.0);
-    const double chi2z = config.get_param("chi2z", 0.0);
-    const double chi5x = config.get_param("chi5x", 0.0);
-    const double chi5y = config.get_param("chi5y", 0.0);
-    const double chi5z = config.get_param("chi5z", 0.0);
-    const double chi7x = config.get_param("chi7x", 0.0);
-    const double chi7y = config.get_param("chi7y", 0.0);
-    const double chi7z = config.get_param("chi7z", 0.0);
-
-    // Orbit-dependent superexchange scale factors.  See the long comment in
-    // the legacy implementation (and the TmFeO3 notes section "Superexchange
-    // distance scaling") for the physical justification: each Fe has 8 nearest
-    // Tm neighbours partitioned into 4 crystallographic orbits with distinct
-    // distances, and the chi values for each orbit can be rescaled
-    // independently by chi_orbit{1..4}_scale.  Default = 1.0 reproduces the
-    // uniform-orbit ansatz.
-    const double chi_orbit_scale[4] = {
-        config.get_param("chi_orbit1_scale", 1.0),
-        config.get_param("chi_orbit2_scale", 1.0),
-        config.get_param("chi_orbit3_scale", 1.0),
-        config.get_param("chi_orbit4_scale", 1.0)
+    struct TrilinearChannel {
+        double xx, yy, zz, xy, xz, yz;
     };
 
-    const auto& bonds = fe_tm_chi_bonds();
+    // Legacy shorthand used in tracked TmFeO3 configs:
+    //   u_{1,3,8} -> W_{1,3,8}^{zz}=+u, W_{1,3,8}^{xx}=-u
+    //   v_{4,6}   -> W_{4,6}^{xz}=+v
+    const double u1 = config.get_param("u1", 0.0);
+    const double u3 = config.get_param("u3", 0.0);
+    const double u8 = config.get_param("u8", 0.0);
+    const double v4 = config.get_param("v4", 0.0);
+    const double v6 = config.get_param("v6", 0.0);
 
-    // Chi tensor (3 x 8): rows = (Sx, Sy, Sz), cols = lambda index 0..7.
-    // Inversion-paired bonds carry chi_inv, which flips lambda^5 / lambda^7
-    // (the A_2^- columns of the time-odd Tm operators).
-    auto make_chi = [&](double sign_57) {
-        Eigen::MatrixXd M = Eigen::MatrixXd::Zero(3, 8);
-        M(0, 1) = chi2x;            M(1, 1) = chi2y;            M(2, 1) = chi2z;
-        M(0, 4) = sign_57 * chi5x;  M(1, 4) = sign_57 * chi5y;  M(2, 4) = sign_57 * chi5z;
-        M(0, 6) = sign_57 * chi7x;  M(1, 6) = sign_57 * chi7y;  M(2, 6) = sign_57 * chi7z;
-        return M;
+    auto read_tri_ch = [&](const std::string& pfx,
+                           double zz_minus_xx = 0.0,
+                           double xz = 0.0) -> TrilinearChannel {
+        return {
+            config.get_param(pfx + "_xx", 0.0) - zz_minus_xx,
+            config.get_param(pfx + "_yy", 0.0),
+            config.get_param(pfx + "_zz", 0.0) + zz_minus_xx,
+            config.get_param(pfx + "_xy", 0.0),
+            config.get_param(pfx + "_xz", 0.0) + xz,
+            config.get_param(pfx + "_yz", 0.0)
+        };
     };
-    const Eigen::MatrixXd chi_E_base = make_chi(+1.0);
-    const Eigen::MatrixXd chi_I_base = make_chi(-1.0);
+    auto tri_ch_nonzero = [](const TrilinearChannel& channel) {
+        return channel.xx != 0.0 || channel.yy != 0.0 || channel.zz != 0.0
+            || channel.xy != 0.0 || channel.xz != 0.0 || channel.yz != 0.0;
+    };
 
-    const bool any_chi = chi2x || chi2y || chi2z
-                      || chi5x || chi5y || chi5z
-                      || chi7x || chi7y || chi7z;
-    if (any_chi) {
-        for (const auto& b : bonds) {
-            const Eigen::MatrixXd& base = (b.type == 0) ? chi_E_base : chi_I_base;
-            Eigen::MatrixXd M = chi_orbit_scale[b.orbit - 1] * base;
-            mixed_uc.set_mixed_bilinear(M, b.fe, b.tm, b.off);
+    const TrilinearChannel W1_ch = read_tri_ch("W1", u1, 0.0);
+    const TrilinearChannel W3_ch = read_tri_ch("W3", u3, 0.0);
+    const TrilinearChannel W4_ch = read_tri_ch("W4", 0.0, v4);
+    const TrilinearChannel W6_ch = read_tri_ch("W6", 0.0, v6);
+    const TrilinearChannel W8_ch = read_tri_ch("W8", u8, 0.0);
+
+    const double W_orbit_scale[4] = {
+        config.get_param("W_orbit1_scale", 1.0),
+        config.get_param("W_orbit2_scale", 1.0),
+        config.get_param("W_orbit3_scale", 1.0),
+        config.get_param("W_orbit4_scale", 1.0)
+    };
+
+    auto fill_channel = [](SpinTensor3& tensor, int lambda_index,
+                           const TrilinearChannel& channel, double sign) {
+        tensor[0](0, lambda_index) = sign * channel.xx;
+        tensor[1](1, lambda_index) = sign * channel.yy;
+        tensor[2](2, lambda_index) = sign * channel.zz;
+        tensor[0](1, lambda_index) = sign * channel.xy;
+        tensor[1](0, lambda_index) = sign * channel.xy;
+        tensor[0](2, lambda_index) = sign * channel.xz;
+        tensor[2](0, lambda_index) = sign * channel.xz;
+        tensor[1](2, lambda_index) = sign * channel.yz;
+        tensor[2](1, lambda_index) = sign * channel.yz;
+    };
+    auto scale_tensor3 = [](const SpinTensor3& tensor, double scale) {
+        SpinTensor3 out(tensor.size());
+        for (size_t i = 0; i < tensor.size(); ++i) {
+            out[i] = scale * tensor[i];
+        }
+        return out;
+    };
+
+    const auto& bond_pairs = fe_tm_w_bond_pairs();
+
+    // On-site Fe-Fe-Tm term:
+    //   H_W = sum_{(i,mu)} lambda_mu^(n) W_n^{ab} S_i^a S_i^b.
+    // Each odd bond is inserted only through its explicit inversion-related
+    // pair so the mirror-odd A2+ channels (lambda_4, lambda_6) are guaranteed
+    // to carry the opposite sign relative to the even bond.
+    const bool any_W = tri_ch_nonzero(W1_ch) || tri_ch_nonzero(W3_ch)
+                    || tri_ch_nonzero(W4_ch) || tri_ch_nonzero(W6_ch)
+                    || tri_ch_nonzero(W8_ch);
+    if (any_W) {
+        auto build_W = [&](double sign_A2) {
+            SpinTensor3 tensor(3);
+            for (auto& block : tensor) {
+                block = Eigen::MatrixXd::Zero(3, 8);
+            }
+            fill_channel(tensor, 0, W1_ch, 1.0);
+            fill_channel(tensor, 2, W3_ch, 1.0);
+            fill_channel(tensor, 7, W8_ch, 1.0);
+            fill_channel(tensor, 3, W4_ch, sign_A2);
+            fill_channel(tensor, 5, W6_ch, sign_A2);
+            return tensor;
+        };
+        const SpinTensor3 W_even_base = build_W(+1.0);
+        const SpinTensor3 W_odd_base = build_W(-1.0);
+        const Eigen::Vector3i zero = Eigen::Vector3i::Zero();
+        for (const auto& pair : bond_pairs) {
+            const double orbit_scale = W_orbit_scale[pair.orbit - 1];
+            mixed_uc.set_mixed_trilinear(
+                scale_tensor3(W_even_base, orbit_scale),
+                pair.even.fe, pair.even.fe, pair.even.tm, zero, pair.even.off);
+            mixed_uc.set_mixed_trilinear(
+                scale_tensor3(W_odd_base, orbit_scale),
+                pair.odd.fe, pair.odd.fe, pair.odd.tm, zero, pair.odd.off);
         }
     }
 

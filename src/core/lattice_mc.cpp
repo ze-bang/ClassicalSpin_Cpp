@@ -27,55 +27,52 @@
 #endif
 
 // ---- Lattice::metropolis_twist_sweep ----
+//
+// SOTA Metropolis update of the twist angles θ_d (one Gaussian-shape
+// proposal per dim with Ld > 1). Step size is adapted on-line per
+// dimension to track ~50% acceptance — Roberts & Rosenthal optimal
+// scaling for a 1-D random-walk Metropolis chain. The legacy
+// "10% global random θ ∈ [0,2π]" branch is removed: at low T it has
+// near-zero acceptance and only adds noise to acceptance statistics.
+//
+// Boundary energy is O(L^{d-1}) per twist proposal — cheap.
     size_t Lattice::metropolis_twist_sweep(double T) {
         if (T <= 0) return 0;
         if (spin_dim != 3) return 0;  // Only defined for 3D spins
-        
+
         size_t accepted = 0;
-        
-        // Probability of attempting a global (random) move vs incremental
-        const double global_move_prob = 0.1;
-        
-        // For each dimension that has length > 1, attempt one rotation update
+
         for (size_t d = 0; d < 3; ++d) {
             size_t Ld = (d == 0) ? dim1 : (d == 1) ? dim2 : dim3;
             if (Ld <= 1) continue;
-            
+
             // Energy on boundary sites before the move
             double E_before = 0.0;
             for (size_t idx : boundary_sites_per_dim[d]) {
                 E_before += site_energy(spins[idx], idx);
             }
-            
-            double angle_new;
-            bool is_global_move = (random_double_lehman(0, 1) < global_move_prob);
-            
-            if (is_global_move) {
-                // Global move: propose completely random angle
-                angle_new = random_double_lehman(0, 2 * M_PI);
-            } else {
-                // Incremental move: small perturbation to current angle
-                // Step size scales with temperature (larger at high T)
-                double max_step = std::min(0.3, std::max(0.02, T * 0.5));
-                double delta = random_double_lehman(-max_step, max_step);
-                angle_new = twist_angles[d] + delta;
-            }
-            
-            // Generate rotation matrix around z-axis
+
+            // Gaussian proposal width (≈ 2× std-dev of uniform on [-w,w]).
+            // Clamp to [1e-4, π] to avoid pathological extremes.
+            double w = std::min(M_PI, std::max(1e-4, twist_step[d]));
+            double delta = random_double_lehman(-w, w);
+            double angle_new = twist_angles[d] + delta;
+
+            // Generate rotation matrix around the dimension's twist axis
             SpinMatrix R_new = rotation_from_axis_angle(rotation_axis[d], angle_new);
-            
+
             // Save old state and apply proposed move
             SpinMatrix saved_R = twist_matrices[d];
             double saved_angle = twist_angles[d];
             twist_matrices[d] = R_new;
             twist_angles[d] = angle_new;
-            
+
             // Energy after the move
             double E_after = 0.0;
             for (size_t idx : boundary_sites_per_dim[d]) {
                 E_after += site_energy(spins[idx], idx);
             }
-            
+
             double dE = E_after - E_before;
             bool accept = (dE < 0) || (random_double_lehman(0, 1) < std::exp(-dE / T));
             if (!accept) {
@@ -83,10 +80,117 @@
                 twist_angles[d] = saved_angle;
             } else {
                 accepted++;
+                ++twist_n_accept[d];
+            }
+            ++twist_n_attempt[d];
+
+            // On-line step adaption: target acceptance 0.5.
+            // Scale by exp(±0.05) per window — gentle enough to remain
+            // ergodic while converging in ~few hundred attempts.
+            if (twist_n_attempt[d] >= twist_step_adapt_window) {
+                double rate = double(twist_n_accept[d]) / double(twist_n_attempt[d]);
+                if (rate > 0.6) {
+                    twist_step[d] *= 1.2;
+                } else if (rate < 0.4) {
+                    twist_step[d] *= 0.8;
+                }
+                twist_step[d] = std::min(M_PI, std::max(1e-4, twist_step[d]));
+                twist_n_attempt[d] = 0;
+                twist_n_accept[d] = 0;
             }
         }
-        
+
         return accepted;
+    }
+
+// ---- Lattice::relax_twist_angles ----
+//
+// Deterministic T=0 relaxation: golden-section 1-D line minimization
+// of the boundary-bond energy as a function of θ_d, performed
+// independently for each dimension. Repeats `n_passes` times over
+// the dimensions to capture coupling between θ_1 and θ_2 (rare but
+// possible for non-coplanar orders).
+//
+// This is the *correct* zero-temperature update for incommensurate
+// orders: dE/dθ is smooth, single-minimum within a 2π period (modulo
+// trivial degeneracies broken by the locked spin config), and
+// converges in ~50 boundary-energy evaluations to machine precision.
+    void Lattice::relax_twist_angles(size_t n_passes, double tol) {
+        if (spin_dim != 3) return;
+
+        const double phi = 0.5 * (std::sqrt(5.0) - 1.0); // 1/golden ratio ≈ 0.618
+
+        auto boundary_energy_at = [&](size_t d, double theta) -> double {
+            SpinMatrix saved_R = twist_matrices[d];
+            double saved_angle = twist_angles[d];
+            twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], theta);
+            twist_angles[d] = theta;
+            double E = 0.0;
+            for (size_t idx : boundary_sites_per_dim[d]) {
+                E += site_energy(spins[idx], idx);
+            }
+            twist_matrices[d] = saved_R;
+            twist_angles[d] = saved_angle;
+            return E;
+        };
+
+        for (size_t pass = 0; pass < n_passes; ++pass) {
+            for (size_t d = 0; d < 3; ++d) {
+                size_t Ld = (d == 0) ? dim1 : (d == 1) ? dim2 : dim3;
+                if (Ld <= 1) continue;
+                if (boundary_sites_per_dim[d].empty()) continue;
+
+                // ---- Bracket: scan in coarse θ around current value ----
+                // The boundary-energy landscape can have multiple minima
+                // (e.g. two competing Q's); a coarse scan over [θ-π, θ+π]
+                // selects the global one before refining.
+                const size_t n_scan = 24;
+                double theta0 = twist_angles[d];
+                double best_theta = theta0;
+                double best_E = boundary_energy_at(d, theta0);
+                for (size_t s = 0; s < n_scan; ++s) {
+                    double theta = theta0 - M_PI + 2.0 * M_PI * (double(s) + 0.5) / double(n_scan);
+                    double E = boundary_energy_at(d, theta);
+                    if (E < best_E) {
+                        best_E = E;
+                        best_theta = theta;
+                    }
+                }
+
+                // ---- Golden-section refinement around best_theta ----
+                double a = best_theta - M_PI / double(n_scan);
+                double b = best_theta + M_PI / double(n_scan);
+                double c = b - phi * (b - a);
+                double d_pt = a + phi * (b - a);
+                double fc = boundary_energy_at(d, c);
+                double fd = boundary_energy_at(d, d_pt);
+
+                size_t max_it = 100;
+                for (size_t it = 0; it < max_it; ++it) {
+                    if (std::abs(b - a) < tol) break;
+                    if (fc < fd) {
+                        b = d_pt;
+                        d_pt = c;
+                        fd = fc;
+                        c = b - phi * (b - a);
+                        fc = boundary_energy_at(d, c);
+                    } else {
+                        a = c;
+                        c = d_pt;
+                        fc = fd;
+                        d_pt = a + phi * (b - a);
+                        fd = boundary_energy_at(d, d_pt);
+                    }
+                }
+
+                double theta_opt = 0.5 * (a + b);
+                // Wrap to [-π, π) for cleaner output.
+                while (theta_opt >  M_PI) theta_opt -= 2.0 * M_PI;
+                while (theta_opt < -M_PI) theta_opt += 2.0 * M_PI;
+                twist_matrices[d] = rotation_from_axis_angle(rotation_axis[d], theta_opt);
+                twist_angles[d] = theta_opt;
+            }
+        }
     }
 
 // ---- Lattice::simulated_annealing ----
@@ -173,14 +277,33 @@
         // T=0 deterministic sweeps if requested
         if (T_zero && n_deterministics > 0) {
             cout << "\nPerforming " << n_deterministics << " deterministic sweeps at T=0..." << endl;
+            // SOTA: at T=0 the boundary-bond energy is a smooth 1-D
+            // function of θ_d, so we replace the (frozen) Metropolis
+            // twist update with a golden-section line minimization.
+            // Interleave it with the spin quench every twist_relax_every
+            // sweeps so spins and twist co-relax to the true minimum.
+            const size_t twist_relax_every = boundary_update
+                ? std::max<size_t>(1, n_deterministics / 50)
+                : 0;
             for (size_t sweep = 0; sweep < n_deterministics; ++sweep) {
                 deterministic_sweep(1);
-                
+
+                if (twist_relax_every > 0 && (sweep % twist_relax_every == 0)) {
+                    relax_twist_angles(/*n_passes=*/2);
+                }
+
                 if (sweep % 100 == 0 || sweep == n_deterministics - 1) {
                     double E = energy_density();
                     cout << "Deterministic sweep " << sweep << "/" << n_deterministics 
                          << ", E/N=" << E << endl;
                 }
+            }
+            // One last high-accuracy twist refinement.
+            if (boundary_update) {
+                relax_twist_angles(/*n_passes=*/4, /*tol=*/1e-12);
+                cout << "Final twist angles (rad): θ = ("
+                     << twist_angles[0] << ", " << twist_angles[1] << ", " << twist_angles[2]
+                     << ")" << endl;
             }
             cout << "Deterministic sweeps completed. Final energy: " << energy_density() << endl;
             // Save final configuration
@@ -383,6 +506,15 @@
     }
 
 // ---- Lattice::perform_mc_sweeps ----
+//
+// SOTA twist-BC interleaving: when boundary_update is on, attempt one
+// twist proposal per dimension every (n_sweeps / twist_sweep_count)
+// MC sweeps, distributed throughout the loop instead of batched at
+// the end. This is essential for incommensurate orders, where the
+// spins must equilibrate at the *current* twist θ between updates;
+// batching all twist proposals after spin equilibration locks the
+// chain into the nearest-grid-Q configuration and rejects every
+// twist proposal.
     double Lattice::perform_mc_sweeps(size_t n_sweeps, double T, bool gaussian_move, 
                             double& sigma, size_t overrelaxation_rate,
                             bool boundary_update,
@@ -391,8 +523,16 @@
         double acc_sum = 0.0;
         size_t total_twist_accepted = 0;
         size_t total_twist_attempted = 0;
-        
-        // Perform MC sweeps
+
+        // How often to attempt a twist update during this sweep batch.
+        // twist_sweep_count is interpreted as the *target number of twist
+        // proposals across n_sweeps*; interval is the spacing between them.
+        size_t twist_interval = 0;
+        if (boundary_update && twist_sweep_count > 0) {
+            twist_interval = std::max<size_t>(1, n_sweeps / twist_sweep_count);
+        }
+
+        // Perform MC sweeps with interleaved twist updates
         for (size_t i = 0; i < n_sweeps; ++i) {
             if (overrelaxation_rate > 0) {
                 overrelaxation();
@@ -402,31 +542,37 @@
             } else {
                 acc_sum += metropolis(T, gaussian_move, sigma);
             }
-        }
-        
-        // Perform twist boundary updates after MC sweeps are complete
-        if (boundary_update) {
-            for (size_t j = 0; j < twist_sweep_count; ++j) {
+
+            if (twist_interval > 0 && (i % twist_interval == 0)) {
                 size_t accepted = metropolis_twist_sweep(T);
                 total_twist_accepted += accepted;
-                // Count number of dimensions with Ld > 1 as attempts
                 size_t n_dims = ((dim1 > 1) ? 1 : 0) + ((dim2 > 1) ? 1 : 0) + ((dim3 > 1) ? 1 : 0);
                 total_twist_attempted += n_dims;
             }
-            
-            // Report twist boundary diagnostics
-            if (total_twist_attempted > 0) {
-                double twist_acc_rate = double(total_twist_accepted) / double(total_twist_attempted);
-                cout << "  [Twist BC: " << total_twist_accepted << "/" << total_twist_attempted 
-                     << " accepted (" << std::fixed << std::setprecision(3) << twist_acc_rate * 100.0 
-                     << "%)]" << endl;
-            }
         }
-        
+
+        // Diagnostics
+        if (boundary_update && total_twist_attempted > 0) {
+            double twist_acc_rate = double(total_twist_accepted) / double(total_twist_attempted);
+            cout << "  [Twist BC: " << total_twist_accepted << "/" << total_twist_attempted 
+                 << " accepted (" << std::fixed << std::setprecision(3) << twist_acc_rate * 100.0 
+                 << "%), θ = (";
+            for (size_t d = 0; d < 3; ++d) {
+                cout << std::setprecision(4) << twist_angles[d];
+                if (d < 2) cout << ", ";
+            }
+            cout << ") rad, step = (";
+            for (size_t d = 0; d < 3; ++d) {
+                cout << std::setprecision(3) << twist_step[d];
+                if (d < 2) cout << ", ";
+            }
+            cout << ")]" << endl;
+        }
+
         if (twist_acc_ptr) {
             *twist_acc_ptr = total_twist_accepted;
         }
-        
+
         return acc_sum;
     }
 

@@ -328,6 +328,15 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "initial_spin_config") {
                 config.initial_spin_config = value;
             }
+            else if (key == "pinning_field_config") {
+                config.pinning_field_config = value;
+            }
+            else if (key == "nn_exchange_disorder_config") {
+                config.nn_exchange_disorder_config = value;
+            }
+            else if (key == "nn_exchange_channel_disorder_config") {
+                config.nn_exchange_channel_disorder_config = value;
+            }
             else if (key == "use_ferromagnetic_init") {
                 config.use_ferromagnetic_init = parse_bool(value);
             }

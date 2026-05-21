@@ -103,6 +103,14 @@ int main(int argc, char** argv) {
             
             // Set parameters (this builds the interaction matrices)
             phonon_lattice.set_parameters(sp_params, ph_params, dr_params);
+            if (!config.nn_exchange_disorder_config.empty()) {
+                phonon_lattice.apply_nn_exchange_disorder_from_file(
+                    config.nn_exchange_disorder_config);
+            }
+            if (!config.nn_exchange_channel_disorder_config.empty()) {
+                phonon_lattice.apply_nn_exchange_channel_disorder_from_file(
+                    config.nn_exchange_channel_disorder_config);
+            }
             
             // Set time-dependent spin-phonon coupling parameters
             phonon_lattice.set_time_dependent_spin_phonon(td_sp_params);
@@ -116,6 +124,9 @@ int main(int argc, char** argv) {
                  config.field_strength * config.field_direction[1],
                  config.field_strength * config.field_direction[2];
             phonon_lattice.set_field(B);
+            if (!config.pinning_field_config.empty()) {
+                phonon_lattice.add_pinning_fields_from_file(config.pinning_field_config);
+            }
             
             // Initialize spins
             if (config.use_ferromagnetic_init) {
@@ -129,7 +140,28 @@ int main(int argc, char** argv) {
             } else {
                 phonon_lattice.init_random();
             }
-            
+
+            // Optional: prescribe a non-zero initial E1 phonon displacement.
+            // Useful for probing the curvature of the BO surface at ε=0
+            // (cooperative pseudo-Jahn-Teller test).
+            const double init_eps_x = config.get_param("initial_eps_x", 0.0);
+            const double init_eps_y = config.get_param("initial_eps_y", 0.0);
+            const double init_v_x   = config.get_param("initial_v_x",   0.0);
+            const double init_v_y   = config.get_param("initial_v_y",   0.0);
+            if (init_eps_x != 0.0 || init_eps_y != 0.0 ||
+                init_v_x   != 0.0 || init_v_y   != 0.0) {
+                phonon_lattice.phonons.Q_x_E1 = init_eps_x;
+                phonon_lattice.phonons.Q_y_E1 = init_eps_y;
+                phonon_lattice.phonons.V_x_E1 = init_v_x;
+                phonon_lattice.phonons.V_y_E1 = init_v_y;
+                if (rank == 0) {
+                    cout << "  Prescribed initial phonon: ε=("
+                         << init_eps_x << ", " << init_eps_y
+                         << "), V=(" << init_v_x << ", " << init_v_y << ")"
+                         << endl;
+                }
+            }
+
             // Run simulation
             switch (config.simulation) {
                 case SimulationType::SIMULATED_ANNEALING:
