@@ -319,6 +319,185 @@ z = np.array([[0, 0, 1], [0, 0, -1], [0, 0, -1], [0, 0, 1]])
 localframe = np.array([x, y, z])
 
 
+# =============================================================================
+# TmFeO3 Pbnm Bertaut / sublattice-frame helpers
+# =============================================================================
+# Pbnm Klein-four eta on the 4 Fe/Tm sublattices.  Same ordering as the C++
+# builder (`kEtaPbnm` in src/core/unitcell_builders.cpp).
+ETA_PBNM = np.array([[1, 1, 1],
+                     [1, -1, -1],
+                     [-1, 1, -1],
+                     [-1, -1, 1]], dtype=float)
+
+# Bertaut sign patterns sigma[sub] for the four irreducible dipole modes of
+# the 4-sublattice Pbnm cell (rows = sublattice 0..3, see tmfeo3_notes.tex
+# Sec.~"Local sublattice frames").
+BERTAUT_SIGNS = {
+    'F': np.array([1.0,  1.0,  1.0,  1.0]),   # uniform (qFM magnon)
+    'G': np.array([1.0, -1.0, -1.0,  1.0]),   # Neel (qAFM magnon)
+    'C': np.array([1.0, -1.0,  1.0, -1.0]),   # C-mode (this is also the
+                                              # default `M_antiferro_*` sign
+                                              # written by the C++ pipeline)
+    'A': np.array([1.0,  1.0, -1.0, -1.0]),   # A-mode
+}
+
+
+def tmfeo3_su3_sublattice_frames(
+        mu_2x: float = 0.0, mu_2y: float = 0.0, mu_2z: float = 5.264,
+        mu_5x: float = 2.3915, mu_5y: float = -2.7866, mu_5z: float = 0.0,
+        mu_7x: float = 0.9128, mu_7y: float = 0.4655, mu_7z: float = 0.0,
+        ) -> np.ndarray:
+    """Build the four 8x8 SU(3) sublattice frames F_mu in the "Option A"
+    pair-locked extension (matches `apply_tmfeo3_tm_sector` in
+    `src/core/unitcell_builders.cpp`).
+
+    F_mu acts as R_act = mu_act^{-1} D_mu mu_act on the (lambda_2, lambda_5,
+    lambda_7) dipole triplet (indices {1,4,6}) AND on the locked
+    (lambda_1, lambda_4, lambda_6) quadrupole partners (indices {0,3,5}),
+    where D_mu = diag(eta_pbnm[mu]).  Identity on (lambda_3, lambda_8)
+    (indices {2,7}).
+
+    Returns
+    -------
+    frames : np.ndarray, shape (4, 8, 8)
+        F_mu for the four Tm sublattices in C++ index order.
+    """
+    mu_act = np.array([[mu_2x, mu_5x, mu_7x],
+                       [mu_2y, mu_5y, mu_7y],
+                       [mu_2z, mu_5z, mu_7z]], dtype=float)
+    if abs(np.linalg.det(mu_act)) < 1e-12:
+        raise ValueError(
+            "mu_act is singular; cannot build pair-locked SU(3) frames. "
+            "Check (mu_2*, mu_5*, mu_7*) configuration.")
+    mu_inv = np.linalg.inv(mu_act)
+    active_im = [1, 4, 6]
+    active_re = [0, 3, 5]
+    frames = np.empty((4, 8, 8), dtype=float)
+    for sub in range(4):
+        D = np.diag(ETA_PBNM[sub])
+        R_act = mu_inv @ D @ mu_act
+        F = np.eye(8)
+        for a in range(3):
+            for b in range(3):
+                F[active_im[a], active_im[b]] = R_act[a, b]
+                F[active_re[a], active_re[b]] = R_act[a, b]
+        frames[sub] = F
+    return frames
+
+
+def tmfeo3_bertaut_lab(spins_traj: np.ndarray,
+                       frames: np.ndarray,
+                       bertaut_signs: Optional[np.ndarray] = None,
+                       n_sublattices: int = 4) -> np.ndarray:
+    """Compute a Bertaut-projected lab-frame trajectory from raw
+    sublattice-frame stored spins.
+
+    M^a(t) = (1/N) sum_i sigma[sub(i)] * F[sub(i)]^a_b * spins[t, i, b]
+
+    Works for both SU(2) (frames shape (4,3,3), spin_dim=3) and SU(3)
+    (frames shape (4,8,8), spin_dim=8).
+
+    Parameters
+    ----------
+    spins_traj : (n_t, n_sites, spin_dim)
+        Raw stored Bloch vectors, e.g. from `get_spins('SU2')` /
+        `get_spins('SU3')`.  Site index maps to sublattice as
+        ``sub = site % n_sublattices`` (matches C++ flatten_index).
+    frames : (4, spin_dim, spin_dim)
+        Per-sublattice frame matrix F_mu.  For Fe (SU(2)), pass the 3x3
+        diag(eta_pbnm[mu]).  For Tm (SU(3)), pass
+        `tmfeo3_su3_sublattice_frames(...)`.
+    bertaut_signs : (4,) or None
+        Bertaut sign pattern.  Use `BERTAUT_SIGNS['F']` for the F-mode
+        (matches C++ `M_global_*`) or `BERTAUT_SIGNS['G']` for the qAFM
+        Neel mode.  ``None`` defaults to F-mode.
+
+    Returns
+    -------
+    M : (n_t, spin_dim)
+        Bertaut-projected lab-frame Bloch trajectory.
+    """
+    if bertaut_signs is None:
+        bertaut_signs = BERTAUT_SIGNS['F']
+    bertaut_signs = np.asarray(bertaut_signs, dtype=float)
+    n_t, n_sites, spin_dim = spins_traj.shape
+    sub_idx = np.arange(n_sites) % n_sublattices
+    F_per_site = frames[sub_idx]                       # (n_sites, sd, sd)
+    sign_per_site = bertaut_signs[sub_idx]             # (n_sites,)
+    # apply F site-wise to spins
+    proj = np.einsum('iab,tib->tia', F_per_site, spins_traj, optimize=True)
+    # weighted average over sites
+    M = np.einsum('i,tia->ta', sign_per_site, proj, optimize=True) / n_sites
+    return M
+
+
+def tmfeo3_fe_sublattice_frames() -> np.ndarray:
+    """3x3 sublattice frames D_mu = diag(eta_pbnm[mu]) for Fe (SU(2)).
+    Returned shape (4, 3, 3).  Use with `tmfeo3_bertaut_lab` when working
+    from raw Fe spin trajectories stored in the legacy local-frame mode."""
+    frames = np.zeros((4, 3, 3), dtype=float)
+    for sub in range(4):
+        frames[sub] = np.diag(ETA_PBNM[sub])
+    return frames
+
+
+def tmfeo3_tm_dipole_lab(
+        spins_su3: np.ndarray,
+        bertaut_signs: Optional[np.ndarray] = None,
+        n_sublattices: int = 4,
+        mu_2x: float = 0.0, mu_2y: float = 0.0, mu_2z: float = 5.264,
+        mu_5x: float = 2.3915, mu_5y: float = -2.7866, mu_5z: float = 0.0,
+        mu_7x: float = 0.9128, mu_7y: float = 0.4655, mu_7z: float = 0.0,
+        ) -> np.ndarray:
+    """Compute the physical lab-frame Bertaut-projected Tm dipole moment
+    J^a(t) directly from raw SU(3) trajectories, bypassing the stored
+    `M_global_SU3` / `M_antiferro_SU3` arrays and the C++ sublattice-frame
+    convention.
+
+    For each site i with sublattice mu = i mod n_sublattices the lab dipole is
+    ``J_lab^a(i, t) = eta_pbnm[mu, a] * sum_b mu_act[a, b] * <lambda_b>(i, t)``
+    (b runs over the time-odd Gell-Mann triplet {lambda_2, lambda_5,
+    lambda_7}, i.e. spin-component indices {1, 4, 6}).  The output is the
+    Bertaut-projected per-site average
+
+        J^a(t) = (1/N) sum_i sigma[mu(i)] * J_lab^a(i, t).
+
+    Use ``bertaut_signs = BERTAUT_SIGNS['F']`` for the qFM net magnetization,
+    ``BERTAUT_SIGNS['G']`` for the qAFM Neel vector, etc.
+
+    Parameters
+    ----------
+    spins_su3 : (n_t, n_sites, 8)
+        Raw stored Tm Bloch vectors, e.g. from `get_spins('SU3')`.
+    bertaut_signs : (4,) or None
+        Bertaut sign pattern.  Defaults to F-mode (uniform).
+
+    Returns
+    -------
+    J : (n_t, 3)
+        Lab-Cartesian (x, y, z) Bertaut-projected Tm dipole moment.
+    """
+    if bertaut_signs is None:
+        bertaut_signs = BERTAUT_SIGNS['F']
+    bertaut_signs = np.asarray(bertaut_signs, dtype=float)
+    mu_act = np.array([[mu_2x, mu_5x, mu_7x],
+                       [mu_2y, mu_5y, mu_7y],
+                       [mu_2z, mu_5z, mu_7z]], dtype=float)
+    active_im = [1, 4, 6]
+    n_t, n_sites, _ = spins_su3.shape
+    sub_idx = np.arange(n_sites) % n_sublattices
+    eta_per_site = ETA_PBNM[sub_idx]                  # (n_sites, 3)
+    sign_per_site = bertaut_signs[sub_idx]            # (n_sites,)
+    # canonical-frame dipole on each site: J_can^a = mu_act[a, b] * <lambda_b_active>
+    J_can = np.einsum('ab,tib->tia', mu_act,
+                      spins_su3[:, :, active_im], optimize=True)  # (n_t, n_sites, 3)
+    # transform to lab via eta (D_mu is diagonal so just elementwise sign)
+    J_lab = J_can * eta_per_site[None, :, :]          # (n_t, n_sites, 3)
+    # Bertaut-weighted per-site average
+    J = np.einsum('i,tia->ta', sign_per_site, J_lab, optimize=True) / n_sites
+    return J
+
+
 def Spin_t(k: np.ndarray, S: np.ndarray, P: np.ndarray) -> np.ndarray:
     """
     Compute time-dependent spin structure factor.

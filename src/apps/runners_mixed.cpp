@@ -832,6 +832,8 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         }
         field_dirs_su3[i] = pump_dir_su3;
     }
+
+    const bool save_spin_traj = (config.get_param("save_spin_trajectories", 0.0) > 0.5);
     
     if (use_tau_parallel) {
         // Single trial, parallelize over tau values
@@ -942,7 +944,6 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         }
         
         // Run MPI-parallelized version
-        const bool save_spin_traj = (config.get_param("save_spin_trajectories", 0.0) > 0.5);
         lattice.pump_probe_spectroscopy_mpi(
             field_dirs_su2,
             field_dirs_su3,
@@ -1078,6 +1079,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 trial_dir,
                 config.md_integrator,
                 config.use_gpu,
+                save_spin_traj,
                 // Ingredient XV (W1/W2/W3):
                 config.reuse_m0_for_m1,
                 config.stationarity_tol,

@@ -1094,6 +1094,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                  bool T_zero_quench, size_t quench_sweeps,
                                  string dir_name,
                                  string method, bool use_gpu,
+                                 bool save_spin_trajectories,
                                  bool reuse_m0_for_m1,
                                  double stationarity_tol,
                                  int outer_omp_threads,
@@ -1115,6 +1116,9 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
              << ", tol=" << stationarity_tol << "), "
              << "W2(outer_omp_threads=" << outer_omp_threads << "), "
              << "W3(pulse_window_chunking=" << (pulse_window_chunking ? "on" : "off") << ")" << endl;
+        if (save_spin_trajectories) {
+            cout << "Raw spin-state saving: ENABLED" << endl;
+        }
         
         // Use current spin configuration as ground state (assumed pre-loaded)
         cout << "\n[1/3] Using current configuration as ground state..." << endl;
@@ -1137,15 +1141,27 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         // Backup ground state
         SpinConfigSU2 ground_state_SU2 = spins_SU2;
         SpinConfigSU3 ground_state_SU3 = spins_SU3;
+        const size_t state_dim = lattice_size_SU2 * spin_dim_SU2 + lattice_size_SU3 * spin_dim_SU3;
         
         // Step 2: Reference single-pulse dynamics (pump at t=0)
         cout << "\n[2/3] Running reference single-pulse dynamics (M0)..." << endl;
         if (use_gpu) cout << "  Using GPU acceleration" << endl;
+        vector<double> M0_spin_flat;
+        vector<vector<double>> M0_spin_states;
         auto M0_trajectory = single_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
                                    pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                    pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                   T_start, T_end, T_step, method, use_gpu, nullptr,
+                                   T_start, T_end, T_step, method, use_gpu,
+                                   save_spin_trajectories ? &M0_spin_states : nullptr,
                                    pulse_window_chunking, abs_tol, rel_tol);
+        if (save_spin_trajectories && !M0_spin_states.empty()) {
+            const size_t n_t = M0_spin_states.size();
+            M0_spin_flat.resize(n_t * state_dim);
+            for (size_t t = 0; t < n_t; ++t) {
+                std::copy(M0_spin_states[t].begin(), M0_spin_states[t].end(),
+                          M0_spin_flat.data() + t * state_dim);
+            }
+        }
 
         // ----- W1: capture ground-state magnetisation triples and decide
         //       whether it is safe to synthesise M1(τ) from M0 by time
@@ -1204,6 +1220,10 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         } else if (reuse_m0_for_m1 && use_gpu) {
             cout << "  [W1] Skipping (GPU path: stationarity check is host-only)." << endl;
         }
+        if (can_reuse_m0 && save_spin_trajectories) {
+            cout << "  [W1] Disabled because save_spin_trajectories=true." << endl;
+            can_reuse_m0 = false;
+        }
 
         // Step 3: Delay time scan
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
@@ -1228,12 +1248,14 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             E_ground, M_ground_SU2, M_ground_SU3,
             Temp_start, Temp_end, n_anneal,
             T_zero_quench, quench_sweeps,
+            save_spin_trajectories,
             &field_in_SU2, &field_in_SU3,
             &site_positions_SU2, &site_positions_SU3
         );
         
         // Write reference trajectory
-        writer.write_reference_trajectory(M0_trajectory);
+        writer.write_reference_trajectory(M0_trajectory,
+                                          save_spin_trajectories ? &M0_spin_flat : nullptr);
 #endif
 
         // ----- W2: outer OpenMP parallelism over τ -----
@@ -1261,6 +1283,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                 cout << "\n--- Delay " << (i+1) << "/" << tau_steps << ": tau = " << current_tau << " ---" << endl;
 
                 TrajectoryType M1_traj;
+                vector<double> M1_spin_flat;
                 if (can_reuse_m0) {
                     M1_traj = synthesize_M1_from_M0(M0_trajectory, M_ground_pair, current_tau,
                                                     T_start, T_end, T_step);
@@ -1268,25 +1291,48 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     spins_SU2 = ground_state_SU2;
                     spins_SU3 = ground_state_SU3;
                     cout << "  Computing M1 (probe at tau)..." << endl;
+                    vector<vector<double>> M1_spin_states;
                     M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
                                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                        T_start, T_end, T_step, method, use_gpu, nullptr,
+                                        T_start, T_end, T_step, method, use_gpu,
+                                        save_spin_trajectories ? &M1_spin_states : nullptr,
                                         pulse_window_chunking, abs_tol, rel_tol);
+                    if (save_spin_trajectories && !M1_spin_states.empty()) {
+                        const size_t n_t = M1_spin_states.size();
+                        M1_spin_flat.resize(n_t * state_dim);
+                        for (size_t t = 0; t < n_t; ++t) {
+                            std::copy(M1_spin_states[t].begin(), M1_spin_states[t].end(),
+                                      M1_spin_flat.data() + t * state_dim);
+                        }
+                    }
                 }
 
                 spins_SU2 = ground_state_SU2;
                 spins_SU3 = ground_state_SU3;
                 cout << "  Computing M01 (pump + probe)..." << endl;
+                vector<vector<double>> M01_spin_states;
                 auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
                                          field_in_SU2, field_in_SU3, current_tau,
                                          pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                          pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                                         T_start, T_end, T_step, method, use_gpu, nullptr,
+                                         T_start, T_end, T_step, method, use_gpu,
+                                         save_spin_trajectories ? &M01_spin_states : nullptr,
                                          pulse_window_chunking, abs_tol, rel_tol);
+                vector<double> M01_spin_flat;
+                if (save_spin_trajectories && !M01_spin_states.empty()) {
+                    const size_t n_t = M01_spin_states.size();
+                    M01_spin_flat.resize(n_t * state_dim);
+                    for (size_t t = 0; t < n_t; ++t) {
+                        std::copy(M01_spin_states[t].begin(), M01_spin_states[t].end(),
+                                  M01_spin_flat.data() + t * state_dim);
+                    }
+                }
 
 #ifdef HDF5_ENABLED
-                writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj);
+                writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj,
+                                            save_spin_trajectories ? &M1_spin_flat : nullptr,
+                                            save_spin_trajectories ? &M01_spin_flat : nullptr);
 #endif
                 current_tau += tau_step;
             }
@@ -1304,34 +1350,58 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                 for (int i = 0; i < tau_steps; ++i) {
                     const double current_tau = tau_start + i * tau_step;
                     TrajectoryType M1_traj;
+                    vector<double> M1_spin_flat;
                     if (can_reuse_m0) {
                         M1_traj = synthesize_M1_from_M0(M0_trajectory, M_ground_pair, current_tau,
                                                         T_start, T_end, T_step);
                     } else {
                         local_lat.spins_SU2 = ground_state_SU2;
                         local_lat.spins_SU3 = ground_state_SU3;
+                        vector<vector<double>> M1_spin_states;
                         M1_traj = local_lat.single_pulse_drive(
                             field_in_SU2, field_in_SU3, current_tau,
                             pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                             pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                            T_start, T_end, T_step, method, /*use_gpu=*/false, nullptr,
+                            T_start, T_end, T_step, method, /*use_gpu=*/false,
+                            save_spin_trajectories ? &M1_spin_states : nullptr,
                             pulse_window_chunking, abs_tol, rel_tol);
+                        if (save_spin_trajectories && !M1_spin_states.empty()) {
+                            const size_t n_t = M1_spin_states.size();
+                            M1_spin_flat.resize(n_t * state_dim);
+                            for (size_t t = 0; t < n_t; ++t) {
+                                std::copy(M1_spin_states[t].begin(), M1_spin_states[t].end(),
+                                          M1_spin_flat.data() + t * state_dim);
+                            }
+                        }
                     }
 
                     local_lat.spins_SU2 = ground_state_SU2;
                     local_lat.spins_SU3 = ground_state_SU3;
+                    vector<vector<double>> M01_spin_states;
                     auto M01_traj = local_lat.double_pulse_drive(
                         field_in_SU2, field_in_SU3, 0.0,
                         field_in_SU2, field_in_SU3, current_tau,
                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
-                        T_start, T_end, T_step, method, /*use_gpu=*/false, nullptr,
+                        T_start, T_end, T_step, method, /*use_gpu=*/false,
+                        save_spin_trajectories ? &M01_spin_states : nullptr,
                         pulse_window_chunking, abs_tol, rel_tol);
+                    vector<double> M01_spin_flat;
+                    if (save_spin_trajectories && !M01_spin_states.empty()) {
+                        const size_t n_t = M01_spin_states.size();
+                        M01_spin_flat.resize(n_t * state_dim);
+                        for (size_t t = 0; t < n_t; ++t) {
+                            std::copy(M01_spin_states[t].begin(), M01_spin_states[t].end(),
+                                      M01_spin_flat.data() + t * state_dim);
+                        }
+                    }
 
 #ifdef HDF5_ENABLED
                     #pragma omp critical(mixed_pump_probe_hdf5_write)
                     {
-                        writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj);
+                        writer.write_tau_trajectory(i, current_tau, M1_traj, M01_traj,
+                                                    save_spin_trajectories ? &M1_spin_flat : nullptr,
+                                                    save_spin_trajectories ? &M01_spin_flat : nullptr);
                     }
 #else
                     (void) M1_traj;

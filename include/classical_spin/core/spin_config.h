@@ -259,6 +259,9 @@ struct SpinConfig {
     
     // Initial configuration
     string initial_spin_config = "";  // Empty means random
+    string pinning_field_config = ""; // Optional rows: site Bx By Bz
+    string nn_exchange_disorder_config = ""; // Optional rows: site partner scale
+    string nn_exchange_channel_disorder_config = ""; // Optional rows: site partner dJ dK dGamma dGammap
     bool use_ferromagnetic_init = false;
     vector<double> ferromagnetic_direction = {0, 0, 1};  // Ferromagnetic init direction (dimension inferred from lattice)
     
@@ -275,6 +278,10 @@ struct SpinConfig {
     double get_param(const string& key, double default_val = 0.0) const {
         auto it = hamiltonian_params.find(key);
         return (it != hamiltonian_params.end()) ? it->second : default_val;
+    }
+
+    bool has_param(const string& key) const {
+        return hamiltonian_params.find(key) != hamiltonian_params.end();
     }
     
     // Set Hamiltonian parameter

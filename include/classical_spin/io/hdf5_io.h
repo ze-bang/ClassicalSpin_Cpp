@@ -1027,6 +1027,7 @@ public:
                             const SpinVector& ground_mag_SU2, const SpinVector& ground_mag_SU3,
                             double Temp_start, double Temp_end, size_t n_anneal,
                             bool T_zero_quench, size_t quench_sweeps,
+                            bool save_spin_trajectories = false,
                             // Optional data
                             const std::vector<SpinVector>* pulse_field_SU2 = nullptr,
                             const std::vector<SpinVector>* pulse_field_SU3 = nullptr,
@@ -1052,6 +1053,7 @@ public:
                       tau_start, tau_end, tau_step,
                       ground_state_energy, ground_mag_SU2, ground_mag_SU3,
                       Temp_start, Temp_end, n_anneal, T_zero_quench, quench_sweeps,
+                      save_spin_trajectories,
                       pulse_field_SU2, pulse_field_SU3, positions_SU2, positions_SU3);
         
         // Compute and store tau values
@@ -1074,7 +1076,8 @@ public:
      */
     void write_reference_trajectory(
         const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
-                                                       std::array<SpinVector, 3>>>>& trajectory) {
+                                                       std::array<SpinVector, 3>>>>& trajectory,
+        const std::vector<double>* spin_state_flat = nullptr) {
         
         size_t n_times = trajectory.size();
         
@@ -1098,6 +1101,8 @@ public:
         write_mixed_magnetization(reference_group_, "M_antiferro_SU3", trajectory, n_times, spin_dim_SU3_, 0, false);
         write_mixed_magnetization(reference_group_, "M_local_SU3", trajectory, n_times, spin_dim_SU3_, 1, false);
         write_mixed_magnetization(reference_group_, "M_global_SU3", trajectory, n_times, spin_dim_SU3_, 2, false);
+
+        write_spin_state_dataset(reference_group_, "M0_spin_state", spin_state_flat, n_times);
     }
     
     /**
@@ -1107,7 +1112,9 @@ public:
                              const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
                                                                            std::array<SpinVector, 3>>>>& M1_trajectory,
                              const std::vector<std::pair<double, std::pair<std::array<SpinVector, 3>, 
-                                                                           std::array<SpinVector, 3>>>>& M01_trajectory) {
+                                                                           std::array<SpinVector, 3>>>>& M01_trajectory,
+                             const std::vector<double>* M1_spin_state_flat = nullptr,
+                             const std::vector<double>* M01_spin_state_flat = nullptr) {
         
         // Create group for this tau
         std::string tau_group_name = "/tau_scan/tau_" + std::to_string(tau_index);
@@ -1136,6 +1143,9 @@ public:
         write_mixed_magnetization(tau_group, "M01_antiferro_SU3", M01_trajectory, n_times, spin_dim_SU3_, 0, false);
         write_mixed_magnetization(tau_group, "M01_local_SU3", M01_trajectory, n_times, spin_dim_SU3_, 1, false);
         write_mixed_magnetization(tau_group, "M01_global_SU3", M01_trajectory, n_times, spin_dim_SU3_, 2, false);
+
+        write_spin_state_dataset(tau_group, "M1_spin_state", M1_spin_state_flat, n_times);
+        write_spin_state_dataset(tau_group, "M01_spin_state", M01_spin_state_flat, n_times);
     }
     
     void close() {
@@ -1165,6 +1175,7 @@ private:
                        const SpinVector& ground_mag_SU2, const SpinVector& ground_mag_SU3,
                        double Temp_start, double Temp_end, size_t n_anneal,
                        bool T_zero_quench, size_t quench_sweeps,
+                       bool save_spin_trajectories,
                        const std::vector<SpinVector>* pulse_field_SU2,
                        const std::vector<SpinVector>* pulse_field_SU3,
                        const std::vector<Eigen::Vector3d>* positions_SU2,
@@ -1227,6 +1238,11 @@ private:
         write_double_attr(metadata_group_, "Temp_start", Temp_start);
         write_double_attr(metadata_group_, "Temp_end", Temp_end);
         write_scalar_attr(metadata_group_, "n_anneal", n_anneal);
+        write_scalar_attr(metadata_group_, "save_spin_trajectories", save_spin_trajectories ? 1u : 0u);
+        write_scalar_attr(metadata_group_, "state_dim_SU2", lattice_size_SU2 * spin_dim_SU2);
+        write_scalar_attr(metadata_group_, "state_dim_SU3", lattice_size_SU3 * spin_dim_SU3);
+        write_scalar_attr(metadata_group_, "state_dim_total",
+                          lattice_size_SU2 * spin_dim_SU2 + lattice_size_SU3 * spin_dim_SU3);
         write_string_attr(metadata_group_, "T_zero_quench", T_zero_quench ? "true" : "false");
         if (T_zero_quench) {
             write_scalar_attr(metadata_group_, "quench_sweeps", quench_sweeps);
@@ -1269,6 +1285,22 @@ private:
         H5::DataSpace dataspace(2, dims);
         H5::DataSet dataset = group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dataspace);
         dataset.write(mag_data.data(), H5::PredType::NATIVE_DOUBLE);
+    }
+
+    void write_spin_state_dataset(H5::Group& group, const std::string& name,
+                                  const std::vector<double>* flat_state, size_t n_times) {
+        if (flat_state == nullptr || flat_state->empty() || n_times == 0) return;
+        const size_t state_dim = flat_state->size() / n_times;
+        if (state_dim == 0 || state_dim * n_times != flat_state->size()) return;
+
+        hsize_t dims[2] = {n_times, state_dim};
+        hsize_t chunk[2] = {std::min((hsize_t)128, dims[0]), dims[1]};
+        H5::DSetCreatPropList plist;
+        plist.setChunk(2, chunk);
+        plist.setDeflate(4);
+        H5::DataSpace dataspace(2, dims);
+        H5::DataSet dataset = group.createDataSet(name, H5::PredType::NATIVE_DOUBLE, dataspace, plist);
+        dataset.write(flat_state->data(), H5::PredType::NATIVE_DOUBLE);
     }
     
     void write_vector_field(H5::Group& group, const std::string& name,

@@ -1,0 +1,90 @@
+# TmFeO3 minimal 2DCS smoke test
+# Exercises param parsing, mixed builder setup, 2DCS trajectory save path, and HDF5 output.
+
+system = tmfeo3
+simulation_mode = 2dcs
+
+lattice_size = 1,1,1
+num_trials = 1
+
+J1ab = 4.74
+J1c = 5.15
+J2ab = 0.15
+J2c = 0.30
+
+Ka = -0.026
+Kb = 0.0
+Kc = -0.029
+
+D1 = 0.048
+D2 = 0.0
+
+e1 = 0.97
+e2 = 3.97
+tm_alpha_scale = 1.0
+tm_beta_scale = 1.0
+
+chi2x = 0.6
+chi2y = 0.0
+chi2z = 0.0
+chi5x = 0.6
+chi5y = 0.0
+chi5z = 0.0
+chi7x = 0.6
+chi7y = 0.0
+chi7z = 0.0
+
+u1 = 0.0
+u3 = 0.0
+u8 = 0.0
+v4 = 0.0
+v6 = 0.0
+w1 = 0.0
+w3 = 0.0
+w8 = 0.0
+w4 = 0.0
+w6 = 0.0
+
+field_strength = 0.0
+field_direction = 0,1,0
+
+T_start = 10.0
+T_end = 0.01
+annealing_steps = 50
+overrelaxation_rate = 1
+use_twist_boundary = false
+gaussian_move = false
+T_zero = true
+
+spin_length = 2.5
+spin_length_su3 = 1.0
+
+initial_spin_config = example_configs/TmFeO3/tmfeo3_gamma2_1x1x1_seed
+
+pump_direction = 0,0,1
+pump_amplitude = 0.1
+pump_width = 0.2
+pump_frequency = 0.0
+
+pump_direction_su3 = 0,0,0,0,0,0,0,0
+pump_amplitude_su3 = 0.0
+pump_width_su3 = 0.2
+pump_frequency_su3 = 0.0
+auto_su3_pump = false
+
+save_spin_trajectories = 1.0
+parallel_tau = false
+reuse_m0_for_m1 = false
+
+tau_start = 0.0
+tau_end = 1.0
+tau_step = 1.0
+
+md_time_start = -1.0
+md_time_end = 2.0
+md_timestep = 0.1
+md_integrator = rk4
+use_gpu = false
+
+output_dir = workflow/tmfeo3_2dcs_smoke
+save_observables = false

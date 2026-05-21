@@ -2482,7 +2482,7 @@ public:
                         SpinVector spin_global = SpinVector::Zero(spin_dim_SU2);
                         for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                             for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                                spin_global(mu) += sublattice_frames_SU2[atom](nu, mu) * spins_SU2[site_idx](nu);
+                                spin_global(mu) += sublattice_frames_SU2[atom](mu, nu) * spins_SU2[site_idx](nu);
                             }
                         }
                         M_sub[atom] += spin_global;
@@ -2523,7 +2523,7 @@ public:
                         SpinVector spin_global = SpinVector::Zero(spin_dim_SU3);
                         for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                             for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                                spin_global(mu) += sublattice_frames_SU3[atom](nu, mu) * spins_SU3[site_idx](nu);
+                                spin_global(mu) += sublattice_frames_SU3[atom](mu, nu) * spins_SU3[site_idx](nu);
                             }
                         }
                         M_sub[atom] += spin_global;
@@ -4203,7 +4203,7 @@ public:
             size_t idx = i * spin_dim_SU2;
             for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                 for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                    M_global_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
+                    M_global_arr[mu] += sublattice_frames_SU2[atom](mu, nu) * x[idx + nu];
                 }
             }
         }
@@ -4221,7 +4221,7 @@ public:
             size_t idx = offset + i * spin_dim_SU3;
             for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                 for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                    M_global_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * x[idx + nu];
+                    M_global_arr[mu] += sublattice_frames_SU3[atom](mu, nu) * x[idx + nu];
                 }
             }
         }
@@ -4240,7 +4240,7 @@ public:
             size_t idx = i * spin_dim_SU2;
             for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                 for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                    M_stag_arr[mu] += sign * sublattice_frames_SU2[atom](nu, mu) * x[idx + nu];
+                    M_stag_arr[mu] += sign * sublattice_frames_SU2[atom](mu, nu) * x[idx + nu];
                 }
             }
         }
@@ -4824,6 +4824,7 @@ public:
                                  bool T_zero_quench = false, size_t quench_sweeps = 1000,
                                  string dir_name = "spectroscopy_mixed",
                                  string method = "dopri5", bool use_gpu = false,
+                                 bool save_spin_trajectories = false,
                                  bool reuse_m0_for_m1 = true,
                                  double stationarity_tol = 1e-6,
                                  int outer_omp_threads = 0,
@@ -5572,7 +5573,7 @@ private:
                 size_t atom = i % N_atoms_SU2;
                 for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * state_vec[i * spin_dim_SU2 + nu];
+                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](mu, nu) * state_vec[i * spin_dim_SU2 + nu];
                     }
                 }
             }
@@ -5594,7 +5595,7 @@ private:
                 size_t atom = i % N_atoms_SU3;
                 for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
+                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](mu, nu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
                     }
                 }
             }
@@ -5679,7 +5680,7 @@ private:
                 size_t atom = i % N_atoms_SU2;
                 for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * state_vec[i * spin_dim_SU2 + nu];
+                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](mu, nu) * state_vec[i * spin_dim_SU2 + nu];
                     }
                 }
             }
@@ -5701,7 +5702,7 @@ private:
                 size_t atom = i % N_atoms_SU3;
                 for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
+                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](mu, nu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
                     }
                 }
             }
@@ -6124,7 +6125,7 @@ private:
                 size_t atom = i % N_atoms_SU2;
                 for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * state_vec[i * spin_dim_SU2 + nu];
+                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](mu, nu) * state_vec[i * spin_dim_SU2 + nu];
                     }
                 }
             }
@@ -6132,7 +6133,7 @@ private:
                 size_t atom = i % N_atoms_SU3;
                 for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
+                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](mu, nu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
                     }
                 }
             }
@@ -6210,7 +6211,7 @@ private:
                 size_t atom = i % N_atoms_SU2;
                 for (size_t mu = 0; mu < spin_dim_SU2; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU2; ++nu) {
-                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](nu, mu) * state_vec[i * spin_dim_SU2 + nu];
+                        M_global_SU2_arr[mu] += sublattice_frames_SU2[atom](mu, nu) * state_vec[i * spin_dim_SU2 + nu];
                     }
                 }
             }
@@ -6218,7 +6219,7 @@ private:
                 size_t atom = i % N_atoms_SU3;
                 for (size_t mu = 0; mu < spin_dim_SU3; ++mu) {
                     for (size_t nu = 0; nu < spin_dim_SU3; ++nu) {
-                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](nu, mu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
+                        M_global_SU3_arr[mu] += sublattice_frames_SU3[atom](mu, nu) * state_vec[total_SU2 + i * spin_dim_SU3 + nu];
                     }
                 }
             }

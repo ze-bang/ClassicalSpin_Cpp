@@ -509,12 +509,30 @@ add_optimized_executable(test_pt_strain src/apps/test_pt_strain.cpp)
 # Regression tests for strain-phonon Hamiltonian consistency
 add_optimized_executable(test_strain_phonon_regressions src/apps/test_strain_phonon_regressions.cpp)
 
+# Symmetry + finite-difference regression tests for the NCTO E1
+# magnetoelastic Hamiltonian (PhononLattice). Verifies the form-factor
+# sum rule, the explicit channel expansion, the absence of any linear-in-ε
+# exchange-striction term, force/energy consistency on both the spin and
+# phonon sides, and one-bond C_3 invariance.
+add_optimized_executable(test_e1_phonon_regressions src/apps/test_e1_phonon_regressions.cpp)
+
 # Regression tests for mixed SU2-SU3 trilinear bookkeeping
 add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_trilinear_regressions.cpp)
 
-# Regression test for TmFeO3 use_global_frame=0 ↔ use_global_frame=1 equivalence
-# (canonical local-frame patch in unitcell_builders.cpp).
-add_optimized_executable(test_global_frame_equivalence src/apps/test_global_frame_equivalence.cpp)
+# Regression test that legacy TmFeO3 frame-selection flags are ignored by the
+# current mixed builder.
+add_optimized_executable(test_global_frame_equivalence src/apps/test_tmfeo3_legacy_frame_flags.cpp)
+
+# Companion regression test that the standalone Fe-only TmFeO3 builder also
+# ignores the retired frame-selection flags.
+add_optimized_executable(test_fe_global_frame_equivalence src/apps/test_tmfeo3_fe_legacy_frame_flags.cpp)
+
+# Standalone Gamma_2 diagnostic in the current canonical storage. Lifts the
+# legacy local-frame seed into the current Fe lab-frame storage before
+# polishing and prints Bertaut F/G/A/C in the lab frame for inspection.
+# NOT registered with CTest: SA is stochastic and small lattices have nearly
+# degenerate Gamma-domain twins.
+add_optimized_executable(diag_tmfeo3_gamma2_sa src/apps/diag_tmfeo3_gamma2_canonical.cpp)
 
 # Regression test for Ingredient XVIII: pulse-drive trajectories at
 # the new 1e-8 default must agree with the legacy 1e-10 reference to
@@ -547,8 +565,10 @@ add_optimized_executable(bench_integrators src/apps/bench_integrators.cpp)
 
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
+    add_test(NAME e1_phonon_regressions COMMAND test_e1_phonon_regressions)
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
     add_test(NAME global_frame_equivalence COMMAND test_global_frame_equivalence)
+    add_test(NAME fe_global_frame_equivalence COMMAND test_fe_global_frame_equivalence)
     add_test(NAME pulse_drive_tolerance COMMAND test_pulse_drive_tolerance)
     set_tests_properties(pulse_drive_tolerance PROPERTIES TIMEOUT 120)
     add_test(NAME pulse_chunking_alignment COMMAND test_pulse_chunking_alignment)
