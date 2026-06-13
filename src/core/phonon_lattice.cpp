@@ -30,6 +30,7 @@
 #include <memory>
 #include <filesystem>
 #include <random>
+#include <algorithm>
 #include <mpi.h>
 
 #ifdef _OPENMP
@@ -324,6 +325,7 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
         site_hexagons[i].clear();
     }
     hexagons.clear();
+    plaquette_j7_offsets.clear();
     
     // Build hexagonal plaquettes for ring exchange
     // On honeycomb, each hexagon consists of alternating A and B sites
@@ -356,6 +358,7 @@ void PhononLattice::set_parameters(const SpinPhononCouplingParams& sp_params,
                 }
             }
         }
+        plaquette_j7_offsets.assign(hexagons.size(), 0.0);
         cout << "  Built " << hexagons.size() << " hexagonal plaquettes for ring exchange" << endl;
     }
     
@@ -433,7 +436,51 @@ double PhononLattice::ring_exchange_energy() const {
     const double qx = phonons.Q_x_E1;
     const double qy = phonons.Q_y_E1;
     const double J7 = effective_J7(qx, qy);
-    return J7 * ring_exchange_normalized();
+    const bool has_disorder = std::any_of(
+        plaquette_j7_offsets.begin(), plaquette_j7_offsets.end(),
+        [](double v) { return std::abs(v) > 1e-14; });
+    if (!has_disorder) {
+        return J7 * ring_exchange_normalized();
+    }
+    if (hexagons.empty()) {
+        return 0.0;
+    }
+
+    double E = 0.0;
+    constexpr double prefactor = 1.0 / 6.0;
+    for (size_t hex_idx = 0; hex_idx < hexagons.size(); ++hex_idx) {
+        const auto& hex = hexagons[hex_idx];
+        const Eigen::Vector3d& S0 = spins[hex[0]];
+        const Eigen::Vector3d& S1 = spins[hex[1]];
+        const Eigen::Vector3d& S2 = spins[hex[2]];
+        const Eigen::Vector3d& S3 = spins[hex[3]];
+        const Eigen::Vector3d& S4 = spins[hex[4]];
+        const Eigen::Vector3d& S5 = spins[hex[5]];
+
+        double d01 = S0.dot(S1), d02 = S0.dot(S2), d03 = S0.dot(S3);
+        double d04 = S0.dot(S4), d05 = S0.dot(S5);
+        double d12 = S1.dot(S2), d13 = S1.dot(S3), d14 = S1.dot(S4), d15 = S1.dot(S5);
+        double d23 = S2.dot(S3), d24 = S2.dot(S4), d25 = S2.dot(S5);
+        double d34 = S3.dot(S4), d35 = S3.dot(S5);
+        double d45 = S4.dot(S5);
+
+        double term0 = 2.0*d01*d23*d45 - 6.0*d02*d13*d45 + 3.0*d03*d12*d45
+                     + 3.0*d02*d14*d35 - d03*d14*d25;
+        double term1 = 2.0*d12*d34*d05 - 6.0*d13*d24*d05 + 3.0*d14*d23*d05
+                     + 3.0*d13*d25*d04 - d14*d25*d03;
+        double term2 = 2.0*d23*d45*d01 - 6.0*d24*d35*d01 + 3.0*d25*d34*d01
+                     + 3.0*d24*d03*d15 - d25*d03*d14;
+        double term3 = 2.0*d34*d05*d12 - 6.0*d35*d04*d12 + 3.0*d03*d45*d12
+                     + 3.0*d35*d14*d02 - d03*d14*d25;
+        double term4 = 2.0*d45*d01*d23 - 6.0*d04*d15*d23 + 3.0*d14*d05*d23
+                     + 3.0*d04*d25*d13 - d14*d25*d03;
+        double term5 = 2.0*d05*d12*d34 - 6.0*d15*d02*d34 + 3.0*d25*d01*d34
+                     + 3.0*d15*d03*d24 - d25*d03*d14;
+
+        E += effective_J7_for_hexagon(hex_idx, qx, qy) * prefactor
+           * (term0 + term1 + term2 + term3 + term4 + term5);
+    }
+    return E;
 }
 
 double PhononLattice::ring_exchange_normalized() const {
@@ -607,11 +654,13 @@ double PhononLattice::site_energy_diff(const Eigen::Vector3d& new_spin,
     // Ring exchange contribution
     // For ring exchange, we compute the energy difference by calculating
     // the energy change for each hexagon containing this site
-    double J7 = effective_J7(qx, qy);
-    if (std::abs(J7) > 1e-12 && !site_hexagons[site].empty()) {
-        double prefactor = J7 / 6.0;
-        
+    if (!site_hexagons[site].empty()) {
         for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+            double J7 = effective_J7_for_hexagon(hex_idx, qx, qy);
+            if (std::abs(J7) < 1e-12) {
+                continue;
+            }
+            double prefactor = J7 / 6.0;
             const auto& hex = hexagons[hex_idx];
             
             // Temporarily modify spin for energy calculation
@@ -765,16 +814,17 @@ SpinVector PhononLattice::get_ring_exchange_field(size_t site, double qx, double
     // in one of the dot products. Using ∂(S_α·S_β)/∂S_α = S_β
     
     Eigen::Vector3d H = Eigen::Vector3d::Zero();
-    double J7 = effective_J7(qx, qy);
-    
-    if (std::abs(J7) < 1e-12 || site_hexagons[site].empty()) {
+    if (site_hexagons[site].empty()) {
         return H;
     }
     
-    double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
-    
     // Loop over all hexagons containing this site
     for (const auto& [hex_idx, pos] : site_hexagons[site]) {
+        double J7 = effective_J7_for_hexagon(hex_idx, qx, qy);
+        if (std::abs(J7) < 1e-12) {
+            continue;
+        }
+        double prefactor = -J7 / 6.0;  // Negative because H_eff = -∂H/∂S
         const auto& hex = hexagons[hex_idx];
         
         // Get all 6 spins
@@ -1863,7 +1913,8 @@ void PhononLattice::simulated_annealing(
     size_t overrelax_rate, double cooling_rate,
     string out_dir, bool save_observables,
     bool T_zero, size_t n_deterministics,
-    bool adiabatic_phonons, bool gaussian_move) 
+    bool adiabatic_phonons, bool gaussian_move,
+    bool preserve_initial_phonons) 
 {
     cout << "Starting PhononLattice simulated annealing..." << endl;
     cout << "T: " << T_start << " → " << T_end << ", sweeps per temp: " << n_steps << endl;
@@ -1873,8 +1924,11 @@ void PhononLattice::simulated_annealing(
         cout << "Adiabatic phonons DISABLED: phonons will be kept at Q=0 during MC" << endl;
     }
     
-    // Initialize phonons to zero (will be updated if adiabatic_phonons is true)
-    phonons = PhononState();
+    // Initialize phonons to zero unless the caller intentionally prescribed a
+    // frozen nonzero E1 coordinate for a fixed-epsilon basin diagnostic.
+    if (!preserve_initial_phonons) {
+        phonons = PhononState();
+    }
     
     if (!out_dir.empty()) {
         std::filesystem::create_directories(out_dir);

@@ -288,12 +288,19 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         } else {
             const double dt1 = t - t_pulse_SU3[0];
             const double dt2 = t - t_pulse_SU3[1];
-            factor1 = field_drive_amp_SU3 *
-                      std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU3), 2)) *
-                      std::cos(field_drive_freq_SU3 * dt1);
-            factor2 = field_drive_amp_SU3 *
-                      std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU3), 2)) *
-                      std::cos(field_drive_freq_SU3 * dt2);
+            const double env1 = std::exp(-std::pow(dt1 / (2.0 * field_drive_width_SU3), 2));
+            const double env2 = std::exp(-std::pow(dt2 / (2.0 * field_drive_width_SU3), 2));
+            // Two-color carrier when field_drive_freq_SU3_2 != 0: drives two CEF
+            // lines under one Gaussian so the f_257 Raman product (E13 x E23)
+            // lands on E12 = E13 - E23 resonantly.
+            double carrier1 = std::cos(field_drive_freq_SU3 * dt1);
+            double carrier2 = std::cos(field_drive_freq_SU3 * dt2);
+            if (field_drive_freq_SU3_2 != 0.0) {
+                carrier1 += std::cos(field_drive_freq_SU3_2 * dt1);
+                carrier2 += std::cos(field_drive_freq_SU3_2 * dt2);
+            }
+            factor1 = field_drive_amp_SU3 * env1 * carrier1;
+            factor2 = field_drive_amp_SU3 * env2 * carrier2;
         }
     }
 
@@ -432,6 +439,13 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             drive_envelopes_SU3(t, su3_f1, su3_f2);
         }
 
+        // Combined pulse-envelope scalars for the field-assisted Fe-Tm
+        // exchange (H_{E chi} uses the SU(3)/electric envelope, H_{B chi}
+        // uses the SU(2)/magnetic envelope).  Zero when the matching pulse is
+        // inactive, so the assisted-exchange branch is skipped entirely.
+        const double env_E = has_mixed_bilinear_drive ? (su3_f1 + su3_f2) : 0.0;
+        const double env_B = has_mixed_bilinear_drive ? (su2_f1 + su2_f2) : 0.0;
+
         const bool fast_su2 = (spin_dim_SU2 == 3);
         const bool fast_su3 = (spin_dim_SU3 == 8);
 
@@ -456,7 +470,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
 
                     double H[3];
                     get_local_field_SU2_flat_into(site, state, offset_SU3,
-                                                  su2_f1, su2_f2, H);
+                                                  su2_f1, su2_f2, H, env_E, env_B);
 
                     dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
                     dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
@@ -483,7 +497,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
 
                     double H[8];
                     get_local_field_SU3_flat_into(site, state, offset_SU3,
-                                                  su3_f1, su3_f2, H);
+                                                  su3_f1, su3_f2, H, env_E, env_B);
 
                     // SU(3) dynamics use sparse Gell-Mann f-symbols (only 9
                     // non-zero (a<b<c) triples instead of 8^3 = 512 entries).
@@ -509,7 +523,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     const size_t idx = site * 3;
                     double H[3];
                     get_local_field_SU2_flat_into(site, state, offset_SU3,
-                                                  su2_f1, su2_f2, H);
+                                                  su2_f1, su2_f2, H, env_E, env_B);
                     dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
                     dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
                     dsdt[idx + 2] = H[0] * state[idx + 1] - H[1] * state[idx + 0];
@@ -538,7 +552,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     const size_t idx = offset_SU3 + site * 8;
                     double H[8];
                     get_local_field_SU3_flat_into(site, state, offset_SU3,
-                                                  su3_f1, su3_f2, H);
+                                                  su3_f1, su3_f2, H, env_E, env_B);
                     cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
                     for (size_t i = 0; i < 8; ++i) {
                         if (damping_rates_SU3(i) != 0.0) {
@@ -582,7 +596,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
     void MixedLattice::get_local_field_SU2_flat_into(
         size_t site, const ODEState& state, size_t offset_SU3,
         double drive_factor1, double drive_factor2,
-        double* __restrict H) const {
+        double* __restrict H, double env_E, double env_B) const {
         const size_t d2 = spin_dim_SU2;
         const size_t d3 = spin_dim_SU3;
         const size_t idx = site * d2;
@@ -636,6 +650,31 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                 for (size_t n = 0; n < n_mb; ++n) {
                     const double* __restrict S = &state[offset_SU3 + mbp[n] * d3];
                     bilinear_kernel_dyn(Jbase + n * stride, S, H, d2, d3);
+                }
+            }
+        }
+
+        // ---- Field-assisted (pulse-modulated) mixed bilinear SU(2)-SU(3) ----
+        // H_{E chi} / H_{B chi}: contribution to dH/dS_Fe, scaled per bond by
+        // the matching pulse envelope (env_E for SU(3)/electric, env_B for
+        // SU(2)/magnetic).  See MixedBilinearDrive / tmfeo3_foundation.tex.
+        const auto& mbpd = mixed_bilinear_drive_partners_SU2[site];
+        const size_t n_mbd = mbpd.size();
+        if (n_mbd != 0 && (env_E != 0.0 || env_B != 0.0)) {
+            const double* __restrict Jbase = mixed_bilinear_drive_packed_SU2[site].data();
+            const auto& env_tag = mixed_bilinear_drive_envelope_SU2[site];
+            const size_t stride = d2 * d3;
+            for (size_t n = 0; n < n_mbd; ++n) {
+                const double env = (env_tag[n] == 0) ? env_E : env_B;
+                if (env == 0.0) continue;
+                const double* __restrict J = Jbase + n * stride;
+                const double* __restrict S = &state[offset_SU3 + mbpd[n] * d3];
+                for (size_t a = 0; a < d2; ++a) {
+                    double acc = 0.0;
+                    for (size_t c = 0; c < d3; ++c) {
+                        acc += J[a * d3 + c] * S[c];
+                    }
+                    H[a] += env * acc;
                 }
             }
         }
@@ -781,7 +820,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
     void MixedLattice::get_local_field_SU3_flat_into(
         size_t site, const ODEState& state, size_t offset_SU3,
         double drive_factor1, double drive_factor2,
-        double* __restrict H) const {
+        double* __restrict H, double env_E, double env_B) const {
         const size_t d2 = spin_dim_SU2;
         const size_t d3 = spin_dim_SU3;
         const size_t idx = offset_SU3 + site * d3;
@@ -834,6 +873,30 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                 for (size_t n = 0; n < n_mb; ++n) {
                     const double* __restrict S = &state[mbp[n] * d2];
                     bilinear_kernel_dyn(Jbase + n * stride, S, H, d3, d2);
+                }
+            }
+        }
+
+        // ---- Field-assisted (pulse-modulated) mixed bilinear SU(3)-SU(2) ----
+        // H_{E chi} / H_{B chi}: contribution to dH/d(lambda_Tm), scaled per
+        // bond by the matching pulse envelope (env_E electric, env_B magnetic).
+        const auto& mbpd = mixed_bilinear_drive_partners_SU3[site];
+        const size_t n_mbd = mbpd.size();
+        if (n_mbd != 0 && (env_E != 0.0 || env_B != 0.0)) {
+            const double* __restrict Jbase = mixed_bilinear_drive_packed_SU3[site].data();
+            const auto& env_tag = mixed_bilinear_drive_envelope_SU3[site];
+            const size_t stride = d3 * d2;
+            for (size_t n = 0; n < n_mbd; ++n) {
+                const double env = (env_tag[n] == 0) ? env_E : env_B;
+                if (env == 0.0) continue;
+                const double* __restrict J = Jbase + n * stride;
+                const double* __restrict S = &state[mbpd[n] * d2];
+                for (size_t a = 0; a < d3; ++a) {
+                    double acc = 0.0;
+                    for (size_t b = 0; b < d2; ++b) {
+                        acc += J[a * d2 + b] * S[b];
+                    }
+                    H[a] += env * acc;
                 }
             }
         }
@@ -1551,13 +1614,36 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                                      bool reuse_m0_for_m1,
                                      double stationarity_tol,
                                      bool pulse_window_chunking,
-                                     double abs_tol, double rel_tol) {
+                                     double abs_tol, double rel_tol,
+                                     const vector<SpinVector>& field_in_SU2_B,
+                                     const vector<SpinVector>& field_in_SU3_B) {
         
         int rank, mpi_size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
         
         std::filesystem::create_directories(dir_name);
+
+        // Distinct SU(2) direction for the 2nd pulse (probe @ tau). When the
+        // caller leaves field_in_SU2_B empty we fall back to field_in_SU2 so
+        // the legacy "same direction for both pulses" behaviour is preserved.
+        const bool distinct_pulse_dirs = !field_in_SU2_B.empty();
+        const vector<SpinVector>& field_in_SU2_probe =
+            distinct_pulse_dirs ? field_in_SU2_B : field_in_SU2;
+        // Distinct SU(3) direction for the 2nd pulse (probe @ tau). Same
+        // fallback logic. Allows e.g. an SU3 (E12) kick only at t=0 and a
+        // pure SU2 (qAFM) kick at tau, isolating omega_tau = qAFM.
+        const bool distinct_pulse_dirs_su3 = !field_in_SU3_B.empty();
+        const vector<SpinVector>& field_in_SU3_probe =
+            distinct_pulse_dirs_su3 ? field_in_SU3_B : field_in_SU3;
+        if (rank == 0 && distinct_pulse_dirs) {
+            cout << "  [2DCS] Distinct SU(2) pulse directions: pump @ t=0 uses field_in_SU2, "
+                 << "probe @ tau uses field_in_SU2_B (selects cross-polarization leg)." << endl;
+        }
+        if (rank == 0 && distinct_pulse_dirs_su3) {
+            cout << "  [2DCS] Distinct SU(3) pulse directions: pump @ t=0 uses field_in_SU3, "
+                 << "probe @ tau uses field_in_SU3_B." << endl;
+        }
         
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
         const bool scheduler_writer_only = (mpi_size > 1);
@@ -1701,7 +1787,10 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         // sizes for the M1 spin buffer (workers send 0 bytes,
         // rank 0 receives uninitialised memory and writes garbage
         // into HDF5). See Ingredient XVII in optimization_notes.tex.
-        if (rank == 0 && reuse_m0_for_m1 && save_spin_trajectories) {
+        if (rank == 0 && reuse_m0_for_m1 && (distinct_pulse_dirs || distinct_pulse_dirs_su3)) {
+            cout << "  [W1] Disabled because distinct SU(2)/SU(3) pulse directions are in use "
+                 << "(M1 probe @ tau is NOT a time-shift of the M0 pump)." << endl;
+        } else if (rank == 0 && reuse_m0_for_m1 && save_spin_trajectories) {
             cout << "  [W1] Disabled because save_spin_trajectories=true (synthesis"
                  << " produces magnetisation triples only, not per-site states)." << endl;
         } else if (rank == 0 && reuse_m0_for_m1 && !use_gpu) {
@@ -1831,7 +1920,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     M1_traj = synthesize_M1_from_M0(M0_trajectory, M_ground_pair, current_tau,
                                                     T_start, T_end, T_step);
                 } else {
-                    M1_traj = single_pulse_drive(field_in_SU2, field_in_SU3, current_tau,
+                    M1_traj = single_pulse_drive(field_in_SU2_probe, field_in_SU3_probe, current_tau,
                                         pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                         pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                         T_start, T_end, T_step, method, use_gpu,
@@ -1866,7 +1955,7 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             {
                 vector<vector<double>> M01_spin_states;
                 auto M01_traj = double_pulse_drive(field_in_SU2, field_in_SU3, 0.0,
-                                         field_in_SU2, field_in_SU3, current_tau,
+                                         field_in_SU2_probe, field_in_SU3_probe, current_tau,
                                          pulse_amp_SU2, pulse_width_SU2, pulse_freq_SU2,
                                          pulse_amp_SU3, pulse_width_SU3, pulse_freq_SU3,
                                          T_start, T_end, T_step, method, use_gpu,

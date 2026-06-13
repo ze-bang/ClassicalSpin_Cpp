@@ -4,6 +4,8 @@
 #include "unitcell.h"
 #include "simple_linear_alg.h"
 #include "classical_spin/core/spin_config.h"  // For should_rank_write
+#include "classical_spin/core/su3_coherent_state.h"  // SU(3) coherent-state utilities
+                                                     // (Zhang & Batista, PRB 104, 104409 (2021))
 #include "classical_spin/mc/mc_common.h"      // Common MC structs & templates
 #include "classical_spin/lattice/pulse_chunking.h"  // W3: pulse-window chunking helper
 #include <vector>
@@ -167,6 +169,20 @@ public:
     vector<vector<size_t>> mixed_bilinear_partners_SU2;              // SU(3) partner indices for SU(2)
     vector<vector<size_t>> mixed_bilinear_partners_SU3;              // SU(2) partner indices for SU(3)
 
+    // Pulse-envelope-modulated mixed SU(2)-SU(3) bilinears (field-assisted
+    // Fe-Tm exchange H_{E chi} and H_{B chi}).  Same storage shape as the
+    // static mixed bilinears, plus a per-entry `envelope` selector:
+    //   0 -> SU(3) pulse envelope (electric / THz field E(t))
+    //   1 -> SU(2) pulse envelope (magnetic field B(t))
+    // At each RHS evaluation the contribution is scaled by the matching pulse
+    // envelope scalar, so it vanishes outside the pulse window.
+    vector<vector<Eigen::MatrixXd>> mixed_bilinear_drive_interaction_SU2;
+    vector<vector<Eigen::MatrixXd>> mixed_bilinear_drive_interaction_SU3;
+    vector<vector<size_t>> mixed_bilinear_drive_partners_SU2;
+    vector<vector<size_t>> mixed_bilinear_drive_partners_SU3;
+    vector<vector<int>>    mixed_bilinear_drive_envelope_SU2;   // per-entry envelope tag
+    vector<vector<int>>    mixed_bilinear_drive_envelope_SU3;   // per-entry envelope tag
+    bool has_mixed_bilinear_drive = false;   // true if any field-assisted bond is set
     vector<vector<SpinTensor3>> mixed_trilinear_interaction_SU2;  // SU(2)-SU(2)-SU(3) trilinear (vector of matrices)
     vector<vector<SpinTensor3>> mixed_trilinear_interaction_SU3;  // SU(3)-SU(2)-SU(2) trilinear (vector of matrices)
     vector<vector<array<size_t, 2>>> mixed_trilinear_partners_SU2;             // (SU(2), SU(3)) partner pairs
@@ -195,6 +211,8 @@ public:
     vector<vector<double>> bilinear_packed_SU3;             // da=db=spin_dim_SU3
     vector<vector<double>> mixed_bilinear_packed_SU2;       // da=spin_dim_SU2, db=spin_dim_SU3
     vector<vector<double>> mixed_bilinear_packed_SU3;       // da=spin_dim_SU3, db=spin_dim_SU2
+    vector<vector<double>> mixed_bilinear_drive_packed_SU2; // field-assisted: da=spin_dim_SU2, db=spin_dim_SU3
+    vector<vector<double>> mixed_bilinear_drive_packed_SU3; // field-assisted: da=spin_dim_SU3, db=spin_dim_SU2
     vector<vector<double>> trilinear_packed_SU2;            // da=db=dc=spin_dim_SU2
     vector<vector<double>> trilinear_packed_SU3;            // da=db=dc=spin_dim_SU3
     vector<vector<double>> mixed_trilinear_packed_SU2;      // da=db=spin_dim_SU2, dc=spin_dim_SU3
@@ -250,6 +268,12 @@ public:
     double field_drive_amp_SU3;               // Pulse amplitude for SU(3)
     double field_drive_freq_SU3;              // Pulse frequency for SU(3)
     double field_drive_width_SU3;             // Pulse width (Gaussian) for SU(3)
+    // Optional SECOND SU(3) carrier color (two-color CEF drive).  When
+    // nonzero the SU(3) envelope carries cos(freq*dt) + cos(freq2*dt) under
+    // the same Gaussian, so one pulse drives two CEF lines (e.g. E13=1.20 and
+    // E23=0.70) resonantly.  This enables the f_257 Raman product to land on
+    // E12 = E13 - E23 = 0.50 THz.  0.0 disables (single-color, legacy behavior).
+    double field_drive_freq_SU3_2 = 0.0;
 
     // Tabulated (experimental) pulse — loaded by load_tabulated_pulse().
     // When non-empty, drive_envelopes_SU2/SU3 use linear interpolation instead
@@ -357,6 +381,13 @@ public:
         mixed_bilinear_interaction_SU3.resize(lattice_size_SU3);
         mixed_bilinear_partners_SU2.resize(lattice_size_SU2);
         mixed_bilinear_partners_SU3.resize(lattice_size_SU3);
+
+        mixed_bilinear_drive_interaction_SU2.resize(lattice_size_SU2);
+        mixed_bilinear_drive_interaction_SU3.resize(lattice_size_SU3);
+        mixed_bilinear_drive_partners_SU2.resize(lattice_size_SU2);
+        mixed_bilinear_drive_partners_SU3.resize(lattice_size_SU3);
+        mixed_bilinear_drive_envelope_SU2.resize(lattice_size_SU2);
+        mixed_bilinear_drive_envelope_SU3.resize(lattice_size_SU3);
         
         mixed_trilinear_interaction_SU2.resize(lattice_size_SU2);
         mixed_trilinear_interaction_SU3.resize(lattice_size_SU3);
@@ -744,6 +775,39 @@ public:
             }
         }
 
+        // Build pulse-modulated mixed bilinear interactions (field-assisted
+        // Fe-Tm exchange H_{E chi}, H_{B chi}).  Identical geometry to the
+        // static mixed bilinears, but stored in the parallel `*_drive_*`
+        // tables together with the per-bond pulse-envelope selector.
+        for (size_t i = 0; i < dim1; ++i) {
+            for (size_t j = 0; j < dim2; ++j) {
+                for (size_t k = 0; k < dim3; ++k) {
+                    for (size_t atom = 0; atom < N_atoms_SU2; ++atom) {
+                        size_t site_idx = flatten_index(i, j, k, atom, N_atoms_SU2);
+
+                        auto bi_range = mixed_uc.bilinear_drive_SU2_SU3.equal_range(atom);
+                        for (auto it = bi_range.first; it != bi_range.second; ++it) {
+                            const auto& bi = it->second;
+                            int pi = static_cast<int>(i) + bi.offset(0);
+                            int pj = static_cast<int>(j) + bi.offset(1);
+                            int pk = static_cast<int>(k) + bi.offset(2);
+                            size_t partner_idx = flatten_index_periodic(pi, pj, pk, bi.partner, N_atoms_SU3);
+
+                            mixed_bilinear_drive_interaction_SU2[site_idx].push_back(bi.interaction);
+                            mixed_bilinear_drive_partners_SU2[site_idx].push_back(partner_idx);
+                            mixed_bilinear_drive_envelope_SU2[site_idx].push_back(bi.envelope);
+
+                            mixed_bilinear_drive_interaction_SU3[partner_idx].push_back(bi.interaction.transpose());
+                            mixed_bilinear_drive_partners_SU3[partner_idx].push_back(site_idx);
+                            mixed_bilinear_drive_envelope_SU3[partner_idx].push_back(bi.envelope);
+
+                            has_mixed_bilinear_drive = true;
+                        }
+                    }
+                }
+            }
+        }
+
         // Build mixed trilinear interactions
         for (size_t i = 0; i < dim1; ++i) {
             for (size_t j = 0; j < dim2; ++j) {
@@ -854,6 +918,9 @@ public:
         trilinear_packed_SU3.assign(lattice_size_SU3, {});
         mixed_trilinear_packed_SU3.assign(lattice_size_SU3, {});
 
+        mixed_bilinear_drive_packed_SU2.assign(lattice_size_SU2, {});
+        mixed_bilinear_drive_packed_SU3.assign(lattice_size_SU3, {});
+
         // ---- SU(2) sublattice ----
         for (size_t site = 0; site < lattice_size_SU2; ++site) {
             // Bilinear SU(2)-SU(2): J(a,b)
@@ -872,6 +939,16 @@ public:
             for (size_t n = 0; n < n_mb; ++n) {
                 const auto& J = mixed_bilinear_interaction_SU2[site][n];
                 double* p = mixed_bilinear_packed_SU2[site].data() + n * d23;
+                for (size_t a = 0; a < d2; ++a)
+                    for (size_t c = 0; c < d3; ++c)
+                        p[a * d3 + c] = J(a, c);
+            }
+            // Field-assisted (pulse-modulated) mixed bilinear SU(2)-SU(3): J(a,c)
+            const size_t n_mbd = mixed_bilinear_drive_interaction_SU2[site].size();
+            mixed_bilinear_drive_packed_SU2[site].assign(n_mbd * d23, 0.0);
+            for (size_t n = 0; n < n_mbd; ++n) {
+                const auto& J = mixed_bilinear_drive_interaction_SU2[site][n];
+                double* p = mixed_bilinear_drive_packed_SU2[site].data() + n * d23;
                 for (size_t a = 0; a < d2; ++a)
                     for (size_t c = 0; c < d3; ++c)
                         p[a * d3 + c] = J(a, c);
@@ -922,6 +999,16 @@ public:
             for (size_t n = 0; n < n_mb; ++n) {
                 const auto& J = mixed_bilinear_interaction_SU3[site][n];
                 double* p = mixed_bilinear_packed_SU3[site].data() + n * d3 * d2;
+                for (size_t a = 0; a < d3; ++a)
+                    for (size_t b = 0; b < d2; ++b)
+                        p[a * d2 + b] = J(a, b);
+            }
+            // Field-assisted (pulse-modulated) mixed bilinear SU(3)-SU(2): J(a,b)
+            const size_t n_mbd = mixed_bilinear_drive_interaction_SU3[site].size();
+            mixed_bilinear_drive_packed_SU3[site].assign(n_mbd * d3 * d2, 0.0);
+            for (size_t n = 0; n < n_mbd; ++n) {
+                const auto& J = mixed_bilinear_drive_interaction_SU3[site][n];
+                double* p = mixed_bilinear_drive_packed_SU3[site].data() + n * d3 * d2;
                 for (size_t a = 0; a < d3; ++a)
                     for (size_t b = 0; b < d2; ++b)
                         p[a * d2 + b] = J(a, b);
@@ -2416,6 +2503,134 @@ public:
             if (norm > 1e-12) {
                 spins_SU3[i] = -local_field / norm * spin_length_SU3;
             }
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // SU(3) coherent-state utilities (qutrit-only, spin_dim_SU3 == 8).
+    //
+    // These project the stored 8-vector Bloch parameterization onto the
+    // physical CP^2 manifold of qutrit pure states, following the SU(N)
+    // coherent-state formulation of Zhang & Batista, PRB 104, 104409
+    // (2021) and the geometric-integrator picture of Dahlbom et al., PRB
+    // 106, 054423 (2022). They are opt-in: no existing code path calls
+    // them automatically. See diag_tmfeo3_su3_coherent_state for the
+    // standalone validation.
+    //
+    // Storage convention. The stored `spins_SU3[i](a)` are interpreted as
+    // the raw Gell-Mann expectation values n^a = <psi|lambda^a|psi>. The
+    // qutrit density matrix is
+    //   rho = (1/3) I + (1/2) sum_a n^a lambda^a,
+    // whose trace is identically 1 regardless of |n|. A physical pure
+    // state has |n|^2 = (N^2 - 1)/N = 8/3, i.e. |n| = 2 sqrt(2/3); the
+    // smaller value |n| = 2/sqrt(3) is the partial Casimir matching the
+    // diagonal sector spanned by (lambda_3, lambda_8) on the singlet
+    // basis (e.g. for |E1>: n_3 = 1, n_8 = 1/sqrt(3), so n_3^2 + n_8^2
+    // = 4/3 and the off-diagonal components are zero).
+    //
+    // The `spin_length_SU3` constructor argument does NOT enter these
+    // routines: for SU(N>2) it is not a free normalisation knob (no
+    // continuous family of states has the same Casimir spectrum), it is
+    // only used by the legacy antiparallel-alignment SA, which the new
+    // `deterministic_sweep_SU3_exact_diag` below replaces.
+    // -------------------------------------------------------------------
+
+    /**
+     * Project every stored SU(3) Bloch vector onto its closest physical
+     * pure-state representation. For each site:
+     *   1. Build  rho = (1/3) I + (1/2) sum_a n^a lambda^a  from the
+     *      stored n^a.
+     *   2. Diagonalise rho; let psi be the eigenvector with the largest
+     *      eigenvalue (the closest pure-state projector).
+     *   3. Overwrite n^a by <psi|lambda^a|psi>.
+     * Returns the minimum top-eigenvalue (purity) encountered across
+     * sites. Values below 1 indicate that the original stored state was
+     * not a physical qutrit pure state (e.g. produced by the legacy
+     * antiparallel-alignment SA).
+     */
+    double physicalize_SU3_state() {
+        if (spin_dim_SU3 != 8) return 1.0;
+        double min_purity = 1.0;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            classical_spin::su3::Vector8r n;
+            for (int a = 0; a < 8; ++a) n(a) = spins_SU3[i](a);
+            double purity = 0.0;
+            auto psi = classical_spin::su3::psi_from_expectations(n, &purity);
+            auto n_phys = classical_spin::su3::expectations_from_psi(psi);
+            for (int a = 0; a < 8; ++a) spins_SU3[i](a) = n_phys(a);
+            if (purity < min_purity) min_purity = purity;
+        }
+        return min_purity;
+    }
+
+    /**
+     * Report the worst-case (smallest) qutrit density-matrix eigenvalue
+     * across all SU(3) sites at the current configuration. Negative
+     * values prove the stored 8-vector parameterization is unphysical at
+     * that site (no qutrit density matrix can produce those expectation
+     * values). Useful to audit seeds / annealed states.
+     */
+    double min_SU3_density_eigenvalue() const {
+        if (spin_dim_SU3 != 8) return 1.0;
+        double worst = 1.0;
+        for (size_t i = 0; i < lattice_size_SU3; ++i) {
+            classical_spin::su3::Vector8r n;
+            for (int a = 0; a < 8; ++a) n(a) = spins_SU3[i](a);
+            const Eigen::Vector3d ev = classical_spin::su3::density_eigenvalues(n);
+            if (ev(0) < worst) worst = ev(0);
+        }
+        return worst;
+    }
+
+    /**
+     * Deterministic SU(3) sweep via exact local diagonalization.
+     *
+     * Replaces the antiparallel-alignment rule used in the standard
+     * `deterministic_sweep`, which can place the stored Bloch vector
+     * outside the qutrit positive cone (and which uses a meaningless
+     * `spin_length_SU3` rescaling for N > 2). For each randomly selected
+     * SU(3) site this:
+     *   1. computes the local Gell-Mann field h^a,
+     *   2. builds the 3x3 mean-field Hamiltonian
+     *        H_loc = (1/2) sum_a h^a lambda^a,
+     *      with sign convention matching `cross_prod_SU3_flat`,
+     *   3. finds its ground-state eigenvector psi,
+     *   4. writes back the physical Bloch vector n^a = <psi|lambda^a|psi>.
+     *
+     * SU(2) sites are updated by the usual antiparallel rule.
+     */
+    void deterministic_sweep_SU3_exact_diag() {
+        // SU(2) sites: standard antiparallel alignment.
+        for (size_t count = 0; count < lattice_size_SU2; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU2);
+            SpinVector local_field = get_local_field_SU2(i);
+            double norm = local_field.norm();
+            if (norm > 1e-12) {
+                spins_SU2[i] = -local_field / norm * spin_length_SU2;
+            }
+        }
+        if (spin_dim_SU3 != 8) {
+            // Fall back to antiparallel alignment for non-qutrit dims.
+            for (size_t count = 0; count < lattice_size_SU3; ++count) {
+                size_t i = random_int_lehman(lattice_size_SU3);
+                SpinVector local_field = get_local_field_SU3(i);
+                double norm = local_field.norm();
+                if (norm > 1e-12) {
+                    spins_SU3[i] = -local_field / norm * spin_length_SU3;
+                }
+            }
+            return;
+        }
+        for (size_t count = 0; count < lattice_size_SU3; ++count) {
+            size_t i = random_int_lehman(lattice_size_SU3);
+            SpinVector local_field = get_local_field_SU3(i);
+            if (local_field.norm() < 1e-15) continue;
+            classical_spin::su3::Vector8r h;
+            for (int a = 0; a < 8; ++a) h(a) = local_field(a);
+            auto H_loc = classical_spin::su3::local_hamiltonian_from_field(h);
+            auto psi   = classical_spin::su3::ground_state(H_loc);
+            auto n_phys = classical_spin::su3::expectations_from_psi(psi);
+            for (int a = 0; a < 8; ++a) spins_SU3[i](a) = n_phys(a);
         }
     }
 
@@ -3961,6 +4176,33 @@ public:
      */
     void landau_lifshitz(const ODEState& state, ODEState& dsdt, double t);
 
+public:
+    /**
+     * Heap-free, drive-hoisted variants of `get_local_field_SU{2,3}_flat`.
+     * The full local field is written directly into the caller-supplied
+     * `H_out[0..spin_dim_SU{2,3}-1]` and the time-dependent envelope
+     * factors are passed in by the caller (typically computed once per RHS
+     * evaluation in `landau_lifshitz`). These are the form used by the LLG
+     * hot loop; together they eliminate one `Eigen::VectorXd` heap
+     * allocation per site per RHS call and the redundant `exp + cos` calls
+     * per site that the legacy `..._flat(t, site)` interface incurs.
+     *
+     * `env_E` / `env_B` are the SU(3) (electric) and SU(2) (magnetic) pulse
+     * envelope scalars that modulate the field-assisted Fe-Tm exchange
+     * (H_{E chi} / H_{B chi}); they default to 0 (assisted terms inactive).
+     * Public so dynamics diagnostics can probe the field-assisted channels.
+     */
+    void get_local_field_SU2_flat_into(size_t site, const ODEState& state,
+                                       size_t offset_SU3,
+                                       double drive_factor1, double drive_factor2,
+                                       double* H_out,
+                                       double env_E = 0.0, double env_B = 0.0) const;
+    void get_local_field_SU3_flat_into(size_t site, const ODEState& state,
+                                       size_t offset_SU3,
+                                       double drive_factor1, double drive_factor2,
+                                       double* H_out,
+                                       double env_E = 0.0, double env_B = 0.0) const;
+
 private:
     /**
      * Compute local field for SU(2) site directly from flat state vector
@@ -3971,24 +4213,6 @@ private:
      * @param offset_SU3 Starting index of SU(3) spins in state vector
      * @param t Current time (for time-dependent drive)
      */
-    /**
-     * Heap-free, drive-hoisted variants of `get_local_field_SU{2,3}_flat`.
-     * The full local field is written directly into the caller-supplied
-     * `H_out[0..spin_dim_SU{2,3}-1]` and the time-dependent envelope
-     * factors are passed in by the caller (typically computed once per RHS
-     * evaluation in `landau_lifshitz`). These are the form used by the LLG
-     * hot loop; together they eliminate one `Eigen::VectorXd` heap
-     * allocation per site per RHS call and the redundant `exp + cos` calls
-     * per site that the legacy `..._flat(t, site)` interface incurs.
-     */
-    void get_local_field_SU2_flat_into(size_t site, const ODEState& state,
-                                       size_t offset_SU3,
-                                       double drive_factor1, double drive_factor2,
-                                       double* H_out) const;
-    void get_local_field_SU3_flat_into(size_t site, const ODEState& state,
-                                       size_t offset_SU3,
-                                       double drive_factor1, double drive_factor2,
-                                       double* H_out) const;
 
     SpinVector get_local_field_SU2_flat(size_t site, const ODEState& state, 
                                          size_t offset_SU3, double t) const;
@@ -4872,7 +5096,9 @@ public:
                                      double stationarity_tol = 1e-6,
                                      bool pulse_window_chunking = true,
                                      double abs_tol = classical_spin_pulse_chunking::kDefaultPumpProbeAbsTol,
-                                     double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol);
+                                     double rel_tol = classical_spin_pulse_chunking::kDefaultPumpProbeRelTol,
+                                     const vector<SpinVector>& field_in_SU2_B = {},
+                                     const vector<SpinVector>& field_in_SU3_B = {});
 
 // ============================================================
 // GPU Implementation Section
@@ -4950,6 +5176,11 @@ private:
      */
     void ensure_gpu_mixed_data_initialized() const {
         if (gpu_mixed_data_initialized_) return;
+        if (has_mixed_bilinear_drive) {
+            throw std::runtime_error(
+                "MixedLattice GPU MD does not support field-assisted Fe-Tm "
+                "exchange (H_{E chi} / H_{B chi}); run with use_gpu=false.");
+        }
         gpu_mixed_data_cache_ = create_gpu_mixed_data();
         gpu_mixed_data_initialized_ = true;
     }
@@ -5867,6 +6098,11 @@ private:
      */
     void ensure_gpu_mixed_data_initialized() const {
         if (gpu_mixed_data_initialized_) return;
+        if (has_mixed_bilinear_drive) {
+            throw std::runtime_error(
+                "MixedLattice GPU MD does not support field-assisted Fe-Tm "
+                "exchange (H_{E chi} / H_{B chi}); run with use_gpu=false.");
+        }
         
         // Flatten SU(2) data
         vector<double> flat_field_SU2, flat_onsite_SU2, flat_bilinear_SU2;

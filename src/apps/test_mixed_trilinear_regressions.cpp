@@ -3,8 +3,10 @@
 #include "classical_spin/lattice/mixed_lattice.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -293,6 +295,16 @@ bool check_shorthand_equivalence(std::ostream& out) {
 }
 
 bool check_mirror_odd_inversion_pairing(std::ostream& out) {
+    // The mirror-odd A2 channels (lambda4, lambda6; inversion parity p=-1) are
+    // ANTISYMMETRIC between inversion-paired Tm sites.  Pbnm inversion permutes
+    // the Tm sublattices by sigma^Tm(I) = (03)(12) and sends lambda4,6 -> -lambda4,6,
+    // while the uniform q=0 Fe spins are invariant (axial, Fe at inversion centers).
+    // Hence the static A2 field obeys  h(Tm0) = -h(Tm3),  h(Tm1) = -h(Tm2).
+    //
+    // (Note: the earlier frame-less W builder produced an accidental per-site
+    // cancellation h=0; with the Pbnm-covariant sigma_C Fe frames now applied to
+    // W, the correct symmetry statement is this inversion antisymmetry, verified
+    // term-by-term in diag_tmfeo3_pbnm_invariance.)
     struct OddChannelCase {
         const char* param_name;
         Eigen::Index lambda_index;
@@ -301,6 +313,8 @@ bool check_mirror_odd_inversion_pairing(std::ostream& out) {
         {"W4_xz", 3},
         {"W6_xz", 5}
     };
+    // Inversion-paired Tm sublattices, sigma^Tm(I) = (03)(12).
+    const std::array<std::pair<int, int>, 2> inv_pairs = {{{0, 3}, {1, 2}}};
 
     for (const auto& odd_case : odd_cases) {
         for (int orbit = 1; orbit <= 4; ++orbit) {
@@ -311,15 +325,29 @@ bool check_mirror_odd_inversion_pairing(std::ostream& out) {
             Lattice lattice = make_lattice_from_config(config);
             assign_uniform_q0_spins(lattice);
 
-            for (size_t site = 0; site < lattice.lattice_size_SU3; ++site) {
-                const auto field = lattice.get_local_field_SU3(site);
-                if (!nearly_equal(field(odd_case.lambda_index), 0.0, kAbsTol, kRelTol)) {
+            std::array<double, 4> h{};
+            for (size_t site = 0; site < lattice.lattice_size_SU3 && site < 4; ++site) {
+                h[site] = lattice.get_local_field_SU3(site)(odd_case.lambda_index);
+            }
+
+            for (const auto& pr : inv_pairs) {
+                if (!nearly_equal(h[pr.first], -h[pr.second], kAbsTol, kRelTol)) {
                     out << "[FAIL] Odd W channel " << odd_case.param_name
-                        << " does not cancel on Tm site " << site
-                        << " for orbit " << orbit
-                        << ": field=" << field(odd_case.lambda_index) << "\n";
+                        << " not inversion-antisymmetric for orbit " << orbit
+                        << ": h(Tm" << pr.first << ")=" << h[pr.first]
+                        << ", h(Tm" << pr.second << ")=" << h[pr.second]
+                        << " (expected h(Tm" << pr.first << ") = -h(Tm" << pr.second << "))\n";
                     return false;
                 }
+            }
+            // Guard against a trivial all-zero pass: the channel must be active.
+            const double max_abs =
+                std::max({std::abs(h[0]), std::abs(h[1]), std::abs(h[2]), std::abs(h[3])});
+            if (max_abs < kAbsTol) {
+                out << "[FAIL] Odd W channel " << odd_case.param_name
+                    << " produced no field at all for orbit " << orbit
+                    << " (expected a nonzero A2 field)\n";
+                return false;
             }
         }
     }

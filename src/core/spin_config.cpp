@@ -198,6 +198,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pump_amplitude") {
                 config.pump_amplitude = stod(value);
             }
+            else if (key == "pump_table_file") {
+                config.pump_table_file = value;
+            }
             else if (key == "pump_width") {
                 config.pump_width = stod(value);
             }
@@ -210,6 +213,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pump_direction") {
                 config.pump_directions = parse_vectorN_list_auto(value, 3);  // Default to 3D, auto-detect dimension
             }
+            else if (key == "pump_direction_2") {
+                config.pump_directions_2 = parse_vectorN_list_auto(value, 3);  // Distinct 2nd-pulse (probe @ tau) SU2 direction for 2DCS
+            }
             // SU3-specific pump parameters
             else if (key == "pump_amplitude_su3") {
                 config.pump_amplitude_su3 = stod(value);
@@ -217,17 +223,20 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             else if (key == "pump_width_su3") {
                 config.pump_width_su3 = stod(value);
             }
+            else if (key == "pump_frequency_su3_2") {
+                config.pump_frequency_su3_2 = stod(value);
+            }
             else if (key == "pump_frequency_su3") {
                 config.pump_frequency_su3 = stod(value);
             }
             else if (key == "pump_direction_su3") {
                 config.pump_directions_su3 = parse_vectorN_list_auto(value, 8);  // Default to 8D for SU3
             }
+            else if (key == "pump_direction_su3_2") {
+                config.pump_directions_su3_2 = parse_vectorN_list_auto(value, 8);  // Distinct 2nd-pulse (probe @ tau) SU3 direction for 2DCS
+            }
             else if (key == "auto_su3_pump") {
                 config.auto_su3_pump = (value == "true" || value == "1");
-            }
-            else if (key == "pump_table_file") {
-                config.pump_table_file = value;
             }
             else if (key == "probe_amplitude") {
                 config.probe_amplitude = stod(value);
@@ -339,6 +348,9 @@ SpinConfig SpinConfig::from_file(const string& filename) {
             }
             else if (key == "nn_exchange_channel_disorder_config") {
                 config.nn_exchange_channel_disorder_config = value;
+            }
+            else if (key == "plaquette_j7_disorder_config") {
+                config.plaquette_j7_disorder_config = value;
             }
             else if (key == "use_ferromagnetic_init") {
                 config.use_ferromagnetic_init = parse_bool(value);
@@ -565,6 +577,7 @@ void SpinConfig::to_file(const string& filename) const {
     file << "pump_amplitude_su3 = " << pump_amplitude_su3 << "\n";
     file << "pump_width_su3 = " << pump_width_su3 << "\n";
     file << "pump_frequency_su3 = " << pump_frequency_su3 << "\n";
+    file << "pump_frequency_su3_2 = " << pump_frequency_su3_2 << "\n";
     file << "pump_direction_su3 = ";
     for (size_t i = 0; i < pump_directions_su3.size(); ++i) {
         if (i > 0) file << ",";

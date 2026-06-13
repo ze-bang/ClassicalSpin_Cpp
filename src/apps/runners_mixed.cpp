@@ -624,6 +624,46 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
 }   
 
 /**
+ * Apply optional per-generator SU(3) Bloch damping for the mixed lattice.
+ *
+ * Bloch damping in the EOM is  dn^a/dt += −Γ_a (n^a − n^a_eq)  (see
+ * mixed_lattice_md.cpp). Γ_a is read per Gell-Mann index from the config:
+ *   gamma_su3           — uniform rate applied to all 8 generators (default 0)
+ *   gamma_su3_lambda{1..8} — optional per-generator override
+ *
+ * The equilibrium Bloch vector n^a_eq is captured from the CURRENT spin
+ * configuration, which is the post-anneal ground state (the runner calls this
+ * after simulated_annealing + MPI broadcast). This makes the damping relax the
+ * pump-induced *deviations* toward the ground state instead of dragging the
+ * static moment to zero (the default equilibrium is zero).
+ *
+ * Returns silently with no effect when every rate is zero, preserving the
+ * zero-overhead undamped default.
+ */
+static void apply_su3_bloch_damping(MixedLattice& lattice, const SpinConfig& config, int rank) {
+    const double gamma_uniform = config.get_param("gamma_su3", 0.0);
+    SpinVector rates = SpinVector::Constant(lattice.spin_dim_SU3, gamma_uniform);
+    for (int a = 0; a < static_cast<int>(lattice.spin_dim_SU3); ++a) {
+        const string key = "gamma_su3_lambda" + to_string(a + 1);
+        rates(a) = config.get_param(key, rates(a));
+    }
+    if (rates.cwiseAbs().maxCoeff() <= 0.0) {
+        return;  // no damping requested -> keep undamped fast path
+    }
+    lattice.set_damping_SU3(rates);
+    // Relax toward the current (post-anneal) ground-state Bloch vectors, which
+    // are already in the local sublattice frame used by the MD state vector.
+    lattice.set_equilibrium_SU3(lattice.spins_SU3);
+    if (rank == 0) {
+        cout << "SU(3) Bloch damping Gamma_a = [";
+        for (int a = 0; a < static_cast<int>(lattice.spin_dim_SU3); ++a) {
+            cout << (a ? ", " : "") << rates(a);
+        }
+        cout << "]  (equilibrium = post-anneal ground state)" << endl;
+    }
+}
+
+/**
  * Run 2D coherent spectroscopy (2DCS) for mixed lattice
  */
 void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
@@ -692,6 +732,32 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
                 comp /= norm;
             }
         }
+    }
+
+    // Optional distinct SU(2) direction for the 2nd pulse (probe @ tau) in 2DCS.
+    // Empty => reuse pump_dirs_norm (legacy single-direction behaviour).
+    const bool use_distinct_pulse2_dir = !config.pump_directions_2.empty();
+    vector<vector<double>> pump_dirs2_norm = config.pump_directions_2;
+    for (auto& dir : pump_dirs2_norm) {
+        double norm = 0.0;
+        for (const auto& comp : dir) {
+            norm += comp * comp;
+        }
+        norm = sqrt(norm);
+        if (norm > 1e-10) {
+            for (auto& comp : dir) {
+                comp /= norm;
+            }
+        }
+    }
+    if (use_distinct_pulse2_dir &&
+        pump_dirs2_norm.size() != 1 && pump_dirs2_norm.size() != lattice.N_atoms_SU2) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction_2 must have either 1 direction (broadcast to all SU2 sublattices) "
+                 << "or N_atoms_SU2 directions. Got " << pump_dirs2_norm.size() << " directions." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
     }
     
     // Validate pump direction count: must be 1 (broadcast to all) or match N_atoms_SU2
@@ -822,6 +888,46 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         }
         field_dirs_su2[i] = pump_dir_su2;
     }
+    // Build the distinct 2nd-pulse (probe @ tau) SU2 field directions. When
+    // pump_direction_2 is unset, this is identical to field_dirs_su2 and the
+    // solver falls back to legacy same-direction behaviour.
+    vector<SpinVector> field_dirs_su2_B;
+    if (use_distinct_pulse2_dir) {
+        field_dirs_su2_B.resize(lattice.lattice_size_SU2);
+        for (size_t i = 0; i < lattice.lattice_size_SU2; ++i) {
+            size_t atom = i % lattice.N_atoms_SU2;
+            size_t dir_idx = (pump_dirs2_norm.size() == 1) ? 0 : atom;
+            SpinVector pump_dir_su2_B(lattice.spin_dim_SU2);
+            for (size_t d = 0; d < lattice.spin_dim_SU2; ++d) {
+                pump_dir_su2_B(d) = pump_dirs2_norm[dir_idx][d];
+            }
+            field_dirs_su2_B[i] = pump_dir_su2_B;
+        }
+    }
+
+    // Optional distinct SU3 direction for the 2nd pulse (probe @ tau). Empty =>
+    // reuse pump_dirs_su3_norm. All-zeros => SU3 fires only at t=0 (isolates
+    // omega_tau to the SU2 mode while omega_t carries the direct E12 drive).
+    const bool use_distinct_pulse2_dir_su3 = !config.pump_directions_su3_2.empty();
+    vector<vector<double>> pump_dirs2_su3_norm = config.pump_directions_su3_2;
+    for (auto& dir : pump_dirs2_su3_norm) {
+        double norm = 0.0;
+        for (const auto& comp : dir) norm += comp * comp;
+        norm = sqrt(norm);
+        if (norm > 1e-10) {
+            for (auto& comp : dir) comp /= norm;
+        }
+    }
+    if (use_distinct_pulse2_dir_su3 &&
+        pump_dirs2_su3_norm.size() != 1 && pump_dirs2_su3_norm.size() != lattice.N_atoms_SU3) {
+        if (rank == 0) {
+            cerr << "Error: pump_direction_su3_2 must have either 1 direction or "
+                 << lattice.N_atoms_SU3 << " directions. Got " << pump_dirs2_su3_norm.size() << "." << endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return;
+    }
+
     for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
         size_t atom = i % lattice.N_atoms_SU3;
         // Use per-sublattice direction if provided, otherwise broadcast first direction to all
@@ -831,6 +937,20 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             pump_dir_su3(d) = pump_dirs_su3_norm[dir_idx][d];
         }
         field_dirs_su3[i] = pump_dir_su3;
+    }
+    // Build distinct 2nd-pulse (probe @ tau) SU3 field directions.
+    vector<SpinVector> field_dirs_su3_B;
+    if (use_distinct_pulse2_dir_su3) {
+        field_dirs_su3_B.resize(lattice.lattice_size_SU3);
+        for (size_t i = 0; i < lattice.lattice_size_SU3; ++i) {
+            size_t atom = i % lattice.N_atoms_SU3;
+            size_t dir_idx = (pump_dirs2_su3_norm.size() == 1) ? 0 : atom;
+            SpinVector pump_dir_su3_B(lattice.spin_dim_SU3);
+            for (size_t d = 0; d < lattice.spin_dim_SU3; ++d) {
+                pump_dir_su3_B(d) = pump_dirs2_su3_norm[dir_idx][d];
+            }
+            field_dirs_su3_B[i] = pump_dir_su3_B;
+        }
     }
 
     const bool save_spin_traj = (config.get_param("save_spin_trajectories", 0.0) > 0.5);
@@ -852,6 +972,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         effective_pump_frequency_su3 = 0.0;
     }
 
+    // Optional second SU(3) carrier color (two-color CEF drive).  Set on the
+    // lattice so drive_envelopes_SU3 superposes cos(freq)+cos(freq2).
+    lattice.field_drive_freq_SU3_2 = config.pump_frequency_su3_2;
     if (use_tau_parallel) {
         // Single trial, parallelize over tau values
         string trial_dir = config.output_dir + "/sample_0";
@@ -921,7 +1044,11 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         if (rank == 0) {
             lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
         }
-        
+
+        // Optional per-generator SU(3) Bloch damping. Equilibrium is captured
+        // from the just-synchronized ground state on every rank.
+        apply_su3_bloch_damping(lattice, config, rank);
+
         if (rank == 0) {
             cout << "\n[2/2] Running MPI-parallel pump-probe spectroscopy..." << endl;
             cout << "  SU2 Pulse: amplitude=" << config.pump_amplitude 
@@ -991,7 +1118,9 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             config.pulse_window_chunking,
             // Ingredient XVIII: pump-probe ODE tolerances (default 1e-8).
             config.pump_probe_abs_tol,
-            config.pump_probe_rel_tol
+            config.pump_probe_rel_tol,
+            field_dirs_su2_B,  // distinct 2nd-pulse (probe @ tau) SU2 directions; empty => same as field_dirs_su2
+            field_dirs_su3_B   // distinct 2nd-pulse (probe @ tau) SU3 directions; empty => same as field_dirs_su3
         );
         
     } else {
@@ -1033,9 +1162,11 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             // Save initial spin configuration before time evolution
             lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
             
+            // Optional per-generator SU(3) Bloch damping (equilibrium = ground state).
+            apply_su3_bloch_damping(lattice, config, rank);
+
             if (rank == 0 || config.num_trials == 1) {
-                cout << "\n[2/3] Pulse configuration:" << endl;
-                cout << "  SU2 Pulse: amplitude=" << config.pump_amplitude 
+                cout << "\n[2/3] Pulse configuration:" << endl;                cout << "  SU2 Pulse: amplitude=" << config.pump_amplitude 
                      << ", width=" << config.pump_width 
                      << ", frequency=" << config.pump_frequency << endl;
                 if (pump_dirs_norm.size() == 1) {

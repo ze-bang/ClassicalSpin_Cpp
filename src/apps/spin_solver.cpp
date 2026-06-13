@@ -111,6 +111,10 @@ int main(int argc, char** argv) {
                 phonon_lattice.apply_nn_exchange_channel_disorder_from_file(
                     config.nn_exchange_channel_disorder_config);
             }
+            if (!config.plaquette_j7_disorder_config.empty()) {
+                phonon_lattice.apply_plaquette_j7_disorder_from_file(
+                    config.plaquette_j7_disorder_config);
+            }
             
             // Set time-dependent spin-phonon coupling parameters
             phonon_lattice.set_time_dependent_spin_phonon(td_sp_params);

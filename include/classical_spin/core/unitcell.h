@@ -61,6 +61,27 @@ struct MixedBilinear {
         : interaction(J), partner(p), offset(o) {}
 };
 
+// Time-dependent (pulse-envelope-modulated) mixed bilinear, used for the
+// field-assisted Fe-Tm exchange terms H_{E chi} and H_{B chi} of the TmFeO3
+// model (tmfeo3_foundation.tex, Eqs. H_E_chi_reorg / H_B_chi_reorg).  The
+// stored tensor is the static part chi^{assist}_{alpha a}; at runtime the
+// coupling is multiplied by the corresponding Gaussian x carrier pulse
+// envelope so that H = envelope(t) * S^alpha_Fe * chi^{assist}_{alpha a} *
+// lambda^a_Tm.  `envelope` selects which pulse drives the modulation:
+//   0 -> SU(3) pulse envelope (the electric / THz field E(t), for H_{E chi})
+//   1 -> SU(2) pulse envelope (the magnetic field B(t),       for H_{B chi})
+struct MixedBilinearDrive {
+    SpinMatrix interaction;  // N_SU2 × N_SU3 matrix (source dim × partner dim)
+    size_t partner;          // Partner sublattice index (in the SU3 lattice)
+    Vector3i offset;         // Cell offset from source to partner
+    int envelope;            // 0 = SU(3)/E envelope, 1 = SU(2)/B envelope
+
+    MixedBilinearDrive() : partner(SIZE_MAX), offset(Vector3i::Zero()), envelope(0) {}
+
+    MixedBilinearDrive(const SpinMatrix& J, size_t p, const Vector3i& o, int env)
+        : interaction(J), partner(p), offset(o), envelope(env) {}
+};
+
 // Mixed trilinear for different spin dimensions
 struct MixedTrilinear {
     SpinTensor3 interaction;  // Tensor with mixed dimensions
@@ -225,6 +246,7 @@ public:
     
     multimap<int, MixedTrilinear> trilinear_SU2_SU3;
     multimap<int, MixedBilinear> bilinear_SU2_SU3;  // key = SU2 sublattice, partner = SU3 sublattice
+    multimap<int, MixedBilinearDrive> bilinear_drive_SU2_SU3;  // pulse-modulated Fe-Tm exchange (H_{E chi}, H_{B chi})
     
     MixedUnitCell(const UnitCell& su2, const UnitCell& su3)
         : SU2_cell(su2), SU3_cell(su3) {}
@@ -242,6 +264,16 @@ public:
                            size_t partner, const Vector3i& offset) {
         bilinear_SU2_SU3.insert(make_pair(source,
             MixedBilinear(J, partner, offset)));
+    }
+
+    // Pulse-envelope-modulated mixed bilinear (field-assisted Fe-Tm exchange).
+    // Same geometry as set_mixed_bilinear; `envelope` picks the modulating
+    // pulse (0 = SU(3)/E field, 1 = SU(2)/B field).
+    void set_mixed_bilinear_drive(const SpinMatrix& J, size_t source,
+                                  size_t partner, const Vector3i& offset,
+                                  int envelope) {
+        bilinear_drive_SU2_SU3.insert(make_pair(source,
+            MixedBilinearDrive(J, partner, offset, envelope)));
     }
 };
 
@@ -321,21 +353,12 @@ public:
                     Vector3d(0.5, 0, 0), Vector3d(0, 0.5, 0)},
                    {Vector3d(1, 0, 0), Vector3d(0, 1, 0), Vector3d(0, 0, 1)}) {
         
-        if (spin_dim == 3) {  // Set local frames for Fe sites
-            SpinMatrix frame0 = SpinMatrix::Identity(3, 3);
-            set_sublattice_frame(frame0, 0);
-            
-            SpinMatrix frame1(3, 3);
-            frame1 << 1, 0, 0, 0, -1, 0, 0, 0, -1;
-            set_sublattice_frame(frame1, 1);
-            
-            SpinMatrix frame2(3, 3);
-            frame2 << -1, 0, 0, 0, 1, 0, 0, 0, -1;
-            set_sublattice_frame(frame2, 2);
-            
-            SpinMatrix frame3(3, 3);
-            frame3 << -1, 0, 0, 0, -1, 0, 0, 0, 1;
-            set_sublattice_frame(frame3, 3);
+        if (spin_dim == 3) {  // Identity frames: storage == lab frame for Fe sites
+            SpinMatrix I3 = SpinMatrix::Identity(3, 3);
+            set_sublattice_frame(I3, 0);
+            set_sublattice_frame(I3, 1);
+            set_sublattice_frame(I3, 2);
+            set_sublattice_frame(I3, 3);
         }
     }
 };

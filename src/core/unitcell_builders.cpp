@@ -540,23 +540,56 @@ void apply_tmfeo3_fe_sector(TmFeO3_Fe& Fe_atoms, const SpinConfig& config) {
     const auto J2b_orig  = J_iso(J2bi);
     const auto J2c_orig  = J_iso(J2ci);
 
+    // Fe sublattice local frames (sigma_C Klein-four group, matches Tm frames and
+    // Fe-Tm coupling convention):
+    //   Fe0: E    -> diag(+1,+1,+1)
+    //   Fe1: C_2x -> diag(+1,-1,-1)
+    //   Fe2: C_2y -> diag(-1,+1,-1)
+    //   Fe3: C_2z -> diag(-1,-1,+1)
+    // State is stored in local frame: S_glob = R_i * S_loc.
+    // All Fe-Fe interactions are rotated: J_loc(src,par) = R_src * J_glob * R_par.
+    // J2 (isotropic) is invariant: R*J_iso*R = J_iso for diagonal +-1 frames.
+    const std::array<Eigen::Matrix3d, 4> R_fe_frames = {{
+        Eigen::Vector3d(+1.0, +1.0, +1.0).asDiagonal(),
+        Eigen::Vector3d(+1.0, -1.0, -1.0).asDiagonal(),
+        Eigen::Vector3d(-1.0, +1.0, -1.0).asDiagonal(),
+        Eigen::Vector3d(-1.0, -1.0, +1.0).asDiagonal(),
+    }};
+    auto rotate_bond = [&](const SpinMatrix& J, int src, int par) {
+        const double es[3] = {R_fe_frames[src](0,0), R_fe_frames[src](1,1), R_fe_frames[src](2,2)};
+        const double ep[3] = {R_fe_frames[par](0,0), R_fe_frames[par](1,1), R_fe_frames[par](2,2)};
+        SpinMatrix Jl = J;
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+                Jl(a, b) *= es[a] * ep[b];
+        return Jl;
+    };
+
+    // Pre-rotate J1 exchange matrices for each (source, partner) sublattice pair.
+    const auto Ja10  = rotate_bond(Ja_orig,   1, 0);
+    const auto Jb10  = rotate_bond(Jb_orig,   1, 0);
+    const auto Ja23l = rotate_bond(Ja23_orig, 2, 3);
+    const auto Jb23l = rotate_bond(Jb23_orig, 2, 3);
+    const auto Jc03  = rotate_bond(Jc_orig,   0, 3);
+    const auto Jc12  = rotate_bond(Jc_orig,   1, 2);
+
     // In-plane J_1 bonds in z = 1/2 plane (Fe1 -> Fe0).
-    Fe_atoms.set_bilinear_interaction(Ja_orig, 1, 0, Eigen::Vector3i(0,  0, 0));
-    Fe_atoms.set_bilinear_interaction(Ja_orig, 1, 0, Eigen::Vector3i(1, -1, 0));
-    Fe_atoms.set_bilinear_interaction(Jb_orig, 1, 0, Eigen::Vector3i(0, -1, 0));
-    Fe_atoms.set_bilinear_interaction(Jb_orig, 1, 0, Eigen::Vector3i(1,  0, 0));
+    Fe_atoms.set_bilinear_interaction(Ja10, 1, 0, Eigen::Vector3i(0,  0, 0));
+    Fe_atoms.set_bilinear_interaction(Ja10, 1, 0, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(Jb10, 1, 0, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(Jb10, 1, 0, Eigen::Vector3i(1,  0, 0));
 
     // In-plane J_1 bonds in z = 0 plane (Fe2 -> Fe3); D_y flipped vs Fe1->Fe0.
-    Fe_atoms.set_bilinear_interaction(Ja23_orig, 2, 3, Eigen::Vector3i(0,  0, 0));
-    Fe_atoms.set_bilinear_interaction(Ja23_orig, 2, 3, Eigen::Vector3i(1, -1, 0));
-    Fe_atoms.set_bilinear_interaction(Jb23_orig, 2, 3, Eigen::Vector3i(0, -1, 0));
-    Fe_atoms.set_bilinear_interaction(Jb23_orig, 2, 3, Eigen::Vector3i(1,  0, 0));
+    Fe_atoms.set_bilinear_interaction(Ja23l, 2, 3, Eigen::Vector3i(0,  0, 0));
+    Fe_atoms.set_bilinear_interaction(Ja23l, 2, 3, Eigen::Vector3i(1, -1, 0));
+    Fe_atoms.set_bilinear_interaction(Jb23l, 2, 3, Eigen::Vector3i(0, -1, 0));
+    Fe_atoms.set_bilinear_interaction(Jb23l, 2, 3, Eigen::Vector3i(1,  0, 0));
 
     // Out-of-plane J_1c (Fe0 <-> Fe3 and Fe1 <-> Fe2 along c).
-    Fe_atoms.set_bilinear_interaction(Jc_orig, 0, 3, Eigen::Vector3i(0, 0, 0));
-    Fe_atoms.set_bilinear_interaction(Jc_orig, 0, 3, Eigen::Vector3i(0, 0, 1));
-    Fe_atoms.set_bilinear_interaction(Jc_orig, 1, 2, Eigen::Vector3i(0, 0, 0));
-    Fe_atoms.set_bilinear_interaction(Jc_orig, 1, 2, Eigen::Vector3i(0, 0, 1));
+    Fe_atoms.set_bilinear_interaction(Jc03, 0, 3, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(Jc03, 0, 3, Eigen::Vector3i(0, 0, 1));
+    Fe_atoms.set_bilinear_interaction(Jc12, 1, 2, Eigen::Vector3i(0, 0, 0));
+    Fe_atoms.set_bilinear_interaction(Jc12, 1, 2, Eigen::Vector3i(0, 0, 1));
 
     // Intra-sublattice J_2 along a, b, c.
     for (int i = 0; i < 4; ++i) {
@@ -589,23 +622,25 @@ void apply_tmfeo3_fe_sector(TmFeO3_Fe& Fe_atoms, const SpinConfig& config) {
     K_mat(2, 2) = Kc;
     for (int i = 0; i < 4; ++i) Fe_atoms.set_onsite_interaction(K_mat, i);
 
-    // AFM sublattice signs for Bertaut staggered observables in the LAB frame.
-    // TmFeO3_Fe ctor installs non-trivial Bertaut sublattice frames
-    //   R_0 = diag(+,+,+), R_1 = diag(+,-,-), R_2 = diag(-,+,-), R_3 = diag(-,-,+),
-    // under which the four sites' lab-frame magnetizations transform as the four
-    // 1-D representations of mmm.  In Γ_2 (Fx, Cy, Gz) the lab Sz pattern is
-    // (+, -, +, -), so the correct staggered weights to project out the G_z
-    // (qAFM) order parameter—and its δG_y partner—are sign(R_μ)_zz themselves:
-    //   site 0:+1,  site 1:-1,  site 2:+1,  site 3:-1.
-    Fe_atoms.set_afm_sublattice_signs({+1.0, -1.0, +1.0, -1.0});
+    // In local frame (sigma_C), Γ_2 (Fx, Gz) maps:
+    //   global Sz (+,-,+,-) -> local Sz (+,+,-,-): C-type pattern.
+    // Staggered weights for G_z in local frame: w_i = sign_i^glob * R_i_zz
+    //   = {+1,-1,+1,-1} * {+1,-1,-1,+1} = {+1,+1,-1,-1}.
+    Fe_atoms.set_afm_sublattice_signs({+1.0, +1.0, -1.0, -1.0});
 
-    // External Zeeman field in lab Cartesian.
+    // Register Fe sublattice frames so that:
+    //   - drive fields are rotated from lab to local: h_loc^i = R_i^T h_lab;
+    //   - M_global_SU2 = sum_i R_i * S_i_loc = sum_i S_i_glob.
+    for (int i = 0; i < 4; ++i)
+        Fe_atoms.set_sublattice_frame(R_fe_frames[i], i);
+
+    // External Zeeman field: rotate from lab to local frame h_loc^i = R_i * h_lab.
         Eigen::Vector3d h_lab;
         h_lab << config.field_direction[0] * h,
                  config.field_direction[1] * h,
                  config.field_direction[2] * h;
         for (int i = 0; i < 4; ++i) {
-        Fe_atoms.set_field(h_lab, i);
+        Fe_atoms.set_field(R_fe_frames[i] * h_lab, i);
     }
 }
 
@@ -684,9 +719,18 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
     //   * set_pulse_SU3() applies the covariant field transform field_local = F_mu^T field_global
     // The static onsite field below remains in the local qutrit basis by
     // construction; it is only used to set the local CEF splitting / Zeeman.
+    // tm_identity_frame=1: set all Tm sublattice frames to identity so that
+    // M_global_SU3 and all drives act directly in the local CEF basis at every
+    // site without staggered projection.  Useful for testing the chi2 couplings
+    // when the physical observable is the net uniform (sigma_F) Tm moment.
+    const bool tm_identity_frame = config.get_param("tm_identity_frame", 0.0) != 0.0;
     const auto R_tm_xyz = tmfeo3_tm_local_frames_xyz();
     for (int sub = 0; sub < 4; ++sub) {
-        Tm_atoms.set_sublattice_frame(tmfeo3_induced_su3_frame(mu_act, R_tm_xyz[sub]), sub);
+        if (tm_identity_frame) {
+            Tm_atoms.set_sublattice_frame(SpinMatrix::Identity(8, 8), sub);
+        } else {
+            Tm_atoms.set_sublattice_frame(tmfeo3_induced_su3_frame(mu_act, R_tm_xyz[sub]), sub);
+        }
     }
 
     if (h != 0.0 && config.field_direction.size() >= 3) {
@@ -810,6 +854,34 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         config.get_param("chi_orbit4_scale", 1.0)
     };
 
+    // ---- chiJ mode: coupling in physical Tm dipole (Jx,Jy,Jz) space ----
+    // Parameterises H = sum_{alpha,beta} chiJ[beta][alpha] * S^alpha_Fe * J^beta_Tm
+    // where J^beta_Tm = sum_a mu_act(beta,a) * lambda_active_a  is the physical
+    // projected magnetic moment operator and S^alpha_Fe is in the Fe local frame.
+    // Naming: chiJ_<Tm-moment><Fe-spin>, e.g. chiJ_zSz = coupling of J_z^Tm to S_z^Fe.
+    // Defaults all zero so existing configs are unaffected.
+    // mu_act defaults must match apply_tmfeo3_tm_sector.
+    Eigen::Matrix3d mu_J;   // mu_J(beta, a): beta=xyz moment, a=active index {lam2,lam5,lam7}
+    mu_J << config.get_param("mu_2x", 0.0),    config.get_param("mu_5x",  2.3915), config.get_param("mu_7x", 0.9128),
+            config.get_param("mu_2y", 0.0),    config.get_param("mu_5y", -2.7866), config.get_param("mu_7y", 0.4655),
+            config.get_param("mu_2z", 5.264),  config.get_param("mu_5z",  0.0),    config.get_param("mu_7z", 0.0);
+
+    Eigen::Matrix3d chiJ = Eigen::Matrix3d::Zero(); // chiJ(beta, alpha): Tm-moment beta, Fe-component alpha
+    chiJ(0, 0) = config.get_param("chiJ_xSx", 0.0);
+    chiJ(0, 1) = config.get_param("chiJ_xSy", 0.0);
+    chiJ(0, 2) = config.get_param("chiJ_xSz", 0.0);
+    chiJ(1, 0) = config.get_param("chiJ_ySx", 0.0);
+    chiJ(1, 1) = config.get_param("chiJ_ySy", 0.0);
+    chiJ(1, 2) = config.get_param("chiJ_ySz", 0.0);
+    chiJ(2, 0) = config.get_param("chiJ_zSx", 0.0);
+    chiJ(2, 1) = config.get_param("chiJ_zSy", 0.0);
+    chiJ(2, 2) = config.get_param("chiJ_zSz", 0.0);
+
+    // chiJ_lam(alpha, a) = sum_beta chiJ(beta,alpha) * mu_J(beta,a)
+    // Fe-component alpha drives active Gell-Mann generator a via the moment matrix.
+    const Eigen::Matrix3d chiJ_lam = chiJ.transpose() * mu_J;
+    const bool any_chiJ = chiJ_lam.cwiseAbs().maxCoeff() > 0.0;
+
     // Legacy shorthand used in tracked TmFeO3 configs:
     //   u_{1,3,8} -> W_{1,3,8}^{zz}=+u, W_{1,3,8}^{xx}=-u
     //   v_{4,6}   -> W_{4,6}^{xz}=+v
@@ -852,8 +924,24 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         config.get_param("W_orbit4_scale", 1.0)
     };
 
-    auto build_chi = [&](double sign_57) {
+    // chi coupling tensor for a specific bond: chi^{ab} couples the LOCAL-frame
+    // Fe spin component S^a_loc to the Tm CEF-basis Gell-Mann operator lambda^b.
+    // Fe spins are stored in the sigma_C local frame (S_glob = R_i S_loc).
+    // No per-sublattice R_aa factor is applied here; the chi/W/kappa parameters
+    // are defined and interpreted directly in the Fe local frame.  This is consistent
+    // with the Fe-Fe Hamiltonian, which is also in the Fe local frame.
+    //
+    // Pbnm even/odd bond sign analysis (why the sign table is unchanged from the
+    // global-frame convention):
+    //   Under inversion I: sigma^Fe(I)=[0123] and R_spin(I)=1, so S_loc is INVARIANT.
+    //   The sign pattern comes only from: E/B field parity x Tm lambda inversion parity.
+    //   Proper cosets: S_loc just permutes (no rotation in local frame), so the bond
+    //   network closure automatically satisfies them — no additional constraints.
+    // Pbnm bond-topology invariance is handled through the even/odd bond pairs and
+    // the Tm sublattice frames.
+    auto build_chi_bond = [&](double sign_57) {
         SpinMatrix tensor = SpinMatrix::Zero(3, 8);
+        // chi{2,5,7}{x,y,z} channels (direct Gell-Mann coupling, global Fe frame)
         tensor(0, 1) = chi2_ch.x;
         tensor(1, 1) = chi2_ch.y;
         tensor(2, 1) = chi2_ch.z;
@@ -863,6 +951,15 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         tensor(0, 6) = sign_57 * chi7_ch.x;
         tensor(1, 6) = sign_57 * chi7_ch.y;
         tensor(2, 6) = sign_57 * chi7_ch.z;
+        // chiJ mode: coupling in physical (Jx,Jy,Jz) Tm moment space.
+        // chiJ_lam(alpha,a) encodes sum_beta chiJ(beta,alpha)*mu_J(beta,a).
+        if (any_chiJ) {
+            for (int alpha = 0; alpha < 3; ++alpha) {
+                tensor(alpha, 1) += chiJ_lam(alpha, 0);          // lam2, inversion-even
+                tensor(alpha, 4) += sign_57 * chiJ_lam(alpha, 1); // lam5, inversion-odd
+                tensor(alpha, 6) += sign_57 * chiJ_lam(alpha, 2); // lam7, inversion-odd
+            }
+        }
         return tensor;
     };
 
@@ -895,20 +992,19 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
     //   H_chi = sum_{(i,mu)} S_i^a chi_{ab} lambda_mu^b.
     // The live TmFeO3 parameterization keeps only the time-odd Tm channels
     // {lambda_2, lambda_5, lambda_7}. lambda_2 is inversion-even, while
-    // lambda_5/lambda_7 flip sign on the inversion-related partner.
+    // lambda_5/lambda_7 flip sign on the inversion-related partner (sign_57).
     const bool any_chi = bilinear_ch_nonzero(chi2_ch)
                       || bilinear_ch_nonzero(chi5_ch)
-                      || bilinear_ch_nonzero(chi7_ch);
+                      || bilinear_ch_nonzero(chi7_ch)
+                      || any_chiJ;
     if (any_chi) {
-        const SpinMatrix chi_even_base = build_chi(+1.0);
-        const SpinMatrix chi_odd_base = build_chi(-1.0);
         for (const auto& pair : bond_pairs) {
             const double orbit_scale = chi_orbit_scale[pair.orbit - 1];
             mixed_uc.set_mixed_bilinear(
-                scale_matrix(chi_even_base, orbit_scale),
+                scale_matrix(build_chi_bond(+1.0), orbit_scale),
                 pair.even.fe, pair.even.tm, pair.even.off);
             mixed_uc.set_mixed_bilinear(
-                scale_matrix(chi_odd_base, orbit_scale),
+                scale_matrix(build_chi_bond(-1.0), orbit_scale),
                 pair.odd.fe, pair.odd.tm, pair.odd.off);
         }
     }
@@ -936,6 +1032,7 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         };
         const SpinTensor3 W_even_base = build_W(+1.0);
         const SpinTensor3 W_odd_base = build_W(-1.0);
+        // W channels use LOCAL-frame Fe spin components (same convention as Fe-Fe H).
         const Eigen::Vector3i zero = Eigen::Vector3i::Zero();
         for (const auto& pair : bond_pairs) {
             const double orbit_scale = W_orbit_scale[pair.orbit - 1];
@@ -945,6 +1042,120 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
             mixed_uc.set_mixed_trilinear(
                 scale_tensor3(W_odd_base, orbit_scale),
                 pair.odd.fe, pair.odd.fe, pair.odd.tm, zero, pair.odd.off);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Field-assisted Fe-Tm exchange: H_{E chi} and H_{B chi}
+    //   (tmfeo3_foundation.tex, Eqs. H_E_chi_reorg / H_B_chi_reorg).
+    //
+    // These are pulse-envelope-modulated mixed bilinears.  At runtime the
+    // coupling is scaled by the SU(3) pulse envelope (electric/THz field E(t),
+    // H_{E chi}) or the SU(2) pulse envelope (magnetic field B(t), H_{B chi}),
+    // so they vanish outside the pulse window and are absent from the static
+    // energy.  The kappaE_*/kappaB_* parameters are the coupling coefficients
+    // already contracted onto the configured pulse polarization (matching the
+    // tex specialization, e.g. kappaE_5y = kappa^E_{c;5y}).
+    //
+    // Inversion-coset signs (Eqs. Ipa / IEpa):
+    //   * H_{E chi}: lambda^2 is A1 (p=+1) -> the E-prefactor flips it on the
+    //     odd bond (sign -1); lambda^{5,7} are A2 (p=-1) -> the E-prefactor
+    //     leaves them with sign +1 on BOTH bonds (no q=0 cancellation).
+    //   * H_{B chi}: B is axial (no extra sign).  lambda^1 (p=+1) keeps +1 on
+    //     both bonds; lambda^{4,6} (p=-1) flip sign on the odd bond.
+    // -------------------------------------------------------------------------
+    {
+        const double kappaE_2x = config.get_param("kappaE_2x", 0.0);
+        const double kappaE_2y = config.get_param("kappaE_2y", 0.0);
+        const double kappaE_2z = config.get_param("kappaE_2z", 0.0);
+        const double kappaE_5x = config.get_param("kappaE_5x", 0.0);
+        const double kappaE_5y = config.get_param("kappaE_5y", 0.0);
+        const double kappaE_5z = config.get_param("kappaE_5z", 0.0);
+        const double kappaE_7x = config.get_param("kappaE_7x", 0.0);
+        const double kappaE_7y = config.get_param("kappaE_7y", 0.0);
+        const double kappaE_7z = config.get_param("kappaE_7z", 0.0);
+
+        const double kappaB_1x = config.get_param("kappaB_1x", 0.0);
+        const double kappaB_1y = config.get_param("kappaB_1y", 0.0);
+        const double kappaB_1z = config.get_param("kappaB_1z", 0.0);
+        const double kappaB_4x = config.get_param("kappaB_4x", 0.0);
+        const double kappaB_4y = config.get_param("kappaB_4y", 0.0);
+        const double kappaB_4z = config.get_param("kappaB_4z", 0.0);
+        const double kappaB_6x = config.get_param("kappaB_6x", 0.0);
+        const double kappaB_6y = config.get_param("kappaB_6y", 0.0);
+        const double kappaB_6z = config.get_param("kappaB_6z", 0.0);
+
+        const bool any_assistE = kappaE_2x || kappaE_2y || kappaE_2z
+                              || kappaE_5x || kappaE_5y || kappaE_5z
+                              || kappaE_7x || kappaE_7y || kappaE_7z;
+        const bool any_assistB = kappaB_1x || kappaB_1y || kappaB_1z
+                              || kappaB_4x || kappaB_4y || kappaB_4z
+                              || kappaB_6x || kappaB_6y || kappaB_6z;
+
+        // Tm Gell-Mann column indices for the active channels.
+        constexpr int LAM1 = 0, LAM2 = 1, LAM4 = 3, LAM5 = 4, LAM6 = 5, LAM7 = 6;
+
+        // E-assisted exchange tensor for one bond (3 Fe components x 8 Tm channels).
+        // Fe spin components are in the LOCAL sigma_C frame.
+        // Odd-bond signs: E is polar (flips under I), S_loc is invariant under I.
+        //   lambda^2  (A1, inv-even): odd sign = (-E)(+S)(+lam) -> -1.
+        //   lambda^5,7 (A2, inv-odd): odd sign = (-E)(+S)(-lam) -> +1.
+        auto build_assistE = [&](bool odd) {
+            SpinMatrix T = SpinMatrix::Zero(3, 8);
+            const double s2  = odd ? -1.0 : 1.0;  // lambda^2: flips on odd bond
+            const double s57 = 1.0;               // lambda^{5,7}: +1 on both bonds
+            T(0, LAM2) = s2 * kappaE_2x;
+            T(1, LAM2) = s2 * kappaE_2y;
+            T(2, LAM2) = s2 * kappaE_2z;
+            T(0, LAM5) = s57 * kappaE_5x;
+            T(1, LAM5) = s57 * kappaE_5y;
+            T(2, LAM5) = s57 * kappaE_5z;
+            T(0, LAM7) = s57 * kappaE_7x;
+            T(1, LAM7) = s57 * kappaE_7y;
+            T(2, LAM7) = s57 * kappaE_7z;
+            return T;
+        };
+
+        // B-assisted exchange tensor for one bond.
+        // Fe spin components are in the LOCAL sigma_C frame.
+        // Odd-bond signs: B is axial (invariant under I), S_loc invariant under I.
+        //   lambda^1  (A1, inv-even): odd sign = (+B)(+S)(+lam) -> +1.
+        //   lambda^4,6 (A2, inv-odd): odd sign = (+B)(+S)(-lam) -> -1.
+        auto build_assistB = [&](bool odd) {
+            SpinMatrix T = SpinMatrix::Zero(3, 8);
+            const double s1  = 1.0;               // lambda^1: +1 on both bonds
+            const double s46 = odd ? -1.0 : 1.0;  // lambda^{4,6}: flip on odd bond
+            T(0, LAM1) = s1 * kappaB_1x;
+            T(1, LAM1) = s1 * kappaB_1y;
+            T(2, LAM1) = s1 * kappaB_1z;
+            T(0, LAM4) = s46 * kappaB_4x;
+            T(1, LAM4) = s46 * kappaB_4y;
+            T(2, LAM4) = s46 * kappaB_4z;
+            T(0, LAM6) = s46 * kappaB_6x;
+            T(1, LAM6) = s46 * kappaB_6y;
+            T(2, LAM6) = s46 * kappaB_6z;
+            return T;
+        };
+
+        if (any_assistE || any_assistB) {
+            for (const auto& pair : bond_pairs) {
+                if (any_assistE) {
+                    mixed_uc.set_mixed_bilinear_drive(
+                        build_assistE(false),
+                        pair.even.fe, pair.even.tm, pair.even.off, /*envelope=*/0);
+                    mixed_uc.set_mixed_bilinear_drive(
+                        build_assistE(true),
+                        pair.odd.fe, pair.odd.tm, pair.odd.off, /*envelope=*/0);
+                }
+                if (any_assistB) {
+                    mixed_uc.set_mixed_bilinear_drive(
+                        build_assistB(false),
+                        pair.even.fe, pair.even.tm, pair.even.off, /*envelope=*/1);
+                    mixed_uc.set_mixed_bilinear_drive(
+                        build_assistB(true),
+                        pair.odd.fe, pair.odd.tm, pair.odd.off, /*envelope=*/1);
+                }
+            }
         }
     }
 

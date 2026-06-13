@@ -375,6 +375,9 @@ public:
     // Hexagonal plaquettes for ring exchange
     // Each hexagon stores 6 site indices in order (i,j,k,l,m,n) going around the ring
     vector<std::array<size_t, 6>> hexagons;
+    // Optional static per-plaquette J7 offsets, used to model Na/stacking-induced
+    // ring-exchange landscapes without adding direct spin pinning.
+    vector<double> plaquette_j7_offsets;
     // For each site, list of hexagons it belongs to and its position (0-5) within each hexagon
     vector<vector<std::pair<size_t, size_t>>> site_hexagons;
     
@@ -498,6 +501,47 @@ public:
         for (size_t i = 0; i < lattice_size; ++i) {
             field[i] = B;
         }
+    }
+
+    /**
+     * Apply additive plaquette-resolved J7 disorder.
+     *
+     * Format: plaquette_index dJ7, with optional '#' comments. The offsets are
+     * static in time and added to the uniform/pump-dependent J7 on each hexagon.
+     */
+    void apply_plaquette_j7_disorder_from_file(const string& filename) {
+        if (filename.empty()) return;
+        ifstream in(filename);
+        if (!in) {
+            throw std::runtime_error("Cannot open plaquette J7 disorder file: " + filename);
+        }
+        if (plaquette_j7_offsets.size() != hexagons.size()) {
+            plaquette_j7_offsets.assign(hexagons.size(), 0.0);
+        }
+
+        string line;
+        size_t line_no = 0;
+        size_t n_loaded = 0;
+        while (std::getline(in, line)) {
+            ++line_no;
+            const size_t hash = line.find('#');
+            if (hash != string::npos) line = line.substr(0, hash);
+            std::istringstream iss(line);
+            size_t plaquette;
+            double dJ7;
+            if (!(iss >> plaquette >> dJ7)) {
+                continue;
+            }
+            if (plaquette >= plaquette_j7_offsets.size()) {
+                throw std::runtime_error(
+                    "Plaquette J7 disorder index out of range at line " +
+                    std::to_string(line_no) + " in " + filename);
+            }
+            plaquette_j7_offsets[plaquette] += dJ7;
+            ++n_loaded;
+        }
+        std::cout << "Applied " << n_loaded << " plaquette J7 disorder offsets from "
+                  << filename << std::endl;
     }
 
     /**
@@ -873,6 +917,11 @@ public:
         return spin_phonon_params.J7 +
                spin_phonon_params.lambda_E1_J7_0 * (qx * qx + qy * qy);
     }
+    double effective_J7_for_hexagon(size_t hex_idx, double qx, double qy) const {
+        const double offset = hex_idx < plaquette_j7_offsets.size()
+                                ? plaquette_j7_offsets[hex_idx] : 0.0;
+        return effective_J7(qx, qy) + offset;
+    }
     double dJ7_dQx_E1(double qx, double /*qy*/) const {
         return 2.0 * spin_phonon_params.lambda_E1_J7_0 * qx;
     }
@@ -1245,7 +1294,8 @@ public:
                             bool T_zero = false,
                             size_t n_deterministics = 1000,
                             bool adiabatic_phonons = false,
-                            bool gaussian_move = false);
+                            bool gaussian_move = false,
+                            bool preserve_initial_phonons = false);
     
     /**
      * Deterministic T=0 sweep: align each spin with its local field

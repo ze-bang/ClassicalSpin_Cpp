@@ -133,22 +133,22 @@ struct SpinConfig {
     size_t pt_optimization_iterations = 20;        // Number of feedback iterations
     
     // Pump-probe parameters (SU2 / default)
+    string pump_table_file = "";  // Optional two-column pulse table for mixed 2DCS
     double pump_amplitude = 1.0;
     double pump_width = 10.0;
     double pump_frequency = 0.0;
     double pump_time = 0.0;
     vector<vector<double>> pump_directions = {{0, 1, 0}};  // Per-sublattice pump directions (general, dimension inferred from lattice)
+    vector<vector<double>> pump_directions_2 = {};  // Optional distinct SU2 direction for the SECOND (probe @ tau) pulse in 2DCS. Empty = same as pump_directions.
     
     // SU3-specific pump parameters (for mixed lattice systems)
     double pump_amplitude_su3 = 1.0;
     double pump_width_su3 = 10.0;
     double pump_frequency_su3 = 0.0;
+    double pump_frequency_su3_2 = 0.0;  // Optional 2nd SU3 carrier color (two-color CEF drive); 0 = single color
     vector<vector<double>> pump_directions_su3 = {{0, 0, 1, 0, 0, 0, 0, 0}};  // Per-sublattice pump directions for SU3 sublattice in mixed systems
+    vector<vector<double>> pump_directions_su3_2 = {};  // Optional distinct SU3 direction for the SECOND (probe @ tau) pulse in 2DCS. Empty = same as pump_directions_su3.
     bool auto_su3_pump = false;  // Auto-compute SU3 pulse from physical 3D direction using mu_act and g_ratio_tm
-
-    // Tabulated (experimental) pump pulse: path to a two-column text/CSV file
-    // with columns (time_ps, E_field). Overrides the Gaussian model when non-empty.
-    std::string pump_table_file = "";
     
     double probe_amplitude = 0.1;
     double probe_width = 10.0;
@@ -266,6 +266,7 @@ struct SpinConfig {
     string pinning_field_config = ""; // Optional rows: site Bx By Bz
     string nn_exchange_disorder_config = ""; // Optional rows: site partner scale
     string nn_exchange_channel_disorder_config = ""; // Optional rows: site partner dJ dK dGamma dGammap
+    string plaquette_j7_disorder_config = ""; // Optional rows: plaquette_index dJ7
     bool use_ferromagnetic_init = false;
     vector<double> ferromagnetic_direction = {0, 0, 1};  // Ferromagnetic init direction (dimension inferred from lattice)
     
