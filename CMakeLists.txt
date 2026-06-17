@@ -578,6 +578,10 @@ add_optimized_executable(diag_tmfeo3_tm_gs_quench src/apps/diag_tmfeo3_tm_gs_que
 # (Pbnm Bertaut analysis) and compare against canonical Gamma_2 reference.
 add_optimized_executable(diag_tmfeo3_fe_random_starts src/apps/diag_tmfeo3_fe_random_starts.cpp)
 
+# Diagnostic: Fe-only GS via deterministic (Method-D) SA, one sample.
+# Verifies that build_tmfeo3_fe with chi=0 converges to Gamma_2 (Fx, Gz).
+add_optimized_executable(diag_tmfeo3_fe_gs_anneal src/apps/diag_tmfeo3_fe_gs_anneal.cpp)
+
 # Diagnostic: numerical verification that the cross-peak (omega_qAFM, omega_E12)
 # is FORBIDDEN under H//z by the sublattice selection rule sigma_A . sigma_F = 0.
 # chi2z drives sigma_F (uniform) lambda^2; M_z_Tm = sigma_A . lambda^2 = 0.

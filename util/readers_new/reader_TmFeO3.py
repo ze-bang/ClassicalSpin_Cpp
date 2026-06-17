@@ -1438,12 +1438,10 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             elif 'pulse_width_SU2' in f['/metadata'].attrs:
                 pulse_width = float(f['/metadata'].attrs['pulse_width_SU2'])
         
-        # Compute time cutoff: excludes only the FIRST pulse (centered at t=0),
-        # i.e. M0's lone pulse / M01's first pulse / what we informally call the
-        # "pump" in C++ convention.  The SECOND pulse fires at t = current_tau
-        # and stays inside the FFT window for any |τ| > pulse_window_sigma·σ —
-        # that is exactly the χ³ rephasing/non-rephasing signal we want to
-        # Fourier-resolve in (ω_τ, ω_t).  See audit C2.
+        # Compute time cutoff: the probe is at t=0 (fixed second pulse).
+        # For the FFT we only use t > t_cutoff (after the probe transient dies).
+        # The time-domain images use the FULL times array including t < 0
+        # (pre-probe region where the pump fired at t=τ < 0).
         t_cutoff = pulse_window_sigma * pulse_width
         t_valid_idx = np.where(times > t_cutoff)[0]
         if len(t_valid_idx) > 0:
@@ -1743,7 +1741,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
             # buffers are only consumed downstream when save_intermediates=True;
             # skipping them saves 3 × spin_dim × n_tau × n_t doubles of RAM
             # (~10 GB at production scale).
-            M_NL_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
+            M_NL_SU2  = np.zeros((spin_dim_SU2, tau_step, length))
+            M01_td_SU2 = np.zeros((spin_dim_SU2, tau_step, length))  # for time-domain plot
+            M1_td_SU2  = np.zeros((spin_dim_SU2, tau_step, length))  # for time-domain plot
             if save_intermediates:
                 M0_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
                 M1_comp_SU2 = np.zeros((spin_dim_SU2, tau_step, length))
@@ -1762,7 +1762,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 M1_T = tau_group['M1_global_SU2'][:].T   # (spin_dim, n_t)
                 M01_T = tau_group['M01_global_SU2'][:].T
                 n = min(n_t_M0, M1_T.shape[1], M01_T.shape[1], length)
-                M_NL_SU2[:, i, :n] = M01_T[:, :n] - M0_SU2_T[:, :n] - M1_T[:, :n]
+                M_NL_SU2[:, i, :n]  = M01_T[:, :n] - M0_SU2_T[:, :n] - M1_T[:, :n]
+                M01_td_SU2[:, i, :n] = M01_T[:, :n]
+                M1_td_SU2[:, i, :n]  = M1_T[:, :n]
                 if save_intermediates:
                     M0_comp_SU2[:, i, :n] = M0_SU2_T[:, :n]
                     M1_comp_SU2[:, i, :n] = M1_T[:, :n]
@@ -1884,19 +1886,40 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 )
             
             if not skip_plots:
-                fig_debug, axes_debug = plt.subplots(n_rows, 1, figsize=(5, 3.5*n_rows))
-                if n_rows == 1:
-                    axes_debug = [axes_debug]
+                # Time-domain window masks for the side panel
+                _td_tau_mask = tau <= 0
+                _td_t_mask   = (times >= -40.0) & (times <= 40.0)
+                _td_tau_ax   = tau[_td_tau_mask]
+                _td_t_ax     = times[_td_t_mask]
+                _td_extent   = [
+                    _td_t_ax[0]   if len(_td_t_ax)   else -40.0,
+                    _td_t_ax[-1]  if len(_td_t_ax)   else  40.0,
+                    _td_tau_ax[0] if len(_td_tau_ax) else -40.0,
+                    _td_tau_ax[-1] if len(_td_tau_ax) else  0.0,
+                ]
+
+                fig_debug, axes_debug = plt.subplots(n_rows, 5, figsize=(20, 3.5*n_rows), squeeze=False)
+
+                def _td_imshow(ax, data2d, title, extent):
+                    vmax = np.abs(data2d).max() or 1.0
+                    im = ax.imshow(data2d, origin='lower', aspect='auto', cmap='RdBu_r',
+                                   vmin=-vmax, vmax=vmax, extent=extent)
+                    plt.colorbar(im, ax=ax, pad=0.02)
+                    ax.set_xlabel('$t$ (ps)')
+                    ax.set_ylabel('$\\tau$ (ps)')
+                    ax.set_title(title)
+                    ax.axhline(0, color='k', lw=0.5, ls=':')
+                    ax.axvline(0, color='k', lw=0.5, ls=':')
             
                 for comp in range(n_rows):
                     label = component_labels_SU2[comp] if comp < len(component_labels_SU2) else f'comp{comp}'
                     M_NL_comp_FF = M_NL_SU2_FFs[comp]
-                    ax_freq = axes_debug[comp]
+                    ax_freq = axes_debug[comp, 0]
                     im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                               norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax_freq.set_xlabel('$\\omega_t$ (THz)')
                     ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax_freq.set_title(f'{label}-component (freq domain)')
+                    ax_freq.set_title(f'{label} (freq domain)')
                     if omega_t_window is not None:
                         ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
@@ -1904,6 +1927,25 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     if energy_levels_mev:
                         add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                     plt.colorbar(im_freq, ax=ax_freq)
+
+                    if _td_tau_mask.any() and _td_t_mask.any():
+                        # Col 1: M_NL
+                        _td_imshow(axes_debug[comp, 1],
+                                   M_NL_SU2[comp][_td_tau_mask][:, _td_t_mask],
+                                   f'{label} $M_{{NL}}$', _td_extent)
+                        # Col 2: M01
+                        _td_imshow(axes_debug[comp, 2],
+                                   M01_td_SU2[comp][_td_tau_mask][:, _td_t_mask],
+                                   f'{label} $M_{{01}}$', _td_extent)
+                        # Col 3: M0 (tiled over τ)
+                        m0_row = M0_SU2_T[comp, :length][_td_t_mask]
+                        m0_td  = np.tile(m0_row, (_td_tau_mask.sum(), 1))
+                        _td_imshow(axes_debug[comp, 3], m0_td,
+                                   f'{label} $M_{{0}}$', _td_extent)
+                        # Col 4: M1
+                        _td_imshow(axes_debug[comp, 4],
+                                   M1_td_SU2[comp][_td_tau_mask][:, _td_t_mask],
+                                   f'{label} $M_{{1}}$', _td_extent)
             
                 plt.tight_layout()
                 plt.savefig(os.path.join(dir, "M_NL_SU2_components_debug.pdf"), dpi=100)
@@ -1926,7 +1968,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
 
             # Pre-allocate (spin_dim, n_tau, n_t) arrays.  M0/M1/M01 component
             # buffers are only used in save_intermediates branches below.
-            M_NL_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
+            M_NL_SU3   = np.zeros((spin_dim_SU3, tau_step, length))
+            M01_td_SU3 = np.zeros((spin_dim_SU3, tau_step, length))  # for time-domain plot
+            M1_td_SU3  = np.zeros((spin_dim_SU3, tau_step, length))  # for time-domain plot
             if save_intermediates:
                 M0_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
                 M1_comp_SU3 = np.zeros((spin_dim_SU3, tau_step, length))
@@ -1944,7 +1988,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 M1_T = tau_group['M1_global_SU3'][:].T   # (spin_dim, n_t)
                 M01_T = tau_group['M01_global_SU3'][:].T
                 n = min(n_t_M0, M1_T.shape[1], M01_T.shape[1], length)
-                M_NL_SU3[:, i, :n] = M01_T[:, :n] - M0_SU3_T[:, :n] - M1_T[:, :n]
+                M_NL_SU3[:, i, :n]   = M01_T[:, :n] - M0_SU3_T[:, :n] - M1_T[:, :n]
+                M01_td_SU3[:, i, :n] = M01_T[:, :n]
+                M1_td_SU3[:, i, :n]  = M1_T[:, :n]
                 if save_intermediates:
                     M0_comp_SU3[:, i, :n] = M0_SU3_T[:, :n]
                     M1_comp_SU3[:, i, :n] = M1_T[:, :n]
@@ -2071,19 +2117,40 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                 )
             
             if not skip_plots:
-                fig_debug, axes_debug = plt.subplots(n_rows, 1, figsize=(5, 3*n_rows))
-                if n_rows == 1:
-                    axes_debug = [axes_debug]
+                # Time-domain window masks (cheap to recompute; safe for SU3-only runs)
+                _td3_tau_mask = tau <= 0
+                _td3_t_mask   = (times >= -40.0) & (times <= 40.0)
+                _td3_tau_ax   = tau[_td3_tau_mask]
+                _td3_t_ax     = times[_td3_t_mask]
+                _td3_extent   = [
+                    _td3_t_ax[0]   if len(_td3_t_ax)   else -40.0,
+                    _td3_t_ax[-1]  if len(_td3_t_ax)   else  40.0,
+                    _td3_tau_ax[0] if len(_td3_tau_ax) else -40.0,
+                    _td3_tau_ax[-1] if len(_td3_tau_ax) else  0.0,
+                ]
+
+                fig_debug, axes_debug = plt.subplots(n_rows, 5, figsize=(20, 3*n_rows), squeeze=False)
+
+                def _td3_imshow(ax, data2d, title, extent):
+                    vmax = np.abs(data2d).max() or 1.0
+                    im = ax.imshow(data2d, origin='lower', aspect='auto', cmap='RdBu_r',
+                                   vmin=-vmax, vmax=vmax, extent=extent)
+                    plt.colorbar(im, ax=ax, pad=0.02)
+                    ax.set_xlabel('$t$ (ps)')
+                    ax.set_ylabel('$\\tau$ (ps)')
+                    ax.set_title(title)
+                    ax.axhline(0, color='k', lw=0.5, ls=':')
+                    ax.axvline(0, color='k', lw=0.5, ls=':')
             
                 for comp in range(n_rows):
                     label = component_labels_SU3[comp] if comp < len(component_labels_SU3) else f'comp{comp}'
                     M_NL_comp_FF = M_NL_SU3_FFs[comp]
-                    ax_freq = axes_debug[comp]
+                    ax_freq = axes_debug[comp, 0]
                     im_freq = ax_freq.imshow(M_NL_comp_FF, origin='lower', aspect='auto', cmap='gnuplot2',
                                               norm=_get_norm(M_NL_comp_FF, norm_type), extent=[omega_t[0], omega_t[-1], omega_tau[0], omega_tau[-1]])
                     ax_freq.set_xlabel('$\\omega_t$ (THz)')
                     ax_freq.set_ylabel('$\\omega_{\\tau}$ (THz)')
-                    ax_freq.set_title(f'{label}-component (freq domain)')
+                    ax_freq.set_title(f'{label} (freq domain)')
                     if omega_t_window is not None:
                         ax_freq.set_xlim(omega_t_window[0], omega_t_window[1])
                     if omega_tau_window is not None:
@@ -2091,6 +2158,25 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                     if energy_levels_mev:
                         add_energy_level_lines(ax_freq, energy_levels_mev, omega_t_window)
                     plt.colorbar(im_freq, ax=ax_freq)
+
+                    if _td3_tau_mask.any() and _td3_t_mask.any():
+                        # Col 1: M_NL
+                        _td3_imshow(axes_debug[comp, 1],
+                                    M_NL_SU3[comp][_td3_tau_mask][:, _td3_t_mask],
+                                    f'{label} $M_{{NL}}$', _td3_extent)
+                        # Col 2: M01
+                        _td3_imshow(axes_debug[comp, 2],
+                                    M01_td_SU3[comp][_td3_tau_mask][:, _td3_t_mask],
+                                    f'{label} $M_{{01}}$', _td3_extent)
+                        # Col 3: M0 (tiled over τ)
+                        m0_row = M0_SU3_T[comp, :length][_td3_t_mask]
+                        m0_td  = np.tile(m0_row, (_td3_tau_mask.sum(), 1))
+                        _td3_imshow(axes_debug[comp, 3], m0_td,
+                                    f'{label} $M_{{0}}$', _td3_extent)
+                        # Col 4: M1
+                        _td3_imshow(axes_debug[comp, 4],
+                                    M1_td_SU3[comp][_td3_tau_mask][:, _td3_t_mask],
+                                    f'{label} $M_{{1}}$', _td3_extent)
             
                 plt.tight_layout()
                 plt.savefig(os.path.join(dir, "M_NL_SU3_components_debug.pdf"), dpi=100)
@@ -2108,6 +2194,171 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
     print(f"  Output files saved to: {dir}")
     
     return results
+
+
+def plot_time_evolution(dir: str,
+                        t_window: Tuple[float, float] = (-40.0, 40.0),
+                        tau_window: Tuple[float, float] = (-40.0, 0.0),
+                        energy_levels_mev: Optional[Dict[str, float]] = None,
+                        title_suffix: str = '') -> None:
+    """Plot magnetisation time evolution from a pump-probe HDF5 file.
+
+    Produces ``time_evolution.pdf`` in *dir* with four rows:
+
+      Row 0: Fe  Sx global  (SU2 comp 0)
+      Row 1: Fe  Sz global  (SU2 comp 2)
+      Row 2: Tm  λ₂ global  (SU3 comp 1)
+      Row 3: Tm  λ₅ global  (SU3 comp 4)
+
+    Each row shows two panels:
+      • Left  panel: M0(t) reference trajectory (no pump).
+      • Right panel: M_NL(t, τ) as a 2D image (x = t, y = τ).
+                     Only the τ ≤ 0 half is shown (``tau_window`` default).
+
+    Args:
+        dir:               Directory containing ``pump_probe_spectroscopy.h5``.
+        t_window:          (t_min, t_max) in ps.  Default (-40, 40).
+        tau_window:        (tau_min, tau_max) in ps for M_NL image.  Default (-40, 0).
+        energy_levels_mev: Optional dict of reference energies (meV) drawn as
+                           vertical dashed lines on the M0 panel.
+        title_suffix:      Appended to the figure suptitle (e.g. "H // a").
+    """
+    hdf5_path = os.path.join(dir, 'pump_probe_spectroscopy.h5')
+    if not os.path.isfile(hdf5_path):
+        print(f'  [plot_time_evolution] HDF5 not found: {hdf5_path}')
+        return
+
+    # Channels: (label, sublattice, component_index)
+    CHANNELS = [
+        ('Fe $S_x$ (global)',     'SU2', 0),
+        ('Fe $S_z$ (global)',     'SU2', 2),
+        ('Tm $\\lambda_2$ (gl.)', 'SU3', 1),
+        ('Tm $\\lambda_5$ (gl.)', 'SU3', 4),
+    ]
+
+    t_min, t_max   = t_window
+    tau_min, tau_max = tau_window
+
+    with h5py.File(hdf5_path, 'r') as f:
+        times    = f['/reference/times'][:]
+        tau_vals = f['/tau_scan/tau_values'][:]
+
+        t_mask   = (times >= t_min)    & (times <= t_max)
+        tau_mask = (tau_vals >= tau_min) & (tau_vals <= tau_max)
+        t_plot   = times[t_mask]
+        tau_plot = tau_vals[tau_mask]
+
+        # Load reference trajectories
+        ref = {}
+        for su in ('SU2', 'SU3'):
+            key = f'/reference/M_global_{su}'
+            if key in f:
+                ref[su] = f[key][:]   # (n_t_full, spin_dim)
+
+        # Build M_NL 2D images: dict[(su, ci)] → (n_tau_sel, n_t_sel)
+        n_tau_sel = int(tau_mask.sum())
+        n_t_sel   = int(t_mask.sum())
+        mnl_2d = {(su, ci): np.zeros((n_tau_sel, n_t_sel))
+                  for _, su, ci in CHANNELS}
+
+        n_full = len(times)
+        for k, ti in enumerate(np.where(tau_mask)[0]):
+            grp = f[f'/tau_scan/tau_{ti}']
+            for su in ('SU2', 'SU3'):
+                k_m1  = f'M1_global_{su}'
+                k_m01 = f'M01_global_{su}'
+                if k_m1 not in grp or k_m01 not in grp:
+                    continue
+                m1  = grp[k_m1][:]    # (n_t_full, spin_dim)
+                m01 = grp[k_m01][:]
+                m0  = ref.get(su)
+                if m0 is None:
+                    continue
+                n = min(n_full, m1.shape[0], m01.shape[0], m0.shape[0])
+                t_mask_n = t_mask[:n]
+                for _, csu, ci in CHANNELS:
+                    if csu != su or ci >= m1.shape[1]:
+                        continue
+                    mnl_row = (m01[:n, ci] - m0[:n, ci] - m1[:n, ci])[t_mask_n]
+                    mnl_2d[(su, ci)][k, :len(mnl_row)] = mnl_row
+
+    # ── figure layout ──────────────────────────────────────────────────────
+    N_ROWS = len(CHANNELS)
+    fig, axes = plt.subplots(N_ROWS, 2, figsize=(11, 2.8 * N_ROWS), squeeze=False)
+
+    # Reference energy period lines on M0 panel
+    def _draw_ref_lines(ax):
+        if not energy_levels_mev or not len(t_plot):
+            return
+        colors_ref = {'e1': '#88ccff', 'e2': '#aaffaa', 'e2_e1': '#ff88ff'}
+        for name, val in energy_levels_mev.items():
+            if val is None or val <= 0:
+                continue
+            period = 4.135667696 / val   # ps (h/E; E in meV)
+            c = colors_ref.get(name, 'yellow')
+            for t0 in np.arange(t_plot[0], t_plot[-1], period):
+                ax.axvline(t0, color=c, lw=0.5, ls='--', alpha=0.5)
+
+    td_extent = [
+        t_plot[0]   if len(t_plot)   else t_min,
+        t_plot[-1]  if len(t_plot)   else t_max,
+        tau_plot[0] if len(tau_plot) else tau_min,
+        tau_plot[-1] if len(tau_plot) else tau_max,
+    ]
+
+    for row, (ch_label, su, ci) in enumerate(CHANNELS):
+        ax_ref = axes[row, 0]
+        ax_td  = axes[row, 1]
+
+        # Left: M0 reference trace
+        m0 = ref.get(su)
+        if m0 is not None and ci < m0.shape[1]:
+            ax_ref.plot(t_plot, m0[t_mask, ci], color='steelblue', lw=0.8)
+        ax_ref.set_ylabel(ch_label, fontsize=7)
+        ax_ref.yaxis.set_label_coords(-0.22, 0.5)
+        if row == 0:
+            ax_ref.set_title('$M_0(t)$ — reference (no pump)', fontsize=8)
+        _draw_ref_lines(ax_ref)
+        ax_ref.axhline(0, color='grey', lw=0.4, ls=':')
+        ax_ref.set_xlim(t_min, t_max)
+        ax_ref.tick_params(labelsize=6)
+        if row < N_ROWS - 1:
+            ax_ref.set_xticklabels([])
+        else:
+            ax_ref.set_xlabel('$t$ (ps)', fontsize=7)
+
+        # Right: M_NL(τ, t) as 2D image
+        img = mnl_2d.get((su, ci))
+        if img is not None and img.size > 0:
+            vmax = np.abs(img).max() or 1.0
+            im = ax_td.imshow(
+                img, origin='lower', aspect='auto', cmap='RdBu_r',
+                vmin=-vmax, vmax=vmax, extent=td_extent,
+            )
+            plt.colorbar(im, ax=ax_td, pad=0.02)
+        ax_td.set_xlim(t_min, t_max)
+        ax_td.set_ylim(tau_min, tau_max)
+        ax_td.axhline(0, color='k', lw=0.5, ls=':')
+        ax_td.axvline(0, color='k', lw=0.5, ls=':')
+        if row == 0:
+            ax_td.set_title('$M_{NL}(t,\\tau)$ — time domain', fontsize=8)
+        ax_td.tick_params(labelsize=6)
+        ax_td.set_ylabel('$\\tau$ (ps)', fontsize=7)
+        if row < N_ROWS - 1:
+            ax_td.set_xticklabels([])
+        else:
+            ax_td.set_xlabel('$t$ (ps)', fontsize=7)
+
+    suptitle = 'TmFeO3 time evolution  —  χ=0 baseline'
+    if title_suffix:
+        suptitle += f'  —  {title_suffix}'
+    fig.suptitle(suptitle, fontsize=9, y=1.01)
+    fig.tight_layout(rect=[0.08, 0, 1.0, 1.0])
+
+    out = os.path.join(dir, 'time_evolution.pdf')
+    fig.savefig(out, dpi=120, bbox_inches='tight')
+    plt.close(fig)
+    print(f'  Saved → {out}')
 
 
 def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float, float]] = None,

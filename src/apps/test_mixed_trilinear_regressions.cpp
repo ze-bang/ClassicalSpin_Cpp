@@ -21,6 +21,40 @@ bool nearly_equal(double lhs, double rhs, double abs_tol, double rel_tol) {
     return std::abs(lhs - rhs) <= abs_tol + rel_tol * scale;
 }
 
+// Klein-four Pbnm rotations and the induced SU(3) baking matrices, mirroring
+// the (frame-less) builder: the per-sublattice Pbnm rotations are baked into
+// the stored tensors, so the Tm field returned by the runtime is in the global
+// Gell-Mann basis.
+std::array<Eigen::Matrix3d, 4> klein_frames() {
+    std::array<Eigen::Matrix3d, 4> R;
+    R[0] = Eigen::Vector3d(+1.0, +1.0, +1.0).asDiagonal();
+    R[1] = Eigen::Vector3d(+1.0, -1.0, -1.0).asDiagonal();
+    R[2] = Eigen::Vector3d(-1.0, +1.0, -1.0).asDiagonal();
+    R[3] = Eigen::Vector3d(-1.0, -1.0, +1.0).asDiagonal();
+    return R;
+}
+
+Eigen::MatrixXd su3_bake(const Eigen::Matrix3d& mu_act, const Eigen::Matrix3d& R_xyz) {
+    constexpr int active_im[3] = {1, 4, 6};
+    constexpr int active_re[3] = {0, 3, 5};
+    Eigen::MatrixXd F = Eigen::MatrixXd::Identity(8, 8);
+    const Eigen::Matrix3d blk = mu_act.fullPivLu().solve(R_xyz * mu_act);
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) {
+            F(active_im[r], active_im[c]) = blk(r, c);
+            F(active_re[r], active_re[c]) = blk(r, c);
+        }
+    return F;
+}
+
+Eigen::Matrix3d tmfeo3_mu_act() {
+    Eigen::Matrix3d mu_act;
+    mu_act << 0.0,   2.3915, 0.9128,
+              0.0,  -2.7866, 0.4655,
+              5.264, 0.0,    0.0;
+    return mu_act;
+}
+
 bool vector_nearly_equal(const Eigen::VectorXd& lhs, const Eigen::VectorXd& rhs,
                         double abs_tol, double rel_tol) {
     if (lhs.size() != rhs.size()) {
@@ -295,60 +329,61 @@ bool check_shorthand_equivalence(std::ostream& out) {
 }
 
 bool check_mirror_odd_inversion_pairing(std::ostream& out) {
-    // The mirror-odd A2 channels (lambda4, lambda6; inversion parity p=-1) are
-    // ANTISYMMETRIC between inversion-paired Tm sites.  Pbnm inversion permutes
-    // the Tm sublattices by sigma^Tm(I) = (03)(12) and sends lambda4,6 -> -lambda4,6,
-    // while the uniform q=0 Fe spins are invariant (axial, Fe at inversion centers).
-    // Hence the static A2 field obeys  h(Tm0) = -h(Tm3),  h(Tm1) = -h(Tm2).
-    //
-    // (Note: the earlier frame-less W builder produced an accidental per-site
-    // cancellation h=0; with the Pbnm-covariant sigma_C Fe frames now applied to
-    // W, the correct symmetry statement is this inversion antisymmetry, verified
-    // term-by-term in diag_tmfeo3_pbnm_invariance.)
-    struct OddChannelCase {
-        const char* param_name;
-        Eigen::Index lambda_index;
-    };
-    const OddChannelCase odd_cases[] = {
-        {"W4_xz", 3},
-        {"W6_xz", 5}
-    };
-    // Inversion-paired Tm sublattices, sigma^Tm(I) = (03)(12).
-    const std::array<std::pair<int, int>, 2> inv_pairs = {{{0, 3}, {1, 2}}};
+    // In the frame-less (global Gell-Mann) convention the per-sublattice Pbnm
+    // rotations are baked into the stored W tensors, so the runtime Tm field is
+    // in the global basis.  The mirror-odd A2 channels (lambda4, lambda6) no
+    // longer obey a raw per-index antisymmetry; instead the FULL 8-vector field
+    // satisfies the exact lab-frame inversion covariance forced by Pbnm:
+    //   h[mu] = X(I,mu)^T h[sigma_I(mu)],   X(I,mu) = F_{sigma(mu)} P F_mu,
+    // with sigma_I^Tm = (03)(12), F_k the induced SU(3) baking matrix of Tm
+    // sublattice k, and P = diag(+,+,+,-,-,-,-,+) the inversion parity.  This is
+    // the same covariance verified term-by-term in diag_tmfeo3_pbnm_invariance,
+    // applied here to the static W-induced Tm field for uniform q=0 Fe order.
+    const auto R = klein_frames();
+    const Eigen::Matrix3d mu_act = tmfeo3_mu_act();
+    std::array<Eigen::MatrixXd, 4> F;
+    for (int k = 0; k < 4; ++k) F[k] = su3_bake(mu_act, R[k]);
 
-    for (const auto& odd_case : odd_cases) {
-        for (int orbit = 1; orbit <= 4; ++orbit) {
-            SpinConfig config = make_base_config();
-            config.set_param(odd_case.param_name, 1.0);
-            set_active_w_orbit(config, orbit);
+    Eigen::VectorXd parity(8);
+    parity << +1, +1, +1, -1, -1, -1, -1, +1;
+    const Eigen::MatrixXd P = parity.asDiagonal();
 
-            Lattice lattice = make_lattice_from_config(config);
-            assign_uniform_q0_spins(lattice);
+    // sigma_I^Tm = (03)(12).
+    const std::array<int, 4> sigmaI = {3, 2, 1, 0};
 
-            std::array<double, 4> h{};
-            for (size_t site = 0; site < lattice.lattice_size_SU3 && site < 4; ++site) {
-                h[site] = lattice.get_local_field_SU3(site)(odd_case.lambda_index);
-            }
+    for (int orbit = 1; orbit <= 4; ++orbit) {
+        SpinConfig config = make_base_config();
+        set_reference_symmetric_tensor_terms(config);   // all W channels active
+        set_active_w_orbit(config, orbit);
 
-            for (const auto& pr : inv_pairs) {
-                if (!nearly_equal(h[pr.first], -h[pr.second], kAbsTol, kRelTol)) {
-                    out << "[FAIL] Odd W channel " << odd_case.param_name
-                        << " not inversion-antisymmetric for orbit " << orbit
-                        << ": h(Tm" << pr.first << ")=" << h[pr.first]
-                        << ", h(Tm" << pr.second << ")=" << h[pr.second]
-                        << " (expected h(Tm" << pr.first << ") = -h(Tm" << pr.second << "))\n";
-                    return false;
-                }
-            }
-            // Guard against a trivial all-zero pass: the channel must be active.
-            const double max_abs =
-                std::max({std::abs(h[0]), std::abs(h[1]), std::abs(h[2]), std::abs(h[3])});
-            if (max_abs < kAbsTol) {
-                out << "[FAIL] Odd W channel " << odd_case.param_name
-                    << " produced no field at all for orbit " << orbit
-                    << " (expected a nonzero A2 field)\n";
+        Lattice lattice = make_lattice_from_config(config);
+        assign_uniform_q0_spins(lattice);
+
+        std::array<Eigen::VectorXd, 4> h;
+        double max_abs = 0.0;
+        for (int site = 0; site < 4; ++site) {
+            h[site] = lattice.get_local_field_SU3(static_cast<size_t>(site));
+            max_abs = std::max(max_abs, h[site].cwiseAbs().maxCoeff());
+        }
+
+        for (int mu = 0; mu < 4; ++mu) {
+            const int nu = sigmaI[mu];
+            // X(I,mu)^T = F_mu^T P F_{sigma(mu)}^T.
+            const Eigen::VectorXd expected =
+                F[mu].transpose() * P * F[nu].transpose() * h[nu];
+            if (!vector_nearly_equal(h[mu], expected, kAbsTol, kRelTol)) {
+                out << "[FAIL] W-induced Tm field violates Pbnm inversion covariance"
+                    << " for orbit " << orbit << " at Tm" << mu
+                    << " (expected h[" << mu << "] = X(I)^T h[" << nu << "])\n";
                 return false;
             }
+        }
+
+        // Guard against a trivial all-zero pass.
+        if (max_abs < kAbsTol) {
+            out << "[FAIL] W-induced Tm field is identically zero for orbit "
+                << orbit << " (expected a nonzero A2 field)\n";
+            return false;
         }
     }
 
