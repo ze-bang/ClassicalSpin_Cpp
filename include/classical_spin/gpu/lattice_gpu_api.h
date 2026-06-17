@@ -158,6 +158,61 @@ void compute_magnetization_gpu(
     std::vector<double>& mag_staggered
 );
 
+// ======================= Batched τ-scan API for 2DCS =======================
+
+/**
+ * Result of a batched GPU integration over B replicas (one per τ value).
+ *
+ * Memory layout of mag_data:
+ *   [t * B * 3 * spin_dim + b * 3 * spin_dim + m * spin_dim + d]
+ * where m = 0 → M_antiferro, m = 1 → M_local, m = 2 → M_global.
+ * All three are normalized by N (dividing by lattice_size).
+ */
+struct BatchedMagResult {
+    size_t B;
+    size_t spin_dim;
+    size_t n_time_points;
+    std::vector<double> times;     // [n_time_points]
+    std::vector<double> mag_data;  // [n_time_points * B * 3 * spin_dim]
+};
+
+/**
+ * GPU batched integration for 2DCS τ-parallelization.
+ *
+ * Runs B replicas of the same lattice simultaneously, each with a different
+ * second-pulse time t_pulse_2 = tau2_values[b].  The first-pulse time
+ * t_pulse_1, amplitude, width, and frequency are taken from the pulse
+ * parameters already set on the handle (via set_gpu_pulse).
+ *
+ * At every save_interval steps the kernel extracts per-replica magnetizations
+ * (antiferro, local, global) on-device and copies only those B×3×spin_dim
+ * doubles to the host — avoiding the B×N×spin_dim full-state download that
+ * would otherwise dominate the runtime.
+ *
+ * @param handle           GPU handle with lattice data + shared pulse params
+ * @param flat_initial_state  Initial spin state [N * spin_dim] (same for all replicas)
+ * @param tau2_values      Per-replica t_pulse_2 [B]
+ * @param afm_signs        AFM sublattice signs [N_atoms]
+ * @param sublattice_frames  Row-major 3×3 (or spin_dim×spin_dim) frames
+ *                           [N_atoms * spin_dim * spin_dim]
+ * @param T_start          Integration start time
+ * @param T_end            Integration end time
+ * @param dt               Fixed step size
+ * @param save_interval    Steps between magnetization snapshots (default: 1)
+ * @param method           Integration method; only "rk4" is supported for
+ *                         batched mode (default: "rk4")
+ */
+BatchedMagResult integrate_gpu_batched(
+    GPULatticeDataHandle* handle,
+    const std::vector<double>& flat_initial_state,
+    const std::vector<double>& tau2_values,
+    const std::vector<double>& afm_signs,
+    const std::vector<double>& sublattice_frames,
+    double T_start, double T_end, double dt,
+    size_t save_interval = 1,
+    const std::string& method = "rk4"
+);
+
 } // namespace gpu
 
 #endif // LATTICE_GPU_API_H

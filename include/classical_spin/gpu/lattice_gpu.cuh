@@ -33,6 +33,8 @@
 #include <vector>
 #include <utility>
 
+#include "classical_spin/gpu/ode/integrator.cuh"
+
 // ======================= GPU Data Structures =======================
 
 /**
@@ -616,32 +618,11 @@ struct GPULatticeData {
     thrust::device_vector<double> work_3;
     thrust::device_vector<double> local_field;
     
-    // RK stage storage (pre-allocated for high-order methods)
-    // These avoid repeated allocation in step functions
-    thrust::device_vector<double> k1, k2, k3, k4, k5, k6, k7;
-    thrust::device_vector<double> tmp_state;
+    // RK stage storage (pre-allocated, owned by the shared gpu::ode module).
+    // Persisting the workspace across steps avoids per-step reallocation.
+    ode::Workspace rk_ws;
     
     bool initialized = false;
-    
-    // Allocate RK working arrays based on method needs
-    void ensure_rk_arrays(size_t array_size, int stages) {
-        if (k1.size() < array_size) {
-            k1.resize(array_size, 0.0);
-            k2.resize(array_size, 0.0);
-            tmp_state.resize(array_size, 0.0);
-        }
-        if (stages >= 4 && k3.size() < array_size) {
-            k3.resize(array_size, 0.0);
-            k4.resize(array_size, 0.0);
-        }
-        if (stages >= 6 && k5.size() < array_size) {
-            k5.resize(array_size, 0.0);
-            k6.resize(array_size, 0.0);
-        }
-        if (stages >= 7 && k7.size() < array_size) {
-            k7.resize(array_size, 0.0);
-        }
-    }
 };
 
 /**

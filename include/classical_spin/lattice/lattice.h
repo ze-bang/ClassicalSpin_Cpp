@@ -5600,7 +5600,260 @@ private:
         cout << "GPU molecular dynamics complete!" << endl;
 #endif
     }
-    
+
+    /**
+     * GPU batched τ-scan for 2DCS.
+     *
+     * Runs all B τ-replicas simultaneously on the GPU.  Each replica has the
+     * same lattice (ground state + exchange + anisotropy) but a different
+     * second-pulse time t_pulse_2 = τ[b].  t_pulse_1 = 0 for all replicas.
+     *
+     * M0 is computed by a single GPU trajectory call.
+     * M01 for all τ is computed in one batched GPU call.
+     * M1 is synthesised from M0 (W1 time-shift, requires stationary GS).
+     *
+     * Output HDF5 schema matches pump_probe_spectroscopy_mpi.
+     */
+    void pump_probe_spectroscopy_gpu_batched(
+        const vector<SpinVector>& field_in,
+        double pulse_amp, double pulse_width, double pulse_freq,
+        double tau_start, double tau_end, double tau_step,
+        double T_start, double T_end, double T_step,
+        bool reuse_m0_for_m1,
+        double stationarity_tol,
+        const string& dir_name
+    ) {
+#ifndef HDF5_ENABLED
+        std::cerr << "[pump_probe_spectroscopy_gpu_batched] HDF5 support is required. Aborting." << std::endl;
+        return;
+#else
+        if (has_trilinear_interactions()) {
+            throw std::runtime_error(
+                "pump_probe_spectroscopy_gpu_batched: lattice has trilinear "
+                "couplings which are not supported on GPU.");
+        }
+
+        std::filesystem::create_directories(dir_name);
+
+        // ---- τ grid ----
+        const int tau_steps_i = static_cast<int>(
+            std::abs((tau_end - tau_start) / tau_step)) + 1;
+        std::vector<double> tau_values(tau_steps_i);
+        for (int i = 0; i < tau_steps_i; ++i)
+            tau_values[i] = tau_start + i * tau_step;
+
+        std::cout << "\n=== GPU Batched 2DCS (" << tau_steps_i << " τ values) ===" << std::endl;
+
+        // Ground state observables
+        const double E_ground = energy_density();
+        const SpinVector M_gnd_anti  = magnetization_local_antiferro();
+        const SpinVector M_gnd_local = magnetization_local();
+        const SpinVector M_gnd_glob  = magnetization_global();
+        const array<SpinVector, 3> M_ground_arr = {M_gnd_anti, M_gnd_local, M_gnd_glob};
+
+        save_positions(dir_name + "/positions.txt");
+        save_spin_config(dir_name + "/initial_spins.txt");
+
+        const SpinConfig ground_state = spins;
+
+        // ---- W1 guard (must hold for batched path: M1 is synthesised from M0) ----
+        if (!reuse_m0_for_m1) {
+            std::cerr << "[pump_probe_spectroscopy_gpu_batched] requires reuse_m0_for_m1=true "
+                         "(M1 is synthesised from M0). Use the CPU MPI path otherwise." << std::endl;
+            return;
+        }
+        {
+            const double max_dS = max_dSdt_norm_no_drive();
+            std::cout << "  [W1] max |dS/dt| = " << max_dS
+                      << " (tol=" << stationarity_tol << ")" << std::endl;
+            if (max_dS > stationarity_tol) {
+                std::cerr << "  [W1] GS is NOT stationary — batched GPU path requires "
+                             "M1 synthesis. Increase stationarity_tol or use the CPU MPI path."
+                          << std::endl;
+                return;
+            }
+            std::cout << "  [W1] GS stationary → synthesising M1 from M0." << std::endl;
+        }
+
+        // ---- Step 1+2: M0 + all M01 in ONE batched GPU call ----
+        // The batch carries (1 + B) replicas on an IDENTICAL time grid:
+        //   replica 0      → reference M0 (second pulse pushed far past T_end so it
+        //                    never fires; equivalent to a single-pulse run)
+        //   replica 1..B   → M01 at delay τ[b-1]
+        // Running M0 through the same integrator guarantees M0/M1/M01 share the
+        // exact same time axis (critical for the 2DCS difference signal).
+        std::cout << "[1/2] Batched GPU integration (" << (tau_steps_i + 1)
+                  << " replicas = 1 reference + " << tau_steps_i << " τ)..." << std::endl;
+
+        const double t_pulse2_disabled = T_end + 100.0 * std::max(pulse_width, 1.0);
+        std::vector<double> batch_tau2(tau_steps_i + 1);
+        batch_tau2[0] = t_pulse2_disabled;                 // M0 reference
+        for (int i = 0; i < tau_steps_i; ++i)
+            batch_tau2[i + 1] = tau_values[i];             // M01 replicas
+
+        // Shared pulse params (t_pulse_1 = 0; t_pulse_2 is per-replica).
+        set_pulse(field_in, 0.0, field_in, 0.0 /*placeholder*/,
+                  pulse_amp, pulse_width, pulse_freq);
+        ensure_gpu_data_initialized();
+        update_gpu_pulse();   // uploads amp, width, freq, field dirs, t_pulse_1=0
+
+        ODEState h_init = spins_to_state(spins);
+        std::vector<double> flat_init(h_init.begin(), h_init.end());
+
+        // AFM signs and sublattice frames for on-device mag extraction
+        std::vector<double> flat_afm(N_atoms);
+        for (size_t a = 0; a < N_atoms; ++a)
+            flat_afm[a] = afm_sublattice_signs[a];
+
+        std::vector<double> flat_frames(N_atoms * spin_dim * spin_dim);
+        for (size_t a = 0; a < N_atoms; ++a)
+            for (size_t r = 0; r < spin_dim; ++r)
+                for (size_t c = 0; c < spin_dim; ++c)
+                    flat_frames[a * spin_dim * spin_dim + r * spin_dim + c] =
+                        sublattice_frames[a](r, c);
+
+        gpu::BatchedMagResult batched = gpu::integrate_gpu_batched(
+            gpu_handle_,
+            flat_init, batch_tau2,
+            flat_afm, flat_frames,
+            T_start, T_end, T_step,
+            /*save_interval=*/ 1,
+            /*method=*/ "rk4"
+        );
+
+        std::cout << "  Done: " << batched.n_time_points << " time pts × "
+                  << (tau_steps_i + 1) << " replicas." << std::endl;
+
+        // Helper: extract PumpProbeTrajectory for batch replica index `b`.
+        const size_t B_sz = batched.B;
+        auto traj_for = [&](size_t b) -> PumpProbeTrajectory {
+            PumpProbeTrajectory traj;
+            traj.reserve(batched.n_time_points);
+            for (size_t ti = 0; ti < batched.n_time_points; ++ti) {
+                const double t    = batched.times[ti];
+                const double* base = batched.mag_data.data()
+                    + ti * B_sz * 3 * spin_dim
+                    + b  * 3 * spin_dim;
+                SpinVector M_anti  = Eigen::Map<const Eigen::VectorXd>(base + 0 * spin_dim, spin_dim);
+                SpinVector M_local = Eigen::Map<const Eigen::VectorXd>(base + 1 * spin_dim, spin_dim);
+                SpinVector M_glob  = Eigen::Map<const Eigen::VectorXd>(base + 2 * spin_dim, spin_dim);
+                traj.push_back({t, {M_anti, M_local, M_glob}});
+            }
+            return traj;
+        };
+
+        // Replica 0 is the M0 reference.
+        PumpProbeTrajectory M0_trajectory = traj_for(0);
+        spins = ground_state;
+
+        // ---- Step 3: Write HDF5 (exact schema of pump_probe_spectroscopy_mpi) ----
+        std::cout << "[2/2] Writing HDF5..." << std::endl;
+        const hsize_t time_points = static_cast<hsize_t>(batched.n_time_points);
+        string hdf5_file = dir_name + "/pump_probe_spectroscopy.h5";
+        try {
+            H5::H5File file(hdf5_file, H5F_ACC_TRUNC);
+
+            H5::Group meta     = file.createGroup("/metadata");
+            H5::Group ref_grp  = file.createGroup("/reference");
+            H5::Group tau_grp  = file.createGroup("/tau_scan");
+
+            // ---- /metadata (attributes) ----
+            {
+                H5::DataSpace scalar(H5S_SCALAR);
+                auto wa = [&](const char* nm, double v) {
+                    meta.createAttribute(nm, H5::PredType::NATIVE_DOUBLE, scalar)
+                        .write(H5::PredType::NATIVE_DOUBLE, &v);
+                };
+                auto wi = [&](const char* nm, size_t v) {
+                    meta.createAttribute(nm, H5::PredType::NATIVE_HSIZE, scalar)
+                        .write(H5::PredType::NATIVE_HSIZE, &v);
+                };
+                wi("lattice_size", lattice_size); wi("spin_dim", spin_dim); wi("N_atoms", N_atoms);
+                wa("pulse_amp",    pulse_amp);     wa("pulse_width", pulse_width);
+                wa("pulse_freq",   pulse_freq);    wa("T_start", T_start); wa("T_end", T_end);
+                wa("T_step",       T_step);        wa("tau_start", tau_start);
+                wa("tau_end",      tau_end);       wa("tau_step", tau_step);
+                wi("tau_steps",    static_cast<size_t>(tau_steps_i));
+                wa("ground_state_energy", E_ground);
+            }
+
+            // ---- /tau_scan/tau_values ----
+            {
+                hsize_t dim[1] = {(hsize_t)tau_steps_i};
+                H5::DataSpace sp(1, dim);
+                tau_grp.createDataSet("tau_values", H5::PredType::NATIVE_DOUBLE, sp)
+                       .write(tau_values.data(), H5::PredType::NATIVE_DOUBLE);
+            }
+
+            // ---- /reference (M0): times + M_antiferro/M_local/M_global ----
+            {
+                std::vector<double> times(time_points);
+                for (hsize_t i = 0; i < time_points; ++i) times[i] = M0_trajectory[i].first;
+                hsize_t td[1] = {time_points};
+                H5::DataSpace ts(1, td);
+                ref_grp.createDataSet("times", H5::PredType::NATIVE_DOUBLE, ts)
+                       .write(times.data(), H5::PredType::NATIVE_DOUBLE);
+
+                auto write_ref_mag = [&](const char* name, int mag_idx) {
+                    hsize_t dims[2] = {time_points, (hsize_t)spin_dim};
+                    H5::DataSpace ds(2, dims);
+                    std::vector<double> data(time_points * spin_dim);
+                    for (hsize_t t = 0; t < time_points; ++t)
+                        for (size_t d = 0; d < spin_dim; ++d)
+                            data[t * spin_dim + d] = M0_trajectory[t].second[mag_idx](d);
+                    ref_grp.createDataSet(name, H5::PredType::NATIVE_DOUBLE, ds)
+                           .write(data.data(), H5::PredType::NATIVE_DOUBLE);
+                };
+                write_ref_mag("M_antiferro", 0);
+                write_ref_mag("M_local",     1);
+                write_ref_mag("M_global",    2);
+            }
+
+            // ---- /tau_scan/tau_N: flat M1_*/M01_* datasets + tau_value attr ----
+            auto write_tau_mag = [&](H5::Group& g, const char* name,
+                                     const PumpProbeTrajectory& traj, int mag_idx) {
+                const size_t npts = traj.size();
+                hsize_t dims[2] = {(hsize_t)npts, (hsize_t)spin_dim};
+                H5::DataSpace ds(2, dims);
+                std::vector<double> data(npts * spin_dim);
+                for (size_t t = 0; t < npts; ++t)
+                    for (size_t d = 0; d < spin_dim; ++d)
+                        data[t * spin_dim + d] = traj[t].second[mag_idx](d);
+                g.createDataSet(name, H5::PredType::NATIVE_DOUBLE, ds)
+                 .write(data.data(), H5::PredType::NATIVE_DOUBLE);
+            };
+
+            for (size_t b = 0; b < (size_t)tau_steps_i; ++b) {
+                // Batch replica index is b+1 (replica 0 is the M0 reference).
+                PumpProbeTrajectory M01_traj = traj_for(b + 1);
+                PumpProbeTrajectory M1_traj  =
+                    synthesize_M1_from_M0(M0_trajectory, M_ground_arr, tau_values[b], T_step);
+
+                H5::Group tg = tau_grp.createGroup("tau_" + std::to_string(b));
+                {
+                    H5::DataSpace scalar(H5S_SCALAR); double tv = tau_values[b];
+                    tg.createAttribute("tau_value", H5::PredType::NATIVE_DOUBLE, scalar)
+                      .write(H5::PredType::NATIVE_DOUBLE, &tv);
+                }
+                write_tau_mag(tg, "M1_antiferro",  M1_traj,  0);
+                write_tau_mag(tg, "M1_local",      M1_traj,  1);
+                write_tau_mag(tg, "M1_global",     M1_traj,  2);
+                write_tau_mag(tg, "M01_antiferro", M01_traj, 0);
+                write_tau_mag(tg, "M01_local",     M01_traj, 1);
+                write_tau_mag(tg, "M01_global",    M01_traj, 2);
+            }
+
+            file.close();
+            std::cout << "  HDF5 written: " << hdf5_file << std::endl;
+        } catch (const H5::Exception& e) {
+            std::cerr << "[pump_probe_spectroscopy_gpu_batched] HDF5 error: "
+                      << e.getDetailMsg() << std::endl;
+        }
+
+        spins = ground_state;
+#endif  // HDF5_ENABLED
+    }
+
     /**
      * GPU version of single_pulse_drive using opaque API
      */

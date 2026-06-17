@@ -3,6 +3,33 @@
 
 #include <cuda_runtime.h>
 #include <cstddef>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+
+// ======================= CUDA error checking =======================
+// Host-side helper that turns a silent CUDA failure (bad launch config,
+// illegal memory access, out-of-memory, ...) into a loud C++ exception
+// instead of producing wrong numbers. Use GPU_CHECK(expr) around CUDA
+// runtime calls and GPU_CHECK_KERNEL() after a kernel launch.
+#ifndef __CUDACC_RTC__
+inline void gpu_check_impl(cudaError_t err, const char* what,
+                           const char* file, int line) {
+    if (err != cudaSuccess) {
+        std::string msg = std::string("CUDA error: ") + cudaGetErrorString(err) +
+                          " (" + what + ") at " + file + ":" + std::to_string(line);
+        throw std::runtime_error(msg);
+    }
+}
+#define GPU_CHECK(expr) ::gpu_check_impl((expr), #expr, __FILE__, __LINE__)
+// Synchronize and check both launch and execution errors of the last kernel.
+#define GPU_CHECK_KERNEL()                                                     \
+    do {                                                                       \
+        ::gpu_check_impl(cudaGetLastError(), "kernel launch", __FILE__, __LINE__); \
+        ::gpu_check_impl(cudaDeviceSynchronize(), "kernel execution",          \
+                         __FILE__, __LINE__);                                  \
+    } while (0)
+#endif
 
 // ======================= Double atomicAdd for older architectures =======================
 
@@ -334,18 +361,21 @@ void add_drive_field_device(double* local_field,
                             size_t atom, double amplitude, double width, double frequency,
                             double t_pulse_1, double t_pulse_2, double curr_time,
                             size_t spin_dim) {
-    if (amplitude > 0.0) {
-        double t1_diff = curr_time - t_pulse_1;
-        double t2_diff = curr_time - t_pulse_2;
-        double env1 = exp(-t1_diff * t1_diff / (2.0 * width * width));
-        double env2 = exp(-t2_diff * t2_diff / (2.0 * width * width));
-        double osc = cos(frequency * curr_time);
-        
+    // NOTE: this must match Lattice::drive_field_at_time_flat (CPU) exactly.
+    //   factor_i = amplitude * exp(-(dt_i / (2*width))^2) * cos(frequency * dt_i)
+    // with dt_i = curr_time - t_pulse_i, evaluated independently per pulse.
+    if (amplitude != 0.0) {
+        const double t1_diff = curr_time - t_pulse_1;
+        const double t2_diff = curr_time - t_pulse_2;
+        const double inv_2w = 1.0 / (2.0 * width);
+        const double a1 = t1_diff * inv_2w;
+        const double a2 = t2_diff * inv_2w;
+        const double factor1 = amplitude * exp(-a1 * a1) * cos(frequency * t1_diff);
+        const double factor2 = amplitude * exp(-a2 * a2) * cos(frequency * t2_diff);
+
         for (size_t i = 0; i < spin_dim; ++i) {
-            local_field[i] -= amplitude * osc * (
-                env1 * field_drive_1[atom * spin_dim + i] +
-                env2 * field_drive_2[atom * spin_dim + i]
-            );
+            local_field[i] -= factor1 * field_drive_1[atom * spin_dim + i]
+                            + factor2 * field_drive_2[atom * spin_dim + i];
         }
     }
 }

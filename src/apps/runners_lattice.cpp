@@ -582,7 +582,11 @@ void run_2dcs_spectroscopy(Lattice& lattice, const SpinConfig& config, int rank,
     // Determine parallelization strategy:
     // - If num_trials == 1 and parallel_tau is enabled: parallelize over tau (use MPI version)
     // - If num_trials > 1: parallelize over trials (original behavior)
-    bool use_tau_parallel = (config.num_trials == 1) && config.parallel_tau && (size > 1);
+    // GPU batched path: when use_gpu is requested with a single rank, the MPI
+    // function runs all tau-replicas in one batched GPU launch, so route there
+    // even when size == 1.
+    bool use_tau_parallel = (config.num_trials == 1) && config.parallel_tau
+                            && ((size > 1) || config.use_gpu);
     
     if (rank == 0) {
         cout << "Running 2D coherent spectroscopy (2DCS)..." << endl;

@@ -945,6 +945,32 @@
         MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
         
         std::filesystem::create_directories(dir_name);
+
+#ifdef CUDA_ENABLED
+        // ---- GPU batched τ-scan: all τ values in one parallel GPU launch ----
+        // When use_gpu=true and the lattice has no trilinear interactions, run
+        // all B τ-replicas simultaneously on the GPU instead of distributing
+        // them across MPI ranks.  This is the equivalent of MPI τ-parallelism
+        // for a single-GPU node: the GPU handles all replicas in one shot.
+        // Rank 0 does the work; remaining ranks (if any) just wait at the barrier.
+        if (use_gpu && !has_trilinear_interactions()) {
+            if (rank == 0) {
+                cout << "\n[pump_probe_spectroscopy_mpi] GPU batched τ-scan selected "
+                        "(use_gpu=true, " << ((int)(std::abs((tau_end - tau_start) / tau_step)) + 1)
+                     << " replicas)." << endl;
+                pump_probe_spectroscopy_gpu_batched(
+                    field_in,
+                    pulse_amp, pulse_width, pulse_freq,
+                    tau_start, tau_end, tau_step,
+                    T_start, T_end, T_step,
+                    reuse_m0_for_m1, stationarity_tol,
+                    dir_name
+                );
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+            return;
+        }
+#endif
         
         // Calculate total tau steps
         int tau_steps = static_cast<int>(std::abs((tau_end - tau_start) / tau_step)) + 1;
