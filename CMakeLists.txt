@@ -569,6 +569,13 @@ add_optimized_executable(bench_md src/apps/bench_md.cpp)
 # and tolerance combinations and prints speedup ratios.
 add_optimized_executable(bench_integrators src/apps/bench_integrators.cpp)
 
+# CPU-vs-GPU equivalence test for the in-house gpu::ode integrator module
+# on the FULLY COUPLED SU(2)/SU(3) TmFeO3 mixed lattice (Fe<->Tm mixed
+# bilinear chi + mixed trilinear W coupling). Drives a single pulse and
+# compares CPU vs GPU magnetisation trajectories across integration
+# methods (euler/rk2/rk4/ssprk53/dopri5). No-op when built without CUDA.
+add_optimized_executable(test_mixed_gpu_cpu_equivalence src/apps/test_mixed_gpu_cpu_equivalence.cpp)
+
 if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
     add_test(NAME e1_phonon_regressions COMMAND test_e1_phonon_regressions)
@@ -579,6 +586,8 @@ if(BUILD_TESTING)
     set_tests_properties(pulse_drive_tolerance PROPERTIES TIMEOUT 120)
     add_test(NAME pulse_chunking_alignment COMMAND test_pulse_chunking_alignment)
     set_tests_properties(pulse_chunking_alignment PROPERTIES TIMEOUT 30)
+    add_test(NAME mixed_gpu_cpu_equivalence COMMAND test_mixed_gpu_cpu_equivalence)
+    set_tests_properties(mixed_gpu_cpu_equivalence PROPERTIES TIMEOUT 300)
     add_test(NAME hdf5_pt_writer_smoke COMMAND test_hdf5_pt)
     set_tests_properties(hdf5_pt_writer_smoke PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
