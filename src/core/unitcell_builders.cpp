@@ -494,10 +494,23 @@ SpinMatrix tmfeo3_induced_su3_frame(const Eigen::Matrix3d& mu_act,
 //
 // Out-of-plane Fe0-Fe3 / Fe1-Fe2 c-axis bonds and all J_2 bonds carry pure
 // isotropic exchange.
-// Default Hamiltonian values: the locked Geom II + Geom III baseline
-// (see tmfeo3_2dcs_geomII_geomIII/README.md).  Picked so that:
-//   * the Gamma_2 (F_x, G_z) phase is the unique global minimum,
-//   * single-ion |Kc - Ka| ~ 0.0034 meV gives qFM ~ 0.38 THz,
+// Default Hamiltonian values: the locked Geom II + Geom III baseline,
+// calibrated to the qFM/qAFM magnon gaps (re-verified 2026-06-17 from
+// properly relaxed, stationary equilibria).  Picked so that:
+//   * the Gamma_2 (F_x, G_z) phase is the unique global minimum.  The in-plane
+//     a-c tilt mode is intentionally SOFT (this is the physical origin of
+//     TmFeO3's spin-reorientation transition), so the Gamma_2 well is shallow
+//     and random-start anneals reach it only ~40% of the time -- production
+//     ground states should be seeded from Gamma_2 and cold-quenched
+//     (n_deterministics >~ 1e5) rather than found from random starts.
+//   * in-plane |Ka - Kc| = 0.0034 meV gives qFM = 0.38 THz.  VERIFIED clean
+//     scaling from three stationary equilibria: q_FM^2 = 42.85*|Ka-Kc| (THz^2),
+//     i.e. q_FM = 6.55*sqrt(|Ka-Kc|) THz (in-plane Gx pump-probe peak, H//c).
+//     NB: raising |Ka-Kc| to stiffen the Gamma_2 selection DETUNES qFM upward
+//     (|Ka-Kc|=0.0077 -> 0.57 THz); the same stiffness sets both, so do NOT
+//     inflate Ka to 'fix' the Gamma_2 robustness.
+//   * out-of-plane |Kc| = 0.0187 meV (Kb=0) gives qAFM ~ 0.90 THz
+//     (out-of-plane Gy pump-probe peak under H//a, directly measured 0.907).
 //   * D1 = 0.049 meV gives a weak-FM canting consistent with the
 //     experimental F_x / G_z ratio,
 //   * D2 = 0 forbids any C_y component (Gamma_2 purity).
