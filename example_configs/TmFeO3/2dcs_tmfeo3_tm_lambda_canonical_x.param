@@ -23,17 +23,6 @@ Kc = -0.09
 D1 = 0.0
 D2 = 0.0
 
-# Tm Energy Splitting (in meV)
-e1 = 2.19190387888 #0.53*4.135667696 = 2.19190387888
-e2 = 5.33501132784 #1.29*4.135667696 = 5.33501132784
-
-# Tm-O (Fe-Tm coupling) scaling factors
-tm_alpha_scale = 1.0
-tm_beta_scale = 1.0
-
-# Fe-Tm Bilinear Coupling
-chii = 0.0     # χ parameter
-
 # Magnetic Field
 field_strength = 0.0
 field_direction = 0,1,0

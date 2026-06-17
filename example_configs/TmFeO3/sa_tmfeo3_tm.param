@@ -9,15 +9,6 @@ simulation_mode = simulated_annealing
 # Lattice Size
 lattice_size = 1,1,1
 
-# Tm Energy Splitting (in meV)
-# These define the crystal field splitting for the Tm ions
-e1 = 0.97
-e2 = 3.97
-
-# Tm field scaling factors
-tm_alpha_scale = 1.0
-tm_beta_scale = 1.0
-
 # Tm-Tm Interactions (optional)
 J_tm = 0.0      # Tm-Tm exchange coupling
 K_tm = 0.0      # Tm onsite anisotropy

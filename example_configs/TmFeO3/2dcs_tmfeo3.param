@@ -19,13 +19,6 @@ Kc = -0.09
 D1 = 0.0
 D2 = 0.0
 
-# Tm Parameters
-e1 = 0.97
-e2 = 3.97
-tm_alpha_scale = 1.0
-tm_beta_scale = 1.0
-chii = 0.05
-
 # Tm-Tm diagonal bilinear coupling (nearest neighbor)
 # Each Jtm_a couples λ_a ⊗ λ_a only (no cross terms)
 Jtm_1 = 0.0

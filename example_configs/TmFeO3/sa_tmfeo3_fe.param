@@ -23,11 +23,6 @@ Kc = -0.09
 D1 = 0.0
 D2 = 0.0
 
-# Tm Energy Splitting (in meV)
-e1 = 0.97
-e2 = 3.97
-
-
 # Simulated Annealing Parameters
 T_start = 20.0
 T_end = 0.01

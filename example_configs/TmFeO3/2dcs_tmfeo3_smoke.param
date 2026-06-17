@@ -19,32 +19,6 @@ Kc = -0.029
 D1 = 0.048
 D2 = 0.0
 
-e1 = 0.97
-e2 = 3.97
-tm_alpha_scale = 1.0
-tm_beta_scale = 1.0
-
-chi2x = 0.6
-chi2y = 0.0
-chi2z = 0.0
-chi5x = 0.6
-chi5y = 0.0
-chi5z = 0.0
-chi7x = 0.6
-chi7y = 0.0
-chi7z = 0.0
-
-u1 = 0.0
-u3 = 0.0
-u8 = 0.0
-v4 = 0.0
-v6 = 0.0
-w1 = 0.0
-w3 = 0.0
-w8 = 0.0
-w4 = 0.0
-w6 = 0.0
-
 field_strength = 0.0
 field_direction = 0,1,0
 

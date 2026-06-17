@@ -534,58 +534,11 @@ add_optimized_executable(test_global_frame_equivalence src/apps/test_tmfeo3_lega
 # ignores the retired frame-selection flags.
 add_optimized_executable(test_fe_global_frame_equivalence src/apps/test_tmfeo3_fe_legacy_frame_flags.cpp)
 
-# Standalone Gamma_2 diagnostic in the current canonical storage. Lifts the
-# legacy local-frame seed into the current Fe lab-frame storage before
-# polishing and prints Bertaut F/G/A/C in the lab frame for inspection.
-# NOT registered with CTest: SA is stochastic and small lattices have nearly
-# degenerate Gamma-domain twins.
-add_optimized_executable(diag_tmfeo3_gamma2_sa src/apps/diag_tmfeo3_gamma2_canonical.cpp)
-
-# Standalone runtime diagnostic for the TmFeO3 chi-only SU(3) path into
-# lambda_2. Uses the exact MixedLattice RHS to show when lambda_2 first
-# appears starting from the onsite CEF ground state.
-add_optimized_executable(diag_tmfeo3_chi_lambda2_path src/apps/diag_tmfeo3_chi_lambda2_path.cpp)
-
-# Runtime regression for the field-assisted Fe-Tm exchange terms H_{E chi} /
-# H_{B chi}: verifies the pulse-envelope-modulated mixed bilinears feed the
-# exact MixedLattice RHS (drive-only, channel gating, reciprocity, and q=0
-# non-cancellation of the E-assisted lambda^5 channel).
-add_optimized_executable(diag_tmfeo3_field_assisted_exchange src/apps/diag_tmfeo3_field_assisted_exchange.cpp)
-
-# Pbnm space-group invariance audit: defines the 8 Pbnm cosets + Fe/Tm
-# sublattice frame rotations and verifies term-by-term energy invariance of the
-# full TmFeO3 Hamiltonian assembled by build_tmfeo3().
-add_optimized_executable(diag_tmfeo3_pbnm_invariance src/apps/diag_tmfeo3_pbnm_invariance.cpp)
-
-# Self-contained validation of the SU(3) coherent-state classical spin
-# dynamics module (Zhang & Batista, PRB 104, 104409 (2021); Dahlbom et al.,
-# PRB 106, 054423 (2022)) applied to a single TmFeO3 Tm qutrit. Compares
-# the exact unitary integrator against an RK4 of the Bloch equation, checks
-# positivity/Casimir invariants, and audits the existing stored seed.
-add_optimized_executable(diag_tmfeo3_su3_coherent_state src/apps/diag_tmfeo3_su3_coherent_state.cpp)
-
 # Stand-alone utility to project an existing TmFeO3 SU(3) seed file onto
 # the closest physical qutrit pure-state representation, fixing the
 # negative-density-eigenvalue defect documented in
 # docs/tmfeo3_notes.tex (positive-cone section).
 add_optimized_executable(fix_tmfeo3_su3_seed src/apps/fix_tmfeo3_su3_seed.cpp)
-
-# Diagnostic: compare MC greedy quench vs SU(3) exact-diag vs single-shot
-# exact diagonalization for the Tm ground state in the Gamma_2 Fe background.
-add_optimized_executable(diag_tmfeo3_tm_gs_quench src/apps/diag_tmfeo3_tm_gs_quench.cpp)
-
-# Diagnostic: many random Fe starts -> classify converged state by Gamma irrep
-# (Pbnm Bertaut analysis) and compare against canonical Gamma_2 reference.
-add_optimized_executable(diag_tmfeo3_fe_random_starts src/apps/diag_tmfeo3_fe_random_starts.cpp)
-
-# Diagnostic: Fe-only GS via deterministic (Method-D) SA, one sample.
-# Verifies that build_tmfeo3_fe with chi=0 converges to Gamma_2 (Fx, Gz).
-add_optimized_executable(diag_tmfeo3_fe_gs_anneal src/apps/diag_tmfeo3_fe_gs_anneal.cpp)
-
-# Diagnostic: numerical verification that the cross-peak (omega_qAFM, omega_E12)
-# is FORBIDDEN under H//z by the sublattice selection rule sigma_A . sigma_F = 0.
-# chi2z drives sigma_F (uniform) lambda^2; M_z_Tm = sigma_A . lambda^2 = 0.
-add_optimized_executable(diag_tmfeo3_qafm_e12_xpeak src/apps/diag_tmfeo3_qafm_e12_xpeak.cpp)
 
 # Regression test for Ingredient XVIII: pulse-drive trajectories at
 # the new 1e-8 default must agree with the legacy 1e-10 reference to
@@ -620,10 +573,6 @@ if(BUILD_TESTING)
     add_test(NAME strain_phonon_regressions COMMAND test_strain_phonon_regressions)
     add_test(NAME e1_phonon_regressions COMMAND test_e1_phonon_regressions)
     add_test(NAME mixed_trilinear_regressions COMMAND test_mixed_trilinear_regressions)
-    add_test(NAME tmfeo3_field_assisted_exchange COMMAND diag_tmfeo3_field_assisted_exchange)
-    set_tests_properties(tmfeo3_field_assisted_exchange PROPERTIES TIMEOUT 60)
-    add_test(NAME tmfeo3_pbnm_invariance COMMAND diag_tmfeo3_pbnm_invariance)
-    set_tests_properties(tmfeo3_pbnm_invariance PROPERTIES TIMEOUT 60)
     add_test(NAME global_frame_equivalence COMMAND test_global_frame_equivalence)
     add_test(NAME fe_global_frame_equivalence COMMAND test_fe_global_frame_equivalence)
     add_test(NAME pulse_drive_tolerance COMMAND test_pulse_drive_tolerance)
