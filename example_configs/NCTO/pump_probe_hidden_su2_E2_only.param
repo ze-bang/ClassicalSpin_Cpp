@@ -1,0 +1,89 @@
+# NCTO E1 pump-probe near hidden-SU(2): E2-only magnetoelastic channel
+# =====================================================================
+#
+# This is the symmetry-breaking bond-nematic test.
+#
+# E2 directly distinguishes the three bond directions. With linear x
+# polarization, the induced quadratic tensor (Qx^2 - Qy^2, 2 Qx Qy) points
+# along a fixed axis and should preferentially bias one zigzag domain.
+#
+# Compared with the A1-only run, this is the channel that can coherently do
+# two jobs at once:
+# 1. destabilize the 3Q state,
+# 2. select a specific single-M zigzag descendant.
+
+system = NCTO
+simulation_mode = pump_probe
+
+lattice_size = 6,6,1
+output_dir = NCTO_E1_hidden_su2_E2_only
+num_trials = 1
+
+J = -1.0
+K = -6.0
+Gamma = 8.0
+Gammap = -4.0
+J2_A = 0.0
+J2_B = 0.0
+J3 = 0.0
+J7 = -0.10
+
+field_strength = 0.0
+field_direction = 0,0,1
+alpha_gilbert = 0.03
+
+omega_E1 = 4.0
+# Same 15-cycle decay convention as the A1-only run.
+gamma_E1 = 0.2543
+lambda_E1_quartic = 0.0
+Z_star = 1.0
+
+# E2-only: anisotropic channel on, A1 channel off
+lambda_E1_J_0 = 0.0
+lambda_E1_K_0 = 0.0
+lambda_E1_Gamma_0 = 0.0
+lambda_E1_Gammap_0 = 0.0
+
+lambda_E1_J_2 = 0.00
+lambda_E1_K_2 = 0.08
+lambda_E1_Gamma_2 = 0.00
+lambda_E1_Gammap_2 = 0.00
+lambda_E1_J7_0 = 0.0
+
+# Linear x-polarized pump to pin one E2 axis and hence one zigzag domain.
+pump_amplitude = 2.0
+pump_frequency = 4.0
+pump_time = 8.0
+pump_width = 6.0
+pump_phase = 0.0
+pump_polarization = 0.0
+
+probe_amplitude = 0.0
+probe_frequency = 4.0
+probe_time = 0.0
+probe_width = 1.0
+
+md_time_start = -4.0
+md_time_end = 80.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = rkf54
+
+initial_spin_config = NCTO_E1_hidden_su2_3Q_SA/sample_0/spins_T=0.txt
+relax_phonons = true
+phonon_only_relax = false
+adiabatic_phonons = false
+
+T_start = 0.0
+T_end = 0.0
+T_zero = true
+annealing_steps = 0
+cooling_rate = 1.0
+overrelaxation_rate = 0
+n_deterministics = 0
+
+# Analyze before/after with:
+#   ./build/analyze_phonon_m_order \
+#     example_configs/NCTO/pump_probe_hidden_su2_E2_only.param \
+#     NCTO_E1_hidden_su2_E2_only/sample_0/initial_spins.txt \
+#     NCTO_E1_hidden_su2_E2_only/sample_0/spins_final.txt

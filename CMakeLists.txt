@@ -526,6 +526,16 @@ add_optimized_executable(gneb_field_eval src/apps/gneb_field_eval.cpp src/apps/r
 # Regression tests for mixed SU2-SU3 trilinear bookkeeping
 add_optimized_executable(test_mixed_trilinear_regressions src/apps/test_mixed_trilinear_regressions.cpp)
 
+# SA ground-state finder for the full mixed (Fe+Tm) TmFeO3 system.
+# Uses biased Ka=0/Kc=-0.029 anisotropy to pin the Neel vector along c
+# and reliably reach the Gamma_2 (F_x, G_z) ground state from random starts.
+add_optimized_executable(diag_tmfeo3_gamma2_sa src/apps/diag_tmfeo3_gamma2_sa.cpp)
+
+# K^- component scan: turns on each of the 9 K^- entries one at a time
+# and reports the resulting Fe+Tm ground state.
+add_optimized_executable(diag_tmfeo3_kminus_scan src/apps/diag_tmfeo3_kminus_scan.cpp)
+add_optimized_executable(diag_tmfeo3_k2y_ramp   src/apps/diag_tmfeo3_k2y_ramp.cpp)
+
 # Regression test that legacy TmFeO3 frame-selection flags are ignored by the
 # current mixed builder.
 add_optimized_executable(test_global_frame_equivalence src/apps/test_tmfeo3_legacy_frame_flags.cpp)

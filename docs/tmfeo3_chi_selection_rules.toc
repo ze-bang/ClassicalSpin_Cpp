@@ -1,0 +1,27 @@
+\contentsline {section}{\numberline {1}Overview and main result}{1}{section.1}%
+\contentsline {section}{\numberline {2}Sigma vectors and Bertaut orthogonality}{2}{section.2}%
+\contentsline {section}{\numberline {3}Fe and Tm local frames}{2}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Fe sublattice frames}{2}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Tm sublattice frames}{3}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Bond connectivity: each Tm sees all four Fe}{3}{subsection.3.3}%
+\contentsline {section}{\numberline {4}Ground-state analysis: which channels activate $\lambda ^2$}{3}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Gamma$_2$ Fe spin background}{3}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Effective field on $\lambda ^2$ from each chi channel}{3}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Chi5 and chi7: exact cancellation by the inversion sign}{4}{subsection.4.3}%
+\contentsline {section}{\numberline {5}The H$\parallel c$ detector coupling}{6}{section.5}%
+\contentsline {section}{\numberline {6}Equation-of-motion analysis for the qAFM kick}{6}{section.6}%
+\contentsline {subsection}{\numberline {6.1}SU(3) equation of motion}{6}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}The qAFM kick}{7}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Time evolution of \boldmath $H_\chi [\lambda ^2]$ after the kick}{7}{subsection.6.3}%
+\contentsline {paragraph}{Chi2z.}{7}{section*.6}%
+\contentsline {paragraph}{Chi2x.}{7}{section*.7}%
+\contentsline {paragraph}{Chi2y.}{7}{section*.8}%
+\contentsline {subsection}{\numberline {6.4}Complete channel survey}{7}{subsection.6.4}%
+\contentsline {section}{\numberline {7}What would allow the cross-peak?}{8}{section.7}%
+\contentsline {section}{\numberline {8}Numerical verification}{9}{section.8}%
+\contentsline {paragraph}{Ground state ($\chi _{2z}=0.6$, Fe pinned to $\Gamma _2$).}{9}{section*.14}%
+\contentsline {paragraph}{$\chi _{2x}=0.6$, same Fe background.}{9}{section*.15}%
+\contentsline {paragraph}{qAFM kick dynamics ($\delta \theta = 0.04\,\mathrm {rad}$, chi2z).}{9}{section*.16}%
+\contentsline {section}{\numberline {9}Summary diagram}{10}{section.9}%
+\contentsline {section}{\numberline {A}Bond-by-bond verification: each Tm sees all four Fe}{10}{appendix.A}%
+\contentsline {section}{\numberline {B}Sigma vector inner product table}{11}{appendix.B}%

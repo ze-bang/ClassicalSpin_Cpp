@@ -1,0 +1,515 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{dsfont}
+\usepackage[hidelinks]{hyperref}
+
+\title{TmFeO$_3$ Hamiltonian and Tm Magnetization Readout}
+\author{}
+\date{\today}
+
+\DeclareMathOperator{\diag}{diag}
+\newcommand{\bS}{\mathbf{S}}
+\newcommand{\bh}{\mathbf{h}}
+\newcommand{\be}{\mathbf{e}}
+\newcommand{\bD}{\mathbf{D}}
+\newcommand{\Jeff}{\mathbf{J}^{\rm eff}}
+\newcommand{\deff}{\mathbf{d}^{\rm eff}}
+\newcommand{\half}{\tfrac{1}{2}}
+
+\begin{document}
+
+\maketitle
+
+This note summarizes the Hamiltonian implemented in
+\texttt{src/core/unitcell\_builders.cpp} for \texttt{build\_tmfeo3()},
+using the notation and physical definitions of the companion theory
+document \texttt{tmfeo3\_notes.tex}. Section~\ref{sec:readout} records
+how the effective Tm SU(3) variables are transformed when magnetization
+is saved, and Section~\ref{sec:drive} details the time-dependent drive.
+
+\tableofcontents
+
+% -------------------------------------------------------------------
+\section{Conventions}
+\label{sec:conventions}
+
+\subsection{Sites and sublattice frames}
+
+The mixed TmFeO$_3$ unit cell contains four Fe sites and four Tm sites.
+Fe spins are three-component SU(2) vectors $\bS_i = (S_i^x, S_i^y,
+S_i^z)$ with spin length $S$; Tm sites are stored as eight-component
+real Gell-Mann expectation-value vectors
+$\boldsymbol{\lambda}_j = (\lambda_1, \dots, \lambda_8)$ in the local
+crystal-field (CEF) basis.
+
+The four Pbnm sublattices are related by the Klein four-group of proper
+$\pi$-rotations $\{R_\mu\}_{\mu=0}^{3} = \{E, C_{2x}, C_{2y}, C_{2z}\}$,
+represented as diagonal matrices
+\begin{equation}
+R_0 = \diag(+,+,+),\quad R_1 = \diag(+,-,-),\quad
+R_2 = \diag(-,+,-),\quad R_3 = \diag(-,-,+).
+\end{equation}
+In the code, the same matrices are written as
+$D_\mu = \diag(\eta_{\mu,x}, \eta_{\mu,y}, \eta_{\mu,z})$.  A global
+spin is recovered from the local-frame spin by
+$S^\alpha_\mu\big|_{\rm glob} = (R_\mu)_{\alpha\alpha}\,\tilde S^\alpha_\mu\big|_{\rm loc}$.
+
+\subsection{Bertaut modes}
+
+The four sublattice combinations
+\begin{equation}
+\mathbf{X}_{\mathbf{n}} = \tfrac14\sum_{\mu=0}^{3} \sigma^X_\mu\,\bS_{\mathbf{n},\mu},
+\quad X \in \{F,G,C,A\},
+\end{equation}
+with sign vectors
+\begin{equation}
+\sigma^F=(+,+,+,+),\;\sigma^G=(+,-,-,+),\;
+\sigma^C=(+,+,-,-),\;\sigma^A=(+,-,+,-),
+\end{equation}
+span the Bertaut basis.  The inverse relation is
+$\bS_{\mathbf{n},\mu} = \sum_X \sigma^X_\mu\,\mathbf{X}_\mathbf{n}$.
+The $\Gamma_2$ ground state has $\mathbf{G} = G_z\hat z$,
+$\mathbf{F} = F_x\hat x$, $\mathbf{C} = C_y\hat y$, $\mathbf{A}\approx 0$.
+
+\subsection{Gell-Mann classification}
+
+The eight Gell-Mann generators are classified by mirror parity ($m_z$,
+site symmetry $C_s$) and time-reversal parity $T$:
+\begin{equation}
+\boxed{
+\begin{aligned}
+A_1^+\ (\text{mirror-even,}\ T\text{-even}):&\quad\lambda^1,\lambda^3,\lambda^8,\\
+A_1^-\ (\text{mirror-even,}\ T\text{-odd}):&\quad\lambda^2,\\
+A_2^+\ (\text{mirror-odd,}\ T\text{-even}):&\quad\lambda^4,\lambda^6,\\
+A_2^-\ (\text{mirror-odd,}\ T\text{-odd}):&\quad\lambda^5,\lambda^7.
+\end{aligned}}
+\label{eq:lambdaclass}
+\end{equation}
+The $T$-odd generators $\lambda^2, \lambda^5, \lambda^7$ carry
+the projected magnetic dipole $\Jeff$; the $T$-even off-diagonal
+generators $\lambda^1, \lambda^4, \lambda^6$ carry the projected electric
+dipole $\deff$.
+
+\subsection{Projected dipole operators}
+
+In the $T$-symmetric gauge the three lowest Tm CEF singlets
+$\{|E_1(A_1)\rangle, |E_2(A_1)\rangle, |E_3(A_2)\rangle\}$ have
+numerical matrix elements (see \texttt{tmfeo3\_notes.tex} \S III.C)
+\begin{equation}
+\Jeff = g_J\mu_B\begin{pmatrix}
+J_z^{\rm eff} \\ J_x^{\rm eff} \\ J_y^{\rm eff}
+\end{pmatrix}
+= g_J\mu_B\begin{pmatrix}
++5.264\,\lambda^2 \\
++2.392\,\lambda^5 + 0.913\,\lambda^7 \\
+-2.787\,\lambda^5 + 0.466\,\lambda^7
+\end{pmatrix},
+\label{eq:Jeff}
+\end{equation}
+which defines the $3\times 8$ active-channel matrix $\mu_{\rm act}$
+used in the code:
+\begin{equation}
+\mu_{\rm act} =
+\begin{pmatrix}
+0 & \mu_{2x} & 0 & 0 & \mu_{5x} & 0 & \mu_{7x} & 0 \\
+0 & \mu_{2y} & 0 & 0 & \mu_{5y} & 0 & \mu_{7y} & 0 \\
+0 & \mu_{2z} & 0 & 0 & \mu_{5z} & 0 & \mu_{7z} & 0
+\end{pmatrix},
+\end{equation}
+so that $(J^\alpha)^{\rm eff} = \sum_{a\in\{2,5,7\}}\mu_{\alpha a}\lambda^a$.
+The projected electric dipole $\deff$ populates $\lambda^1$ (via $d_{x,y}$)
+and $\lambda^{4,6}$ (via $d_z$).
+
+% -------------------------------------------------------------------
+\section{Fe Sector}
+\label{sec:Fe}
+
+\subsection{Four-sublattice Hamiltonian}
+
+The Fe sector is the standard four-sublattice orthoferrite Hamiltonian
+with Heisenberg exchange, Dzyaloshinskii--Moriya (DM) interaction, and
+biaxial single-ion anisotropy:
+\begin{equation}
+\begin{aligned}
+H_{\rm Fe} = {}&
+\sum_{\langle ij\rangle_{\parallel}} J_1\,\bS_i\!\cdot\!\bS_j
+ + \sum_{\langle ij\rangle_c} J_{1c}\,\bS_i\!\cdot\!\bS_j
+ + \sum_{\langle\!\langle ij\rangle\!\rangle} J_2\,\bS_i\!\cdot\!\bS_j\\
+ &+\sum_{\langle ij\rangle_{\parallel}} \bD_{ij}\cdot(\bS_i\times\bS_j)\\
+ &- \sum_i \bigl[K_a(S_i^x)^2 + K_b(S_i^y)^2 + K_c(S_i^z)^2\bigr].
+\end{aligned}
+\label{eq:HFe}
+\end{equation}
+Here $J_1$ (\texttt{J1ab}), $J_{1c}$ (\texttt{J1c}), $J_2$
+(\texttt{J2ab}/\texttt{J2c}) are the in-plane NN, c-axis NN, and NNN
+exchange constants; $K_{a,b,c}$ (\texttt{Ka}, \texttt{Kb}, \texttt{Kc})
+are the biaxial single-ion anisotropy constants.
+
+\subsection{DM bond pattern}
+
+The DM vectors on in-plane NN bonds are fixed by $Pbnm$ symmetry.
+With bonds at height $z = \tfrac{1}{2}$ and $z = 0$ distinguished by
+the $S_1$ screw axis:
+\begin{equation}
+\bD^{(z=\tfrac{1}{2})}_{ij} = (0,+D_1,+D_2),\qquad
+\bD^{(z=0)}_{ij} = (0,-D_1,+D_2).
+\label{eq:Dpattern}
+\end{equation}
+The sign reversal of $D_1$ between the two planes is required by
+the $S_1$ screw that maps one $z$-plane to the other; $D_2$ is
+symmetric.
+
+\subsubsection*{Code implementation}
+
+The code encodes each bond as a lab-frame exchange matrix via
+\begin{equation}
+J(J_{\rm iso}, D_y, D_z) =
+\begin{pmatrix}
+J_{\rm iso} & D_z & -D_y \\
+-D_z & J_{\rm iso} & 0 \\
+D_y & 0 & J_{\rm iso}
+\end{pmatrix}.
+\end{equation}
+With the parameter names in \texttt{apply\_tmfeo3\_fe\_sector()}, the
+NN exchange matrices assigned to each bond set are
+\begin{align}
+J_a^{(10)} = J_b^{(10)} &= J(J_{1ab}, +D_1, +D_2), \notag\\
+J_a^{(23)} = J_b^{(23)} &= J(J_{1ab}, -D_1, +D_2), \\
+J_c,\; J_{2a},\; J_{2b},\; J_{2c} &= J_{\rm iso}\,\mathds{1}_{3\times 3}.\notag
+\end{align}
+The antisymmetric part of $J_{ij}$ is identified with
+$\bD_{ij}\cdot(\bS_i\times\bS_j)$, reproducing Eq.~\eqref{eq:Dpattern}.
+
+\subsection{Fe Zeeman (static field)}
+
+A static external field $\bh = h\,\hat n$ adds
+\begin{equation}
+H_{\rm Fe,Z} = -g_e\mu_B\sum_i \bh\cdot\bS_i,
+\end{equation}
+where in the code the $g_e\mu_B$ prefactor is absorbed into
+\texttt{field\_strength} $= g_e\mu_B\,h$ and
+\texttt{field\_direction} $= \hat n$.
+
+% -------------------------------------------------------------------
+\section{Tm Sector}
+\label{sec:Tm}
+
+\subsection{CEF Hamiltonian: three-level truncation}
+
+The microscopic Tm$^{3+}$ CEF Hamiltonian is a Stevens-operator
+sum over even-$|m|$ terms allowed by the $C_s$ site symmetry,
+truncated to the lowest three singlets
+$\{|E_1(A_1)\rangle, |E_2(A_1)\rangle, |E_3(A_2)\rangle\}$ with
+energies $\epsilon_1 = 0$, $\epsilon_2 \equiv e_1$,
+$\epsilon_3 \equiv e_2$ (code parameters \texttt{e1}, \texttt{e2}).
+In the truncated qutrit basis the diagonal part is
+\begin{equation}
+H_{\rm CEF}^{(0)} = \bar\epsilon\,\mathds{1}
++ h_3^{(0)}\lambda^3 + h_8^{(0)}\lambda^8,
+\label{eq:HTm0}
+\end{equation}
+with
+\begin{equation}
+h_3^{(0)} = \frac{e_1}{2},\qquad
+h_8^{(0)} = \frac{e_1 - 2e_2}{2\sqrt{3}},
+\end{equation}
+and $\bar\epsilon = (e_1 + e_2)/3$ irrelevant.  Numerically,
+$h_3^{(0)} = -0.96$\,meV, $h_8^{(0)} = -3.97$\,meV.  The code stores
+the on-site SU(3) field vector
+\begin{equation}
+\mathbf{B}_{\rm CEF} = (0, 0, \alpha, 0, 0, 0, 0, \beta),
+\end{equation}
+with
+\begin{equation}
+\alpha = -h_3^{(0)}\,s_\alpha,\qquad
+\beta  = -h_8^{(0)}\,s_\beta,
+\end{equation}
+and scale factors \texttt{tm\_alpha\_scale} $= s_\alpha$,
+\texttt{tm\_beta\_scale} $= s_\beta$ (default $1$).
+The on-site Tm CEF contribution per site is
+$H_{\rm CEF}^{(0)} = -\mathbf{B}_{\rm CEF}\cdot\boldsymbol\lambda_j$.
+
+\subsection{Tm Zeeman coupling (static field)}
+
+The static field couples to the projected magnetic dipole:
+\begin{equation}
+H_{\rm Tm,Z} = -\sum_j \Jeff_j \cdot \bh
+= -g_{\rm ratio}\sum_j\sum_{a\in\{2,5,7\}} B_a\,\lambda_a^{(j)},
+\end{equation}
+where $B_a = \sum_\alpha \mu_{\alpha a}\,h_\alpha$ projects the field
+onto the active $T$-odd channels, and
+\texttt{g\_ratio\_tm} $= g_{\rm ratio} = g_J/g_e$ is the
+Tm-to-Fe $g$-factor ratio.
+
+\subsection{Tm--Tm diagonal bilinears}
+
+Nearest-neighbor Tm--Tm interactions are parameterized as a diagonal
+coupling in the Gell-Mann basis:
+\begin{equation}
+H_{\rm TmTm} = \frac{1}{2}\sum_{\langle j,j'\rangle}\sum_{a=1}^{8}
+J_a^{\rm Tm}\,\lambda_a^{(j)}\lambda_a^{(j')},
+\end{equation}
+implemented via the $8\times 8$ diagonal matrix
+$J_{\rm Tm} = \diag(J_{\rm tm,1}, \dots, J_{\rm tm,8})$ on the
+bond geometry listed in \texttt{apply\_tmfeo3\_tm\_sector()}.
+
+% -------------------------------------------------------------------
+\section{Fe--Tm Couplings}
+\label{sec:FeTm}
+
+\subsection{Bilinear Fe--Tm coupling ($\chi$ term)}
+
+Because the Hamiltonian must be $T$-even and the Fe spin $\bS$ is
+$T$-odd, only the $T$-odd Gell-Mann generators $\lambda^{2,5,7}$
+can appear linearly (Eq.~\eqref{eq:lambdaclass}).  The most general
+$Pbnm$-symmetric bilinear Fe--Tm coupling is
+\begin{equation}
+H_\chi = \sum_{(i,j)}\sum_{\alpha=x,y,z}\sum_{a\in\{2,5,7\}}
+\chi^{\alpha a}_{ij}\,S_i^\alpha\,\lambda_j^a,
+\label{eq:Hchi}
+\end{equation}
+with bond-resolved coupling tensor $\chi^{\alpha a}_{ij}$.  The
+active channels in matrix form are
+\begin{equation}
+\chi =
+\begin{pmatrix}
+0 & \chi_{2x} & 0 & 0 & \chi_{5x} & 0 & \chi_{7x} & 0 \\
+0 & \chi_{2y} & 0 & 0 & \chi_{5y} & 0 & \chi_{7y} & 0 \\
+0 & \chi_{2z} & 0 & 0 & \chi_{5z} & 0 & \chi_{7z} & 0
+\end{pmatrix}.
+\end{equation}
+At $\mathbf{q}=0$ only $\bar\chi^{2z}\neq 0$ survives the
+inversion-pair cancellation; this is the dominant channel coupling
+$\lambda^2$ ($A_1^-$) to $G_z$ (the $\Gamma_2$ N\'{e}el order
+parameter).  The off-diagonal mirror-odd channels
+$\chi^{5x,7x,5y,7y}$ cancel at $\mathbf{q}=0$ due to the Pbnm
+bond-pair structure.
+
+The code stores 16 explicit inversion-related bond pairs;
+on the inversion-odd partner bond the $\lambda^5$ and $\lambda^7$
+channels flip sign while $\lambda^2$ does not.
+
+\subsection{Mixed trilinear $W$ term}
+
+The $T$-even generators $\lambda^{1,3,4,6,8}$ do not appear in the
+linear coupling $H_\chi$, but they enter at second order via virtual
+Tm transitions.  Expanding to quadratic order in the Bertaut
+amplitudes, the resulting $\mathbf{q}=0$ effective Hamiltonian is
+\begin{equation}
+\begin{aligned}
+H_W = {}&
+{-}\sum_{\mathbf{n},j}\bigl[
+u_1\lambda^1_{\mathbf{n},j}
++ u_3\lambda^3_{\mathbf{n},j}
++ u_8\lambda^8_{\mathbf{n},j}\bigr]
+\mathcal{I}^{\rm Fe}_{A_1^+}(\mathbf{n})\\
+&-\sum_{\mathbf{n},j}\bigl[
+v_4\lambda^4_{\mathbf{n},j}
++ v_6\lambda^6_{\mathbf{n},j}\bigr]
+\mathcal{I}^{\rm Fe}_{A_2^+}(\mathbf{n}),
+\end{aligned}
+\label{eq:HW}
+\end{equation}
+where the $A_1^+$ (mirror-even) Fe bilinears are
+\begin{equation}
+\mathcal{I}^{\rm Fe}_{A_1^+}
+= \alpha_1 G_z^2 + \alpha_2 F_x^2 + \alpha_3 C_y^2 + \cdots
+\end{equation}
+and the $A_2^+$ (mirror-odd) ones are
+\begin{equation}
+\mathcal{I}^{\rm Fe}_{A_2^+}
+= \beta_1 F_xG_z + \beta_2 G_zC_y + \cdots
+\end{equation}
+with $\alpha_i, \beta_i$ phenomenological $\mathbf{q}=0$ coefficients.
+In the code, \texttt{build\_tmfeo3()} populates
+$n \in \{1,3,4,6,8\}$ channels of the on-site trilinear tensor
+$W^{\alpha\beta}_{n,ij}$.
+The $A_2^+$ channels ($\lambda^4$, $\lambda^6$) change sign on
+inversion-odd bond partners; the $A_1^+$ channels ($\lambda^{1,3,8}$)
+are even.  The $A_2^+$ on-site contribution vanishes at $\mathbf{q}=0$
+in the inversion-pair cancellation, leaving the $A_1^+$
+population-modulation channel as the dominant back-action mechanism.
+
+\subsection{Total Hamiltonian}
+
+The full working Hamiltonian is
+\begin{equation}
+\boxed{
+H_{\rm total}(t) = H_{\rm Fe} + H_{\rm CEF}^{(0)}
++ H_{\rm Tm,Z} + H_{\rm TmTm}
++ H_\chi + H_W
++ H_{\rm drive}(t),
+}
+\label{eq:Htotal}
+\end{equation}
+corresponding to the microscopic Hamiltonian $H_{\rm micro}(t)$
+of \texttt{tmfeo3\_notes.tex} Eq.~(Hmicro) augmented by the $W$ back-action
+term, Eq.~(Htotal).
+
+% -------------------------------------------------------------------
+\section{How the Tm Magnetization Is Saved}
+\label{sec:readout}
+
+\subsection{Stored local SU(3) variables}
+
+Each Tm site is evolved and stored internally as an eight-component
+local vector $\boldsymbol{\lambda}^{\rm loc} = (\lambda_1, \dots,
+\lambda_8)$ in the canonical local CEF basis.
+
+\subsection{Sublattice-frame map for readout}
+
+The builder constructs an $8\times 8$ sublattice frame $F_\mu$ from
+the projected dipole matrix:
+\begin{equation}
+F_\mu = \mu_{\rm act}^{-1}\,D_\mu\,\mu_{\rm act}
+\quad\text{on the active triplet }\{\lambda_2,\lambda_5,\lambda_7\}.
+\end{equation}
+The same $3\times 3$ action is extended to the coherence-partner
+triplet $\{\lambda_1,\lambda_4,\lambda_6\}$, while $\lambda_3$ and
+$\lambda_8$ are left invariant.  In block form,
+\begin{equation}
+\boldsymbol{\lambda}^{\rm glob} = F_\mu\,\boldsymbol{\lambda}^{\rm loc}.
+\end{equation}
+The frame is installed via
+\texttt{Tm\_atoms.set\_sublattice\_frame(\ldots)} and copied into
+\texttt{sublattice\_frames\_SU3} when the \texttt{MixedLattice} is built.
+
+\subsection{What the saved SU(3) magnetization means}
+
+When the code computes global SU(3) magnetization it applies the frame
+site by site:
+\begin{equation}
+M_{{\rm SU3},\mu}^{\rm glob} =
+\frac{1}{N_{\rm Tm}}\sum_{j\in\mu} F_\mu\,\boldsymbol{\lambda}_j^{\rm loc}.
+\end{equation}
+\begin{itemize}
+\item \texttt{M\_local\_SU3}: average local qutrit Bloch vector in the
+  CEF basis.
+\item \texttt{M\_global\_SU3}: average SU(3) vector after $F_\mu$ is
+  applied.
+\item \texttt{M\_antiferro\_SU3}: staggered combination formed by the
+  mixed-lattice observable code.
+\end{itemize}
+
+\subsection{Recovering the physical Tm dipole}
+
+The physically observable Tm magnetic dipole in lab Cartesian
+components is
+\begin{equation}
+J^\alpha_{\rm lab}(j) = \eta_{\mu(j),\alpha}\sum_{a\in\{2,5,7\}}
+\mu_{\alpha a}\,\lambda_a^{\rm loc}(j).
+\end{equation}
+The SU(3) arrays are not themselves the Cartesian dipole; they are
+the Gell-Mann expectation values in the local CEF basis or after the
+sublattice-frame map.  The physical Tm magnetization is recovered by
+projecting the $T$-odd channels with $\mu_{\rm act}$ and then applying
+the Pbnm sign pattern $D_\mu$.
+
+% -------------------------------------------------------------------
+\section{Drive Hamiltonian}
+\label{sec:drive}
+
+The THz drive couples to both Fe and Tm via magnetic-dipole and
+(at Tm) electric-dipole vertices.  The microscopic drive terms are
+(\texttt{tmfeo3\_notes.tex} Eqs.~(Hdrivem)--(Hdrivee))
+\begin{align}
+H_{\rm drive}^{\rm m}(t) &= -g_e\mu_B\sum_{i}\bh(t)\cdot\bS_i
+- g_J\mu_B\sum_{j}\bh(t)\cdot\Jeff_j, \label{eq:Hdm}\\
+H_{\rm drive}^{\rm e}(t) &= -\sum_{j}\be(t)\cdot\deff_j. \label{eq:Hde}
+\end{align}
+The two THz propagation geometries are (for propagation along $\hat b$):
+\begin{equation}
+\begin{aligned}
+H\!\parallel\! a,\; E\!\parallel\! c:\;&
+h_x\neq 0,\; e_z\neq 0
+\;\Rightarrow\;\text{drives }\lambda^{5,7}\text{ and }\lambda^{4,6};\\
+H\!\parallel\! c,\; E\!\parallel\! a:\;&
+h_z\neq 0,\; e_x\neq 0
+\;\Rightarrow\;\text{drives }\lambda^2\text{ and }\lambda^1.
+\end{aligned}
+\end{equation}
+
+\subsection{Pulse envelope}
+
+The code supports up to two simultaneously active pulses ($k = 1, 2$)
+per species.  Each pulse carries a Gaussian-modulated cosine envelope:
+\begin{equation}
+f_k(t) =
+A\exp\!\left[-\frac{(t-t_{B_k})^2}{4\sigma^2}\right]
+\cos\!\bigl[\omega(t-t_{B_k})\bigr],
+\end{equation}
+where $A$ (\texttt{pump\_amplitude}), $\sigma$ (\texttt{pump\_width}),
+and $\omega$ (\texttt{pump\_frequency}) are set independently for the
+Fe (SU(2)) and Tm (SU(3)) sectors.  The intensity profile
+$I(t)\propto e^{-(t-t_{B_k})^2/(2\sigma^2)}$ has standard deviation
+$\sigma$.  A tabulated-waveform mode (via \texttt{pump\_table\_file})
+replaces the Gaussian with linear interpolation of a normalized
+$E(t)$ file.
+
+\subsection{Fe drive}
+
+The pulse direction for Fe atom type $\mu$ is a 3-component Cartesian
+vector $\mathbf{b}^{(k)}_\mu$, which is transformed to the local
+sublattice frame before integration:
+\begin{equation}
+\tilde{\mathbf{b}}^{(k)}_\mu = D_\mu^T\,\mathbf{b}^{(k)}_\mu.
+\end{equation}
+The drive contribution to the local effective field on Fe site $i$ is
+\begin{equation}
+\mathbf{h}^{\rm Fe}_{{\rm drive},i}(t)
+= \sum_{k=1}^{2} f_k(t)\,\tilde{\mathbf{b}}^{(k)}_\mu,
+\end{equation}
+giving the Hamiltonian term
+$H_{\rm drive}^{\rm m,Fe}(t) = -\sum_i \mathbf{h}^{\rm Fe}_{{\rm drive},i}(t)\cdot\bS_i$,
+reproducing the $-g_e\mu_B\sum_i\bh\cdot\bS_i$ term of
+Eq.~\eqref{eq:Hdm} with $A = g_e\mu_B\,h_{\rm peak}$.
+
+\subsection{Tm drive}
+
+The pulse direction for Tm atom type $\nu$ is an 8-component Gell-Mann
+vector $\mathbf{c}^{(k)}_\nu$, transformed to the local CEF frame as
+\begin{equation}
+\tilde{\mathbf{c}}^{(k)}_\nu = F_\nu^T\,\mathbf{c}^{(k)}_\nu.
+\end{equation}
+The drive contribution to the local SU(3) effective field on Tm site $j$
+is
+\begin{equation}
+\mathbf{h}^{\rm Tm}_{{\rm drive},j}(t)
+= \sum_{k=1}^{2} f_k(t)\,\tilde{\mathbf{c}}^{(k)}_\nu,
+\end{equation}
+giving
+$H_{\rm drive}^{\rm Tm}(t) = -\sum_j
+\mathbf{h}^{\rm Tm}_{{\rm drive},j}(t)\cdot\boldsymbol{\lambda}_j$.
+
+\paragraph{Channel assignments for physical fields.}
+Any of the eight Gell-Mann channels may be driven by setting the
+corresponding component of \texttt{pump\_directions\_su3}.  For a
+physical electromagnetic wave with field components $h_\alpha(t)$ and
+$e_\alpha(t)$:
+\begin{itemize}
+\item \emph{Magnetic} $h_z$ $\Rightarrow$ $c_2 = g_{\rm ratio}\mu_{2z}$
+  \quad[$\lambda^2$, $A_1^-$, drives $\omega_{12}$ coherence]
+\item \emph{Magnetic} $h_x$ $\Rightarrow$ $c_5 = g_{\rm ratio}\mu_{5x}$,
+  $c_7 = g_{\rm ratio}\mu_{7x}$
+  \quad[$\lambda^{5,7}$, $A_2^-$, drives $\omega_{13}$/$\omega_{23}$]
+\item \emph{Electric} $e_z$ $\Rightarrow$ $c_4 \propto p_{z4}$,
+  $c_6 \propto p_{z6}$
+  \quad[$\lambda^{4,6}$, $A_2^+$, drives $\omega_{13}$/$\omega_{23}$]
+\item \emph{Electric} $e_x$ $\Rightarrow$ $c_1 \propto p_x$
+  \quad[$\lambda^1$, $A_1^+$, drives $\omega_{12}$ coherence]
+\end{itemize}
+
+\paragraph{The \texttt{auto\_su3\_pump} shortcut.}
+When \texttt{auto\_su3\_pump} is enabled, the runner projects a
+3-component physical direction $\hat{\mathbf{e}}$ onto the active
+$T$-odd channels via $c_a = \sum_\alpha \mu_{\alpha a}\,e_\alpha$,
+$a\in\{2,5,7\}$.  Internally this writes to the 0-based array positions
+$\{1,4,6\}$, which correspond to $\lambda_2, \lambda_5, \lambda_7$ in
+the 1-based Gell-Mann labeling used throughout this document.
+
+\end{document}

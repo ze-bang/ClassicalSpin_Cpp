@@ -1,0 +1,65 @@
+# NCTO 3Q seed preparation at Kruger (2023) parameter set
+# =========================================================
+#
+# Reference: Kruger (2023) NCTO spin Hamiltonian fit
+#   (J1, K1, Gamma1, Gamma1', J2A, J2B, J3, J7S^4) =
+#   (0.68, -7.89, 3.07, -2.94, -0.06, -0.70, 0.52, -0.26) meV
+#
+# J7 code convention: paper reports J7 in S^4 quantum normalization.
+# Code uses 6-spin ring exchange (O(S^6) for unit classical spins).
+# Conversion: J7_code = J7_paper / S^2 = 4 * J7_paper = -1.04 meV.
+#
+# We first run SA at J7_code = -1.04 to check if 3Q is the GS.
+# If ZZ, try J7_code = -0.26 (direct convention) and scan more negative.
+#
+# All E1 couplings disabled -- pure spin Hamiltonian SA.
+
+system = NCTO
+simulation_mode = SA
+
+lattice_size = 6,6,1
+output_dir = NCTO_kruger2023_3Q_SA
+num_trials = 8
+
+J = 0.68
+K = -7.89
+Gamma = 3.07
+Gammap = -2.94
+J2_A = -0.06
+J2_B = -0.70
+J3 = 0.52
+J7 = -1.04
+
+field_strength = 0.0
+field_direction = 0,0,1
+alpha_gilbert = 0.0
+
+omega_E1 = 4.0
+gamma_E1 = 0.2543
+lambda_E1_quartic = 0.0
+Z_star = 1.0
+
+lambda_E1_J_0 = 0.0
+lambda_E1_J_2 = 0.0
+lambda_E1_K_0 = 0.0
+lambda_E1_K_2 = 0.0
+lambda_E1_Gamma_0 = 0.0
+lambda_E1_Gamma_2 = 0.0
+lambda_E1_Gammap_0 = 0.0
+lambda_E1_Gammap_2 = 0.0
+lambda_E1_J7_0 = 0.0
+
+pump_amplitude = 0.0
+probe_amplitude = 0.0
+
+adiabatic_phonons = false
+relax_phonons = false
+phonon_only_relax = false
+
+T_start = 20.0
+T_end = 1e-3
+annealing_steps = 80000
+cooling_rate = 0.9
+overrelaxation_rate = 0
+T_zero = true
+n_deterministics = 5000

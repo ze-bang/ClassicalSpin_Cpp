@@ -1,0 +1,71 @@
+# NCTO E1 pump-probe at Gamma' = -3.5: E2-only channel
+# ====================================================
+
+system = NCTO
+simulation_mode = pump_probe
+
+lattice_size = 6,6,1
+output_dir = NCTO_E1_Gp_neg3p5_E2_only
+num_trials = 1
+
+J = -1.0
+K = -6.0
+Gamma = 8.0
+Gammap = -3.5
+J2_A = 0.0
+J2_B = 0.0
+J3 = 0.0
+J7 = -0.10
+
+field_strength = 0.0
+field_direction = 0,0,1
+alpha_gilbert = 0.05
+
+omega_E1 = 4.0
+gamma_E1 = 0.2543
+lambda_E1_quartic = 0.0
+Z_star = 1.0
+
+# User-requested fixed lambda magnitude.
+lambda_E1_J_0 = 0.0
+lambda_E1_K_0 = 0.0
+lambda_E1_Gamma_0 = 0.0
+lambda_E1_Gammap_0 = 0.0
+
+lambda_E1_J_2 = 0.0
+lambda_E1_K_2 = 0.04
+lambda_E1_Gamma_2 = 0.0
+lambda_E1_Gammap_2 = 0.0
+lambda_E1_J7_0 = 0.0
+
+# Scan this upward in the terminal loop.
+pump_amplitude = 2.0
+pump_frequency = 4.0
+pump_time = 8.0
+pump_width = 6.0
+pump_phase = 0.0
+pump_polarization = 0.0
+
+probe_amplitude = 0.0
+probe_frequency = 4.0
+probe_time = 0.0
+probe_width = 1.0
+
+md_time_start = -4.0
+md_time_end = 80.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = rkf54
+
+initial_spin_config = NCTO_E1_Gp_neg3p5_3Q_SA/sample_0/spins_T=0.txt
+relax_phonons = true
+phonon_only_relax = false
+adiabatic_phonons = false
+
+T_start = 0.0
+T_end = 0.0
+T_zero = true
+annealing_steps = 0
+cooling_rate = 1.0
+overrelaxation_rate = 0
+n_deterministics = 0

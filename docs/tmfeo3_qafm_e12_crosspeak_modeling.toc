@@ -1,0 +1,24 @@
+\contentsline {section}{\numberline {1}Physical setup and notation}{2}{section.1}%
+\contentsline {paragraph}{Units (critical).}{2}{section*.2}%
+\contentsline {section}{\numberline {2}Route A: the intended mechanism}{2}{section.2}%
+\contentsline {paragraph}{Observable channel (confirmed).}{2}{section*.3}%
+\contentsline {section}{\numberline {3}What we did and what we found}{2}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Baseline: $\chi _{2x}=0$ gives identically zero nonlinear signal}{2}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}$\chi _{2x}=0.75$, $W=0$: the 2D spectrum}{3}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}The key discovery: $\chi _{2x}$ renormalizes the Tm transition}{3}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}The equilibrium itself is not stationary}{3}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Units error that previously masked the picture}{3}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Analysis bugs discovered and fixed}{4}{subsection.3.6}%
+\contentsline {paragraph}{Bug~1: Angular vs.\ linear THz (critical).}{4}{section*.4}%
+\contentsline {paragraph}{Bug~2: Flip/index mismatch in $\omega _\tau $.}{4}{section*.5}%
+\contentsline {paragraph}{Bug~3: Gaussian apodization destroys the qAFM cross-peak.}{4}{section*.6}%
+\contentsline {subsection}{\numberline {3.7}Updated physical picture at $\chi _{2x}=0.75$~meV}{4}{subsection.3.7}%
+\contentsline {section}{\numberline {4}Diagnosis summary}{5}{section.4}%
+\contentsline {section}{\numberline {5}Modeling roadmap: how to recover the cross-peak}{5}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Route 1 --- Weak-coupling / perturbative regime (fastest)}{5}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Route 2 --- Dress the reference, then linearize (most physical)}{5}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Route 3 --- $\chi _{2z}$-mediated even channel (alternative cascade)}{6}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Analysis-side fixes (apply to all routes)}{6}{subsection.5.4}%
+\contentsline {section}{\numberline {6}Concrete next experiment}{6}{section.6}%
+\contentsline {section}{\numberline {A}File and data inventory}{6}{appendix.A}%
+\contentsline {section}{\numberline {B}Lambda-index key (\texttt {M\_local\_SU3})}{7}{appendix.B}%

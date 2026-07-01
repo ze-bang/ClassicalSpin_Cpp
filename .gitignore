@@ -3,6 +3,7 @@
 # ============================================================================
 build/
 build-*/
+build_gpu/
 cmake-build-*/
 out/
 *.o
@@ -108,7 +109,10 @@ core.[0-9]*
 # notes, plots; not source. Add specific subpaths back with
 # `!path` if anything in them is worth tracking.
 TFO_project/
+tfo_project/
 NCTO_project/
+NCTO_kruger2023_3Q_SA/
+output/
 
 # LaTeX build artifacts
 *.aux

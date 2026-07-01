@@ -1,0 +1,75 @@
+# NCTO E1-only hidden-SU(2) preparation run
+# ==========================================
+#
+# Purpose:
+# 1. Use the E1 phonon lattice (with all magnetoelastic couplings off)
+#    to prepare a clean triple-Q state at the hidden-SU(2) point.
+# 2. Reuse the saved spins_T=0.txt as the initial state for the A1-only
+#    and E2-only pump-probe runs.
+#
+# Spin model:
+#   (J, K, Gamma, Gammap) = A * (-1/9, -2/3, 8/9, -4/9), A = 9
+#   => (-1, -6, 8, -4)
+#
+# A small negative J7 biases the hidden-SU(2) manifold toward 3Q.
+
+system = NCTO
+simulation_mode = SA
+
+lattice_size = 6,6,1
+output_dir = NCTO_E1_hidden_su2_3Q_SA
+num_trials = 1
+
+# Hidden-SU(2) point
+J = -1.0
+K = -6.0
+Gamma = 8.0
+Gammap = -4.0
+J2_A = 0.0
+J2_B = 0.0
+J3 = 0.0
+J7 = -0.10
+
+field_strength = 0.0
+field_direction = 0,0,1
+alpha_gilbert = 0.0
+
+# E1 mode parameters (inactive during SA because all lambda's and drives are zero)
+omega_E1 = 4.0
+gamma_E1 = 0.2543
+lambda_E1_quartic = 0.0
+Z_star = 1.0
+
+# Magnetoelastic couplings off for state preparation
+lambda_E1_J_0 = 0.0
+lambda_E1_J_2 = 0.0
+lambda_E1_K_0 = 0.0
+lambda_E1_K_2 = 0.0
+lambda_E1_Gamma_0 = 0.0
+lambda_E1_Gamma_2 = 0.0
+lambda_E1_Gammap_0 = 0.0
+lambda_E1_Gammap_2 = 0.0
+lambda_E1_J7_0 = 0.0
+
+# No drive in the preparation run
+pump_amplitude = 0.0
+probe_amplitude = 0.0
+
+adiabatic_phonons = false
+relax_phonons = false
+phonon_only_relax = false
+
+T_start = 25.0
+T_end = 1e-3
+annealing_steps = 50000
+cooling_rate = 0.9
+overrelaxation_rate = 0
+T_zero = true
+n_deterministics = 4000
+
+# After this run, check triple-Q balance with:
+#   ./build/analyze_phonon_m_order \
+#     example_configs/NCTO/hidden_su2_triple_q_sa.param \
+#     NCTO_E1_hidden_su2_3Q_SA/sample_0/spins_T=0.txt
+#
+# A clean 3Q state should have min(S_Mi)/max(S_Mi) close to 1.

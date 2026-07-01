@@ -1,0 +1,94 @@
+# NCTO E1 pump-probe near hidden-SU(2): A1-only magnetoelastic channel
+# =====================================================================
+#
+# This is the symmetry-preserving scalar test.
+#
+# Important interpretation:
+# - A1 preserves C3, so at strict T = 0 it cannot by itself select which
+#   zigzag domain wins.
+# - It can still soften or destabilize the 3Q state if the scalar exchange
+#   modulation moves the Hamiltonian away from the hidden-SU(2) ray.
+# - If you keep lambda_X,0 proportional to (J, K, Gamma, Gammap), you are
+#   mostly moving along the hidden-SU(2) direction and should not expect a
+#   clean deterministic 3Q -> single-domain ZZ switch.
+#
+# The default below uses K-only scalar modulation as a concrete off-ray probe.
+
+system = NCTO
+simulation_mode = pump_probe
+
+lattice_size = 6,6,1
+output_dir = NCTO_E1_hidden_su2_A1_only
+num_trials = 1
+
+J = -1.0
+K = -6.0
+Gamma = 8.0
+Gammap = -4.0
+J2_A = 0.0
+J2_B = 0.0
+J3 = 0.0
+J7 = -0.10
+
+field_strength = 0.0
+field_direction = 0,0,1
+alpha_gilbert = 0.03
+
+omega_E1 = 4.0
+# gamma chosen so the free-phonon envelope drops to about 5% after 15 cycles:
+#   exp[-gamma * (15 * 2pi / omega_E1) / 2] ~ 0.05
+gamma_E1 = 0.2543
+lambda_E1_quartic = 0.0
+Z_star = 1.0
+
+# A1-only: scalar channel on, E2 channel off
+lambda_E1_J_0 = 0.00
+lambda_E1_K_0 = 0.08
+lambda_E1_Gamma_0 = 0.00
+lambda_E1_Gammap_0 = 0.00
+
+lambda_E1_J_2 = 0.0
+lambda_E1_K_2 = 0.0
+lambda_E1_Gamma_2 = 0.0
+lambda_E1_Gammap_2 = 0.0
+lambda_E1_J7_0 = 0.0
+
+# Linear x-polarized pump; for A1-only the polarization is not essential.
+pump_amplitude = 2.0
+pump_frequency = 4.0
+pump_time = 8.0
+pump_width = 6.0
+pump_phase = 0.0
+pump_polarization = 0.0
+
+probe_amplitude = 0.0
+probe_frequency = 4.0
+probe_time = 0.0
+probe_width = 1.0
+
+md_time_start = -4.0
+md_time_end = 80.0
+md_timestep = 0.01
+md_save_interval = 10
+md_integrator = rkf54
+
+# T = 0 protocol: load precomputed 3Q state, relax to the joint stationary
+# spin-phonon point, then launch deterministic dynamics.
+initial_spin_config = NCTO_E1_hidden_su2_3Q_SA/sample_0/spins_T=0.txt
+relax_phonons = true
+phonon_only_relax = false
+adiabatic_phonons = false
+
+T_start = 0.0
+T_end = 0.0
+T_zero = true
+annealing_steps = 0
+cooling_rate = 1.0
+overrelaxation_rate = 0
+n_deterministics = 0
+
+# Analyze before/after with:
+#   ./build/analyze_phonon_m_order \
+#     example_configs/NCTO/pump_probe_hidden_su2_A1_only.param \
+#     NCTO_E1_hidden_su2_A1_only/sample_0/initial_spins.txt \
+#     NCTO_E1_hidden_su2_A1_only/sample_0/spins_final.txt

@@ -1,0 +1,55 @@
+\contentsline {title}{Holstein--Primakoff magnons coupled to SU(3) flavor-wave bosons on the Pbnm four-sublattice cell of TmFeO$_3$: linearized equations of motion}{1}{section*.2}%
+\contentsline {abstract}{Abstract}{1}{section*.1}%
+\tocdepth@munge 
+\contentsline {section}{\numberline {}Contents}{1}{section*.3}%
+\tocdepth@restore 
+\contentsline {section}{\numberline {I}Setup and notation}{1}{section*.4}%
+\contentsline {subsection}{\numberline {A}Hamiltonian recap}{1}{section*.5}%
+\contentsline {subsection}{\numberline {B}Ground state and local rotations}{2}{section*.6}%
+\contentsline {section}{\numberline {II}Fe sector: Holstein--Primakoff in local frames}{2}{section*.7}%
+\contentsline {subsection}{\numberline {A}HP expansion}{2}{section*.8}%
+\contentsline {subsection}{\numberline {B}Bilinear bond Hamiltonian}{2}{section*.9}%
+\contentsline {subsection}{\numberline {C}DM bond term and the qAFM gap}{2}{section*.10}%
+\contentsline {subsection}{\numberline {D}Single-ion anisotropy}{3}{section*.11}%
+\contentsline {subsection}{\numberline {E}Zeeman}{3}{section*.12}%
+\contentsline {section}{\numberline {III}Tm sector: generalized SU(3) flavor-wave bosons}{3}{section*.13}%
+\contentsline {subsection}{\numberline {A}Schwinger three-boson representation}{3}{section*.14}%
+\contentsline {subsection}{\numberline {B}Condensate and HP-like expansion around $|E_1\rangle $}{3}{section*.15}%
+\contentsline {subsection}{\numberline {C}CEF Hamiltonian as flavor-boson dispersion}{3}{section*.16}%
+\contentsline {subsection}{\numberline {D}Tm Zeeman}{4}{section*.17}%
+\contentsline {subsection}{\numberline {E}Tm--Tm bilinear couplings}{4}{section*.18}%
+\contentsline {section}{\numberline {IV}Fe--Tm coupling sectors}{4}{section*.19}%
+\contentsline {subsection}{\numberline {A}$\chi $ exchange (bilinear)}{4}{section*.20}%
+\contentsline {subsection}{\numberline {B}$W$ trilinear (Fe--Fe--Tm)}{4}{section*.21}%
+\contentsline {section}{\numberline {V}Fourier transform on the Pbnm cell}{5}{section*.22}%
+\contentsline {subsection}{\numberline {A}Definitions}{5}{section*.23}%
+\contentsline {subsection}{\numberline {B}Bond geometric factors}{5}{section*.24}%
+\contentsline {subsection}{\numberline {C}Bosonic Nambu vector}{5}{section*.25}%
+\contentsline {section}{\numberline {VI}Linearized Hamiltonian in $\mathbf {k}$-space}{5}{section*.26}%
+\contentsline {subsection}{\numberline {A}Block structure}{5}{section*.27}%
+\contentsline {subsection}{\numberline {B}Fe magnon block ($8{\times }8$)}{5}{section*.28}%
+\contentsline {subsection}{\numberline {C}Tm flavor-boson blocks ($8{\times }8$ each)}{6}{section*.29}%
+\contentsline {subsection}{\numberline {D}Fe--Tm hybridization ($8{\times }8$)}{6}{section*.30}%
+\contentsline {section}{\numberline {VII}Linearized equations of motion}{6}{section*.31}%
+\contentsline {subsection}{\numberline {A}Paraunitary EOM}{6}{section*.32}%
+\contentsline {subsection}{\numberline {B}Symmetry constraints}{6}{section*.33}%
+\contentsline {subsection}{\numberline {C}Recovering the $\mathbf {k}{=}0$ joint EOM}{6}{section*.34}%
+\contentsline {section}{\numberline {VIII}Bertaut diagonalization: explicit qFM, qAFM, and Tm flavor operators}{6}{section*.35}%
+\contentsline {subsection}{\numberline {A}Klein-four unitary on the four sublattices}{7}{section*.36}%
+\contentsline {subsection}{\numberline {B}Fe Bertaut magnon operators}{7}{section*.37}%
+\contentsline {subsection}{\numberline {C}Reduced Bertaut kernel at $\mathbf {k}{=}0$}{7}{section*.38}%
+\contentsline {subsection}{\numberline {D}qFM and qAFM Bogoliubov rotation}{7}{section*.39}%
+\contentsline {subsection}{\numberline {E}Tm flavor Bertaut bosons}{8}{section*.40}%
+\contentsline {subsection}{\numberline {F}Selection rules: which Bertaut classes mix?}{8}{section*.41}%
+\contentsline {section}{\numberline {IX}Torque equations of motion}{8}{section*.42}%
+\contentsline {subsection}{\numberline {A}First-order (linear) torques: Fe qFM and qAFM}{8}{section*.43}%
+\contentsline {subsection}{\numberline {B}First-order torques: Tm flavor bosons}{8}{section*.44}%
+\contentsline {subsection}{\numberline {C}First-order Fe--Tm hybridization terms}{8}{section*.45}%
+\contentsline {subsection}{\numberline {D}Second-order (cubic-vertex) torques}{9}{section*.46}%
+\contentsline {paragraph}{\numberline {a}Fe magnon-magnon (3-leg vertex).}{9}{section*.47}%
+\contentsline {paragraph}{\numberline {b}Tm flavor-flavor (3-leg vertex).}{9}{section*.48}%
+\contentsline {paragraph}{\numberline {c}Fe--Tm cubic vertex ($1/\sqrt S$ from $\chi $, $1/S$ from $W$).}{9}{section*.49}%
+\contentsline {subsection}{\numberline {E}Compact second-order torque equations}{9}{section*.50}%
+\contentsline {subsection}{\numberline {F}Recovery of $\chi ^{(3)}$ 2DCS pathways}{10}{section*.51}%
+\contentsline {section}{\numberline {X}Summary}{10}{section*.52}%
+\contentsline {section}{\numberline {}References}{10}{section*.53}%

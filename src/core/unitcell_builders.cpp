@@ -22,11 +22,11 @@
  *       projected Tm Zeeman.  Tm always lives in its CEF local basis
  *       in a single direct storage convention.
  *
- *   * `apply_tmfeo3_fe_tm_couplings(mixed_uc, config)`         - the on-site
- *       mixed Fe-Fe-Tm trilinear W only. The Fe-Tm bonds are stored as 16
- *       explicit even/odd inversion pairs so the A2+ channels on the odd
- *       bonds are guaranteed to be related to their even partners by the
- *       required inversion sign flip.
+ *   * `apply_tmfeo3_fe_tm_couplings(mixed_uc, config)`         - the projected
+ *       Fe-Tm K^- bilinear only. The Fe-Tm bonds are stored as 16 explicit
+ *       even/odd inversion pairs; the proper-coset partners carry Fe row signs
+ *       R_i and the inversion-related partners carry the M_- column sign on
+ *       lambda_5/lambda_7.
  */
 
 #include "classical_spin/core/unitcell_builders.h"
@@ -418,65 +418,21 @@ void warn_if_tmfeo3_legacy_frame_flags_ignored(const SpinConfig& config,
         << "local CEF basis.\n";
 }
 
-std::array<Eigen::Matrix3d, 4> tmfeo3_tm_local_frames_xyz() {
-    // Tm local dipole axes follow the Klein-four eta pattern:
+std::array<Eigen::Matrix3d, 4> tmfeo3_transport_frames_xyz() {
+    // Transported-gauge Klein-four rotations.  Fe spins are stored in global
+    // Cartesian axes, while Tm lambda operators are local qutrit coordinates.
+    // These matrices therefore enter physical moment projections and K^- row
+    // signs; they are not installed as SU(3) sublattice frames.
     //   sublattice 0: R_0 = diag(+,+,+)
     //   sublattice 1: R_1 = diag(+,-,-)
     //   sublattice 2: R_2 = diag(-,+,-)
     //   sublattice 3: R_3 = diag(-,-,+)
-    // For a local dipole vector J_loc = (J_x, J_y, J_z), the global dipole is
-    // J_glob^(mu) = R_mu J_loc^(mu).
     std::array<Eigen::Matrix3d, 4> frames;
     frames[0] = Eigen::Vector3d(+1.0, +1.0, +1.0).asDiagonal();
     frames[1] = Eigen::Vector3d(+1.0, -1.0, -1.0).asDiagonal();
     frames[2] = Eigen::Vector3d(-1.0, +1.0, -1.0).asDiagonal();
     frames[3] = Eigen::Vector3d(-1.0, -1.0, +1.0).asDiagonal();
     return frames;
-}
-
-SpinMatrix tmfeo3_induced_su3_frame(const Eigen::Matrix3d& mu_act,
-                                    const Eigen::Matrix3d& R_xyz) {
-    // The SU(3) state is stored in the lambda basis, while the physical Tm
-    // magnetic dipole lives in the projected local Cartesian basis:
-    //   J_local = mu_act * lambda_active,
-    // with lambda_active = (lambda_2, lambda_5, lambda_7).
-    // The local->global induced action on the active SU(3) triplet is
-    //   lambda_global = F_mu lambda_local,
-    //   F_mu = mu_act^{-1} R_xyz mu_act.
-    // The coherence partners (lambda_1, lambda_4, lambda_6) must carry the
-    // same 3x3 action so each |E_a><E_b| pair has one bulk character, while
-    // the diagonal population channels (lambda_3, lambda_8) remain invariant.
-    //
-    // Physical justification (non-Kramers derivation):
-    //   Tm^3+ is non-Kramers (J=6 integer), so time reversal squares to +1
-    //   and the three CEF eigenstates |1>,|2>,|3> can be chosen real.
-    //   The four Tm sublattices are related by proper C_2 rotations (Pbnm
-    //   coset reps), which act as real orthogonal matrices V_{g_i} on the
-    //   3-level subspace via rho -> V rho V^T (real V).
-    //   Under this action, V_{jj'} V_{kk'} multiplies both Re(rho_{j'k'})
-    //   and Im(rho_{j'k'}) identically, so:
-    //     F_i^E = F_i^M = mu_act^{-1} D_i mu_act
-    //   for all four sublattices.  The A1+/A2+ inversion-parity distinction
-    //   (lambda_1 vs lambda_{4,6}) affects external-coupling signs (the W
-    //   inv flag) but NOT the proper-rotation frame, which sees all
-    //   off-diagonal pairs identically.
-    constexpr int active_im[3] = {1, 4, 6};
-    constexpr int active_re[3] = {0, 3, 5};
-
-    SpinMatrix frame = SpinMatrix::Identity(8, 8);
-    Eigen::FullPivLU<Eigen::Matrix3d> lu(mu_act);
-    if (lu.rank() != 3) {
-        return frame;
-    }
-
-    const Eigen::Matrix3d active_frame = lu.solve(R_xyz * mu_act);
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 3; ++col) {
-            frame(active_im[row], active_im[col]) = active_frame(row, col);
-            frame(active_re[row], active_re[col]) = active_frame(row, col);
-        }
-    }
-    return frame;
 }
 
 
@@ -681,27 +637,7 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
                 mu_2y, mu_5y, mu_7y,
                 mu_2z, mu_5z, mu_7z;
     const int active_im[3] = {1, 4, 6};   // lambda_2, lambda_5, lambda_7
-
-    // Register the Tm sublattice frame on the SU(3) unit cell.  This is the
-    // only extra ingredient needed for the existing mixed-lattice machinery to
-    // do the right thing for dynamic readout/drive:
-    //   * saved global SU(3) magnetization applies lambda_global = F_mu lambda_local
-    //   * set_pulse_SU3() applies the covariant field transform field_local = F_mu^T field_global
-    // The static onsite field below remains in the local qutrit basis by
-    // construction; it is only used to set the local CEF splitting / Zeeman.
-    // tm_identity_frame=1: set all Tm sublattice frames to identity so that
-    // M_global_SU3 and all drives act directly in the local CEF basis at every
-    // site without staggered projection.  Useful for testing the chi2 couplings
-    // when the physical observable is the net uniform (sigma_F) Tm moment.
-    const bool tm_identity_frame = config.get_param("tm_identity_frame", 0.0) != 0.0;
-    const auto R_tm_xyz = tmfeo3_tm_local_frames_xyz();
-    for (int sub = 0; sub < 4; ++sub) {
-        if (tm_identity_frame) {
-            Tm_atoms.set_sublattice_frame(SpinMatrix::Identity(8, 8), sub);
-        } else {
-            Tm_atoms.set_sublattice_frame(tmfeo3_induced_su3_frame(mu_act, R_tm_xyz[sub]), sub);
-        }
-    }
+    const auto R_transport = tmfeo3_transport_frames_xyz();
 
     if (h != 0.0 && config.field_direction.size() >= 3) {
         Eigen::Vector3d h_vec;
@@ -709,10 +645,11 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
                  config.field_direction[1] * h,
                  config.field_direction[2] * h;
         for (int sub = 0; sub < 4; ++sub) {
+            const Eigen::Vector3d h_local = R_transport[sub].transpose() * h_vec;
             for (int a = 0; a < 3; ++a) {
                 double B_a = 0.0;
                 for (int al = 0; al < 3; ++al) {
-                    B_a += mu_act(al, a) * h_vec(al);
+                    B_a += mu_act(al, a) * h_local(al);
                 }
                 Tm_atoms.field[sub](active_im[a]) += g_ratio_tm * B_a;
             }
@@ -750,11 +687,11 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
 // Fe-Tm couplings (only used by build_tmfeo3, not by the standalone builders)
 // -----------------------------------------------------------------------------
 
-// 16 Fe-Tm inversion-related bond pairs = 4 orbits * 4 pairs/orbit.
-// The same Fe-Tm topology is used for both the linear chi term and the on-site
-// trilinear W term. For each pair, the odd bond is the inversion-related
-// partner of the even bond. The mirror-odd Tm channels therefore pick up the
-// opposite sign on the odd bond, while the mirror-even channels do not.
+// 16 Fe-Tm inversion-related bond pairs = 4 geometric orbits * 4 proper-coset
+// branches/orbit.  For each pair, `even` is the transported proper branch and
+// `odd` is its inversion-related partner.  K^- is stored in local Tm lambda
+// coordinates with columns (lambda_2, lambda_5, lambda_7); odd bonds multiply
+// by M_- = diag(+1,-1,-1) on those columns.
 struct FeTmBond {
     int fe;               // Fe sublattice index
     int tm;               // Tm sublattice index
@@ -762,12 +699,12 @@ struct FeTmBond {
 };
 
 struct FeTmBondPair {
-    int orbit;                 // 1..4 (selects W_orbit scale)
+    int orbit;                 // 1..4 (selects Kminus orbit tensor/scale)
     FeTmBond even;             // E/S1/S2/S1S2 coset representative
     FeTmBond odd;              // inversion-related partner in I/S1I/S2I/S1S2I coset
 };
 
-const std::array<FeTmBondPair, 16>& fe_tm_w_bond_pairs() {
+const std::array<FeTmBondPair, 16>& tmfeo3_kminus_bond_pairs() {
     static const std::array<FeTmBondPair, 16> kPairs = {{
         // Fe0 (z = 1/2)
         {1, {0, 3, { -1,  0,  0}}, {0, 0, {  0,  0,  0}}},
@@ -794,328 +731,273 @@ const std::array<FeTmBondPair, 16>& fe_tm_w_bond_pairs() {
 }
 
 void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& config) {
-    struct BilinearChannel {
-        double x, y, z;
+    constexpr int lambda_columns[3] = {1, 4, 6}; // lambda_2, lambda_5, lambda_7
+    constexpr int lambda_plus_columns[5] = {0, 2, 3, 5, 7}; // lambda_1,3,4,6,8
+    const char* row_names[3] = {"x", "y", "z"};
+    const char* lambda_names[3] = {"2", "5", "7"};
+    const char* lambda_plus_names[5] = {"1", "3", "4", "6", "8"};
+    const char* quad_names[6] = {"xx", "yy", "zz", "xy", "xz", "yz"};
+
+    auto read_Kminus_orbit = [&](int orbit) {
+        Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                const std::string common_key = std::string("Kminus_")
+                                             + lambda_names[col] + row_names[row];
+                const std::string orbit_key = std::string("Kminus")
+                                            + std::to_string(orbit) + "_"
+                                            + lambda_names[col] + row_names[row];
+                K(row, col) = config.has_param(orbit_key)
+                            ? config.get_param(orbit_key, 0.0)
+                            : config.get_param(common_key, 0.0);
+            }
+        }
+        return K;
     };
 
-    struct TrilinearChannel {
-        double xx, yy, zz, xy, xz, yz;
+    std::array<Eigen::Matrix3d, 4> Kminus_orbit;
+    std::array<bool, 4> orbit_nonzero;
+    for (int orbit = 1; orbit <= 4; ++orbit) {
+        Kminus_orbit[orbit - 1] = read_Kminus_orbit(orbit);
+        orbit_nonzero[orbit - 1] = Kminus_orbit[orbit - 1].cwiseAbs().maxCoeff() > 0.0;
+    }
+
+    const double orbit_scale[4] = {
+        config.get_param("Kminus_orbit1_scale", 1.0),
+        config.get_param("Kminus_orbit2_scale", 1.0),
+        config.get_param("Kminus_orbit3_scale", 1.0),
+        config.get_param("Kminus_orbit4_scale", 1.0)
     };
 
-    const BilinearChannel chi2_ch = {
-        config.get_param("chi2x", 0.0),
-        config.get_param("chi2y", 0.0),
-        config.get_param("chi2z", 0.0)
-    };
-    const BilinearChannel chi5_ch = {
-        config.get_param("chi5x", 0.0),
-        config.get_param("chi5y", 0.0),
-        config.get_param("chi5z", 0.0)
-    };
-    const BilinearChannel chi7_ch = {
-        config.get_param("chi7x", 0.0),
-        config.get_param("chi7y", 0.0),
-        config.get_param("chi7z", 0.0)
-    };
-    const double chi_orbit_scale[4] = {
-        config.get_param("chi_orbit1_scale", 1.0),
-        config.get_param("chi_orbit2_scale", 1.0),
-        config.get_param("chi_orbit3_scale", 1.0),
-        config.get_param("chi_orbit4_scale", 1.0)
-    };
+    const auto R_fe = tmfeo3_transport_frames_xyz();
+    const Eigen::Matrix3d M_even = Eigen::Matrix3d::Identity();
+    Eigen::Matrix3d M_odd = Eigen::Matrix3d::Identity();
+    M_odd(1, 1) = -1.0;
+    M_odd(2, 2) = -1.0;
 
-    // ---- chiJ mode: coupling in physical Tm dipole (Jx,Jy,Jz) space ----
-    // Parameterises H = sum_{alpha,beta} chiJ[beta][alpha] * S^alpha_Fe * J^beta_Tm
-    // where J^beta_Tm = sum_a mu_act(beta,a) * lambda_active_a  is the physical
-    // projected magnetic moment operator and S^alpha_Fe is in the Fe local frame.
-    // Naming: chiJ_<Tm-moment><Fe-spin>, e.g. chiJ_zSz = coupling of J_z^Tm to S_z^Fe.
-    // Defaults all zero so existing configs are unaffected.
-    // mu_act defaults must match apply_tmfeo3_tm_sector.
-    Eigen::Matrix3d mu_J;   // mu_J(beta, a): beta=xyz moment, a=active index {lam2,lam5,lam7}
-    mu_J << config.get_param("mu_2x", 0.0),    config.get_param("mu_5x",  2.3915), config.get_param("mu_7x", 0.9128),
-            config.get_param("mu_2y", 0.0),    config.get_param("mu_5y", -2.7866), config.get_param("mu_7y", 0.4655),
-            config.get_param("mu_2z", 5.264),  config.get_param("mu_5z",  0.0),    config.get_param("mu_7z", 0.0);
+    Eigen::Matrix3d M_esj_odd = Eigen::Matrix3d::Identity();
+    M_esj_odd(0, 0) = -1.0;  // -M_- on (lambda2,lambda5,lambda7)
 
-    Eigen::Matrix3d chiJ = Eigen::Matrix3d::Zero(); // chiJ(beta, alpha): Tm-moment beta, Fe-component alpha
-    chiJ(0, 0) = config.get_param("chiJ_xSx", 0.0);
-    chiJ(0, 1) = config.get_param("chiJ_xSy", 0.0);
-    chiJ(0, 2) = config.get_param("chiJ_xSz", 0.0);
-    chiJ(1, 0) = config.get_param("chiJ_ySx", 0.0);
-    chiJ(1, 1) = config.get_param("chiJ_ySy", 0.0);
-    chiJ(1, 2) = config.get_param("chiJ_ySz", 0.0);
-    chiJ(2, 0) = config.get_param("chiJ_zSx", 0.0);
-    chiJ(2, 1) = config.get_param("chiJ_zSy", 0.0);
-    chiJ(2, 2) = config.get_param("chiJ_zSz", 0.0);
+    Eigen::MatrixXd M_plus_even = Eigen::MatrixXd::Identity(5, 5);
+    Eigen::MatrixXd M_plus_odd = Eigen::MatrixXd::Identity(5, 5);
+    M_plus_odd(2, 2) = -1.0;  // lambda4
+    M_plus_odd(3, 3) = -1.0;  // lambda6
 
-    // chiJ_lam(alpha, a) = sum_beta chiJ(beta,alpha) * mu_J(beta,a)
-    // Fe-component alpha drives active Gell-Mann generator a via the moment matrix.
-    const Eigen::Matrix3d chiJ_lam = chiJ.transpose() * mu_J;
-    const bool any_chiJ = chiJ_lam.cwiseAbs().maxCoeff() > 0.0;
-
-
-    auto read_tri_ch = [&](const std::string& pfx) -> TrilinearChannel {
-        return {
-            config.get_param(pfx + "_xx", 0.0),
-            config.get_param(pfx + "_yy", 0.0),
-            config.get_param(pfx + "_zz", 0.0),
-            config.get_param(pfx + "_xy", 0.0),
-            config.get_param(pfx + "_xz", 0.0),
-            config.get_param(pfx + "_yz", 0.0)
-        };
-    };
-    auto tri_ch_nonzero = [](const TrilinearChannel& channel) {
-        return channel.xx != 0.0 || channel.yy != 0.0 || channel.zz != 0.0
-            || channel.xy != 0.0 || channel.xz != 0.0 || channel.yz != 0.0;
-    };
-    auto bilinear_ch_nonzero = [](const BilinearChannel& channel) {
-        return channel.x != 0.0 || channel.y != 0.0 || channel.z != 0.0;
+    auto build_Kminus_bond = [&](int fe_sub, const Eigen::Matrix3d& K_ref,
+                                 const Eigen::Matrix3d& inversion_column_signs,
+                                 double scale) {
+        const Eigen::Matrix3d K_bond = scale * R_fe[fe_sub] * K_ref * inversion_column_signs;
+        SpinMatrix tensor = SpinMatrix::Zero(3, 8);
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                tensor(row, lambda_columns[col]) = K_bond(row, col);
+            }
+        }
+        return tensor;
     };
 
-    const TrilinearChannel W1_ch = read_tri_ch("W1");
-    const TrilinearChannel W3_ch = read_tri_ch("W3");
-    const TrilinearChannel W4_ch = read_tri_ch("W4");
-    const TrilinearChannel W6_ch = read_tri_ch("W6");
-    const TrilinearChannel W8_ch = read_tri_ch("W8");
+    auto read_minus_bilinear_orbit = [&](const std::string& prefix, int orbit) {
+        Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                const std::string suffix = std::string(lambda_names[col]) + row_names[row];
+                const std::string common_key = prefix + "_" + suffix;
+                const std::string orbit_key = prefix + std::to_string(orbit) + "_" + suffix;
+                K(row, col) = config.has_param(orbit_key)
+                            ? config.get_param(orbit_key, 0.0)
+                            : config.get_param(common_key, 0.0);
+            }
+        }
+        return K;
+    };
 
-    const double W_orbit_scale[4] = {
+    auto read_plus_bilinear_orbit = [&](const std::string& prefix, int orbit) {
+        Eigen::MatrixXd K = Eigen::MatrixXd::Zero(3, 5);
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 5; ++col) {
+                const std::string suffix = std::string(lambda_plus_names[col]) + row_names[row];
+                const std::string common_key = prefix + "_" + suffix;
+                const std::string orbit_key = prefix + std::to_string(orbit) + "_" + suffix;
+                K(row, col) = config.has_param(orbit_key)
+                            ? config.get_param(orbit_key, 0.0)
+                            : config.get_param(common_key, 0.0);
+            }
+        }
+        return K;
+    };
+
+    auto build_minus_drive_bond = [&](int fe_sub, const Eigen::Matrix3d& K_ref,
+                                      const Eigen::Matrix3d& inversion_column_signs,
+                                      double scale) {
+        const Eigen::Matrix3d K_bond = scale * R_fe[fe_sub] * K_ref * inversion_column_signs;
+        SpinMatrix tensor = SpinMatrix::Zero(3, 8);
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                tensor(row, lambda_columns[col]) = K_bond(row, col);
+            }
+        }
+        return tensor;
+    };
+
+    auto build_plus_drive_bond = [&](int fe_sub, const Eigen::MatrixXd& K_ref,
+                                     const Eigen::MatrixXd& inversion_column_signs,
+                                     double scale) {
+        const Eigen::MatrixXd K_bond = scale * R_fe[fe_sub] * K_ref * inversion_column_signs;
+        SpinMatrix tensor = SpinMatrix::Zero(3, 8);
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 5; ++col) {
+                tensor(row, lambda_plus_columns[col]) = K_bond(row, col);
+            }
+        }
+        return tensor;
+    };
+
+    auto read_W_orbit = [&](int orbit) {
+        std::array<Eigen::Matrix3d, 5> W;
+        for (auto& matrix : W) {
+            matrix.setZero();
+        }
+        for (int channel = 0; channel < 5; ++channel) {
+            for (int comp = 0; comp < 6; ++comp) {
+                const std::string common_key = std::string("W")
+                                             + lambda_plus_names[channel] + "_"
+                                             + quad_names[comp];
+                const std::string orbit_key = std::string("W")
+                                            + std::to_string(orbit) + "_"
+                                            + lambda_plus_names[channel] + "_"
+                                            + quad_names[comp];
+                const double value = config.has_param(orbit_key)
+                                   ? config.get_param(orbit_key, 0.0)
+                                   : config.get_param(common_key, 0.0);
+                switch (comp) {
+                    case 0: W[channel](0, 0) = value; break;
+                    case 1: W[channel](1, 1) = value; break;
+                    case 2: W[channel](2, 2) = value; break;
+                    case 3: W[channel](0, 1) = W[channel](1, 0) = value; break;
+                    case 4: W[channel](0, 2) = W[channel](2, 0) = value; break;
+                    case 5: W[channel](1, 2) = W[channel](2, 1) = value; break;
+                }
+            }
+        }
+        return W;
+    };
+
+    auto W_nonzero = [](const std::array<Eigen::Matrix3d, 5>& W) {
+        for (const auto& matrix : W) {
+            if (matrix.cwiseAbs().maxCoeff() > 0.0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto build_W_bond = [&](int fe_sub, const std::array<Eigen::Matrix3d, 5>& W_ref,
+                            const Eigen::MatrixXd& inversion_column_signs,
+                            double scale) {
+        SpinTensor3 tensor(3);
+        for (int row = 0; row < 3; ++row) {
+            tensor[row] = Eigen::MatrixXd::Zero(3, 8);
+        }
+        for (int channel = 0; channel < 5; ++channel) {
+            const double sign = inversion_column_signs(channel, channel);
+            const Eigen::Matrix3d W_bond = scale * sign * R_fe[fe_sub] * W_ref[channel] * R_fe[fe_sub];
+            const int lambda_col = lambda_plus_columns[channel];
+            for (int alpha = 0; alpha < 3; ++alpha) {
+                for (int beta = 0; beta < 3; ++beta) {
+                    tensor[alpha](beta, lambda_col) = W_bond(alpha, beta);
+                }
+            }
+        }
+        return tensor;
+    };
+
+    for (const auto& pair : tmfeo3_kminus_bond_pairs()) {
+        const int orbit_index = pair.orbit - 1;
+        if (!orbit_nonzero[orbit_index] || orbit_scale[orbit_index] == 0.0) {
+            continue;
+        }
+
+        mixed_uc.set_mixed_bilinear(
+            build_Kminus_bond(pair.even.fe, Kminus_orbit[orbit_index],
+                              M_even, orbit_scale[orbit_index]),
+            pair.even.fe, pair.even.tm, pair.even.off);
+        mixed_uc.set_mixed_bilinear(
+            build_Kminus_bond(pair.odd.fe, Kminus_orbit[orbit_index],
+                              M_odd, orbit_scale[orbit_index]),
+            pair.odd.fe, pair.odd.tm, pair.odd.off);
+    }
+
+    std::array<Eigen::Matrix3d, 4> kappaE_orbit;
+    std::array<Eigen::MatrixXd, 4> kappaB_orbit;
+    std::array<std::array<Eigen::Matrix3d, 5>, 4> W_orbit;
+    std::array<bool, 4> kappaE_nonzero;
+    std::array<bool, 4> kappaB_nonzero;
+    std::array<bool, 4> W_orbit_nonzero;
+    for (int orbit = 1; orbit <= 4; ++orbit) {
+        kappaE_orbit[orbit - 1] = read_minus_bilinear_orbit("kappaE", orbit);
+        kappaB_orbit[orbit - 1] = read_plus_bilinear_orbit("kappaB", orbit);
+        W_orbit[orbit - 1] = read_W_orbit(orbit);
+        kappaE_nonzero[orbit - 1] = kappaE_orbit[orbit - 1].cwiseAbs().maxCoeff() > 0.0;
+        kappaB_nonzero[orbit - 1] = kappaB_orbit[orbit - 1].cwiseAbs().maxCoeff() > 0.0;
+        W_orbit_nonzero[orbit - 1] = W_nonzero(W_orbit[orbit - 1]);
+    }
+
+    const double kappaE_scale[4] = {
+        config.get_param("kappaE_orbit1_scale", 1.0),
+        config.get_param("kappaE_orbit2_scale", 1.0),
+        config.get_param("kappaE_orbit3_scale", 1.0),
+        config.get_param("kappaE_orbit4_scale", 1.0)
+    };
+    const double kappaB_scale[4] = {
+        config.get_param("kappaB_orbit1_scale", 1.0),
+        config.get_param("kappaB_orbit2_scale", 1.0),
+        config.get_param("kappaB_orbit3_scale", 1.0),
+        config.get_param("kappaB_orbit4_scale", 1.0)
+    };
+    const double W_scale[4] = {
         config.get_param("W_orbit1_scale", 1.0),
         config.get_param("W_orbit2_scale", 1.0),
         config.get_param("W_orbit3_scale", 1.0),
         config.get_param("W_orbit4_scale", 1.0)
     };
 
-    // chi coupling tensor for a specific bond: chi^{ab} couples the LOCAL-frame
-    // Fe spin component S^a_loc to the Tm CEF-basis Gell-Mann operator lambda^b.
-    // Fe spins are stored in the global lab Cartesian frame.
-    // The chi/W/kappa parameters are defined and interpreted in the global Fe frame.
-    //
-    // Pbnm even/odd bond sign analysis:
-    //   Under inversion I: Fe sites permute as [0123] with no spin rotation in global frame.
-    //   The sign pattern comes only from: E/B field parity x Tm lambda inversion parity.
-    //   Proper cosets: S_glob just permutes (no rotation), so the bond network closure
-    //   automatically satisfies them — no additional constraints.
-    // Pbnm bond-topology invariance is handled through the even/odd bond pairs and
-    // the Tm sublattice frames.
-    auto build_chi_bond = [&](double sign_57) {
-        SpinMatrix tensor = SpinMatrix::Zero(3, 8);
-        // chi{2,5,7}{x,y,z} channels (direct Gell-Mann coupling, global Fe frame)
-        tensor(0, 1) = chi2_ch.x;
-        tensor(1, 1) = chi2_ch.y;
-        tensor(2, 1) = chi2_ch.z;
-        tensor(0, 4) = sign_57 * chi5_ch.x;
-        tensor(1, 4) = sign_57 * chi5_ch.y;
-        tensor(2, 4) = sign_57 * chi5_ch.z;
-        tensor(0, 6) = sign_57 * chi7_ch.x;
-        tensor(1, 6) = sign_57 * chi7_ch.y;
-        tensor(2, 6) = sign_57 * chi7_ch.z;
-        // chiJ mode: coupling in physical (Jx,Jy,Jz) Tm moment space.
-        // chiJ_lam(alpha,a) encodes sum_beta chiJ(beta,alpha)*mu_J(beta,a).
-        if (any_chiJ) {
-            for (int alpha = 0; alpha < 3; ++alpha) {
-                tensor(alpha, 1) += chiJ_lam(alpha, 0);          // lam2, inversion-even
-                tensor(alpha, 4) += sign_57 * chiJ_lam(alpha, 1); // lam5, inversion-odd
-                tensor(alpha, 6) += sign_57 * chiJ_lam(alpha, 2); // lam7, inversion-odd
-            }
+    for (const auto& pair : tmfeo3_kminus_bond_pairs()) {
+        const int orbit_index = pair.orbit - 1;
+        if (kappaE_nonzero[orbit_index] && kappaE_scale[orbit_index] != 0.0) {
+            mixed_uc.set_mixed_bilinear_drive(
+                build_minus_drive_bond(pair.even.fe, kappaE_orbit[orbit_index],
+                                       M_even, kappaE_scale[orbit_index]),
+                pair.even.fe, pair.even.tm, pair.even.off, 0);
+            mixed_uc.set_mixed_bilinear_drive(
+                build_minus_drive_bond(pair.odd.fe, kappaE_orbit[orbit_index],
+                                       M_esj_odd, kappaE_scale[orbit_index]),
+                pair.odd.fe, pair.odd.tm, pair.odd.off, 0);
         }
-        return tensor;
-    };
 
-    auto fill_channel = [](SpinTensor3& tensor, int lambda_index,
-                           const TrilinearChannel& channel, double sign) {
-        tensor[0](0, lambda_index) = sign * channel.xx;
-        tensor[1](1, lambda_index) = sign * channel.yy;
-        tensor[2](2, lambda_index) = sign * channel.zz;
-        tensor[0](1, lambda_index) = sign * channel.xy;
-        tensor[1](0, lambda_index) = sign * channel.xy;
-        tensor[0](2, lambda_index) = sign * channel.xz;
-        tensor[2](0, lambda_index) = sign * channel.xz;
-        tensor[1](2, lambda_index) = sign * channel.yz;
-        tensor[2](1, lambda_index) = sign * channel.yz;
-    };
-    auto scale_tensor3 = [](const SpinTensor3& tensor, double scale) {
-        SpinTensor3 out(tensor.size());
-        for (size_t i = 0; i < tensor.size(); ++i) {
-            out[i] = scale * tensor[i];
+        if (kappaB_nonzero[orbit_index] && kappaB_scale[orbit_index] != 0.0) {
+            mixed_uc.set_mixed_bilinear_drive(
+                build_plus_drive_bond(pair.even.fe, kappaB_orbit[orbit_index],
+                                      M_plus_even, kappaB_scale[orbit_index]),
+                pair.even.fe, pair.even.tm, pair.even.off, 1);
+            mixed_uc.set_mixed_bilinear_drive(
+                build_plus_drive_bond(pair.odd.fe, kappaB_orbit[orbit_index],
+                                      M_plus_odd, kappaB_scale[orbit_index]),
+                pair.odd.fe, pair.odd.tm, pair.odd.off, 1);
         }
-        return out;
-    };
-    auto scale_matrix = [](const SpinMatrix& matrix, double scale) {
-        return scale * matrix;
-    };
 
-    const auto& bond_pairs = fe_tm_w_bond_pairs();
-
-    // Linear Fe-Tm term:
-    //   H_chi = sum_{(i,mu)} S_i^a chi_{ab} lambda_mu^b.
-    // The live TmFeO3 parameterization keeps only the time-odd Tm channels
-    // {lambda_2, lambda_5, lambda_7}. lambda_2 is inversion-even, while
-    // lambda_5/lambda_7 flip sign on the inversion-related partner (sign_57).
-    const bool any_chi = bilinear_ch_nonzero(chi2_ch)
-                      || bilinear_ch_nonzero(chi5_ch)
-                      || bilinear_ch_nonzero(chi7_ch)
-                      || any_chiJ;
-    if (any_chi) {
-        for (const auto& pair : bond_pairs) {
-            const double orbit_scale = chi_orbit_scale[pair.orbit - 1];
-            mixed_uc.set_mixed_bilinear(
-                scale_matrix(build_chi_bond(+1.0), orbit_scale),
-                pair.even.fe, pair.even.tm, pair.even.off);
-            mixed_uc.set_mixed_bilinear(
-                scale_matrix(build_chi_bond(-1.0), orbit_scale),
-                pair.odd.fe, pair.odd.tm, pair.odd.off);
-        }
-    }
-
-    // On-site Fe-Fe-Tm term:
-    //   H_W = sum_{(i,mu)} lambda_mu^(n) W_n^{ab} S_i^a S_i^b.
-    // Each odd bond is inserted only through its explicit inversion-related
-    // pair so the mirror-odd A2+ channels (lambda_4, lambda_6) are guaranteed
-    // to carry the opposite sign relative to the even bond.
-    const bool any_W = tri_ch_nonzero(W1_ch) || tri_ch_nonzero(W3_ch)
-                    || tri_ch_nonzero(W4_ch) || tri_ch_nonzero(W6_ch)
-                    || tri_ch_nonzero(W8_ch);
-    if (any_W) {
-        auto build_W = [&](double sign_A2) {
-            SpinTensor3 tensor(3);
-            for (auto& block : tensor) {
-                block = Eigen::MatrixXd::Zero(3, 8);
-            }
-            fill_channel(tensor, 0, W1_ch, 1.0);
-            fill_channel(tensor, 2, W3_ch, 1.0);
-            fill_channel(tensor, 7, W8_ch, 1.0);
-            fill_channel(tensor, 3, W4_ch, sign_A2);
-            fill_channel(tensor, 5, W6_ch, sign_A2);
-            return tensor;
-        };
-        const SpinTensor3 W_even_base = build_W(+1.0);
-        const SpinTensor3 W_odd_base = build_W(-1.0);
-        // W channels use LOCAL-frame Fe spin components (same convention as Fe-Fe H).
-        const Eigen::Vector3i zero = Eigen::Vector3i::Zero();
-        for (const auto& pair : bond_pairs) {
-            const double orbit_scale = W_orbit_scale[pair.orbit - 1];
+        if (W_orbit_nonzero[orbit_index] && W_scale[orbit_index] != 0.0) {
             mixed_uc.set_mixed_trilinear(
-                scale_tensor3(W_even_base, orbit_scale),
-                pair.even.fe, pair.even.fe, pair.even.tm, zero, pair.even.off);
+                build_W_bond(pair.even.fe, W_orbit[orbit_index],
+                             M_plus_even, W_scale[orbit_index]),
+                pair.even.fe, pair.even.fe, pair.even.tm,
+                Eigen::Vector3i::Zero(), pair.even.off);
             mixed_uc.set_mixed_trilinear(
-                scale_tensor3(W_odd_base, orbit_scale),
-                pair.odd.fe, pair.odd.fe, pair.odd.tm, zero, pair.odd.off);
+                build_W_bond(pair.odd.fe, W_orbit[orbit_index],
+                             M_plus_odd, W_scale[orbit_index]),
+                pair.odd.fe, pair.odd.fe, pair.odd.tm,
+                Eigen::Vector3i::Zero(), pair.odd.off);
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Field-assisted Fe-Tm exchange: H_{E chi} and H_{B chi}
-    //   (tmfeo3_foundation.tex, Eqs. H_E_chi_reorg / H_B_chi_reorg).
-    //
-    // These are pulse-envelope-modulated mixed bilinears.  At runtime the
-    // coupling is scaled by the SU(3) pulse envelope (electric/THz field E(t),
-    // H_{E chi}) or the SU(2) pulse envelope (magnetic field B(t), H_{B chi}),
-    // so they vanish outside the pulse window and are absent from the static
-    // energy.  The kappaE_*/kappaB_* parameters are the coupling coefficients
-    // already contracted onto the configured pulse polarization (matching the
-    // tex specialization, e.g. kappaE_5y = kappa^E_{c;5y}).
-    //
-    // Inversion-coset signs (Eqs. Ipa / IEpa):
-    //   * H_{E chi}: lambda^2 is A1 (p=+1) -> the E-prefactor flips it on the
-    //     odd bond (sign -1); lambda^{5,7} are A2 (p=-1) -> the E-prefactor
-    //     leaves them with sign +1 on BOTH bonds (no q=0 cancellation).
-    //   * H_{B chi}: B is axial (no extra sign).  lambda^1 (p=+1) keeps +1 on
-    //     both bonds; lambda^{4,6} (p=-1) flip sign on the odd bond.
-    // -------------------------------------------------------------------------
-    {
-        const double kappaE_2x = config.get_param("kappaE_2x", 0.0);
-        const double kappaE_2y = config.get_param("kappaE_2y", 0.0);
-        const double kappaE_2z = config.get_param("kappaE_2z", 0.0);
-        const double kappaE_5x = config.get_param("kappaE_5x", 0.0);
-        const double kappaE_5y = config.get_param("kappaE_5y", 0.0);
-        const double kappaE_5z = config.get_param("kappaE_5z", 0.0);
-        const double kappaE_7x = config.get_param("kappaE_7x", 0.0);
-        const double kappaE_7y = config.get_param("kappaE_7y", 0.0);
-        const double kappaE_7z = config.get_param("kappaE_7z", 0.0);
-
-        const double kappaB_1x = config.get_param("kappaB_1x", 0.0);
-        const double kappaB_1y = config.get_param("kappaB_1y", 0.0);
-        const double kappaB_1z = config.get_param("kappaB_1z", 0.0);
-        const double kappaB_4x = config.get_param("kappaB_4x", 0.0);
-        const double kappaB_4y = config.get_param("kappaB_4y", 0.0);
-        const double kappaB_4z = config.get_param("kappaB_4z", 0.0);
-        const double kappaB_6x = config.get_param("kappaB_6x", 0.0);
-        const double kappaB_6y = config.get_param("kappaB_6y", 0.0);
-        const double kappaB_6z = config.get_param("kappaB_6z", 0.0);
-
-        const bool any_assistE = kappaE_2x || kappaE_2y || kappaE_2z
-                              || kappaE_5x || kappaE_5y || kappaE_5z
-                              || kappaE_7x || kappaE_7y || kappaE_7z;
-        const bool any_assistB = kappaB_1x || kappaB_1y || kappaB_1z
-                              || kappaB_4x || kappaB_4y || kappaB_4z
-                              || kappaB_6x || kappaB_6y || kappaB_6z;
-
-        // Tm Gell-Mann column indices for the active channels.
-        constexpr int LAM1 = 0, LAM2 = 1, LAM4 = 3, LAM5 = 4, LAM6 = 5, LAM7 = 6;
-
-        // E-assisted exchange tensor for one bond (3 Fe components x 8 Tm channels).
-        // Fe spin components are in the LOCAL sigma_C frame.
-        // Odd-bond signs: E is polar (flips under I), S_loc is invariant under I.
-        //   lambda^2  (A1, inv-even): odd sign = (-E)(+S)(+lam) -> -1.
-        //   lambda^5,7 (A2, inv-odd): odd sign = (-E)(+S)(-lam) -> +1.
-        auto build_assistE = [&](bool odd) {
-            SpinMatrix T = SpinMatrix::Zero(3, 8);
-            const double s2  = odd ? -1.0 : 1.0;  // lambda^2: flips on odd bond
-            const double s57 = 1.0;               // lambda^{5,7}: +1 on both bonds
-            T(0, LAM2) = s2 * kappaE_2x;
-            T(1, LAM2) = s2 * kappaE_2y;
-            T(2, LAM2) = s2 * kappaE_2z;
-            T(0, LAM5) = s57 * kappaE_5x;
-            T(1, LAM5) = s57 * kappaE_5y;
-            T(2, LAM5) = s57 * kappaE_5z;
-            T(0, LAM7) = s57 * kappaE_7x;
-            T(1, LAM7) = s57 * kappaE_7y;
-            T(2, LAM7) = s57 * kappaE_7z;
-            return T;
-        };
-
-        // B-assisted exchange tensor for one bond.
-        // Fe spin components are in the LOCAL sigma_C frame.
-        // Odd-bond signs: B is axial (invariant under I), S_loc invariant under I.
-        //   lambda^1  (A1, inv-even): odd sign = (+B)(+S)(+lam) -> +1.
-        //   lambda^4,6 (A2, inv-odd): odd sign = (+B)(+S)(-lam) -> -1.
-        auto build_assistB = [&](bool odd) {
-            SpinMatrix T = SpinMatrix::Zero(3, 8);
-            const double s1  = 1.0;               // lambda^1: +1 on both bonds
-            const double s46 = odd ? -1.0 : 1.0;  // lambda^{4,6}: flip on odd bond
-            T(0, LAM1) = s1 * kappaB_1x;
-            T(1, LAM1) = s1 * kappaB_1y;
-            T(2, LAM1) = s1 * kappaB_1z;
-            T(0, LAM4) = s46 * kappaB_4x;
-            T(1, LAM4) = s46 * kappaB_4y;
-            T(2, LAM4) = s46 * kappaB_4z;
-            T(0, LAM6) = s46 * kappaB_6x;
-            T(1, LAM6) = s46 * kappaB_6y;
-            T(2, LAM6) = s46 * kappaB_6z;
-            return T;
-        };
-
-        if (any_assistE || any_assistB) {
-            for (const auto& pair : bond_pairs) {
-                if (any_assistE) {
-                    mixed_uc.set_mixed_bilinear_drive(
-                        build_assistE(false),
-                        pair.even.fe, pair.even.tm, pair.even.off, /*envelope=*/0);
-                    mixed_uc.set_mixed_bilinear_drive(
-                        build_assistE(true),
-                        pair.odd.fe, pair.odd.tm, pair.odd.off, /*envelope=*/0);
-                }
-                if (any_assistB) {
-                    mixed_uc.set_mixed_bilinear_drive(
-                        build_assistB(false),
-                        pair.even.fe, pair.even.tm, pair.even.off, /*envelope=*/1);
-                    mixed_uc.set_mixed_bilinear_drive(
-                        build_assistB(true),
-                        pair.odd.fe, pair.odd.tm, pair.odd.off, /*envelope=*/1);
-                }
-            }
-        }
-    }
-
 }
 
 }  // anonymous namespace

@@ -1,0 +1,124 @@
+\contentsline {title}{A Symmetry-Allowed Minimal Model for Two-Dimensional Coherent Terahertz Spectroscopy of TmFeO$_3$ in the $\Gamma _2$ Phase}{1}{section*.2}%
+\contentsline {abstract}{Abstract}{1}{section*.1}%
+\tocdepth@munge 
+\contentsline {section}{\numberline {}Contents}{1}{section*.3}%
+\tocdepth@restore 
+\contentsline {section}{\numberline {I}Introduction}{2}{section*.4}%
+\contentsline {subsection}{\numberline {A}What this paper provides}{2}{section*.5}%
+\contentsline {subsection}{\numberline {B}Notation}{3}{section*.6}%
+\contentsline {section}{\numberline {II}Crystal structure and sublattice frames}{3}{section*.7}%
+\contentsline {subsection}{\numberline {A}Pbnm setting and Wyckoff positions}{3}{section*.8}%
+\contentsline {subsection}{\numberline {B}Sublattice permutations}{3}{section*.9}%
+\contentsline {subsection}{\numberline {C}Local sublattice frames}{3}{section*.10}%
+\contentsline {paragraph}{\numberline {a}Definition.}{3}{section*.11}%
+\contentsline {paragraph}{\numberline {b}Derivation for Fe ($4b$).}{3}{section*.12}%
+\contentsline {paragraph}{\numberline {c}Spin transformation.}{3}{section*.13}%
+\contentsline {paragraph}{\numberline {d}Derivation for Tm ($4c$).}{3}{section*.14}%
+\contentsline {paragraph}{\numberline {e}Group structure.}{4}{section*.15}%
+\contentsline {subsection}{\numberline {D}Polar versus axial vectors under $R_\mu $}{4}{section*.16}%
+\contentsline {subsection}{\numberline {E}Action on the projected qutrit subspace}{4}{section*.17}%
+\contentsline {section}{\numberline {III}Crystal-field model for Tm$^{3+}$}{4}{section*.18}%
+\contentsline {subsection}{\numberline {A}Stevens-operator Hamiltonian}{4}{section*.19}%
+\contentsline {paragraph}{\numberline {a}Local-frame convention for the Tm sector.}{4}{section*.20}%
+\contentsline {subsection}{\numberline {B}Three-singlet manifold and mirror parity}{5}{section*.21}%
+\contentsline {subsection}{\numberline {C}Projected angular-momentum matrix elements: $T$-symmetric gauge}{6}{section*.22}%
+\contentsline {subsection}{\numberline {D}Projected electric dipole}{6}{section*.23}%
+\contentsline {subsection}{\numberline {E}Mirror classification of Gell-Mann generators}{6}{section*.24}%
+\contentsline {subsection}{\numberline {F}Bertaut algebra for the Tm Gell-Mann operators}{7}{section*.25}%
+\contentsline {paragraph}{\numberline {a}Convention.}{7}{section*.26}%
+\contentsline {paragraph}{\numberline {b}$\sigma $-vectors of axial / polar generators.}{7}{section*.27}%
+\contentsline {paragraph}{\numberline {c}$\sigma $-vectors of the eight Gell-Mann generators.}{7}{section*.28}%
+\contentsline {paragraph}{\numberline {d}Bertaut sublattice combinations.}{7}{section*.29}%
+\contentsline {paragraph}{\numberline {e}Polar (electric) drive --- same $R_\mu $, different parity.}{8}{section*.30}%
+\contentsline {paragraph}{\numberline {f}Why Fe has no polar dipole, but Tm does.}{8}{section*.31}%
+\contentsline {paragraph}{\numberline {g}Cross-coupling to Fe.}{8}{section*.32}%
+\contentsline {paragraph}{\numberline {h}Consequence for the scalar EOMs of Sec.~\ref {sec:EOMscalar}.}{8}{section*.33}%
+\contentsline {section}{\numberline {IV}Fe four-sublattice Hamiltonian}{9}{section*.34}%
+\contentsline {subsection}{\numberline {A}Microscopic Hamiltonian}{9}{section*.35}%
+\contentsline {subsection}{\numberline {B}Local-frame form of $H_{\rm Fe}$}{9}{section*.36}%
+\contentsline {paragraph}{\numberline {a}Heisenberg term.}{9}{section*.37}%
+\contentsline {paragraph}{\numberline {b}DM term.}{9}{section*.38}%
+\contentsline {paragraph}{\numberline {c}Anisotropy.}{9}{section*.39}%
+\contentsline {paragraph}{\numberline {d}Local-frame Hamiltonian.}{9}{section*.40}%
+\contentsline {subsection}{\numberline {C}Bertaut decomposition}{9}{section*.41}%
+\contentsline {subsection}{\numberline {D}Effective fields and the per-cell normalization}{10}{section*.42}%
+\contentsline {subsection}{\numberline {E}DM Hamiltonian in Bertaut form}{10}{section*.43}%
+\contentsline {subsection}{\numberline {F}Ground state in the $\Gamma _2$ phase}{11}{section*.44}%
+\contentsline {section}{\numberline {V}Tm--Fe coupling}{11}{section*.45}%
+\contentsline {subsection}{\numberline {A}Most general bilinear coupling}{11}{section*.46}%
+\contentsline {subsection}{\numberline {B}Surviving $\mathbf q\!=\!0$ channels}{11}{section*.47}%
+\contentsline {subsection}{\numberline {C}Bare CEF field on the Tm qutrit}{11}{section*.48}%
+\contentsline {subsection}{\numberline {D}Anisotropy modulation: Van Vleck back-action}{12}{section*.49}%
+\contentsline {subsection}{\numberline {E}Coherence contribution to Van Vleck}{12}{section*.50}%
+\contentsline {section}{\numberline {VI}Drive Hamiltonian}{12}{section*.51}%
+\contentsline {subsection}{\numberline {A}Drive Hamiltonian in Bertaut form}{12}{section*.52}%
+\contentsline {section}{\numberline {VII}Microscopic Hamiltonian and $\mathbf q=0$ Reduction}{13}{section*.53}%
+\contentsline {section}{\numberline {VIII}2DCS framework and experimental geometries}{13}{section*.54}%
+\contentsline {subsection}{\numberline {A}Experimental nonlinear field, normal coordinates, and geometry channels}{13}{section*.55}%
+\contentsline {subsection}{\numberline {B}The third-order response function}{14}{section*.56}%
+\contentsline {section}{\numberline {IX}SU(3) Bloch dynamics with CPTP dissipation}{14}{section*.57}%
+\contentsline {subsection}{\numberline {A}Coherent evolution}{14}{section*.58}%
+\contentsline {subsection}{\numberline {B}Lindblad dissipator}{14}{section*.59}%
+\contentsline {subsection}{\numberline {C}Linearization around the $|E_1\rangle $ vacuum}{15}{section*.60}%
+\contentsline {paragraph}{\numberline {}Validity regime.}{15}{section*.61}%
+\contentsline {section}{\numberline {X}Effective Fe magnon sector around the $\Gamma _2$ ground state}{15}{section*.62}%
+\contentsline {subsection}{\numberline {A}Linearization}{15}{section*.63}%
+\contentsline {subsection}{\numberline {B}Explicit $4\times 4$ linearized matrix}{15}{section*.64}%
+\contentsline {subsection}{\numberline {C}qFM frequency}{15}{section*.65}%
+\contentsline {subsection}{\numberline {D}qAFM frequency: with the DM gap}{15}{section*.66}%
+\contentsline {subsection}{\numberline {E}Spin-reorientation transitions}{16}{section*.67}%
+\contentsline {section}{\numberline {XI}Coherent emission}{16}{section*.68}%
+\contentsline {section}{\numberline {XII}Linearized joint EOM}{16}{section*.69}%
+\contentsline {subsection}{\numberline {A}Joint variable vector}{16}{section*.70}%
+\contentsline {subsection}{\numberline {B}Joint matrix}{16}{section*.71}%
+\contentsline {section}{\numberline {XIII}Detailed Liouville-pathway analysis of the six 2DCS peaks}{17}{section*.72}%
+\contentsline {subsection}{\numberline {A}General peak amplitude expression}{17}{section*.73}%
+\contentsline {subsection}{\numberline {B}Bertaut bookkeeping for every pathway}{17}{section*.74}%
+\contentsline {paragraph}{\numberline {a}$\sigma $-rule for a third-order pathway.}{17}{section*.75}%
+\contentsline {paragraph}{\numberline {b}$\sigma $-vectors of the six peaks.}{17}{section*.76}%
+\contentsline {paragraph}{\numberline {c}Consequences for the pathway analysis.}{18}{section*.77}%
+\contentsline {subsection}{\numberline {C}Geometry I: $H\parallel a, E\parallel c$, VV}{18}{section*.78}%
+\contentsline {paragraph}{\numberline {a}$(E_{12}, E_{23})$.}{18}{section*.79}%
+\contentsline {paragraph}{\numberline {b}$(E_{12}, E_{13})$.}{18}{section*.80}%
+\contentsline {paragraph}{\numberline {c}$(\mathrm {qAFM}, E_{13})$.}{18}{section*.81}%
+\contentsline {subsection}{\numberline {D}Geometry II: $H\parallel a, E\parallel c$, VH}{18}{section*.82}%
+\contentsline {paragraph}{\numberline {a}$(\mathrm {qAFM}, E_{12})$.}{18}{section*.83}%
+\contentsline {subsection}{\numberline {E}Geometry III: $H\parallel c, E\parallel a$, VH}{18}{section*.84}%
+\contentsline {paragraph}{\numberline {a}$(E_{12}, \mathrm {qAFM})$.}{18}{section*.85}%
+\contentsline {paragraph}{\numberline {b}$(\mathrm {qFM}, \mathrm {qAFM})$.}{19}{section*.86}%
+\contentsline {subsection}{\numberline {F}Summary peak table}{19}{section*.87}%
+\contentsline {subsection}{\numberline {G}Explicit matrix-element catalogue}{19}{section*.88}%
+\contentsline {paragraph}{\numberline {a}Pathway notation.}{19}{section*.89}%
+\contentsline {paragraph}{\numberline {b}Geometry-I peaks.}{19}{section*.90}%
+\contentsline {paragraph}{\numberline {c}Geometry-II peak.}{21}{section*.91}%
+\contentsline {paragraph}{\numberline {e}Magnitudes and ratios.}{21}{section*.92}%
+\contentsline {section}{\numberline {XIV}Perturbative EOM derivation of $\chi ^{(3)}$}{21}{section*.93}%
+\contentsline {subsection}{\numberline {A}Setup: nonlinear joint EOM}{21}{section*.94}%
+\contentsline {paragraph}{\numberline {a}Explicit form of the nonlinear vertices.}{22}{section*.95}%
+\contentsline {paragraph}{\numberline {b}Bertaut reading of the dynamical variables.}{22}{section*.96}%
+\contentsline {subsection}{\numberline {B}Standard second-order normal-coordinate form}{22}{section*.97}%
+\contentsline {subsection}{\numberline {C}Explicit scalar EOMs in the physical mode basis}{22}{section*.98}%
+\contentsline {subsection}{\numberline {D}Order-by-order expansion}{24}{section*.99}%
+\contentsline {subsection}{\numberline {E}Numerical 2DCS simulation protocol}{24}{section*.100}%
+\contentsline {subsection}{\numberline {F}Structure of $G(\omega )$}{25}{section*.101}%
+\contentsline {subsection}{\numberline {G}Pathway-by-pathway recovery of $\chi ^{(3)}$}{25}{section*.102}%
+\contentsline {paragraph}{\numberline {a}Tm-only $\chi ^{(3)}$ — pathway $(E_{12},E_{23})$.}{25}{section*.103}%
+\contentsline {paragraph}{\numberline {b}Fe$\to $Tm exchange — pathway $(\mathrm {qAFM},E_{12})$.}{25}{section*.104}%
+\contentsline {paragraph}{\numberline {c}Fe-only nonlinearity — pathway $(\mathrm {qFM},\mathrm {qAFM})$.}{25}{section*.105}%
+\contentsline {subsection}{\numberline {H}Summary: EOM-Liouville dictionary}{25}{section*.106}%
+\contentsline {section}{\numberline {XV}Conclusion}{26}{section*.107}%
+\appendix 
+\contentsline {section}{\numberline {A}Conventions glossary}{26}{section*.108}%
+\contentsline {section}{\numberline {B}DM Bertaut prefactor derivation}{26}{section*.109}%
+\contentsline {paragraph}{\numberline {a}Explicit antisymmetrization.}{26}{section*.110}%
+\contentsline {section}{\numberline {C}Inversion-pair cancellation of mirror-odd Fe--Tm channels}{27}{section*.111}%
+\contentsline {section}{\numberline {D}Bond enumeration}{27}{section*.112}%
+\contentsline {subsection}{\numberline {1}Fe--Fe NN, NNN, and out-of-plane bonds}{27}{section*.113}%
+\contentsline {paragraph}{\numberline {a}In-plane NN ($J_1$).}{27}{section*.114}%
+\contentsline {paragraph}{\numberline {b}Out-of-plane NN ($J_{1c}$).}{27}{section*.115}%
+\contentsline {paragraph}{\numberline {c}NNN ($J_2$).}{27}{section*.116}%
+\contentsline {subsection}{\numberline {2}Fe--Tm bond shells}{27}{section*.117}%
+\contentsline {section}{\numberline {E}Second-order Bertaut expansion}{27}{section*.118}%
+\contentsline {section}{\numberline {}References}{27}{section*.119}%
+\appendix 
+\contentsline {section}{\numberline {A}Executable verification status}{28}{section*.120}%

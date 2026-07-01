@@ -343,6 +343,9 @@ void run_molecular_dynamics_mixed(MixedLattice& lattice, const SpinConfig& confi
 /**
  * Run pump-probe experiment for mixed lattice
  */
+static void apply_su3_bloch_damping(MixedLattice& lattice, const SpinConfig& config, int rank);
+static void apply_su2_gilbert_damping(MixedLattice& lattice, const SpinConfig& config, int rank);
+
 void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int rank, int size) {
     if (rank == 0) {
         cout << "Running pump-probe simulation on mixed lattice..." << endl;
@@ -554,6 +557,9 @@ void run_pump_probe_mixed(MixedLattice& lattice, const SpinConfig& config, int r
         
         // Save initial spin configuration before time evolution
         lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
+
+        apply_su2_gilbert_damping(lattice, config, rank);
+        apply_su3_bloch_damping(lattice, config, rank);
         
         // Setup pump field directions
         if (rank == 0) {
@@ -660,6 +666,20 @@ static void apply_su3_bloch_damping(MixedLattice& lattice, const SpinConfig& con
             cout << (a ? ", " : "") << rates(a);
         }
         cout << "]  (equilibrium = post-anneal ground state)" << endl;
+    }
+}
+
+/**
+ * Apply optional SU(2) Gilbert damping for mixed-lattice time evolution.
+ *
+ * Parameter key:
+ *   alpha_gilbert  — dimensionless Gilbert damping coefficient (default 0)
+ */
+static void apply_su2_gilbert_damping(MixedLattice& lattice, const SpinConfig& config, int rank) {
+    const double alpha = config.get_param("alpha_gilbert", 0.0);
+    lattice.alpha_gilbert = alpha;
+    if (rank == 0 && alpha != 0.0) {
+        cout << "SU(2) Gilbert damping alpha = " << alpha << endl;
     }
 }
 
@@ -1047,6 +1067,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
 
         // Optional per-generator SU(3) Bloch damping. Equilibrium is captured
         // from the just-synchronized ground state on every rank.
+        apply_su2_gilbert_damping(lattice, config, rank);
         apply_su3_bloch_damping(lattice, config, rank);
 
         if (rank == 0) {
@@ -1163,6 +1184,7 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
             lattice.save_spin_config_to_dir(trial_dir, "initial_spins");
             
             // Optional per-generator SU(3) Bloch damping (equilibrium = ground state).
+            apply_su2_gilbert_damping(lattice, config, rank);
             apply_su3_bloch_damping(lattice, config, rank);
 
             if (rank == 0 || config.num_trials == 1) {

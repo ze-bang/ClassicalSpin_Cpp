@@ -1,0 +1,37 @@
+# BCAO candidate 5b68948c43753097 - field scan H || a-axis (x)
+system = honeycomb_bcao
+simulation_mode = simulated_annealing
+
+lattice_size = 36,36,1
+
+J1xy = -7.330559339374304
+J1z  = -2.1909552961587906
+D    =  0.9139200206845999
+E    =  0.4282374829053879
+F    =  2.56827144138515
+G    = -0.832473773509264
+J3xy =  1.8781363237649202
+J3z  =  0.006727754138410091
+
+# Field scan along a-axis
+field_direction = 1,0,0
+field_scan_start = 0.0
+field_scan_end   = 1.5
+field_scan_steps = 30
+
+# g-factor and spin (BCAO: g~5, S=1/2)
+g_factor = 5.0,5.0,5.0
+
+# Simulated annealing — slow cool for each field step
+T_start = 2.0
+T_end   = 0.001
+annealing_steps = 200000
+overrelaxation_rate = 10
+use_twist_boundary = true
+gaussian_move = false
+cooling_rate  = 0.95
+T_zero = true
+n_deterministics = 20000
+
+output_dir = /tmp/bcao_5b68_field_a
+save_observables = true

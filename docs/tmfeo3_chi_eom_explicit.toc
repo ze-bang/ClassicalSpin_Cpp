@@ -1,0 +1,31 @@
+\contentsline {section}{\numberline {1}Crystal structure}{1}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Fe sublattice (4 sites, SU(2), $S=5/2$ projected to spin-length $s_\text {Fe}=2.5$)}{1}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Tm sublattice (4 sites per magnetic cell, SU(3), $J=6$ qutrit)}{2}{subsection.1.2}%
+\contentsline {section}{\numberline {2}Hamiltonian}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Total Hamiltonian}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Fe sector $H_\text {Fe}$}{2}{subsection.2.2}%
+\contentsline {paragraph}{NN $J_{1ab}$ bonds, $z=\tfrac {1}{2}$ plane (Fe$_1 \to $ Fe$_0$)}{2}{section*.5}%
+\contentsline {paragraph}{NN $J_{1ab}$ bonds, $z=0$ plane (Fe$_2 \to $ Fe$_3$, $D_y$ flipped)}{3}{section*.6}%
+\contentsline {paragraph}{NN $J_{1c}$ bonds, $c$-axis (pure isotropic)}{3}{section*.7}%
+\contentsline {paragraph}{NNN $J_{2ab}$ bonds (intra-sublattice, $\mathbf {a}$ and $\mathbf {b}$ directions)}{3}{section*.8}%
+\contentsline {paragraph}{NNN $J_{2c}$ bonds (intra-sublattice, $\mathbf {c}$ direction)}{3}{section*.9}%
+\contentsline {paragraph}{NNN $J_{2c}$ bonds (inter-sublattice, Fe$_0 \leftrightarrow $ Fe$_2$)}{3}{section*.10}%
+\contentsline {paragraph}{NNN $J_{2c}$ bonds (inter-sublattice, Fe$_1 \leftrightarrow $ Fe$_3$)}{3}{section*.11}%
+\contentsline {subsection}{\numberline {2.3}Tm sector $H_\text {Tm}$}{3}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Fe--Tm bilinear coupling $H_\chi $}{4}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Local effective fields}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Fe local field $\mathcal {H}_i^\alpha $}{5}{subsection.3.1}%
+\contentsline {paragraph}{Fe$_0$}{6}{section*.17}%
+\contentsline {paragraph}{Fe$_1$}{6}{section*.18}%
+\contentsline {paragraph}{Fe$_2$}{6}{section*.19}%
+\contentsline {paragraph}{Fe$_3$}{7}{section*.20}%
+\contentsline {subsection}{\numberline {3.2}Tm local field $\mathcal {H}_\mu ^a$}{7}{subsection.3.2}%
+\contentsline {paragraph}{Tm$_0$ --- 8 Fe neighbours (from bond table)}{7}{section*.22}%
+\contentsline {section}{\numberline {4}Equations of motion}{8}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Fe spins (SU(2) Landau--Lifshitz)}{8}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Tm qutrits (SU(3) Gell-Mann precession)}{8}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}What $\chi $ drives at each Gell-Mann component}{9}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Summary: coupling channel structure at linear order}{11}{subsection.4.4}%
+\contentsline {paragraph}{Route 1 --- $H^2_\chi $ alone, \emph {linear} in $H^2_\chi $}{11}{section*.27}%
+\contentsline {paragraph}{Route 2 --- $H^5_\chi \cdot H^7_\chi $, \emph {quadratic} in $\chi $, $\lambda ^2$ at $t^3$}{12}{section*.28}%
+\contentsline {section}{\numberline {5}Default parameter values (code defaults)}{12}{section.5}%

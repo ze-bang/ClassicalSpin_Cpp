@@ -1,0 +1,407 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{TmFeO$_3$ Hamiltonian and Tm Magnetization Readout}
+\author{}
+\date{\today}
+
+\DeclareMathOperator{\diag}{diag}
+\newcommand{\bS}{\mathbf{S}}
+\newcommand{\bh}{\mathbf{h}}
+
+\begin{document}
+
+\maketitle
+
+This note summarizes the Hamiltonian implemented in
+\texttt{src/core/unitcell\_builders.cpp} for \texttt{build\_tmfeo3()},
+and then records how the effective Tm SU(3) variables are transformed when
+magnetization is saved.
+
+\section{Conventions}
+
+The mixed TmFeO$_3$ unit cell contains four Fe sites and four Tm sites.  The
+Fe sector is treated as SU(2)-like three-component spins
+$\bS_i = (S_i^x,S_i^y,S_i^z)$, while the Tm sector is stored as an eight-
+component real vector of Gell-Mann expectation values
+$\boldsymbol{\lambda}_j = (\lambda_1,\dots,\lambda_8)$.
+
+For the four Pbnm sublattices, the Cartesian sign patterns are
+\begin{equation}
+\eta_0 = (+1,+1,+1),\quad
+\eta_1 = (+1,-1,-1),\quad
+\eta_2 = (-1,+1,-1),\quad
+\eta_3 = (-1,-1,+1),
+\end{equation}
+or equivalently
+\begin{equation}
+D_\mu = \diag(\eta_{\mu,x},\eta_{\mu,y},\eta_{\mu,z}).
+\end{equation}
+
+The full Hamiltonian implemented by the mixed builder is
+\begin{equation}
+\mathcal{H} = \mathcal{H}_{\mathrm{FeFe}} + \mathcal{H}_{\mathrm{SIA}}
++ \mathcal{H}_{\mathrm{FeZ}} + \mathcal{H}_{\mathrm{CEF}}
++ \mathcal{H}_{\mathrm{TmZ}} + \mathcal{H}_{\mathrm{TmTm}}
++ \mathcal{H}_{\chi} + \mathcal{H}_{W}.
+\end{equation}
+
+\section{Fe Sector}
+
+\subsection{Fe--Fe bilinear exchange and DM}
+
+The Fe--Fe contribution is
+\begin{equation}
+\mathcal{H}_{\mathrm{FeFe}} = \frac{1}{2}\sum_{i,j}
+\sum_{\alpha,\beta = x,y,z}
+S_i^\alpha J_{ij}^{\alpha\beta} S_j^\beta.
+\end{equation}
+
+The code constructs a lab-frame matrix with isotropic exchange and a DM vector
+$D=(0,D_y,D_z)$ through
+\begin{equation}
+J(J_{\mathrm{iso}},D_y,D_z) =
+\begin{pmatrix}
+J_{\mathrm{iso}} & D_z & -D_y \\
+-D_z & J_{\mathrm{iso}} & 0 \\
+D_y & 0 & J_{\mathrm{iso}}
+\end{pmatrix}.
+\end{equation}
+
+With the parameter names used in the builder,
+\begin{align}
+J_a^{(10)} &= J(J_{1ab}, +D_1, +D_2), \\
+J_b^{(10)} &= J(J_{1ab}, +D_1, +D_2), \\
+J_a^{(23)} &= J(J_{1ab}, -D_1, +D_2), \\
+J_b^{(23)} &= J(J_{1ab}, -D_1, +D_2), \\
+J_c &= J_{1c}\,\mathbb{1}_{3\times 3}, \\
+J_{2a} &= J_{2ab}\,\mathbb{1}_{3\times 3}, \\
+J_{2b} &= J_{2ab}\,\mathbb{1}_{3\times 3}, \\
+J_{2c} &= J_{2c}\,\mathbb{1}_{3\times 3}.
+\end{align}
+
+These are inserted on the bond set encoded in
+\texttt{apply\_tmfeo3\_fe\_sector()}, namely the in-plane nearest-neighbor
+Fe$_1\to$Fe$_0$ and Fe$_2\to$Fe$_3$ bonds, the c-axis Fe$_0\leftrightarrow$Fe$_3$
+and Fe$_1\leftrightarrow$Fe$_2$ bonds, and the same-sublattice and cross-
+sublattice next-nearest-neighbor bonds.
+
+\subsection{Fe single-ion anisotropy}
+
+The on-site Fe anisotropy is
+\begin{equation}
+\mathcal{H}_{\mathrm{SIA}} = \sum_i
+\left(K_a (S_i^x)^2 + K_b (S_i^y)^2 + K_c (S_i^z)^2\right),
+\end{equation}
+implemented as the diagonal matrix
+\begin{equation}
+K = \diag(K_a,K_b,K_c)
+\end{equation}
+on every Fe site.
+
+\subsection{Fe Zeeman term}
+
+The Fe Zeeman contribution is
+\begin{equation}
+\mathcal{H}_{\mathrm{FeZ}} = -\sum_i \bh \cdot \bS_i,
+\qquad
+\bh = h\,\hat{n},
+\end{equation}
+with \texttt{field\_strength} $=h$ and
+\texttt{field\_direction} $=\hat{n}$.
+
+\section{Tm Sector}
+
+\subsection{Tm CEF field in the local qutrit basis}
+
+The Tm sector is stored in the local crystal-field basis.  The code uses a
+three-level crystal-field Hamiltonian with diagonal energies
+\begin{equation}
+H_{\mathrm{CEF}}^{\mathrm{diag}} = \diag(0,e_1,e_2),
+\end{equation}
+which is represented as an SU(3) field along $\lambda_3$ and $\lambda_8$:
+\begin{equation}
+\mathcal{H}_{\mathrm{CEF}} = -\sum_j \left( \alpha\,\lambda_3^{(j)}
++ \beta\,\lambda_8^{(j)} \right),
+\end{equation}
+with
+\begin{equation}
+\alpha = e_1\,s_\alpha,
+\qquad
+\beta = \frac{2e_2-e_1}{\sqrt{3}}\,s_\beta,
+\end{equation}
+where $s_\alpha =$ \texttt{tm\_alpha\_scale} and
+$s_\beta =$ \texttt{tm\_beta\_scale}.
+
+Equivalently, the local eight-component Tm field initialized on every Tm site
+is
+\begin{equation}
+\mathbf{B}_{\mathrm{CEF}} = (0,0,\alpha,0,0,0,0,\beta).
+\end{equation}
+
+\subsection{Projected Tm Zeeman coupling}
+
+The physical Tm dipole is projected onto the active time-odd triplet
+$\{\lambda_2,\lambda_5,\lambda_7\}$.  The code defines
+\begin{equation}
+\mu_{\mathrm{act}} =
+\begin{pmatrix}
+\mu_{2x} & \mu_{5x} & \mu_{7x} \\
+\mu_{2y} & \mu_{5y} & \mu_{7y} \\
+\mu_{2z} & \mu_{5z} & \mu_{7z}
+\end{pmatrix},
+\end{equation}
+so that the local projected dipole is
+\begin{equation}
+J_\alpha^{\mathrm{loc}} = \sum_{a \in \{2,5,7\}} \mu_{\alpha a}\,\lambda_a.
+\end{equation}
+
+Given the lab field $\bh = (h_x,h_y,h_z)$, the local projected field coupled to
+the active SU(3) channels is
+\begin{equation}
+B_a = \sum_{\alpha = x,y,z} \mu_{\alpha a} h_\alpha,
+\qquad a \in \{2,5,7\},
+\end{equation}
+and the Zeeman term added to the local Tm field is
+\begin{equation}
+\mathcal{H}_{\mathrm{TmZ}} = -g_{\mathrm{ratio}}
+\sum_j \sum_{a\in\{2,5,7\}} B_a\,\lambda_a^{(j)},
+\end{equation}
+with $g_{\mathrm{ratio}} =$ \texttt{g\_ratio\_tm}.
+
+\subsection{Tm--Tm diagonal bilinears}
+
+The Tm--Tm interaction kept by the builder is diagonal in the Gell-Mann basis:
+\begin{equation}
+\mathcal{H}_{\mathrm{TmTm}} = \frac{1}{2}\sum_{\langle j,j'\rangle}
+\sum_{a=1}^{8} J_a^{\mathrm{Tm}}\,\lambda_a^{(j)}\lambda_a^{(j')}.
+\end{equation}
+
+In the code, this is the $8\times 8$ diagonal matrix
+\begin{equation}
+J_{\mathrm{Tm}} = \diag(J_{\mathrm{tm},1},\dots,J_{\mathrm{tm},8}),
+\end{equation}
+inserted on the specific Tm--Tm bond geometry listed in
+\texttt{apply\_tmfeo3\_tm\_sector()}.
+
+\section{Fe--Tm Couplings}
+
+\subsection{Bilinear $\chi$ term}
+
+The mixed Fe--Tm bilinear term is
+\begin{equation}
+\mathcal{H}_{\chi} = \frac{1}{2}\sum_{(i,j)}
+\sum_{\alpha= x,y,z}\sum_{a=1}^{8}
+\chi_{ij}^{\alpha a} S_i^\alpha \lambda_j^a.
+\end{equation}
+
+Only the three time-odd Tm channels are populated:
+\begin{equation}
+\chi^{\alpha a} \neq 0 \quad \text{only for } a\in\{2,5,7\}.
+\end{equation}
+Writing the active coefficients explicitly,
+\begin{equation}
+\chi =
+\begin{pmatrix}
+0 & \chi_{2x} & 0 & 0 & \chi_{5x} & 0 & \chi_{7x} & 0 \\
+0 & \chi_{2y} & 0 & 0 & \chi_{5y} & 0 & \chi_{7y} & 0 \\
+0 & \chi_{2z} & 0 & 0 & \chi_{5z} & 0 & \chi_{7z} & 0
+\end{pmatrix}.
+\end{equation}
+
+The code stores 16 explicit inversion-related bond pairs.  On the inversion-
+odd partner bond, the $\lambda_5$ and $\lambda_7$ channels flip sign while the
+$\lambda_2$ channel does not.
+
+\subsection{Mixed trilinear $W$ term}
+
+The implemented mixed trilinear is an on-site Fe--Fe--Tm coupling,
+\begin{equation}
+\mathcal{H}_{W} = \sum_{(i,j)} \sum_{n=1}^{8}
+\sum_{\alpha,\beta = x,y,z}
+W_{n,ij}^{\alpha\beta} \lambda_n^{(j)} S_i^\alpha S_i^\beta.
+\end{equation}
+
+The code fills only the channels
+$n \in \{1,3,4,6,8\}$, with the A$_2^+$ channels $\lambda_4$ and $\lambda_6$
+changing sign on inversion-related odd bonds and the A$_1^+$ channels
+$\lambda_1$, $\lambda_3$, and $\lambda_8$ remaining even.  The inserted bond
+set is the same 16-pair Fe--Tm table used for the $\chi$ term.
+
+\section{How the Tm Magnetization Is Saved}
+
+\subsection{Stored local SU(3) variables}
+
+Each Tm site is evolved and stored internally as an eight-component local
+vector
+\begin{equation}
+\boldsymbol{\lambda}^{\mathrm{loc}} =
+(\lambda_1,\lambda_2,\ldots,\lambda_8)
+\end{equation}
+in the canonical local crystal-field basis.
+
+\subsection{Sublattice-frame map used for readout}
+
+To obtain the global SU(3) readout used by the mixed-lattice machinery, the
+builder constructs an $8\times 8$ sublattice frame $F_\mu$ from the projected
+dipole matrix:
+\begin{equation}
+F_\mu = \mu_{\mathrm{act}}^{-1} D_\mu \mu_{\mathrm{act}}
+\quad \text{on the active triplet } \{\lambda_2,\lambda_5,\lambda_7\}.
+\end{equation}
+
+The same $3\times 3$ action is copied onto the coherence-partner triplet
+$\{\lambda_1,\lambda_4,\lambda_6\}$, while the diagonal population channels
+$\lambda_3$ and $\lambda_8$ are left invariant.  In block form,
+\begin{equation}
+\boldsymbol{\lambda}^{\mathrm{glob}} = F_\mu \,
+\boldsymbol{\lambda}^{\mathrm{loc}}.
+\end{equation}
+
+This frame is installed through
+\texttt{Tm\_atoms.set\_sublattice\_frame(...)} and later copied into
+\texttt{sublattice\_frames\_SU3} when the \texttt{MixedLattice} is built.
+
+\subsection{What the saved SU(3) magnetization means}
+
+When the code computes global SU(3) magnetization, it applies the installed
+sublattice frame site by site:
+\begin{equation}
+M_{\mathrm{SU3},\mu}^{\mathrm{glob}} =
+\frac{1}{N_{\mathrm{Tm}}}
+\sum_{j \in \mu}
+F_\mu\,\boldsymbol{\lambda}_j^{\mathrm{loc}}.
+\end{equation}
+
+So the saved arrays have the following meaning:
+\begin{itemize}
+\item \texttt{M\_local\_SU3}: average local qutrit Bloch vector in the local
+CEF basis.
+\item \texttt{M\_global\_SU3}: average SU(3) vector after the sublattice-frame
+map $F_\mu$ has been applied.
+\item \texttt{M\_antiferro\_SU3}: the staggered combination formed by the
+mixed-lattice observable code from the same SU(3) components.
+\end{itemize}
+
+\subsection{Recovering the physical Tm dipole moment}
+
+The physically observable Tm dipole in lab Cartesian components is obtained
+from the active time-odd channels as
+\begin{equation}
+J_{\alpha,\mathrm{lab}}(j) =
+\eta_{\mu(j),\alpha}
+\sum_{a\in\{2,5,7\}} \mu_{\alpha a} \, \lambda_a^{\mathrm{loc}}(j).
+\end{equation}
+
+That is, the SU(3) magnetization arrays are not themselves the Cartesian Tm
+moment.  They are the stored Gell-Mann expectation values, either in the local
+CEF basis or after the induced sublattice-frame map.  The physical Tm
+magnetization is recovered by projecting the active channels with
+$\mu_{\mathrm{act}}$ and then applying the Pbnm sign pattern $D_\mu$.
+
+\section{Drive Hamiltonian}
+
+The code supports up to two simultaneously active pulses ($k = 1, 2$) per
+sublattice species, with independently configurable envelopes for the Fe
+(SU(2)) and Tm (SU(3)) sectors.  The total drive term added to
+$\mathcal{H}$ is
+\begin{equation}
+\mathcal{H}_{\mathrm{drive}}(t) = \mathcal{H}_{\mathrm{drive}}^{\mathrm{Fe}}(t)
++ \mathcal{H}_{\mathrm{drive}}^{\mathrm{Tm}}(t).
+\end{equation}
+
+\subsection{Pulse envelope}
+
+Each pulse is a Gaussian-modulated cosine carrier centered at time $t_{B_k}$:
+\begin{equation}
+f_k(t) =
+A \exp\!\left[-\frac{(t - t_{B_k})^2}{4\sigma^2}\right]
+\cos\!\bigl[\omega\,(t - t_{B_k})\bigr],
+\end{equation}
+where $A$ (\texttt{pump\_amplitude}) is the peak amplitude, $\sigma$
+(\texttt{pump\_width}) is the half-width of the Gaussian envelope, and $\omega$
+(\texttt{pump\_frequency}) is the carrier angular frequency.  The intensity
+profile $I(t) \propto e^{-(t-t_{B_k})^2/(2\sigma^2)}$ has standard deviation
+$\sigma$, so \texttt{pump\_width} is the intensity half-width.
+
+An alternative tabulated mode is available: when a two-column $E(t)$ file is
+supplied via \texttt{pump\_table\_file}, the Gaussian is replaced by linear
+interpolation of the normalized waveform (peak $= 1$) and $A$ serves purely as
+an overall amplitude scale.
+
+\subsection{Fe (SU(2)) drive}
+
+The global pulse direction for each pulse $k$ and Fe atom type $\mu$ is a
+3-component Cartesian vector $\mathbf{b}^{(k)}_\mu$.  Before integration
+begins it is transformed to the local sublattice frame,
+\begin{equation}
+\tilde{\mathbf{b}}^{(k)}_\mu = D_\mu^{\,T}\,\mathbf{b}^{(k)}_\mu,
+\end{equation}
+where $D_\mu = \diag(\eta_{\mu,x},\eta_{\mu,y},\eta_{\mu,z})$ is the Pbnm
+frame matrix for Fe sublattice $\mu$ (Section~1).  For the standard diagonal
+frames $D_\mu^T = D_\mu$.  The instantaneous drive field added to the local
+effective field of Fe site $i$ (atom index $\mu = i \bmod N_{\mathrm{at}}^{\mathrm{Fe}}$) is
+\begin{equation}
+\mathbf{h}^{\mathrm{Fe}}_{\mathrm{drive},i}(t)
+= \sum_{k=1}^{2}
+f_k(t;\,A_{\mathrm{Fe}},\sigma_{\mathrm{Fe}},\omega_{\mathrm{Fe}})
+\;\tilde{\mathbf{b}}^{(k)}_\mu,
+\end{equation}
+and the corresponding Hamiltonian term is
+\begin{equation}
+\mathcal{H}^{\mathrm{Fe}}_{\mathrm{drive}}(t)
+= -\sum_i
+\mathbf{h}^{\mathrm{Fe}}_{\mathrm{drive},i}(t) \cdot \mathbf{S}_i.
+\end{equation}
+
+\subsection{Tm (SU(3)) drive}
+
+The global pulse direction for Tm atom type $\nu$ is an 8-component
+Gell-Mann vector $\mathbf{c}^{(k)}_\nu$.  It is projected into the local CEF
+basis via the Tm sublattice frame,
+\begin{equation}
+\tilde{\mathbf{c}}^{(k)}_\nu = F_\nu^{\,T}\,\mathbf{c}^{(k)}_\nu,
+\end{equation}
+where $F_\nu$ is the $8\times 8$ frame matrix defined in Section~5.  The
+instantaneous drive field added to the local SU(3) effective field of Tm site
+$j$ (atom index $\nu = j \bmod N_{\mathrm{at}}^{\mathrm{Tm}}$) is
+\begin{equation}
+\mathbf{h}^{\mathrm{Tm}}_{\mathrm{drive},j}(t)
+= \sum_{k=1}^{2}
+f_k(t;\,A_{\mathrm{Tm}},\sigma_{\mathrm{Tm}},\omega_{\mathrm{Tm}})
+\;\tilde{\mathbf{c}}^{(k)}_\nu,
+\end{equation}
+and the Hamiltonian term is
+\begin{equation}
+\mathcal{H}^{\mathrm{Tm}}_{\mathrm{drive}}(t)
+= -\sum_j
+\mathbf{h}^{\mathrm{Tm}}_{\mathrm{drive},j}(t) \cdot \boldsymbol{\lambda}_j.
+\end{equation}
+
+\paragraph{Generality of the drive channels.}
+The code places no restriction on which Gell-Mann components are nonzero
+in $\mathbf{c}^{(k)}_\nu$: any of the eight channels can be driven by setting
+the corresponding component of \texttt{pump\_directions\_su3}.
+
+For a drive via a physical electromagnetic field with Cartesian polarization
+$\hat{\mathbf{e}} = (e_x, e_y, e_z)$, only the time-odd dipole channels couple
+directly.  The global 8-component direction is then
+\begin{equation}
+c_a = \sum_{\alpha = x,y,z} \mu_{\alpha a}\,e_\alpha,
+\qquad a \in \{2,5,7\},
+\qquad c_a = 0 \text{ otherwise},
+\end{equation}
+with the Tm amplitude scaled by $g_{\mathrm{ratio}}$ relative to the Fe
+amplitude.  This projection is automated by the \texttt{auto\_su3\_pump} flag
+in the runner.  Internally, \texttt{auto\_su3\_pump} stores the result in
+the 0-based array positions $\{1,4,6\}$, which correspond to $\lambda_2,
+\lambda_5, \lambda_7$ in the 1-based Gell-Mann labeling used throughout this
+document.
+
+\end{document}

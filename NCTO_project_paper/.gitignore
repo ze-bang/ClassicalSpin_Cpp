@@ -1,0 +1,11 @@
+# LaTeX build artifacts -- keep only sources (.tex, .bib) and final PDFs if desired.
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.bak

@@ -1,0 +1,363 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm,mathtools}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcommand{\mtrip}{\bm{m}}
+\newcommand{\etrip}{\bm{e}}
+\newcommand{\Mglob}{\bm{M}_{\mathrm{global}}}
+\newcommand{\uone}{\bm{u}_1}
+\newcommand{\Fmu}{\mathcal{F}_\mu}
+\newcommand{\Lie}{\mathcal{L}}
+\newcommand{\sgnF}{\sigma_F}
+\newcommand{\sgnC}{\sigma_C}
+\newcommand{\sgnA}{\sigma_A}
+\newcommand{\sgnG}{\sigma_G}
+
+\begin{document}
+
+\title{Symbolic Audit of the Implemented $\chi/W$ Surface for the\texorpdfstring{ $H\parallel c$, $E\parallel a$ }{ H//c, E//a } Readout in TmFeO$_3$}
+\author{}
+\date{May 2026}
+
+\maketitle
+
+\section{Statement of the audit}
+
+The question is whether the \emph{currently implemented and currently scanned}
+mixed Fe--Tm Hamiltonian can generate a physically meaningful Fe--Tm crosspeak
+at excitation near the Fe qAFM mode and detection near the Tm
+$E_1 \rightarrow E_2$ line, when the experimental readout is taken from the
+stored mixed-lattice observable \texttt{M\_global\_SU3} in its
+\texttt{lambda1/lambda2} components.
+
+The working criterion is the same as in the previous note: amplitudes of order
+$10^{-3}$ or smaller are not counted as genuine.
+
+The conclusion remains negative, but the correct reason is slightly sharper than
+the markdown draft: the obstruction is not that one is measuring a naive
+uniform sum of raw local $\lambda_1$ and $\lambda_2$. The real obstruction is
+that the code measures an \emph{induced-frame} global SU(3) observable, and in
+the present Geometry-II setting the implemented $\chi$ source, the CEF
+Liouvillian, and the scanned $W_1^{xy}/W_1^{yz}$ vertices never generate the
+four-sublattice character required by that readout.
+
+\section{The actual code-level readout operator}
+
+In the mixed Tm sector the active magnetic and electric SU(3) triplets are
+\begin{equation}
+\mtrip_\mu =
+\begin{pmatrix}
+\lambda_\mu^2 \\
+\lambda_\mu^5 \\
+\lambda_\mu^7
+\end{pmatrix},
+\qquad
+\etrip_\mu =
+\begin{pmatrix}
+\lambda_\mu^1 \\
+\lambda_\mu^4 \\
+\lambda_\mu^6
+\end{pmatrix},
+\end{equation}
+with one triplet per Tm sublattice $\mu=1,\dots,4$.
+
+The code does \emph{not} store a raw local-site sum. Instead it uses the
+induced frame
+\begin{equation}
+\begin{aligned}
+\Fmu &= \mu_{\mathrm{act}}^{-1} R_\mu \, \mu_{\mathrm{act}}, \\
+R_1 &= \mathrm{diag}(+,+,+),
+&R_2 &= \mathrm{diag}(+,-,-), \\
+R_3 &= \mathrm{diag}(-,+,-),
+&R_4 &= \mathrm{diag}(-,-,+),
+\end{aligned}
+\label{eq:induced-frame}
+\end{equation}
+with the same $3\times 3$ active block acting on both
+$\mtrip_\mu$ and $\etrip_\mu$.
+
+The stored global observables are therefore
+\begin{equation}
+\Mglob^{(m)} = \frac{1}{4}\sum_{\mu=1}^{4} \Fmu \, \mtrip_\mu,
+\qquad
+\Mglob^{(e)} = \frac{1}{4}\sum_{\mu=1}^{4} \Fmu \, \etrip_\mu,
+\label{eq:stored-global}
+\end{equation}
+and the saved components labelled \texttt{lambda2} and \texttt{lambda1} are
+just
+\begin{equation}
+M_{\mathrm{global}}[\lambda_2] = \uone^{\mathsf T}\Mglob^{(m)},
+\qquad
+M_{\mathrm{global}}[\lambda_1] = \uone^{\mathsf T}\Mglob^{(e)},
+\label{eq:stored-lambda12}
+\end{equation}
+with $\uone=(1,0,0)^{\mathsf T}$.
+
+This matters because Eqs.~\eqref{eq:stored-global}--\eqref{eq:stored-lambda12}
+already include the four-sublattice sign structure. For example, the default
+projected moment matrix makes the $c$-axis magnetic probe proportional to the
+stored global $\lambda_2$ component, which in local language is the
+$(+,-,-,+)$-weighted sum of raw local $\lambda_2$ values, not a naive uniform
+sum.
+
+\section{Implemented Hamiltonian in the present scan surface}
+
+At the level relevant here, the mixed model is
+\begin{equation}
+H = H_{\mathrm{CEF}} + H_\chi + H_W + H_{\mathrm{drive}},
+\end{equation}
+with
+\begin{equation}
+H_{\mathrm{CEF}} = \sum_{\mu=1}^{4}\left(\alpha \, \lambda_\mu^3 + \beta \, \lambda_\mu^8\right),
+\label{eq:hcef}
+\end{equation}
+\begin{equation}
+H_\chi = \sum_{i,\mu} S_i^a \, \chi_{ab}(i,\mu) \, \lambda_\mu^b,
+\qquad
+b \in \{2,5,7\},
+\label{eq:hchi}
+\end{equation}
+\begin{equation}
+H_W = \sum_{i,\mu} \lambda_\mu^{(n)} \, W_n^{ab}(i,\mu) \, S_i^a S_i^b,
+\qquad
+n \in \{1,3,4,6,8\}.
+\label{eq:hw}
+\end{equation}
+
+The code-level support is therefore:
+\begin{itemize}[leftmargin=*]
+\item $\chi$ populates only the magnetic triplet $(\lambda_2,\lambda_5,\lambda_7)$,
+\item $W$ never populates $\lambda_2$ at all,
+\item the present scan surface used in the existing 2DCS campaign turns on pure
+      $\chi$ lines and the two even $W_1$ lines $W_1^{xy}$ and $W_1^{yz}$.
+\end{itemize}
+
+The odd $W_{4,6}$ channels exist in the builder, but they are not part of the
+current scan surface audited here.
+
+\section{Klein-four character bookkeeping and the SU(3) EOM}
+
+For the symbolic audit it is convenient to expand any four-sublattice pattern in
+the Klein-four character basis
+\begin{equation}
+\sgnF=(+,+,+,+),\quad
+\sgnC=(+,+,-,-),\quad
+\sgnA=(+,-,+,-),\quad
+\sgnG=(+,-,-,+).
+\label{eq:characters}
+\end{equation}
+
+For any site-resolved SU(3) component $x_\mu^a$ we write
+\begin{equation}
+x_\mu^a = \sum_{X\in\{F,C,A,G\}} \sigma_X(\mu) \, x_X^a,
+\qquad
+x_X^a = \frac{1}{4}\sum_{\mu=1}^{4}\sigma_X(\mu) \, x_\mu^a.
+\label{eq:character-decomposition}
+\end{equation}
+
+This is only a bookkeeping decomposition of the four-site pattern. It is not a
+claim that the full Tm sector should always be reduced to a single Fe-like
+Bertaut variable.
+
+With $[\lambda^a,\lambda^b]=2 i f^{abc}\lambda^c$, the local SU(3) equation of
+motion takes the form
+\begin{equation}
+\dot{\ell}_\mu^a = \kappa \, f^{abc} \, \ell_\mu^b h_\mu^c,
+\label{eq:local-eom}
+\end{equation}
+where $\kappa$ is the overall convention-dependent prefactor and
+$h_\mu^c = -\partial H / \partial \ell_\mu^c$.
+
+Substituting Eq.~\eqref{eq:character-decomposition} into
+Eq.~\eqref{eq:local-eom} gives the character-resolved equation
+\begin{equation}
+\dot{\ell}_Z^a
+=
+\kappa \sum_{\substack{X,Y\in\{F,C,A,G\}\\XY=Z}}
+f^{abc} \, \ell_X^b h_Y^c,
+\label{eq:character-eom}
+\end{equation}
+where the multiplication is the Klein-four group law coming from pointwise sign
+products, for example $G\cdot A=C$ and $G\cdot G=F$.
+
+Equation~\eqref{eq:character-eom} is the key symbolic audit. It implies three
+facts immediately:
+\begin{enumerate}[leftmargin=*]
+\item An $F$-character field preserves the four-sublattice character, because
+      $F\cdot X = X$.
+\item To convert a $G$-character coherence into a $C$-character coherence one
+      needs an $A$-character field, because $G\cdot A = C$.
+\item The subset $\{F,G\}$ is closed under multiplication, so a dynamics built
+      only from $F$- and $G$-character fields can never generate a
+      $C$-character response.
+\end{enumerate}
+
+The CEF field in Eq.~\eqref{eq:hcef} is uniform, hence pure $F$-character.
+Therefore the linearized CEF Liouvillian is block diagonal in the character
+label. In particular, on the $1 \leftrightarrow 2$ coherence pair one has
+schematically
+\begin{equation}
+\partial_t
+\begin{pmatrix}
+\ell_X^1 \\
+\ell_X^2
+\end{pmatrix}
+=
+\begin{pmatrix}
+0 & +\Omega_{12} \\
+-\Omega_{12} & 0
+\end{pmatrix}
+\begin{pmatrix}
+\ell_X^1 \\
+\ell_X^2
+\end{pmatrix}
++ \cdots,
+\label{eq:12-rotation}
+\end{equation}
+with the \emph{same} character label $X$ on both components. The CEF can rotate
+$\lambda_2$ into $\lambda_1$, but it cannot change the four-sublattice
+character while doing so.
+
+\section{Geometry-II source channels}
+
+For the readout geometry of interest, the derivation already recorded in
+\texttt{docs/tmfeo3\_notes.tex} gives
+\begin{equation}
+H_{\mathrm{drive}}^{m,\mathrm{Tm}} \propto h_z \, \Lambda_G^2,
+\qquad
+H_{\mathrm{drive}}^{e,\mathrm{Tm}} \propto e_x \, \Lambda_C^1.
+\label{eq:geometry-two-source}
+\end{equation}
+
+Thus the desired Fe$\rightarrow$Tm crosspeak requires the following symbolic
+sequence:
+\begin{equation}
+\begin{aligned}
+&\text{qAFM magnetic leg: } G\text{-character in the magnetic triplet} \\
+&\hspace{5.9em}\longrightarrow
+\text{electric readout leg: } C\text{-character in the electric triplet}.
+\end{aligned}
+\label{eq:needed-conversion}
+\end{equation}
+
+From Eq.~\eqref{eq:character-eom}, this means that some implemented vertex must
+provide an \emph{$A$-character} effective field while also supplying the
+triplet conversion needed to turn the magnetic $\lambda_2$-type coherence into
+the electric $\lambda_1$-type readout direction.
+
+\section{Why the present chi plus scanned W1 surface cannot do this}
+
+\subsection{Chi alone}
+
+The magnetic $\chi$ tensor populates only the magnetic triplet and injects the
+qAFM-coupled $\lambda_2$ channel. Equation~\eqref{eq:12-rotation} allows that
+source to rotate locally into a $\lambda_1$-type coherence, but only inside the
+same character block. Therefore a $G$-character $\chi$ source can only generate
+$G$-character $\lambda_1/\lambda_2$ response. It cannot generate the required
+$C$-character electric readout of Eq.~\eqref{eq:geometry-two-source}.
+
+So $\chi$ provides the right frequency pair, but the wrong character sector.
+
+\subsection{W1xy and W1yz}
+
+The present scan surface turns on only the even $W_1$ channel. Linearizing its
+Fe bilinear around the $\Gamma_2$ background
+\begin{equation}
+\Gamma_2: \qquad F_x \oplus G_z,
+\end{equation}
+and the qAFM fluctuation
+\begin{equation}
+\delta Q_{\mathrm{qAFM}} \sim F_z \oplus G_y,
+\end{equation}
+gives the character content
+\begin{equation}
+S_x \delta S_y : F \cdot G = G,
+\qquad
+S_z \delta S_y : G \cdot G = F.
+\label{eq:w1-characters}
+\end{equation}
+
+Hence, at the level linear in the qAFM normal coordinate,
+\begin{itemize}[leftmargin=*]
+\item $W_1^{xy}$ furnishes only a $G$-character electric-triplet source,
+\item $W_1^{yz}$ furnishes only an $F$-character electric-triplet source.
+\end{itemize}
+
+Neither one supplies the missing $A$-character vertex. Since the CEF field is
+also $F$-character, the entire symbolic closure of the present
+$\chi + W_1^{xy} + W_1^{yz} + H_{\mathrm{CEF}}$ surface is
+\begin{equation}
+\{F,G\} \cdot \{F,G\} = \{F,G\},
+\end{equation}
+which never reaches the $C$ block required by the $E\parallel a$ readout.
+
+This is the cleanest symmetry statement of the obstruction: with the current
+scan surface, the EOM never leaves the $\{F,G\}$ subgroup, while the target
+readout needs the $C$ block.
+
+\subsection{Why this is enough to rule out the observed crosspeak}
+
+The desired third-order signal is not merely a Tm resonance near
+$\omega_{12}$. It is specifically a Geometry-II Fe$\rightarrow$Tm crosspeak:
+qAFM excitation on the magnetic leg and electric-triplet readout on the Tm leg.
+
+The current implementation fails to provide the required symbolic bridge:
+\begin{enumerate}[leftmargin=*]
+\item $\chi$ provides the qAFM-active magnetic source but remains trapped in the
+      wrong character block.
+\item $W_1$ provides electric-triplet weight but only in $F$ or $G$, never in
+      the $C$ block demanded by $E\parallel a$.
+\item The uniform CEF field preserves character and therefore cannot repair the
+      mismatch.
+\end{enumerate}
+
+Therefore the present Hamiltonian does not contain a path from the qAFM-fed
+Tm sector into the actual induced-frame Geometry-II readout operator.
+
+\section{Consistency with the existing 2DCS data}
+
+The symbolic audit matches the cached spectra already generated in the repo.
+For the baselines and for the full $W_1^{xy}/W_1^{yz}$ grid,
+\texttt{M\_NL\_SU3\_FF\_lambda1} and
+\texttt{M\_NL\_SU3\_FF\_lambda2} are exactly zero at the nearest grid points to
+\begin{equation}
+\omega_\tau = 0.911105\;\mathrm{THz},
+\qquad
+\omega_t = 0.493319\;\mathrm{THz},
+\qquad
+\omega_t = 0.693729\;\mathrm{THz}.
+\end{equation}
+
+The separate raw-state control also remains consistent with the EOM audit:
+it can hide tiny weight in a non-measured character channel, but that weight is
+only $6.99\times 10^{-5}$ at $(0.911,0.493)$ THz and therefore still far below
+the $10^{-3}$ threshold.
+
+\section{Final verdict}
+
+For the current TmFeO$_3$ implementation and the current scan surface, the
+absence of the Fe--Tm crosspeak is structural.
+
+The decisive symbolic facts are:
+\begin{enumerate}[leftmargin=*]
+\item the code-level readout lives in the induced-frame observable
+      \texttt{M\_global\_SU3}, not in a raw local-site sum,
+\item the Geometry-II source channels require a $G \rightarrow C$ transfer in
+      the Tm sector,
+\item the present $\chi$ plus scanned $W_1$ surface supplies only $F$- and
+      $G$-character vertices, while the CEF Liouvillian preserves character,
+\item therefore the linearized SU(3) EOM never reaches the required $C$ block.
+\end{enumerate}
+
+So the observed qAFM $\rightarrow$ $E_1 \rightarrow E_2$ Fe--Tm crosspeak
+cannot be produced by retuning the existing $\chi$ coefficients or the current
+$W_1^{xy}/W_1^{yz}$ scan line alone. To obtain that signal, the model needs an
+additional interaction or readout channel that injects the missing character
+structure into the electric triplet in the induced-frame basis.
+
+\end{document}
