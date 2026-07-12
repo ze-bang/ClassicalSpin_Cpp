@@ -176,6 +176,14 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             cout << "================================================\n" << endl;
         }
         
+        // Keep a lab-frame (pre-local-transform) representative of each pulse
+        // vector for the polarization-resolved magnetic gates B_x/B_y/B_z(t).
+        // The THz pump is a uniform plane wave, so atom 0 represents all atoms.
+        field_drive_global_SU2[0] = field_in1.empty()
+            ? SpinVector::Zero(spin_dim_SU2) : field_in1[0];
+        field_drive_global_SU2[1] = field_in2.empty()
+            ? SpinVector::Zero(spin_dim_SU2) : field_in2[0];
+
         t_pulse_SU2[0] = t_B1;
         t_pulse_SU2[1] = t_B2;
         field_drive_amp_SU2 = amp;
@@ -446,6 +454,21 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         const double env_E = has_mixed_bilinear_drive ? (su3_f1 + su3_f2) : 0.0;
         const double env_B = has_mixed_bilinear_drive ? (su2_f1 + su2_f2) : 0.0;
 
+        // Polarization-resolved magnetic gates: the actual lab-frame field
+        // components B_eta(t) = dir1_eta * f1 + dir2_eta * f2, atom-independent
+        // for a uniform pump.  A B_z-gated kappaB vertex (tag 4) is then
+        // identically zero for an H||a pump (B along x) and active for H||c,
+        // so one Hamiltonian self-selects by measurement geometry.
+        double env_Bx = 0.0, env_By = 0.0, env_Bz = 0.0;
+        if (has_mixed_bilinear_drive && field_drive_amp_SU2 != 0.0 &&
+            field_drive_global_SU2[0].size() >= 3) {
+            const auto& g0 = field_drive_global_SU2[0];
+            const auto& g1 = field_drive_global_SU2[1];
+            env_Bx = g0(0) * su2_f1 + g1(0) * su2_f2;
+            env_By = g0(1) * su2_f1 + g1(1) * su2_f2;
+            env_Bz = g0(2) * su2_f1 + g1(2) * su2_f2;
+        }
+
         const bool fast_su2 = (spin_dim_SU2 == 3);
         const bool fast_su3 = (spin_dim_SU3 == 8);
 
@@ -470,7 +493,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
 
                     double H[3];
                     get_local_field_SU2_flat_into(site, state, offset_SU3,
-                                                  su2_f1, su2_f2, H, env_E, env_B);
+                                                  su2_f1, su2_f2, H, env_E, env_B,
+                                                  env_Bx, env_By, env_Bz);
 
                     dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
                     dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
@@ -497,7 +521,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
 
                     double H[8];
                     get_local_field_SU3_flat_into(site, state, offset_SU3,
-                                                  su3_f1, su3_f2, H, env_E, env_B);
+                                                  su3_f1, su3_f2, H, env_E, env_B,
+                                                  env_Bx, env_By, env_Bz);
 
                     // SU(3) dynamics use sparse Gell-Mann f-symbols (only 9
                     // non-zero (a<b<c) triples instead of 8^3 = 512 entries).
@@ -523,7 +548,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     const size_t idx = site * 3;
                     double H[3];
                     get_local_field_SU2_flat_into(site, state, offset_SU3,
-                                                  su2_f1, su2_f2, H, env_E, env_B);
+                                                  su2_f1, su2_f2, H, env_E, env_B,
+                                                  env_Bx, env_By, env_Bz);
                     dsdt[idx + 0] = H[1] * state[idx + 2] - H[2] * state[idx + 1];
                     dsdt[idx + 1] = H[2] * state[idx + 0] - H[0] * state[idx + 2];
                     dsdt[idx + 2] = H[0] * state[idx + 1] - H[1] * state[idx + 0];
@@ -552,7 +578,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     const size_t idx = offset_SU3 + site * 8;
                     double H[8];
                     get_local_field_SU3_flat_into(site, state, offset_SU3,
-                                                  su3_f1, su3_f2, H, env_E, env_B);
+                                                  su3_f1, su3_f2, H, env_E, env_B,
+                                                  env_Bx, env_By, env_Bz);
                     cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
                     for (size_t i = 0; i < 8; ++i) {
                         if (damping_rates_SU3(i) != 0.0) {
@@ -596,9 +623,13 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
     void MixedLattice::get_local_field_SU2_flat_into(
         size_t site, const ODEState& state, size_t offset_SU3,
         double drive_factor1, double drive_factor2,
-        double* __restrict H, double env_E, double env_B) const {
+        double* __restrict H, double env_E, double env_B,
+        double env_Bx, double env_By, double env_Bz) const {
         const size_t d2 = spin_dim_SU2;
         const size_t d3 = spin_dim_SU3;
+        // Envelope lookup indexed by the per-bond `envelope` tag:
+        //   0=E(scalar) 1=B(scalar) 2=B_x 3=B_y 4=B_z (lab-frame components).
+        const double env_lut[5] = { env_E, env_B, env_Bx, env_By, env_Bz };
         const size_t idx = site * d2;
         const double* __restrict field0 = field_SU2[site].data();
         for (size_t a = 0; a < d2; ++a) H[a] = -field0[a];
@@ -665,7 +696,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             const auto& env_tag = mixed_bilinear_drive_envelope_SU2[site];
             const size_t stride = d2 * d3;
             for (size_t n = 0; n < n_mbd; ++n) {
-                const double env = (env_tag[n] == 0) ? env_E : env_B;
+                const int tag = env_tag[n];
+                const double env = env_lut[(tag >= 0 && tag < 5) ? tag : 1];
                 if (env == 0.0) continue;
                 const double* __restrict J = Jbase + n * stride;
                 const double* __restrict S = &state[offset_SU3 + mbpd[n] * d3];
@@ -820,9 +852,12 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
     void MixedLattice::get_local_field_SU3_flat_into(
         size_t site, const ODEState& state, size_t offset_SU3,
         double drive_factor1, double drive_factor2,
-        double* __restrict H, double env_E, double env_B) const {
+        double* __restrict H, double env_E, double env_B,
+        double env_Bx, double env_By, double env_Bz) const {
         const size_t d2 = spin_dim_SU2;
         const size_t d3 = spin_dim_SU3;
+        // Envelope lookup indexed by the per-bond `envelope` tag (see SU2 twin).
+        const double env_lut[5] = { env_E, env_B, env_Bx, env_By, env_Bz };
         const size_t idx = offset_SU3 + site * d3;
         const double* __restrict field0 = field_SU3[site].data();
         for (size_t a = 0; a < d3; ++a) H[a] = -field0[a];
@@ -887,7 +922,8 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             const auto& env_tag = mixed_bilinear_drive_envelope_SU3[site];
             const size_t stride = d3 * d2;
             for (size_t n = 0; n < n_mbd; ++n) {
-                const double env = (env_tag[n] == 0) ? env_E : env_B;
+                const int tag = env_tag[n];
+                const double env = env_lut[(tag >= 0 && tag < 5) ? tag : 1];
                 if (env == 0.0) continue;
                 const double* __restrict J = Jbase + n * stride;
                 const double* __restrict S = &state[mbpd[n] * d2];

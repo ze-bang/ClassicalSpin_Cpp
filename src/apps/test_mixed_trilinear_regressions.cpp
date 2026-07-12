@@ -509,8 +509,9 @@ bool check_higher_order_builder_surface(std::ostream& out) {
     for (const auto& pair : kminus_bond_pairs()) {
         const MixedBilinearDrive* even_E = find_drive_bilinear(mixed_uc, pair.even, 0);
         const MixedBilinearDrive* odd_E = find_drive_bilinear(mixed_uc, pair.odd, 0);
-        const MixedBilinearDrive* even_B = find_drive_bilinear(mixed_uc, pair.even, 1);
-        const MixedBilinearDrive* odd_B = find_drive_bilinear(mixed_uc, pair.odd, 1);
+        // Legacy field-less kappaB keys now gate on B_z (envelope tag 4).
+        const MixedBilinearDrive* even_B = find_drive_bilinear(mixed_uc, pair.even, 4);
+        const MixedBilinearDrive* odd_B = find_drive_bilinear(mixed_uc, pair.odd, 4);
         const MixedTrilinear* even_W = find_trilinear(mixed_uc, pair.even);
         const MixedTrilinear* odd_W = find_trilinear(mixed_uc, pair.odd);
         if (even_E == nullptr || odd_E == nullptr || even_B == nullptr || odd_B == nullptr
@@ -581,8 +582,8 @@ bool check_higher_order_orbit_specific_override(std::ostream& out) {
         if (pair.orbit != 3) {
             continue;
         }
-        const MixedBilinearDrive* even = find_drive_bilinear(mixed_uc, pair.even, 1);
-        const MixedBilinearDrive* odd = find_drive_bilinear(mixed_uc, pair.odd, 1);
+        const MixedBilinearDrive* even = find_drive_bilinear(mixed_uc, pair.even, 4);
+        const MixedBilinearDrive* odd = find_drive_bilinear(mixed_uc, pair.odd, 4);
         if (even == nullptr || odd == nullptr) {
             out << "[FAIL] Missing orbit-specific kappaB bond\n";
             return false;
@@ -605,17 +606,25 @@ bool check_driven_bilinear_field_consistency(Lattice& lattice, std::ostream& out
     assign_deterministic_spins(lattice);
     const auto state = lattice.spins_to_state();
     const size_t offset_su3 = lattice.lattice_size_SU2 * lattice.spin_dim_SU2;
-    const double env_E = 0.37;
-    const double env_B = -0.23;
+    // Distinct values for every envelope tag so component-resolved gates
+    // (2=B_x, 3=B_y, 4=B_z) are exercised, not just the scalar E/B tags.
+    const double env_E = 0.37, env_B = -0.23;
+    const double env_Bx = 0.11, env_By = -0.51, env_Bz = 0.29;
+    const double env_lut[5] = { env_E, env_B, env_Bx, env_By, env_Bz };
+    auto env_of = [&](int tag) {
+        return (tag >= 0 && tag < 5) ? env_lut[tag] : env_B;
+    };
 
     for (size_t site = 0; site < lattice.lattice_size_SU2; ++site) {
         double H0[3] = {0.0, 0.0, 0.0};
         double Hd[3] = {0.0, 0.0, 0.0};
-        lattice.get_local_field_SU2_flat_into(site, state, offset_su3, 0.0, 0.0, H0, 0.0, 0.0);
-        lattice.get_local_field_SU2_flat_into(site, state, offset_su3, 0.0, 0.0, Hd, env_E, env_B);
+        lattice.get_local_field_SU2_flat_into(site, state, offset_su3, 0.0, 0.0, H0,
+                                              0.0, 0.0, 0.0, 0.0, 0.0);
+        lattice.get_local_field_SU2_flat_into(site, state, offset_su3, 0.0, 0.0, Hd,
+                                              env_E, env_B, env_Bx, env_By, env_Bz);
         Eigen::Vector3d expected = Eigen::Vector3d::Zero();
         for (size_t n = 0; n < lattice.mixed_bilinear_drive_partners_SU2[site].size(); ++n) {
-            const double env = (lattice.mixed_bilinear_drive_envelope_SU2[site][n] == 0) ? env_E : env_B;
+            const double env = env_of(lattice.mixed_bilinear_drive_envelope_SU2[site][n]);
             const size_t partner = lattice.mixed_bilinear_drive_partners_SU2[site][n];
             expected += env * lattice.mixed_bilinear_drive_interaction_SU2[site][n]
                             * lattice.spins_SU3[partner];
@@ -630,11 +639,13 @@ bool check_driven_bilinear_field_consistency(Lattice& lattice, std::ostream& out
     for (size_t site = 0; site < lattice.lattice_size_SU3; ++site) {
         double H0[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         double Hd[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-        lattice.get_local_field_SU3_flat_into(site, state, offset_su3, 0.0, 0.0, H0, 0.0, 0.0);
-        lattice.get_local_field_SU3_flat_into(site, state, offset_su3, 0.0, 0.0, Hd, env_E, env_B);
+        lattice.get_local_field_SU3_flat_into(site, state, offset_su3, 0.0, 0.0, H0,
+                                              0.0, 0.0, 0.0, 0.0, 0.0);
+        lattice.get_local_field_SU3_flat_into(site, state, offset_su3, 0.0, 0.0, Hd,
+                                              env_E, env_B, env_Bx, env_By, env_Bz);
         Eigen::VectorXd expected = Eigen::VectorXd::Zero(8);
         for (size_t n = 0; n < lattice.mixed_bilinear_drive_partners_SU3[site].size(); ++n) {
-            const double env = (lattice.mixed_bilinear_drive_envelope_SU3[site][n] == 0) ? env_E : env_B;
+            const double env = env_of(lattice.mixed_bilinear_drive_envelope_SU3[site][n]);
             const size_t partner = lattice.mixed_bilinear_drive_partners_SU3[site][n];
             expected += env * lattice.mixed_bilinear_drive_interaction_SU3[site][n]
                             * lattice.spins_SU2[partner];

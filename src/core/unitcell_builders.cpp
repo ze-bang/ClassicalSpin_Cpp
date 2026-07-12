@@ -811,16 +811,49 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
         return K;
     };
 
-    auto read_plus_bilinear_orbit = [&](const std::string& prefix, int orbit) {
-        Eigen::MatrixXd K = Eigen::MatrixXd::Zero(3, 5);
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 5; ++col) {
-                const std::string suffix = std::string(lambda_plus_names[col]) + row_names[row];
-                const std::string common_key = prefix + "_" + suffix;
-                const std::string orbit_key = prefix + std::to_string(orbit) + "_" + suffix;
-                K(row, col) = config.has_param(orbit_key)
-                            ? config.get_param(orbit_key, 0.0)
-                            : config.get_param(common_key, 0.0);
+    // Polarization-resolved kappaB reader.  Returns one (spin-axis x lambda+)
+    // 3x5 matrix per lab-frame driving-field axis {x, y, z}.  The field axis
+    // sets which B-component gates the vertex at runtime (envelope tags 2/3/4):
+    // a B_z-gated term is silent for an H||a (B along x) pump and active for
+    // H||c, so a single Hamiltonian self-selects by measurement geometry.
+    //
+    // New field-resolved keys:  kappaB[<orbit>]_<field><lambda><spin>   e.g. kappaB_z1y
+    // Legacy keys (no field):    kappaB[<orbit>]_<lambda><spin>          e.g. kappaB_1y
+    // Legacy keys map onto the global z axis (the physically dominant, B||c
+    // gate), preserving the meaning of previously tuned kappaB parameters.
+    const char* field_names[3] = {"x", "y", "z"};
+    auto read_kappaB_orbit = [&](int orbit) {
+        std::array<Eigen::MatrixXd, 3> K;
+        for (auto& m : K) m = Eigen::MatrixXd::Zero(3, 5);
+        for (int f = 0; f < 3; ++f) {
+            for (int row = 0; row < 3; ++row) {
+                for (int col = 0; col < 5; ++col) {
+                    const std::string lam = lambda_plus_names[col];
+                    const std::string spin = row_names[row];
+                    // Field-resolved key takes precedence.
+                    const std::string new_suffix = std::string(field_names[f]) + lam + spin;
+                    const std::string new_common = "kappaB_" + new_suffix;
+                    const std::string new_orbit  = "kappaB" + std::to_string(orbit) + "_" + new_suffix;
+                    if (config.has_param(new_orbit)) {
+                        K[f](row, col) = config.get_param(new_orbit, 0.0);
+                        continue;
+                    }
+                    if (config.has_param(new_common)) {
+                        K[f](row, col) = config.get_param(new_common, 0.0);
+                        continue;
+                    }
+                    // Legacy (field-less) keys fold onto the global z axis.
+                    if (f == 2) {
+                        const std::string leg_suffix = lam + spin;
+                        const std::string leg_common = "kappaB_" + leg_suffix;
+                        const std::string leg_orbit  = "kappaB" + std::to_string(orbit) + "_" + leg_suffix;
+                        if (config.has_param(leg_orbit)) {
+                            K[f](row, col) = config.get_param(leg_orbit, 0.0);
+                        } else if (config.has_param(leg_common)) {
+                            K[f](row, col) = config.get_param(leg_common, 0.0);
+                        }
+                    }
+                }
             }
         }
         return K;
@@ -928,17 +961,20 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
     }
 
     std::array<Eigen::Matrix3d, 4> kappaE_orbit;
-    std::array<Eigen::MatrixXd, 4> kappaB_orbit;
+    std::array<std::array<Eigen::MatrixXd, 3>, 4> kappaB_orbit;   // [orbit][field axis x/y/z]
     std::array<std::array<Eigen::Matrix3d, 5>, 4> W_orbit;
     std::array<bool, 4> kappaE_nonzero;
-    std::array<bool, 4> kappaB_nonzero;
+    std::array<std::array<bool, 3>, 4> kappaB_nonzero;            // [orbit][field axis]
     std::array<bool, 4> W_orbit_nonzero;
     for (int orbit = 1; orbit <= 4; ++orbit) {
         kappaE_orbit[orbit - 1] = read_minus_bilinear_orbit("kappaE", orbit);
-        kappaB_orbit[orbit - 1] = read_plus_bilinear_orbit("kappaB", orbit);
+        kappaB_orbit[orbit - 1] = read_kappaB_orbit(orbit);
         W_orbit[orbit - 1] = read_W_orbit(orbit);
         kappaE_nonzero[orbit - 1] = kappaE_orbit[orbit - 1].cwiseAbs().maxCoeff() > 0.0;
-        kappaB_nonzero[orbit - 1] = kappaB_orbit[orbit - 1].cwiseAbs().maxCoeff() > 0.0;
+        for (int f = 0; f < 3; ++f) {
+            kappaB_nonzero[orbit - 1][f] =
+                kappaB_orbit[orbit - 1][f].cwiseAbs().maxCoeff() > 0.0;
+        }
         W_orbit_nonzero[orbit - 1] = W_nonzero(W_orbit[orbit - 1]);
     }
 
@@ -974,15 +1010,23 @@ void apply_tmfeo3_fe_tm_couplings(MixedUnitCell& mixed_uc, const SpinConfig& con
                 pair.odd.fe, pair.odd.tm, pair.odd.off, 0);
         }
 
-        if (kappaB_nonzero[orbit_index] && kappaB_scale[orbit_index] != 0.0) {
-            mixed_uc.set_mixed_bilinear_drive(
-                build_plus_drive_bond(pair.even.fe, kappaB_orbit[orbit_index],
-                                      M_plus_even, kappaB_scale[orbit_index]),
-                pair.even.fe, pair.even.tm, pair.even.off, 1);
-            mixed_uc.set_mixed_bilinear_drive(
-                build_plus_drive_bond(pair.odd.fe, kappaB_orbit[orbit_index],
-                                      M_plus_odd, kappaB_scale[orbit_index]),
-                pair.odd.fe, pair.odd.tm, pair.odd.off, 1);
+        // One driven bond per lab-frame field axis {x,y,z} that carries a
+        // nonzero kappaB slice.  The envelope tag 2+f selects the B_x/B_y/B_z(t)
+        // gate at runtime.  Legacy field-less keys land on f=2 (B_z), so the
+        // common single-axis case still emits exactly one bond per Fe site.
+        if (kappaB_scale[orbit_index] != 0.0) {
+            for (int f = 0; f < 3; ++f) {
+                if (!kappaB_nonzero[orbit_index][f]) continue;
+                const int env_tag = 2 + f;   // 2=B_x, 3=B_y, 4=B_z
+                mixed_uc.set_mixed_bilinear_drive(
+                    build_plus_drive_bond(pair.even.fe, kappaB_orbit[orbit_index][f],
+                                          M_plus_even, kappaB_scale[orbit_index]),
+                    pair.even.fe, pair.even.tm, pair.even.off, env_tag);
+                mixed_uc.set_mixed_bilinear_drive(
+                    build_plus_drive_bond(pair.odd.fe, kappaB_orbit[orbit_index][f],
+                                          M_plus_odd, kappaB_scale[orbit_index]),
+                    pair.odd.fe, pair.odd.tm, pair.odd.off, env_tag);
+            }
         }
 
         if (W_orbit_nonzero[orbit_index] && W_scale[orbit_index] != 0.0) {

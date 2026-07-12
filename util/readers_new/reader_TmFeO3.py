@@ -1324,7 +1324,9 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
                       reload_components: bool = False,
                       save_intermediates: bool = False,
                       skip_plots: bool = False,
-                      auto_window_margin: float = 2.0) -> Dict[str, np.ndarray]:
+                      auto_window_margin: float = 2.0,
+                      tau_gate: float = 0.0,
+                      dc_remove: bool = False) -> Dict[str, np.ndarray]:
     """Read and compute 2D nonlinear spectroscopy using FFT for mixed SU(2)+SU(3) systems.
     
     Reads pump-probe spectroscopy data from HDF5 file and computes the nonlinear
@@ -1575,15 +1577,33 @@ def read_2D_nonlinear(dir: str, omega_t_window: Optional[Tuple[float, float]] = 
         _cfft_cache = {}
         _fft_cache = {}
 
+        # Optional pulse-overlap gate along tau: zero at tau=0, cosine ramp to 1
+        # at tau=-tau_gate.  Physically motivated: the |tau| < pulse-overlap
+        # region carries the coherent artifact (both pulses on simultaneously),
+        # which is broad in omega_tau and buries the sequential cross peaks.
+        _gate_tau = None
+        if tau_gate and tau_gate > 0:
+            _gate_tau = np.ones_like(tau)
+            gmask = tau > -tau_gate
+            _gate_tau[gmask] = 0.5 * (1.0 - np.cos(np.pi * (-tau[gmask]) / tau_gate))
+            print(f"    τ overlap gate: zero at τ=0, ramp to 1 at τ=-{tau_gate}")
+
         def _apodize_filter(data):
             """Filter to t >= t_cutoff and apply mean subtraction + apodization."""
             data_filtered = data[..., t0_idx:]
-            # Mean subtraction across the full (tau, t) grid (matches axis=None
-            # behaviour of np.mean) — preserved per-component for batched arrays.
-            mean_axes = (-2, -1)
-            data_dynamic = data_filtered - data_filtered.mean(axis=mean_axes, keepdims=True)
+            if dc_remove:
+                # Per-tau DC removal along t: kills the static-offset ridge at
+                # omega_t ~ 0 without touching finite-frequency content.
+                data_dynamic = data_filtered - data_filtered.mean(axis=-1, keepdims=True)
+            else:
+                # Mean subtraction across the full (tau, t) grid (matches axis=None
+                # behaviour of np.mean) — preserved per-component for batched arrays.
+                mean_axes = (-2, -1)
+                data_dynamic = data_filtered - data_filtered.mean(axis=mean_axes, keepdims=True)
             if apod_window is not None:
                 data_dynamic = data_dynamic * apod_window  # broadcasts across batch
+            if _gate_tau is not None:
+                data_dynamic = data_dynamic * _gate_tau[..., :, None]
             return data_dynamic
 
         def _fft2_shift(data_dynamic, axes=(-2, -1)):
@@ -2370,7 +2390,8 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
                             reload_components: bool = False,
                             save_intermediates: bool = False,
                             skip_plots: bool = False,
-                            auto_window_margin: float = 2.0) -> Dict[str, np.ndarray]:
+                            auto_window_margin: float = 2.0,
+                            tau_gate: float = 0.0, dc_remove: bool = False) -> Dict[str, np.ndarray]:
     """
     Read 2D coherent spectroscopy data and compute nonlinear spectra for both sublattices.
     
@@ -2399,7 +2420,8 @@ def read_2DCS_combined_hdf5(filepath: str, omega_t_window: Optional[Tuple[float,
                              window_type=window_type, energy_levels_mev=energy_levels_mev,
                              load_from_cache=load_from_cache, reload_components=reload_components,
                              save_intermediates=save_intermediates, skip_plots=skip_plots,
-                             auto_window_margin=auto_window_margin)
+                             auto_window_margin=auto_window_margin,
+                             tau_gate=tau_gate, dc_remove=dc_remove)
 
 
 def run_interactive_2dcs(filepath: str, 
@@ -2848,6 +2870,141 @@ def get_metadata_from_hdf5(filepath: str) -> Dict[str, Any]:
 # MAIN
 # =============================================================================
 
+
+def plot_consolidated_grid(dir: str, tau_gate: float = 6.0, t_zoom=(3.0, 30.0),
+                           smooth=(3.0, 2.0), norm_type: NormType = 'linear',
+                           energy_levels_mev: Optional[Dict[str, float]] = None,
+                           flip_channels=('SU3-5', 'SU3-6')):
+    """Consolidated N x 3 grid: [ (omega_t, omega_tau) | (t, tau) close-up | (omega_t, tau) ]
+    plus a companion file with the mixed (t, omega_tau) domain (FFT along tau only).
+
+    Rows: SU3 lambda2, lambda4, lambda5, lambda6, lambda7 and Fe S_x.  Channels listed in
+    `flip_channels` (species-index keys) have their omega_tau axis mirrored so both
+    qutrit transfer peaks display on the same E12 side.  Spots are broadened by a
+    Gaussian of `smooth` bins for visibility; guide lines are drawn thin.
+    Outputs: M_NL_consolidated_grid.pdf and M_NL_wtau_vs_t.pdf in `dir`.
+    """
+    from scipy.ndimage import gaussian_filter
+    MEVTHZ = 1.0 / 4.135667696
+    SCALEG = 2 * np.pi * MEVTHZ
+    fp = os.path.join(dir, 'pump_probe_spectroscopy.h5')
+    chans = [('SU3', 1, r'$\lambda^2$ (G1 cross-pol)'),
+             ('SU3', 3, r'$\lambda^4$ (G3)'), ('SU3', 4, r'$\lambda^5$ (G3)'),
+             ('SU3', 5, r'$\lambda^6$ (G3)'), ('SU3', 6, r'$\lambda^7$ (G3)'),
+             ('SU2', 0, r'Fe $S_x$')]
+    with h5py.File(fp, 'r') as f:
+        t = f['/reference/times'][:]
+        tau = f['/tau_scan/tau_values'][:]
+        n_tau = len(tau)
+        data = {}
+        M0 = {sp: f[f'/reference/M_global_{sp}'][:] for sp in ('SU2', 'SU3')}
+        for sp, l, _ in chans:
+            data[(sp, l)] = np.zeros((n_tau, len(t)))
+        for i in range(n_tau):
+            g = f[f'/tau_scan/tau_{i}']
+            m1 = {sp: g[f'M1_global_{sp}'][:] for sp in ('SU2', 'SU3')}
+            m01 = {sp: g[f'M01_global_{sp}'][:] for sp in ('SU2', 'SU3')}
+            for sp, l, _ in chans:
+                data[(sp, l)][i] = m01[sp][:, l] - m1[sp][:, l] - M0[sp][:, l]
+    tm = t >= t_zoom[0]
+    tk = t[tm]
+    apod = np.exp(np.log(0.03) * ((tk - tk[0]) / (tk[-1] - tk[0])) ** 2)
+    wtau_win = np.ones_like(tau)
+    gmask = tau > -tau_gate
+    wtau_win[gmask] = 0.5 * (1 - np.cos(np.pi * (-tau[gmask]) / tau_gate))
+    e2 = tau < (tau[0] + 10)
+    wtau_win[e2] *= 0.5 * (1 - np.cos(np.pi * (tau[e2] - tau[0]) / 10))
+    wt = np.fft.fftshift(np.fft.fftfreq(tm.sum(), t[1] - t[0])) * SCALEG
+    wta = np.fft.fftshift(np.fft.fftfreq(n_tau, tau[1] - tau[0])) * SCALEG
+    zoom = (t >= t_zoom[0]) & (t <= t_zoom[1])
+    lev = energy_levels_mev or {}
+    guide = [v * MEVTHZ for v in lev.values() if v]
+
+    def prep(sp, l):
+        M = data[(sp, l)]
+        Md = M[:, tm] - M[:, tm].mean(axis=1, keepdims=True)
+        Mw = Md * wtau_win[:, None] * apod[None, :]
+        F2 = np.abs(np.fft.fftshift(np.fft.fft2(Mw)))
+        Ft = np.abs(np.fft.fftshift(np.fft.fft(Mw, axis=1), axes=1))       # (tau, omega_t)
+        Fq = np.abs(np.fft.fftshift(np.fft.fft(Mw, axis=0), axes=0))       # (omega_tau, t)
+        return M, F2, Ft, Fq
+
+    nrows = len(chans)
+    fig, axs = plt.subplots(nrows, 3, figsize=(15, 3.1 * nrows))
+    fig2, axs2 = plt.subplots(nrows, 1, figsize=(7.5, 3.0 * nrows))
+    for r, (sp, l, lab) in enumerate(chans):
+        M, F2, Ft, Fq = prep(sp, l)
+        flip = f'{sp}-{l}' in flip_channels
+        # --- col 1: (omega_t, omega_tau), smoothed, optional flip ---
+        A = gaussian_filter(F2, sigma=smooth)
+        if flip:
+            A = A[::-1, :]
+        sel = (np.abs(wta)[:, None] > 0.10) & (np.abs(wta)[:, None] < 1.6) & \
+              (wt[None, :] > 0.15) & (wt[None, :] < 1.6)
+        nv = A[sel].max() if sel.any() and A[sel].max() > 0 else (A.max() or 1)
+        ax = axs[r, 0]
+        ax.pcolormesh(wt, wta, A / nv, shading='auto', cmap='inferno', rasterized=True,
+                      norm=_get_norm(A / nv, norm_type))
+        for gv in guide:
+            for sgn in (1, -1):
+                ax.axhline(sgn * gv, color='cyan', lw=0.25, alpha=0.35)
+                ax.axvline(sgn * gv, color='cyan', lw=0.25, alpha=0.35)
+        ax.set_xlim(0.15, 1.55); ax.set_ylim(-1.5, 1.5)
+        ax.set_ylabel(r'$\omega_\tau$ (THz)')
+        ttl = lab + (r'  [$\omega_\tau$ mirrored]' if flip else '')
+        ax.set_title(ttl, fontsize=9)
+        if r == nrows - 1:
+            ax.set_xlabel(r'$\omega_t$ (THz)')
+        # --- col 2: (t, tau) close-up on the FFT region ---
+        ax = axs[r, 1]
+        Z = M[:, zoom] - M[:, zoom].mean(axis=1, keepdims=True)
+        vm = np.percentile(np.abs(Z), 99) or 1
+        ax.pcolormesh(t[zoom][::2], tau[::2], Z[::2, ::2], shading='auto', cmap='RdBu_r',
+                      vmin=-vm, vmax=vm, rasterized=True)
+        ax.set_ylabel(r'$\tau$'); ax.set_title('$M_{NL}(t,\tau)$, FFT window', fontsize=9)
+        if r == nrows - 1:
+            ax.set_xlabel('$t$')
+        # --- col 3: (omega_t, tau): FFT along t only ---
+        ax = axs[r, 2]
+        B = gaussian_filter(Ft, sigma=(0, smooth[1]))
+        nv2 = B[:, (wt > 0.15) & (wt < 1.6)].max() or 1
+        ax.pcolormesh(wt, tau[::2], (B / nv2)[::2], shading='auto', cmap='inferno', rasterized=True,
+                      norm=_get_norm(B / nv2, norm_type))
+        for gv in guide:
+            ax.axvline(gv, color='cyan', lw=0.25, alpha=0.35)
+        ax.set_xlim(0.15, 1.55); ax.set_ylabel(r'$\tau$')
+        ax.set_title(r'$|FFT_t|$ vs delay', fontsize=9)
+        if r == nrows - 1:
+            ax.set_xlabel(r'$\omega_t$ (THz)')
+        # --- companion: (t, omega_tau): FFT along tau only ---
+        ax = axs2[r] if nrows > 1 else axs2
+        C = gaussian_filter(Fq[:, zoom[tm.argmax():][:tm.sum()] if False else (tk >= t_zoom[0]) & (tk <= t_zoom[1])], sigma=(smooth[0], 0))
+        if flip:
+            C = C[::-1, :]
+        tz = tk[(tk >= t_zoom[0]) & (tk <= t_zoom[1])]
+        nv3 = C[(np.abs(wta) > 0.10) & (np.abs(wta) < 1.6)].max() or 1
+        ax.pcolormesh(tz[::2], wta, (C / nv3)[:, ::2], shading='auto', cmap='inferno', rasterized=True,
+                      norm=_get_norm(C / nv3, norm_type))
+        for gv in guide:
+            for sgn in (1, -1):
+                ax.axhline(sgn * gv, color='cyan', lw=0.25, alpha=0.35)
+        ax.set_ylim(-1.5, 1.5)
+        ax.set_ylabel(r'$\omega_\tau$ (THz)')
+        ax.set_title(ttl + r'   $|FFT_\tau|$ vs $t$', fontsize=9)
+        if r == nrows - 1:
+            ax.set_xlabel('$t$')
+    fig.suptitle('Consolidated grid: frequency / time / mixed domains', fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    out1 = os.path.join(dir, 'M_NL_consolidated_grid.pdf')
+    fig.savefig(out1, dpi=110); plt.close(fig)
+    print(f'    Generated: {out1}')
+    fig2.suptitle(r'Mixed domain: FFT along $\tau$, time domain in $t$ (FFT window)', fontsize=12)
+    fig2.tight_layout(rect=[0, 0, 1, 0.98])
+    out2 = os.path.join(dir, 'M_NL_wtau_vs_t.pdf')
+    fig2.savefig(out2, dpi=110); plt.close(fig2)
+    print(f'    Generated: {out2}')
+
+
 def find_hdf5_file(path: str, analysis_type: str) -> str:
     """
     Find the appropriate HDF5 file given a path.
@@ -2946,6 +3103,13 @@ Examples:
                         help='Run interactive mode with sliders to tune λ2, λ5, λ7, and SU(2) x weights')
     
     # Load from cache option
+    parser.add_argument('--grid', action='store_true',
+                        help='Produce the consolidated Nx3 grid (freq/time/mixed domains) and the wtau-vs-t companion, then exit.')
+    parser.add_argument('--tau-gate', type=float, default=0.0,
+                        help='Gate out the pulse-overlap region: cosine ramp from 0 at τ=0 to 1 at τ=-G '
+                             '(units of the simulation time axis). Suppresses the coherent artifact.')
+    parser.add_argument('--dc-remove', action='store_true',
+                        help='Per-τ DC removal along t before the 2D FFT (kills the static-offset ridge at ω_t≈0).')
     parser.add_argument('--load-results', '--from-cache', action='store_true',
                         help='Skip FFT calculations and load from previously saved .txt files (only regenerate plots)')
     
@@ -2985,6 +3149,17 @@ Examples:
         print(f"Error: {e}")
         sys.exit(1)
     
+    if getattr(args, 'grid', False):
+        _lev = {}
+        if args.e1: _lev['e1'] = args.e1
+        if args.e2: _lev['e2'] = args.e2; _lev['e2-e1'] = (args.e2 - args.e1) if args.e1 else None
+        if args.kc: _lev['qAFM'] = args.kc
+        if args.qfm: _lev['qFM'] = args.qfm
+        plot_consolidated_grid(os.path.dirname(filepath) or '.',
+                               tau_gate=(args.tau_gate or 6.0),
+                               norm_type=args.norm, energy_levels_mev=_lev)
+        sys.exit(0)
+
     print(f"Analyzing {filepath} (type: {analysis_type})")
     print(f"  Normalization: {args.norm}")
     print(f"  Window type: {args.window}")
@@ -3034,7 +3209,8 @@ Examples:
                                               load_from_cache=args.load_results,
                                               reload_components=args.reload_components,
                                               skip_plots=args.skip_plots,
-                                              save_intermediates=args.save_intermediates)
+                                              save_intermediates=args.save_intermediates,
+                                              tau_gate=args.tau_gate, dc_remove=args.dc_remove)
             print(f"Results keys: {list(results.keys())}")
     else:
         print(f"Unknown analysis type: {analysis_type}")

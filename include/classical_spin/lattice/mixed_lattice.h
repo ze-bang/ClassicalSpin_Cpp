@@ -172,10 +172,17 @@ public:
     // Pulse-envelope-modulated mixed SU(2)-SU(3) bilinears (field-assisted
     // Fe-Tm exchange H_{E chi} and H_{B chi}).  Same storage shape as the
     // static mixed bilinears, plus a per-entry `envelope` selector:
-    //   0 -> SU(3) pulse envelope (electric / THz field E(t))
-    //   1 -> SU(2) pulse envelope (magnetic field B(t))
+    //   0 -> SU(3) pulse envelope (electric / THz field E(t), scalar)
+    //   1 -> SU(2) pulse envelope (magnetic field B(t), scalar magnitude)
+    //   2 -> global B_x(t) component   (polarization-resolved magnetic gate)
+    //   3 -> global B_y(t) component
+    //   4 -> global B_z(t) component
     // At each RHS evaluation the contribution is scaled by the matching pulse
-    // envelope scalar, so it vanishes outside the pulse window.
+    // envelope scalar, so it vanishes outside the pulse window.  The
+    // component-resolved tags (2..4) gate a vertex by the *actual* driving-field
+    // component along a lab (global) axis, so e.g. a B_z-gated kappaB vertex is
+    // identically zero for an H||a (B along x) pump and active for H||c.  This
+    // makes a single Hamiltonian self-select by measurement geometry.
     vector<vector<Eigen::MatrixXd>> mixed_bilinear_drive_interaction_SU2;
     vector<vector<Eigen::MatrixXd>> mixed_bilinear_drive_interaction_SU3;
     vector<vector<size_t>> mixed_bilinear_drive_partners_SU2;
@@ -259,6 +266,12 @@ public:
 
     // Time-dependent fields for molecular dynamics
     array<SpinVector, 2> field_drive_SU2;     // Two pulse components for SU(2)
+    // Global (lab-frame) representative of the two SU(2) pulse field vectors,
+    // BEFORE the per-sublattice local-frame transform.  Used only to compute
+    // the polarization-resolved magnetic gates B_x/B_y/B_z(t) for the
+    // component-tagged (2..4) field-assisted bilinears.  The THz pump is a
+    // uniform plane wave, so a single lab-frame vector per pulse suffices.
+    array<SpinVector, 2> field_drive_global_SU2{SpinVector::Zero(3), SpinVector::Zero(3)};
     array<SpinVector, 2> field_drive_SU3;     // Two pulse components for SU(3)
     array<double, 2> t_pulse_SU2;             // Pulse center times for SU(2)
     array<double, 2> t_pulse_SU3;             // Pulse center times for SU(3)
@@ -4196,12 +4209,16 @@ public:
                                        size_t offset_SU3,
                                        double drive_factor1, double drive_factor2,
                                        double* H_out,
-                                       double env_E = 0.0, double env_B = 0.0) const;
+                                       double env_E = 0.0, double env_B = 0.0,
+                                       double env_Bx = 0.0, double env_By = 0.0,
+                                       double env_Bz = 0.0) const;
     void get_local_field_SU3_flat_into(size_t site, const ODEState& state,
                                        size_t offset_SU3,
                                        double drive_factor1, double drive_factor2,
                                        double* H_out,
-                                       double env_E = 0.0, double env_B = 0.0) const;
+                                       double env_E = 0.0, double env_B = 0.0,
+                                       double env_Bx = 0.0, double env_By = 0.0,
+                                       double env_Bz = 0.0) const;
 
 private:
     /**
