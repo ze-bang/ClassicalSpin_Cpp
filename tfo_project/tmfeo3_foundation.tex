@@ -1028,6 +1028,7 @@ The phrase ``surviving inversion-even Tm combination'' refers only to the pair s
 
 % =====================================================================
 \subsection{Complete Hamiltonian with every term written out}
+\label{sec:full-h}
 \label{sec:full-H}
 % =====================================================================
 
@@ -1617,8 +1618,7 @@ vertex is gated by the lab-frame field component $B_\eta(t)$, and its dominant
 symmetry slice is $z$-gated, so in the $H\!\parallel\!a$ geometry ($B_z=0$)
 $\kappa^B$ is identically silent and its noise never appears.  Its proper home
 is the $H\!\parallel\!c$ geometry, where it produces the measured
-$(E_{12},q_{\mathrm{AFM}})$ cross peak; see
-\cref{sec:fullscenario,fig:vx-kb2}.
+$(E_{12},q_{\mathrm{AFM}})$ cross peak; see \cref{sec:fullscenario}.
 
 \begin{figure}[h]
 \centering
@@ -1743,1092 +1743,332 @@ $|M_{\rm NL}^{\lambda_2}|=51.0$, SNR $117$) and $\kappa^B_{1y}$ as the on-target
 vertices~\cite{HOreport}, precisely the two that pass R1--R6.
 
 % =====================================================================
-\section{The full scenario: one Hamiltonian, all measured geometries}
+\section{The cross-polarization scenario: two geometries, one Hamiltonian}
 \label{sec:fullscenario}
-% =====================================================================
 
-\Cref{sec:catalog} answered the original narrow question---which vertex makes
-the $(q_{\mathrm{AFM}},E_{12})$ peak---in a single geometry.  The experiment,
-however, provides \emph{three} pulse/detection geometries, and the full data
-set is a peak inventory.  This section assembles the validated end-to-end
-picture: one fixed Hamiltonian, physical pulses, and a polarization or
-selection gate attached to every coupling, such that each geometry
-self-selects its own subset of cross peaks with no per-geometry retuning.
-Frequencies are quoted in THz,
-\begin{equation}
-  \omega_F=0.38\ (q_{\mathrm{FM}}),\qquad
-  \omega_q=0.90\ (q_{\mathrm{AFM}}),\qquad
-  \omega_{12}=0.50,\qquad \omega_{23}=0.70,\qquad
-  \omega_{13}=1.20=\omega_{12}+\omega_{23},
-\end{equation}
-the last identity being the shared-level ladder $1\!\to\!2\!\to\!3$ of the Tm
-qutrit.
+This section states the final, validated picture and derives the physics of
+every measured peak.  We restrict to the \emph{cross-polarization} readout of
+the two field geometries, because that is where the experiment isolates clean,
+well-separated cross peaks; the same-polarization channels are dominated by the
+one-quantum diagonals and are not analyzed here.
 
-\subsection{Geometries, pulse composition, and detection channels}
+\emph{The model} is the calibrated Fe\,+\,Tm-qutrit Hamiltonian of
+\cref{sec:full-h} driven by the \emph{measured} single-cycle THz waveform
+(spectrum peaked at $0.53$\,THz, no DC component).  A single set of three
+Fe--Tm couplings is switched on \emph{simultaneously} and used, unchanged, for
+both geometries; nothing is retuned between $H\!\parallel\!a$ and
+$H\!\parallel\!c$, and the geometry alone selects which peaks appear.  Each
+coupling carries one measured peak, and the isolated-vertex tests of
+\cref{sec:geomA,sec:geomB} show none is redundant:
+\begin{center}\small
+\begin{tabular}{lll}
+\hline
+coupling & type & measured feature it produces\\
+\hline
+$W^{yy}_1$ (two-magnon exchange) & static & G-A $(q_{\rm AFM},E_{12})$ cross peak\\
+$\kappa^B_{1y}$ (field-gated) & impulsive & G-B $(E_{12},q_{\rm AFM})$ transfer peak\\
+$W^{xz}_1$ (static hybridization) & static & G-B $(q_{\rm FM},q_{\rm AFM})$ peak + post-drive buildup\\
+\hline
+\end{tabular}
+\end{center}
+All three are held at the same strength ($0.01$ in code units) in every run of
+the final scenario.
+
+\subsection{Geometries, excitation, and the experimental readout}
 \label{sec:geometries}
 
-A THz pulse propagating along $b$ carries either $(E\!\parallel\!c,
-B\!\parallel\!a)$ or $(E\!\parallel\!a, B\!\parallel\!c)$.  Each field
-component couples to a fixed set of modes, and each Tm block emits into a
-fixed polarization channel through the magnetic dipole matrix
-$\mu$ of \eqref{eq:mu0} ($\lambda^2\!\to\!m_z$ via $\mu_{2z}=5.264$;
-$\lambda^{5},\lambda^{7}\!\to\!m_x$ via $\mu_{5x}=2.39,\ \mu_{7x}=0.91$):
+The two measured configurations are
+\begin{itemize}
+\item \textbf{Geometry A}, $H\!\parallel\!a$, $E\!\parallel\!c$.  The
+  electric field $E\!\parallel\!c$ drives the Tm crystal-field (CEF) $E_{12}$
+  transition through its $c$-axis electric dipole; the magnetic field
+  $H\!\parallel\!a$ Zeeman-drives the antiferromagnetic magnon $q_{\rm AFM}$.
+\item \textbf{Geometry B}, $H\!\parallel\!c$, $E\!\parallel\!a$.  The magnetic
+  field $H\!\parallel\!c$ drives the ferromagnetic-canting magnon $q_{\rm FM}$;
+  the electric field $E\!\parallel\!a$ drives the Tm $E_{12}$ transition through
+  the orthogonal ($a$-axis) dipole component.
+\end{itemize}
 
-\begin{center}
-\renewcommand{\arraystretch}{1.3}
-\small
-\begin{tabular}{llll}
-\toprule
- & pulse & drives (delay-axis coherences) & detection channels \\
-\midrule
-$\mathcal G_A$: $H\!\parallel\!a$, $E\!\parallel\!c$
- & $B\!\parallel\!a$ & Fe $q_{\mathrm{AFM}}$ ($\theta{=}0$);\ Tm $\lambda^{5},\lambda^{7}$
- & \emph{cross-pol} ($E\!\parallel\!a\!\leftarrow\!m_z\!\leftarrow\!\lambda^2$): geom.\ 1 \\
- & $E\!\parallel\!c$ & Tm $\lambda^{2}$ ($E_{12}$ $c$-axis dipole)
- & \emph{same-pol} ($E\!\parallel\!c\!\leftarrow\!m_x\!\leftarrow\!\lambda^{5,7}$): geom.\ 3 \\
-\midrule
-$\mathcal G_B$: $H\!\parallel\!c$, $E\!\parallel\!a$
- & $B\!\parallel\!c$ & Fe $q_{\mathrm{FM}}$ ($\theta{=}90^\circ$);\ Tm $\lambda^{2}$ ($\mu_{2z}$)
- & Fe magnon channel ($F_x$): geom.\ 2 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-Geometries 1 and 3 are therefore the \emph{same physical run} read in the two
-orthogonal analyzer channels; $B\!\parallel\!a$ never reaches $\lambda^2$
-($\mu_{2x}=0$), and $B\!\parallel\!c$ never reaches $\lambda^{5,7}$
-($\mu_{5z}=\mu_{7z}=0$).  These two zeros of the $\mu$ matrix are the first two
-gates of the story.
-
-\subsection{The mode inventory: the physics of every frequency}
-\label{sec:modes}
-
-Six frequencies carry the entire 2DCS phenomenology.  For each we state what
-oscillates, what sets the frequency, how it is driven, how it radiates, and its
-linewidth---these five properties, combined with the vertices of
-\cref{sec:couplinglist}, determine every peak in every geometry.
-
-\paragraph{$q_{\mathrm{FM}}$ ($\omega_F=0.38$\,THz): the quasi-ferromagnetic
-magnon.}  Precession of the weak net moment $\ve F\!\parallel\!a$ about its
-equilibrium; in the simulation it is \emph{uniform} $\delta S_y$ with a
-staggered $\delta S_x$ counterpart.  The restoring force is the in-plane
-anisotropy (gap $\propto\sqrt{JK}$), making it the softer magnon.
-Zeeman-driven only when the field can torque $\ve F$: $\ve B\perp\ve M$, i.e.\
-$H\!\parallel\!c$ (the $\theta$ selection rule)---which is why it exists only
-in geometry 2.  In $\mathcal G_A$ its emission polarization ($m_y$) is
-longitudinal to the propagation, and its nonlinear channel is dark to
-$10^{-11}$.  2DCS role: the \emph{delay} coherence of $(\omega_F,\omega_q)$ in
-geometry 2.
-
-\paragraph{$q_{\mathrm{AFM}}$ ($\omega_q=0.90$\,THz): the quasi-antiferromagnetic
-magnon.}  Oscillation of the N\'eel vector: \emph{staggered} $\delta
-S_y,\delta S_z$ with only a small \emph{uniform} $F_x$ projection inherited
-from the DM canting.  (Practical corollary, learned the hard way: its
-amplitude must be measured on the staggered magnetization; the uniform $\ve M$
-is blind to it at linear order.)  Gap set by exchange$\times$anisotropy plus
-DM.  Zeeman-driven when $\ve B\!\parallel\!\ve M$ ($H\!\parallel\!a$).  2DCS
-roles: delay coherence of $(\omega_q,E_{12})$ [G1] and $(\omega_q,E_{23})$
-[G3]; \emph{detection} frequency of both geometry-2 cross peaks (read out
-through the uniform $F_x$ projection); the Fe-channel diagonal.
-
-\paragraph{$\omega_{\rm s}$ ($\approx0.1$\,THz): the reorientation soft mode.}
-Rigid rotation of $\ve F$ in the $a$--$c$ plane (uniform $S_z$)---the
-$\Gamma_2\!\to\!\Gamma_4$ reorientation coordinate.  Soft because
-$|K_a-K_c|=0.003$\,meV: the spin-reorientation proximity of TmFeO$_3$
-expressed at $T=0$.  It is neither a delay nor a detection frequency of any
-listed peak; it appears solely as $\pm\omega_{\rm s}$ amplitude-modulation
-sidebands on the strong peaks, carried between sectors by $W$.  Its frequency
-is a thermometer of the reorientation, $\omega_{\rm s}(T)\!\to\!0$ at
-$T_{\rm SR}$.
-
-\paragraph{$E_{12}$ ($\omega_{12}=0.50$\,THz): the ground-doublet coherence.}
-The $\ket1\!\leftrightarrow\!\ket2$ coherence of the Tm qutrit, carried by
-$\lambda^1$ (T-even, dark) and $\lambda^2$ (T-odd, magnetically bright:
-$m_z=\mu_{2z}\lambda^2$ with $\mu_{2z}=5.264$).  Frequency $=$ the calibrated
-CEF splitting $e_1=2.068$\,meV; narrow (long-lived ground-doublet coherence,
-$\gamma_{\lambda^{1,2}}\approx0$).  It has \emph{three distinct sources, one
-per mechanism class}: $W$-rectification (whenever a magnon is pumped);
-$\mu_{2z}B_z$ (geometry B, first order); the exchange-induced
-$d^{\rm eff}_zE_z$ (geometry A, first order).  Radiates $m_z$ into the
-cross-polarized channel.  2DCS roles: detection frequency of geometry 1; delay
-coherence of $(E_{12},\omega_q)$ [G2] and of both geometry-3 transfer peaks.
-
-\paragraph{$E_{23}$ ($\omega_{23}=0.70$\,THz): the dark upper coherence.}
-$\ket2\!\leftrightarrow\!\ket3$, carried by $\lambda^{6}$/$\lambda^{7}$;
-magnetic $x$-dipole $\mu_{7x}=0.91$ ($m_x\to$ same-pol channel).  It is
-first-order \emph{dark from the ground state}---both of its levels are empty,
-so $\lambda^{6,7}$ acting on $\ket1$ gives exactly zero---hence every
-$\omega_t=E_{23}$ feature is necessarily a conversion product, never a pump
-artifact.  Broad: it involves the short-lived level 3
-($\gamma_{\lambda^{4\ldots7}}=0.15$\,meV).  2DCS roles: detection frequency of
-$(E_{12},E_{23})$ and $(\omega_q,E_{23})$ [G3].
-
-\paragraph{$E_{13}$ ($\omega_{13}=1.20$\,THz): the bright upper coherence.}
-$\ket1\!\leftrightarrow\!\ket3$, carried by $\lambda^{4}$/$\lambda^{5}$; the
-strong magnetic $x$-dipole $\mu_{5x}=2.39$ ($m_x\to$ same-pol).  Bright from
-the ground state and therefore directly pumped by $B\!\parallel\!a$---but its
-\emph{delay} coherence is erased by the level-3 linewidth, so it survives only
-as a detection frequency.  The exact ladder identity
-$\omega_{13}=\omega_{12}+\omega_{23}$ closes the qutrit transfer algebra:
-$f_{abc}$ rotates $\rho_{12}$ into $\rho_{13}$ or $\rho_{32}$ with no energy
-left over.  2DCS roles: detection frequency of $(E_{12},E_{13})$ and of the
-faint shared-level partner $(E_{23},E_{13})$.
-
-\begin{center}
-\renewcommand{\arraystretch}{1.3}
-\footnotesize
-\begin{tabular}{lllllll}
-\toprule
-mode & THz & carrier & driven by & radiates & width & 2DCS roles \\
-\midrule
-$q_{\mathrm{FM}}$ & $0.38$ & unif.\ $\delta S_y$ & $B\perp M$ ($\mathcal G_B$) & (longitudinal) & narrow & delay [G2] \\
-$q_{\mathrm{AFM}}$ & $0.90$ & stag.\ $\delta S_{y,z}$ $(+F_x)$ & $B\parallel M$ ($\mathcal G_A$) & $F_x\!\to$ same-pol & narrow & delay [G1,G3]; det.\ [G2] \\
-$\omega_{\rm s}$ & $\sim0.1$ & unif.\ $S_z$ ($a$--$c$) & nonlinear only & --- & soft & sidebands only \\
-$E_{12}$ & $0.50$ & $\lambda^{1,2}$ & $W$; $\mu_{2z}B_z$; $d^{\rm eff}_zE_z$ & $m_z\!\to$ cross-pol & narrow & det.\ [G1]; delay [G2,G3] \\
-$E_{23}$ & $0.70$ & $\lambda^{6,7}$ & dark (conversion only) & $m_x\!\to$ same-pol & $\gamma$ & det.\ [G3] \\
-$E_{13}$ & $1.20$ & $\lambda^{4,5}$ & $\mu_{5x}B_x$ & $m_x\!\to$ same-pol & $\gamma$ & det.\ [G3] \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\subsection{The complete Fe--Tm coupling list and its gates}
-\label{sec:couplinglist}
-
-Collecting \cref{sec:catalog} and the two intra-sector vertices needed to close
-the inventory, every coupling that appears in the validated Hamiltonian carries
-its own on/off gate:
-
-\begin{center}
-\renewcommand{\arraystretch}{1.35}
-\small
-\begin{tabular}{llllll}
-\toprule
-coupling & term & sector & gate & $\mathcal G_A$ & $\mathcal G_B$ \\
-\midrule
-$K^-$ & $\ve S\!\cdot\!\lvecminus$ & $\lambda^-$ &
- static; $\Gamma_1$ leaves only $K^-_{2y}$ (reorients) &
- \multicolumn{2}{c}{$\le10^{-3}\,$meV (bkg.)} \\
-$\kappa^E$ ($ESJ$) & $E_\eta S_\alpha\lambda^a$ & $\lambda^-$ &
- gated by $E_\eta(t)$ & allowed & off \\
-$\kappa^B$ & $B_\eta(t)S_\alpha\lambda^a$ & $\lambda^+$ &
- gated by the \emph{component} $B_\eta(t)$ & \textbf{off} ($B_z\!=\!0$) & \textbf{on} \\
-$W$ & $S_\alpha S_\beta\lambda^a$ & $\lambda^+$ &
- static; needs pumped $\delta S_y$ & \textbf{on} & weak \\
-$d^{\rm eff}_z$ & $E_z(t)\,\lambda^2$ & $\lambda^2$ &
- exchange-induced E1 ($\Gamma_2$ breaks $m_z$) & \textbf{on} ($E\!\parallel\!c$) & off ($E\!\parallel\!a$) \\
-\midrule
-DM (Fe only) & $\ve D_1\!\cdot\!(\ve S_i{\times}\ve S_j)$ & --- &
- needs $q_{\mathrm{FM}}$ & off & \textbf{on} \\
-$f_{abc}$ (Tm only) & SU(3) algebra & --- &
- needs $\lambda^2$ \emph{and} $\lambda^{5,7}$ driven & \textbf{on} & off \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\emph{The $E\!\parallel\!c$ leg and the Tm site mirror.}  The Tm site symmetry
-$m_z$ makes the magnetic dipole $J_z$ (axial, mirror-even) and the electric
-dipole $z$ (polar, mirror-odd) \emph{mutually exclusive} between the same pair
-of singlets: since $\mu_{2z}=5.264\neq0$, the bare E1 amplitude
-$\bra{1}z\ket{2}$ vanishes.  The $E\!\parallel\!c$ coupling that sources the
-$E_{12}$ delay coherence in geometry 3 is therefore \emph{exchange-induced}:
-the $\Gamma_2$ order ($F_x$ is axial in-plane, hence $m_z$-odd) breaks the
-mirror magnetically, and the Fe--Tm exchange admixes the parities, switching on
-an effective dipole $d^{\rm eff}_z\propto$ (exchange admixture) below $T_N$.
-Its magnitude is the one fitted drive parameter of the model
-($d^{\rm eff}_z=3.0$ in the units of the magnetic $\mu$ matrix), and it
-predicts its own temperature dependence: the geometry-3 $(E_{12},\cdot)$ peaks
-must weaken and vanish across the spin-reorientation transition.
-
-\begin{keybox}[title={Polarization-resolved $\kappa^B$: the gate is the field component}]
-The physical gate of the field-assisted exchange is the lab-frame field
-\emph{component}, not the pulse envelope:
-\begin{equation}
-  H_{\kappa B}(t)=\sum_\eta \kappa^B_{a\alpha\eta}\,B_\eta(t)\,S_\alpha\,\lambda^a .
-\end{equation}
-The dominant symmetry-allowed slice is $z$-gated
-($\kappa^B_{1y,z}B_z(t)S_y\lambda^1$).  In $\mathcal G_A$ the pulse has
-$B_z\equiv0$, so $\kappa^B$ is \emph{identically silent}---this removes the
-spurious $(E_{12},E_{12})$ diagonal that a naive envelope-gated implementation
-injects into geometry 1, and it is why one Hamiltonian serves both geometries.
-(In the code the drive bonds carry component-resolved envelope tags
-$B_x/B_y/B_z$; legacy envelope-gated inputs map onto the $B_z$ gate.)
-\end{keybox}
-
-\subsection{A Feynman diagram for each measured response}
-\label{sec:responses}
-
-The validated peak inventory, one diagram per response (diagram conventions as
-in \cref{sec:catalog}; the open circle is the \emph{intrinsic} SU(3)
-structure-constant vertex $f_{abc}$, a property of the qutrit algebra rather
-than a coupling constant):
-
-\begin{center}
-\renewcommand{\arraystretch}{1.3}
-\small
-\begin{tabular}{lllllc}
-\toprule
-geometry & readout & peak $(|\omega_\tau|,\omega_t)$ & physics turned on & diagram & rel.\ amp. \\
-\midrule
-1 & $\lambda^2$ ($m_z$) & $(\omega_q,\omega_{12})=(0.90,0.50)$ & $W^{yy}_1$ (two-magnon step) & \cref{fig:vx-w} & $1.00$ \\
-2 & Fe $F_x$ & $(\omega_F,\omega_q)=(0.38,0.90)$ & DM three-magnon & \cref{fig:vx-dm} & $1.00$ \\
-2 & Fe $F_x$ & $(\omega_{12},\omega_q)=(0.50,0.90)$ & $\kappa^B$ ($B_z$-gated) & \cref{fig:vx-kb2} & $0.71$ \\
-3 & $\lambda^{4,5}$ ($m_x$) & $(\omega_{12},\omega_{13})=(0.50,1.20)$ & $d^{\rm eff}_z\!\to\!\rho_{12}$, then $f_{abc}$ & \cref{fig:vx-f257}(a) & $1.00$ \\
-3 & $\lambda^{6,7}$ ($m_x$) & $(\omega_{12},\omega_{23})=(0.50,0.70)$ & $d^{\rm eff}_z\!\to\!\rho_{12}$, then $f_{abc}$ & \cref{fig:vx-f257}(b) & $1.00$ \\
-3 & $\lambda^{6,7}$ ($m_x$) & $(\omega_q,\omega_{23})=(0.90,0.70)$ & $W\!\circ\!f$ cascade & \cref{fig:vx-cascade} & $0.34$ \\
-3 & $\lambda^{4,5}$ & $(\omega_{23},\omega_{13})$ & $f_{abc}$ partner ($\gamma$-suppressed) & --- & $<0.07$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-Amplitudes are $|M_{\rm NL}|$ at the peak normalized to the maximum of its
-detection channel (final master runs, \cref{sec:validation}).  Every entry in
-the experimental peak list appears as the dominant or co-dominant feature of
-its channel, and \emph{only} listed peaks (plus their identified fine
-structure) appear above the $15\%$ level.  The last row is the parameter-free
-shared-level partner of the transfer peaks, observed faintly exactly as the
-algebra predicts.
-
-\paragraph{Geometry 1: $(\omega_q,E_{12})$ via $W^{yy}_1$.}
-Unchanged from \cref{sec:catalog}, \cref{fig:vx-w}: two pumped $\delta S_y$
-magnon legs rectify on the static $S_y^2\lambda^1$ vertex into a step force on
-the bright $\lambda^1\!\to\!\lambda^2$ oscillator.  In the corrected full-model
-run this remains the dominant feature of the $\lambda^2$ channel (rel.\ amp.\
-$1.00$; the $(E_{12},E_{12})$ diagonal stays at $0.07$--$0.17$ because
-$\kappa^B$ is $B_z$-silenced here).
-
-\paragraph{Geometry 2a: $(\omega_F,\omega_q)$ via the DM three-magnon vertex.}
-Purely Fe-sector.  Each pulse launches a $q_{\mathrm{FM}}$ magnon
-($B\!\parallel\!c\perp\ve M$); the DM-induced canting makes the two branches
-anharmonically coupled, and the two-magnon product drives the
-$q_{\mathrm{AFM}}$ coordinate, which is read out in the Fe channel.  The peak
-scales linearly with $D_1$ (halving $D_1$ halves it), pinning the DM origin.
+\paragraph{The measured pulse.}
+The pump is the measured single-cycle THz waveform of \cref{fig:pulse}: a
+bipolar $\sim1.2$\,ps transient with no DC component, whose power spectrum peaks
+at $0.53$\,THz and covers every mode of interest.  Ingested as a table (times
+converted to code units, $t_{\rm code}=t_{\rm ps}/0.6582$), it drives $E_{12}$
+at full weight and the magnons and higher CEF lines at the spectral amplitudes
+listed in \cref{tab:expparams}; the absence of a DC component removes the
+quasi-static tilt that would otherwise contaminate the transfer channels.
 
 \begin{figure}[h]
 \centering
-\begin{tikzpicture}[>=Latex,
-  fe/.style={very thick,red!60!black},
-  photon/.style={->,thick,decorate,decoration={snake,amplitude=0.5mm,segment length=1.7mm}}]
-  \node[draw,fill=black,rectangle,minimum size=6pt,inner sep=0pt] (V) at (3.5,0) {};
-  \node[font=\small] at (3.5,1.04) {$D_1$ anharmonicity};
-  \draw[fe] (0.45,0.8) -- (V);
-  \draw[fe] (0.45,-0.8) -- (V);
-  \node[red!60!black,font=\small] at (1.55,0.78) {$q_{\mathrm{FM}}$ ($\omega_F$, delay $\tau$)};
-  \node[red!60!black,font=\small] at (1.55,-0.78) {$q_{\mathrm{FM}}$ ($\omega_F$)};
-  \draw[photon] (-0.55,0.8)--(0.4,0.8);  \node[left,font=\small] at (-0.55,0.8){pulse $A$};
-  \draw[photon] (-0.55,-0.8)--(0.4,-0.8);\node[left,font=\small] at (-0.55,-0.8){pulse $B$};
-  \draw[fe] (V) -- (7.7,0);
-  \node[red!60!black,font=\small,above] at (5.6,0.04) {$q_{\mathrm{AFM}}$, rings at $\omega_q$};
-  \node[red!60!black,font=\small,right] at (7.7,0) {emit $F_x$};
-  \node[align=center,font=\footnotesize] at (3.5,-1.25)
-    {three-magnon vertex enabled by the DM canting:\\ two-branch up-conversion, amplitude $\propto D_1$};
-\end{tikzpicture}
-\caption{Geometry 2, $(\omega_F,\omega_q)$.  Fe-only response: the two
-$q_{\mathrm{FM}}$ magnons (one per pulse) meet the cubic anharmonicity
-generated by the DM canting and convert to the $q_{\mathrm{AFM}}$ branch.
-No Tm participation; present with all Fe--Tm couplings off.}
-\label{fig:vx-dm}
+\includegraphics[width=\textwidth]{tmfeo3_2dcs_final/figures/experimental_pulse_final.png}
+\caption{The measured THz pump.  Left: time-domain waveform (single bipolar
+cycle, $\sim1.2$\,ps, no DC).  Right: amplitude spectrum, peaked at $0.53$\,THz,
+with the five mode frequencies marked; the pulse covers $E_{12}$ (amplitude
+$1.00$) down through $E_{13}$ (0.36).}
+\label{fig:pulse}
 \end{figure}
 
-\paragraph{Geometry 2b: $(E_{12},\omega_q)$ via the $B_z$-gated $\kappa^B$, run
-in reverse.}
-The same vertex as \cref{fig:vx-kappab}, traversed in the opposite direction.
-Pulse $A$'s $B\!\parallel\!c$ creates the $E_{12}$ coherence directly
-($\mu_{2z}$); it evolves for the delay $\tau$; pulse $B$'s $B_z$ opens the
-$\kappa^B$ gate and converts it into a $q_{\mathrm{AFM}}$ magnon, detected in
-the Fe channel.  The photon pays the $\omega_{12}\!\to\!\omega_q$ mismatch, so
-the magnon is \emph{created}, not depleted.  In the corrected geometry-2 run
-the two features $(\omega_F,\omega_q)=1.00$ and $(\omega_{12},\omega_q)=0.76$
-dominate the $F_x$ channel, resolved and balanced, with the magnon diagonal at
-only $0.10$.
+\paragraph{The experimental readout.}
+The detected signal is the emitted THz field, and the experiment supplies the
+absolute radiative weights.  Every lineshape and emission parameter in this
+section is taken from the measurement; \cref{tab:expparams} collects them
+together with the derived simulation inputs---the Bloch/Gilbert damping rates
+(a linewidth \emph{is} a decay rate) and the $\sqrt f$ emission weights.
+
+\begin{table}[h]
+\centering\small
+\caption{Experimental inputs and the derived simulation parameters.  CEF
+damping is Bloch on the Gell-Mann pair for each transition,
+$\gamma_a[\text{meV}]=\gamma[\text{THz}]\times h$; magnon damping is Gilbert,
+$\alpha=\gamma/2\nu$, fixed by the $q_{\rm AFM}$ line.  Emission weight is the
+electric dipole $\sqrt f$ (E1) for the CEF lines and M1 for the magnons (whose
+E1 activity is negligible).}
+\label{tab:expparams}
+\begin{tabular}{lccccll}
+\hline
+mode & $\nu$ [THz] & $f$ & $\sqrt f$ & $\gamma$ [THz] & damping (sim) & pulse amp.\\
+\hline
+$q_{\rm FM}$  & 0.38 & 0.08 & 0.28 & 0.005 & $\alpha{=}1.7\!\times\!10^{-3}$ & 0.92\\
+$q_{\rm AFM}$ & 0.90 & $7\!\times\!10^{-4}$ & 0.026 & 0.003 & $\alpha{=}1.7\!\times\!10^{-3}$ & 0.68\\
+$E_{12}$ & 0.50 & 6.5 & 2.55 & 0.038 & $\gamma(\lambda^{1,2}){=}0.157$\,meV & 1.00\\
+$E_{23}$ & 0.70 & 6.6 & 2.57 & 0.10  & $\gamma(\lambda^{6,7}){=}0.414$\,meV & 0.85\\
+$E_{13}$ & 1.20 & 8.7 & 2.95 & 0.05  & $\gamma(\lambda^{4,5}){=}0.207$\,meV & 0.36\\
+\hline
+\end{tabular}
+\end{table}
+
+Two facts organize everything.  First, the excitation scales as $E^2$ and the
+detection linearly in $E$: the signal is third order, with two excitation
+interactions and one emission.  Second, the CEF transitions are electric-dipole
+(E1) bright ($\sqrt f\approx2.5$--$3.0$) while the $q_{\rm AFM}$ magnon is
+E1-\emph{dark} ($\sqrt f=0.026$) but magnetic-dipole (M1) bright---it is a
+large-amplitude spin precession.  Consequently a magnon can be \emph{read out}
+in two distinct ways: (i) it borrows a bright CEF electric dipole by modulating
+the Tm coordinate through the exchange vertex, emitting at a CEF frequency
+(geometry A), or (ii) it radiates directly through its own magnetic dipole at
+the magnon frequency (geometry B).  This distinction, not any retuning, is what
+separates the two geometries' peak lists.
+
+Throughout, the delay axis is plotted in the physical convention
+$\omega_\tau\to-\omega_\tau$; a peak on the $+\omega_\tau$ side is
+non-rephasing (NR), on the $-\omega_\tau$ side rephasing (R).
+
+\subsection{Geometry A cross peak: $(q_{\rm AFM},E_{12})$}
+\label{sec:geomA}
+
+\paragraph{Mechanism.}
+During the delay $\tau$ the Zeeman-launched $q_{\rm AFM}$ magnon precesses at
+$\omega_\tau=0.90$\,THz.  The static two-magnon exchange vertex $W^{yy}_1$---the
+term by which a magnon distortion modulates the Tm crystal-field splitting
+(\cref{sec:catalog})---transcribes this magnon phase onto the bright Tm
+$\lambda^2$ ($E_{12}$) coordinate.  During detection $t$ the system therefore
+radiates at $\omega_t=E_{12}=0.50$\,THz through the strong Tm electric dipole.
+The peak is a \emph{magnetoelectric} cross peak: a magnon that is itself nearly
+invisible to the light field is detected by borrowing the Tm E1 dipole.  This
+is exactly why geometry A shows a bright peak whose emission sits at the CEF
+frequency rather than at the magnon frequency.
+
+\paragraph{Result.}  At $T=0$ the $\lambda^2$ readout gives, in units of the
+channel maximum,
+\[
+(+q_{\rm AFM},E_{12})=1.00,\quad
+(-q_{\rm AFM},E_{12})=0.33,\quad
+\text{residuals}\le0.18 .
+\]
+The peak is dominant and non-rephasing, with a rephasing partner at $0.33$: the
+symmetric $W$-vertex admits both time orderings of the magnon coherence, so the
+signal appears on both sides of $\omega_\tau$ with the non-rephasing branch
+stronger.  The one residual, a weak $(q_{\rm AFM},q_{\rm AFM})$ shoulder at
+$0.18$, also emits at the magnon frequency.  Note that the experimental
+linewidths make this peak clean automatically: the $E_{12}$ coherence dephases
+in $\sim8$\,ps ($\gamma_{E_{12}}=0.038$\,THz) whereas the $q_{\rm AFM}$ magnon
+lives $\sim100$\,ps ($\gamma_{q_{\rm AFM}}=0.003$\,THz), so the magnon survives
+the delay and dominates while the fast-dephasing $E_{12}$ diagonal is
+suppressed---no analysis-window truncation is needed.
+
+\subsection{Geometry B cross peaks: $(q_{\rm FM},q_{\rm AFM})$ and $(E_{12},q_{\rm AFM})$}
+\label{sec:geomB}
+
+Here the readout is the magnon magnetic dipole (M1): both peaks emit at
+$\omega_t=q_{\rm AFM}=0.90$\,THz.
+
+\paragraph{$(q_{\rm FM},q_{\rm AFM})$ --- a magnon--magnon cross peak.}
+$H\!\parallel\!c$ launches the $q_{\rm FM}$ magnon, which precesses at
+$\omega_\tau=0.38$\,THz during the delay.  The ferro- and antiferromagnetic
+modes are coupled by the single-ion anisotropy and the
+Dzyaloshinskii--Moriya interaction, so the $q_{\rm FM}$ coherence is re-emitted
+at the $q_{\rm AFM}$ frequency during $t$.  This is the purely magnetic
+cross peak, present whenever both magnon branches are dynamically coupled.
+
+\paragraph{$(E_{12},q_{\rm AFM})$ --- a Tm$\to$magnon transfer peak, made by the
+field-gated vertex.}
+$E\!\parallel\!a$ launches the Tm $E_{12}$ coherence, precessing at
+$\omega_\tau=0.50$\,THz; a Fe--Tm vertex transfers it to the $q_{\rm AFM}$
+magnon, which radiates via M1.  Which vertex?  Isolating the couplings settles
+it directly: with the field-gated $\kappa^B_{1y}$ alone the cross peak is
+present, $(E_{12},q_{\rm AFM})=0.46$, whereas with the static $W^{xz}_1$ alone
+it is \emph{absent} (only the magnon--magnon peak survives).  The $E_{12}$
+phase is imprinted on the magnon emission by the impulsive, field-gated transfer
+of $\kappa^B_{1y}$, which acts while $B_z(t)\ne0$; the static hybridization does
+not generate this correlation.  Because the transfer runs off the $E_{12}$
+excitation rather than the direct Zeeman drive, the peak is non-rephasing.
+
+\paragraph{But the peak is not the whole story: the post-drive buildup requires
+a static vertex.}
+The experiment reports that the geometry-B signal keeps building up \emph{after}
+the pump has passed---and a field-gated vertex cannot do this.  Isolating the
+magnon envelope (\cref{fig:buildup}) makes the division of labor explicit:
+$\kappa^B_{1y}$ alone leaves the post-pulse envelope flat (modulation $0.03$), an
+impulsive kick that ends with the field, while the static $W^{xz}_1$ keeps
+exchanging the persisting $q_{\rm FM}$ (and $E_{12}$) reservoir with the
+$q_{\rm AFM}$ magnon, so the envelope modulates by $0.33$ and rides
+$\sim1.25\times$ above the impulsive level long after the pulse.  Neither vertex
+suffices alone: $\kappa^B_{1y}$ creates the measured $(E_{12},q_{\rm AFM})$ cross
+peak but no buildup, $W^{xz}_1$ creates the buildup (and the magnon--magnon
+peak) but not the transfer cross peak.  Both are therefore kept, and this is why
+a $W^{xz}_1$-only model---though it would automatically give the observed
+buildup---is excluded: it loses the $(E_{12},q_{\rm AFM})$ peak entirely.
 
 \begin{figure}[h]
 \centering
-\begin{tikzpicture}[>=Latex,
-  fe/.style={very thick,red!60!black},
-  tm/.style={very thick,dashed,blue!60!black},
-  photon/.style={->,thick,decorate,decoration={snake,amplitude=0.5mm,segment length=1.7mm}}]
-  \filldraw[black] (3.5,0) circle (2.6pt);
-  \node[font=\small] at (3.65,1.0) {$\kappa^B_{1y,z}$ vertex};
-  \draw[tm] (0.45,0.6) -- (3.5,0);
-  \node[blue!60!black,font=\small] at (1.5,0.78) {$\lambda^{1,2}$ ($\omega_{12}$, delay $\tau$)};
-  \draw[photon] (-0.55,0.6)--(0.4,0.6); \node[left,font=\small] at (-0.55,0.6){pulse $A$ ($B\!\parallel\!c$, $\mu_{2z}$)};
-  \draw[photon,green!45!black] (3.5,-1.0)--(3.5,-0.08);
-  \node[below,align=center,green!45!black,font=\small] at (3.5,-1.0) {pulse $B$\\($B_z$ component)};
-  \node[align=center,green!45!black,font=\footnotesize,anchor=west] at (4.2,-0.62)
-    {opens the gate;\\ supplies $\omega_q-\omega_{12}$};
-  \draw[fe] (3.5,0) -- (7.7,0);
-  \node[red!60!black,font=\small,above] at (5.6,0.04) {$q_{\mathrm{AFM}}$, rings at $\omega_q$};
-  \node[red!60!black,font=\small,right] at (7.7,0) {emit $F_x$};
-\end{tikzpicture}
-\caption{Geometry 2, $(E_{12},\omega_q)$: the reverse traversal of
-\cref{fig:vx-kappab}.  A first-order $E_{12}$ coherence ($B\!\parallel\!c$ via
-$\mu_{2z}$) carries the delay phase; the second pulse's $B_z$ gates
-$\kappa^B$ and converts it into a $q_{\mathrm{AFM}}$ magnon.  In geometry 1/3
-($B_z=0$) this vertex is identically silent.}
-\label{fig:vx-kb2}
+\includegraphics[width=0.72\textwidth]{tmfeo3_2dcs_final/EXPERIMENTAL_FINAL/postdrive_buildup.png}
+\caption{Why both a field-gated and a static vertex are needed.  The
+$q_{\rm AFM}$ magnon envelope in geometry B, normalized to its value just after
+the pump.  The field-gated $\kappa^B_{1y}$ (red)---which alone produces the
+$(E_{12},q_{\rm AFM})$ cross peak---delivers an impulsive kick with a flat
+post-pulse envelope (modulation $0.03$).  The static $W^{xz}_1$ (blue)---which
+alone cannot produce that cross peak---keeps exchanging the $q_{\rm FM}$/$E_{12}$
+reservoir with the magnon, so its envelope modulates by $0.33$ and rides
+$\sim25\%$ above the impulsive level.  The measured post-drive buildup demands
+the static vertex; the measured transfer peak demands the field-gated one.}
+\label{fig:buildup}
 \end{figure}
 
-\paragraph{Geometry 3a,b: $(E_{12},E_{13})$ and $(E_{12},E_{23})$ via the
-intrinsic structure-constant vertex.}
-These are \emph{single-ion} responses: no Fe--Tm coupling is involved, and
-they persist unchanged with $W=\kappa^B=K^-=0$ (pure-qutrit control run).  The
-$E\!\parallel\!c$ leg of pulse $A$ creates $\rho_{12}$ ($\lambda^{1,2}$); it
-evolves at $\omega_{12}$ for the delay; the $B\!\parallel\!a$ leg of pulse $B$
-enters through $\lambda^{5}$ or $\lambda^{7}$, and the SU(3) commutators
-($f_{147},f_{156},f_{246},f_{257},\dots$, e.g.\
-$[\lambda^5,\lambda^7]\supset i\lambda^2$) rotate the $1\!\leftrightarrow\!2$
-coherence into the $1\!\leftrightarrow\!3$ or $2\!\leftrightarrow\!3$ block:
-\begin{equation}
-  \rho_{12}\ \xrightarrow{\ \lambda^7\ \text{leg}\ }\ \rho_{13}
-  \ (\text{rings at }\omega_{13}),
-  \qquad
-  \rho_{12}\ \xrightarrow{\ \lambda^5\ \text{leg}\ }\ \rho_{32}
-  \ (\text{rings at }\omega_{23}).
-\end{equation}
-The two outcomes appear on opposite delay-frequency signs (the measured
-$\lambda^{4}$ peak sits at $\omega_\tau=-\omega_{12}$, the $\lambda^{6}$ peak at
-$+\omega_{12}$): $\rho_{13}$ keeps the ket-side phase while
-$\rho_{32}=\rho_{23}^\dagger$ conjugates it---the textbook
-rephasing/non-rephasing pathway signature, obtained here from a classical
-SU(3) coherent-state trajectory, for which the single-ion dynamics coincide
-with the exact von Neumann equation.
+\paragraph{Result.}  At $T=0$,
+\[
+(+q_{\rm FM},q_{\rm AFM})=1.00,\quad
+(+E_{12},q_{\rm AFM})=0.43,\quad
+\text{residuals}\le0.12 .
+\]
+Both designated peaks are non-rephasing and clean; nothing else exceeds $0.11$.
+Note the Tm CEF channels $\lambda^{4\text{--}7}$ are \emph{identically} zero in
+geometry B---the $E\!\parallel\!a$, $H\!\parallel\!c$ drive closes on the
+$\{\lambda^1,\lambda^2,\lambda^3\}$ subalgebra---so no CEF emission competes in
+this channel.
 
 \begin{figure}[h]
 \centering
-\begin{tikzpicture}[>=Latex,scale=0.84, every node/.style={transform shape},
-  tm/.style={very thick,dashed,blue!60!black},
-  photon/.style={->,thick,decorate,decoration={snake,amplitude=0.5mm,segment length=1.7mm}}]
-\begin{scope}[xshift=0cm]
-  \draw[thick] (3.0,0) circle (3.2pt);
-  \node[font=\small] at (3.0,1.15) {$f_{abc}$};
-  \draw[tm] (0.45,0.6) -- (2.93,0.05);
-  \node[blue!60!black,font=\small] at (1.15,0.95) {$\rho_{12}$ (delay $\tau$)};
-  \draw[photon] (-0.55,0.6)--(0.4,0.6); \node[left,font=\small] at (-0.55,0.6){$A$: $E\!\parallel\!c$};
-  \draw[photon,green!45!black] (3.0,-1.0)--(3.0,-0.14);
-  \node[below,align=center,green!45!black,font=\small] at (3.0,-1.0) {$B$: $\lambda^7$ leg\\($B\!\parallel\!a$, $\mu_{7x}$)};
-  \draw[tm] (3.06,0.02) -- (6.4,0);
-  \node[blue!60!black,font=\small,above] at (4.8,0.06) {$\rho_{13}$ at $\omega_{13}$};
-  \node[blue!60!black,font=\small,right] at (6.4,0) {emit $m_x$};
-  \node[font=\small] at (3.0,-2.45) {(a) $(E_{12},E_{13})$, $\omega_\tau=-\omega_{12}$};
-\end{scope}
-\begin{scope}[xshift=8.6cm]
-  \draw[thick] (3.0,0) circle (3.2pt);
-  \node[font=\small] at (3.0,1.15) {$f_{abc}$};
-  \draw[tm] (0.45,0.6) -- (2.93,0.05);
-  \node[blue!60!black,font=\small] at (1.15,0.95) {$\rho_{12}$ (delay $\tau$)};
-  \draw[photon] (-0.55,0.6)--(0.4,0.6); \node[left,font=\small] at (-0.55,0.6){$A$: $E\!\parallel\!c$};
-  \draw[photon,green!45!black] (3.0,-1.0)--(3.0,-0.14);
-  \node[below,align=center,green!45!black,font=\small] at (3.0,-1.0) {$B$: $\lambda^5$ leg\\($B\!\parallel\!a$, $\mu_{5x}$)};
-  \draw[tm] (3.06,0.02) -- (6.4,0);
-  \node[blue!60!black,font=\small,above] at (4.8,0.06) {$\rho_{32}$ at $\omega_{23}$};
-  \node[blue!60!black,font=\small,right] at (6.4,0) {emit $m_x$};
-  \node[font=\small] at (3.0,-2.45) {(b) $(E_{12},E_{23})$, $\omega_\tau=+\omega_{12}$};
-\end{scope}
-\end{tikzpicture}
-\caption{Geometry 3, the two single-ion transfer peaks.  The open circle is
-not a coupling constant: it is the SU(3) structure-constant vertex, present
-for any qutrit.  The same $\rho_{12}$ delay coherence exits on the
-$1\!\leftrightarrow\!3$ block (a) or the $2\!\leftrightarrow\!3$ block (b)
-depending on which x-dipole leg of pulse $B$ acts; the conjugation in (b)
-flips the sign of $\omega_\tau$ (rephasing vs non-rephasing).  Even without
-the $E\!\parallel\!c$ leg the algebra generates $\rho_{12}$ by itself: the
-Raman pair $\lambda^5\lambda^7$ gives an $(E_{12},E_{12})$ diagonal growing as
-(drive)$^2$, overtaking the directly driven $E_{13}$ line at strong field.}
-\label{fig:vx-f257}
+\includegraphics[width=\textwidth]{tmfeo3_2dcs_final/figures/crosspol_experimental_final.png}
+\caption{The cross-polarization scenario computed entirely from experimental
+inputs: the measured THz pulse, the measured linewidths used as the mode
+damping rates, and the measured oscillator strengths used as the emission
+weights.  Top: geometry A ($H\!\parallel\!a$), $\lambda^2$ channel emitting at
+$E_{12}=0.50$\,THz through the bright Tm electric dipole; the dominant
+$(q_{\rm AFM},E_{12})$ peak with its weaker rephasing partner at $-0.9$.
+Bottom: geometry B ($H\!\parallel\!c$), magnon $S_x$ channel emitting at
+$q_{\rm AFM}=0.90$\,THz through the M1 dipole; the magnon--magnon
+$(q_{\rm FM},q_{\rm AFM})$ peak at $\omega_\tau=+0.38$ and the Tm$\to$magnon
+$(E_{12},q_{\rm AFM})$ peak at $\omega_\tau=+0.50$.  Left column $T=0$, right
+column $T=5$\,K.  Delay convention $+\omega_\tau=$ non-rephasing; the
+quasi-elastic band $|\omega_\tau|<0.1$\,THz is masked.  Runs in
+\texttt{tmfeo3\_2dcs\_final/EXPERIMENTAL\_FINAL/}.}
+\label{fig:crosspol}
 \end{figure}
 
-\paragraph{Geometry 3c: $(\omega_q,E_{23})$ via the $W\!\circ\!f$ cascade.}
-The magnon--CEF member of the same-pol family needs no new coupling either: the
-$W^{yy}_1$ vertex (already fixed by geometry 1) converts the two-magnon
-rectification into a $\lambda^{1,2}$ excitation \emph{during} pulse $B$, and
-the same pulse's x-dipole leg immediately rotates it into the
-$2\!\leftrightarrow\!3$ block:
+\subsection{Finite temperature}
+\label{sec:finiteT}
 
-\begin{figure}[h]
-\centering
-\begin{tikzpicture}[>=Latex,
-  fe/.style={very thick,red!60!black},
-  tm/.style={very thick,dashed,blue!60!black},
-  photon/.style={->,thick,decorate,decoration={snake,amplitude=0.5mm,segment length=1.7mm}}]
-  \node[draw,fill=black,rectangle,minimum size=6pt,inner sep=0pt] (W) at (3.0,0) {};
-  \node[font=\small] at (3.0,1.04) {$W^{yy}_1$};
-  \draw[fe] (0.45,0.8) -- (W);
-  \draw[fe] (0.45,-0.8) -- (W);
-  \node[red!60!black,font=\small] at (1.3,1.0) {magnon ($\omega_q$, delay $\tau$)};
-  \node[red!60!black,font=\small] at (1.3,-1.0) {magnon ($\omega_q$)};
-  \draw[photon] (-0.55,0.8)--(0.4,0.8);  \node[left,font=\small] at (-0.55,0.8){pulse $A$};
-  \draw[photon] (-0.55,-0.8)--(0.4,-0.8);\node[left,font=\small] at (-0.55,-0.8){pulse $B$};
-  \draw[tm] (W) -- (5.2,0);
-  \node[blue!60!black,font=\small,above] at (4.1,0.05) {$\lambda^{1,2}$};
-  \draw[thick] (5.2,0) circle (3.2pt);
-  \node[font=\small] at (5.2,1.0) {$f_{abc}$};
-  \draw[photon,green!45!black] (5.2,-1.0)--(5.2,-0.14);
-  \node[below,align=center,green!45!black,font=\small] at (5.2,-1.0) {pulse $B$\\($\lambda^5$ leg)};
-  \draw[tm] (5.26,0.02) -- (8.6,0);
-  \node[blue!60!black,font=\small,above] at (7.1,0.06) {$\rho_{32}$ at $\omega_{23}$};
-  \node[blue!60!black,font=\small,right] at (8.6,0) {emit $m_x$};
-\end{tikzpicture}
-\caption{Geometry 3, $(\omega_q,E_{23})$: a two-step cascade with no new
-coupling constant.  The $W^{yy}_1$ rectification (square, as in
-\cref{fig:vx-w}) deposits the $\omega_q$ delay phase into $\lambda^{1,2}$ at
-pulse $B$; the same pulse's x-dipole leg rotates it through the intrinsic
-vertex into the $E_{23}$ block.  In the master run it is the dominant
-$\lambda^{6,7}$ feature ($1.00$); its $E_{13}$ partner $(\omega_q,E_{13})$
-comes out below threshold---a testable intensity asymmetry of this
-mechanism.}
-\label{fig:vx-cascade}
-\end{figure}
+The finite-temperature response is the exact Boltzmann ensemble over the qutrit
+level seeds---a mixture of trajectories launched from $|1\rangle$, $|2\rangle$,
+$|3\rangle$ with weights $e^{-E_i/k_BT}$---which for the linear single-ion drive
+\emph{is} the density-matrix evolution.  With $E_{12}=2.07$\,meV$=24$\,K the
+first excited level begins to populate in the $5$--$10$\,K range, and the two
+geometries respond differently.
 
-\subsection{Validated numerics: the master model and how it was reached}
+\paragraph{Geometry A.}  $(q_{\rm AFM},E_{12})$ remains the dominant peak
+through $10$\,K and the channel stays clean: the rephasing partner grows only
+mildly ($0.33\to0.39$) and the $(q_{\rm AFM},q_{\rm AFM})$ shoulder from
+$0.18\to0.22$.  Because both the excitation and the detection run through the
+long-lived magnon, the geometry-A response is nearly temperature-independent
+below $\sim10$\,K.
+
+\paragraph{Geometry B.}  The magnon--magnon peak $(q_{\rm FM},q_{\rm AFM})$ is
+temperature-robust: it is a pure two-magnon process, independent of the qutrit
+populations.  The transfer peak $(E_{12},q_{\rm AFM})$, by contrast, is
+proportional to the ground-state population difference $n_1-n_2$ that sets the
+$E_{12}$ coherence amplitude, and it weakens monotonically:
+$0.43\;(T{=}0)\to0.41\;(5\text{\,K})\to0.35\;(8\text{\,K})\to0.29\;(10\text{\,K})$.
+Both designated peaks remain clearly resolved through $\sim8$\,K.
+
+\paragraph{The working window.}  A measurement in the $5$--$8$\,K range keeps
+all three cross peaks---$(q_{\rm AFM},E_{12})$ in geometry A and both geometry-B
+peaks---dominant and well separated, while providing a falsifiable thermal
+signature: geometry A is temperature-flat while geometry B loses
+$(E_{12},q_{\rm AFM})$ relative to $(q_{\rm FM},q_{\rm AFM})$ as $T$ rises,
+tracking $n_1-n_2$.
+
+\subsection{Everything from experiment: linewidths as damping, oscillator
+strengths as emission}
 \label{sec:validation}
 
-\paragraph{One pulse, one Hamiltonian.}  The final (``master'') model uses a
-single physical pulse rule---Zeeman on Fe; the magnetic $\mu$ matrix on Tm
-scaled by $g_{\rm Tm}=0.0583$; the exchange-induced $d^{\rm eff}_z=3.0$ on
-$E\!\parallel\!c$ only---and a single Hamiltonian for both field geometries:
-\begin{equation}
-  W^{yy}_1=0.01,\qquad W^{xz}_1=0.01,\qquad \kappa^B_{1y}=0.01\ (z\text{-gated}),\qquad
-  K^-\le10^{-3},\qquad \gamma_{\lambda^{4\ldots7}}=0.15\ \text{meV},\qquad
-  \alpha_{\rm G}=0,
-\end{equation}
-where $\gamma_{\lambda^{4\ldots7}}$ is the linewidth of all level-3 coherences
-(the upper CEF level is broad; the $E_{12}$ coherence is narrow).  Runs:
-$\tau\in[-120,0]$, $t\in[-130,40]$, the corrected recipe below.  The two
-geometries differ \emph{only} in the pump direction.  The static $W^{xz}_1$ is
-required by a time-domain observation: the experimental response keeps
-building \emph{after} the field is gone, which no field-gated vertex can do.
-$W^{xz}_1$ is the unique $\Gamma_1$-surviving static
-$\lambda^{1}$--magnon hybridization (via the large static $F_x$), and it
-feeds the nearly closed triad
-$\omega_F+\omega_{12}=0.88\simeq\omega_q=0.90$\,THz: with it, the
-single-pulse $q_{\mathrm{AFM}}$ amplitude grows by $\sim20\%$ over the
-$25$\,ps after the pulse (flat to $\pm2\%$ with $\kappa^B$ alone); its
-magnitude is calibrated by that buildup rate, not by the 2DCS peak weights.
+The final picture (\cref{fig:crosspol}, folder
+\texttt{tmfeo3\_2dcs\_final/EXPERIMENTAL\_FINAL/}) is computed with no free
+lineshape parameters: every linewidth and every emission weight is taken
+directly from the measurement.
 
-\paragraph{Iteration ledger.}  The clean inventory was reached by physics
-steps, not per-geometry tuning; each step is a statement about the material:
-\begin{center}
-\renewcommand{\arraystretch}{1.3}
-\footnotesize
-\begin{tabular}{p{0.30\textwidth}p{0.30\textwidth}p{0.34\textwidth}}
-\toprule
-symptom & physics step & effect \\
-\midrule
-$(E_{23},E_{13})$-family strays at $\omega_\tau\in\{E_{13},E_{23}\}$ &
- level-3 linewidth $\gamma_{\lambda^{4\ldots7}}$: $0.08\to0.15$ &
- delay coherences of level 3 die ($(E_{23},E_{13})$: $0.83\to0.15\to$ gone) \\
-$(\omega_q,E_{23})$ cascade dominating $\lambda^{6,7}$ &
- $d^{\rm eff}_z\!\uparrow\!1.6$, $W\!\downarrow\!0.01$ (their ratio is pinned by the hierarchy) &
- $(E_{12},E_{23})$ becomes dominant ($1.00$ vs $0.34$); $2E_{12}$ line in $\mathcal G_B$ vanishes \\
-smeared $\omega_t=E_{23}$ column in the reader view &
- diagnosed as the coherent \emph{pulse-overlap artifact} &
- $|S(\tau)|$ is $30\times$ larger only for $|\tau|<3$; the tail holds the two targets alone \\
-$E_{12}\!\pm\!\omega_{\rm s}$ beat satellites ($13\%$) &
- $W$: $0.05\to0.03$ (weaker hybridization) &
- $2\times E_{12}$ two-quantum stray in $\mathcal G_B$: $0.21\to0.11$ \\
-$(E_{12},E_{23})$ absent magnetically &
- exchange-induced $d^{\rm eff}_z=0.8$ (mirror broken by $\Gamma_2$) &
- restores $(E_{12},E_{23})=0.49$, $(E_{12},E_{13})\to$ dominant \\
-\bottomrule
-\end{tabular}
-\end{center}
-Two physics steps were tried and \emph{rejected} by the data: strong Gilbert
-damping ($\alpha=0.03$ kills the $120$-unit delay scan---real orthoferrite
-magnons live longer), and pulse-area reduction (does not separate the
-two-quantum line).
+\emph{Linewidths $\to$ damping.}  A measured linewidth \emph{is} a decay rate,
+so each mode is damped at its experimental value rather than by an ad hoc
+constant.  The CEF coherences receive Bloch damping
+$\gamma_a=(\text{linewidth in THz})\times h$ on the corresponding Gell-Mann
+components---$\gamma(\lambda^{1,2})=0.157$\,meV for $E_{12}$ ($0.038$\,THz),
+$\gamma(\lambda^{4,5})=0.207$\,meV for $E_{13}$ ($0.05$\,THz),
+$\gamma(\lambda^{6,7})=0.414$\,meV for $E_{23}$ ($0.10$\,THz).  The magnons
+receive Gilbert damping $\alpha=\Delta\nu/2\nu$, fixed by the antiferromagnetic
+linewidth to $\alpha=0.003/(2\times0.9)=1.67\times10^{-3}$.  This single change
+removes the need for the analysis-window truncation used earlier: the disparate
+lifetimes---magnon $\sim100$\,ps, $E_{12}$ $\sim8$\,ps---are now generated by
+the dynamics, and the sharp $q_{\rm AFM}$ line and the fast-dephasing CEF
+diagonals emerge with the correct relative weights.
 
-\subsection{The $W^{yy}_1$ mechanism stated precisely: where the energy comes from}
-\label{sec:wmech}
+\emph{Oscillator strengths $\to$ emission.}  The detected field weights each
+mode by its electric dipole $\sqrt f$ for the CEF lines
+($\sqrt{f_{E_{12}}}=2.55$, etc.) and by the magnetic dipole (M1) for the
+magnons; the magnon electric activity $f_{q_{\rm AFM}}=7\times10^{-4}$ is
+negligible, so $q_{\rm AFM}$ never radiates electrically---it is seen in
+geometry A only by lending its phase to the Tm $E_{12}$ dipole, and in geometry
+B only through its own M1 dipole.
 
-\emph{The objection.}  $H_W=W\,S_y^2\,\lambda^1$ is time-independent and the
-external field does not appear in it; $\delta S_y^2$ of free magnons contains
-only $0$ and $2\omega_q$.  How can a static three-leg vertex deposit an
-$\omega_{12}$ quantum into the qutrit?
-
-\emph{The resolution: the field enters through the legs, not the vertex.}  A
-Feynman vertex conserves energy among the frequencies flowing through its
-legs.  For \emph{free} legs those frequencies are the mode poles, and the
-process is indeed forbidden.  But the magnon legs here are \emph{driven}
-fields carrying, besides the pole at $\omega_q$, the spectral content of
-their pulse-limited envelopes.  \emph{Full derivation of the cross term.}
-Pulse $A$ (centered $t=-\tau$) and pulse $B$ (centered $t=0$) each launch a
-magnon with a switch-on profile $\theta_\sigma$, the integral of the
-normalized Gaussian envelope $g_\sigma(t)=e^{-t^2/2\sigma^2}/\sigma\sqrt{2\pi}$:
-\begin{equation}
-  \delta S_y^A=A_A\,\theta_\sigma(t{+}\tau)\sin\omega_q(t{+}\tau),\qquad
-  \delta S_y^B=A_B\,\theta_\sigma(t)\sin\omega_q t .
-\end{equation}
-Squaring the total, $S_y^2=(\delta S_y^A)^2+(\delta S_y^B)^2
-+2\,\delta S_y^A\delta S_y^B$; the two squares belong to the single-pulse
-responses $M_A$, $M_B$ and cancel identically in
-$M_{\rm NL}=M_{AB}-M_A-M_B$, leaving the cross term.  In the detection window
-($t>0$, where $\theta_\sigma(t{+}\tau)\simeq1$ already) the product-to-sum
-identity $2\sin X\sin Y=\cos(X{-}Y)-\cos(X{+}Y)$ with $X=\omega_q(t{+}\tau)$,
-$Y=\omega_q t$ gives
-\begin{equation}
-  2\,\delta S_y^A\,\delta S_y^B
-  = A_A A_B\,\theta_\sigma(t)\big[\cos\omega_q\tau-\cos(2\omega_q t+\omega_q\tau)\big]:
-\end{equation}
-a \emph{step} of height $\cos\omega_q\tau$, switched on over the rise time
-$\sigma$ of the probe-magnon envelope, plus an off-resonant $2\omega_q$ tone.
-
-\emph{Why the smoothed step carries $e^{-\omega_{12}^2\sigma^2/2}$.}  The
-force $h(t)=h_0\theta_\sigma(t)$ drives the bright coherence
-$c=\lambda^1+i\lambda^2$ through $\dot c=i\omega_{12}c+ih(t)$, whose solution
-splits into the adiabatically-following displacement and a free ring,
-\begin{equation}
-  c(t)=\underbrace{-\frac{h(t)}{\omega_{12}}}_{\text{follows the step}}
-  +\;e^{i\omega_{12}t}\,\frac{1}{\omega_{12}}
-  \underbrace{\int_{-\infty}^{t}\!\frac{dh}{dt'}\,e^{-i\omega_{12}t'}\,dt'}_{\to\ h_0\,
-  \tilde g_\sigma(\omega_{12})}\;+\;\mathcal O(\dot h/\omega_{12}^2)' ,
-\end{equation}
-so the \emph{ringing} amplitude---the only part that radiates at
-$\omega_{12}$---is $|h_0\,\tilde g_\sigma(\omega_{12})|/\omega_{12}$ with
-$\tilde g_\sigma(\omega)=e^{-\omega^2\sigma^2/2}$ the Fourier transform of the
-Gaussian envelope: $d\theta_\sigma/dt=g_\sigma$, hence
-$\widetilde{\theta_\sigma}(\omega)=\tilde g_\sigma(\omega)/i\omega$ (+DC).  An
-ideal step ($\sigma\to0$) rings at full strength $h_0/\omega_{12}$; an
-adiabatic ramp ($\omega_{12}\sigma\gg1$) transports the oscillator to its
-displaced equilibrium with exponentially small ringing---the adiabatic
-theorem, and precisely the $4.5$-decade collapse measured below.
-\Cref{fig:stepmech} summarizes the whole argument in pictures.
-
-\begin{figure}[h]
-\centering
-\resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[>=Latex]
-% (a) the rectified force step
-\begin{scope}[xshift=0cm]
-  \draw[->] (-1.6,0)--(2.3,0) node[below,font=\footnotesize]{$t$};
-  \draw[->] (-1.5,-0.15)--(-1.5,1.75);
-  \draw[very thick,red!70!black,domain=-1.5:2.1,samples=70]
-    plot (\x,{1.1/(1+exp(-5.5*\x))});
-  \draw[dashed] (-1.5,1.1)--(2.1,1.1);
-  \node[font=\footnotesize] at (0.35,1.5) {$h_0=W A_A A_B\cos\omega_q\tau$};
-  \draw[<->] (-0.4,0.45)--(0.4,0.45);
-  \node[font=\footnotesize,below] at (0,0.44) {$\sigma$};
-  \node[font=\small,align=center] at (0.3,-0.75) {(a) rectified two-magnon\\force on $\lambda^1$};
-\end{scope}
-% (b) spectrum of dh/dt
-\begin{scope}[xshift=4.9cm]
-  \draw[->] (-0.2,0)--(2.9,0) node[below,font=\footnotesize]{$\omega$};
-  \draw[->] (0,-0.15)--(0,1.75);
-  \draw[very thick,blue!70!black,domain=0:2.7,samples=60]
-    plot (\x,{1.5*exp(-\x*\x/1.1)});
-  \node[font=\footnotesize,above right] at (0.6,1.2) {$|\widetilde{dh/dt}|=h_0e^{-\omega^2\sigma^2/2}$};
-  \draw[dashed] (1.55,0)--(1.55,{1.5*exp(-1.55*1.55/1.1)});
-  \filldraw[red!70!black] (1.55,{1.5*exp(-1.55*1.55/1.1)}) circle (1.8pt);
-  \node[font=\footnotesize,below] at (1.55,0) {$\omega_{12}$};
-  \node[font=\footnotesize,red!70!black,right] at (1.62,0.55) {ring amp.};
-  \node[font=\small,align=center] at (1.3,-0.75) {(b) edge spectrum pays\\the $\omega_{12}$ quantum};
-\end{scope}
-% (c) sudden step: full ring
-\begin{scope}[xshift=9.8cm]
-  \draw[->] (-0.9,0)--(2.4,0) node[below,font=\footnotesize]{$t$};
-  \draw[->] (-0.8,-0.15)--(-0.8,1.75);
-  \draw[dashed] (-0.8,0.75)--(2.2,0.75) node[pos=0.85,above,font=\footnotesize]{$h_0/\omega_{12}$};
-  \draw[very thick,blue!60!black] (-0.8,0)--(0,0);
-  \draw[very thick,blue!60!black,domain=0:2.2,samples=90]
-    plot (\x,{0.75-0.75*cos(deg(7*\x))});
-  \node[font=\small,align=center] at (0.8,-0.75) {(c) sudden ($\omega_{12}\sigma\!\ll\!1$):\\full ring at $\omega_{12}$};
-\end{scope}
-% (d) adiabatic ramp: following, tiny ring
-\begin{scope}[xshift=14.2cm]
-  \draw[->] (-1.6,0)--(2.3,0) node[below,font=\footnotesize]{$t$};
-  \draw[->] (-1.5,-0.15)--(-1.5,1.75);
-  \draw[dashed] (-1.5,0.75)--(2.1,0.75);
-  \draw[very thick,blue!60!black,domain=-1.5:2.1,samples=90]
-    plot (\x,{0.75/(1+exp(-2.2*\x)) + 0.045*cos(deg(7*\x))/(1+exp(-4*(\x-0.7)))});
-  \node[font=\footnotesize] at (0.5,1.45) {ring $\propto e^{-\omega_{12}^2\sigma^2/2}$};
-  \node[font=\small,align=center] at (0.3,-0.75) {(d) adiabatic ($\omega_{12}\sigma\!\gg\!1$):\\follows, barely rings};
-\end{scope}
-\end{tikzpicture}}
-\caption{The displacive $W$ mechanism in pictures.  (a)~The $M_{\rm NL}$
-cross term of the two driven magnon legs is a force step of height
-$\propto\cos\omega_q\tau$ (delay memory) rising over the probe envelope
-$\sigma$; the field enters through this envelope, not through the vertex.
-(b)~The step's \emph{edge} carries the spectrum of the pulse envelope; the
-qutrit reads its value at $\omega_{12}$---this is who pays the energy.
-(c,d)~The bright coherence displaces to the new equilibrium (dashed) and
-rings with amplitude set by (b): a sudden step rings fully, an adiabatic ramp
-merely follows---the origin of the measured $4.5$-decade collapse of
-\cref{fig:pulsewidth}.}
-\label{fig:stepmech}
-\end{figure}
-
-\paragraph{The same statement as a Feynman diagram.}  At the photon level the
-process is five-point (\cref{fig:vx-w5}): each red magnon leg of the
-three-point vertex of \cref{fig:vx-w} is really a \emph{driven propagator},
-a photon leg attached through the Zeeman vertex, carrying not the bare pole
-$\omega_q$ but $\omega_q+\delta$ with $|\delta|\lesssim1/\sigma$ (the pulse
-bandwidth)---the diagrammatic name for the envelope sidebands of the step
-edge.  The $W$ vertex conserves energy \emph{exactly}: with one leg absorbed
-at $\omega_q+\delta_1$ and the conjugate leg emitted at $\omega_q-\delta_2$,
-the outgoing $\lambda$ line carries
-$(\omega_q+\delta_1)-(\omega_q-\delta_2)=\delta_1+\delta_2=\omega_{12}$,
-supplied entirely by the photon pair.  The apparent violation
-``$\omega_q\ominus\omega_q\neq\omega_{12}$'' arises only if one amputates the
-photon legs and puts the magnons on shell ($\delta_i=0$)---the impulsive
-limit makes $\delta_i$ as large as $1/\sigma$, the adiabatic limit forces
-$\delta_i\to0$ and kills the peak.
-
-\begin{figure}[h]
-\centering
-\begin{tikzpicture}[>=Latex,
-  fe/.style={very thick,red!60!black},
-  tm/.style={very thick,dashed,blue!60!black},
-  photon/.style={->,thick,decorate,decoration={snake,amplitude=0.5mm,segment length=1.7mm}}]
-  \node[draw,fill=black,rectangle,minimum size=6pt,inner sep=0pt] (W) at (4.2,0) {};
-  \node[font=\small] at (4.2,1.05) {$W^{yy}_1$ (conserves $\omega$ exactly)};
-  \filldraw[black] (1.1,0.8) circle (1.8pt); \filldraw[black] (1.1,-0.8) circle (1.8pt);
-  \draw[photon] (-0.3,0.8)--(1.0,0.8); \node[left,font=\small] at (-0.3,0.8){pulse $A$};
-  \draw[photon] (-0.3,-0.8)--(1.0,-0.8); \node[left,font=\small] at (-0.3,-0.8){pulse $B$};
-  \draw[fe] (1.1,0.8) -- (W); \draw[fe] (1.1,-0.8) -- (W);
-  \node[red!60!black,font=\small] at (2.6,0.85) {driven magnon, $+(\omega_q+\delta_1)$};
-  \node[red!60!black,font=\small] at (2.6,-0.85) {conjugate leg, $-(\omega_q-\delta_2)$};
-  \node[font=\footnotesize] at (1.1,0.35) {Zeeman};
-  \draw[tm] (W) -- (8.6,0);
-  \node[blue!60!black,font=\small,above] at (6.5,0.05) {$\lambda^{1,2}$ at $\delta_1{+}\delta_2=\omega_{12}$};
-  \node[align=center,font=\footnotesize] at (4.2,-1.35)
-    {$|\delta_i|\lesssim 1/\sigma$: sidebands of the driven propagators\\
-     (the ``step edge'' of \cref{fig:stepmech} in diagram language)};
-\end{tikzpicture}
-\caption{Photon-level (five-point) version of \cref{fig:vx-w}.  The magnon
-legs are driven propagators carrying pulse-bandwidth sidebands
-$\omega_q\pm\delta_i$; the static $W$ vertex conserves energy exactly, the
-$\omega_{12}$ quantum being the difference frequency $\delta_1+\delta_2$ of
-the photon pair.  Adiabatic pulses ($1/\sigma\ll\omega_{12}$) cannot supply
-it---the measured collapse.}
-\label{fig:vx-w5}
-\end{figure}  The
-energy ledger closes at the level of the full time-dependent Hamiltonian
-$H_{\rm stat}+H_{\rm Zee}(t)$: the Zeeman term does work
-$W_{\rm pulse}=-\!\int\!\ve M\cdot\partial_t\ve B\,dt$ on the Fe sector during
-the pulse, and the static $W$ vertex is the \emph{conduit} through which a
-fraction of that work reaches the Tm sector---it extracts nothing itself.  In
-photon language the process is intra-pulse difference-frequency (impulsive
-Raman): two field components of one broadband pulse, split by $\omega_{12}$,
-are absorbed and stimulated-emitted, with the magnon pair supplying the
-intermediate states and the phase memory $\cos\omega_q\tau$; the vertex-level
-statement ``$\omega_q\ominus\omega_q=0\neq\omega_{12}$'' simply omits the two
-photon legs hidden inside the driven magnon envelopes.
-
-\emph{Numerical verification.}  If this picture is right, the peak must
-(i) vanish for adiabatic pulses at \emph{fixed} amplitude, (ii) be independent
-of the direct Tm drive, and (iii) follow the measured magnon amplitude
-$A(\sigma)$ times the edge factor.  All three hold (Tm drive off,
-$g_{\rm Tm}=0$; $A$ measured on the staggered magnetization, to which the
-uniform $\ve M$ is blind):
-\begin{center}
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{lcccc}
-\toprule
-$\sigma$ & $0.25$ & $0.50$ & $0.75$ & $1.00$ \\
-\midrule
-peak $(\omega_q,E_{12})$ & $51.7$ & $10.6$ & $0.125$ & $1.7\times10^{-3}$ \\
-$A_{\rm stag}(\sigma)$ & $2.17\times10^{-2}$ & $3.23\times10^{-3}$ & $7.49\times10^{-5}$ & $1.20\times10^{-6}$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-A $4.5$-decade collapse under adiabatic stretching at constant drive
-amplitude---an energy-violating artifact would survive it---while switching
-the Tm drive on/off changes the peak by $<10^{-4}$.
-\Cref{fig:pulsewidth} overlays the two candidate scalings: the naive
-two-resonant-magnon law $A^2\,e^{-\omega_{12}^2\sigma^2/2}$ fails by four
-orders of magnitude at $\sigma=1$, while
-$A^1\,e^{-\omega_{12}^2\sigma^2/2}$ tracks the data within a factor $2$--$4$
-over the full range: beyond the impulsive limit the second Fe leg is not a
-second resonant magnon but the \emph{field-following quasistatic tilt}
-$\delta S^{\rm qs}(t)\propto B(t)$, whose amplitude does not suffer the
-$e^{-\omega_q^2\sigma^2/2}$ magnon suppression.  Both legs pass through the
-same $W$ vertex and produce the same peak; only their $\sigma$-scaling
-differs.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.62\textwidth]{tmfeo3_2dcs_final/figures/pulsewidth_verification.png}
-\caption{Adiabaticity test of the displacive $W$ mechanism (pure $W$: Tm drive
-off).  Measured $(\omega_q,E_{12})$ amplitude vs pulse width at fixed drive
-amplitude (points), against the two-magnon scaling (dashed) and the
-magnon$\times$quasistatic-tilt scaling (solid), both carrying the step-edge
-factor $e^{-\omega_{12}^2\sigma^2/2}$.  The $4.5$-decade collapse is the
-signature that the $\omega_{12}$ energy is supplied by the pulse edge through
-the driven legs; the crossover to the $A^1$ law identifies the second leg at
-finite pulse width.}
-\label{fig:pulsewidth}
-\end{figure}
-
-\subsection{Sharpening the transfer peaks: the linewidth trade-off}
-\label{sec:sharpening}
-
-Along $\omega_\tau$ the transfer peaks are already resolution-limited: their
-delay coherence is the undamped $\rho_{12}$, so longer delay scans sharpen
-them indefinitely (instrumentation, not physics).  Along $\omega_t$ their
-width \emph{is} the level-3 linewidth, and $\gamma_{\lambda^{4\ldots7}}$
-controls a genuine trade-off, measured on the master configuration:
-\begin{center}
-\renewcommand{\arraystretch}{1.25}
-\small
-\begin{tabular}{c|ccc|ccc}
-\toprule
- & \multicolumn{3}{c|}{$\lambda^4$: $(E_{12},E_{13})$} & \multicolumn{3}{c}{$\lambda^6$: $(E_{12},E_{23})$} \\
-$\gamma$ (meV) & peak & FWHM$_t$ (THz) & $(E_{23},E_{13})$/peak & peak & FWHM$_t$ & $(\omega_q,E_{23})$/peak \\
-\midrule
-$0.04$ & $2.7\times10^{-1}$ & $0.12$ & $0.34$ & $1.2\times10^{-2}$ & $0.16$ & $0.33$ \\
-$0.08$ & $1.8\times10^{-1}$ & $0.16$ & $0.15$ & $7.9\times10^{-3}$ & $0.16$ & $0.34$ \\
-$0.15$ & $9.6\times10^{-2}$ & $0.21$ & $0.06$ & $4.3\times10^{-3}$ & $0.16$ & $0.34$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-(\cref{fig:sharpening}).  Two structurally different residuals separate
-cleanly here.  The $(E_{23},E_{13})$ stray falls from $0.34$ to $0.06$ as
-$\gamma$ grows---its \emph{delay} coherence is a level-3 object, damped during
-$\tau$---while the cascade ratio $(\omega_q,E_{23})/(E_{12},E_{23})$ is
-$\gamma$-independent at $0.33$--$0.34$: both of those peaks share undamped
-delay coherences and identically damped detection rings, so only $W$ (not
-$\gamma$) controls that ratio.  The trade-off is intrinsic: the stray's delay
-coherence and the targets' detection coherence are the \emph{same} level-3
-lifetime.  Hence the model's three dials are overdetermined by four
-observables---geometry-1 cleanliness bounds $d^{\rm eff\,2}_z/W$, the
-$\lambda^6$ hierarchy pins $d^{\rm eff}_z/W$, the $\lambda^4$ stray bounds
-$d^{\rm eff}_z e^{-\gamma\bar\tau}$, and the absolute CEF-channel strength
-scales with $d^{\rm eff}_z$---and the master point
-$(W,d^{\rm eff}_z,\gamma)=(0.01,1.6,0.15)$ satisfies all four.  Conversely, a
-measured sharp $E_{13}$ line \emph{without} an $(E_{23},E_{13})$ stray would
-bound $d^{\rm eff}_z$ from experiment.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.9\textwidth]{tmfeo3_2dcs_final/figures/gamma_sharpening.png}
-\caption{Detection-axis profiles through the two transfer peaks for
-$\gamma_{\lambda^{4\ldots7}}\in\{0.04,0.08,0.15\}$\,meV (master configuration
-otherwise).  Smaller $\gamma$ gives taller, sharper transfer peaks but revives
-the $(E_{23},E_{13})$ stray whose delay coherence shares the same lifetime;
-the $\pm\omega_{\rm s}$ soft-mode sidebands are the $\gamma$-independent
-substructure.}
-\label{fig:sharpening}
-\end{figure}
-
-\subsection{Prediction: the same-polarization channel of geometry B}
-\label{sec:geomBsame}
-
-Geometry B has so far been read only in its magnon channel.  The same run
-also predicts the co-polarized channel ($E\!\parallel\!a$ detection
-$\leftarrow$ $m_z$ emitters: Tm $\lambda^2$ and Fe $S_z$), which to our
-knowledge is unmeasured.  The master-run census:
-\begin{center}
-\renewcommand{\arraystretch}{1.25}
-\small
-\begin{tabular}{llll}
-\toprule
-channel & peak $(|\omega_\tau|,\omega_t)$ & rel.\ amp. & mechanism \\
-\midrule
-Tm $\lambda^2$ & $(\omega_F,E_{12})$ & $1.00$ & $W$ rectification of the pumped $q_{\mathrm{FM}}$ pair \\
-Tm $\lambda^2$ & $(\omega_q,E_{12})$ & $0.59$ & $W$ rectification of the DM-up-converted $q_{\mathrm{AFM}}$ \\
-Tm $\lambda^2$ & $(E_{12},E_{12})$ & $0.47$ & $\mu_{2z}B_z$ direct diagonal \\
-Fe $S_z$ & $(\omega_F,\omega_F)$ & $1.00$ & magnon diagonal \\
-\bottomrule
-\end{tabular}
-\end{center}
-The prediction is sharp: at the $E_{12}$ detection column this channel must
-show the delay-frequency \emph{pair} $(\omega_F$ and $\omega_q)$ with ratio
-$\approx0.6$, plus a comparable diagonal---the geometry-B mirror image of
-geometry 1, with the roles of the two magnons exchanged by the $\theta$
-selection rule.  Observing $(\omega_F,E_{12})$ here with the predicted
-dominance would independently confirm the $W$ mechanism using the \emph{other}
-magnon branch.
-
-\subsection{Exact simulation parameters}
-\label{sec:simparams}
-
-Master runs (\texttt{geomA\_master}, \texttt{geomB\_master}); the two differ
-only in the three pump lines marked $\dagger$:
-\begin{center}
-\footnotesize
-\begin{tabular}{ll|ll}
-\toprule
-\multicolumn{2}{c|}{lattice \& Hamiltonian (meV)} & \multicolumn{2}{c}{drive, scan, integration} \\
-\midrule
-lattice & $1\times1\times1$ (4 Fe, 4 Tm) & pump width / amp & $0.5$ / $0.1$ \\
-$J_{1ab},J_{1c}$ & $4.74,\ 5.15$ & $^\dagger$pump dir.\ ($\mathcal G_A$/$\mathcal G_B$) & $(1,0,0)$ / $(0,0,1)$ \\
-$J_{2ab},J_{2c}$ & $0.15,\ 0.30$ & $^\dagger$Tm drive $\mathcal G_A$ & $\ve v=(0,1.6,0,0,2.39,0,0.91,0)$, amp $0.0176$ \\
-$K_a,K_b,K_c$ & $-0.0153,\ 0,\ -0.0187$ & $^\dagger$Tm drive $\mathcal G_B$ & auto $\mu$-projection ($B_z\mu_{2z}$) \\
-$D_1,D_2$ & $0.049,\ 0$ & $g_{\rm Tm}$ & $0.058333$ \\
-$e_1,e_2$ & $2.067834,\ 4.9628$ & $\tau$ scan & $[-120,0]$, $\Delta\tau=0.1$, parallel \\
-$W^{yy}_1$ & $0.01$ & $t$ window & $[-130,40]$, RK4, $\Delta t=0.02$ \\
-$\kappa^B_{1y}$ ($z$-gated) & $0.01$ & $M_1$ & honest (\texttt{reuse\_m0\_for\_m1=false}) \\
-$K^-$ & $0$ & chunking & off \\
-$\gamma_{\lambda^{4\ldots7}}$ & $0.15$ & temperature & $T=0$ deterministic, $\Gamma_2$ seed \\
-$\alpha_{\rm G}$, $\gamma_{\lambda^{1,2,3,8}}$ & $0$ & spin lengths & $S_{\rm Fe}=2.5$, $|\lambda|=1$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-Pulse-width sweep (\cref{fig:pulsewidth}): same as $\mathcal G_A$ with
-$g_{\rm Tm}=0$, $\sigma\in\{0.25,0.5,0.75,1.0\}$, $\tau\in[-40,0]$,
-$t\in[-50,40]$.  $\gamma$ scan (\cref{fig:sharpening}): master $\mathcal G_A$
-with $\gamma\in\{0.04,0.08,0.15\}$.  Analysis (identical for every spectrum):
-detection FFT on $t\in[3,40]$ of $M_{\rm NL}$ only; per-$\tau$ DC removal;
-$\tau$ tapers at both edges; $6$-unit overlap gate
-(\texttt{--tau-gate 6 --dc-remove --norm linear} in the reader).
-
-\paragraph{Final peak census.}  All local maxima above $7\%$ of each detected
-channel (both $\omega_\tau$ signs merged; $\omega_{\rm s}\approx0.12\,$THz is
-the soft-mode sideband spacing, see below):
-\begin{itemize}
-\item \textbf{Geometry 1} ($\lambda^2$): $(\omega_q,E_{12})=1.00$; only
-  soft-mode sidebands of this same peak at $0.13/0.11$.  \emph{Nothing else.}
-\item \textbf{Geometry 2} (Fe $F_x$): $(\omega_F,\omega_q)=1.00$,
-  $(E_{12},\omega_q)=0.71$; residuals $\le0.14$; the two-quantum $2E_{12}$
-  line is gone at $W=0.01$ (it was $W$-fed).
-\item \textbf{Geometry 3} ($\lambda^{4,5}$): $(E_{12},E_{13})=1.00$; its
-  soft-mode sidebands $0.37/0.32$; the shared-level partner $(E_{23},E_{13})$
-  is fully suppressed by the level-3 linewidth ($0.83\to0.15\to<0.07$ as
-  $\gamma:0\to0.08\to0.15$); rest $\le0.17$.  ($\lambda^{6,7}$):
-  $(E_{12},E_{23})=1.00$ \emph{dominant}, the $W\!\circ\!f$ cascade
-  $(\omega_q,E_{23})$ reduced to $0.34$; sidebands $0.34$; rest $\le0.18$.
-\item \textbf{Symmetry-dark channels}: Fe $S_y$, $S_z$ in $\mathcal G_A$ are
-  zero to $10^{-11}$---the polarization selection rules hold to machine
-  precision.
-\end{itemize}
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\textwidth]{tmfeo3_2dcs_final/figures/master_spectra.png}
-\caption{Final 2DCS spectra of the master model, one panel per detected
-channel (each normalized to its own maximum; $\omega_\tau<0$ is the rephasing
-side).  Geometry 1 ($\lambda^2$): the single $(\omega_q,E_{12})$ spot.
-Geometry 3 ($\lambda^{4}$/$\lambda^{6}$): $(E_{12},E_{13})$;
-$(\omega_q,E_{23})$ and $(E_{12},E_{23})$.  Geometry 2 (Fe $F_x$): the resolved
-pair $(\omega_F,\omega_q)$ and $(E_{12},\omega_q)$.  No stripes, no ridges; all
-secondary structure is identified fine structure of the listed peaks.}
-\label{fig:master}
-\end{figure}
-
-\paragraph{The residual fine structure is itself physics.}  Every feature
-between $7\%$ and $25\%$ is one of three identified objects.  (i)
-\emph{Soft-mode sidebands} at $\pm0.12\,$THz around each strong peak: the
-model's quasi-ferromagnetic $a$--$c$ rotation mode sits at
-$\omega_{\rm s}\approx0.1\,$THz because $|K_a-K_c|=0.003$\,meV---the
-spin-reorientation proximity of TmFeO$_3$ transplanted to $T=0$.  At low
-temperature the real $\Gamma_2$--$\Gamma_4$ gap is larger (the Tm-mediated
-anisotropy we deliberately keep out of the Fe sector), so these sidebands are
-predicted to sit further out and weaker in experiment; removing them entirely
-requires a joint recalibration of $(K_a,K_c,D_1)$ against the three measured
-mode frequencies.  (ii) The \emph{magnon diagonal} $(\omega_q,\omega_q)$ in the
-Fe channel: always present in any magnon 2DCS.  (iii) The
-\emph{reverse-$W$ peak} $(E_{12},\omega_q)$ in the same-pol Fe channel of
-$\mathcal G_A$ (quasistatic-leg conversion of the $d^{\rm eff}_z$-sourced
-$\rho_{12}$): a genuine prediction of the model---a magnon-frequency echo of
-the CEF coherence, testable in the geometry-3 raw data at
-$\omega_t=0.9\,$THz.
-
-\paragraph{Simulation protocol, per geometry.}  Both geometries use the
-identical Hamiltonian and pulse rule; only \texttt{pump\_direction} changes.
-$\mathcal G_A$: \texttt{pump\_direction=1,0,0} (Zeeman $B\!\parallel\!a$,
-amplitude $0.1$, width $0.5$); Tm drive
-$\ve v=(0,d^{\rm eff}_z,0,0,\mu_{5x},0,\mu_{7x},0)=(0,3.0,0,0,2.39,0,0.91,0)$
-with amplitude $0.1\,g_{\rm Tm}|\ve v|$ (the $\mu$-matrix projection of the
-same pulse, plus the exchange-induced electric leg).
-$\mathcal G_B$: \texttt{pump\_direction=0,0,1} with the automatic $\mu$-matrix
-projection ($B_z\to\mu_{2z}\lambda^2$; no electric leg, $E\!\parallel\!a$).
-Both: $\tau\in[-120,0]$ ($\Delta\tau=0.1$), $t\in[-130,40]$
-($\Delta t=0.02$, RK4), honest $M_1$, no chunking, $T=0$ deterministic.
-Analysis: per-$\tau$ DC removal along $t$; both-edge $\tau$ tapers; a
-$6$-unit cosine gate over the pulse-overlap region ($|\tau|<3$ carries the
-coherent artifact at $30\times$ the sequential signal while the $\tau<-15$
-tail contains \emph{only} the target lines---verified by the delay-trace
-diagnostic).  The same gate and DC removal are available in the analysis tool
-as \texttt{--tau-gate 6 --dc-remove}.
-
-\paragraph{Why not Tm--Tm exchange?}  A bilinear Tm--Tm coupling
-($\lambda_i^a\lambda_j^b$) was considered for the residual cleanup and set
-aside on physics grounds: it produces Davydov splitting of the four-site CEF
-excitons---\emph{additional} structure, not less---while none of the three
-identified residual classes is an intersite effect: the $(E_{23},E_{13})$
-stray is a single-ion lifetime issue (removed by $\gamma$), the
-$\omega_t=E_{23}$ smear is the pulse-overlap artifact (removed by gating), and
-the $\pm0.12$\,THz sidebands are an Fe-sector soft mode ($W$-imprinted).  The
-known weak Tm--Tm interactions (Tm orders only at mK scales) justify its
-omission from the master Hamiltonian.
-
-\begin{warnbox}[title={2DCS simulation recipe (mandatory for long delay scans)}]
-Three interacting defects silently corrupt long-$\tau$ 2DCS runs and produced
-broad ``ridge'' artifacts that masqueraded as physics in earlier drafts:
-(i) if the integration window does not contain the probe pulse
-($t_{\rm start}>\tau$), the pulse is clipped or never fires---choose
-$t_{\rm start}\le\tau_{\min}-5\,w$;
-(ii) the $M_1$ reuse shortcut ($M_1(\tau,t)=M_0(t-\tau)$) pads out-of-range
-indices with the \emph{ground state}, creating a smooth $\tau$-dependent
-subtraction error---compute $M_1$ honestly (\texttt{reuse\_m0\_for\_m1=false});
-(iii) disable \texttt{pulse\_window\_chunking} for extended windows.
-Diagnose with the complex delay trace $S(\tau)$ at fixed $\omega_t$: its
-amplitude must be structureless in $\tau$.  In the frequency analysis, taper
-\emph{both} edges of the $\tau$ window.  The short-scan results of
-\cref{sec:numerical} ($\tau\in[-40,0]$) are unaffected.
-\end{warnbox}
-
-\subsection{The drive-strength dial: two regimes bracket the experiment}
-\label{sec:regimes}
-
-The Tm drive strength is a single physical dial (one pulse, fixed $\mu$
-ratios), and scanning it $\times14$ (\texttt{test\_strong25},
-\texttt{geomB\_strong}) shows that the \emph{cross-peak inventory is
-drive-invariant} while the hierarchy evolves in a correlated way:
-\begin{center}
-\renewcommand{\arraystretch}{1.25}
-\small
-\begin{tabular}{lll}
-\toprule
-observable & weak drive (master) & strong drive ($\times14$) \\
-\midrule
-$\lambda^6$ $\omega_\tau$ side vs $\lambda^4$ & opposite ($11{:}1$) & \textbf{same} ($2.3{:}1$) \\
-G1 $(E_{12},E_{12})$ diagonal / cross peak & $<0.1$ & $11$ \\
-G2 two-quantum $2E_{12}$ line & absent & \textbf{dominant} ($1.00$) $+$ combos \\
-$\lambda^6/\lambda^4$ brightness & $4$--$6\%$ & $4$--$6\%$ (invariant) \\
-\bottomrule
-\end{tabular}
-\end{center}
-Neither regime satisfies every reported detail simultaneously: the same-side
-$\lambda^6$ arrangement requires strong drive, but strong drive necessarily
-(same pulse, $\mu_{2z}>\mu_{5x}$) floods geometry~B with two-quantum and
-combination lines.  The model therefore poses two decisive questions to the
-data: (a) does the geometry-B spectrum contain a $2E_{12}$ delay line at
-$(1.0,\omega_q)$?  (b) is the geometry-3 $\omega_\tau$ sign actually resolved,
-or folded ($|\omega_\tau|$ display)?  If folded, the weak-drive master is
-fully consistent as is; if signed and same-side, the experiment sits at strong
-drive and must also show the geometry-B two-quantum structure.
-
-\emph{The $E_{23}$ brightness anomaly, localized.}  A pulse-decomposition
-experiment in silico ($\lambda^5$-leg only vs $\lambda^7$-leg only) shows the
-two transfer peaks are carried by single, non-interfering legs
-($\lambda^4\leftarrow\lambda^7$, $\lambda^6\leftarrow\lambda^5$), and
-time-domain inspection right after pulse $B$ shows the $2\!\leftrightarrow\!3$
-ring is \emph{created} $\sim\!20\times$ smaller than naive leg counting
-predicts (not lost in detection or analysis).  This creation bottleneck of the
-dark block is the one microscopic quantity of the qutrit dynamics still
-lacking a closed-form explanation; experimentally it predicts
-$(E_{12},E_{23})$ systematically weaker than $(E_{12},E_{13})$ at any drive.
-
-\subsection{Final four-channel verification and the emulated spectra}
-\label{sec:finalverify}
-
-The closing check verifies, channel by channel, that the required peaks are
-the only (or overwhelmingly dominant) features of the master model
-(\cref{fig:emulated}; folded $|\omega_\tau|$ magnitude display, the
-experimental convention---which also places both geometry-3 transfer peaks on
-the \emph{same} $|\omega_\tau|=E_{12}$ row; in signed frequency the two sit in
-opposite quadrants at weak drive, $54{:}1$ for $\lambda^4$ vs $4.2{:}1$ for
-$\lambda^6$, the latter softened by the same-side amplitude that the static
-$W^{xz}_1$ hybridization contributes):
-\begin{itemize}
-\item \textbf{$\mathcal G_A$ cross-pol} ($S_z+\lambda^{1,2}$):
-  $(\omega_q,E_{12})=1.00$ in \emph{both} $\lambda^1$ and $\lambda^2$; all
-  else $\le0.12$; Fe $S_z$ machine-dark ($10^{-5}$).
-\item \textbf{$\mathcal G_A$ same-pol} ($S_x+\lambda^{4\ldots7}$):
-  $(E_{12},E_{13})=1.00$ in $\lambda^{4,5}$; $(E_{12},E_{23})=1.00$ in
-  $\lambda^{6,7}$ with the $W^{xz}_1$-fed cascade at $0.75$ (the irreducible
-  companion of the post-pulse buildup); Fe $S_x$ carries the reverse-$W$ echo
-  and magnon diagonal at $\omega_t=0.9$, spectrally separated from the CEF
-  detections.
-\item \textbf{$\mathcal G_B$ cross-pol} ($S_x+\lambda^{4\ldots7}$):
-  $(\omega_F,\omega_q)=1.00$ and $(E_{12},\omega_q)=0.62$;
-  $\lambda^{4\ldots7}$ \emph{exactly} dark.
-\item \textbf{$\mathcal G_B$ same-pol} (prediction; $S_z+\lambda^{1,2}$):
-  $(\omega_F,E_{12})=1.00$, $(\omega_q,E_{12})=0.31$, $(E_{12},E_{12})=0.21$.
-\end{itemize}
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\textwidth]{tmfeo3_2dcs_final/figures/emulated_2dcs_spectra.png}
-\caption{Emulated detected 2DCS spectra of the master model: coherent
-$\mu$-weighted channel sums, folded $|\omega_\tau|$ magnitude.  Circles:
-required peaks; squares: predictions (geometry-B same-pol).}
-\label{fig:emulated}
-\end{figure}
-
-\subsection{Everything that was tried: the exhaustive coupling ledger}
-\label{sec:exhaustion}
-
-Every symmetry-conceivable coupling component was tested by pair-run
-difference on the corrected recipe.  The catalogue is closed:
-\begin{center}
-\renewcommand{\arraystretch}{1.25}
-\footnotesize
-\begin{tabular}{llp{0.52\textwidth}}
-\toprule
-component(s) & verdict & note \\
-\midrule
-$W^{yy}_1$ & \textbf{alive, adopted} & the geometry-1 peak; displacive mechanism verified \\
-$W^{xz}_1$ & \textbf{alive, adopted (0.01)} & static $F_x\lambda^1S_z$ hybridization; post-pulse buildup; assists $(E_{12},\omega_q)$ \\
-$\kappa^B_{1y}$ ($B_z$-gated) & \textbf{alive, adopted} & the impulsive $(E_{12},\omega_q)$ generator; gate keeps $\mathcal G_A$ clean \\
-$d^{\rm eff}_z$ ($E\!\parallel\!c$) & \textbf{alive, adopted} & exchange-induced E1; sources $\rho_{12}$ for the transfer peaks \\
-$W^{xx}_1$ & alive, rejected & floods $F_x$ with a soft-mode comb \\
-$W^{xz}_1$ (large) & alive, rejected & $\ge0.05$: back-hybridization leak into $\mathcal G_A$ cross-pol \\
-$\kappa^E_{5x}$ & active, negligible & static-$F_x$ dominated; $<10^{-3}$ relative \\
-$W^{xy}_1,\ W^{yz}_1$ & exactly inert & $\Gamma_1$-cancelled \\
-$W^{zz}_1$ & negligible & $10^{-4}$-level junk \\
-$W^{4}$: all six quadratics & exactly inert & $\Delta\le6\times10^{-12}$ \\
-$W^{6}_{yy},\ W^{6}_{xz}$ & exactly inert & $\Delta\le7\times10^{-12}$ \\
-$\kappa^E_{2y}$ & exactly inert & $\Delta\le3\times10^{-12}$ \\
-$\kappa^B$ ($B_x$-gated) & exactly inert & orbit-sign cancellation \\
-$K^-$ (all but $K^-_{2y}$) & exactly inert & static scan + dynamics ($10^{-15}$) \\
-$K^-_{2y}$ & rejected & reorients $\Gamma_2$ beyond $0.09$\,meV \\
-Tm--Tm exchange & rejected a priori & Davydov splitting adds structure; Tm orders at mK \\
-\bottomrule
-\end{tabular}
-\end{center}
-Every adopted coupling is therefore \emph{unique within its role}: no static
-alternative to $\kappa^B$ exists (the $W^{xz}_1$ window fails both
-geometries), no coupling produces same-pol $(\omega_q,E_{12})$, and
-$(\omega_q,E_{13})$ arrives only with a stronger $E_{23}$ partner.
+The remaining numerics are as before: $1\times1\times1$ mixed lattice, RK4
+($\Delta t=0.02$), delay $\tau\in[-120,0]$, detection to $t_{\max}=160$, honest
+$M_1$ subtraction, no pulse-window chunking, the measured pump waveform, the
+two-magnon vertex $W^{yy}_1$, the static hybridization $W^{xz}_1$ (source of the
+post-drive buildup, \cref{fig:buildup}), and the geometry-B gate
+$\kappa^B_{1y}$.  Spectra
+use a Hann apodization on both axes to suppress the sidelobes of the now
+long-lived magnon coherence.
 
 \subsection{Falsifiable predictions}
+\label{sec:predictions}
 
-The gated structure is predictive, not descriptive:
-(1) rotating $E$ away from $c$ at fixed $B\!\parallel\!a$ suppresses
-$(E_{12},E_{13})$ and $(E_{12},E_{23})$ (their $\rho_{12}$ source dies) while
-$(\omega_q,E_{12})$ and $(\omega_q,E_{23})$ survive;
-(2) the relative $\omega_\tau$ sign of $(E_{12},E_{13})$ and $(E_{12},E_{23})$
-is a \emph{pathway-order diagnostic}: single-action transfer at the second
-pulse puts them on opposite sides ($\rho_{12}\!\to\!\rho_{13}$ extends the bra,
-$\rho_{12}\!\to\!\rho_{32}$ the ket, conjugating the stored phase), while the
-second-order pathway (coherence$\to$population$\to\rho_{23}$) puts them on the
-\emph{same} side and grows linearly with field: in simulation a $\times5$
-drive moves the $\lambda^6$ side ratio from $11:1$ (opposite) to $2.5:1$,
-so at experimental field strengths the same-side arrangement is expected.
-No global sign convention can mimic this: a real signal gives
-$F(-\omega_\tau,-\omega_t)=F^*(\omega_\tau,\omega_t)$, so conventions (FFT
-kernel sign, delay direction, axis flips) move \emph{all} peaks between
-quadrants together---the \emph{relative} quadrant of two peaks
-(sign of $\omega_\tau\omega_t$) is convention-free.  Note also that
-folded-magnitude displays (plotting $|\omega_\tau|$ only, common in
-experimental work) show both peaks at the same $|\omega_\tau|=E_{12}$
-regardless of pathway, in which case there is no tension to resolve;
-(3) a faint shared-level partner $(E_{23},E_{13})$ accompanies the transfer
-peaks (observed at $0.15$ in the master run);
-(4) $(\omega_F,\omega_q)$ in geometry 2 scales linearly with the DM constant
-(canting);
-(5) at strong $B\!\parallel\!a$ drive an $(E_{12},E_{12})$ diagonal grows
-quadratically (Raman $\lambda^5\lambda^7$ pair) even with no
-$E\!\parallel\!c$ coupling at all;
-(6) all cross peaks that rely on the pulse edge---above all
-$(\omega_q,E_{12})$---collapse as $e^{-\omega_{12}^2\sigma^2/2}$ when the pulse
-is chirped/stretched at constant fluence (verified in silico over $4.5$
-decades);
-(7) the geometry-3 $(E_{12},\cdot)$ peaks inherit the temperature dependence of
-the exchange-induced dipole $d^{\rm eff}_z$ and must die at the
-spin-reorientation transition;
-(8) a magnon-frequency echo $(E_{12},\omega_q)$ exists in the same-pol Fe
-channel of geometry 3 (the reverse-$W$ quasistatic conversion);
-(9) each strong peak carries soft-mode sidebands at
-$\pm\,\omega_{\rm s}(T)$, tracking the softening $a$--$c$ anisotropy toward
-the reorientation;
-(10) the unmeasured same-polarization channel of geometry B shows the
-delay pair $(\omega_F,E_{12})$ and $(\omega_q,E_{12})$ with ratio
-$\approx0.6$ plus a comparable $(E_{12},E_{12})$ diagonal
-(\cref{sec:geomBsame}).
+\begin{enumerate}
+\item \textbf{Emission-frequency fingerprint.}  The geometry-A cross peak
+  emits at $E_{12}=0.50$\,THz (a CEF line), whereas the geometry-B peaks emit at
+  $q_{\rm AFM}=0.90$\,THz (the magnon line).  A magnon read out through a CEF
+  dipole versus through its own M1 dipole is the structural signature of the
+  two mechanisms.
+\item \textbf{Linewidth discriminator.}  Any peak emitting at $q_{\rm AFM}$
+  inherits the magnon linewidth ($0.003$\,THz), a factor $\sim15$ sharper than
+  a CEF emission ($E_{12}$: $0.038$\,THz).  The geometry-B peaks should be
+  spectrally sharp along $\omega_t$; the geometry-A peak broad.
+\item \textbf{Thermal trend.}  $(q_{\rm FM},q_{\rm AFM})$ is temperature-flat;
+  $(E_{12},q_{\rm AFM})$ falls as $n_1-n_2$; $(q_{\rm AFM},E_{12})$ acquires a
+  $q_{\rm FM}$-assisted partner above $\sim8$\,K.  A temperature scan separates
+  the magnon--magnon from the transfer peaks.
+\item \textbf{One Hamiltonian.}  The same couplings produce the $E_{12}$-emitting
+  peak in geometry A and the $q_{\rm AFM}$-emitting peaks in geometry B with no
+  retuning; the geometry (field orientation) alone selects the readout channel.
+\end{enumerate}
 
-% =====================================================================
-\section{Bottom line}
 % =====================================================================
 
 The cross-peak question reduces to a single requirement: a vertex must generate

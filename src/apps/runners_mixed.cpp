@@ -1000,8 +1000,11 @@ void run_2dcs_spectroscopy_mixed(MixedLattice& lattice, const SpinConfig& config
         string trial_dir = config.output_dir + "/sample_0";
         filesystem::create_directories(trial_dir);
         
-        // Always equilibrate for 2DCS (only rank 0)
-        if (rank == 0) {
+        // Always equilibrate for 2DCS (only rank 0), unless the caller
+        // explicitly disabled every relaxation stage (annealing_steps=0 and
+        // n_deterministics=0): then the loaded seed is used verbatim, which
+        // is required for excited-level (thermal-ensemble) initial states.
+        if (rank == 0 && (config.annealing_steps > 0 || config.n_deterministics > 0)) {
             if (!config.initial_spin_config.empty()) {
                 cout << "\n[1/2] Equilibrating from loaded seed to true ground state..." << endl;
             } else {
