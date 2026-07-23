@@ -660,6 +660,13 @@ static void apply_su3_bloch_damping(MixedLattice& lattice, const SpinConfig& con
     // Relax toward the current (post-anneal) ground-state Bloch vectors, which
     // are already in the local sublattice frame used by the MD state vector.
     lattice.set_equilibrium_SU3(lattice.spins_SU3);
+    // Optional thermal repopulation: absorbed drive energy shifts the lambda3
+    // equilibrium (rise time = 1/Gamma_3); see mixed_lattice.h.
+    lattice.thermal_heat = config.get_param("thermal_heat", 0.0);
+    if (rank == 0 && lattice.thermal_heat != 0.0) {
+        cout << "Thermal repopulation ON: thermal_heat = " << lattice.thermal_heat
+             << " (lambda3 equilibrium shifts with absorbed drive energy)" << endl;
+    }
     if (rank == 0) {
         cout << "SU(3) Bloch damping Gamma_a = [";
         for (int a = 0; a < static_cast<int>(lattice.spin_dim_SU3); ++a) {

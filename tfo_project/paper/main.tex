@@ -214,10 +214,16 @@ enforced: every coherence reservoir dies within its $T_2$
 ($E_{12}$: $8$\,ps), so the converted magnon amplitude peaks at pulse
 end and decays with the reservoir lifetime.  A slow buildup therefore
 implicates the one long-lived reservoir the ion possesses---the CEF
-\emph{populations} ($T_1$)---acting on the magnon through the
-population channel ($\lambda^3$) of the same exchange, the mechanism
-known from thermally driven spin reorientation; the growth time would
-directly measure $T_1$ [SM, Sec.~S7].
+\emph{populations}---fed incoherently by the dissipated pulse energy
+and acting on the magnon through the population channel ($\lambda^3$,
+$W_3$) of the same exchange: the mechanism of thermally driven spin
+reorientation.  Implemented in the solver (dissipated coherence energy
+shifts the $\lambda^3$ equilibrium; the relaxation chases it), this
+channel reproduces the observation---the transfer signal falls off the
+impulsive peak, recovers on the repopulation time $1/\Gamma_3$, and
+persists beyond $100$\,ps---and its recovery time and late-time
+fraction directly measure the Tm repopulation time and
+$c_{\rm heat}W_3$ [SM, Sec.~S7].
 
 \begin{figure*}[t]
 \includegraphics[width=\textwidth]{figs/samepol_darkmu13_final.png}

@@ -447,6 +447,46 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
             drive_envelopes_SU3(t, su3_f1, su3_f2);
         }
 
+        // Thermal repopulation accumulator: E_dep(t) = ∫ Σ_i (f1'·v1 + f2'·v2)·λ_i dt.
+        // Slow variable, updated per RHS stage with time-monotonic guards
+        // (fixed-step RK4: stages at t, t+h/2, t+h/2, t+h). Resets on a
+        // backward time jump (start of a new trajectory).
+        if (thermal_heat != 0.0) {
+            if (t < thermal_last_t) {           // new trajectory begins
+                thermal_Edep = 0.0;
+                thermal_last_t = -1.0e300;
+                thermal_last_P = 0.0;
+            }
+            if (t > thermal_last_t) {
+                // Heat source = the DISSIPATED energy (what the bath actually
+                // receives): P_diss = Σ_sites Σ_a Γ_a (λ_a − λ_a_eq)².
+                // Positive-definite and monotone; the M01 trajectory's
+                // coherence products carry the pump-FID × probe interference,
+                // so the τ label survives the M_NL subtraction.
+                double P = 0.0;
+                for (size_t site = 0; site < lattice_size_SU3; ++site) {
+                    const size_t idx = offset_SU3 + site * spin_dim_SU3;
+                    for (size_t a = 0; a < spin_dim_SU3; ++a) {
+                        if (a == 2 || a == 7) continue;   // populations: their
+                        // relaxation returns energy to the bath and must not
+                        // re-heat (closes a runaway feedback loop otherwise)
+                        const double g = damping_rates_SU3(a);
+                        if (g != 0.0) {
+                            const double d = state[idx + a] - equilibrium_SU3[site](a);
+                            P += g * d * d;
+                        }
+                    }
+                }
+                const double dtt = t - thermal_last_t;
+                if (dtt < 1.0) {                // skip the fresh-trajectory jump
+                    thermal_Edep += 0.5 * (P + thermal_last_P) * dtt;
+                }
+                thermal_last_t = t;
+                thermal_last_P = P;
+            }
+        }
+        const double thermal_eq3_shift = thermal_heat * thermal_Edep;
+
         // Combined pulse-envelope scalars for the field-assisted Fe-Tm
         // exchange (H_{E chi} uses the SU(3)/electric envelope, H_{B chi}
         // uses the SU(2)/magnetic envelope).  Zero when the matching pulse is
@@ -528,11 +568,14 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     // non-zero (a<b<c) triples instead of 8^3 = 512 entries).
                     cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
 
-                    // Bloch damping: −Γ_i (n^i − n^i_eq).
+                    // Bloch damping: −Γ_i (n^i − n^i_eq).  λ3 (i==2) chases the
+                    // thermally shifted equilibrium (τ-labeled heating).
                     for (size_t i = 0; i < 8; ++i) {
                         if (damping_rates_SU3(i) != 0.0) {
+                            double eq = equilibrium_SU3[site](i);
+                            if (i == 2) eq -= thermal_eq3_shift;
                             dsdt[idx + i] -= damping_rates_SU3(i) *
-                                (state[idx + i] - equilibrium_SU3[site](i));
+                                (state[idx + i] - eq);
                         }
                     }
                 }
@@ -583,8 +626,10 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                     cross_prod_SU3_flat(H, &state[idx], &dsdt[idx], /*accumulate=*/false);
                     for (size_t i = 0; i < 8; ++i) {
                         if (damping_rates_SU3(i) != 0.0) {
+                            double eq = equilibrium_SU3[site](i);
+                            if (i == 2) eq -= thermal_eq3_shift;
                             dsdt[idx + i] -= damping_rates_SU3(i) *
-                                (state[idx + i] - equilibrium_SU3[site](i));
+                                (state[idx + i] - eq);
                         }
                     }
                 }
@@ -601,7 +646,9 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                             }
                         }
                         if (damping_rates_SU3(i) != 0.0) {
-                            dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - equilibrium_SU3[site](i));
+                            double eq = equilibrium_SU3[site](i);
+                            if (i == 2) eq -= thermal_eq3_shift;
+                            dSdt_i -= damping_rates_SU3(i) * (state[idx + i] - eq);
                         }
                         dsdt[idx + i] = dSdt_i;
                     }

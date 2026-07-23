@@ -482,6 +482,42 @@ and the product $W_3\,\Delta n$.}
 \label{fig:si-buildupmodel}
 \end{figure}
 
+\paragraph{The mechanism implemented in the solver.}
+The incoherent channel is now part of the simulation: the solver
+accumulates the \emph{dissipated} coherence energy,
+$E_{\rm dep}(t)=\int\!dt'\sum_{i,a\neq3,8}\Gamma_a
+\big(\lambda^a_i-\lambda^a_{i,\rm eq}\big)^2$ (the energy the bath
+actually receives; the population channels are excluded from the sum,
+which closes an otherwise runaway self-heating loop), and shifts the
+$\lambda^3$ equilibrium by $-c_{\rm heat}E_{\rm dep}$.  The existing
+$\Gamma_3$ relaxation then chases the shifted equilibrium, so the
+repopulation rise time is $1/\Gamma_3$ by construction, and the
+pump-FID$\times$probe interference contained in the dissipated energy
+carries the $\omega_\tau=E_{12}$ label through the $M_{\rm NL}$
+subtraction automatically.  A full 2DCS run with
+$W_3^{yz}=0.01$, $1/\Gamma_3=33$\,ps, and $c_{\rm heat}$ set for a
+few-percent population shift (run \texttt{bb5c}) reproduces the
+observed phenomenology [Fig.~\ref{fig:si-buildupinsim}]: the
+$\omega_\tau=E_{12}$ row falls off the impulsive peak, \emph{builds
+back up} on the repopulation time, and persists beyond $100$\,ps---%
+$50$--$100\times$ above the coherent-only model at late times.  The two
+new parameters map onto measurables: the recovery time of the row is
+$1/\Gamma_3$, and the late-to-impulsive intensity ratio calibrates
+$c_{\rm heat}\,W_3$.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{figs/buildup_insim.png}
+\caption{The buildup inside the simulation (geometry B, run
+\texttt{bb5c}: $W_3^{yz}=0.01$, dissipation-fed thermal repopulation,
+$1/\Gamma_3=33$\,ps).  Left: mixed-domain map
+$|{\rm FFT}_\tau M_{\rm NL}|(\omega_\tau,t)$.  Right: the
+$\omega_\tau=E_{12}$ row---after the impulsive peak the signal recovers
+on the repopulation time and persists beyond $100$\,ps (red), versus
+the coherent-only model dying by $40$\,ps (dashed).}
+\label{fig:si-buildupinsim}
+\end{figure}
+
 If the experimental buildup over tens of ps is real, it must be fed by
 the one reservoir that outlives every $T_2$: the CEF \emph{populations}.
 A pulse-deposited excited population $n_2$ relaxes on $T_1$, and through

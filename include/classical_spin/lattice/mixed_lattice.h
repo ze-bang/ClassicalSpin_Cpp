@@ -307,6 +307,18 @@ public:
     SpinVector damping_rates_SU3;               // 8-component, one Γ per Gell-Mann channel
     SpinConfigSU3 equilibrium_SU3;              // Per-site equilibrium Bloch vector
 
+    // Thermal repopulation (tau-labeled heating): the energy absorbed from the
+    // SU(3) drive, E_dep(t) = ∫ f'(t)·Σ_i(v_i·λ_i) dt, shifts the λ3
+    // equilibrium by −thermal_heat·E_dep. The existing Γ_3 relaxation then
+    // chases the shifted equilibrium, so the population rise time is 1/Γ_3 and
+    // the pump-FID × probe interference in E_dep carries the ω_τ=E12 delay
+    // label into M_NL automatically. Accumulator resets when integration time
+    // jumps backward (a new trajectory).
+    double thermal_heat = 0.0;                  // coupling (0 = feature off)
+    mutable double thermal_Edep = 0.0;          // deposited energy accumulator
+    mutable double thermal_last_t = -1.0e300;   // last accumulation time
+    mutable double thermal_last_P = 0.0;        // last absorbed power (trapezoid)
+
     // ============================================================
     // LOCAL FIELD CACHING FOR OPTIMIZED MONTE CARLO
     // ============================================================
