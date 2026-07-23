@@ -392,7 +392,15 @@ transfer: the pump-stored $E_{12}$ coherence is converted \emph{into}
 the $\qafm$ magnon by the static hybridization---the static $W$ family
 read in both directions, magnon$\to$CEF through $W^{yy}_1$ and
 CEF$\to$magnon through $W^{xz}_1$.  The measured amplitude ratio of the
-reverse to the forward peak calibrates $W^{xz}_1$ directly.
+reverse to the forward peak calibrates $W^{xz}_1$ directly.  Because
+the reverse peak emits at the magnon frequency it is detected through
+the magnon's own M1 dipole; the experimentally observed intensity
+\emph{parity} of the two peaks fixes the M1/E1 detection weight at
+$w\simeq3.6$ (runs \texttt{vA}, composite census in
+\texttt{data/census\_crosspol\_composite.json}), which brings the
+magnon diagonal ($\sim3\times$ the cross peaks) and
+$E_{12}{+}\qafm=1.4$\,THz combination tones ($\sim0.5\times$) as
+predicted companions of the detected map.
 Assignment discriminators for the experimental peak: an
 $(E_{12},\qafm)$ reading emits exactly at the magnon frequency
 ($0.86$\,THz measured), inherits the narrow magnon linewidth along
@@ -433,6 +441,36 @@ the mechanism of thermally driven spin reorientation), with amplitude
 proportional to $\Delta n(t)$ and growth time equal to the
 repopulation time---both measurable, neither present in a purely
 coherent drive model.
+
+\paragraph{The population grating also fails---for a sharp reason.}
+One might hope the $\tau$-labeled population created jointly by pump
+and probe (the ``population grating'', which carries the $E_{12}$ delay
+phase and survives on $T_1$) could feed a delayed, phase-labeled magnon
+signal.  A full 2DCS run with the population channel on
+($W_3^{yz}=0.01$, $T_1=100$ code units; run \texttt{bb4\_W3grating})
+shows the $\omega_\tau=E_{12}$ row \emph{identical} to the $W_3$-off
+baseline at every detection time.  The reason is structural: the
+grating's delay label is written by the $E_{12}$ \emph{coherence}
+before the probe arrives, so its $\tau$-support is confined to
+$|\tau|\lesssim T_2(E_{12})$, and its $W_3$ force is a step at the
+probe---an impulsive launch, not a slow drive.  No element of the
+coherent model class produces post-pulse growth.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{figs/buildup_model.png}
+\caption{Minimal quantitative model of the observed buildup: a magnon
+(measured frequency and linewidth) driven by an \emph{incoherent}
+population ramp $F(t)\propto\Delta
+n(t)=(1-e^{-t/\tau_{\rm rise}})\,e^{-t/T_1}$.  The signal grows on
+$\tau_{\rm rise}$, peaks at tens of ps, and persists on
+$\min(T_1,\text{magnon lifetime})$---the experimental phenomenology---%
+whereas the full coherent model (dashed) decays with
+$T_2(E_{12})=8$\,ps.  Fitting the experimental envelope to this form
+measures $\tau_{\rm rise}$ (the phonon-mediated Tm repopulation time)
+and the product $W_3\,\Delta n$.}
+\label{fig:si-buildupmodel}
+\end{figure}
 
 If the experimental buildup over tens of ps is real, it must be fed by
 the one reservoir that outlives every $T_2$: the CEF \emph{populations}.
