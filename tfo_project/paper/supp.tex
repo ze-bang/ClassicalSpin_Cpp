@@ -337,25 +337,60 @@ legs, which is why the experimental pulse yields the cleanest spectra.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.7\textwidth]{figs/postdrive_buildup.png}
-\caption{The $\qafm$ envelope in geometry B, normalized just after the
-pump.  The field-gated $\kappa^B_{1y}$ (which alone produces the
-$(E_{12},\qafm)$ cross peak) leaves a flat post-pulse envelope
-(modulation $0.03$); the static $W^{xz}_1$ (which alone cannot produce
-that peak) keeps exchanging the $\qfm$/$E_{12}$ reservoir with the
-magnon (modulation $0.33$, envelope $\sim25\%$ above the impulsive
-level).  The measured post-drive buildup requires the static vertex; the
-measured transfer peak requires the gated one.}
+\includegraphics[width=0.95\textwidth]{figs/postdrive_buildup_final.png}
+\caption{No coherence-fed post-pulse buildup once the measured
+linewidths are enforced (single measured pulse, geometry B, runs
+\texttt{bb2\_*}; Gabor amplitude, $\sigma=5$\,ps, artifact-free local
+analysis).  Left: the $\qafm$ amplitude for the four vertex
+configurations peaks \emph{at} pulse end and decays with
+$\tau_{\rm env}\approx8$\,ps $=T_2(E_{12})$; the vertices set the
+absolute scale but none produces post-pulse growth.  Right: all
+coherent reservoirs die within their measured $T_2$ (log scale)---there
+is nothing left to pump the magnon slowly.}
 \label{fig:si-buildup}
 \end{figure}
 
 Isolated-vertex runs: $\kappa^B_{1y}$ alone $\Rightarrow$
-$(E_{12},\qafm)$ present, no buildup; $W^{xz}_1$ alone
-$\Rightarrow$ peak absent, buildup present.  In the consolidated
-Hamiltonian $W^{yy}_1=W^{xz}_1=0.01$ and $\kappa^B_{1y}=0.0035$: the
-geometry-B peak ratio is the observable that calibrates $\kappa^B$, and
-because $\kappa^B$ is $B_z$-gated the recalibration provably cannot
-affect either $H\!\parallel\!a$ channel (verified bit-identical).
+$(E_{12},\qafm)$ present; $W^{xz}_1$ alone $\Rightarrow$ peak absent.
+In the consolidated Hamiltonian $W^{yy}_1=W^{xz}_1=0.01$ and
+$\kappa^B_{1y}=0.0035$: the geometry-B peak ratio is the observable
+that calibrates $\kappa^B$, and because $\kappa^B$ is $B_z$-gated the
+recalibration provably cannot affect either $H\!\parallel\!a$ channel
+(verified bit-identical).
+
+\paragraph{The post-drive buildup: a corrected analysis.}
+An earlier stage of this project attributed the experimentally reported
+post-pulse growth of the geometry-B signal to slow $W^{xz}_1$-mediated
+exchange through the nearly closed triad
+$\qfm+E_{12}=0.88\approx\qafm$.  That attribution does not survive the
+enforcement of the measured linewidths.  Because $B\!\parallel\!c$ never
+drives $\qafm$ directly, \emph{all} geometry-B magnon amplitude is
+converted, and a converted signal inherits its source's lifetime: with
+$T_2(E_{12})=8$\,ps the $E_{12}$-fed component (and with it the triad)
+is dead within $\sim$10\,ps.  The artifact-free Gabor analysis of
+Fig.~\ref{fig:si-buildup} shows the $\qafm$ amplitude peaking at pulse
+end and decaying monotonically in every vertex configuration; the
+earlier ``buildup'' was visible only while $\lambda^{1,2}$ were left
+undamped (an infinitely lived $E_{12}$ reservoir, inconsistent with the
+measured $0.038$\,THz linewidth).  Consequently $W^{xz}_1$ loses its
+buildup role; it is retained at $0.01$ only as the symmetry-allowed
+static hybridization, bounded above ($\lesssim0.02$) by the
+mixer sweep of the preceding paragraph.
+
+If the experimental buildup over tens of ps is real, it must be fed by
+the one reservoir that outlives every $T_2$: the CEF \emph{populations}.
+A pulse-deposited excited population $n_2$ relaxes on $T_1$, and through
+the population channel of the same exchange family
+($W_3\,S_\alpha S_\beta\,\lambda^3$, implemented in the solver but not
+part of the present minimal Hamiltonian) it shifts the effective Fe
+anisotropy as it relaxes---precisely the mechanism of thermally driven
+spin reorientation in TmFeO$_3$.  This route makes a sharp experimental
+discriminator: a population-fed buildup is a \emph{non-oscillatory}
+background (or a slow shift of the magnon frequency/equilibrium) whose
+growth time directly measures $T_1$, whereas growth of the
+$0.90$\,THz \emph{oscillation amplitude} over tens of ps would require a
+persistent coherent source that the measured $T_2$'s exclude---observing
+it would falsify the linewidth-constrained model class itself.
 
 \paragraph{Why the static vertex cannot replace the gated one.}
 $W^{xz}_1 S_xS_z\lambda^1$ is trilinear; around the $\Gamma_2$ order it
