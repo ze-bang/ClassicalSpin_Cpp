@@ -57,6 +57,13 @@ for ax,T in zip(axs[:3],[0.0,10.0,20.0]):
     for a,p,yy,xx in pks: print(f"   {a:5.2f} x{p:4.1f}  ({yy:+.2f}, {xx:.2f})")
     n=A.max()
     ax.pcolormesh(wtb,wTb,A/n,shading="auto",cmap="inferno",vmin=0,vmax=1,rasterized=True)
+    for nm,v in [("qFM",0.38),("E12",0.50),("E23",0.70),("qAFM",0.90),("E13",1.20)]:
+        ax.axvline(v,color="w",ls="--",lw=0.7,alpha=0.35)
+        ax.axhline(v,color="w",ls="--",lw=0.7,alpha=0.35)
+        ax.axhline(-v,color="w",ls="--",lw=0.7,alpha=0.35)
+        ax.text(v,1.30,nm,ha="center",va="top",color="w",alpha=0.55,fontsize=6)
+        ax.text(1.565,v,nm,ha="left",va="center",color="0.35",fontsize=6)
+        ax.text(1.565,-v,nm,ha="left",va="center",color="0.35",fontsize=6)
     for a,p,yy,xx in pks:
         ax.plot(xx,yy,"x",color="cyan",ms=9,mew=1.8)
         if a>0.05: ax.annotate(f"({yy:+.1f},{xx:.2f})",(xx,yy),textcoords="offset points",xytext=(4,5),color="cyan",fontsize=7)
