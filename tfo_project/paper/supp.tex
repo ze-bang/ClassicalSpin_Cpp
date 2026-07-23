@@ -355,7 +355,45 @@ $\Rightarrow$ peak absent, buildup present.  In the consolidated
 Hamiltonian $W^{yy}_1=W^{xz}_1=0.01$ and $\kappa^B_{1y}=0.0035$: the
 geometry-B peak ratio is the observable that calibrates $\kappa^B$, and
 because $\kappa^B$ is $B_z$-gated the recalibration provably cannot
-affect either $H\!\parallel\!a$ channel (verified bit-identical).  In
+affect either $H\!\parallel\!a$ channel (verified bit-identical).
+
+\paragraph{Why the static vertex cannot replace the gated one.}
+$W^{xz}_1 S_xS_z\lambda^1$ is trilinear; around the $\Gamma_2$ order it
+decomposes into a static CEF shift, two energy-conserving
+\emph{bilinear} hops ($F_x\,\delta S_z\,\lambda^1$ and
+$G_z\,\delta S_x\,\lambda^1$: pure hybridization), and a genuine
+two-fluctuation converter $\delta S_x\,\delta S_z\,\lambda^1$.  The
+converter piece is real and retained---it drives the post-pulse buildup
+through the nearly closed triad $\qfm+E_{12}=0.88\approx\qafm$
+($0.02$\,THz detuning)---but it is fluctuation-fed (its energy leg is a
+probe-launched magnon, one factor of drive$\times$susceptibility weaker
+and spectrally narrow) and detuning-limited (secular accumulation over
+tens of ps), so it produces an \emph{envelope}, not an impulsive
+phase-stamped kick.  At $W^{xz}_1=0.01$ the isolated run has sizable
+absolute amplitude at $(+0.5,\,0.90)$ (0.72 of map max) but it is the
+\emph{tail} of the magnon--magnon peak---no genuine local maximum on
+the $E_{12}$ row.
+
+A careful strength sweep in the consolidated configuration
+($W^{xz}_1\in\{0.01,0.02,0.03,0.05,0.07,0.09\}$, $\kappa^B=0$;
+runs \texttt{vBwxz*}) shows that raising the static vertex \emph{never}
+creates a second resolved peak.  Instead the two delay rows
+coalesce---the leading peak's delay phase migrates continuously,
+$0.38\to0.40\to0.48\to0.47$\,THz across the sweep, the resolved
+$(\qfm,\qafm)$/$(E_{12},\qafm)$ doublet structure never appears at any
+strength, and the hybridization-shifted $E_{12}$ branch leaks into the
+M1 channel as emission strays at $\omega_t=0.44$--$0.45$\,THz (growing
+to $0.15$--$0.16$ by $W^{xz}_1=0.09$).  This is the structural signature
+of a static mixer: it \emph{moves} peaks (level repulsion of the
+hybridized normal modes---also shifting the mode frequencies off their
+1D-measured values), whereas the experiment shows two resolved peaks at
+the \emph{unshifted} delay energies $0.38$ and $0.50$\,THz.  A gated
+converter \emph{adds} a peak while leaving the normal modes untouched;
+with $\kappa^B_{1y}=0.0035$ the census gives
+$(+0.38,0.90)=1.00$ and a separate $(+0.53,0.89)=0.46$, both on the
+measured lines.  The necessity of the field-gated vertex therefore does
+not rest on any operating-point fine-tuning: static mixing and gated
+conversion are qualitatively different operations on the 2D map.  In
 geometry B the Tm CEF channels $\lambda^{4\text{--}7}$ are
 \emph{exactly} zero (machine precision): the
 $E\!\parallel\!a,H\!\parallel\!c$ drive closes on the
