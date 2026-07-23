@@ -46,7 +46,9 @@ UnitCell build_bcao_honeycomb(const SpinConfig& config) {
     const double G = config.get_param("G", 0.0);
     const double J3xy = config.get_param("J3xy", 2.5);
     const double J3z = config.get_param("J3z", -0.85);
-    
+    const double J2xy = config.get_param("J2xy", 0.0);
+    const double J2z = config.get_param("J2z", 0.0);
+
     // Use HoneyComb class from unitcell.h (already has lattice vectors and positions)
     HoneyComb atoms(3);
     
@@ -81,6 +83,22 @@ UnitCell build_bcao_honeycomb(const SpinConfig& config) {
     atoms.set_bilinear_interaction(J3_mat, 0, 1, Eigen::Vector3i(1, 0, 0));
     atoms.set_bilinear_interaction(J3_mat, 0, 1, Eigen::Vector3i(-1, 0, 0));
     atoms.set_bilinear_interaction(J3_mat, 0, 1, Eigen::Vector3i(1, -2, 0));
+
+    // Second neighbours: same-sublattice triangular bonds. Only the three
+    // positive offsets are declared; the lattice adds each reverse bond with
+    // J^T, so declaring all six would double count.
+    if (J2xy != 0.0 || J2z != 0.0) {
+        Eigen::Matrix3d J2_mat = Eigen::Matrix3d::Zero();
+        J2_mat(0, 0) = J2xy;
+        J2_mat(1, 1) = J2xy;
+        J2_mat(2, 2) = J2z;
+
+        for (size_t sub = 0; sub < 2; ++sub) {
+            atoms.set_bilinear_interaction(J2_mat, sub, sub, Eigen::Vector3i(1, 0, 0));
+            atoms.set_bilinear_interaction(J2_mat, sub, sub, Eigen::Vector3i(0, 1, 0));
+            atoms.set_bilinear_interaction(J2_mat, sub, sub, Eigen::Vector3i(1, -1, 0));
+        }
+    }
     
     // Set magnetic field (with anisotropic g-factors from g_factor)
     Eigen::Vector3d field;

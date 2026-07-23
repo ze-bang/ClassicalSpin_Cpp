@@ -1,0 +1,56 @@
+# BCAO ground state - Maksimov, Jiang, Regnault & Chernyshev,
+# "BaCo2(AsO4)2: Strong Kitaev, After All" (arXiv:2503.20859), parameter set Eq. (3):
+#   {J1, Delta1, Jpm_pm, Jz_pm} = {-6.54, 0.36, 0.15, -3.76} meV
+#   {J2, J3, Delta3}            = {-0.21, 1.70, 0.03} meV, Delta2 = 0
+# In Kitaev notation this is {J, K, Gamma, Gamma'} ~ {-3.3, -5.6, 3.0, 0.6} meV.
+#
+# Mapping onto this builder's frame (paper Eq. (1)+(2) at bond angle phi = 0):
+#   J1xy = J1          J1z = J1*Delta1     D = 2*Jpm_pm
+#   E    = 0           F   = 0             G = -Jz_pm
+#   J3xy = J3          J3z = J3*Delta3
+#   J2xy = J2          J2z = J2*Delta2 = 0
+# The builder places the phi=0 matrix on the bond along the lattice y axis, so in the
+# output spin components x = b and y = a*. Harmless here: gx ~ gy and the field is zero.
+#
+# Energies are in meV and T_start/T_end are energies too (the solver applies no k_B
+# conversion), so these are NOT kelvin.
+
+system = honeycomb_bcao
+simulation_mode = simulated_annealing
+
+lattice_size = 36,36,1
+spin_length = 0.5
+
+J1xy = -6.54
+J1z  = -2.3544
+D    =  0.30
+E    =  0.0
+F    =  0.0
+G    =  3.76
+J2xy = -0.21
+J2z  =  0.0
+J3xy =  1.70
+J3z  =  0.051
+
+# Zero field: we want the zero-field ground state
+field_strength = 0.0
+field_direction = 0,1,0
+g_factor = 5.0,5.0,2.5
+
+# annealing_steps is sweeps *per temperature step*; cooling_rate 0.9 from
+# T_start to T_end gives ~124 temperature steps.
+T_start = 5.0
+T_end   = 0.00001
+annealing_steps = 5000
+overrelaxation_rate = 10
+use_twist_boundary = false
+gaussian_move = false
+cooling_rate = 0.9
+T_zero = true
+n_deterministics = 100000
+
+num_trials = 8
+output_dir = /home/pc_linux/ClassicalSpin_Cpp/output/bcao_strong_kitaev_sa
+# The ground state only needs the T=0 quench; the thermodynamic sampling that
+# save_observables triggers costs far more than the anneal itself.
+save_observables = false
