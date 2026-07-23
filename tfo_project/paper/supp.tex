@@ -27,8 +27,8 @@
 \renewcommand{\thefigure}{S\arabic{figure}}
 
 \title{Supplemental Material for\\
-``Magnon--crystal-field cross peaks in two-dimensional terahertz
-spectroscopy of TmFeO$_3$''}
+``Reading a magnet's Hamiltonian term by term: two-dimensional terahertz
+spectroscopy as vertex spectroscopy of TmFeO$_3$''}
 \author{}
 \date{\today}
 
@@ -292,7 +292,7 @@ $E_{13}$ & 1.20 & 8.7 & 2.95 & 0.05  & $\gamma(\lambda^{4,5})=0.207$\,meV & 0.36
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.95\textwidth]{../tmfeo3_2dcs_final/figures/experimental_pulse_final.png}
+\includegraphics[width=0.95\textwidth]{figs/experimental_pulse_final.png}
 \caption{The measured THz pump.  Left: single bipolar cycle
 ($\sim1.2$\,ps, no DC).  Right: amplitude spectrum peaked at
 $0.53$\,THz$\,\approx E_{12}$, covering all five modes.  The absence of
@@ -337,7 +337,7 @@ legs, which is why the experimental pulse yields the cleanest spectra.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.7\textwidth]{../tmfeo3_2dcs_final/EXPERIMENTAL_FINAL/postdrive_buildup.png}
+\includegraphics[width=0.7\textwidth]{figs/postdrive_buildup.png}
 \caption{The $\qafm$ envelope in geometry B, normalized just after the
 pump.  The field-gated $\kappa^B_{1y}$ (which alone produces the
 $(E_{12},\qafm)$ cross peak) leaves a flat post-pulse envelope
@@ -350,18 +350,23 @@ measured transfer peak requires the gated one.}
 \end{figure}
 
 Isolated-vertex runs: $\kappa^B_{1y}$ alone $\Rightarrow$
-$(E_{12},\qafm)=0.46$ present, no buildup; $W^{xz}_1$ alone
-$\Rightarrow$ peak absent, buildup present.  Both retained at $0.01$
-code units.  In geometry B the Tm CEF channels $\lambda^{4\text{--}7}$
-are \emph{exactly} zero (machine precision): the
+$(E_{12},\qafm)$ present, no buildup; $W^{xz}_1$ alone
+$\Rightarrow$ peak absent, buildup present.  In the consolidated
+Hamiltonian $W^{yy}_1=W^{xz}_1=0.01$ and $\kappa^B_{1y}=0.0035$: the
+geometry-B peak ratio is the observable that calibrates $\kappa^B$, and
+because $\kappa^B$ is $B_z$-gated the recalibration provably cannot
+affect either $H\!\parallel\!a$ channel (verified bit-identical).  In
+geometry B the Tm CEF channels $\lambda^{4\text{--}7}$ are
+\emph{exactly} zero (machine precision): the
 $E\!\parallel\!a,H\!\parallel\!c$ drive closes on the
 $\{\lambda^1,\lambda^2,\lambda^3\}$ subalgebra, an SU(2) closure that
 protects geometry B from CEF contamination.
 
-Finite temperature: $(\qfm,\qafm)$ is a pure two-magnon process and
-temperature-flat; $(E_{12},\qafm)\propto n_1-n_2$ falls
-$0.43\,(0\,\mathrm K)\to0.41\,(5)\to0.35\,(8)\to0.29\,(10\,\mathrm K)$.
-Both peaks remain resolved through $\sim8$\,K, defining the working
+Finite temperature (regenerated final-scenario runs \texttt{vB2}):
+$(\qfm,\qafm)$ is a pure two-magnon process and temperature-flat;
+$(E_{12},\qafm)\propto n_1-n_2$ falls
+$0.46\,(0\,\mathrm K)\to0.45\,(5)\to0.40\,(8)\to0.36\,(10\,\mathrm K)$.
+Both peaks remain resolved through $\sim10$\,K, defining the working
 window $5$--$8$\,K.
 
 % =====================================================================
@@ -462,15 +467,60 @@ $(+0.89,0.33)$ maximum at $0.21$ relative, evidence the peak is
 reachable in an extended Hamiltonian class.
 
 % =====================================================================
+\section{The consolidated configuration and its verified censuses}
+\label{si:consolidated}
+% =====================================================================
+
+Every spectrum in the paper is produced by \emph{one} Hamiltonian and
+\emph{one} drive model; only the field geometry changes between
+channels.  Couplings (code units): Fe exchange/anisotropy/DM of the
+calibrated orthoferrite model ($D_1=0.049$, $D_2=0.014$); Tm CEF
+$e_1=2.0678$, $e_2=4.9628$\,meV; Fe--Tm $W^{yy}_1=0.01$,
+$W^{xz}_1=0.01$, $\kappa^B_{1y}=0.0035$; drive legs
+$(d_z,\mu^z_{13},\mu^z_{23})\propto(3.0,\,0,\,0.9128)$ for
+$E\!\parallel\!c$ (the dark-$\mu_{13}$ rule) and the auto-projected
+Zeeman drive for the magnetic field; dampings and emission weights from
+Table~\ref{tab:si-exp}.  The final regeneration (runs \texttt{vA},
+\texttt{vB2}, \texttt{it14hr}; three Boltzmann seeds each) gives the
+blind censuses, normalized per channel [amp, $(\omega_T,\omega_t)$,
+$+$\,=\,non-rephasing]:
+\begin{center}\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\toprule
+channel & leading genuine peaks (T=0) & reading\\
+\midrule
+A cross ($\lambda^2$) & $1.00\,(+0.91,0.50)$; $0.46\,(-0.90,0.50)$;
+  $0.24\,(+0.90,0.89)$ & $W^{yy}_1$ peak; R partner; magnon shoulder\\
+B cross ($S_x$) & $1.00\,(+0.38,0.90)$; $0.46\,(+0.53,0.89)$;
+  $0.17\,(-0.42,0.90)$ & magnon--magnon; $\kappa^B$ transfer; R partner\\
+A same (composite) & $1.00\,(+0.49,0.71)$\footnotemark;
+  $0.71\,(+0.49,1.20)$; $0.49\,(-0.47,0.71)$ &
+  population-route transfer; $\mu_{13}$-throttled; R remnant\\
+\bottomrule
+\end{tabular}
+\end{center}
+\footnotetext{Cross peaks normalized to the leading cross peak; the
+$\omega_T\!\approx\!0$ pump--probe bands are excluded per the census
+convention of Sec.~\ref{si:numerics}.}
+The complete censuses at all temperatures, together with the normalized
+spectra themselves, are archived as
+\texttt{paper/data/census\_final\_scenario.json} and
+\texttt{paper/data/*.npz}.
+
+% =====================================================================
 \section{Data and code availability}
 % =====================================================================
-All parameter files, the blind-census scripts, the standalone qutrit
-integrator, and the long-form derivation note
+The paper folder is self-contained: \texttt{paper/params/} holds the
+exact \texttt{.param} files of every final-scenario run
+(\texttt{vA}, \texttt{vB2}, \texttt{it14hr}; three thermal seeds each),
+\texttt{paper/data/} the distilled spectra and censuses,
+\texttt{paper/scripts/} the census pipeline and the standalone qutrit
+integrator.  The long-form derivation note
 (\texttt{tmfeo3\_foundation.tex}: transported-gauge orbit formulas,
-vertex diagrams, complete written-out Hamiltonian, mode inventory) are
-archived with the repository
-(\texttt{tfo\_project/}); every spectrum in the paper can be regenerated
-from the committed \texttt{.param} files with the public
-\texttt{ClassicalSpin\_Cpp} solver.
+vertex diagrams, complete written-out Hamiltonian, mode inventory) is
+archived alongside (\texttt{tfo\_project/}); every spectrum in the
+paper can be regenerated from the committed \texttt{.param} files with
+the public \texttt{ClassicalSpin\_Cpp} solver.
 
 \end{document}

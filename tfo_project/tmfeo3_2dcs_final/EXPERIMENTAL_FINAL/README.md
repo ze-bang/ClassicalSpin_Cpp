@@ -34,3 +34,13 @@ W1_xz-only builds up but loses (E12,qAFM). The scenario runs gmA/gmB have all on
 - Figure: crosspol_experimental_final.png (also in ../figures/).
 
 Written up in tmfeo3_foundation.tex §sec:fullscenario (fig:crosspol).
+
+## Regeneration 2026-07-23 (consolidated Hamiltonian, runs vA_gs1-3 / vB2_gs1-3)
+One Hamiltonian for ALL channels (incl. same-pol it14hr): v4 + D2=0.014,
+W1_yy=0.01, W1_xz=0.01, kappaB_1y=0.0035 (recalibrated once; B_z-gated so
+both H||a channels provably unaffected). Verified blind censuses:
+A (lambda2): (+0.91,0.50)=1.00, (-0.90,0.50)=0.46, (+0.90,0.89)=0.24, T-flat.
+B (Sx): (+0.38,0.90)=1.00, (+0.53,0.89)=0.46 -> 0.45/0.40/0.36 @5/8/10K, res<=0.17.
+Params + distilled data in ../../paper/{params,data}; figure paper/figs/crosspol_final.png.
+NOTE: vB_gs1-3 (kappaB=0.01 first regeneration) show the inverted ratio 0.76/1.00 —
+the B ratio is the kappaB calibration observable.
