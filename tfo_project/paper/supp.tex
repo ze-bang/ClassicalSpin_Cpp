@@ -400,6 +400,40 @@ $\omega_t$, and softens toward the spin reorientation; the
 $2E_{12}$ harmonic reading sits rigidly at $1.00$\,THz, is broader, and
 grows one field power faster.
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figs/reverseW_peak.png}
+\caption{The reverse-W transfer peak in the geometry-A cross channel
+($\lambda^2$), zoomed on the region of the reported $(0.5,\,1.0)$
+feature; all amplitudes normalized to the main $(\qafm,E_{12})$ peak.
+Left to right: baseline (genuine local maximum at
+$(+0.49,\,0.90)=0.063$), $W^{xz}_1=0$ (collapsed to $0.009$), Tm drive
+$\times2$ (doubled to $0.123$).  Rightmost: the $\omega_T=+E_{12}$ row
+cut---the peak sits at the $\qafm$ emission frequency with the
+$2E_{12}=1.00$\,THz harmonic as a shoulder.}
+\label{fig:si-reverseW}
+\end{figure}
+
+\paragraph{The population channel demonstrated.}
+To make the $T_1$ scenario concrete we ran the geometry-B single-pulse
+protocol with the population channel switched on
+($W_3^{yz}\,S_yS_z\lambda^3=0.01$, $\gamma_{\lambda^3}=0.02$, i.e.\
+$T_1=33$\,ps; runs \texttt{bb3\_W3} versus \texttt{bb3\_ctl}).  The
+pulse deposits $\Delta n$ with $\Delta\lambda^3=-4.6\times10^{-4}$,
+which then relaxes on the set $T_1$ exactly
+($-3.6\to-2.0\to-0.8\to-0.2\times10^{-4}$ at $13/33/66/132$\,ps); the
+$\qafm$ \emph{oscillation} is bit-identical with and without $W_3$
+(populations do not oscillate), and the population-fed quasi-static
+background scales as $W_3\,\Delta n$---of order $10^{-7}$ here, far
+below the coherent signals, because \emph{coherent} THz pumping only
+produces $\Delta n\sim5\times10^{-4}$.  The quantitative conclusion: a
+sizable experimental post-pulse buildup requires \emph{incoherent}
+population transfer (absorption $\to$ phonons $\to$ Tm repopulation,
+the mechanism of thermally driven spin reorientation), with amplitude
+proportional to $\Delta n(t)$ and growth time equal to the
+repopulation time---both measurable, neither present in a purely
+coherent drive model.
+
 If the experimental buildup over tens of ps is real, it must be fed by
 the one reservoir that outlives every $T_2$: the CEF \emph{populations}.
 A pulse-deposited excited population $n_2$ relaxes on $T_1$, and through
