@@ -646,8 +646,14 @@ void apply_tmfeo3_tm_sector(TmFeO3_Tm& Tm_atoms, const SpinConfig& config) {
     //   B_3 = e1, B_8 = (2 e2 - e1) / sqrt(3).
     const double alpha = e1 * tm_alpha_scale;
     const double beta  = (2.0 * e2 - e1) / std::sqrt(3.0) * tm_beta_scale;
+    // Optional ordered-state-induced static mixing fields (T-odd terms made
+    // legal below T_N by the Gamma_2 order): h_tm_a adds a constant field on
+    // Gell-Mann component a (1-indexed), e.g. h_tm_6 mixes levels 2<->3.
     Eigen::VectorXd tm_field(8);
     tm_field << 0, 0, alpha, 0, 0, 0, 0, beta;
+    for (int a = 1; a <= 8; ++a) {
+        tm_field(a - 1) += config.get_param("h_tm_" + std::to_string(a), 0.0);
+    }
     for (int i = 0; i < 4; ++i) Tm_atoms.set_field(tm_field, i);
 
     Eigen::Matrix3d mu_act;

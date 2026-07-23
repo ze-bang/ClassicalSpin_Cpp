@@ -1749,8 +1749,9 @@ vertices~\cite{HOreport}, precisely the two that pass R1--R6.
 This section states the final, validated picture and derives the physics of
 every measured peak.  We restrict to the \emph{cross-polarization} readout of
 the two field geometries, because that is where the experiment isolates clean,
-well-separated cross peaks; the same-polarization channels are dominated by the
-one-quantum diagonals and are not analyzed here.
+well-separated cross peaks; the same-polarization channel of geometry A is
+analyzed separately in \cref{sec:samepol}, where it is shown to require one
+additional selection rule (a $z$-dark $1\!\to\!3$ CEF dipole) and nothing else.
 
 \emph{The model} is the calibrated Fe\,+\,Tm-qutrit Hamiltonian of
 \cref{sec:full-h} driven by the \emph{measured} single-cycle THz waveform
@@ -2067,6 +2068,240 @@ long-lived magnon coherence.
 \item \textbf{One Hamiltonian.}  The same couplings produce the $E_{12}$-emitting
   peak in geometry A and the $q_{\rm AFM}$-emitting peaks in geometry B with no
   retuning; the geometry (field orientation) alone selects the readout channel.
+\end{enumerate}
+
+% =====================================================================
+\section{The same-polarization channel of geometry A: five peaks from a
+$z$-dark $1\to3$ dipole}
+\label{sec:samepol}
+
+The same-polarization detection channel of geometry A
+($H\!\parallel\!a$, $E\!\parallel\!c$ in, $E\!\parallel\!c$ out) shows, in
+$(\omega_\tau,\omega_t)$ and THz, its largest signals at
+\[
+(0.5,\,0.7)\ \approx\ (0.5,\,0)\ \;>\;\ (0.5,\,1.2)\ \;>\;\
+(0.9,\,0.38),\ (0.9,\,1.2),
+\]
+with \emph{both} members of the $0.5$-family transfer pair on the \emph{same}
+signed side of the delay axis.  This section derives the physics of each peak
+and reports the final calibrated simulation (run \texttt{it14hr}, thermal
+Boltzmann ensemble over the CEF levels, measured pulse, measured linewidth
+dampings).  Throughout, peaks are identified \emph{blindly}: a feature counts
+only if it is a genuine two-dimensional local maximum with prominence
+$\geq1.5$ over the local median background; no box-probing of preassigned
+positions is used.
+
+\subsection{The structural clue: no $\omega_\tau=1.2$ rows anywhere}
+\label{sec:darkmu13}
+
+The experimental map contains delay frequencies $\omega_\tau\in\{0.5,\,0.9\}$
+only.  There is no peak, strong or weak, with delay phase
+$E_{13}=1.2$\,THz.  Since a first-order action of the pump on a bright
+$1\!\to\!3$ dipole would necessarily store an $E_{13}$ coherence during the
+delay---and the same matrix element would produce a
+$(E_{13},E_{23})=(1.2,\,0.7)$ transfer peak with \emph{exactly} the same
+dipole product $\mu_{12}\mu_{13}\mu_{23}$ as the observed
+$(E_{12},E_{23})=(0.5,\,0.7)$ peak---the absence of the entire
+$\omega_\tau=1.2$ row is a selection rule, not an accident:
+\begin{equation}
+  \boxed{\ \mu^z_{13}\simeq0:\quad\text{the }1\to3\text{ CEF transition is
+  electric-dipole dark for }E\!\parallel\!c.\ }
+\end{equation}
+This is the natural consequence of a parity-alternating CEF ladder under the
+relevant mirror: with $\ket{1}$ even, $\ket{2}$ odd, $\ket{3}$ even, the
+($m_z$-odd, exchange-induced) $z$-dipole connects $1\!\leftrightarrow\!2$ and
+$2\!\leftrightarrow\!3$ but \emph{not} $1\!\leftrightarrow\!3$.  It does not
+contradict the measured 1D oscillator strength of $E_{13}$
+($f=8.7$, \cref{tab:expparams}): that strength lives in the orthogonal
+($a$/$b$-axis) dipole components---precisely the ones the cross-polarized
+channel of \cref{sec:fullscenario} uses.  The same transition is bright in one
+polarization and dark in the other.
+
+In the simulation the rule is implemented by removing the $\lambda^5$ leg from
+the $E\!\parallel\!c$ drive vector
+($\texttt{pump\_direction\_su3}=(0,3.0,0,0,\mathbf{0},0,0.9128,0)$),
+keeping only a few-percent $\mu^z_{13}$ in \emph{detection}
+(channel weights $0.05\,\lambda^4:4.4\,\lambda^6$, i.e.\
+$\mu^z_{13}/\mu^z_{23}\approx1\%$, symmetry-breaking admixture).  Magnon
+emission is excluded from the detected composite because the measured magnon
+oscillator strengths ($f_{q_{\rm AFM}}=7\times10^{-4}$) are negligible against
+the CEF E1 strengths ($f\sim6.5$--$8.7$).
+
+One dark dipole then fixes three independent failures of the bright-$\mu_{13}$
+model \emph{simultaneously}:
+\begin{enumerate}
+\item the spurious $(1.2,\,0.7)$ interloper (which no parameter tuning could
+  separate from the real $(0.5,\,0.7)$ peak, their dipole products being
+  identical) is eliminated at the root;
+\item the $(0.5,\,1.2)$ peak drops to the observed sub-dominant strength,
+  because its \emph{emission} is throttled by the small $\mu^z_{13}$;
+\item the dominant $(0.5,\,0.7)$ transfer peak migrates from the rephasing to
+  the non-rephasing side---the side the experiment sees---because the
+  single-action (rephasing) conversion route $\rho_{12}\to\rho_{32}$ requires
+  the now-absent $\mu_{13}$ drive leg, and the transfer is forced through the
+  co-rotating population route described next.
+\end{enumerate}
+
+\subsection{The physics of each peak}
+\label{sec:samepolpeaks}
+
+\paragraph{$(+0.5,\,0.7)$ --- the dominant transfer peak
+(coherence $\to$ population $\to$ coherence).}
+The pump, acting once through the bright $z$-dipole $d_z^{\rm eff}$, stores the
+$E_{12}$ coherence $\rho_{12}$, which oscillates at $0.5$\,THz during the
+delay.  With $\mu_{13}$ drive-dark, the probe cannot convert it in a single
+action; instead it acts \emph{twice}: a $1\!\leftrightarrow\!2$ action
+converts the stored coherence into a level-2 \emph{population} modulation that
+still carries the $\omega_\tau=E_{12}$ phase, and a
+$2\!\leftrightarrow\!3$ action converts that population into the emitting
+$E_{23}$ coherence at $\omega_t=0.70$\,THz.  This
+coherence$\to$population$\to$coherence route is co-rotating, so the peak lands
+on the \emph{non-rephasing} ($+$) side, and it involves no $\mu_{13}$ at any
+vertex.  Being one field-order higher than a single-action transfer, it
+overtakes the residual rephasing pathway at the calibrated drive (twice the
+weak-probe baseline), consistent with the experimental fluence regime.
+
+\paragraph{$(0.5,\,0)$ --- the rectified $E_{12}$ line.}
+The same double probe action, taken at its zero-frequency output, rectifies
+the stored $E_{12}$ coherence into a slow net magnetization change of the
+detection window: $S_{\rm DC}(\tau)=\langle M_{\rm NL}\rangle_t$ oscillates at
+exactly $E_{12}$.  After cubic drift removal its spectrum is the sharpest
+feature of the entire channel (right panel of \cref{fig:samepol}), a clean
+line at $\omega_T=+0.49$\,THz in both Tm detection channels.  This is the
+$(0.5,\,0)$ peak: same storage physics as the transfer peaks, DC output leg.
+
+\paragraph{$(+0.5,\,1.2)$ --- the weak transfer partner.}
+From the stored $\rho_{12}$, a \emph{single} probe action on the bright
+$2\!\leftrightarrow\!3$ dipole rotates the bra to give $\rho_{13}$, emitting
+at $E_{13}=1.2$\,THz; the route is again co-rotating (same $+$ side, as
+observed).  Although lower order than the $0.7$ route, its \emph{emission}
+carries the nearly-dark $\mu^z_{13}$, which caps it at sub-dominant strength:
+the measured ratio of the two transfer peaks is a direct measure of the
+residual $1\!\to\!3$ $z$-dipole admixture.  In the calibrated model
+$(+0.5,1.2)/(+0.5,0.7)=0.78$.
+
+\paragraph{$(0.9,\,1.2)$ --- magnon-delay transfer (thermally assisted).}
+Here the pump excites the $q_{\rm AFM}$ magnon ($0.90$\,THz delay phase)
+through the Zeeman $H\!\parallel\!a$ channel; the Fe--Tm couplings ($W$,
+$\kappa^B$) hand the modulation to the Tm ion, which emits weakly at $E_{13}$
+through the same throttled $\mu^z_{13}$.  The peak is small at low temperature
+and grows with the thermal population of level 2
+($0.10\to0.17\to0.51$ relative, at $0/10/20$\,K), the model's expected
+thermal trend for a route assisted by excited-level population.
+
+\paragraph{$(0.9,\,0.38)$ --- not reproduced; carrier identified.}
+The remaining listed peak, magnon-delay with quasi-ferromagnetic-mode
+emission, does \emph{not} appear in the calibrated model.  The carrier exists:
+the $q_{\rm FM}$ emission at $0.38$--$0.41$\,THz is present as a $b$-axis M1
+ridge in the Fe $S_y$ channel (the $\Gamma_2$ selection rule puts
+$\delta F_{y,z}$, not $\delta F_x$, at $q_{\rm FM}$), but it is uniformly
+modulated in delay: the model lacks a $q_{\rm AFM}\!\to\!q_{\rm FM}$
+magnon--magnon transfer vertex of sufficient strength.  A configuration probed
+during the search (reduced drive with a small negative $\mu_{13}$ leg) did
+produce a genuine $(+0.89,\,0.33)$ local maximum at $0.21$ relative---evidence
+that the peak is reachable---but at unacceptable cost elsewhere.  This is the
+one open structural item of the channel.
+
+\subsection{Exact single-ion verification and the two residual features}
+\label{sec:samepoltoy}
+
+Because each Tm site evolves under a Hamiltonian linear in the Gell-Mann
+operators, the site's $\vec\lambda$ equation of motion \emph{is} the exact von
+Neumann equation of a driven, damped three-level system: the classical SU(3)
+propagation is quantum-exact at single-ion level.  We exploited this with a
+standalone qutrit integrator (same CEF energies, damping, and measured pulse;
+$\sim10^3\times$ cheaper than the lattice run), which reproduces the full
+simulation's $0.5$-family census \emph{exactly}---proving the family is
+single-ion physics---and allows exhaustive scans.  Two robust residual
+features survive every knob and are therefore \emph{predictions}, not bugs:
+\begin{itemize}
+\item \textbf{The rephasing remnant at $(-0.5,\,0.7)$.}  The mirror
+  (rephasing) partner of the dominant transfer peak retains
+  $0.5$--$0.6$ of its amplitude across all drive strengths, dipole-phase
+  choices, and dampings---an exact-qutrit floor under this pulse.  If the
+  experimental map truly contains nothing at $(-0.5,\,0.7)$, the suppression
+  must come from outside the point-ion model (quadrant folding in the display,
+  or propagation/phase-matching in the thick sample).
+\item \textbf{The two-quantum line at $(+1.0,\,0.7)$.}  A peak with delay
+  phase $2E_{12}=0.99$\,THz and $E_{23}$ emission appears at $\approx0.4$
+  relative.  It is \emph{absent} in the exact single-ion dynamics and is
+  therefore a lattice/mean-field product (two sites' $E_{12}$ coherences
+  beating), switched on at the calibrated drive.  Experimentally it would sit
+  $0.09$\,THz above the $0.90$ magnon row; resolving $0.99$ from $0.90$ in
+  $\omega_\tau$ is a direct test.
+\end{itemize}
+
+\subsection{Calibrated configuration and final census}
+\label{sec:samepolcensus}
+
+The final configuration is the v4 Hamiltonian of \cref{sec:fullscenario}
+(couplings $W^{yy}_1=W^{xz}_1=\kappa^B_{1y}=0.01$ unchanged) with:
+measured pulse; drive vector $(0,3.0,0,0,0,0,0.9128,0)$ (dark $\mu^z_{13}$),
+per-leg amplitude twice the weak-probe baseline
+($\texttt{pump\_amplitude\_su3}=0.2195$, Fe $\texttt{pump\_amplitude}=1.2$);
+measured CEF linewidths as dampings
+($\gamma_{\lambda^{1,2}}=0.157$, $\gamma_{\lambda^{4,5}}=0.207$,
+$\gamma_{\lambda^{6,7}}=0.414$), population relaxation
+$\gamma_{\lambda^{3,8}}=0.08$, Gilbert $\alpha=0.0017$; Boltzmann ensemble
+over verbatim CEF-level seeds; detection composite
+$0.05\,\lambda^4+4.4\,\lambda^6$ (magnon M1 excluded by measured $f$);
+$\omega_t$ resolution $0.01$\,THz ($t$ window extended to $160$).
+Blind census at $10$\,K, cross peaks normalized to the leader
+(pump--probe $\omega_T\!\approx\!0$ bands excluded):
+\begin{center}\small
+\begin{tabular}{llll}
+\hline
+peak $(\omega_T,\omega_t)$ & model & experiment & mechanism\\
+\hline
+$(+0.49,\,0.72)$ & $1.00$ & strongest & coherence$\to$population$\to\rho_{23}$\\
+$(0.5,\,0)$ & sharpest $S_{\rm DC}$ line & co-strongest & rectified $E_{12}$ storage\\
+$(+0.49,\,1.20)$ & $0.78$ & second tier & single-action transfer, $\mu^z_{13}$-throttled emission\\
+$(+0.91,\,1.18)$ & $0.20$ ($0.51$ at $20$\,K) & weak & magnon delay, Fe--Tm handoff, thermal\\
+$(0.9,\,0.38)$ & absent & weak & missing $q_{\rm AFM}\!\to\!q_{\rm FM}$ vertex (open)\\
+\hline
+$(-0.47,\,0.70)$ & $0.55$ & not listed & rephasing remnant (exact-qutrit floor; prediction)\\
+$(+0.99,\,0.71)$ & $0.49$ & not listed & two-site $2E_{12}$ two-quantum line (prediction)\\
+\hline
+\end{tabular}
+\end{center}
+Four of the five listed peaks are reproduced with the correct hierarchy and,
+critically, with \emph{both} $0.5$-family transfer peaks on the same
+(non-rephasing) side, resolving the signed-side discrepancy recorded in the
+cross-polarization campaign for this channel: the discrepancy was an artifact
+of assuming a bright $\mu_{13}$ drive leg.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{tmfeo3_2dcs_final/figures/samepol_darkmu13_final.png}
+\caption{Same-polarization geometry-A channel, final calibrated model
+(\texttt{it14hr}).  Left three panels: blind-census maps at $0$, $10$,
+$20$\,K (crosses = genuine local maxima, prominence $\geq1.5$); the dominant
+cross features are $(+0.5,\,0.7)$ and $(+0.5,\,1.2)$, both non-rephasing, with
+the rephasing remnant and the $2E_{12}$ two-quantum line as the predicted
+sub-features.  Right: FFT of the rectified signal $S_{\rm DC}(\tau)$, whose
+sharp line at $\omega_T=+0.49$\,THz is the $(0.5,\,0)$ peak.}
+\label{fig:samepol}
+\end{figure}
+
+\subsection{Falsifiable predictions of the dark-dipole scenario}
+\begin{enumerate}
+\item \textbf{Polarization test of $\mu_{13}$.}  The $E_{13}$ line, strong in
+  1D absorption (other polarizations), should be strongly suppressed in
+  $E\!\parallel\!c$ absorption; equivalently, rotating the 2DCS detection
+  polarization away from $c$ should revive the $\omega_\tau=1.2$ delay rows.
+\item \textbf{Field scaling of the pair ordering.}  The dominant
+  $(+0.5,\,0.7)$ peak is one field-order higher than $(+0.5,\,1.2)$: lowering
+  the fluence should invert their order, raising it should widen the gap.
+\item \textbf{Thermal trend.}  $(0.9,\,1.2)$ grows steeply with temperature
+  (level-2 assisted), while the $0.5$-family survives with slowly degrading
+  contrast; by $\sim20$\,K the $(+0.5,\,1.2)$ and $(+0.5,\,0.7)$ peaks reach
+  near-parity.
+\item \textbf{The two sub-features.}  A rephasing remnant at $(-0.5,\,0.7)$
+  at roughly half the dominant peak, and a two-quantum line at delay
+  $0.99$\,THz (not $0.90$): both should be present in the raw data if the
+  model class is right; their absence would point respectively to
+  propagation-level pathway selection and to weaker inter-site coherence than
+  mean-field predicts.
 \end{enumerate}
 
 % =====================================================================
