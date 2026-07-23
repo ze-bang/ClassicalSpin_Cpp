@@ -372,10 +372,33 @@ Fig.~\ref{fig:si-buildup} shows the $\qafm$ amplitude peaking at pulse
 end and decaying monotonically in every vertex configuration; the
 earlier ``buildup'' was visible only while $\lambda^{1,2}$ were left
 undamped (an infinitely lived $E_{12}$ reservoir, inconsistent with the
-measured $0.038$\,THz linewidth).  Consequently $W^{xz}_1$ loses its
-buildup role; it is retained at $0.01$ only as the symmetry-allowed
-static hybridization, bounded above ($\lesssim0.02$) by the
+measured $0.038$\,THz linewidth).  $W^{xz}_1$ therefore loses its
+buildup role---but it acquires a direct observable of its own instead
+(next paragraph); it remains bounded above ($\lesssim0.02$) by the
 mixer sweep of the preceding paragraph.
+
+\paragraph{The reverse transfer peak: $W^{xz}_1$'s own observable.}
+The experiment reports an additional geometry-A \emph{cross}-channel
+peak near $(0.5,\,1.0)$.  The model contains a genuine local maximum at
+exactly $(+0.49,\,0.90)=(E_{12},\qafm)$ in the $\lambda^2$ channel
+($0.063$ of the main peak; run \texttt{vA}), with a weaker
+$2E_{12}=1.00$\,THz harmonic companion at $0.021$.  Isolated-vertex
+tests identify the mechanism: with $W^{xz}_1\to0$ the peak collapses
+sevenfold ($0.063\to0.009$; run \texttt{vA\_noWxz}) while the main
+$(\qafm,E_{12})$ peak is untouched, and doubling the Tm drive doubles it
+($0.063\to0.123$; run \texttt{vA\_su3x2}), i.e.\ it is linear in the
+stored $E_{12}$ amplitude.  This is the \emph{reverse} of the main
+transfer: the pump-stored $E_{12}$ coherence is converted \emph{into}
+the $\qafm$ magnon by the static hybridization---the static $W$ family
+read in both directions, magnon$\to$CEF through $W^{yy}_1$ and
+CEF$\to$magnon through $W^{xz}_1$.  The measured amplitude ratio of the
+reverse to the forward peak calibrates $W^{xz}_1$ directly.
+Assignment discriminators for the experimental peak: an
+$(E_{12},\qafm)$ reading emits exactly at the magnon frequency
+($0.86$\,THz measured), inherits the narrow magnon linewidth along
+$\omega_t$, and softens toward the spin reorientation; the
+$2E_{12}$ harmonic reading sits rigidly at $1.00$\,THz, is broader, and
+grows one field power faster.
 
 If the experimental buildup over tens of ps is real, it must be fed by
 the one reservoir that outlives every $T_2$: the CEF \emph{populations}.
@@ -391,6 +414,23 @@ growth time directly measures $T_1$, whereas growth of the
 $0.90$\,THz \emph{oscillation amplitude} over tens of ps would require a
 persistent coherent source that the measured $T_2$'s exclude---observing
 it would falsify the linewidth-constrained model class itself.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{figs/mixed_domain_B.png}
+\caption{The buildup discriminator in the representation directly
+comparable to experiment: Fourier transform of $M_{\rm NL}(\tau,t)$
+along the delay $\tau$ \emph{only}, keeping the real detection time $t$
+(geometry B, run \texttt{vB2}).  Left: $|{\rm FFT}_\tau|(\omega_\tau,t)$
+map---each delay-frequency row evolves in real time.  Right: cuts of
+the $\omega_\tau=\qfm$ (magnon--magnon) and $\omega_\tau=E_{12}$
+($\kappa^B$-transfer) rows.  The linewidth-constrained model predicts
+both rows peak with the pulse and decay within $\sim$20--30\,ps; an
+experimental version of this plot in which the $E_{12}$ row \emph{rises}
+over tens of ps is the signature of the population-fed ($T_1$)
+mechanism.}
+\label{fig:si-mixed}
+\end{figure}
 
 \paragraph{Why the static vertex cannot replace the gated one.}
 $W^{xz}_1 S_xS_z\lambda^1$ is trilinear; around the $\Gamma_2$ order it
