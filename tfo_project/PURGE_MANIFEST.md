@@ -164,3 +164,18 @@ and EXPERIMENTAL_FINAL/README.md + seeds (tmfeo3_gamma2_1x1x1_seed_*) + experime
 8.6G	./tmfeo3_2dcs_final/xB_gs1/sample_0/pump_probe_spectroscopy.h5
 8.6G	./tmfeo3_2dcs_final/xB_gs2/sample_0/pump_probe_spectroscopy.h5
 8.6G	./tmfeo3_2dcs_final/xB_gs3/sample_0/pump_probe_spectroscopy.h5
+
+## Purge 2026-07-23 (post-paper consolidation; 126 GB reclaimed)
+Deleted h5 of all superseded same-pol iterations (it3-it8, it6b/it6c ensembles,
+it14 low-res) and the kappaB=0.01 first regeneration (vB_gs1-3; its
+ratio-inversion result is recorded in EXPERIMENTAL_FINAL/README.md).
+Each purged dir retains its .param for bit-exact regeneration.
+
+KEPT (the paper + current exploration set, ~180 GB):
+- it14hr_gs1-3                       — paper geo-A same-pol (dark-mu13 final)
+- EXPERIMENTAL_FINAL/vA_gs1-3        — paper geo-A cross (consolidated Hamiltonian)
+- EXPERIMENTAL_FINAL/vB2_gs1-3       — paper geo-B cross (kappaB=0.0035)
+- EXPERIMENTAL_FINAL/vBwxz*_gs1 (6)  — W1_xz mixer-vs-converter sweep
+- EXPERIMENTAL_FINAL/vA_su3x2, vA_noWxz — reverse-W (0.5,~1.0) mechanism tests
+- EXPERIMENTAL_FINAL/bb_*, bb2_* (8) — geo-B post-pulse buildup single-pulse runs
+Distilled spectra/censuses for all of the above: tfo_project/paper/data/.
