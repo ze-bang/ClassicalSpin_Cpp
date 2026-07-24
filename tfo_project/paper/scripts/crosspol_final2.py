@@ -18,7 +18,7 @@ def load(run,sp,l):
 def spec(t,tau,M):
     tm=t>=3.0
     at=np.hanning(2*tm.sum())[tm.sum():]; atau=np.hanning(2*len(tau))[:len(tau)]
-    Md=(M[:,tm]-M[:,tm].mean())*atau[:,None]*at[None,:]
+    Md=(M[:,tm]-M[:,tm].mean(axis=0,keepdims=True))*atau[:,None]*at[None,:]
     wt=np.fft.fftshift(np.fft.fftfreq(tm.sum(),t[1]-t[0]))*SCALE
     wta=np.fft.fftshift(np.fft.fftfreq(len(tau),tau[1]-tau[0]))*SCALE
     mx=(wt>0.12)&(wt<1.6); my=(np.abs(wta)<1.6)
@@ -48,15 +48,15 @@ def mix(runs,sp,l,T):
         t,tau,M=load(r,sp,l)
         tot=w*M if tot is None else tot+w*M
     return t,tau,tot
-runsA=["EXPERIMENTAL_FINAL/vA_gs1","EXPERIMENTAL_FINAL/vA_gs2","EXPERIMENTAL_FINAL/vA_gs3"]
-runsB=["EXPERIMENTAL_FINAL/vB2_gs1","EXPERIMENTAL_FINAL/vB2_gs2","EXPERIMENTAL_FINAL/vB2_gs3"]
+runsA=["EXPERIMENTAL_FINAL/fin_A_gs1","EXPERIMENTAL_FINAL/fin_A_gs2","EXPERIMENTAL_FINAL/fin_A_gs3"]
+runsB=["EXPERIMENTAL_FINAL/fin_B_gs1","EXPERIMENTAL_FINAL/fin_B_gs2","EXPERIMENTAL_FINAL/fin_B_gs3"]
 # calibrate M1 weight at T=0: parity of reverse (0.49,0.90 in Fe) with main (0.90,0.50 in l2)
 t,tau,Ml2=mix(runsA,"SU3",1,0)
 t,tau,Mfe=mix(runsA,"SU2",0,0)
 wtb,wTb,Al2=spec(t,tau,Ml2); _,_,Afe=spec(t,tau,Mfe)
 main=Al2[np.argmin(np.abs(wTb-0.90))][np.argmin(np.abs(wtb-0.50))]
 rev=Afe[np.argmin(np.abs(wTb-0.49))][np.argmin(np.abs(wtb-0.90))]
-wM1=1.18*main/rev  # fixed-point tweak for exact composite parity
+wM1=main/rev  # fixed-point tweak for exact composite parity
 print(f"M1/E1 detection weight calibrated by reverse-peak parity: w = {wM1:.2f}")
 census={}
 fig,axs=plt.subplots(2,2,figsize=(11.5,9))

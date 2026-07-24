@@ -253,7 +253,17 @@ prominence $\geq1.5$ over the local median background
 ($0.34$\,THz annulus) and amplitude $\geq4$--$5\%$ of the map maximum,
 merged within $0.09$\,THz.  Rectified ($\omega_t\approx0$) content is
 analyzed separately via $S_{\rm DC}(\tau)=\langle\Mnl\rangle_t$ with
-cubic drift removal.
+cubic drift removal.  In every 2D map the $\tau$-averaged signal is
+subtracted at each detection time before windowing, which functionally
+removes the $\omega_\tau=0$ (pump--probe) row; the slow-in-$\tau$
+wings that remain within $|\omega_\tau|<0.12$\,THz are masked.  The
+model reproduces the observed dominance of the $(0,E_{23})$ band in the
+same-polarized channel before this removal; $\omega_\tau=0$ features
+carry pump--probe, not delay-coherence, information and are excluded
+from all censuses.  Radiation bookkeeping used throughout: for
+$k\parallel b$, M1 dipoles radiate $E\propto\hat k\times m$, so the
+$E\parallel c$-detected channel carries $d_z(\lambda^2)+m_x$ and the
+$E\parallel a$-detected channel carries $d_x(\lambda^{5,7})+m_z$.
 
 \paragraph{Thermal ensembles.}  Boltzmann mixtures of trajectories from
 the level seeds $\ket1,\ket2,\ket3$ (Sec.~\ref{si:qutrit}).  Two
@@ -750,6 +760,22 @@ spectra themselves, are archived as
 \texttt{paper/data/*.npz}; the buildup magnitude at this conservative
 calibration is a free dial ($c_{\rm heat}$) that the measured
 late-to-impulsive intensity ratio will pin.
+
+\paragraph{Prediction: the geometry-B same-polarized channel.}
+For $H\parallel c$, $E\parallel a$ the same-polarized detection reads
+$E\parallel a\leftarrow d_x(\lambda^{5,7})+m_z$.  In the final
+configuration the Tm CEF channels are \emph{identically} zero there
+(machine $0$; the $B\parallel c$ drive closes on the
+$\{\lambda^{1,2,3}\}$ subalgebra), so the channel is a pure
+$m_z$ M1 magnon map.  Predicted census (runs \texttt{fin\_B}, $T=0$):
+$(+0.90,\,0.38)=1.00$ (the $\qafm\!\to\!\qfm$ magnon--magnon
+transfer---the very peak absent from the geometry-A same-polarized
+channel, where $m_z$ is dark at the $10^{-11}$ level),
+$(+0.52,\,0.38)=0.42$ ($E_{12}\!\to\!\qfm$), $\qfm$ diagonal
+$0.41$, $(-0.38,\,0.50)=0.38$.  Consequently the weak
+$(\qafm,0.38)$ reported in geometry A is naturally polarization
+leakage of this dominant geometry-B feature; a polarizer-purity scan
+(the peak should scale with the leakage angle squared) discriminates.
 
 % =====================================================================
 \section{Data and code availability}

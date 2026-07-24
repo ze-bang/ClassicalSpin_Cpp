@@ -133,11 +133,21 @@ Gilbert $\alpha=1.7\times10^{-3}$], and each emitter weighted by its
 measured oscillator strength ($\sqrt f=2.5$--$3.0$ for the E1-bright CEF
 lines; $f_{\qafm}=7\times10^{-4}$: the $\qafm$ magnon is E1-dark but
 M1-bright) [SM, Sec.~S5].  Peaks are identified blindly as 2D local
-maxima with prominence $\geq1.5$ over the local median background.
-The E1/M1 dichotomy already dictates the readout physics: a magnon can
-only be seen either by borrowing a CEF electric dipole through an
-Fe--Tm vertex, or through its own magnetic dipole at the magnon
-frequency.  The three channels realize the three possibilities.
+maxima with prominence $\geq1.5$ over the local median background, and
+in every map the $\tau$-averaged signal is subtracted at each detection
+time, functionally removing the $\omega_\tau=0$ (pump--probe) row:
+those features carry no delay-coherence information, and the model in
+fact reproduces their observed dominance before removal.
+The E1/M1 dichotomy dictates the readout physics, and the radiation
+bookkeeping resolves which channel sees what: for propagation along
+$b$, an M1 dipole radiates $E\propto\hat k\times m$, so
+$m\parallel a$ radiates $E\parallel c$ and $m\parallel c$ radiates
+$E\parallel a$.  Each detected polarization therefore carries one E1
+dipole set plus one M1 component:
+$E\parallel c\leftarrow d_z(\lambda^2)+m_x$ (which is how the
+E1-dark $\qafm$, living in $\delta F_x$, appears in the
+$E\parallel c$-detected channel), and
+$E\parallel a\leftarrow d_x(\lambda^{5,7})+m_z$.
 
 \begin{figure}[t]
 \includegraphics[width=\columnwidth]{figs/crosspol_final.png}
@@ -274,12 +284,14 @@ partner $(E_{12},E_{13})$, though lower order, emits through the
 throttled $\mu^z_{13}$ and is capped at $0.78$ of the dominant peak;
 the measured ratio calibrates the residual admixture at the percent
 level.  The magnon-delay peak $(\qafm,E_{13})$ is weak and thermally
-activated ($0.10\to0.51$ from $0$ to $20$\,K).  The one feature the
-model does not produce is $(\qafm,0.38)$: the $\qfm$ emission carrier
-exists (a $b$-axis M1 ridge, as $\Gamma_2$ requires) but no
-$\qafm\!\to\!\qfm$ transfer vertex of sufficient strength exists in the
-present Hamiltonian class---itself a sharp statement about what the
-material's Hamiltonian must contain beyond it [SM, Sec.~S8].
+activated ($0.10\to0.51$ from $0$ to $20$\,K).  The one listed feature the
+model does not produce here is $(\qafm,0.38)$---and the radiation
+bookkeeping now explains why: $\qfm$ radiates through $m_z$, and in
+geometry A the $m_z$ channel is numerically dark ($10^{-11}$).  The
+same transfer is instead the \emph{dominant} peak of the geometry-B
+same-polarized channel (below), so the weak $(\qafm,0.38)$ reported in
+geometry A is naturally a polarization leakage of that channel---a
+polarizer-purity test discriminates [SM, Sec.~S8].
 
 Because the single-ion dynamics is quantum-exact, these pathway claims
 were verified against a standalone qutrit integrator (same pulse, same
@@ -322,7 +334,14 @@ polarization away from $c$ revives the $\omega_\tau=1.2$\,THz rows;
 $(E_{12},E_{13})$ order (they differ by one field power); (5)~the
 rephasing remnant at $(-E_{12},E_{23})$ and the two-quantum line at
 $\omega_\tau=0.99$\,THz (resolvable from $0.90$) should exist in raw
-data; (6)~adiabatically long pulses collapse the geometry-A cross peak.
+data; (6)~adiabatically long pulses collapse the geometry-A cross peak;
+(7)~the geometry-B \emph{same}-polarized channel is a pure magnon
+($m_z$ M1) map: the Tm CEF channels vanish identically there
+(subalgebra closure), and the predicted census is dominated by the
+magnon--magnon transfer $(\qafm,\qfm)=(0.9,\,0.38)$ at $1.00$, with
+$(E_{12},\qfm)=0.42$ and the $\qfm$ diagonal at $0.41$---observing
+\emph{any} CEF emission in that channel would falsify the subalgebra
+structure of the drive.
 
 \emph{Conclusion.}---Two-dimensional THz spectroscopy of TmFeO$_3$
 admits a term-by-term microscopic reading: two symmetry-selected Fe--Tm

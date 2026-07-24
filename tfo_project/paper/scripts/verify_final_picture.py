@@ -18,7 +18,7 @@ def load(run,sp,l):
 def spec_hann(t,tau,M):
     tm=t>=3.0
     at=np.hanning(2*tm.sum())[tm.sum():]; atau=np.hanning(2*len(tau))[:len(tau)]
-    Md=(M[:,tm]-M[:,tm].mean())*atau[:,None]*at[None,:]
+    Md=(M[:,tm]-M[:,tm].mean(axis=0,keepdims=True))*atau[:,None]*at[None,:]
     wt=np.fft.fftshift(np.fft.fftfreq(tm.sum(),t[1]-t[0]))*SCALE
     wta=np.fft.fftshift(np.fft.fftfreq(len(tau),tau[1]-tau[0]))*SCALE
     mx=(wt>0.12)&(wt<1.6); my=(np.abs(wta)<1.6)
@@ -29,13 +29,13 @@ def spec_samepol(t,tau,M):
     at=np.exp(np.log(0.03)*((tk-tk[0])/(tk[-1]-tk[0]))**2)
     atau=np.ones_like(tau); m1=tau>-6; atau[m1]=0.5*(1-np.cos(np.pi*(-tau[m1])/6))
     m2=tau<-110; atau[m2]=0.5*(1-np.cos(np.pi*(120+tau[m2])/10))
-    Md=(M[:,tm]-M[:,tm].mean())*atau[:,None]*at[None,:]
+    Md=(M[:,tm]-M[:,tm].mean(axis=0,keepdims=True))*atau[:,None]*at[None,:]
     wt=np.fft.fftshift(np.fft.fftfreq(tm.sum(),t[1]-t[0]))*SCALE
     wta=np.fft.fftshift(np.fft.fftfreq(len(tau),tau[1]-tau[0]))*SCALE
     mx=(wt>0.12)&(wt<1.6); my=(np.abs(wta)<1.6)
     A=gaussian_filter(np.abs(np.fft.fftshift(np.fft.fft2(Md)))[np.ix_(my,mx)],sigma=(2,1.5))
     return wt[mx],-wta[my],A
-def blind(wtb,wTb,A,qe=0.18,amp_min=0.05,nmax=10):
+def blind(wtb,wTb,A,qe=0.12,amp_min=0.05,nmax=10):
     B=A.copy(); B[np.abs(wTb)<qe,:]=0
     dyx=abs(wTb[1]-wTb[0]); dxx=abs(wtb[1]-wtb[0])
     n=B.max(); fp=(int(0.10/dyx)|1,int(0.10/dxx)|1)
@@ -111,5 +111,20 @@ for T in [0,10]:
     census[f"A_same_T{T}"]=pk
     print(f"\n=== A same-pol composite, T={T} ===")
     for a,p,yy,xx in pk[:9]: print(f"   {a:5.2f} x{p:4.1f}  ({yy:+.2f}, {xx:.2f})")
+# ---------- geometry B SAME-pol prediction: detect E||a = x-E1 (l4/l6) + m_z M1 (Sz) ----------
+for T in [0]:
+    t,tau,M4=mix(runsB,"SU3",3,T); _,_,M6=mix(runsB,"SU3",5,T); _,_,Mz=mix(runsB,"SU2",2,T)
+    wtb,wTb,A4=spec_hann(t,tau,M4); _,_,A6=spec_hann(t,tau,M6); _,_,Az=spec_hann(t,tau,Mz)
+    print(f"\n=== B same-pol prediction, T={T} ===")
+    print(f"   CEF x-dipole channels: max|A4|={A4.max():.3e}, max|A6|={A6.max():.3e}  vs  m_z M1: max|Az|={Az.max():.3e}")
+    comp=0.05*A4+4.4*A6+0.69*Az
+    pk=blind(wtb,wTb,comp)
+    census["B_same_prediction_T0"]={"maxA4":float(f"{A4.max():.3e}"),"maxA6":float(f"{A6.max():.3e}"),
+                                    "maxAz":float(f"{Az.max():.3e}"),"peaks":pk}
+    for a,p,yy,xx in pk[:8]: print(f"   {a:5.2f} x{p:4.1f}  ({yy:+.2f}, {xx:.2f})")
+    pkz=blind(wtb,wTb,Az)
+    census["B_same_Sz_only_T0"]=pkz
+    print("   Sz (m_z M1) channel alone:")
+    for a,p,yy,xx in pkz[:6]: print(f"   {a:5.2f} x{p:4.1f}  ({yy:+.2f}, {xx:.2f})")
 json.dump(census,open(f"{OUT}/census_final_picture.json","w"),indent=1)
 print(f"\nwrote {OUT}/census_final_picture.json")

@@ -3,7 +3,7 @@ from scipy.ndimage import gaussian_filter, maximum_filter, median_filter
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 SCALE=2*np.pi/4.135667696
 BASE="tfo_project/tmfeo3_2dcs_final"
-runs={"gs1":"it14hr_gs1","gs2":"it14hr_gs2","gs3":"it14hr_gs3"}
+runs={"gs1":"fin_S_gs1","gs2":"fin_S_gs2","gs3":"fin_S_gs3"}
 E=[0.0,2.067834,4.9628]
 data={}
 for k,r in runs.items():
@@ -28,7 +28,7 @@ mx=(wt>0.12)&(wt<1.6); my=(np.abs(wta)<1.6)
 wtb=wt[mx]; wTb=-wta[my]
 dyx=abs(wta[1]-wta[0]); dxx=abs(wt[1]-wt[0])
 def spec(M):
-    Md=(M[:,tm]-M[:,tm].mean())*w[:,None]*apod[None,:]
+    Md=(M[:,tm]-M[:,tm].mean(axis=0,keepdims=True))*w[:,None]*apod[None,:]
     return gaussian_filter(np.abs(np.fft.fftshift(np.fft.fft2(Md)))[np.ix_(my,mx)],sigma=(2,1.5))
 def blind(A,amp_min=0.04,prom_min=1.5,nmax=12):
     n=A.max(); fp=(int(0.10/dyx)|1,int(0.10/dxx)|1)
