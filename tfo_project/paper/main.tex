@@ -138,28 +138,31 @@ in every map the $\tau$-averaged signal is subtracted at each detection
 time, functionally removing the $\omega_\tau=0$ (pump--probe) row:
 those features carry no delay-coherence information, and the model in
 fact reproduces their observed dominance before removal.
-The E1/M1 dichotomy dictates the readout physics, and the radiation
-bookkeeping resolves which channel sees what: for propagation along
-$b$, an M1 dipole radiates $E\propto\hat k\times m$, so
-$m\parallel a$ radiates $E\parallel c$ and $m\parallel c$ radiates
-$E\parallel a$.  Each detected polarization therefore carries one E1
-dipole set plus one M1 component:
-$E\parallel c\leftarrow d_z(\lambda^2)+m_x$ (which is how the
-E1-dark $\qafm$, living in $\delta F_x$, appears in the
-$E\parallel c$-detected channel), and
-$E\parallel a\leftarrow d_x(\lambda^{5,7})+m_z$.
+The E1/M1 dichotomy dictates the readout physics, and detection is
+resolved by the \emph{magnetic} polarization of the emitted THz: for
+$H\parallel a$ input, cross detection reads the
+$(H\parallel c,\,E\parallel a)$ output, which receives \emph{two}
+source families radiating into the same polarization---the $m_z$
+magnetic dipoles (Tm $m_z=5.264\,\lambda^2$; Fe $S_z$, numerically
+dark in geometry A) and the $x$-axis electric dipoles
+($d_x$: $\lambda^{5,7}$, i.e.\ the $E_{23}/E_{13}$ emissions).  The
+$\qafm$ magnon appears in this channel not through Fe M1 (its
+$\delta F_x$ radiates the \emph{same}-polarized output) but through
+its $W$-hybridized weight in the Tm $m_z$ dipole.
 
 \begin{figure}[t]
 \includegraphics[width=\columnwidth]{figs/crosspol_final.png}
 \caption{Cross-polarized channels from experimental inputs only
 (measured pulse, linewidth damping, oscillator-strength emission).
-Top: geometry A ($H\!\parallel\!a$), detected E1$+$M1 composite
-($\lambda^2$ plus M1-weighted magnon channel), normalized to the main
-peak: the magnetoelectric $(\qafm,E_{12})$ peak of $W^{yy}_1$ and the
-reverse transfer $(E_{12},\qafm)$ of $W^{xz}_1$ at equal intensity, as
-observed; the $(\qafm,\qafm)$ magnon diagonal is absent, as observed,
-which pins the Zeeman:E1 drive ratio; parity pins the M1/E1 detection
-weight ($w\simeq0.7$).  Bottom: geometry B
+Top: geometry A cross channel (detect $H\parallel c$):
+$m_z$ M1 sources ($5.264\lambda^2+S_z$) plus $x$-E1 sources
+($2.39\lambda^5+0.91\lambda^7$, weight $w_{E1}=0.94$ from the
+observed parity), normalized to the main peak: the magnetoelectric
+$(\qafm,E_{12})$ peak of $W^{yy}_1$ and, at equal intensity, the
+extended $E_{12}$-row feature spanning $0.9$--$1.2$\,THz (reverse-$W$
+$(E_{12},\qafm)$ $+$ $2E_{12}$ harmonic $+$ $(E_{12},E_{13})$); the
+$(\qafm,\qafm)$ magnon diagonal is absent, as observed, which pins
+the Zeeman drive far below the E1 drive.  Bottom: geometry B
 ($H\!\parallel\!c$), magnon M1 channel---the magnon--magnon
 $(\qfm,\qafm)$ peak and the $\kappa^B$-gated transfer $(E_{12},\qafm)$.
 Left $T=0$, right $T=5$\,K.}
@@ -191,17 +194,23 @@ hybridization $W^{xz}_1$ (it dies sevenfold when $W^{xz}_1\to0$ and
 scales linearly with the Tm drive; a $2E_{12}=1.0$\,THz harmonic
 companion sits beside it).  The static $W$ family is thus read in both
 directions---magnon$\to$CEF through $W^{yy}_1$, CEF$\to$magnon through
-$W^{xz}_1$.  Because the reverse peak emits at the magnon frequency, it
-is detected through the magnon's \emph{own} M1 dipole, whereas the
-forward peak uses the Tm E1 dipole.  Two observed facts then fix two
-detection-side dials with no Hamiltonian change: the \emph{absence} of
-the $(\qafm,\qafm)$ magnon diagonal pins the Zeeman drive far below
-the E1 drive (the diagonal is cubic in the Zeeman amplitude, the main
-peak quadratic, the reverse peak linear), and the intensity
-\emph{parity} of the two transfer peaks calibrates the M1/E1 detection
-weight ($w\simeq0.7$ at the resulting operating point).  The
-$E_{12}{+}\qafm=1.4$\,THz combination tones ($\sim0.4$) remain as
-predicted companions [SM, Sec.~S7].
+$W^{xz}_1$; the reverse peak reaches the detector through the
+$W$-hybridized $\qafm$ weight of the Tm $m_z$ dipole.  In the
+detected channel it is joined by two co-located contributors radiating
+into the same output polarization---the $2E_{12}=1.0$\,THz harmonic
+and the $x$-E1 $(E_{12},E_{13})$ transfer at $1.2$\,THz---forming an
+extended $E_{12}$-row feature spanning $0.9$--$1.2$\,THz, which we
+identify with the reported peak ``near $(0.5,\,1.0)$''.  Two observed
+facts fix two detection-side dials with no Hamiltonian change: the
+\emph{absence} of the $(\qafm,\qafm)$ magnon diagonal pins the
+Zeeman drive far below the E1 drive (the diagonal is cubic in the
+Zeeman amplitude, the main peak quadratic, the Tm-fed reverse content
+nearly independent), and the intensity \emph{parity} of the extended
+feature with the main peak calibrates the E1/M1 detection weight
+($w_{E1}=0.94$).  Discriminator among the three contributors: the
+exact emission frequency and its temperature trend ($0.90$ tracks the
+magnon and softens near the reorientation; $1.0$ and $1.2$ are rigid
+CEF-locked lines) [SM, Sec.~S7].
 
 \emph{Peaks 2--3, geometry B cross-polarized: the gated vertex, and a
 division of labor.}---For $H\!\parallel\!c$ both observed peaks emit at

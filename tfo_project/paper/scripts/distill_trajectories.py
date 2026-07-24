@@ -4,13 +4,13 @@ OUT="tfo_project/paper/data/trajectories"; os.makedirs(OUT,exist_ok=True)
 DEC=10   # t decimation: dt 0.02 -> 0.2 code units, Nyquist 3.8 THz (all content < 2.5 THz)
 # channels per geometry: (dataset kind, species, component index, short name)
 CH={
- "fin_A":[("global","SU2",0,"Sx"),("global","SU2",1,"Sy"),("global","SU2",2,"Sz"),
-          ("global","SU3",0,"l1"),("global","SU3",1,"l2"),("antiferro","SU2",1,"stagSy")],
+ "fin_A2":[("global","SU2",0,"Sx"),("global","SU2",1,"Sy"),("global","SU2",2,"Sz"),
+          ("global","SU3",1,"l2"),("global","SU3",4,"l5"),("global","SU3",6,"l7"),("antiferro","SU2",1,"stagSy")],
  "fin_B":[("global","SU2",0,"Sx"),("global","SU2",1,"Sy"),("global","SU2",2,"Sz"),
           ("antiferro","SU2",1,"stagSy"),("global","SU3",1,"l2")],
  "fin_S":[("global","SU3",3,"l4"),("global","SU3",5,"l6"),("global","SU2",0,"Sx")],
 }
-LOC={"fin_A":"EXPERIMENTAL_FINAL/","fin_B":"EXPERIMENTAL_FINAL/","fin_S":""}
+LOC={"fin_A2":"EXPERIMENTAL_FINAL/","fin_B":"EXPERIMENTAL_FINAL/","fin_S":""}
 for geom,chans in CH.items():
     for g in ["gs1","gs2","gs3"]:
         run=f"{LOC[geom]}{geom}_{g}"
