@@ -707,12 +707,21 @@ Every spectrum in the paper is produced by \emph{one} Hamiltonian and
 channels.  Couplings (code units): Fe exchange/anisotropy/DM of the
 calibrated orthoferrite model ($D_1=0.049$, $D_2=0.014$); Tm CEF
 $e_1=2.0678$, $e_2=4.9628$\,meV; Fe--Tm $W^{yy}_1=0.01$,
-$W^{xz}_1=0.01$, $\kappa^B_{1y}=0.0035$; drive legs
+$W^{xz}_1=0.01$, $\kappa^B_{1y}=0.0035$, population channel
+$W_3^{yz}=0.01$ with the thermal-repopulation feedback
+($\Gamma_3=\Gamma_8=0.02$, i.e.\ $T_1=33$\,ps;
+$c_{\rm heat}=2000$, saturation cap $0.05$, heat-reservoir cooling
+$1/300$ code units); the $\lambda$-leg of every $S S\lambda$ vertex
+couples to the deviation $\lambda-\lambda_{\rm eq}$ (the static
+equilibrium contribution is already absorbed in the measured Fe
+parameters---without this renormalization the static $W_3\lambda^3$
+piece shifts the magnon lines by $\sim$7\%); drive legs
 $(d_z,\mu^z_{13},\mu^z_{23})\propto(3.0,\,0,\,0.9128)$ for
 $E\!\parallel\!c$ (the dark-$\mu_{13}$ rule) and the auto-projected
 Zeeman drive for the magnetic field; dampings and emission weights from
-Table~\ref{tab:si-exp}.  The final regeneration (runs \texttt{vA},
-\texttt{vB2}, \texttt{it14hr}; three Boltzmann seeds each) gives the
+Table~\ref{tab:si-exp}.  The final regeneration (runs \texttt{fin\_A},
+\texttt{fin\_B}, \texttt{fin\_S}; three Boltzmann seeds each,
+thermal channel included) gives the
 blind censuses, normalized per channel [amp, $(\omega_T,\omega_t)$,
 $+$\,=\,non-rephasing]:
 \begin{center}\small
@@ -721,12 +730,12 @@ $+$\,=\,non-rephasing]:
 \toprule
 channel & leading genuine peaks (T=0) & reading\\
 \midrule
-A cross ($\lambda^2$) & $1.00\,(+0.91,0.50)$; $0.46\,(-0.90,0.50)$;
-  $0.24\,(+0.90,0.89)$ & $W^{yy}_1$ peak; R partner; magnon shoulder\\
-B cross ($S_x$) & $1.00\,(+0.38,0.90)$; $0.46\,(+0.53,0.89)$;
+A cross (E1+M1 comp.) & $1.00\,(+0.49,0.90)$; $0.91\,(+0.90,0.48)$;
+  magnon diag.\ absent & $W^{xz}_1$ reverse; $W^{yy}_1$ forward\\
+B cross ($S_x$) & $1.00\,(+0.38,0.90)$; $0.45\,(+0.53,0.89)$;
   $0.17\,(-0.42,0.90)$ & magnon--magnon; $\kappa^B$ transfer; R partner\\
 A same (composite) & $1.00\,(+0.49,0.71)$\footnotemark;
-  $0.71\,(+0.49,1.20)$; $0.49\,(-0.47,0.71)$ &
+  $0.72\,(+0.49,1.20)$; $0.59\,(-0.48,0.70)$ &
   population-route transfer; $\mu_{13}$-throttled; R remnant\\
 \bottomrule
 \end{tabular}
@@ -736,8 +745,11 @@ $\omega_T\!\approx\!0$ pump--probe bands are excluded per the census
 convention of Sec.~\ref{si:numerics}.}
 The complete censuses at all temperatures, together with the normalized
 spectra themselves, are archived as
-\texttt{paper/data/census\_final\_scenario.json} and
-\texttt{paper/data/*.npz}.
+\texttt{paper/data/census\_final\_picture.json},
+\texttt{census\_final\_scenario.json}, and
+\texttt{paper/data/*.npz}; the buildup magnitude at this conservative
+calibration is a free dial ($c_{\rm heat}$) that the measured
+late-to-impulsive intensity ratio will pin.
 
 % =====================================================================
 \section{Data and code availability}

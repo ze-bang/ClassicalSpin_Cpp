@@ -663,8 +663,12 @@ static void apply_su3_bloch_damping(MixedLattice& lattice, const SpinConfig& con
     // Optional thermal repopulation: absorbed drive energy shifts the lambda3
     // equilibrium (rise time = 1/Gamma_3); see mixed_lattice.h.
     lattice.thermal_heat = config.get_param("thermal_heat", 0.0);
+    lattice.thermal_cap  = config.get_param("thermal_cap", 1.0e30);
+    lattice.thermal_cool = config.get_param("thermal_cool", 0.0);
     if (rank == 0 && lattice.thermal_heat != 0.0) {
         cout << "Thermal repopulation ON: thermal_heat = " << lattice.thermal_heat
+             << ", cap = " << lattice.thermal_cap
+             << ", cool rate = " << lattice.thermal_cool
              << " (lambda3 equilibrium shifts with absorbed drive energy)" << endl;
     }
     if (rank == 0) {

@@ -479,13 +479,17 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                 }
                 const double dtt = t - thermal_last_t;
                 if (dtt < 1.0) {                // skip the fresh-trajectory jump
+                    if (thermal_cool > 0.0) {
+                        thermal_Edep *= std::exp(-thermal_cool * dtt);
+                    }
                     thermal_Edep += 0.5 * (P + thermal_last_P) * dtt;
                 }
                 thermal_last_t = t;
                 thermal_last_P = P;
             }
         }
-        const double thermal_eq3_shift = thermal_heat * thermal_Edep;
+        double thermal_eq3_shift = thermal_heat * thermal_Edep;
+        if (thermal_eq3_shift > thermal_cap) thermal_eq3_shift = thermal_cap;
 
         // Combined pulse-envelope scalars for the field-assisted Fe-Tm
         // exchange (H_{E chi} uses the SU(3)/electric envelope, H_{B chi}
@@ -784,18 +788,38 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
         const size_t n_mtri = mtp.size();
         if (n_mtri != 0) {
             const double* __restrict Tbase = mixed_trilinear_packed_SU2[site].data();
+            // The SU(3) leg couples to the DEVIATION (λ − λ_eq): the static
+            // equilibrium contribution (large only for the population
+            // channels λ3, λ8) is already absorbed in the measured Fe
+            // parameters, so it must not renormalize the magnon spectrum.
+            // equilibrium_SU3 is zero unless Bloch damping set it.
+            const bool has_eq = !equilibrium_SU3.empty();
             if (fast) {
                 for (size_t n = 0; n < n_mtri; ++n) {
                     const double* __restrict S1 = &state[mtp[n][0] * 3];
                     const double* __restrict S2 = &state[offset_SU3 + mtp[n][1] * 8];
-                    trilinear_kernel<3, 3, 8>(Tbase + n * 72, S1, S2, H);
+                    double S2s[8];
+                    if (has_eq) {
+                        const auto& eq = equilibrium_SU3[mtp[n][1]];
+                        for (int a = 0; a < 8; ++a) S2s[a] = S2[a] - eq(a);
+                    } else {
+                        for (int a = 0; a < 8; ++a) S2s[a] = S2[a];
+                    }
+                    trilinear_kernel<3, 3, 8>(Tbase + n * 72, S1, S2s, H);
                 }
             } else {
                 const size_t stride = d2 * d2 * d3;
                 for (size_t n = 0; n < n_mtri; ++n) {
                     const double* __restrict S1 = &state[mtp[n][0] * d2];
                     const double* __restrict S2 = &state[offset_SU3 + mtp[n][1] * d3];
-                    trilinear_kernel_dyn(Tbase + n * stride, S1, S2, H, d2, d2, d3);
+                    std::vector<double> S2s(d3);
+                    if (has_eq) {
+                        const auto& eq = equilibrium_SU3[mtp[n][1]];
+                        for (size_t a = 0; a < d3; ++a) S2s[a] = S2[a] - eq(a);
+                    } else {
+                        for (size_t a = 0; a < d3; ++a) S2s[a] = S2[a];
+                    }
+                    trilinear_kernel_dyn(Tbase + n * stride, S1, S2s.data(), H, d2, d2, d3);
                 }
             }
         }
@@ -880,7 +904,9 @@ inline void trilinear_kernel_dyn(const double* __restrict T,
                 double temp = 0.0;
                 for (size_t b = 0; b < spin_dim_SU2; ++b) {
                     for (size_t c = 0; c < spin_dim_SU3; ++c) {
-                        temp += T[a](b, c) * state[p1_idx + b] * state[p2_idx + c];
+                        const double lam = state[p2_idx + c] -
+                            (equilibrium_SU3.empty() ? 0.0 : equilibrium_SU3[p2](c));
+                        temp += T[a](b, c) * state[p1_idx + b] * lam;
                     }
                 }
                 H(a) += temp;

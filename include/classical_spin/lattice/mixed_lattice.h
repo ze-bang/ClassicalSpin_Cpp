@@ -315,6 +315,8 @@ public:
     // label into M_NL automatically. Accumulator resets when integration time
     // jumps backward (a new trajectory).
     double thermal_heat = 0.0;                  // coupling (0 = feature off)
+    double thermal_cap  = 1.0e30;               // max |lambda3 eq shift| (saturation)
+    double thermal_cool = 0.0;                  // heat-reservoir cooling rate (1/time; 0 = no cooling)
     mutable double thermal_Edep = 0.0;          // deposited energy accumulator
     mutable double thermal_last_t = -1.0e300;   // last accumulation time
     mutable double thermal_last_P = 0.0;        // last absorbed power (trapezoid)
