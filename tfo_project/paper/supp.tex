@@ -754,7 +754,12 @@ late-to-impulsive intensity ratio will pin.
 % =====================================================================
 \section{Data and code availability}
 % =====================================================================
-The paper folder is self-contained: \texttt{paper/params/} holds the
+The paper folder is self-contained: \texttt{paper/data/trajectories/}
+holds the \emph{full time-domain trajectories} of the final scenario
+(all nine runs: $M_{\rm NL}(\tau,t)$ for every detected channel plus
+the single-pulse references, $t$-decimated $\times10$ to a
+$3.8$\,THz Nyquist, float32; every spectrum in the paper regenerates
+from these, verified to the digit); \texttt{paper/params/} holds the
 exact \texttt{.param} files of every final-scenario run
 (\texttt{vA}, \texttt{vB2}, \texttt{it14hr}; three thermal seeds each),
 \texttt{paper/data/} the distilled spectra and censuses,
