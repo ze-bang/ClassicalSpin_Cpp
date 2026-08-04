@@ -978,39 +978,84 @@ coherence that radiates into the analysed polarisation (constrained by
 the emitting multipole).  This asymmetry does most of the explanatory
 work below.
 
-\subsection{What each channel can see}
+\subsection{Excitation and readout, case by case}
 \label{si:whatsees}
 
-Detection is resolved by the \emph{magnetic} polarisation of the
-emitted THz field, and for a given input geometry the analysed output
-selects one Cartesian component of the total magnetic moment:
-\begin{center}\small
-\renewcommand{\arraystretch}{1.3}
-\begin{tabular}{llll}
+Every channel in the atlas is specified by two independent choices: what
+the pulse \emph{drives}, fixed by the field orientation, and what the
+analyser \emph{reads}, fixed by which Cartesian component of the total
+magnetic moment radiates into the accepted polarisation.  For
+propagation along $b$ the two transverse polarisation states are
+($H\!\parallel\!a$, $E\!\parallel\!c$) and ($H\!\parallel\!c$,
+$E\!\parallel\!a$), so ``same'' and ``cross'' detection select $m_x$ and
+$m_z$ respectively in geometry A, and the reverse in geometry B.
+
+\begin{table}[h]
+\centering\small
+\caption{Excitation and readout for the four measured configurations.
+$d_z^{\rm eff}$ is the exchange-induced $c$-axis dipole of the $E_{12}$
+transition; $\mu^z_{23}=0.913$ and $\mu^z_{13}\simeq0$ (the selection
+rule of \cref{si:peaksAsame}); $\mu^z_{12}=5.264$ is the Tm $c$-axis
+magnetic moment; $\beta\simeq7\mu$ is the hyperpolarisability allowed by
+the absence of inversion at the Tm $4c$ site.  Fe$^{3+}$ at $4b$ sits on
+an inversion centre and therefore contributes no quadratic term.}
+\label{tab:si-channels}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{p{2.1cm}p{5.2cm}p{7.4cm}}
 \toprule
-geometry / analyser & detected moment & Fe content & Tm content\\
+configuration & excitation (what the pulse drives) & readout (what the
+analyser detects)\\
 \midrule
-A, cross ($H\!\parallel\!a$ in, $H\!\parallel\!c$ out) & $m_z$ &
-  $F_z\equiv0$ (machine zero) & $\mu\lambda^2+\beta\lambda^1\lambda^2$\\
-A, same ($H\!\parallel\!a$ out) & $m_x$ &
-  $F_x$: carries $\qafm$ & $2.39\lambda^5+0.91\lambda^7$ ($\to\lambda^{4,6}$)\\
-B, cross ($H\!\parallel\!c$ in, $H\!\parallel\!a$ out) & $m_x$ &
-  $F_x$: carries $\qafm$ & $\lambda^{4\text{--}7}\equiv0$ (subalgebra)\\
-B, same ($H\!\parallel\!c$ out) & $m_z$ &
-  $F_z$: carries $\qfm$ & $\lambda^{4\text{--}7}\equiv0$\\
+\textbf{A, cross}\newline $H\!\parallel\!a$, $E\!\parallel\!c$ in;
+$H\!\parallel\!c$ out
+& Fe: Zeeman $H_x F_x$ $\Rightarrow$ $\qafm$ (which carries
+  $\delta F_x$).\newline
+  Tm: $E\!\parallel\!c$ on the $c$-axis dipoles, drive vector
+  $(\lambda^2,\lambda^5,\lambda^7)\!\propto\!(d_z^{\rm eff},0,\mu^z_{23})$
+  $\Rightarrow$ $E_{12}$ and $E_{23}$; $E_{13}$ \emph{dark}.
+& $m_z=F_z+\mu^z_{12}\lambda^2+\beta\lambda^1\lambda^2$.\newline
+  $F_z\equiv0$ (machine zero: $\qafm$ has no $c$-axis moment), so the
+  channel is \emph{purely} Tm: the $E_{12}$ dipole, its $W^{xz}_1$-forced
+  $\qafm$ sideband, and the quadratic term radiating at $2E_{12}$.\\
+\textbf{A, same}\newline $H\!\parallel\!a$, $E\!\parallel\!c$ in;
+$H\!\parallel\!a$ out
+& identical to A-cross --- it is the same experiment, differing only in
+  the analyser.
+& $m_x=F_x+2.39\lambda^5+0.91\lambda^7$ (quadratures
+  $\lambda^{4},\lambda^{6}$).\newline
+  Fe $F_x$ carries $\qafm$; the Tm $a$-axis moments carry $E_{13}$ and
+  $E_{23}$.  This is where the CEF--CEF transfers appear.\\
+\textbf{B, cross}\newline $H\!\parallel\!c$, $E\!\parallel\!a$ in;
+$H\!\parallel\!a$ out
+& Fe: Zeeman $H_z F_z$ $\Rightarrow$ $\qfm$ (which carries
+  $\delta F_z$, $\delta F_y$).\newline
+  Tm: the $c$-directed field projects onto $\mu^z_{12}$ only, driving
+  $\lambda^2$ alone $\Rightarrow$ the $\{\lambda^1,\lambda^2,\lambda^3\}$
+  subalgebra closes.
+& $m_x=F_x+2.39\lambda^5+0.91\lambda^7$.\newline
+  The Tm part is \emph{identically zero} ($\lambda^{4\text{--}7}\equiv0$
+  by the closure above), so this channel is pure Fe: a magnon map read
+  out on the $\qafm$ line.\\
+\textbf{B, same}\newline $H\!\parallel\!c$, $E\!\parallel\!a$ in;
+$H\!\parallel\!c$ out
+& identical to B-cross.
+& $m_z=F_z+\mu^z_{12}\lambda^2+\beta\lambda^1\lambda^2$.\newline
+  $F_z$ carries $\qfm$, but the Tm $\lambda^2$ is driven directly here
+  and is $50\times$ larger, so the channel is Tm-dominated --- see the
+  prediction below.\\
 \bottomrule
 \end{tabular}
-\end{center}
-Two entries in this table are exact statements rather than
-approximations, and both do real work.  First, $F_z$ vanishes to
-machine precision ($10^{-15}$ at every frequency) in geometry A: the
-$\qafm$ magnon lives in $\delta F_x$ and has \emph{no} $c$-axis moment,
-so the Fe sublattice is radiatively silent in the geometry-A cross
-channel.  Anything seen there at a magnon frequency must therefore come
-from the Tm ion.  Second, in geometry B the $E\!\parallel\!a$,
-$H\!\parallel\!c$ drive closes on the $\{\lambda^1,\lambda^2,\lambda^3\}$
-subalgebra, so the CEF coordinates $\lambda^{4\text{--}7}$ are
-identically zero and both geometry-B channels are pure magnon maps.
+\end{table}
+
+Two entries are exact statements rather than approximations, and both do
+real explanatory work.  First, $F_z\equiv0$ in geometry A: the $\qafm$
+magnon lives in $\delta F_x$ and has no $c$-axis moment, so the Fe
+sublattice is radiatively silent in the A-cross channel and anything
+seen there at a magnon frequency must come from the Tm ion.  Second, in
+geometry B the $c$-directed drive couples only to $\mu^z_{12}$, closing
+the $\{\lambda^1,\lambda^2,\lambda^3\}$ subalgebra, so
+$\lambda^{4\text{--}7}$ vanish identically and no $E_{13}$ or $E_{23}$
+emission is possible in either geometry-B channel.
 
 \subsection{Geometry A, cross-polarised}
 \label{si:peaksAcross}
@@ -1332,34 +1377,44 @@ polarisation leakage of that channel.  Discriminator: the feature
 should scale as the square of the analyser leakage angle in a
 polariser-purity scan.
 
-\subsection{Geometry B, same-polarised: a pure magnon map (prediction)}
+\subsection{Geometry B, same-polarised: a prediction, and a $\beta$ meter}
 \label{si:peaksBsame}
 
-No data exist for this channel yet, so the entire census is a
-prediction, and a clean one: the analysed moment is $m_z$, and because
-the geometry-B drive closes on the $\{\lambda^{1,2,3}\}$ subalgebra the
-Tm CEF coordinates are \emph{identically} zero.  This is therefore a
-pure Fe magnon map, and observing \emph{any} CEF emission in it would
-falsify the subalgebra structure of the drive.
+No data exist for this channel yet, so its entire census is a
+prediction---and it turns out to be the sharpest test of the
+hyperpolarisability in the whole atlas.  The detected moment is
+$m_z=F_z+\mu^z_{12}\lambda^2+\beta\lambda^1\lambda^2$.  The CEF
+coordinates $\lambda^{4\text{--}7}$ vanish identically here (subalgebra
+closure), so no $E_{13}$ or $E_{23}$ emission is possible; but
+$\lambda^2$ is driven \emph{directly} by the $c$-directed field through
+the large moment $\mu^z_{12}=5.264$, and the resulting Tm signal is
+$\sim\!50\times$ the Fe $F_z$ contribution.  This channel is therefore
+Tm-dominated, not the pure magnon map one might expect.
+
+The consequence depends on $\beta$, which is exactly why it is
+diagnostic:
 \begin{center}\small
 \renewcommand{\arraystretch}{1.25}
 \begin{tabular}{lll}
 \toprule
-peak & amplitude & content\\
+& linear moment only ($\beta=0$) & with $\beta\simeq7\mu$ from the A-cross parity\\
 \midrule
-$(\qafm,\qfm)=(0.90,0.38)$ & $1.00$ & magnon--magnon transfer, reverse
-  direction of the geometry-B cross peak\\
-$(E_{12},\qfm)=(0.52,0.38)$ & $0.42$ & Tm$\to$magnon transfer read out
-  on the $\qfm$ branch\\
-$(\qfm,\qfm)$ & $0.41$ & $\qfm$ diagonal\\
-$(-\qfm,E_{12})$ & $0.38$ & rephasing partner with $E_{12}$ emission\\
+leading & $(\qfm,\qafm)=(0.38,0.90)$, $1.00$ & $(E_{12},2E_{12})=(0.49,1.00)$, $1.00$\\
+next & $(\pm E_{12},E_{12})$, $0.91$--$0.94$ & everything else below $0.10$\\
+then & $(\qfm,E_{12})=(0.38,0.50)$, $0.61$ & ---\\
 \bottomrule
 \end{tabular}
 \end{center}
-The headline is that $(\qafm,\qfm)$ dominates here---precisely the
-feature absent from the geometry-A same-polarised channel---which makes
-the two channels a matched pair and turns the leakage hypothesis above
-into a quantitative test.
+With the $\beta$ inferred from geometry A, the second harmonic is
+$4.1\times$ the magnon--magnon feature and the channel collapses to a
+\emph{single} peak at $(E_{12},2E_{12})$.  Measuring this channel
+therefore reads $\beta$ off directly: a clean one-peak map at
+$(0.5,\,1.0)$ confirms the large hyperpolarisability inferred in
+geometry A, whereas a map led by $(\qfm,\qafm)$ with $E_{12}$ diagonals
+beneath it puts $\beta$ far below that value and would force the
+geometry-A $(0.5,1.0)$ feature back onto one of the alternative
+assignments.  Either outcome is decisive, which makes this the single
+most informative measurement still missing.
 
 % =====================================================================
 \section{The complete atlas}
