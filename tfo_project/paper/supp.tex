@@ -911,16 +911,55 @@ $0.18$--$0.28$, and nothing else above $0.14$---the channel
 (Tm $m_x$): $(E_{12},E_{23})=1.00$, $(E_{12},E_{13})=0.80$, the
 predicted rephasing remnant $0.67$, the two-quantum row $0.32$.
 
-\emph{What remains unexplained.}  The reported second cross-channel
-feature near $(0.5,\,1.0)$ is present in the model but weak: the
-forced-response $(E_{12},\qafm)$ reaches only $\sim6\%$ of the main
-peak at this operating point (and $\sim0.28$ counting the
-$(\qafm,\qafm)$ neighbour).  Raising it within the model requires
-$W^{xz}_1$ at its geometry-B upper bound ($\times4$ at most), so a
-strong experimental peak there would point outside the present
-coupling set---most naturally to an $a$-directed electric dipole on the
-$E_{13}$ transition, which the model does not carry, or to leakage
-from the same-polarized channel where $(E_{12},E_{13})=0.80$ is strong.
+\subsection*{The second cross peak is second-harmonic emission}
+The reported second cross-channel feature near $(0.5,\,1.0)$ is
+\emph{not} the forced-response $(E_{12},\qafm)$ line, which reaches only
+$\sim6\%$ of the main peak here and sits at $0.90$.  It is the
+second harmonic of the $E_{12}$ coherence: $2E_{12}=1.0000$\,THz, the
+reported position.  The model missed it for a structural reason---our
+emitted moment was taken \emph{linear} in the qutrit coordinates,
+$m_z=\mu\lambda^2$, and a linear dipole cannot radiate a harmonic.
+
+Symmetry permits more.  The Tm$^{3+}$ ion sits at the $4c$ site, whose
+point symmetry is the single mirror $m$---\emph{no inversion}---so a
+second-order contribution to the emitted moment is allowed at the Tm
+site (and forbidden at Fe, which occupies the inversion-symmetric $4b$
+site).  The lowest such term compatible with time reversal is
+\begin{equation}
+  m_z \;=\; \mu\,\lambda^2 \;+\; \beta\,\lambda^1\lambda^2 ,
+  \label{eq:shg}
+\end{equation}
+since $\lambda^1$ is $\mathcal T$-even and $\lambda^2$ $\mathcal T$-odd,
+so the product is $\mathcal T$-odd exactly as a magnetization must be;
+and because $\lambda^{1,2}$ both oscillate at $\omega_{12}$, the term
+radiates at $2\omega_{12}$.  This is a detection-side (hyperpolarizability)
+term: the dynamics is untouched.
+
+Evaluated on the existing trajectories, the quadratic channel is
+remarkably clean---it contributes essentially \emph{one} peak, at
+$(+0.49,\,1.00)=(E_{12},2E_{12})$, which is $5.8\times$ its own
+$(E_{12},E_{12})$ diagonal, with only a weak $(\qafm,2E_{12})$
+companion at $0.17$; the result is identical in the local and global
+sublattice frames.  Calibrating $\beta$ by the observed parity of the
+two experimental peaks gives $\beta\simeq7\mu$, and the geometry-A
+cross census becomes
+\[
+(\qafm,E_{12})=1.00,\quad (E_{12},2E_{12})=0.97,
+\]
+with the rephasing partner of the main peak at $0.49$ and nothing else
+above $0.39$---precisely the two peaks the experiment resolves.
+
+Four measurements discriminate this assignment from the
+forced-response one: (i) the line sits at exactly $2E_{12}$ and
+\emph{tracks $E_{12}$}, whereas a $\qafm$ reading would soften toward
+the spin reorientation; (ii) it is one field order higher than
+$(\qafm,E_{12})$, so it grows faster with fluence; (iii) its width is
+twice the $E_{12}$ linewidth ($\approx0.076$\,THz), against
+$0.003$\,THz for anything magnon-derived; (iv) it is independent of
+$W^{xz}_1$ and of the Zeeman drive.  A standing prediction of
+Eq.~\eqref{eq:shg} is the companion harmonic of the magnon-forced
+response at $(\qafm,2\qafm)=(0.9,\,1.8)$\,THz, which the model puts at
+$0.39$.
 
 % =====================================================================
 \section{The complete atlas}

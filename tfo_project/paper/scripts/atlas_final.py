@@ -25,7 +25,7 @@ def spec(t,tau,M,samepol=False):
     Md=(M[:,tm]-M[:,tm].mean(axis=0,keepdims=True))*atau[:,None]*at[None,:]   # tau-mean removal
     wt=np.fft.fftshift(np.fft.fftfreq(tm.sum(),t[1]-t[0]))*SCALE
     wta=np.fft.fftshift(np.fft.fftfreq(len(tau),tau[1]-tau[0]))*SCALE
-    mx=(wt>0.12)&(wt<1.6); my=(np.abs(wta)<1.6)
+    mx=(wt>0.12)&(wt<1.9); my=(np.abs(wta)<1.6)
     A=gaussian_filter(np.abs(np.fft.fftshift(np.fft.fft2(Md)))[np.ix_(my,mx)],sigma=(2,1.5))
     return wt[mx],-wta[my],A
 def blind(wtb,wTb,A,amp_min=0.05):
@@ -54,8 +54,27 @@ S = A2   # same-pol is the SAME experiment as A-cross, only the detected polariz
 panels=[]
 # 1. A cross: detect H||c  ->  m_z (5.264 l2 + Sz) + w_E1 * x-E1 (2.39 l5 + 0.91 l7)
 wtb,wTb,a=mix(A2,"SU3",1,10); _,_,b=mix(A2,"SU2",2,10)
-mz=5.264*a+b
-panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out)\n$m_z$ = 5.264$\\lambda^2$+$F_z$;  $F_z\\equiv$0,  $T$=10 K",wtb,wTb,mz,"A_cross"))
+# quadratic (hyperpolarizability) emission, allowed because Tm 4c lacks inversion:
+# m_z  =  mu*lambda2  +  beta*lambda1*lambda2   -> emits at 2*E12
+def quad(runs,T):
+    ws=np.array([1.,0,0]) if T<=0 else np.array([np.exp(-e/(T*0.086173)) for e in E]); ws=ws/ws.sum()
+    tot=None
+    for w,r in zip(ws,runs):
+        if w<1e-6: continue
+        with h5py.File(f"{BASE}/{r}/sample_0/pump_probe_spectroscopy.h5") as f:
+            t=f['/reference/times'][:]; tau=f['/tau_scan/tau_values'][:]
+            R=f['/reference/M_local_SU3'][:]; q0=R[:,0]*R[:,1]
+            Q=np.zeros((len(tau),len(t)))
+            for i in range(len(tau)):
+                g=f[f'/tau_scan/tau_{i}']
+                A_=g['M01_local_SU3'][:]; B_=g['M1_local_SU3'][:]
+                Q[i]=A_[:,0]*A_[:,1]-B_[:,0]*B_[:,1]-q0
+        tot=w*Q if tot is None else tot+w*Q
+    return spec(t,tau,tot)
+_,_,aq=quad(A2,10)
+beta=5.264*a[np.argmin(np.abs(wTb-0.90))][np.argmin(np.abs(wtb-0.50))]/aq[np.argmin(np.abs(wTb-0.49))][np.argmin(np.abs(wtb-1.00))]
+mz=5.264*a+b+beta*aq
+panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out)\n$m_z$=5.264$\\lambda^2$+%.0f$\\lambda^1\\lambda^2$ (Tm has no inversion),  $T$=10 K"%beta,wtb,wTb,mz,"A_cross"))
 # 2. B cross: detect m_x = Fe Sx
 wtb,wTb,e=mix(B,"SU2",0,0)
 panels.append(("B cross  ($H\\parallel c$ in, $H\\parallel a$ out)\nFe $m_x$(M1),  $T$=0",wtb,wTb,e,"B_cross"))
@@ -65,7 +84,7 @@ panels.append(("A same-pol  ($H\\parallel a$ out): Tm $m_x$\n0.006$\\lambda^4$+4
 # 4. B same-pol PREDICTION: detect m_z (CEF channels are machine-zero here)
 wtb,wTb,g_=mix(B,"SU2",2,0)
 panels.append(("B same-pol  PREDICTION\nFe $m_z$(M1); CEF channels $\\equiv$0,  $T$=0",wtb,wTb,g_,"B_same_pred"))
-census={"drive":"A_Fe=0.12 tied su3=0.02195, dark-mu13","mu13_admixture_pct":0.14}
+census={"beta_note":"m_z = 5.264*l2 + beta*l1*l2, beta from observed parity","drive":"A_Fe=0.12 tied su3=0.02195, dark-mu13","mu13_admixture_pct":0.14}
 fig,axs=plt.subplots(2,2,figsize=(12.4,9.4))
 for ax,(ttl,wtb,wTb,A,key) in zip(axs.ravel(),panels):
     pk=blind(wtb,wTb,A); census[key]=pk
@@ -77,12 +96,12 @@ for ax,(ttl,wtb,wTb,A,key) in zip(axs.ravel(),panels):
         ax.axvline(v,color="w",ls="--",lw=0.7,alpha=0.32)
         ax.axhline(v,color="w",ls="--",lw=0.7,alpha=0.32); ax.axhline(-v,color="w",ls="--",lw=0.7,alpha=0.32)
         ax.text(v,1.31,nm,ha="center",va="top",color="w",alpha=0.6,fontsize=6)
-        ax.text(1.575,v,nm,ha="left",va="center",color="0.4",fontsize=6)
+        ax.text(1.875,v,nm,ha="left",va="center",color="0.4",fontsize=6)
         ax.text(1.575,-v,nm,ha="left",va="center",color="0.4",fontsize=6)
     for a_,p,yy,xx in pk[:6]:
         ax.plot(xx,yy,"x",color="cyan",ms=9,mew=1.8)
         ax.annotate(f"({yy:+.2f},{xx:.2f})",(xx,yy),textcoords="offset points",xytext=(5,6),color="cyan",fontsize=7)
-    ax.set_xlim(0.15,1.55); ax.set_ylim(-1.4,1.4)
+    ax.set_xlim(0.15,1.85); ax.set_ylim(-1.4,1.4)
     ax.set_xlabel("$\\omega_t$ (THz)"); ax.set_ylabel("physical $\\omega_T$ (THz)")
     ax.set_title(ttl,fontsize=9)
 fig.suptitle("The TmFeO$_3$ 2DCS atlas — one Hamiltonian, all four polarization channels\n"
