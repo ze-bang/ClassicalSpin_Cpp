@@ -6,6 +6,7 @@
 
 \usepackage{amsmath,amssymb,mathtools,bm}
 \usepackage{graphicx}
+\graphicspath{{./}}
 \usepackage{geometry}
 \geometry{margin=2.2cm}
 \usepackage{booktabs,array,longtable}
@@ -1856,6 +1857,53 @@ $\omega_\tau=E_{13}$ rows requires, since a bright $\mu^z_{13}$ would
 store an $E_{13}$ delay coherence at first order and produce an
 $(E_{13},E_{23})$ peak with the same dipole product as the observed
 $(E_{12},E_{23})$.
+
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/atlas_final.png}
+\caption{The atlas: all four polarisation channels from one Hamiltonian
+at one operating point.  Detection is resolved by the emitted magnetic
+polarisation, so each panel reads one Cartesian moment component
+(\cref{sec:detops}).  Dashed guides mark the five mode energies; cyan
+crosses are blind-census maxima; the $\omega_\tau=0$ pump--probe row is
+removed.}
+\label{fig:found-atlas}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/samepol_darkmu13_final.png}
+\caption{Geometry-A same-polarised channel at $0$, $10$ and $20$\,K,
+with the $S_{\rm DC}(\tau)$ panel in which the rectified $(E_{12},0)$
+line appears at $+0.49$\,THz.  The census is stable across this
+temperature range.}
+\label{fig:found-samepol}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/samepol_vs_experiment.png}
+\caption{Digitised measurement (left) against the model with the three
+symmetry-required detection weights fitted (right), same axes and
+colour scale.  Crosses mark the two designated peaks.  Four of the six
+measured amplitudes are reproduced within $15\%$
+(\cref{sec:samepolfit}).}
+\label{fig:found-vsexp}
+\end{figure*}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{figs/tm_dipole_forced.png}
+\caption{Why the Tm dipole emits at the magnon frequency: it is an
+off-resonant \emph{forced} response through $G_z\,\delta S_x\lambda^1$,
+not harmonic generation.  (a) the dipole rings at its own $E_{12}$ with
+a small $0.90$\,THz wobble on top; (b) that wobble grows linearly with
+$W^{xz}_1$ and is phase-locked to the magnon driving it; (c) the line
+sits at the magnon frequency, not at the $2E_{12}$ harmonic, which is
+present but $12\times$ weaker.}
+\label{fig:found-forced}
+\end{figure}
 
 \subsection{Result: the anchors}
 \label{sec:anchors}
