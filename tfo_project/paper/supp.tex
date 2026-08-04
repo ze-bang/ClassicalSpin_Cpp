@@ -725,9 +725,9 @@ verification, and the falsification ladder}
 % =====================================================================
 
 \subsection{Configuration}
-The final same-polarization configuration (run \texttt{it14hr};
-parameter files in
-\texttt{tmfeo3\_2dcs\_final/params\_samepol\_final/}) is the unchanged
+The same-polarisation configuration first isolated in run
+\texttt{it14hr} (superseded by \texttt{flu0.12} at the settled operating
+point of \cref{si:operating}; parameters in \texttt{paper/params/}) is the unchanged
 v4 Hamiltonian with: measured pulse; drive vector
 $(0,3.0,0,0,\mathbf{0},0,0.9128,0)$ on
 $(\lambda^1,\dots,\lambda^8)$---i.e.\ the $1\!\to\!3$ leg removed
@@ -784,7 +784,7 @@ The dark-dipole scenario was reached by exhausting the alternatives;
 each row was run in the full lattice model with the blind census:
 \begin{center}\small
 \renewcommand{\arraystretch}{1.25}
-\begin{tabular}{lll}
+\begin{tabular}{p{4.6cm}p{1.1cm}p{7.4cm}}
 \toprule
 hypothesis & run & outcome\\
 \midrule
@@ -837,35 +837,38 @@ piece shifts the magnon lines by $\sim$7\%); drive legs
 $(d_z,\mu^z_{13},\mu^z_{23})\propto(3.0,\,0,\,0.9128)$ for
 $E\!\parallel\!c$ (the dark-$\mu_{13}$ rule) and the auto-projected
 Zeeman drive for the magnetic field; dampings and emission weights from
-Table~\ref{tab:si-exp}.  The final regeneration (runs \texttt{fin\_A},
-\texttt{fin\_B}, \texttt{fin\_S}; three Boltzmann seeds each,
-thermal channel included) gives the
+Table~\ref{tab:si-exp}.  The final regeneration (runs \texttt{flu0.12} for geometry A and
+\texttt{fin\_B} for geometry B, three Boltzmann seeds each, thermal
+channel included) gives the
 blind censuses, normalized per channel [amp, $(\omega_T,\omega_t)$,
 $+$\,=\,non-rephasing]:
-\begin{center}\small
+\begin{center}\footnotesize
 \renewcommand{\arraystretch}{1.2}
-\begin{tabular}{lll}
+\begin{tabular}{p{1.5cm}p{4.4cm}p{5.6cm}}
 \toprule
-channel & leading genuine peaks (T=0) & reading\\
+channel & leading genuine peaks & reading\\
 \midrule
-A cross (E1+M1 comp.) & $1.00\,(+0.49,0.90)$; $0.91\,(+0.90,0.48)$;
-  magnon diag.\ absent & $W^{xz}_1$ reverse; $W^{yy}_1$ forward\\
-B cross ($S_x$) & $1.00\,(+0.38,0.90)$; $0.45\,(+0.53,0.89)$;
-  $0.17\,(-0.42,0.90)$ & magnon--magnon; $\kappa^B$ transfer; R partner\\
-A same (composite) & $1.00\,(+0.49,0.71)$\footnotemark;
-  $0.72\,(+0.49,1.20)$; $0.59\,(-0.48,0.70)$ &
-  population-route transfer; $\mu_{13}$-throttled; R remnant\\
+A cross\newline ($m_z$) & $1.00\,(+0.90,0.50)$;
+  $0.97\,(+0.49,1.00)$; $0.52\,(-0.90,0.50)$ &
+  $W^{yy}_1$ magnetoelectric peak; $2E_{12}$ harmonic; R partner\\
+B cross\newline ($m_x$) & $1.00\,(+0.38,0.90)$;
+  $0.45\,(+0.53,0.89)$; $0.17\,(-0.42,0.90)$ &
+  magnon--magnon; $\kappa^B$ transfer; R partner\\
+A same\newline ($m_x$) & $1.00\,(+0.49,0.70)$;
+  $0.80\,(+0.49,1.20)$; $0.67\,(-0.49,0.70)$ &
+  population-route transfer; $\mu^z_{13}$-throttled; R remnant\\
+B same\newline ($m_z$) & $1.00\,(+0.49,1.00)$, nothing else above $0.07$ &
+  single harmonic peak; measures $\beta$\\
 \bottomrule
 \end{tabular}
 \end{center}
-\footnotetext{Cross peaks normalized to the leading cross peak; the
-$\omega_T\!\approx\!0$ pump--probe bands are excluded per the census
-convention of Sec.~\ref{si:numerics}.}
+Cross peaks are normalised within each channel and the
+$\omega_\tau\!\approx\!0$ pump--probe row is excluded per the census
+convention of Sec.~\ref{si:numerics}.
 The complete censuses at all temperatures, together with the normalized
-spectra themselves, are archived as
-\texttt{paper/data/census\_final\_picture.json},
-\texttt{census\_final\_scenario.json}, and
-\texttt{paper/data/*.npz}; the buildup magnitude at this conservative
+spectra themselves, are archived under
+\texttt{paper/data/} as \texttt{census\_atlas\_final.json},
+\texttt{census\_final\_picture.json} and the \texttt{.npz} spectra; the buildup magnitude at this conservative
 calibration is a free dial ($c_{\rm heat}$) that the measured
 late-to-impulsive intensity ratio will pin.
 
