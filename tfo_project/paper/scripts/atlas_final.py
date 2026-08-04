@@ -48,26 +48,24 @@ def mix(runs,sp,l,T,samepol=False):
         if w<1e-6: continue
         t,tau,M=load(r,sp,l); tot=w*M if tot is None else tot+w*M
     return spec(t,tau,tot,samepol)
-A2=[f"EXPERIMENTAL_FINAL/fin_A2_{g}" for g in ["gs1","gs2","gs3"]]
+A2=[f"flu0.12_{g}" for g in ["gs1","gs2","gs3"]]   # geometry A: ONE drive for both its channels
 B =[f"EXPERIMENTAL_FINAL/fin_B_{g}"  for g in ["gs1","gs2","gs3"]]
-S =[f"fin_S_{g}" for g in ["gs1","gs2","gs3"]]
+S = A2   # same-pol is the SAME experiment as A-cross, only the detected polarization differs
 panels=[]
 # 1. A cross: detect H||c  ->  m_z (5.264 l2 + Sz) + w_E1 * x-E1 (2.39 l5 + 0.91 l7)
-wtb,wTb,a=mix(A2,"SU3",1,0); _,_,b=mix(A2,"SU2",2,0)
-_,_,c=mix(A2,"SU3",4,0); _,_,d=mix(A2,"SU3",6,0)
-mz=5.264*a+b; xe1=2.3915*c+0.9128*d
-wE1=mz[np.argmin(np.abs(wTb-0.90))][np.argmin(np.abs(wtb-0.50))]/xe1[np.argmin(np.abs(wTb-0.51))][np.argmin(np.abs(wtb-1.20))]
-panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out)\n$m_z$(M1) + %.2f$\\times$$x$-E1,  $T$=0"%wE1,wtb,wTb,mz+wE1*xe1,"A_cross"))
+wtb,wTb,a=mix(A2,"SU3",1,10); _,_,b=mix(A2,"SU2",2,10)
+mz=5.264*a+b
+panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out)\n$m_z$ = 5.264$\\lambda^2$+$F_z$;  $F_z\\equiv$0,  $T$=10 K",wtb,wTb,mz,"A_cross"))
 # 2. B cross: detect m_x = Fe Sx
 wtb,wTb,e=mix(B,"SU2",0,0)
 panels.append(("B cross  ($H\\parallel c$ in, $H\\parallel a$ out)\nFe $m_x$(M1),  $T$=0",wtb,wTb,e,"B_cross"))
 # 3. A same-pol: detect E||c -> CEF composite
 wtb,wTb,f4=mix(S,"SU3",3,10,True); _,_,f6=mix(S,"SU3",5,10,True)
-panels.append(("A same-pol  ($E\\parallel c$ in and out)\n0.05$\\lambda^4$+4.4$\\lambda^6$,  $T$=10 K",wtb,wTb,0.05*f4+4.4*f6,"A_same"))
+panels.append(("A same-pol  ($H\\parallel a$ out): Tm $m_x$\n0.006$\\lambda^4$+4.4$\\lambda^6$,  $T$=10 K",wtb,wTb,0.006*f4+4.4*f6,"A_same"))
 # 4. B same-pol PREDICTION: detect m_z (CEF channels are machine-zero here)
 wtb,wTb,g_=mix(B,"SU2",2,0)
 panels.append(("B same-pol  PREDICTION\nFe $m_z$(M1); CEF channels $\\equiv$0,  $T$=0",wtb,wTb,g_,"B_same_pred"))
-census={"wE1":round(float(wE1),2)}
+census={"drive":"A_Fe=0.12 tied su3=0.02195, dark-mu13","mu13_admixture_pct":0.14}
 fig,axs=plt.subplots(2,2,figsize=(12.4,9.4))
 for ax,(ttl,wtb,wTb,A,key) in zip(axs.ravel(),panels):
     pk=blind(wtb,wTb,A); census[key]=pk

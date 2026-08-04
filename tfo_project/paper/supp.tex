@@ -864,6 +864,65 @@ leakage of this dominant geometry-B feature; a polarizer-purity scan
 (the peak should scale with the leakage angle squared) discriminates.
 
 % =====================================================================
+\section{One drive for one experiment: the operating point}
+\label{si:operating}
+% =====================================================================
+
+The two geometry-A channels are \emph{the same measurement}---same
+$H\parallel a$, $E\parallel c$ excitation, differing only in the
+detected polarization---so they must share one drive.  Two constraints
+then fix it, and they are independent:
+
+\emph{(i) Fluence, from the cross channel.}  The Tm and Fe drives are
+not free of one another: $A_{\rm Tm}=g_{\rm ratio}|v|A_{\rm Fe}$, so a
+single fluence sets both.  Scanning it (runs \texttt{flu*}) shows the
+cross channel is a sensitive fluence meter.  At the strong drive we had
+been using ($A_{\rm Fe}=1.2$) the channel is nonperturbative: the
+$E_{12}$ diagonal reaches $1.45$ of the $(\qafm,E_{12})$ peak and a
+forest of multi-magnon strays appears at
+$\omega_\tau=0.63,\,0.72,\,0.99,\,1.25,\,1.51$\,THz, none of them
+observed.  Lowering the fluence removes them monotonically---the
+diagonal falls to $0.56$, $0.16$, $0.06$ at
+$A_{\rm Fe}=0.4,\,0.12,\,0.04$---so the experiment sits in the
+perturbative regime, $A_{\rm Fe}\lesssim0.12$.  (Geometry B was
+independently at $A_{\rm Fe}=0.1$, so one fluence already serves all
+geometries.)
+
+\emph{(ii) The residual $\mu^z_{13}$ admixture, from the
+same-polarized channel.}  Lowering the fluence inverts the
+same-polarized hierarchy, because the $(E_{12},E_{23})$ route is one
+field order higher than $(E_{12},E_{13})$:
+$(E_{12},E_{13})/(E_{12},E_{23})$ runs $0.72\to1.28\to2.79\to5.25$ as
+$A_{\rm Fe}$ drops.  The one remaining dial is the residual $z$-dipole
+admixture of the $1\!\to\!3$ transition, which multiplies the $E_{13}$
+emission only.  Requiring the observed ordering
+[$(E_{12},E_{23})$ strongest, $(E_{12},E_{13})$ below it] at the
+fluence fixed above gives $\mu^z_{13}/\mu^z_{23}=0.14\%$---consistent
+with the ``dark'' assignment of \cref{si:samepol} and now
+\emph{measured} rather than assumed.
+
+At this operating point ($A_{\rm Fe}=0.12$, tied
+$A_{\rm Tm}=0.02195$, dark-$\mu_{13}$ drive, $0.14\%$ admixture) both
+geometry-A channels come out right at once.  Cross (Tm $m_z$ alone;
+$F_z\equiv0$): $(\qafm,E_{12})=1.00$ with its rephasing partner
+$0.51$, then only $(\qafm,\qafm)_{\rm Tm}=0.28$, the $E_{12}$ diagonal
+$0.18$--$0.28$, and nothing else above $0.14$---the channel
+``cleanly resolves $(\qafm,E_{12})$'', as reported.  Same-polarized
+(Tm $m_x$): $(E_{12},E_{23})=1.00$, $(E_{12},E_{13})=0.80$, the
+predicted rephasing remnant $0.67$, the two-quantum row $0.32$.
+
+\emph{What remains unexplained.}  The reported second cross-channel
+feature near $(0.5,\,1.0)$ is present in the model but weak: the
+forced-response $(E_{12},\qafm)$ reaches only $\sim6\%$ of the main
+peak at this operating point (and $\sim0.28$ counting the
+$(\qafm,\qafm)$ neighbour).  Raising it within the model requires
+$W^{xz}_1$ at its geometry-B upper bound ($\times4$ at most), so a
+strong experimental peak there would point outside the present
+coupling set---most naturally to an $a$-directed electric dipole on the
+$E_{13}$ transition, which the model does not carry, or to leakage
+from the same-polarized channel where $(E_{12},E_{13})=0.80$ is strong.
+
+% =====================================================================
 \section{The complete atlas}
 \label{si:atlas}
 % =====================================================================
