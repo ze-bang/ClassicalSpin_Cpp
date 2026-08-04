@@ -1750,6 +1750,72 @@ $c$-axis electric dipole---the latter being the natural direction to
 look, precisely because it would evade the leak by symmetry rather than
 by tuning.
 
+\subsection{Campaign: should the drive act on $\lambda^{1,4,6}$ instead of
+$\lambda^{2,5,7}$?}
+\label{si:drivecampaign}
+
+The drive vector carries components only on $\lambda^2,\lambda^5,\lambda^7$
+(the $\mathcal T$-odd triplet, i.e.\ the projected magnetic moments), whereas
+every conversion vertex we retain acts on $\lambda^1$ or $\lambda^3$ ($\mathcal
+T$-even).  Since the CEF transitions are E1-\emph{bright}
+($f=6.5$--$8.7$) and electric dipoles are $\mathcal T$-even, one might expect
+the drive to belong on $\lambda^1,\lambda^4,\lambda^6$ instead.  We tested
+this directly (runs \texttt{cA\_e}, \texttt{cB\_e1}, \texttt{cB\_e1m}).  The
+question splits in two, with different answers.
+
+\paragraph{Quadrature: immaterial.}
+$\lambda^1$ and $\lambda^2$ are the two quadratures of the \emph{same}
+$1\!\leftrightarrow\!2$ coherence, so driving one or the other differs by a
+phase, not by physics.  Geometry B makes this explicit: replacing its
+$\lambda^2$ (magnetic) drive by a $\lambda^1$ (electric $d_x$) drive of the
+same strength leaves the spectra unchanged---
+$(\qfm,\qafm)=1.00$ and $(E_{12},\qafm)=0.44$ against $1.00$ and $0.45$, and
+an identical single-peak same-polarised map---with
+$|E_{12}|=2.16\times10^{-2}$ versus $2.88\times10^{-2}$.  The apparent
+mismatch between a drive on $\lambda^2$ and vertices on $\lambda^1$ is
+therefore not a defect: both act on the same coherence, and the precession
+$\dot\lambda^1=-\Delta_{12}\lambda^2$ exchanges them within one period.
+
+\paragraph{Which transition: decisive, and it is the crux.}
+What does matter is \emph{which transition} the field addresses, and there
+parity is unambiguous: $E\!\parallel\!c$ couples through $d_z$, which connects
+$1\!\leftrightarrow\!3$ and $2\!\leftrightarrow\!3$ ($\lambda^{4},\lambda^{6}$),
+while $1\!\leftrightarrow\!2$ requires $d_{x}$, i.e.\ $E\!\parallel\!a$.
+Driving geometry A on its parity-allowed blocks inverts the coherence
+hierarchy:
+\begin{center}\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{lccc}
+\toprule
+geometry-A drive & $|E_{12}|$ & $|E_{13}|$ & $|E_{23}|$\\
+\midrule
+current, on $\lambda^{2},\lambda^{7}$ & $2.09\times10^{-2}$ &
+  $3.6\times10^{-5}$ & $4.3\times10^{-7}$\\
+electric $d_z$, on $\lambda^{4},\lambda^{6}$ & $2.07\times10^{-3}$ &
+  $7.1\times10^{-3}$ & $8.5\times10^{-6}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+The parity-allowed drive makes $E_{13}$ the dominant coherence by a factor
+$3.4$, and suppresses $E_{12}$ tenfold.  The consequences propagate exactly as
+expected: the $(E_{12},2E_{12})$ harmonic disappears from the cross channel
+(its parent coherence is now weak), and the same-polarised census becomes
+magnon-delay dominated.  The measured inventory demands the opposite---strong
+$\omega_\tau=E_{12}$ rows and \emph{no} $\omega_\tau=E_{13}$ row anywhere.
+
+\paragraph{Verdict.}
+Moving the drive to the $\mathcal T$-even set does not simplify the picture and
+cannot recover the peaks: for a given transition it changes nothing (quadrature),
+and for the transition selection it makes the agreement worse.  The campaign
+therefore sharpens rather than removes the tension of
+\cref{si:reciprocity}: the data require the $1\!\leftrightarrow\!2$ transition
+to be driven in geometry A, which is precisely the channel that mirror parity
+forbids and only the $\Gamma_2$-induced symmetry breaking can open.  The
+$E_{12}$-dominated coherence hierarchy of the first row above is thus not an
+artefact of putting the drive on $\lambda^2$; it is what the measurement
+requires, and its origin remains the exchange-induced coupling whose
+reciprocity partner has yet to be found in the data.
+
 % =====================================================================
 \section{Data and code availability}
 % =====================================================================
