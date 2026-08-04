@@ -77,13 +77,13 @@ mz=5.264*a+b+beta*aq
 panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out)\n$m_z$=5.264$\\lambda^2$+%.0f$\\lambda^1\\lambda^2$ (Tm has no inversion),  $T$=10 K"%beta,wtb,wTb,mz,"A_cross"))
 # 2. B cross: detect m_x = Fe Sx
 wtb,wTb,e=mix(B,"SU2",0,0)
-panels.append(("B cross  ($H\\parallel c$ in, $H\\parallel a$ out)\nFe $m_x$(M1),  $T$=0",wtb,wTb,e,"B_cross"))
+panels.append(("B cross  ($H\\parallel c$ in, $H\\parallel a$ out)\nFe $m_x$(M1); Tm $m_x{\\propto}\\lambda^{5,7}\\equiv$0,  $T$=0",wtb,wTb,e,"B_cross"))
 # 3. A same-pol: detect E||c -> CEF composite
 wtb,wTb,f4=mix(S,"SU3",3,10,True); _,_,f6=mix(S,"SU3",5,10,True)
 panels.append(("A same-pol  ($H\\parallel a$ out): Tm $m_x$\n0.006$\\lambda^4$+4.4$\\lambda^6$,  $T$=10 K",wtb,wTb,0.006*f4+4.4*f6,"A_same"))
 # 4. B same-pol PREDICTION: detect m_z (CEF channels are machine-zero here)
 wtb,wTb,g_=mix(B,"SU2",2,0); _,_,bl2=mix(B,"SU3",1,0); _,_,bq=quad(B,0)
-panels.append(("B same-pol  PREDICTION ($m_z$ readout)\n$F_z$+5.264$\\lambda^2$+%.0f$\\lambda^1\\lambda^2$;  CEF $\\equiv$0,  $T$=0"%beta,
+panels.append(("B same-pol  PREDICTION ($m_z$ readout)\n$F_z$+5.264$\\lambda^2$+%.0f$\\lambda^1\\lambda^2$;  $\\lambda^{4-7}\\equiv$0,  $T$=0"%beta,
                wtb,wTb,g_+5.264*bl2+beta*bq,"B_same_pred"))
 census={"beta_note":"m_z = 5.264*l2 + beta*l1*l2, beta from observed parity","drive":"A_Fe=0.12 tied su3=0.02195, dark-mu13","mu13_admixture_pct":0.14}
 fig,axs=plt.subplots(2,2,figsize=(12.4,9.4))
