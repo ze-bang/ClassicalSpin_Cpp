@@ -431,6 +431,45 @@ $\omega_t$, and softens toward the spin reorientation; the
 $2E_{12}$ harmonic reading sits rigidly at $1.00$\,THz, is broader, and
 grows one field power faster.
 
+\paragraph{How a $\qafm$ emission is possible at all in this channel.}
+The cross channel detects $m_z$ (plus $x$-E1), and the $\qafm$ magnon
+has \emph{no} $F_z$ component: the simulated Fe $S_z$ is dark to
+machine precision ($\sim10^{-15}$ at every frequency, run
+\texttt{fin\_A2}), so the magnon never radiates here.  Two distinct
+things follow.  (i) The main peak is unaffected---$\qafm$ occupies the
+\emph{delay} axis, where no radiation is required; it is excited
+through $F_x$ (which carries it strongly, $2.1\times10^{-3}$ against
+the $E_{12}$ line's $2.4\times10^{-4}$ in the same channel) and hands
+its phase to the Tm ion, which radiates at $E_{12}$.  (ii) The reverse
+peak's $\qafm$ \emph{emission} comes from the Tm dipole, not the
+magnon: in $\Gamma_2$ the static vertex
+$W^{xz}_1S_xS_z\lambda^1$ contains $G_z\,\delta S_x\,\lambda^1$, a
+linear hop between the magnon coordinate and $\lambda^1$, which
+off-resonantly admixes magnon character into the Tm $m_z$ dipole.
+Verified in linear response (probe-only trajectories):
+\begin{center}\small
+\begin{tabular}{lccc}
+\hline
+$W^{xz}_1$ & $m_z$ weight at $0.90$ & admixture & 2D peak $(E_{12},\qafm)$\\
+\hline
+$0$    & $2.2\times10^{-5}$ & $0.09\%$ & $1.1\times10^{-2}$ (residual)\\
+$0.01$ & $2.9\times10^{-4}$ & $1.2\%$  & $3.9\times10^{-2}$\\
+$0.02$ & $6.1\times10^{-4}$ & $2.6\%$  & $1.2\times10^{-1}$\\
+\hline
+\end{tabular}
+\end{center}
+The admixture is linear in $W^{xz}_1$ and the 2D peak quadratic
+(transfer $\times$ detection; $3.7\times$ measured against $4\times$
+expected), and the sideband sits at $0.8999$\,THz---the magnon line
+itself, not the $\qfm+E_{12}=0.876$ combination.  Two consequences:
+the feature is a dedicated $W^{xz}_1$ meter (intensity
+$\propto (W^{xz}_1)^4$), and, because the geometry-B mixer sweep bounds
+$W^{xz}_1\lesssim0.02$, the model caps its $0.90$ component at
+$\sim0.5$--$0.6$ of the main peak: full parity of the
+\emph{$0.90$ line alone} with the main peak would exceed that bound and
+falsify the static-hybridization assignment, favouring the $1.00$/$1.20$
+(harmonic and $x$-E1) readings of the reported feature instead.
+
 \begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{figs/reverseW_peak.png}
