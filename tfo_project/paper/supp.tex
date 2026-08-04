@@ -1683,6 +1683,73 @@ $\omega_\tau=E_{12}$ rows collapse there while $(\qafm,E_{12})$
 persists, the symmetry-broken picture is confirmed and $d_z^{\rm eff}$
 is measured by the size of the collapse.
 
+\subsection{Is there a sweet spot? A one-parameter scan}
+\label{si:sweetspot}
+
+The two pictures differ by one number: the strength $d_z^{\rm eff}$ of
+the symmetry-broken $c$-axis coupling to the $1\!\leftrightarrow\!2$
+transition, which the working model uses freely and strict reciprocity
+sets to zero.  Enforcing reciprocity means putting the \emph{same}
+$d_z^{\rm eff}$ in the drive and in the same-polarised emission, and
+scanning it (runs \texttt{recip\_Adark}, \texttt{sweet03/10/30},
+\texttt{full10/30}) asks whether an intermediate value recovers
+everything.
+
+\begin{center}\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{ccccc}
+\toprule
+$d_z^{\rm eff}$ & same-pol leader & leak $(\cdot,E_{12})/(E_{12},E_{23})$
+& $(E_{12},E_{13})/(E_{12},E_{23})$ & cross $(E_{12},2E_{12})$\\
+\midrule
+$0$   & $(\qafm,E_{13})$ & $0.73$ & $9.66$ & $0.01$\\
+$0.3$ & $(\qafm,E_{12})$ leak & $1.77$ & $6.85$ & $0.02$\\
+$1.0$ & $(\qafm,E_{12})$ leak & $3.57$ & $2.76$ & $0.15$\\
+$3.0$ & $(\qafm,E_{12})$ leak & $4.21$ & $1.21$ & $0.62$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{There is no sweet spot in $d_z^{\rm eff}$.}
+The obstruction is structural rather than numerical: the strength of
+the $E_{12}$ delay coherence and the strength of its
+reciprocity-required emission are \emph{both} proportional to
+$d_z^{\rm eff}$, so their ratio cannot be tuned.  Raising
+$d_z^{\rm eff}$ to make $E_{12}$ dominate the delay axis raises the
+emission leak in lock step; the leak already exceeds the CEF peaks by
+$d_z^{\rm eff}=0.3$ and reaches $4.2\times$ by $d_z^{\rm eff}=3$, so at
+every non-zero value the same-polarised channel is led by an $E_{12}$
+emission line at $\omega_t=0.50$ that the measured inventory does not
+contain.  The cross channel behaves in the opposite way---the
+$(E_{12},2E_{12})$ harmonic needs $d_z^{\rm eff}\gtrsim3$ to reach
+$0.62$---so the two channels pull the parameter in opposite directions.
+
+\paragraph{The only reciprocity-clean point, and what it costs.}
+At $d_z^{\rm eff}=0$ the leak vanishes by construction and the
+$E_{12}$ delay coherence survives, created by magnon conversion through
+$W^{yy}_1$ rather than by any dipole: the same-polarised channel then
+shows $(E_{12},E_{13})$ at $0.71$ of the leading feature.  What it does
+not do is place that feature \emph{first}: the leading row is
+$(\qafm,E_{13})$, i.e.\ magnon-delay, whereas experiment wants the
+magnon rows weak.  The entire residual discrepancy of the enforced
+model is therefore one ratio,
+\begin{equation}
+  R=\frac{\text{$E_{12}$-delay rows}}{\text{$\qafm$-delay rows}}
+  \Big|_{\rm same-pol}, \qquad
+  R_{\rm model}\simeq0.7,\quad R_{\rm exp}\gg1 .
+\end{equation}
+Since at $d_z^{\rm eff}=0$ the $E_{12}$ coherence is conversion-made,
+$R$ scales as $W^{yy}_1A_{\rm Fe}$---and both factors are already pinned
+by other observables ($W^{yy}_1$ by the geometry-A cross peak,
+$A_{\rm Fe}$ by the absence of nonperturbative strays), so $R$ is a
+\emph{prediction} of the enforced model, not a free parameter.  Closing
+the remaining factor of a few requires either a larger two-magnon
+conversion than the cross peak permits, or an additional Fe--Tm vertex
+that feeds the $1\!\leftrightarrow\!2$ coherence without carrying a
+$c$-axis electric dipole---the latter being the natural direction to
+look, precisely because it would evade the leak by symmetry rather than
+by tuning.
+
 % =====================================================================
 \section{Data and code availability}
 % =====================================================================
