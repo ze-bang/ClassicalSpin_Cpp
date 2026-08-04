@@ -1292,112 +1292,182 @@ coherent-only model at late times.  The recovery time measures the Tm
 repopulation time and the late-to-impulsive ratio calibrates
 $c_{\rm heat}W_3$.
 
-\subsection{Geometry A, same-polarised}
+\subsection{Geometry A, same-polarised: every pathway}
 \label{si:peaksAsame}
 
-The analysed moment is $m_x$, which receives the Tm $a$-axis moments
-($\lambda^{5,7}$, equivalently their quadratures $\lambda^{4,6}$) and
-the Fe $F_x$.  The organising fact of this channel is a selection rule.
+The analysed moment is $m_x$, and three contributions reach it, each
+required by symmetry and each carrying measured features: the Tm
+$a$-axis CEF moments ($\lambda^{5,7}$, equivalently their quadratures
+$\lambda^{4,6}$), which emit at $E_{13}$ and $E_{23}$; the Fe $F_x$,
+which emits at the magnon frequencies; and the exchange-induced
+$d_z^{\rm eff}\lambda^2$, which emits at $E_{12}$ and which reciprocity
+requires once the same coupling appears in the drive.  Fitting those
+three weights to the digitised measurement, with the cross channels
+held fixed, reproduces four of six amplitudes within $15\%$
+(\cref{tab:si-samepolfit}).  Every feature is accounted for below.
 
-\paragraph{The $z$-dark $1\to3$ dipole.}
-The measured inventory contains delay frequencies
-$\omega_\tau\in\{E_{12},\qafm\}$ only---there is no feature anywhere
-with delay phase $E_{13}$.  A bright $1\!\to\!3$ dipole would
-necessarily store an $E_{13}$ coherence at first order and produce an
-$(E_{13},E_{23})$ peak with \emph{exactly} the same dipole product
-$\mu_{12}\mu_{13}\mu_{23}$ as the observed $(E_{12},E_{23})$ peak, so
-no parameter choice could separate them.  The absence of the whole row
-is therefore a selection rule, $\mu^z_{13}\simeq0$: the natural
-consequence of a parity-alternating CEF ladder ($\ket1,\ket3$ even,
-$\ket2$ odd under the site mirror), for which the $z$-dipole connects
-$1\!\leftrightarrow\!2$ and $2\!\leftrightarrow\!3$ but not
-$1\!\leftrightarrow\!3$.  This does not contradict the measured
-$E_{13}$ oscillator strength ($f=8.7$), which lives in the orthogonal
-polarisations: the same transition is bright in one polarisation and
-dark in another, a fact the 2D map resolves and 1D absorption---summed
-over its bright polarisations---does not.  The residual admixture is
-not assumed but \emph{measured}: it multiplies the $E_{13}$ emission
-only, so the observed ordering of the two transfer peaks fixes it at
-$\mu^z_{13}/\mu^z_{23}=0.14\%$.
+\begin{table}[h]
+\centering\small
+\caption{Geometry-A same-polarised channel: measured amplitudes against
+the model with the three symmetry-required detection weights fitted
+($4.4\lambda^6+8.2\times10^{-5}F_x+1.5\times10^{-4}\lambda^2$; the
+$\mu^z_{13}$ weight fits to zero).  Amplitudes are normalised to
+$(E_{12},E_{23})$.}
+\label{tab:si-samepolfit}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{lccl}
+\toprule
+peak & exp. & model & pathway\\
+\midrule
+$(E_{12},0)$ & $1.00$ & (see text) & rectified $E_{12}$ storage\\
+$(E_{12},E_{23})$ & $1.00$ & $1.00$ &
+  coherence$\to$population$\to\rho_{23}$\\
+$(E_{12},\qfm)$ & $0.45$ & $0.38$ & Tm$\to$magnon, $\qfm$ branch\\
+$(E_{12},\qafm)$ & $0.40$ & $0.46$ & Tm$\to$magnon, $\qafm$ branch\\
+$(0,E_{12})$ & $0.40$ & --- & pump--probe row (removed by construction)\\
+$(\qafm,E_{12})$ & $0.30$ & $0.32$ &
+  magnon$\to$Tm, read through $d_z^{\rm eff}$\\
+$(\qafm,E_{13})$ & $0.30$ & $0.09$ & magnon delay, CEF emission\\
+$(E_{12},E_{13})$ & $0.15$ & $0.44$ & single-action transfer\\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\paragraph{$(E_{12},E_{23})=(0.49,\,0.70)$, amplitude $1.00$ --- the
-dominant transfer, via a population.}
+\paragraph{The $z$-dark $1\to3$ dipole, now measured rather than
+assumed.}
+The measured map contains delay frequencies
+$\omega_\tau\in\{E_{12},\qafm\}$ only; there is no feature anywhere with
+delay phase $E_{13}$.  A bright $1\!\to\!3$ dipole would store an
+$E_{13}$ coherence at first order and produce an $(E_{13},E_{23})$ peak
+with \emph{exactly} the same dipole product
+$\mu_{12}\mu_{13}\mu_{23}$ as the observed $(E_{12},E_{23})$ peak, so no
+parameter choice could separate them.  The absence of the whole row is
+therefore a selection rule, $\mu^z_{13}\simeq0$: the natural consequence
+of the parity-alternating ladder of \cref{si:whatsees}.  It does not
+contradict the measured $E_{13}$ oscillator strength ($f=8.7$), which
+lives in the orthogonal polarisations---the same transition is bright in
+one polarisation and dark in another, a fact the 2D map resolves and 1D
+absorption, summed over its bright polarisations, does not.  In the fit
+the residual admixture is not imposed: it comes out at zero.
+
+\paragraph{$(E_{12},E_{23})$, amplitude $1.00$ --- the dominant
+transfer, via a population.}
 With the single-action route removed by the dark dipole, the dominant
 pathway acts twice: one probe interaction converts the stored $E_{12}$
 coherence into a level-2 \emph{population} that still carries the
 $\omega_\tau=E_{12}$ phase, and a second converts that population into
-the emitting $E_{23}$ coherence.  Being co-rotating, this route lands
-\emph{non-rephasing}---the observed side---and it involves $\mu_{13}$
-at no vertex.  It is one field order higher than the $E_{13}$ partner,
-which is why it dominates only above a threshold fluence and why the
-hierarchy inverts at weak drive; that sensitivity is what fixes the
-operating point jointly with the cross channel.
+the emitting $E_{23}$ coherence.  Being co-rotating it lands
+non-rephasing, the observed side, and it involves $\mu_{13}$ at no
+vertex---which is why it survives while the $E_{13}$ partner is
+throttled.
 
-\paragraph{$(E_{12},E_{23})$ at zero detection frequency --- the
-rectified line.}
-Taken at its zero-frequency output, the same double action rectifies
-the stored coherence into a slow net magnetisation of the detection
-window.  $S_{\rm DC}(\tau)=\langle M_{\rm NL}\rangle_t$, after cubic
-drift removal, shows a sharp line at exactly $+E_{12}$---the
-$(E_{12},0)$ entry of the measured list, and the sharpest feature of
-the channel.  It is the same storage physics with a DC output leg.
+\paragraph{$(E_{12},0)$ --- the rectified line.}
+Taken at its zero-frequency output, the same double action rectifies the
+stored coherence into a slow net magnetisation of the detection window.
+This is the strongest measured feature, and in the 2D maps it is
+suppressed by construction: the $t\geq3$ detection window with Gaussian
+apodisation removes the $\omega_t\to0$ region.  It is therefore analysed
+separately through $S_{\rm DC}(\tau)=\langle\Mnl\rangle_t$ with cubic
+drift removal, where it appears as a sharp line at exactly
+$+0.49$\,THz---the sharpest feature of the channel.  Its absence from
+the fitted table is an analysis-window statement, not a physical one.
 
-\paragraph{$(E_{12},E_{13})=(0.49,\,1.20)$, amplitude $0.80$ --- the
-throttled partner.}
+\paragraph{$(E_{12},E_{13})$, amplitude $0.15$ --- the throttled
+partner.}
 A \emph{single} probe action on the bright $2\!\leftrightarrow\!3$
-dipole rotates the bra to give $\rho_{13}$, emitting at
-$E_{13}=1.20$\,THz; the route is again co-rotating, hence the same
-non-rephasing side, as observed.  Although lower order than the
-$E_{23}$ route, its emission passes through the nearly dark
-$\mu^z_{13}$, which caps it below the dominant peak.  The measured
-ratio of the two transfer peaks is thus a direct measurement of the
-residual $1\!\to\!3$ admixture.
+dipole rotates the bra to give $\rho_{13}$, emitting at $E_{13}$; the
+route is co-rotating, hence the same non-rephasing side.  Although lower
+order than the $E_{23}$ route, its emission passes through the nearly
+dark $\mu^z_{13}$, which caps it.  The model over-produces this peak by
+$2.9\times$---see \cref{si:openitem2}.
 
-\paragraph{$(-E_{12},E_{23})$, amplitude $0.67$ --- the rephasing
-remnant; a hard prediction.}
-The mirror of the dominant transfer.  Because the single-ion dynamics
-is quantum-exact, this was checked against a standalone qutrit
-integrator: the rephasing partner retains $0.47$--$0.58$ of the
-dominant peak across all drive strengths, dipole-phase choices and
-dampings.  It is an exact floor for any three-level ion under this
-pulse.  If the experimental map truly contains nothing at
-$(-E_{12},E_{23})$, the suppression must come from outside the
-point-ion model---quadrant folding in the display convention, or
-propagation and phase-matching in a thick sample.
+\paragraph{$(E_{12},\qfm)$ and $(E_{12},\qafm)$, amplitudes $0.45$ and
+$0.40$ --- Tm$\to$magnon transfer, read through Fe.}
+The stored $E_{12}$ coherence is handed to the Fe sublattice by the
+static Fe--Tm couplings and radiates through $F_x$, which carries both
+magnon branches.  These are the reverse of the geometry-A cross peak:
+there the magnon feeds the Tm dipole, here the Tm coherence feeds the
+magnon.  They require the Fe $F_x$ term in the detection operator---%
+without it the channel has no magnon-frequency emission at all---and the
+fit uses them to fix its weight.  Their presence, together with the
+cross-channel $(\qafm,E_{12})$, is what makes the static $W$ family
+readable in both directions.
 
-\paragraph{$(E_{13},E_{23})=(1.20,\,0.71)$, amplitude $0.32$ --- the
-two-quantum row.}
-An $E_{13}$ delay coherence does survive the dark dipole, but only at
-\emph{second} order: the pump drives $1\!\to\!2$ and $2\!\to\!3$ in
-succession, building $\rho_{13}$ through the ladder rather than
-directly.  Being second order it is far weaker than the first-order
-row a bright $\mu^z_{13}$ would have produced, which is why the model
-is consistent with an inventory that lists no $E_{13}$ delay features
-while still predicting a weak one.  The analogous $2E_{12}$
-two-quantum line, absent from the exact single-ion dynamics, is a
-genuine inter-site (mean-field) product.
+\paragraph{$(\qafm,E_{12})$, amplitude $0.30$ --- the reciprocity
+partner, observed.}
+Here the magnon occupies the delay axis and the Tm ion radiates at
+$E_{12}$ into the \emph{same}-polarised channel.  That emission is
+possible only through $d_z^{\rm eff}$, the exchange-induced $c$-axis
+coupling that the $\Gamma_2$ order permits below $T_N$---and reciprocity
+demands it, because the same $d_z^{\rm eff}$ is what lets
+$E\!\parallel\!c$ create the $E_{12}$ coherence in the first place.  We
+had earlier reported this partner as \emph{absent} from the data and
+treated the mismatch as an open tension; the digitised map shows it
+present at $0.30$ of maximum, and the fitted weight reproduces it at
+$0.32$.  The tension is therefore a quantitative constraint, not a
+contradiction, and this peak is the direct measurement of
+$d_z^{\rm eff}$.
 
-\paragraph{$(\qafm,E_{13})=(0.90,\,1.20)$, amplitude $0.08$ ---
-thermally activated.}
-The magnon is excited by the Zeeman channel and sets the delay phase;
-the Fe--Tm couplings hand the modulation to the Tm ion, which emits
-weakly at $E_{13}$ through the throttled $\mu^z_{13}$.  It grows
-steeply with the thermal population of level 2
-($0.10\to0.17\to0.51$ relative at $0/10/20$\,K), the expected trend for
-a route assisted by excited-level population, and is therefore the
-channel's best thermometer.
+\paragraph{$(\qafm,E_{13})$, amplitude $0.30$ --- magnon delay, CEF
+emission.}
+The magnon sets the delay phase, the Fe--Tm couplings hand the
+modulation to the Tm ion, and it emits at $E_{13}$ through the CEF
+moment.  The model under-produces this by $3\times$---the other half of
+the discrepancy discussed next.
 
-\paragraph{The missing $(\qafm,\qfm)=(0.90,\,0.38)$.}
-The one listed feature the model does not place in this channel.  The
-carrier exists---$\qfm$ emission is a $b$/$c$-axis affair, as
-$\Gamma_2$ requires---but the analysed moment here is $m_x$, and the
-$\qfm$ mode radiates through $m_z$, which is dark in geometry A at the
-$10^{-11}$ level.  The same transfer is the \emph{dominant} peak of the
-geometry-B same-polarised channel (below), so a weak
-$(\qafm,\qfm)$ in the geometry-A same-polarised map is naturally
-polarisation leakage of that channel.  Discriminator: the feature
-should scale as the square of the analyser leakage angle in a
-polariser-purity scan.
+\paragraph{$(0,E_{12})$ --- the pump--probe row.}
+Present in the measurement at $0.40$, and removed from every model
+census by construction: the $\tau$-averaged signal is subtracted at each
+detection time (\cref{si:numerics}).  It carries pump--probe rather than
+delay-coherence information and is excluded on both sides.
+
+\paragraph{Model features not in the measured list.}
+Two features the model places in this channel are absent from the
+reported inventory, and both are predictions rather than
+discrepancies.  (i) The \emph{rephasing remnant} $(-E_{12},E_{23})$, at
+$0.67$ of the dominant transfer: the mirror of the
+population-mediated route.  Because the single-ion dynamics is
+quantum-exact we checked it against a standalone qutrit integrator,
+where the rephasing partner retains $0.47$--$0.58$ of the dominant peak
+across all drive strengths, dipole phases and dampings---an exact floor
+for any three-level ion under this pulse.  If the measured map truly
+contains nothing there, the suppression must come from outside the
+point-ion model: quadrant folding in the display convention, or
+propagation and phase-matching in a thick sample.  (ii) The
+\emph{two-quantum row} $(E_{13},E_{23})$ at $0.32$: an $E_{13}$ delay
+coherence does survive the dark dipole, but only at \emph{second} order,
+the pump driving $1\!\to\!2$ and $2\!\to\!3$ in succession rather than
+$1\!\to\!3$ directly.  Its weakness relative to the first-order row a
+bright $\mu^z_{13}$ would have produced is exactly why the model is
+consistent with an inventory listing no $E_{13}$ delay features at all;
+that it is not zero is a falsifiable prediction, and the analogous
+$2E_{12}$ line---absent from the exact single-ion dynamics---is a
+genuine inter-site product.
+
+\subsection{The one open item}
+\label{si:openitem2}
+
+The two failures in \cref{tab:si-samepolfit} are not independent.  Both
+peaks are detected at $E_{13}$ and therefore share the same emission
+weight, so their ratio is a property of the conversion dynamics alone:
+\begin{equation}
+  \frac{(E_{12},E_{13})}{(\qafm,E_{13})}\Big|_{\rm model}=4.9 ,
+  \qquad
+  \frac{(E_{12},E_{13})}{(\qafm,E_{13})}\Big|_{\rm exp}=0.5 .
+  \label{eq:si-gap}
+\end{equation}
+No choice of detection weights can move it, and no rescaling of the
+drive does either, since both routes are first order in the stored
+coherence they start from.  The model routes too much $E_{13}$ emission
+through the $E_{12}$-excitation row relative to the magnon row---%
+equivalently, the magnon$\to$Tm handoff that feeds $(\qafm,E_{13})$ is
+too weak relative to the intra-Tm $\rho_{12}\to\rho_{13}$ rotation.
+Closing that factor of ten is the single remaining discrepancy of the
+atlas.  It is a statement about the conversion dynamics, and the natural
+places to look are the strength of the magnon$\to$Tm handoff at the
+$E_{13}$ block (which our vertex set feeds only through $\lambda^1$) and
+the possibility of a $\lambda^4$-targeting vertex, allowed in the $W$
+family but so far held at zero.
 
 \subsection{Geometry B, same-polarised: a prediction, and a $\beta$ meter}
 \label{si:peaksBsame}
@@ -1556,7 +1626,7 @@ turns on $\omega_\tau=E_{13}$ rows (in both channels), because the
 $E\!\parallel\!c$ field couples to $d_z$ on $\lambda^4$, which drives
 $1\!\to\!3$ at \emph{first} order---the very row the data exclude.
 
-\subsection{The sharpened statement, and what is unresolved}
+\subsection{The sharpened statement, and how it was resolved}
 
 Following the parity table to its conclusion gives a strong constraint
 we had not previously articulated: from the ground state $\ket1$, a
@@ -1573,14 +1643,18 @@ be created by \emph{conversion from the magnon}, i.e.\ by the same
 $W^{yy}_1$ vertex that produces the $(\qafm,E_{12})$ cross peak, rather
 than by any direct dipole.
 
-That is a more economical picture than the one we have implemented---it
-would remove the $d_z^{\rm eff}$ drive leg entirely and let one vertex
-account for both the cross peak and the same-polarised $E_{12}$
-rows---and it is fully reciprocity-consistent.  We do not claim it
-here, because reproducing the \emph{observed dominance} of the
-$E_{12}$-delay rows in the same-polarised channel through conversion
-alone has not been demonstrated: in the runs above the magnon-delay
-rows lead instead.  Two experiments would settle it.  Because the
+That would be a more economical picture---it would remove the
+$d_z^{\rm eff}$ drive leg entirely and let one vertex account for both
+the cross peak and the same-polarised $E_{12}$ rows---but the data
+exclude it.  The measured map is dominated by $E_{12}$-delay rows,
+which conversion alone does not deliver (in the runs above the
+magnon-delay rows lead instead), \emph{and} it contains the
+$(\qafm,E_{12})$ peak at $0.30$ of maximum, i.e.\ $E_{12}$ emission in
+the same-polarised channel.  That peak is precisely the reciprocity
+partner of $d_z^{\rm eff}$, which we had earlier reported as missing.
+Both facts point the same way: the symmetry-broken coupling is real,
+appears in drive and emission alike as reciprocity demands, and is
+measured by the $(\qafm,E_{12})$ amplitude.  Two experiments would settle it.  Because the
 exchange-induced $d_z^{\rm eff}$ is proportional to the order
 parameter, any peak that relies on it must vanish at the spin
 reorientation, whereas conversion-generated peaks survive as long as
@@ -1683,7 +1757,7 @@ $\omega_\tau=E_{12}$ rows collapse there while $(\qafm,E_{12})$
 persists, the symmetry-broken picture is confirmed and $d_z^{\rm eff}$
 is measured by the size of the collapse.
 
-\subsection{Is there a sweet spot? A one-parameter scan}
+\subsection{The $d_z^{\rm eff}$ scan, and what the data select}
 \label{si:sweetspot}
 
 The two pictures differ by one number: the strength $d_z^{\rm eff}$ of
@@ -1710,11 +1784,21 @@ $3.0$ & $(\qafm,E_{12})$ leak & $4.21$ & $1.21$ & $0.62$\\
 \end{tabular}
 \end{center}
 
-\paragraph{There is no sweet spot in $d_z^{\rm eff}$.}
-The obstruction is structural rather than numerical: the strength of
-the $E_{12}$ delay coherence and the strength of its
+\paragraph{The scan, and where the data put us.}
+The strength of the $E_{12}$ delay coherence and the strength of its
 reciprocity-required emission are \emph{both} proportional to
-$d_z^{\rm eff}$, so their ratio cannot be tuned.  Raising
+$d_z^{\rm eff}$, so their ratio cannot be tuned---it is a prediction.
+When this scan was run we were treating the reciprocity partner as
+\emph{unobserved}, and on that assumption no value of
+$d_z^{\rm eff}$ worked: any value large enough to give the $E_{12}$
+delay rows also put a visible $E_{12}$ emission line in the
+same-polarised channel.  The digitised measurement removes the
+premise---that line is present, at $0.30$ of maximum---so the correct
+reading of the scan is not that a window is missing but that the
+\emph{measured} partner amplitude selects the operating point.  The
+fitted detection weight, $1.5\times10^{-4}\lambda^2$, reproduces it at
+$0.32$; the untuned ratio is therefore a successful prediction of the
+symmetry-broken picture rather than a tension.  Raising
 $d_z^{\rm eff}$ to make $E_{12}$ dominate the delay axis raises the
 emission leak in lock step; the leak already exceeds the CEF peaks by
 $d_z^{\rm eff}=0.3$ and reaches $4.2\times$ by $d_z^{\rm eff}=3$, so at
