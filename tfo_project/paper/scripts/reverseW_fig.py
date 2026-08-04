@@ -16,15 +16,15 @@ def load(run):
 def spec(t,tau,M):
     tm=t>=3.0
     at=np.hanning(2*tm.sum())[tm.sum():]; atau=np.hanning(2*len(tau))[:len(tau)]
-    Md=(M[:,tm]-M[:,tm].mean())*atau[:,None]*at[None,:]
+    Md=(M[:,tm]-M[:,tm].mean(axis=0,keepdims=True))*atau[:,None]*at[None,:]
     wt=np.fft.fftshift(np.fft.fftfreq(tm.sum(),t[1]-t[0]))*SCALE
     wta=np.fft.fftshift(np.fft.fftfreq(len(tau),tau[1]-tau[0]))*SCALE
     mx=(wt>0.12)&(wt<1.6); my=(np.abs(wta)<1.6)
     A=gaussian_filter(np.abs(np.fft.fftshift(np.fft.fft2(Md)))[np.ix_(my,mx)],sigma=(2,1.5))
     return wt[mx],-wta[my],A
-runs=[("EXPERIMENTAL_FINAL/vA_gs1","baseline ($W^{xz}_1{=}0.01$)"),
-      ("EXPERIMENTAL_FINAL/vA_noWxz","$W^{xz}_1=0$"),
-      ("EXPERIMENTAL_FINAL/vA_su3x2","Tm drive $\\times2$")]
+runs=[("flu0.12_gs1","baseline ($W^{xz}_1{=}0.01$)"),
+      ("hybF_00","$W^{xz}_1=0$"),
+      ("hybF_002","$W^{xz}_1=0.02$")]
 fig,axs=plt.subplots(1,4,figsize=(16.5,4.4),gridspec_kw={"width_ratios":[1,1,1,1.15]})
 mainref=None; rows={}
 for ax,(run,lab) in zip(axs[:3],runs):
@@ -51,7 +51,6 @@ for v,nm in [(0.70,"E23"),(0.90,"qAFM"),(1.00,"2E12"),(1.20,"E13")]:
 ax.set_xlabel("omega_t (THz)"); ax.set_ylabel("amplitude / main peak")
 ax.set_title("cut along $\\omega_T=+E_{12}$: the reverse-transfer row",fontsize=9.5)
 ax.legend(fontsize=8); ax.set_ylim(0,0.135)
-fig.suptitle("Geometry A cross channel: the reverse-W transfer peak $(E_{12},q_{\\rm AFM})$ near the reported $(0.5,\\,1.0)$ "
-             "— dies with $W^{xz}_1$, linear in Tm drive",fontsize=11)
+fig.suptitle("Geometry A cross ($m_z$): the $W^{xz}_1$-forced magnon content of the Tm dipole — the atlas's $W^{xz}_1$ meter",fontsize=11)
 fig.tight_layout(); fig.savefig("tfo_project/paper/figs/reverseW_peak.png",dpi=115)
 print("saved paper/figs/reverseW_peak.png")

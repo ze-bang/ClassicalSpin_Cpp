@@ -452,15 +452,20 @@ Verified in linear response (probe-only trajectories):
 \hline
 $W^{xz}_1$ & $m_z$ weight at $0.90$ & admixture & 2D peak $(E_{12},\qafm)$\\
 \hline
-$0$    & $2.2\times10^{-5}$ & $0.09\%$ & $1.1\times10^{-2}$ (residual)\\
-$0.01$ & $2.9\times10^{-4}$ & $1.2\%$  & $3.9\times10^{-2}$\\
-$0.02$ & $6.1\times10^{-4}$ & $2.6\%$  & $1.2\times10^{-1}$\\
+$0$    & $5.7\times10^{-5}$ & $0.09\%$ & $0.010$ (residual)\\
+$0.01$ & $6.3\times10^{-3}$ & $9.9\%$  & $0.064$ of the main peak\\
+$0.02$ & $1.2\times10^{-2}$ & $19.2\%$ & $0.117$\\
 \hline
 \end{tabular}
 \end{center}
-The admixture is linear in $W^{xz}_1$ and the 2D peak quadratic
-(transfer $\times$ detection; $3.7\times$ measured against $4\times$
-expected).  Three further facts identify the process as an
+The admixture is linear in $W^{xz}_1$, and at the final operating point
+so is the resulting 2D feature (increments in the ratio $1:1.98$ for
+$W^{xz}_1=0.01:0.02$, tracking the admixture's $1:1.94$): there the
+coupling enters through the \emph{detection} step alone.  (At the much
+weaker Zeeman drive used in an earlier calibration the same feature
+scaled quadratically, transfer $\times$ detection; which power applies
+therefore depends on the operating point, and the linear behaviour is
+the one relevant here.)  Three further facts identify the process as an
 \emph{off-resonant forced response}---the Tm oscillator shaken at the
 magnon frequency---rather than harmonic generation
 [Fig.~\ref{fig:si-forced}]:
@@ -472,8 +477,9 @@ $12\times$ weaker ($2.5\times10^{-5}$ against $2.9\times10^{-4}$);
 source at $\times1.65$), whereas a harmonic would be quadratic, and the
 Tm's own $E_{12}$ line does not move at all
 ($2.376$ vs $2.377\times10^{-2}$);
-(c) the transfer coefficient $|\lambda^2|_{0.90}/|m_x|_{0.90}=0.146$
-is drive-independent ($0.1461$ vs $0.1419$)---the hallmark of a linear
+(c) the transfer coefficient $|\lambda^2|_{0.90}/|m_x|_{0.90}$
+is drive-independent ($0.142$--$0.155$ over a $20\times$ range of
+drive)---the hallmark of a linear
 response function $\chi(\omega_q)\propto
 \omega_{12}/(\omega_{12}^2-\omega_q^2)$ evaluated off resonance.
 The remaining $\lambda^{1,2}$ vertices cannot do this, which is why the
@@ -491,8 +497,8 @@ emission---a strong experimental discriminator against both the
 $2E_{12}$ and $(E_{12},E_{13})$ readings.  (Our windows are
 resolution-limited at $\approx0.05$\,THz and cannot check this
 directly.)  Two consequences:
-the feature is a dedicated $W^{xz}_1$ meter (intensity
-$\propto (W^{xz}_1)^4$), and, because the geometry-B mixer sweep bounds
+the feature is a dedicated $W^{xz}_1$ meter (amplitude
+$\propto W^{xz}_1$ at this operating point), and, because the geometry-B mixer sweep bounds
 $W^{xz}_1\lesssim0.02$, the model caps its $0.90$ component at
 $\sim0.5$--$0.6$ of the main peak: full parity of the
 \emph{$0.90$ line alone} with the main peak would exceed that bound and
@@ -576,6 +582,22 @@ $T_2(E_{12})=8$\,ps.  Fitting the experimental envelope to this form
 measures $\tau_{\rm rise}$ (the phonon-mediated Tm repopulation time)
 and the product $W_3\,\Delta n$.}
 \label{fig:si-buildupmodel}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{figs/mixed_domain_B.png}
+\caption{The buildup discriminator in the representation directly
+comparable to experiment: Fourier transform of $\Mnl(\tau,t)$ along the
+delay $\tau$ \emph{only}, keeping the real detection time $t$ (geometry
+B, final run).  Left: the $|{\rm FFT}_\tau|(\omega_\tau,t)$ map, each
+delay-frequency row evolving in real time.  Right: cuts of the
+$\omega_\tau=\qfm$ and $\omega_\tau=E_{12}$ rows.  With coherent
+vertices only, both rows peak with the pulse and decay within
+$\sim$20--30\,ps; an experimental version of this plot in which the
+$E_{12}$ row \emph{rises} over tens of ps is the signature of the
+population-fed ($T_1$) mechanism.}
+\label{fig:si-mixed}
 \end{figure}
 
 \paragraph{The mechanism implemented in the solver.}
@@ -1165,11 +1187,11 @@ at $0.8999$\,THz (the magnon, not the $\qfm+E_{12}=0.876$
 combination); its amplitude is \emph{linear} in the Zeeman drive
 ($\times1.70$ for a $\times1.67$ increase, tracking the source at
 $\times1.65$) whereas a harmonic would be quadratic; the transfer
-coefficient $|\lambda^2|_{0.90}/|m_x|_{0.90}=0.146$ is
+coefficient $|\lambda^2|_{0.90}/|m_x|_{0.90}=0.142$--$0.155$ is
 drive-independent, the hallmark of a linear susceptibility
 $\chi\propto\omega_{12}/(\omega_{12}^2-\omega_q^2)$ evaluated off
 resonance; and the admixture grows linearly with $W^{xz}_1$
-($0.09\%\to1.2\%\to2.6\%$ at $W^{xz}_1=0/0.01/0.02$).
+($0.09\%\to9.9\%\to19.2\%$ at $W^{xz}_1=0/0.01/0.02$).
 The same mechanism, with an $E_{12}$ delay instead of a $\qafm$ delay,
 gives the weak $(E_{12},\qafm)$ reverse-transfer feature; being
 doubly-$W^{xz}_1$-mediated (transfer $\times$ detection) its amplitude

@@ -1,14 +1,14 @@
 import numpy as np, h5py
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 SCALE=2*np.pi/4.135667696; PS=0.6582119569
-BASE="tfo_project/tmfeo3_2dcs_final/EXPERIMENTAL_FINAL"
+BASE="tfo_project/tmfeo3_2dcs_final"
 def ref(run,ds,l):
     with h5py.File(f"{BASE}/{run}/sample_0/pump_probe_spectroscopy.h5") as f:
         return f['/reference/times'][:], f[f'/reference/M_{ds}'][:,l]
-t,l2_0 =ref("hyb_noWxz","global_SU3",1)
-_,l2_1 =ref("fin_A2_gs1","global_SU3",1)
-_,l2_2 =ref("hyb_2Wxz","global_SU3",1)
-_,mx   =ref("fin_A2_gs1","global_SU2",0)
+t,l2_0 =ref("hybF_00","global_SU3",1)
+_,l2_1 =ref("flu0.12_gs1","global_SU3",1)
+_,l2_2 =ref("hybF_002","global_SU3",1)
+_,mx   =ref("flu0.12_gs1","global_SU2",0)
 def bp(M,f0,df=0.05):
     """Gaussian band-pass around f0 (THz) — no brick-wall ringing"""
     F=np.fft.rfft(M-M.mean()); fr=np.fft.rfftfreq(len(M),t[1]-t[0])*SCALE

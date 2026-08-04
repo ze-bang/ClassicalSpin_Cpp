@@ -2,7 +2,7 @@ import numpy as np, h5py
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 SCALE=2*np.pi/4.135667696; PS=0.6582119569
 BASE="tfo_project/tmfeo3_2dcs_final"
-d=f"{BASE}/EXPERIMENTAL_FINAL/vB2_gs1/sample_0"
+d=f"{BASE}/EXPERIMENTAL_FINAL/fin_B_gs1/sample_0"
 with h5py.File(f"{d}/pump_probe_spectroscopy.h5") as f:
     t=f['/reference/times'][:]; tau=f['/tau_scan/tau_values'][:]
     M0=f['/reference/M_global_SU2'][:,0]
@@ -13,7 +13,7 @@ with h5py.File(f"{d}/pump_probe_spectroscopy.h5") as f:
 # FFT along tau ONLY; keep t as real time
 w=np.ones_like(tau); m1=tau>-6; w[m1]=0.5*(1-np.cos(np.pi*(-tau[m1])/6))
 m2=tau<-110; w[m2]=0.5*(1-np.cos(np.pi*(120+tau[m2])/10))
-Md=(M-M.mean())*w[:,None]
+Md=(M-M.mean(axis=0,keepdims=True))*w[:,None]
 S=np.abs(np.fft.fftshift(np.fft.fft(Md,axis=0),axes=0))   # (omega_tau, t)
 wta=np.fft.fftshift(np.fft.fftfreq(len(tau),tau[1]-tau[0]))*SCALE
 wT=-wta
