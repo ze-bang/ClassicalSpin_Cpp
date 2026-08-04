@@ -1463,6 +1463,134 @@ dominated by $(\qafm,\qfm)=(0.9,0.38)$.  Numerical censuses in
 \end{figure}
 
 % =====================================================================
+\section{Reciprocity: are the excitation and detection operators the same?}
+\label{si:reciprocity}
+% =====================================================================
+
+Light couples to matter through one operator per polarisation,
+$H_{\rm int}=-\ve d\!\cdot\!\ve E-\ve m\!\cdot\!\ve B$, and the same
+operator radiates.  A given analyser setting must therefore see exactly
+the operator that the same polarisation would have driven.  This
+section asks whether our model respects that, and the answer is
+instructive: the requirement is sharp, the qutrit blocks it selects are
+confirmed independently, and our drive violates it in one specific way.
+
+\subsection{Mirror parity assigns each polarisation to one block}
+
+The Tm $4c$ site has point symmetry $m$ (the mirror $z\to-z$).  Under
+it a polar vector has $d_{x},d_{y}$ even and $d_z$ odd, while an axial
+vector has $m_z$ even and $m_{x},m_{y}$ odd.  The projected moment
+matrix of the model fixes the level parities without further input:
+$\lambda^2$ carries \emph{only} $\mu_z=5.264$, while $\lambda^5$ and
+$\lambda^7$ carry \emph{only} $x,y$ components
+($2.39,-2.79$ and $0.91,0.47$).  Since $m_z$ is even and $m_{x,y}$ odd,
+this requires $\ket1,\ket2$ to share a parity and $\ket3$ to be
+opposite.  The allowed couplings follow immediately:
+\begin{center}\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{lccl}
+\toprule
+transition & magnetic ($\mathcal T$-odd) & electric ($\mathcal T$-even)
+& polarisation it couples to\\
+\midrule
+$1\!\leftrightarrow\!2$ ($\lambda^{1,2}$) & $m_z$ on $\lambda^2$ &
+  $d_{x,y}$ on $\lambda^1$ & $(E\!\parallel\!a,H\!\parallel\!c)$\\
+$1\!\leftrightarrow\!3$ ($\lambda^{4,5}$) & $m_{x,y}$ on $\lambda^5$ &
+  $d_z$ on $\lambda^4$ & $(E\!\parallel\!c,H\!\parallel\!a)$\\
+$2\!\leftrightarrow\!3$ ($\lambda^{6,7}$) & $m_{x,y}$ on $\lambda^7$ &
+  $d_z$ on $\lambda^6$ & $(E\!\parallel\!c,H\!\parallel\!a)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+So each polarisation owns a block: $(E\!\parallel\!a,H\!\parallel\!c)$
+drives and reads $\{\lambda^1,\lambda^2\}$, while
+$(E\!\parallel\!c,H\!\parallel\!a)$ drives and reads
+$\{\lambda^4,\lambda^5,\lambda^6,\lambda^7\}$.  Cross-polarised
+detection then reads precisely the block the pulse did \emph{not}
+drive---which is the structural reason cross-polarisation isolates
+conversion.
+
+Two independent facts confirm this assignment.  It is not imposed: the
+moment matrix comes from projecting the physical $\ve J$ operator, and
+it came out with exactly this block structure.  And it \emph{predicts}
+the geometry-B subalgebra closure we had found empirically: geometry B
+is $(E\!\parallel\!a,H\!\parallel\!c)$, which owns $\{\lambda^1,
+\lambda^2\}$, so the drive closes on $\{\lambda^1,\lambda^2,\lambda^3\}$
+and $\lambda^{4\text{--}7}$ must vanish identically---as they do, to
+machine precision.
+
+\subsection{Where our drive violates it}
+
+Our geometry-A drive vector places its dominant component, $3.0$, on
+$\lambda^2$---an operator belonging to the \emph{other} polarisation's
+block---while the geometry-A same-polarised detection omits $\lambda^2$
+entirely.  That is a genuine non-reciprocity, and it entered for a
+physical reason: below $T_N$ the $\Gamma_2$ order breaks the site
+mirror ($F_x$ is $m_z$-odd), so an exchange-induced $d_z^{\rm eff}$ on
+the $1\!\leftrightarrow\!2$ transition becomes allowed.  The physics is
+real; what is not consistent is using it in the drive without also
+letting $\lambda^2$ radiate into the same-polarised channel with the
+same coefficient.
+
+\subsection{What a reciprocity-consistent drive gives}
+
+We tested the strict version---geometry A driving only its own block,
+$(\lambda^4,\lambda^5,\lambda^6,\lambda^7)$ with weights
+$\sqrt f$ for the electric legs and $\mu_{x}$ for the magnetic ones
+(runs \texttt{recip\_A}, \texttt{recip\_Adark}, and an E1-strength
+scan).  Two results, one reassuring and one not:
+
+\emph{The cross channel is essentially unchanged.}
+$(\qafm,E_{12})=1.00$ with the same companions
+[$(\qafm,2\qafm)$, $(\qafm,\qafm)$, the rephasing partner] whether the
+drive is the current one or the reciprocal one.  This is exactly as it
+should be: that channel is populated by \emph{conversion} from the
+magnon, not by the direct Tm drive, so the atlas's headline peak and
+its interpretation are robust against this issue.
+
+\emph{The same-polarised channel changes.}  With the reciprocal drive
+the $E_{12}$-delay rows drop from dominant to $0.73$--$0.88$ of the
+leading feature, and magnon-delay rows take over.  Raising the E1
+coupling restores $(E_{12},E_{23})$ to the lead but simultaneously
+turns on $\omega_\tau=E_{13}$ rows (in both channels), because the
+$E\!\parallel\!c$ field couples to $d_z$ on $\lambda^4$, which drives
+$1\!\to\!3$ at \emph{first} order---the very row the data exclude.
+
+\subsection{The sharpened statement, and what is unresolved}
+
+Following the parity table to its conclusion gives a strong constraint
+we had not previously articulated: from the ground state $\ket1$, a
+first-order excitation must use $1\!\leftrightarrow\!2$ or
+$1\!\leftrightarrow\!3$.  In geometry A the former is forbidden (its
+dipoles belong to the other polarisation), so \emph{the only
+first-order Tm excitation available is $1\!\to\!3$}.  The data then
+close the loop from the other side: the complete absence of
+$\omega_\tau=E_{13}$ rows says that this route, too, is weak.  Taken
+together the two statements imply that in geometry A the Tm ion is
+barely excited directly at all---and therefore that the $E_{12}$
+coherence which unmistakably \emph{is} present on the delay axis must
+be created by \emph{conversion from the magnon}, i.e.\ by the same
+$W^{yy}_1$ vertex that produces the $(\qafm,E_{12})$ cross peak, rather
+than by any direct dipole.
+
+That is a more economical picture than the one we have implemented---it
+would remove the $d_z^{\rm eff}$ drive leg entirely and let one vertex
+account for both the cross peak and the same-polarised $E_{12}$
+rows---and it is fully reciprocity-consistent.  We do not claim it
+here, because reproducing the \emph{observed dominance} of the
+$E_{12}$-delay rows in the same-polarised channel through conversion
+alone has not been demonstrated: in the runs above the magnon-delay
+rows lead instead.  Two experiments would settle it.  Because the
+exchange-induced $d_z^{\rm eff}$ is proportional to the order
+parameter, any peak that relies on it must vanish at the spin
+reorientation, whereas conversion-generated peaks survive as long as
+the magnon does; and a same-polarised map showing \emph{no} $E_{12}$
+emission on the detection axis (as the reported inventory suggests,
+having $(E_{12},0)$ but no $(\cdot,E_{12})$ entry) is itself evidence
+that $\lambda^2$ does not radiate into $E\!\parallel\!c$---hence that
+$d_z^{\rm eff}$ is small and the conversion picture is the right one.
+
+% =====================================================================
 \section{Data and code availability}
 % =====================================================================
 The paper folder is self-contained: \texttt{paper/data/trajectories/}
