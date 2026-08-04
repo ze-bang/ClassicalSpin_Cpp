@@ -460,8 +460,37 @@ $0.02$ & $6.1\times10^{-4}$ & $2.6\%$  & $1.2\times10^{-1}$\\
 \end{center}
 The admixture is linear in $W^{xz}_1$ and the 2D peak quadratic
 (transfer $\times$ detection; $3.7\times$ measured against $4\times$
-expected), and the sideband sits at $0.8999$\,THz---the magnon line
-itself, not the $\qfm+E_{12}=0.876$ combination.  Two consequences:
+expected).  Three further facts identify the process as an
+\emph{off-resonant forced response}---the Tm oscillator shaken at the
+magnon frequency---rather than harmonic generation
+[Fig.~\ref{fig:si-forced}]:
+(a) the line sits at $0.8999$\,THz, the magnon itself, while the
+genuine $2E_{12}=1.00$\,THz harmonic appears separately and
+$12\times$ weaker ($2.5\times10^{-5}$ against $2.9\times10^{-4}$);
+(b) its amplitude is \emph{linear} in the Zeeman drive
+($\times1.70$ for a $\times1.67$ drive increase, tracking the magnon
+source at $\times1.65$), whereas a harmonic would be quadratic, and the
+Tm's own $E_{12}$ line does not move at all
+($2.376$ vs $2.377\times10^{-2}$);
+(c) the transfer coefficient $|\lambda^2|_{0.90}/|m_x|_{0.90}=0.146$
+is drive-independent ($0.1461$ vs $0.1419$)---the hallmark of a linear
+response function $\chi(\omega_q)\propto
+\omega_{12}/(\omega_{12}^2-\omega_q^2)$ evaluated off resonance.
+The remaining $\lambda^{1,2}$ vertices cannot do this, which is why the
+effect is $W^{xz}_1$-specific: in $\Gamma_2$ the two-magnon
+$W^{yy}_1S_y^2\lambda^1$ has \emph{no} static leg ($S_y$ is purely
+dynamical), so it is quadratic in the fluctuation and delivers
+$2\qafm=1.80$\,THz (present, $3.0\times10^{-6}$) and DC but nothing at
+$\qafm$; and $\kappa^B$ is identically gated off in this geometry
+($B_y=0$ for $H\parallel a$).  Only $W^{xz}_1$ pairs a static leg
+($G_z$) with a linearly fluctuating one ($\delta S_x$).
+Lineshape prediction: since $\chi$ is smooth across $0.90$\,THz, the
+forced line inherits the \emph{drive's} lineshape, i.e.\ the magnon
+linewidth ($0.003$\,THz), an order of magnitude narrower than any CEF
+emission---a strong experimental discriminator against both the
+$2E_{12}$ and $(E_{12},E_{13})$ readings.  (Our windows are
+resolution-limited at $\approx0.05$\,THz and cannot check this
+directly.)  Two consequences:
 the feature is a dedicated $W^{xz}_1$ meter (intensity
 $\propto (W^{xz}_1)^4$), and, because the geometry-B mixer sweep bounds
 $W^{xz}_1\lesssim0.02$, the model caps its $0.90$ component at
@@ -482,6 +511,21 @@ $\times2$ (doubled to $0.123$).  Rightmost: the $\omega_T=+E_{12}$ row
 cut---the peak sits at the $\qafm$ emission frequency with the
 $2E_{12}=1.00$\,THz harmonic as a shoulder.}
 \label{fig:si-reverseW}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figs/tm_dipole_forced.png}
+\caption{Time evolution of the Tm $m_z$ dipole.  (a) It rings at its
+own $E_{12}=0.50$\,THz, with a small forced $0.90$\,THz wobble on top
+(the $W^{xz}_1$-induced part, $\times20$).  (b) Isolating that part by
+differencing runs at $W^{xz}_1=0$, $0.01$, $0.02$: it grows linearly
+with the coupling and is phase-locked to the Fe $m_x$ magnon that
+drives it.  (c) Spectrum: the line sits at the magnon frequency
+$0.90$\,THz, not at the $2E_{12}=1.00$\,THz harmonic, which is present
+but $12\times$ weaker; the $2\qafm=1.80$\,THz line from the
+\emph{quadratic} $W^{yy}_1$ vertex is weaker still.}
+\label{fig:si-forced}
 \end{figure}
 
 \paragraph{The population channel demonstrated.}
@@ -818,6 +862,30 @@ $0.41$, $(-0.38,\,0.50)=0.38$.  Consequently the weak
 $(\qafm,0.38)$ reported in geometry A is naturally polarization
 leakage of this dominant geometry-B feature; a polarizer-purity scan
 (the peak should scale with the leakage angle squared) discriminates.
+
+% =====================================================================
+\section{The complete atlas}
+\label{si:atlas}
+% =====================================================================
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figs/atlas_final.png}
+\caption{All four polarization channels from the single consolidated
+Hamiltonian, regenerated with the final methods (magnetic-resolution
+detection; $\tau$-averaged signal subtracted per detection time so the
+$\omega_\tau=0$ pump--probe row is removed, with $|\omega_T|<0.18$\,THz
+masked; blind census, crosses).  Top left: geometry-A cross,
+$m_z$(M1)$+0.94\times x$-E1 --- the $(\qafm,E_{12})$ peak of $W^{yy}_1$
+and the extended $E_{12}$ row at $0.9$--$1.2$\,THz.  Top right:
+geometry-B cross, Fe $m_x$ --- $(\qfm,\qafm)$ and the
+$\kappa^B$-gated $(E_{12},\qafm)$.  Bottom left: geometry-A
+same-polarized CEF composite at $10$\,K.  Bottom right: the
+geometry-B same-polarized \emph{prediction} --- a pure $m_z$ magnon map
+dominated by $(\qafm,\qfm)=(0.9,0.38)$.  Numerical censuses in
+\texttt{data/census\_atlas\_final.json}.}
+\label{fig:si-atlas}
+\end{figure}
 
 % =====================================================================
 \section{Data and code availability}
