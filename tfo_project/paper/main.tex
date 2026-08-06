@@ -13,6 +13,7 @@
 \newcommand{\Fe}{\mathrm{Fe}}
 \newcommand{\Tm}{\mathrm{Tm}}
 \newcommand{\ket}[1]{|#1\rangle}
+\newcommand{\bra}[1]{\langle #1|}
 \newcommand{\ve}[1]{\boldsymbol{#1}}
 \newcommand{\qafm}{q_{\rm AFM}}
 \newcommand{\qfm}{q_{\rm FM}}
@@ -124,10 +125,19 @@ built from these.
 
 The Tm $4c$ site carries the mirror $m$ ($z\to-z$), under which
 $d_{x,y}$ are even and $d_z$ odd, while $m_z$ is even and $m_{x,y}$ odd.
-The projected moment matrix---an output of the $PJP$ construction, not an
-input---has $\lambda^2$ carrying only $\mu_z$ and $\lambda^{5,7}$ only
-$\mu_{x,y}$, which forces $\ket1,\ket2$ to share a parity and $\ket3$ to
-be opposite.  Every coupling follows:
+Two exact statements then fix the entire readout.  First, time reversal:
+the CEF eigenstates are nondegenerate singlets and may be chosen real, in
+which basis $J_\alpha$ is imaginary-antisymmetric, so $PJP$ has support
+\emph{only} on $\lambda^{2,5,7}$---the magnetic moment is rigorously
+off-diagonal, with no permanent component.  The electric dipole, being
+$\mathcal T$-even and real-symmetric, occupies exactly the complement
+$\lambda^{1,3,4,6,8}$, which \emph{does} include the diagonal generators
+$\lambda^{3,8}$.  Second, the mirror decides whether those diagonals
+survive: $\bra id_z\ket i=0$ because $d_z$ is odd, whereas
+$\bra id_x\ket i$ is allowed.  The projected moment matrix---an output of
+the $PJP$ construction, not an input---has $\lambda^2$ carrying only
+$\mu_z$ and $\lambda^{5,7}$ only $\mu_{x,y}$, which forces $\ket1,\ket2$
+to share a parity and $\ket3$ to be opposite.  Every coupling follows:
 \begin{center}\small
 \renewcommand{\arraystretch}{1.25}
 \begin{tabular}{lccl}
@@ -136,6 +146,8 @@ transition & magnetic & electric & owned by\\
 \hline
 $1\!\leftrightarrow\!2$ & $m_z$ ($\lambda^2$) & $d_{x}$ ($\lambda^1$) &
   $(E\!\parallel\!a,H\!\parallel\!c)$\\
+populations & --- & $d_x$ ($\lambda^{3},\lambda^8$) &
+  $(E\!\parallel\!a,H\!\parallel\!c)$\\
 $1\!\leftrightarrow\!3$ & $m_{x}$ ($\lambda^5$) & $d_z$ ($\lambda^4$) &
   $(E\!\parallel\!c,H\!\parallel\!a)$\\
 $2\!\leftrightarrow\!3$ & $m_{x}$ ($\lambda^7$) & $d_z$ ($\lambda^6$) &
@@ -143,6 +155,14 @@ $2\!\leftrightarrow\!3$ & $m_{x}$ ($\lambda^7$) & $d_z$ ($\lambda^6$) &
 \hline
 \end{tabular}
 \end{center}
+The population row is the one asymmetry between the two polarisations,
+and it is forced: both operators owned by $(E\!\parallel\!a,
+H\!\parallel\!c)$ are mirror-\emph{even}, so that analyser setting reads
+the CEF level populations directly through $d_x$, while both operators
+owned by $(E\!\parallel\!c,H\!\parallel\!a)$ are mirror-\emph{odd} and
+are therefore purely off-diagonal.  A population carries no oscillation
+at a transition frequency, so this term radiates only near $\omega_t=0$;
+it is a rectified, not a resonant, channel.
 Reciprocity---one operator per polarisation, driving and radiating
 alike---then implies that \emph{cross-polarised detection reads exactly
 the block the pulse did not drive}.  This is the structural reason
@@ -170,22 +190,48 @@ The resulting detection operators are collected in
 Table~\ref{tab:channels}.
 
 \begin{table}[b]
-\caption{What each channel detects.  Detection is resolved by the
-emitted magnetic polarisation.}
+\caption{What each channel detects.  An analyser setting selects a
+polarisation \emph{state}, hence both the magnetic and the electric
+dipole that radiate into it; there are therefore only \emph{two}
+detection operators, and the two channels sharing one are constrained to
+share it exactly.  $w_{E1}$ is the $E1/M1$ balance, an $\mathcal O(1)$
+number our data do not fix (see text).}
 \label{tab:channels}
 \centering\small
 \renewcommand{\arraystretch}{1.3}
-\begin{tabular}{lll}
+\begin{tabular}{ll}
 \hline
-channel & moment & content\\
+\multicolumn{2}{l}{$(E\!\parallel\!a,H\!\parallel\!c)$:\quad
+  $F_z+\mu\lambda^2
+   +w_{E1}(\lambda^1+\lambda^3)
+   +\beta\lambda^1\lambda^2$}\\
 \hline
-A cross & $m_z$ & $F_z\equiv0$; $\mu\lambda^2+\beta\lambda^1\lambda^2$\\
-A same & $m_x$ & $F_x$; CEF $\lambda^{4,6}$; $d_z^{\rm eff}\lambda^2$\\
-B cross & $m_x$ & $F_x$; Tm part $\equiv0$\\
-B same & $m_z$ & $F_z$; $\mu\lambda^2+\beta\lambda^1\lambda^2$\\
+A cross & $F_z\equiv0$: Tm only.  $\lambda^{1,2}$ resonant at $E_{12}$,
+  $\lambda^3$ rectified\\
+B same & $F_z$ alive but $50\times$ smaller than the Tm terms\\
+\hline
+\multicolumn{2}{l}{$(E\!\parallel\!c,H\!\parallel\!a)$:\quad
+  $F_x+\mu_{x}(\lambda^5,\lambda^7)
+   +w_{E1}'(\lambda^4,\lambda^6)
+   +d_z^{\rm eff}\lambda^2$
+  \ \ (no $\lambda^{3,8}$: mirror-odd)}\\
+\hline
+A same & $F_x$; CEF $\lambda^{4,6}$; $d_z^{\rm eff}\lambda^2$\\
+B cross & $F_x$; Tm part $\equiv0$ by closure\\
 \hline
 \end{tabular}
 \end{table}
+
+Two consequences are worth stating before the pathways.  The
+geometry-A cross and geometry-B same-polarised channels analyse the
+\emph{same} output polarisation, so they are not independently
+adjustable: one operator must explain both.  And because $\lambda^1$
+and $\lambda^2$ are quadratures of the same $1\!\leftrightarrow\!2$
+coherence, their magnitude spectra coincide to $10\%$; varying $w_{E1}$
+over a factor of $50$ moves every geometry-A cross amplitude by at most
+$0.04$ once $\beta$ is refitted.  The atlas is thus insensitive to the
+$E1/M1$ balance everywhere except one line---the rectified geometry-B
+feature, which exists only because $\lambda^3$ is readable.
 
 \begin{figure*}[t]
 \includegraphics[width=\textwidth]{figs/atlas_final.png}
@@ -446,18 +492,31 @@ with an inventory listing no $E_{13}$ delay features.
 
 \subsection{Geometry B, same-polarised: a prediction and a $\beta$ meter}
 
-The detected moment is $m_z$.  The CEF coordinates
-$\lambda^{4\text{--}7}$ vanish identically here, so no $E_{13}$ or
-$E_{23}$ emission is possible; but $\lambda^2$ is driven \emph{directly}
-through $\mu^z_{12}=5.264$, and the resulting Tm signal is $\sim50\times$
-the Fe contribution.  The channel is therefore Tm-dominated, and what it
-shows depends on $\beta$: with the linear moment alone it would be led by
-$(\qfm,\qafm)$ with $E_{12}$ diagonals beneath, whereas with the
-$\beta\simeq7\mu$ inferred in geometry A the second harmonic is
-$4.1\times$ the magnon--magnon feature and the map collapses to a
-\emph{single} peak at $(E_{12},2E_{12})$.  Measuring this channel reads
-$\beta$ off directly; either outcome is decisive, which makes it the most
-informative measurement still missing.
+This channel is analysed with the \emph{same} operator as geometry-A
+cross, so it is a prediction with no freedom left.  Calling it an ``$m_z$
+readout'' would understate it: $\mu\lambda^2$ is the Tm $E_{12}$ CEF
+moment and is $\sim\!50\times$ the Fe $F_z$ term, so the channel is
+CEF-dominated, not magnon-dominated, and it additionally carries the
+electric $\lambda^1$ and---uniquely among the four channels---the
+population readout $\lambda^3$.  What vanishes here is only
+$\lambda^{4\text{--}7}$, by the subalgebra closure, so no $E_{13}$ or
+$E_{23}$ emission is possible; $\lambda^8$ vanishes for the same reason.
+
+Two features follow.  The map is led by the second harmonic
+$(E_{12},2E_{12})$, because $\lambda^2$ is driven \emph{directly} through
+$\mu^z_{12}$ and the $\beta\simeq7\mu$ inferred in geometry A then makes
+the harmonic $4.1\times$ the magnon--magnon feature; measuring it reads
+$\beta$ off directly.  Beneath it, at $0.53$ of that peak, sits a
+\emph{rectified} pair at $(\pm E_{12},\omega_t\!\to\!0)$: the drive
+writes a level population modulated at the delay frequency $E_{12}$, and
+$\lambda^3$ is readable in this polarisation and no other.  This is a
+direct optical readout of the population channel $W_3$---the same
+quantity whose slow transfer produces the post-pulse buildup of
+geometry-B cross---and it is the only place in the atlas where the $E1/M1$
+balance matters, since with the magnetic moment alone it would fall to
+$0.09$.  A measured rectified line at $(E_{12},0)$ in this channel
+therefore measures $w_{E1}$; its absence would mean $d_x$ has no
+permanent component despite the mirror allowing one.
 
 \section{The one open item}
 \label{sec:open}
@@ -492,8 +551,10 @@ $\omega_\tau=E_{13}$ rows; the $2E_{12}$ line tracks $E_{12}$ and so does
 \emph{not} soften at the spin reorientation, whereas every feature
 relying on $d_z^{\rm eff}\propto\langle F_x\rangle$---the
 $E_{12}$-excitation family and the $(\qafm,E_{12})$ emission peak---must
-vanish there; the geometry-B same-polarised channel should be a single
-harmonic peak; and adiabatically long pulses collapse the geometry-A
+vanish there; the geometry-B same-polarised channel should show the
+harmonic peak led, with a rectified $(E_{12},0)$ line at $\sim\!0.5$ of
+it whose presence measures the electric population readout $w_{E1}$; and
+adiabatically long pulses collapse the geometry-A
 cross peak.  The temperature scan through the reorientation is the
 decisive one, since it separates the symmetry-broken from the
 conversion-generated features and measures $d_z^{\rm eff}$ by the size of

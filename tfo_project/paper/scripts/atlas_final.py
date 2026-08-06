@@ -51,9 +51,24 @@ def mix(runs,sp,l,T,samepol=False):
 A2=[f"flu0.12_{g}" for g in ["gs1","gs2","gs3"]]   # geometry A: ONE drive for both its channels
 B =[f"EXPERIMENTAL_FINAL/fin_B_{g}"  for g in ["gs1","gs2","gs3"]]
 S = A2   # same-pol is the SAME experiment as A-cross, only the detected polarization differs
+# ---------------------------------------------------------------------------
+# The two OUTPUT polarizations, and the full operator each one analyses.
+# Tm 4c site mirror m (z->-z):  m_z, d_x EVEN ;  m_x, d_z ODD.
+# Time reversal in a real singlet basis puts the MAGNETIC moment purely on
+# lambda^{2,5,7}; the ELECTRIC dipole is the T-even complement lambda^{1,3,4,6,8}.
+#   P2 = (E||a, H||c)  [A cross, B same-pol] : both operators mirror-EVEN
+#        -> m_z: F_z + mu*l2      d_x: l1 AND the diagonals l3, l8 (populations)
+#   P1 = (E||c, H||a)  [A same-pol, B cross] : both operators mirror-ODD
+#        -> m_x: F_x + l5,l7      d_z: l4, l6      (no diagonal -> no population)
+# The P2 population readout is the asymmetry: only that polarization can see
+# lambda3/lambda8.  W_E1 is the E1/M1 balance -- an O(1) free parameter that
+# the atlas is insensitive to everywhere except the geometry-B rectified line.
+W_E1, C3 = 5.264, 1.0
+# ---------------------------------------------------------------------------
 panels=[]
-# 1. A cross: detect H||c  ->  m_z (5.264 l2 + Sz) + w_E1 * x-E1 (2.39 l5 + 0.91 l7)
+# 1. A cross: detect (E||a,H||c) -> F_z + 5.264 l2 + W_E1(l1 + C3 l3) + beta l1 l2
 wtb,wTb,a=mix(A2,"SU3",1,10); _,_,b=mix(A2,"SU2",2,10)
+_,_,a1=mix(A2,"SU3",0,10); _,_,a3=mix(A2,"SU3",2,10)
 # quadratic (hyperpolarizability) emission, allowed because Tm 4c lacks inversion:
 # m_z  =  mu*lambda2  +  beta*lambda1*lambda2   -> emits at 2*E12
 def quad(runs,T):  # quadratic (hyperpolarisability) channel
@@ -72,20 +87,32 @@ def quad(runs,T):  # quadratic (hyperpolarisability) channel
         tot=w*Q if tot is None else tot+w*Q
     return spec(t,tau,tot)
 _,_,aq=quad(A2,10)
-beta=5.264*a[np.argmin(np.abs(wTb-0.90))][np.argmin(np.abs(wtb-0.50))]/aq[np.argmin(np.abs(wTb-0.49))][np.argmin(np.abs(wtb-1.00))]
-mz=5.264*a+b+beta*aq
-panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out)\n$m_z$=5.264$\\lambda^2$+%.0f$\\lambda^1\\lambda^2$ (Tm has no inversion),  $T$=10 K"%beta,wtb,wTb,mz,"A_cross"))
+lin=5.264*a+b+W_E1*(a1+C3*a3)
+beta=lin[np.argmin(np.abs(wTb-0.90))][np.argmin(np.abs(wtb-0.50))]/aq[np.argmin(np.abs(wTb-0.49))][np.argmin(np.abs(wtb-1.00))]
+mz=lin+beta*aq
+panels.append(("A cross  ($H\\parallel a$ in, $H\\parallel c$ out): the $(E\\parallel a,H\\parallel c)$ operator\n"
+               "$F_z{\\equiv}0$ + 5.264$\\lambda^2$($m_z$) + %.1f($\\lambda^1{+}\\lambda^3$)($d_x$, CEF) + %.0f$\\lambda^1\\lambda^2$,  $T$=10 K"%(W_E1,beta),
+               wtb,wTb,mz,"A_cross"))
 # 2. B cross: detect m_x = Fe Sx
 wtb,wTb,e=mix(B,"SU2",0,0)
 panels.append(("B cross  ($H\\parallel c$ in, $H\\parallel a$ out)\nFe $m_x$(M1); Tm $m_x{\\propto}\\lambda^{5,7}\\equiv$0,  $T$=0",wtb,wTb,e,"B_cross"))
 # 3. A same-pol: detect E||c -> CEF composite
 wtb,wTb,f4=mix(S,"SU3",3,10,True); _,_,f6=mix(S,"SU3",5,10,True)
-panels.append(("A same-pol  ($H\\parallel a$ out): Tm $m_x$\n0.006$\\lambda^4$+4.4$\\lambda^6$,  $T$=10 K",wtb,wTb,0.006*f4+4.4*f6,"A_same"))
-# 4. B same-pol PREDICTION: detect m_z (CEF channels are machine-zero here)
+panels.append(("A same-pol  ($H\\parallel a$ out): the $(E\\parallel c,H\\parallel a)$ operator\n"
+               "$F_x$ + $\\lambda^{5,7}$($m_x$) + 0.006$\\lambda^4$+4.4$\\lambda^6$($d_z$, CEF);  mirror-odd $\\Rightarrow$ no $\\lambda^{3,8}$,  $T$=10 K",
+               wtb,wTb,0.006*f4+4.4*f6,"A_same"))
+# 4. B same-pol PREDICTION: SAME operator as A cross -- both analyse (E||a,H||c)
 wtb,wTb,g_=mix(B,"SU2",2,0); _,_,bl2=mix(B,"SU3",1,0); _,_,bq=quad(B,0)
-panels.append(("B same-pol  PREDICTION ($m_z$ readout)\n$F_z$+5.264$\\lambda^2$+%.0f$\\lambda^1\\lambda^2$;  $\\lambda^{4-7}\\equiv$0,  $T$=0"%beta,
-               wtb,wTb,g_+5.264*bl2+beta*bq,"B_same_pred"))
-census={"beta_note":"m_z = 5.264*l2 + beta*l1*l2, beta from observed parity","drive":"A_Fe=0.12 tied su3=0.02195, dark-mu13","mu13_admixture_pct":0.14}
+_,_,bl1=mix(B,"SU3",0,0); _,_,bl3=mix(B,"SU3",2,0)
+panels.append(("B same-pol PREDICTION: the SAME $(E\\parallel a,H\\parallel c)$ operator as A cross\n"
+               "$F_z$+5.264$\\lambda^2$+%.1f($\\lambda^1{+}\\lambda^3$)+%.0f$\\lambda^1\\lambda^2$;  $\\lambda^{4-7}\\equiv$0 (closure), $\\lambda^8\\equiv$0,  $T$=0"%(W_E1,beta),
+               wtb,wTb,g_+5.264*bl2+W_E1*(bl1+C3*bl3)+beta*bq,"B_same_pred"))
+census={"detection_P2":"(E||a,H||c) = F_z + 5.264*l2 (m_z) + W_E1*(l1 + l3) (d_x; l3 = population readout, mirror-even) + beta*l1*l2",
+        "detection_P1":"(E||c,H||a) = F_x + l5,l7 (m_x) + 0.006*l4 + 4.4*l6 (d_z); mirror-ODD so no l3/l8 population term",
+        "W_E1":W_E1,"C3":C3,
+        "beta_note":"beta re-fitted from the observed A-cross parity (E12,2E12)=(qAFM,E12)",
+        "anchor_insensitivity":"A-cross observables move by <=0.04 over a 50x range of W_E1 (see p2_operator_fix.py)",
+        "drive":"A_Fe=0.12 tied su3=0.02195, dark-mu13","mu13_admixture_pct":0.14}
 fig,axs=plt.subplots(2,2,figsize=(12.4,9.4))
 for ax,(ttl,wtb,wTb,A,key) in zip(axs.ravel(),panels):
     pk=blind(wtb,wTb,A); census[key]=pk

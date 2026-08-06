@@ -1814,30 +1814,63 @@ $2\omega_{12}$.
 \subsection{Detection operator, channel by channel}
 \label{sec:detops}
 
-Detection is resolved by the \emph{magnetic} polarisation of the
-emitted field, so each analyser setting reads one Cartesian component
-of the total moment:
+An analyser accepts a polarisation \emph{state}, not a Cartesian
+component of the magnetisation, so \emph{both} the magnetic and the
+electric dipole that radiate into that state contribute.  There are
+therefore only two detection operators in the whole atlas, and the two
+channels that share one are not independently adjustable.
+
+Their content is fixed by two exact statements.  Time reversal on the
+real singlet basis of \cref{eq:mu0} puts the projected \emph{magnetic}
+moment entirely on $\lambda^{2,5,7}$---rigorously off-diagonal, with no
+permanent component---so the \emph{electric} dipole, being
+$\mathcal T$-even and real-symmetric, occupies exactly the complement
+$\lambda^{1,3,4,6,8}$, which includes the diagonal generators.  The site
+mirror then decides whether those diagonals survive: $\bra id_z\ket i=0$
+because $d_z$ is mirror-odd, while $\bra id_x\ket i$ is allowed.  Since
+$m_z$ is likewise mirror-even and $m_x$ mirror-odd, the two analyser
+settings are structurally different---one can read level populations and
+the other cannot:
 \begin{center}\small
 \renewcommand{\arraystretch}{1.3}
-\begin{tabular}{llll}
+\begin{tabular}{lll}
 \toprule
-channel & detected moment & Fe content & Tm content\\
+analyser state & operator & channels sharing it\\
 \midrule
-A cross & $m_z$ & $F_z\equiv0$ & $\mu\lambda^2+\beta\lambda^1\lambda^2$\\
-A same & $m_x$ & $F_x$ (carries $\qafm$) &
-  CEF $\lambda^{6}$ ($E_{23}$), $\lambda^{4}$ ($E_{13}$), and
-  $d_z^{\rm eff}\lambda^2$ ($E_{12}$)\\
-B cross & $m_x$ & $F_x$ (carries $\qafm$) & $\equiv0$ (closure)\\
-B same & $m_z$ & $F_z$ (carries $\qfm$) &
-  $\mu\lambda^2+\beta\lambda^1\lambda^2$, $50\times$ the Fe term\\
+$(E\!\parallel\!a,H\!\parallel\!c)$ &
+  $F_z+\mu\lambda^2$ ($m_z$, mirror-even)\newline
+  $+\,w_{E1}(\lambda^1+\lambda^3+\lambda^8)$ ($d_x$, mirror-even)\newline
+  $+\,\beta\lambda^1\lambda^2$ &
+  A cross ($F_z\equiv0$);\newline
+  B same ($F_z$ alive, $50\times$\newline smaller than the Tm terms)\\
+\midrule
+$(E\!\parallel\!c,H\!\parallel\!a)$ &
+  $F_x+\mu_x(\lambda^5,\lambda^7)$ ($m_x$, mirror-odd)\newline
+  $+\,w_{E1}'(\lambda^4,\lambda^6)$ ($d_z$, mirror-odd)\newline
+  $+\,d_z^{\rm eff}\lambda^2$;\ \ no $\lambda^{3,8}$ &
+  A same;\newline B cross (Tm part $\equiv0$\newline by closure)\\
 \bottomrule
 \end{tabular}
 \end{center}
-The $d_z^{\rm eff}\lambda^2$ entry in the same-polarised row is
+Three entries deserve comment.  The $d_z^{\rm eff}\lambda^2$ term is
 required by reciprocity once $d_z^{\rm eff}$ appears in the drive, and
 it is \emph{observed}: the measured same-polarised map contains a peak
 at $(\qafm,E_{12})$---$E_{12}$ emission in that channel---at $0.30$ of
-maximum.
+maximum.  The population terms $\lambda^{3,8}$ appear in one
+polarisation only; because a population does not oscillate at a
+transition frequency they radiate near $\omega_t=0$, making that
+channel's contribution rectified rather than resonant.  And $w_{E1}$,
+the $E1/M1$ balance, is an $\mathcal O(1)$ number our data do not fix:
+$\lambda^1$ and $\lambda^2$ are quadratures of the same coherence, their
+magnitude spectra agree to $8$--$11\%$, and sweeping $w_{E1}$ over a
+factor of $50$ (with $\beta$ refitted from the observed geometry-A
+parity each time) moves every geometry-A cross amplitude by at most
+$0.04$.  The single quantity that responds is the geometry-B rectified
+line, which is therefore a measurement of $w_{E1}$ rather than a
+nuisance.  Naming these channels by their magnetic component alone---an
+``$m_z$ readout''---understates them in two ways: $\mu\lambda^2$ is the
+Tm \emph{CEF} moment of the $1\!\leftrightarrow\!2$ transition, not a
+magnon, and the electric $d_x$ contributes to the same setting.
 
 \subsection{Operating point}
 \label{sec:operating2}
@@ -2003,10 +2036,15 @@ about the readout.
   This is the decisive experiment: a temperature scan through the
   reorientation separates the two mechanisms and measures
   $d_z^{\rm eff}$ by the size of the collapse.
-\item \textbf{Geometry-B same-polarised.}  Predicted to be a single
-  peak at $(E_{12},2E_{12})$; its strength measures $\beta$, and a map
-  led instead by $(\qfm,\qafm)$ would put $\beta$ far below the value
-  inferred in geometry A.
+\item \textbf{Geometry-B same-polarised.}  Predicted to be led by
+  $(E_{12},2E_{12})$, whose strength measures $\beta$---a map led
+  instead by $(\qfm,\qafm)$ would put $\beta$ far below the value
+  inferred in geometry A.  Beneath it, at $0.53$, a rectified pair at
+  $(\pm E_{12},\omega_t\!\to\!0)$: this is the $\lambda^3$ population
+  readout, allowed in this polarisation and no other, and its amplitude
+  measures $w_{E1}$ (it falls to $0.09$ with the electric readout off).
+  It is also the only optical readout of the $W_3$ population channel
+  anywhere in the atlas.
 \item \textbf{Pulse length.}  Adiabatically long pulses collapse the
   geometry-A cross peak by orders of magnitude.
 \end{enumerate}

@@ -857,8 +857,10 @@ B cross\newline ($m_x$) & $1.00\,(+0.38,0.90)$;
 A same\newline ($m_x$) & $1.00\,(+0.49,0.70)$;
   $0.80\,(+0.49,1.20)$; $0.67\,(-0.49,0.70)$ &
   population-route transfer; $\mu^z_{13}$-throttled; R remnant\\
-B same\newline ($m_z$) & $1.00\,(+0.49,1.00)$, nothing else above $0.07$ &
-  single harmonic peak; measures $\beta$\\
+B same\newline (same operator\newline as A cross) &
+  $1.00\,(+0.49,1.00)$; $0.54\,(+0.49,0.13)$; $0.53\,(-0.49,0.13)$ &
+  $2E_{12}$ harmonic (measures $\beta$); rectified $\lambda^3$ population
+  pair (measures $w_{E1}$)\\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -873,20 +875,41 @@ calibration is a free dial ($c_{\rm heat}$) that the measured
 late-to-impulsive intensity ratio will pin.
 
 \paragraph{Prediction: the geometry-B same-polarized channel.}
-For $H\parallel c$, $E\parallel a$ the same-polarized detection reads
-$E\parallel a\leftarrow d_x(\lambda^{5,7})+m_z$.  In the final
-configuration the Tm CEF channels are \emph{identically} zero there
-(machine $0$; the $B\parallel c$ drive closes on the
-$\{\lambda^{1,2,3}\}$ subalgebra), so the channel is a pure
-$m_z$ M1 magnon map.  Predicted census (runs \texttt{fin\_B}, $T=0$):
-$(+0.90,\,0.38)=1.00$ (the $\qafm\!\to\!\qfm$ magnon--magnon
-transfer---the very peak absent from the geometry-A same-polarized
-channel, where $m_z$ is dark at the $10^{-11}$ level),
-$(+0.52,\,0.38)=0.42$ ($E_{12}\!\to\!\qfm$), $\qfm$ diagonal
-$0.41$, $(-0.38,\,0.50)=0.38$.  Consequently the weak
-$(\qafm,0.38)$ reported in geometry A is naturally polarization
-leakage of this dominant geometry-B feature; a polarizer-purity scan
-(the peak should scale with the leakage angle squared) discriminates.
+\label{si:Bsamepred}
+For $H\parallel c$, $E\parallel a$ the same-polarized analyser accepts
+the $(E\!\parallel\!a,H\!\parallel\!c)$ state, which is the state
+geometry-A cross also analyses.  The operator is therefore fixed with no
+remaining freedom:
+$F_z+\mu^z_{12}\lambda^2+w_{E1}(\lambda^1+\lambda^3)
++\beta\lambda^1\lambda^2$.  What is identically zero here is
+$\lambda^{4\text{--}7}$ (the $B\!\parallel\!c$ drive closes on the
+$\{\lambda^{1,2,3}\}$ subalgebra) and $\lambda^8$ with it, so no
+$E_{13}$ or $E_{23}$ emission is possible.  Calling the channel an
+``$m_z$ magnon map'' would be wrong twice over: $\mu^z_{12}\lambda^2$ is
+the Tm CEF moment and exceeds the Fe $F_z$ by $\sim\!50\times$, and the
+electric $\lambda^1$ and $\lambda^3$ are readable in this polarisation
+as well.  Measured amplitudes at $T=0$ (runs \texttt{fin\_B}):
+$\lambda^1=3.00$, $\lambda^2=2.78$, $\lambda^3=18.3$, $F_z=0.055$,
+$\lambda^{4\text{--}8}=0$.
+
+The predicted census (\cref{fig:si-atlas}, lower right) has two families.
+The map is \emph{led} by $(+0.49,1.00)=1.00$, the $2E_{12}$ harmonic:
+$\lambda^2$ is driven directly through $\mu^z_{12}$, and the
+$\beta\simeq7\mu$ inferred from the geometry-A cross parity makes the
+harmonic $4.1\times$ the magnon--magnon feature.  Beneath it lies a
+\emph{rectified} pair, $(\pm0.49,\,\omega_t\!\to\!0)=0.54,\,0.53$, with
+weaker partners at $(\pm0.19,\,\omega_t\!\to\!0)=0.31,\,0.26$: the pulse
+writes a level population modulated at the delay frequency $E_{12}$, and
+$\lambda^3$ converts it to radiation.  These two families measure
+different things.  The harmonic reads $\beta$; the rectified pair reads
+$w_{E1}$, falling from $0.54$ to $0.09$ if the electric readout is
+switched off, and it is the \emph{only} feature anywhere in the atlas
+that depends on the $E1/M1$ balance (\cref{si:e1m1}).  It is also the
+only direct optical readout of the level populations, hence of the same
+$W_3$ channel whose slow transfer produces the geometry-B cross buildup
+of \cref{si:buildup}.  A measurement showing the harmonic but no
+rectified line would mean $d_x$ has no permanent component despite the
+mirror allowing one.
 
 % =====================================================================
 \section{One drive for one experiment: the operating point}
@@ -1008,12 +1031,47 @@ work below.
 
 Every channel in the atlas is specified by two independent choices: what
 the pulse \emph{drives}, fixed by the field orientation, and what the
-analyser \emph{reads}, fixed by which Cartesian component of the total
-magnetic moment radiates into the accepted polarisation.  For
-propagation along $b$ the two transverse polarisation states are
-($H\!\parallel\!a$, $E\!\parallel\!c$) and ($H\!\parallel\!c$,
-$E\!\parallel\!a$), so ``same'' and ``cross'' detection select $m_x$ and
-$m_z$ respectively in geometry A, and the reverse in geometry B.
+analyser \emph{reads}.  An analyser accepts a polarisation \emph{state},
+not a magnetic component: for propagation along $b$ the two transverse
+states are ($H\!\parallel\!a$, $E\!\parallel\!c$) and
+($H\!\parallel\!c$, $E\!\parallel\!a$), and \emph{both} the magnetic and
+the electric dipole radiating into a given state contribute to it.
+There are therefore only two detection operators in the whole atlas, and
+the two channels sharing one---geometry-A cross and geometry-B
+same-polarised---have no independent freedom between them.
+
+The content of each operator is fixed by \cref{si:reciprocity}.  Time
+reversal, acting on the real singlet CEF basis, puts the projected
+magnetic moment entirely on $\lambda^{2,5,7}$: it is rigorously
+off-diagonal, with no permanent component on any level.  The electric
+dipole is the $\mathcal T$-even, real-symmetric complement and therefore
+occupies $\lambda^{1,3,4,6,8}$, which \emph{includes} the diagonal
+generators.  The site mirror then decides whether those diagonals
+survive in a given polarisation: $\bra id_z\ket i=0$ because $d_z$ is
+mirror-odd, while $\bra id_x\ket i$ is allowed because $d_x$ is
+mirror-even.  Since $m_z$ is also mirror-even and $m_x$ mirror-odd, the
+two polarisations are structurally different:
+\begin{center}\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{lll}
+\toprule
+analyser state & parity of both operators & Tm content\\
+\midrule
+$(E\!\parallel\!a,H\!\parallel\!c)$ & even & $\lambda^1,\lambda^2$
+  (resonant at $E_{12}$) \emph{and} $\lambda^3,\lambda^8$ (populations)\\
+$(E\!\parallel\!c,H\!\parallel\!a)$ & odd & $\lambda^{4,5,6,7}$ only;
+  no population term exists\\
+\bottomrule
+\end{tabular}
+\end{center}
+The population entry radiates only near $\omega_t=0$---a population has
+no oscillation at a transition frequency---so it is a rectified channel
+and is invisible in the resonant part of every map.  It is nonetheless
+the only optical readout of the level occupations anywhere in the atlas,
+and it is what makes the geometry-B same-polarised prediction
+two-featured.  We write the $E1/M1$ balance as $w_{E1}$; it is an
+$\mathcal O(1)$ number that our data do not fix, and
+\cref{si:e1m1} shows that no measured quantity depends on it.
 
 \begin{table}[h]
 \centering\small
@@ -1038,10 +1096,14 @@ $H\!\parallel\!c$ out
   Tm: $E\!\parallel\!c$ on the $c$-axis dipoles, drive vector
   $(\lambda^2,\lambda^5,\lambda^7)\!\propto\!(d_z^{\rm eff},0,\mu^z_{23})$
   $\Rightarrow$ $E_{12}$ and $E_{23}$; $E_{13}$ \emph{dark}.
-& $m_z=F_z+\mu^z_{12}\lambda^2+\beta\lambda^1\lambda^2$.\newline
+& $F_z+\mu^z_{12}\lambda^2$ (magnetic $m_z$)
+  $+\,w_{E1}(\lambda^1+\lambda^3)$ (electric $d_x$)
+  $+\,\beta\lambda^1\lambda^2$.\newline
   $F_z\equiv0$ (machine zero: $\qafm$ has no $c$-axis moment), so the
-  channel is \emph{purely} Tm: the $E_{12}$ dipole, its $W^{xz}_1$-forced
-  $\qafm$ sideband, and the quadratic term radiating at $2E_{12}$.\\
+  channel is \emph{purely} Tm: the $E_{12}$ dipole in both its
+  quadratures, its $W^{xz}_1$-forced $\qafm$ sideband, and the quadratic
+  term radiating at $2E_{12}$.  $\lambda^3$ contributes only near
+  $\omega_t=0$ and $\lambda^8$ is $5.6\times10^{-4}$ of $\lambda^2$.\\
 \textbf{A, same}\newline $H\!\parallel\!a$, $E\!\parallel\!c$ in;
 $H\!\parallel\!a$ out
 & identical to A-cross --- it is the same experiment, differing only in
@@ -1064,10 +1126,13 @@ $H\!\parallel\!a$ out
 \textbf{B, same}\newline $H\!\parallel\!c$, $E\!\parallel\!a$ in;
 $H\!\parallel\!c$ out
 & identical to B-cross.
-& $m_z=F_z+\mu^z_{12}\lambda^2+\beta\lambda^1\lambda^2$.\newline
-  $F_z$ carries $\qfm$, but the Tm $\lambda^2$ is driven directly here
-  and is $50\times$ larger, so the channel is Tm-dominated --- see the
-  prediction below.\\
+& identical to A-cross: $F_z+\mu^z_{12}\lambda^2
+  +w_{E1}(\lambda^1+\lambda^3)+\beta\lambda^1\lambda^2$.\newline
+  $F_z$ carries $\qfm$, but the Tm $E_{12}$ terms are driven directly
+  here and are $50\times$ larger, so the channel is CEF-dominated, not
+  magnon-dominated.  $\lambda^8\equiv0$ by the closure, but $\lambda^3$
+  is large ($6.6\times\lambda^2$) and readable --- see the prediction
+  below.\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1085,11 +1150,25 @@ emission is possible in either geometry-B channel.
 \subsection{Geometry A, cross-polarised}
 \label{si:peaksAcross}
 
+This channel analyses the $(E\!\parallel\!a,H\!\parallel\!c)$ state, so
+it uses the operator $O_2$ of \cref{eq:si-O2}---the same one the
+geometry-B same-polarised channel uses.  Two of its terms are silent
+here.  $F_z\equiv0$ to $10^{-15}$, because $\qafm$ has no $c$-axis
+moment, which is what makes the channel purely Tm.  And the electric
+terms, although present, change nothing measurable: $\lambda^1$ is the
+quadrature partner of $\lambda^2$ and carries the same spectrum to
+$11\%$, while $\lambda^3$ radiates only near $\omega_t=0$.  Sweeping
+$w_{E1}$ over a factor of $50$ moves every amplitude below by at most
+$0.04$ once $\beta$ is refitted (\cref{si:e1m1}).  The pathways are
+therefore stated in terms of the coherences themselves, and hold for
+either multipole.
+
 \paragraph{$(\qafm,E_{12})=(0.90,\,0.50)$, amplitude $1.00$ --- the
 magnetoelectric cross peak; measures $W^{yy}_1$.}
 The $H\!\parallel\!a$ Zeeman field launches the $\qafm$ magnon, which
-precesses through the delay at $0.90$\,THz.  It never radiates: it has
-no $m_z$, and the analysed channel is $m_z$.  What it does instead is
+precesses through the delay at $0.90$\,THz.  It never radiates: the Fe
+sublattice reaches this analyser only through $F_z$, and $\qafm$ has no
+$c$-axis moment.  What it does instead is
 modulate the Tm crystal field through the two-magnon vertex
 $W^{yy}_1S_y^2\lambda^1$.  Because the vertex is quadratic in the
 fluctuation and the two pulses each supply one magnon leg, the
@@ -1476,15 +1555,30 @@ family but so far held at zero.
 \label{si:peaksBsame}
 
 No data exist for this channel yet, so its entire census is a
-prediction---and it turns out to be the sharpest test of the
-hyperpolarisability in the whole atlas.  The detected moment is
-$m_z=F_z+\mu^z_{12}\lambda^2+\beta\lambda^1\lambda^2$.  The CEF
-coordinates $\lambda^{4\text{--}7}$ vanish identically here (subalgebra
-closure), so no $E_{13}$ or $E_{23}$ emission is possible; but
-$\lambda^2$ is driven \emph{directly} by the $c$-directed field through
-the large moment $\mu^z_{12}=5.264$, and the resulting Tm signal is
-$\sim\!50\times$ the Fe $F_z$ contribution.  This channel is therefore
-Tm-dominated, not the pure magnon map one might expect.
+prediction---and it carries the sharpest test of the
+hyperpolarisability in the whole atlas, plus the only readout of the
+level populations.  The analyser accepts $(E\!\parallel\!a,
+H\!\parallel\!c)$, which is the state geometry-A cross also analyses, so
+the operator is inherited rather than chosen:
+\begin{equation}
+  O_{2}=F_z+\mu^z_{12}\lambda^2
+       +w_{E1}\bigl(\lambda^1+\lambda^3\bigr)
+       +\beta\lambda^1\lambda^2 .
+  \label{eq:si-O2}
+\end{equation}
+It is worth being explicit about what this is \emph{not}.  It is not a
+magnon readout: $\mu^z_{12}\lambda^2$ is the Tm CEF moment of the
+$1\!\leftrightarrow\!2$ transition, driven \emph{directly} by the
+$c$-directed field through $\mu^z_{12}=5.264$, and it exceeds the Fe
+$F_z$ contribution by $\sim\!50\times$.  Nor is it purely magnetic: the
+mirror-even electric dipole $d_x$ radiates into the same polarisation,
+contributing the second quadrature $\lambda^1$ of the same coherence and,
+because $\bra id_x\ket i\neq0$, the level populations $\lambda^3$ and
+$\lambda^8$.  What does vanish identically is $\lambda^{4\text{--}7}$
+(subalgebra closure), and $\lambda^8$ with them, so no $E_{13}$ or
+$E_{23}$ emission is possible in this channel.  Measured amplitudes at
+$T=0$: $\lambda^1=3.00$, $\lambda^2=2.78$, $\lambda^3=18.3$,
+$F_z=0.055$, $\lambda^{4\text{--}8}=0$.
 
 The consequence depends on $\beta$, which is exactly why it is
 diagnostic:
@@ -1501,15 +1595,72 @@ then & $(\qfm,E_{12})=(0.38,0.50)$, $0.61$ & ---\\
 \end{tabular}
 \end{center}
 With the $\beta$ inferred from geometry A, the second harmonic is
-$4.1\times$ the magnon--magnon feature and the channel collapses to a
-\emph{single} peak at $(E_{12},2E_{12})$.  Measuring this channel
-therefore reads $\beta$ off directly: a clean one-peak map at
+$4.1\times$ the magnon--magnon feature and \emph{leads} the map.
+Measuring it therefore reads $\beta$ off directly: a map led at
 $(0.5,\,1.0)$ confirms the large hyperpolarisability inferred in
 geometry A, whereas a map led by $(\qfm,\qafm)$ with $E_{12}$ diagonals
 beneath it puts $\beta$ far below that value and would force the
 geometry-A $(0.5,1.0)$ feature back onto one of the alternative
-assignments.  Either outcome is decisive, which makes this the single
-most informative measurement still missing.
+assignments.
+
+The channel is not a single peak, however, because $\lambda^3$ is
+readable here.  A population carries no oscillation at a transition
+frequency, so it radiates near $\omega_t=0$; but it \emph{is} modulated
+along the delay axis at $E_{12}$, since that is the coherence the pump
+wrote before it decayed into population.  The result is a rectified pair
+$(\pm E_{12},\omega_t\!\to\!0)$ at $0.54$ and $0.53$ of the harmonic,
+with $(\pm0.19,\omega_t\!\to\!0)$ at $0.31$ and $0.26$ beneath.  Its
+size is a direct measure of $w_{E1}$: turning the electric readout off
+drops it to $0.09$, while the harmonic and every geometry-A cross
+amplitude are unmoved (\cref{si:e1m1}).  Because $\lambda^3$ is the same
+population coordinate whose slow transfer produces the geometry-B cross
+buildup of \cref{si:buildup}, this line is also the only place in the
+atlas where the $W_3$ channel is read out optically rather than
+inferred from a time trace.  Both families together---one measuring
+$\beta$, one measuring $w_{E1}$ and $W_3$---make this the single most
+informative measurement still missing.
+
+\subsection{The $E1/M1$ balance, and why nothing else depends on it}
+\label{si:e1m1}
+
+The weight $w_{E1}$ in \cref{eq:si-O2} is the ratio of the electric to
+the magnetic emission amplitude of the $1\!\leftrightarrow\!2$
+transition.  Both are allowed---the $4c$ site has no inversion, so the
+CEF transition is $E1$-active, and $\mu^z_{12}$ is large---and our data
+do not fix the ratio.  This would be a serious ambiguity if the atlas
+depended on it.  It does not, for a structural reason: $\lambda^1$ and
+$\lambda^2$ are the two quadratures of the same coherence, so their
+magnitude spectra agree to $8$--$11\%$, and adding one to the other
+rescales the resonant response without changing its shape.  Sweeping
+$w_{E1}$ over a factor of $50$ (script
+\texttt{scripts/p2\_operator\_fix.py}), with $\beta$ refitted at each
+step from the observed geometry-A parity as always:
+
+\begin{center}\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{lccccc}
+\toprule
+$w_{E1}/\mu$ & $0$ & $0.19$ & $1.0$ & $1.9$ & $5.0$\\
+\midrule
+$\beta$ & $31.5$ & $38.1$ & $66.3$ & $97.6$ & $205.5$\\
+\midrule
+A cross $(\qafm,E_{12})$ & $1.00$ & $1.00$ & $1.00$ & $1.00$ & $1.00$\\
+A cross $(E_{12},2E_{12})$ & $0.97$ & $0.97$ & $0.97$ & $0.97$ & $0.98$\\
+A cross $(-\qafm,E_{12})$ & $0.52$ & $0.51$ & $0.49$ & $0.48$ & $0.48$\\
+A cross $(E_{12},E_{12})$ & $0.33$ & $0.34$ & $0.35$ & $0.36$ & $0.37$\\
+\midrule
+B same $(E_{12},2E_{12})$ & $1.00$ & $1.00$ & $1.00$ & $0.88$ & $0.72$\\
+B same $(E_{12},{\sim}0)$ & $0.09$ & $0.25$ & $0.54$ & $0.58$ & $0.57$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Every geometry-A cross amplitude moves by at most $0.04$ across the
+whole range; $\beta$ absorbs the change, which is why it is quoted as a
+ratio to $\mu$ rather than as an absolute number.  Only the geometry-B
+rectified line responds, and it responds strongly---which is what makes
+it a measurement of $w_{E1}$ rather than a nuisance.  The atlas figures
+use $w_{E1}=\mu$ and equal weight on $\lambda^1$ and $\lambda^3$, the
+symmetric default; no conclusion in this work depends on that choice.
 
 % =====================================================================
 \section{The complete atlas}
@@ -1520,17 +1671,25 @@ most informative measurement still missing.
 \centering
 \includegraphics[width=\textwidth]{figs/atlas_final.png}
 \caption{All four polarization channels from the single consolidated
-Hamiltonian, regenerated with the final methods (magnetic-resolution
-detection; $\tau$-averaged signal subtracted per detection time so the
-$\omega_\tau=0$ pump--probe row is removed, with $|\omega_T|<0.18$\,THz
-masked; blind census, crosses).  Top left: geometry-A cross,
-$m_z$(M1)$+0.94\times x$-E1 --- the $(\qafm,E_{12})$ peak of $W^{yy}_1$
-and the extended $E_{12}$ row at $0.9$--$1.2$\,THz.  Top right:
-geometry-B cross, Fe $m_x$ --- $(\qfm,\qafm)$ and the
-$\kappa^B$-gated $(E_{12},\qafm)$.  Bottom left: geometry-A
-same-polarized CEF composite at $10$\,K.  Bottom right: the
-geometry-B same-polarized \emph{prediction} --- a pure $m_z$ magnon map
-dominated by $(\qafm,\qfm)=(0.9,0.38)$.  Numerical censuses in
+Hamiltonian, regenerated with the final methods.  Only \emph{two}
+detection operators appear, one per analyser polarization state, each
+containing both the magnetic and the electric dipole that radiate into
+it (\cref{si:whatsees}); the $\tau$-averaged signal is subtracted per
+detection time so the $\omega_\tau=0$ pump--probe row is removed, with
+$|\omega_T|<0.18$\,THz masked; blind census, crosses.  Top left:
+geometry-A cross, the $(E\!\parallel\!a,H\!\parallel\!c)$ operator
+$F_z{\equiv}0+\mu\lambda^2+w_{E1}(\lambda^1{+}\lambda^3)
++\beta\lambda^1\lambda^2$ --- the $(\qafm,E_{12})$ peak of $W^{yy}_1$
+and the $2E_{12}$ harmonic.  Top right: geometry-B cross, the
+$(E\!\parallel\!c,H\!\parallel\!a)$ operator with its Tm part
+identically zero --- $(\qfm,\qafm)$ and the $\kappa^B$-gated
+$(E_{12},\qafm)$.  Bottom left: geometry-A same-polarized, the same
+$(E\!\parallel\!c,H\!\parallel\!a)$ operator, CEF composite at
+$10$\,K; both its constituents are mirror-odd, so it carries no
+population term.  Bottom right: the geometry-B same-polarized
+\emph{prediction}, analysed with the \emph{same} operator as top left
+--- led by the $2E_{12}$ harmonic, with the rectified $\lambda^3$
+population pair at $\omega_t\!\to\!0$ beneath it.  Numerical censuses in
 \texttt{data/census\_atlas\_final.json}.}
 \label{fig:si-atlas}
 \end{figure}
@@ -1698,7 +1857,8 @@ A same & $(E_{12},E_{23})\!\approx\!(E_{12},0)$ strongest,
   no $(E_{12},E_{23})$, no $(E_{12},0)$
 & hierarchy \textbf{inverted}; the two strongest measured peaks
   \textbf{absent}\\
-B same & (not measured) & single peak $(E_{12},2E_{12})=1.00$
+B same & (not measured) & $(E_{12},2E_{12})=1.00$ led, rectified
+  $\lambda^3$ pair at $0.53$
 & prediction stands\\
 \bottomrule
 \end{tabular}
