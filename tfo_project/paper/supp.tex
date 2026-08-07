@@ -156,7 +156,9 @@ to produce the geometry-A cross peak at $(\qafm,E_{12})$:
 \begin{table}[h]
 \centering\small
 \caption{Vertex scorecard.  Only $W$ and $\kappa^B$ pass all six
-requirements.}
+requirements; the final model uses the static $W$ family alone, the
+geometry-B transfer being fed by the electric quadrature of the drive
+rather than by a field-assisted vertex.}
 \begin{tabular}{lccccl}
 \toprule
 vertex & legs & sector & R1 & R2--R6 & verdict\\
@@ -168,7 +170,7 @@ $ESJ$ & $E+\Fe+\Tm^-$ & $\lambda^-$ & $\times$ & \checkmark &
 $W$ & $2\Fe+\Tm^+$ & $\lambda^+$ & \checkmark & \checkmark &
   \textbf{winner}: rank-1, factorized peak\\
 $\kappa^B$ & $B+\Fe+\Tm^+$ & $\lambda^+$ & \checkmark & \checkmark &
-  works; $B_z$-gated $\Rightarrow$ geometry-B vertex\\
+  passes, but superseded (not in the final model)\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -200,26 +202,33 @@ a clean factorized peak with no diagonal partner.  The field-gated
 vertex kicks at the probe, $h^1\propto B_y(t)S_y(t)$ with
 $S_y(0)=A\sin\qafm\tau$, giving
 $\Mnl^{\kappa}\propto\sin(\qafm\tau)[1-\cos\omega_{12}t]$: also on
-target, but the same gate dumps each pulse's local response into Tm at
-both pulse times, generating an $(E_{12},E_{12})$ diagonal and a
-$(0,E_{12})$ background.  Its dominant symmetry slice is $z$-gated
-($B_z(t)$), so in geometry A ($B_z=0$) it is \emph{identically silent}:
-the gate is simultaneously the reason it is harmless in geometry A and
-active in geometry B.
+target.  It is, however, not required.  The one physical geometry-B
+pulse carries an electric quadrature, $E\!\parallel\!a$ acting through
+$d_x\lambda^1$, which writes the $E_{12}$ coherence directly; the
+static $W^{xz}_1$ at its master value then converts the stored
+coherence into the magnon, and the measured transfer peak is
+reproduced with $\kappa^B=0$.  The polarisation ownership of $d_x$
+supplies the geometry selection the $B_z$ gate supplied before: the
+component does not exist in geometry A.
 
 \paragraph{Exhaustion of the quadratic families.}
 All remaining symmetry-allowed quadratic couplings were switched on one
 at a time in the full nonlinear dynamics and are exactly inert
 (differences at the $10^{-12}$ level or below): $W_4^{yy,xy,yz,xx,zz,xz}$,
 $W_1^{xy}$, $W_6^{yy,xz}$, $\kappa^E_{2y}$, $\kappa^E_{5x}$.  Among the
-$W_1$ components: $W_1^{yz}$ inert, $W_1^{zz}$ negligible, $W_1^{xx}$
-alive but floods the spectrum with an $\omega_t=0.16$\,THz comb,
-$W_1^{xz}$ alive and on-target for hybridization (used below), and no
-static component can replace the gated $\kappa^B$ for the geometry-B
-transfer peak: the entire $W_1{+}W_4$ family fails to produce
-$(E_{12},\qafm)$ in geometry B without simultaneously contaminating
-geometry A.  The $B_z$-gate is therefore \emph{proven necessary by
-exhaustion}.
+$W_1$ components: $W_1^{yz}$ couples the qutrit to the $A_y/C_y$
+exchange modes (wrong magnon irrep---verified by the upper-branch ghost
+row at $1.4$\,THz under strong coupling), $W_1^{zz}$ negligible,
+$W_1^{xx}$ alive but floods the spectrum with an $\omega_t=0.16$\,THz
+comb, and $W_1^{xz}$ is the on-target converter.  No static component
+converts a \emph{magnetically} written coherence without entering the
+mixer regime (level repulsion dragging the $E_{12}$ line, excluded by
+1D absorption at every strength---verified with the bare splitting
+recalibrated at each coupling so the dressed line stays at its measured
+position, which preserves $E_{12}{+}E_{23}{=}E_{13}$ automatically).
+The \emph{electrically} written coherence requires no such regime: the
+master $W^{xz}_1=0.01$ suffices, and the field-assisted family is
+retired by parsimony rather than by symmetry.
 
 % =====================================================================
 \section{Numerical protocol}
@@ -341,7 +350,7 @@ $\propto A^1$).  The measured no-DC waveform suppresses the quasistatic
 legs, which is why the experimental pulse yields the cleanest spectra.
 
 % =====================================================================
-\section{Geometry B: gate versus buildup}
+\section{Geometry B: transfer mechanism and timing}
 \label{si:buildup}
 % =====================================================================
 
@@ -360,13 +369,17 @@ is nothing left to pump the magnon slowly.}
 \label{fig:si-buildup}
 \end{figure}
 
-Isolated-vertex runs: $\kappa^B_{1y}$ alone $\Rightarrow$
-$(E_{12},\qafm)$ present; $W^{xz}_1$ alone $\Rightarrow$ peak absent.
-In the consolidated Hamiltonian $W^{yy}_1=W^{xz}_1=0.01$ and
-$\kappa^B_{1y}=0.0035$: the geometry-B peak ratio is the observable
-that calibrates $\kappa^B$, and because $\kappa^B$ is $B_z$-gated the
-recalibration provably cannot affect either $H\!\parallel\!a$ channel
-(verified bit-identical).
+Isolated-drive runs settle the transfer mechanism.  With the coherence
+written \emph{magnetically} ($\mu_z\lambda^2$ only) and
+$W^{xz}_1=0.01$, the $(E_{12},\qafm)$ peak is absent; adding the
+\emph{electric} quadrature of the same physical pulse
+($d_x\lambda^1$, amplitude $0.0165=0.54\,\mu_z$, relative sign
+negative) produces the peak at the unshifted row position
+$\omega_\tau=0.52$ at the measured ratio, with no field-assisted
+vertex anywhere ($\kappa^B=0$).  The geometry-B peak ratio is the
+observable that calibrates $w_{E1}$, and because the $d_x$ drive is
+owned by $E\!\parallel\!a$ it provably cannot affect either
+$H\!\parallel\!a$ channel (the component does not exist there).
 
 \paragraph{The post-drive buildup: a corrected analysis.}
 An earlier stage of this project attributed the experimentally reported
@@ -612,15 +625,20 @@ $\Gamma_3$ relaxation then chases the shifted equilibrium, so the
 repopulation rise time is $1/\Gamma_3$ by construction, and the
 pump-FID$\times$probe interference contained in the dissipated energy
 carries the $\omega_\tau=E_{12}$ label through the $M_{\rm NL}$
-subtraction automatically.  A full 2DCS run with
-$W_3^{yz}=0.01$, $1/\Gamma_3=33$\,ps, and $c_{\rm heat}$ set for a
-few-percent population shift (run \texttt{bb5c}) reproduces the
-observed phenomenology [Fig.~\ref{fig:si-buildupinsim}]: the
+subtraction automatically.  A demonstration run with
+$W_3^{yz}=0.01$, $1/\Gamma_3=33$\,ps, and $c_{\rm heat}$ deliberately
+boosted to a few-percent population shift (run \texttt{bb5c})
+establishes that the channel \emph{can} produce the reported
+phenomenology [Fig.~\ref{fig:si-buildupinsim}]: the
 $\omega_\tau=E_{12}$ row falls off the impulsive peak, \emph{builds
-back up} on the repopulation time, and persists beyond $100$\,ps---%
-$50$--$100\times$ above the coherent-only model at late times.  The two
-new parameters map onto measurables: the recovery time of the row is
-$1/\Gamma_3$, and the late-to-impulsive intensity ratio calibrates
+back up} on the repopulation time, and persists beyond $100$\,ps,
+$50$--$100\times$ above the coherent-only model at late times.  At the
+conservative headline calibration (saturation cap $0.05$), however, the
+same channel yields only a tail roughly four decades below the
+impulsive peak: the buildup magnitude is a free dial that only the
+measured late-to-impulsive intensity ratio can pin.  The two new
+parameters then map onto measurables: the recovery time of the row is
+$1/\Gamma_3$, and the late-to-impulsive ratio calibrates
 $c_{\rm heat}\,W_3$.
 
 \begin{figure}[h]
@@ -668,46 +686,41 @@ mechanism.}
 \label{fig:si-mixed}
 \end{figure}
 
-\paragraph{Why the static vertex cannot replace the gated one.}
+\paragraph{Why the transfer requires the electric writing channel.}
 $W^{xz}_1 S_xS_z\lambda^1$ is trilinear; around the $\Gamma_2$ order it
 decomposes into a static CEF shift, two energy-conserving
 \emph{bilinear} hops ($F_x\,\delta S_z\,\lambda^1$ and
-$G_z\,\delta S_x\,\lambda^1$: pure hybridization), and a genuine
-two-fluctuation converter $\delta S_x\,\delta S_z\,\lambda^1$.  The
-converter piece is real and retained---it drives the post-pulse buildup
-through the nearly closed triad $\qfm+E_{12}=0.88\approx\qafm$
-($0.02$\,THz detuning)---but it is fluctuation-fed (its energy leg is a
-probe-launched magnon, one factor of drive$\times$susceptibility weaker
-and spectrally narrow) and detuning-limited (secular accumulation over
-tens of ps), so it produces an \emph{envelope}, not an impulsive
-phase-stamped kick.  At $W^{xz}_1=0.01$ the isolated run has sizable
-absolute amplitude at $(+0.5,\,0.90)$ (0.72 of map max) but it is the
-\emph{tail} of the magnon--magnon peak---no genuine local maximum on
-the $E_{12}$ row.
-
-A careful strength sweep in the consolidated configuration
-($W^{xz}_1\in\{0.01,0.02,0.03,0.05,0.07,0.09\}$, $\kappa^B=0$;
-runs \texttt{vBwxz*}) shows that raising the static vertex \emph{never}
-creates a second resolved peak.  Instead the two delay rows
-coalesce---the leading peak's delay phase migrates continuously,
-$0.38\to0.40\to0.48\to0.47$\,THz across the sweep, the resolved
-$(\qfm,\qafm)$/$(E_{12},\qafm)$ doublet structure never appears at any
-strength, and the hybridization-shifted $E_{12}$ branch leaks into the
-M1 channel as emission strays at $\omega_t=0.44$--$0.45$\,THz (growing
-to $0.15$--$0.16$ by $W^{xz}_1=0.09$).  This is the structural signature
-of a static mixer: it \emph{moves} peaks (level repulsion of the
-hybridized normal modes---also shifting the mode frequencies off their
-1D-measured values), whereas the experiment shows two resolved peaks at
-the \emph{unshifted} delay energies $0.38$ and $0.50$\,THz.  A gated
-converter \emph{adds} a peak while leaving the normal modes untouched;
-with $\kappa^B_{1y}=0.0035$ the census gives
-$(+0.38,0.90)=1.00$ and a separate $(+0.53,0.89)=0.46$, both on the
-measured lines.  The necessity of the field-gated vertex therefore does
-not rest on any operating-point fine-tuning: static mixing and gated
-conversion are qualitatively different operations on the 2D map.  In
-geometry B the Tm CEF channels $\lambda^{4\text{--}7}$ are
-\emph{exactly} zero (machine precision): the
-$E\!\parallel\!a,H\!\parallel\!c$ drive closes on the
+$G_z\,\delta S_x\,\lambda^1$: pure hybridization), and a
+two-fluctuation converter $\delta S_x\,\delta S_z\,\lambda^1$.  If the
+$E_{12}$ coherence is written \emph{magnetically} ($\mu_z\lambda^2$
+only), the converter is too weak at the master coupling and the only
+route to the peak is to crank the hybridization: a careful strength
+sweep ($W^{xz}_1\in\{0.01,0.02,0.03,0.05,0.07,0.09\}$, $\kappa^B=0$;
+runs \texttt{vBwxz*}) shows this \emph{never} creates a second
+resolved peak.  Instead the two delay rows coalesce---the leading
+peak's delay phase migrates continuously,
+$0.38\to0.40\to0.48\to0.47$\,THz, the resolved
+$(\qfm,\qafm)$/$(E_{12},\qafm)$ doublet never appears at any strength,
+and the hybridization-shifted $E_{12}$ branch leaks into the M1 channel
+as emission strays at $\omega_t=0.44$--$0.45$\,THz.  This is the
+structural signature of a static mixer: it \emph{moves} peaks (level
+repulsion, also shifting the modes off their 1D-measured values),
+whereas the experiment shows two resolved peaks at the \emph{unshifted}
+delay energies.  The failure is not a calibration artifact: pinning the
+dressed $E_{12}$ line at its measured position by recalibrating the
+bare splitting at each coupling (the sum rule
+$E_{12}{+}E_{23}{=}E_{13}$ is preserved automatically) removes the
+magnetically fed peak at every strength.  What resolves the channel is
+the \emph{electric quadrature of the drive}: $E\!\parallel\!a$ writes
+the coherence through $d_x\lambda^1$, and at the master
+$W^{xz}_1=0.01$ the census gives $(+0.38,0.90)=1.00$ and a separate
+$(+0.53,0.90)=0.45$, both on the measured lines, with
+$\mathrm{sign}(d_x\mu_z)<0$ fixing the row position and the ratio
+fixing $w_{E1}=0.54$.  Electrically written conversion \emph{adds} a
+peak while leaving the normal modes untouched; magnetically forced
+static mixing cannot.  In geometry B the Tm CEF channels
+$\lambda^{4\text{--}7}$ are \emph{exactly} zero (machine precision):
+the drive touches only $\lambda^1,\lambda^2$ and closes on the
 $\{\lambda^1,\lambda^2,\lambda^3\}$ subalgebra, an SU(2) closure that
 protects geometry B from CEF contamination.
 
@@ -825,7 +838,10 @@ Every spectrum in the paper is produced by \emph{one} Hamiltonian and
 channels.  Couplings (code units): Fe exchange/anisotropy/DM of the
 calibrated orthoferrite model ($D_1=0.049$, $D_2=0.014$); Tm CEF
 $e_1=2.0678$, $e_2=4.9628$\,meV; Fe--Tm $W^{yy}_1=0.01$,
-$W^{xz}_1=0.01$, $\kappa^B_{1y}=0.0035$, population channel
+$W^{xz}_1=0.01$, no field-assisted coupling ($\kappa^B=0$; the
+geometry-B Tm drive carries both quadratures of the one physical
+pulse, $\mu_z\lambda^2$ at $0.0307$ and $d_x\lambda^1$ at $-0.0165$,
+i.e.\ $w_{E1}=0.54$), population channel
 $W_3^{yz}=0.01$ with the thermal-repopulation feedback
 ($\Gamma_3=\Gamma_8=0.02$, i.e.\ $T_1=33$\,ps;
 $c_{\rm heat}=2000$, saturation cap $0.05$, heat-reservoir cooling
@@ -852,15 +868,15 @@ A cross\newline ($m_z$) & $1.00\,(+0.90,0.50)$;
   $0.97\,(+0.49,1.00)$; $0.52\,(-0.90,0.50)$ &
   $W^{yy}_1$ magnetoelectric peak; $2E_{12}$ harmonic; R partner\\
 B cross\newline ($m_x$) & $1.00\,(+0.38,0.90)$;
-  $0.45\,(+0.53,0.89)$; $0.17\,(-0.42,0.90)$ &
-  magnon--magnon; $\kappa^B$ transfer; R partner\\
+  $0.45\,(+0.53,0.90)$; $0.13\,(-0.39,0.90)$ &
+  magnon--magnon; electric-write $\to W^{xz}_1$ transfer; R partner\\
 A same\newline ($m_x$) & $1.00\,(+0.49,0.70)$;
   $0.80\,(+0.49,1.20)$; $0.67\,(-0.49,0.70)$ &
   population-route transfer; $\mu^z_{13}$-throttled; R remnant\\
 B same\newline (same operator\newline as A cross) &
-  $1.00\,(+0.49,1.00)$; $0.54\,(+0.49,0.13)$; $0.53\,(-0.49,0.13)$ &
-  $2E_{12}$ harmonic (measures $\beta$); rectified $\lambda^3$ population
-  pair (measures $w_{E1}$)\\
+  $1.00\,(+0.51,1.00)$; all others $\leq0.07$ &
+  $2E_{12}$ harmonic alone (zero-parameter test of $\beta$; no
+  population readout)\\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -880,36 +896,26 @@ For $H\parallel c$, $E\parallel a$ the same-polarized analyser accepts
 the $(E\!\parallel\!a,H\!\parallel\!c)$ state, which is the state
 geometry-A cross also analyses.  The operator is therefore fixed with no
 remaining freedom:
-$F_z+\mu^z_{12}\lambda^2+w_{E1}(\lambda^1+\lambda^3)
-+\beta\lambda^1\lambda^2$.  What is identically zero here is
-$\lambda^{4\text{--}7}$ (the $B\!\parallel\!c$ drive closes on the
-$\{\lambda^{1,2,3}\}$ subalgebra) and $\lambda^8$ with it, so no
-$E_{13}$ or $E_{23}$ emission is possible.  Calling the channel an
-``$m_z$ magnon map'' would be wrong twice over: $\mu^z_{12}\lambda^2$ is
-the Tm CEF moment and exceeds the Fe $F_z$ by $\sim\!50\times$, and the
-electric $\lambda^1$ and $\lambda^3$ are readable in this polarisation
-as well.  Measured amplitudes at $T=0$ (runs \texttt{fin\_B}):
-$\lambda^1=3.00$, $\lambda^2=2.78$, $\lambda^3=18.3$, $F_z=0.055$,
-$\lambda^{4\text{--}8}=0$.
+$F_z+\mu^z_{12}\lambda^2+w_{E1}\lambda^1+\beta\lambda^1\lambda^2$
+(no population generators; \cref{si:e1m1}).  What is identically zero
+here is $\lambda^{4\text{--}7}$ (the geometry-B drive touches only
+$\lambda^1,\lambda^2$ and closes on the $\{\lambda^{1,2,3}\}$
+subalgebra) and $\lambda^8$ with it, so no $E_{13}$ or $E_{23}$
+emission is possible.
 
-The predicted census (\cref{fig:si-atlas}, lower right) has two families.
-The map is \emph{led} by $(+0.49,1.00)=1.00$, the $2E_{12}$ harmonic:
-$\lambda^2$ is driven directly through $\mu^z_{12}$, and the
-$\beta\simeq7\mu$ inferred from the geometry-A cross parity makes the
-harmonic $4.1\times$ the magnon--magnon feature.  Beneath it lies a
-\emph{rectified} pair, $(\pm0.49,\,\omega_t\!\to\!0)=0.54,\,0.53$, with
-weaker partners at $(\pm0.19,\,\omega_t\!\to\!0)=0.31,\,0.26$: the pulse
-writes a level population modulated at the delay frequency $E_{12}$, and
-$\lambda^3$ converts it to radiation.  These two families measure
-different things.  The harmonic reads $\beta$; the rectified pair reads
-$w_{E1}$, falling from $0.54$ to $0.09$ if the electric readout is
-switched off, and it is the \emph{only} feature anywhere in the atlas
-that depends on the $E1/M1$ balance (\cref{si:e1m1}).  It is also the
-only direct optical readout of the level populations, hence of the same
-$W_3$ channel whose slow transfer produces the geometry-B cross buildup
-of \cref{si:buildup}.  A measurement showing the harmonic but no
-rectified line would mean $d_x$ has no permanent component despite the
-mirror allowing one.
+The prediction is a single feature.  The linear readouts
+$\mu^z_{12}\lambda^2$ and $w_{E1}\lambda^1$ carry the directly driven
+coherence, which the $\Mnl$ subtraction removes at first order, and
+$F_z$ sits $\sim\!50\times$ below the Tm terms; the channel therefore
+collapses onto its quadratic term.  The map is led by
+$(+0.51,1.00)=1.00$, the $2E_{12}$ hyperpolarisability harmonic, with
+everything else at or below $0.07$ (component decomposition: the
+$\beta\lambda^1\lambda^2$ term is $>\!99\%$ of the composite).  Since
+$\beta$ is already fixed by the geometry-A cross parity, the channel is
+a zero-parameter consistency test: a map led by anything else falsifies
+the hyperpolarisability, and an observed rectified pair at
+$(\pm E_{12},\omega_t\!\to\!0)$ would falsify the exclusion of the
+population generators from detection.
 
 % =====================================================================
 \section{One drive for one experiment: the operating point}
@@ -1058,20 +1064,22 @@ two polarisations are structurally different:
 analyser state & parity of both operators & Tm content\\
 \midrule
 $(E\!\parallel\!a,H\!\parallel\!c)$ & even & $\lambda^1,\lambda^2$
-  (resonant at $E_{12}$) \emph{and} $\lambda^3,\lambda^8$ (populations)\\
+  (resonant at $E_{12}$); mirror parity would also allow the diagonals
+  $\lambda^3,\lambda^8$\\
 $(E\!\parallel\!c,H\!\parallel\!a)$ & odd & $\lambda^{4,5,6,7}$ only;
-  no population term exists\\
+  no diagonal term exists\\
 \bottomrule
 \end{tabular}
 \end{center}
-The population entry radiates only near $\omega_t=0$---a population has
-no oscillation at a transition frequency---so it is a rectified channel
-and is invisible in the resonant part of every map.  It is nonetheless
-the only optical readout of the level occupations anywhere in the atlas,
-and it is what makes the geometry-B same-polarised prediction
-two-featured.  We write the $E1/M1$ balance as $w_{E1}$; it is an
-$\mathcal O(1)$ number that our data do not fix, and
-\cref{si:e1m1} shows that no measured quantity depends on it.
+A permanent (diagonal) moment does not radiate at any transition
+frequency; the detection operators exclude the population generators
+$\lambda^{3},\lambda^8$ throughout, so both analyser settings read
+off-diagonal coherences only, and a measured rectified line at
+$\omega_t\!\to\!0$ in an even-parity channel would falsify the
+exclusion.  We write the $E1/M1$ balance as $w_{E1}$; in
+\emph{detection} no measured quantity depends on it (\cref{si:e1m1}),
+while in the \emph{drive} it feeds the geometry-B transfer peak
+linearly and is fixed by the measured ratio at $w_{E1}=0.54$.
 
 \begin{table}[h]
 \centering\small
@@ -1097,13 +1105,12 @@ $H\!\parallel\!c$ out
   $(\lambda^2,\lambda^5,\lambda^7)\!\propto\!(d_z^{\rm eff},0,\mu^z_{23})$
   $\Rightarrow$ $E_{12}$ and $E_{23}$; $E_{13}$ \emph{dark}.
 & $F_z+\mu^z_{12}\lambda^2$ (magnetic $m_z$)
-  $+\,w_{E1}(\lambda^1+\lambda^3)$ (electric $d_x$)
-  $+\,\beta\lambda^1\lambda^2$.\newline
+  $+\,w_{E1}\lambda^1$ (electric $d_x$)
+  $+\,\beta\lambda^1\lambda^2$; no population generators.\newline
   $F_z\equiv0$ (machine zero: $\qafm$ has no $c$-axis moment), so the
   channel is \emph{purely} Tm: the $E_{12}$ dipole in both its
   quadratures, its $W^{xz}_1$-forced $\qafm$ sideband, and the quadratic
-  term radiating at $2E_{12}$.  $\lambda^3$ contributes only near
-  $\omega_t=0$ and $\lambda^8$ is $5.6\times10^{-4}$ of $\lambda^2$.\\
+  term radiating at $2E_{12}$.\\
 \textbf{A, same}\newline $H\!\parallel\!a$, $E\!\parallel\!c$ in;
 $H\!\parallel\!a$ out
 & identical to A-cross --- it is the same experiment, differing only in
@@ -1127,12 +1134,13 @@ $H\!\parallel\!a$ out
 $H\!\parallel\!c$ out
 & identical to B-cross.
 & identical to A-cross: $F_z+\mu^z_{12}\lambda^2
-  +w_{E1}(\lambda^1+\lambda^3)+\beta\lambda^1\lambda^2$.\newline
+  +w_{E1}\lambda^1+\beta\lambda^1\lambda^2$ (no population
+  generators).\newline
   $F_z$ carries $\qfm$, but the Tm $E_{12}$ terms are driven directly
   here and are $50\times$ larger, so the channel is CEF-dominated, not
-  magnon-dominated.  $\lambda^8\equiv0$ by the closure, but $\lambda^3$
-  is large ($6.6\times\lambda^2$) and readable --- see the prediction
-  below.\\
+  magnon-dominated; in $\Mnl$ the linear readouts cancel at first
+  order and the channel collapses onto the quadratic term --- see the
+  prediction below.\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1155,9 +1163,9 @@ it uses the operator $O_2$ of \cref{eq:si-O2}---the same one the
 geometry-B same-polarised channel uses.  Two of its terms are silent
 here.  $F_z\equiv0$ to $10^{-15}$, because $\qafm$ has no $c$-axis
 moment, which is what makes the channel purely Tm.  And the electric
-terms, although present, change nothing measurable: $\lambda^1$ is the
+term, although present, changes nothing measurable: $\lambda^1$ is the
 quadrature partner of $\lambda^2$ and carries the same spectrum to
-$11\%$, while $\lambda^3$ radiates only near $\omega_t=0$.  Sweeping
+$11\%$.  Sweeping
 $w_{E1}$ over a factor of $50$ moves every amplitude below by at most
 $0.04$ once $\beta$ is refitted (\cref{si:e1m1}).  The pathways are
 therefore stated in terms of the coherences themselves, and hold for
@@ -1310,31 +1318,37 @@ Fe--Tm coupling is involved at any vertex, which is why this peak is
 temperature-flat: it is a pure two-magnon process, independent of the
 qutrit populations.
 
-\paragraph{$(E_{12},\qafm)=(0.53,\,0.89)$, amplitude $0.45$ --- the
-gated transfer peak; measures $\kappa^B_{1y}$.}
-$E\!\parallel\!a$ stores a Tm $E_{12}$ coherence through the delay; a
-Fe--Tm vertex then transfers it to the magnon, which radiates via M1.
-Isolating the vertices settles which one: with $\kappa^B_{1y}$ alone
-the peak is present, with the static hybridisation alone it is absent,
-and \emph{no strength of the static vertex rescues it}.  A sweep over
-$W^{xz}_1\in\{0.01,\dots,0.09\}$ shows the static vertex never creates
-a second resolved peak; instead the two delay rows coalesce and the
-leading peak's delay phase migrates continuously
-($0.38\to0.40\to0.48$\,THz), while hybridisation-shifted $E_{12}$
-emission leaks in at $0.44$--$0.45$\,THz.  This is the structural
-signature of a mixer: a static vertex \emph{moves} peaks (level
-repulsion, which also shifts the modes off their 1D-measured
-positions), whereas a gated converter \emph{adds} a peak at unshifted
-lines.  The experiment shows two resolved peaks at the unshifted
-energies, so the gate is required.  Physically $\kappa^B$ supplies the
-$0.50\to0.90$\,THz mismatch impulsively from the photon while
-$B_z(t)\neq0$, and the very same gate makes it \emph{identically
-silent} in geometry A ($B_z=0$), where its background would otherwise
-contaminate the clean $W^{yy}_1$ peak.  \emph{Temperature:} falls as
+\paragraph{$(E_{12},\qafm)=(0.53,\,0.90)$, amplitude $0.45$ --- the
+electrically written transfer peak; measures $w_{E1}W^{xz}_1$.}
+$E\!\parallel\!a$ owns the $1\!\leftrightarrow\!2$ block: the pulse's
+electric field writes the $E_{12}$ coherence through $d_x\lambda^1$,
+and the static $W^{xz}_1$ transfers the stored coherence to the magnon,
+which radiates via M1.  No field enters the conversion vertex; the
+polarisation ownership of $d_x$ performs the geometry selection (the
+component does not exist in geometry A, so the conversion can never
+contaminate the clean $W^{yy}_1$ peak there).  Isolating the drive
+quadratures settles the mechanism: with the coherence written
+\emph{magnetically} only ($\mu_z\lambda^2$) and $W^{xz}_1=0.01$ the
+peak is absent, and forcing the magnetic route by cranking
+$W^{xz}_1\in\{0.02,\dots,0.09\}$ never produces a resolved second row
+at the right position---the rows coalesce, the leader migrates
+($0.38\to0.40\to0.48$\,THz), and hybridisation-shifted $E_{12}$
+emission leaks in at $0.44$--$0.45$\,THz, the structural signature of
+a mixer.  The failure survives recalibration: pinning the dressed
+$E_{12}$ line at its measured position (raising the bare splitting,
+which preserves $E_{12}{+}E_{23}{=}E_{13}$ automatically) removes the
+magnetically fed peak at \emph{every} coupling strength.  Adding the
+electric quadrature at the master $W^{xz}_1=0.01$ produces the peak at
+the \emph{unshifted} row position $\omega_\tau=0.52$---set by the
+interference of the two drive quadratures, which requires
+$\mathrm{sign}(d_x\mu_z)<0$---at the measured ratio for
+$w_{E1}=0.54$, with strays $\leq0.17$.  \emph{Temperature:} falls as
 the population difference $n_1-n_2$
 ($0.46\to0.45\to0.40\to0.36$ at $0/5/8/10$\,K), because it runs off the
 $E_{12}$ coherence amplitude---the sharpest thermal discriminator in
-the atlas against the temperature-flat magnon--magnon peak.
+the atlas against the temperature-flat magnon--magnon peak---and,
+riding the order parameter through the static vertex ($\propto G_z$),
+it must collapse at the spin reorientation.
 
 \paragraph{$(-\qfm,\qafm)$ at $0.17$ and $(\qafm,\qafm)$ at $0.14$.}
 The rephasing partner of the magnon--magnon peak, and the $\qafm$
@@ -1367,12 +1381,16 @@ $W_3\,S_\alpha S_\beta\lambda^3$---the mechanism of thermally driven
 spin reorientation in this material.  Implemented in the solver
 (dissipated coherence energy shifts the $\lambda^3$ equilibrium; the
 $\Gamma_3$ relaxation chases it, so the rise time is $1/\Gamma_3$ by
-construction), it reproduces the observation: the $\omega_\tau=E_{12}$
-row falls off the impulsive peak, recovers on the repopulation time,
-and persists beyond $100$\,ps, $50$--$100\times$ above the
-coherent-only model at late times.  The recovery time measures the Tm
-repopulation time and the late-to-impulsive ratio calibrates
-$c_{\rm heat}W_3$.
+construction), the channel produces a real, drive-uncorrelated late
+tail---but at the conservative calibration it emerges roughly four
+decades below the impulsive peak, far short of the reported growth at
+the peak's own scale.  The buildup therefore stands as the one timing
+observable outside the present coupling space, and it is decisive:
+every mechanism here fixes the converted amplitude by the end of the
+coherence window, so a confirmed growth of the transfer peak's own
+amplitude would require a reservoir this Hamiltonian does not contain.
+If observed, its recovery time measures the Tm repopulation time and
+the late-to-impulsive ratio calibrates $c_{\rm heat}W_3$.
 
 \subsection{Geometry A, same-polarised: every pathway}
 \label{si:peaksAsame}
@@ -1551,88 +1569,54 @@ $E_{13}$ block (which our vertex set feeds only through $\lambda^1$) and
 the possibility of a $\lambda^4$-targeting vertex, allowed in the $W$
 family but so far held at zero.
 
-\subsection{Geometry B, same-polarised: a prediction, and a $\beta$ meter}
+\subsection{Geometry B, same-polarised: a one-line prediction}
 \label{si:peaksBsame}
 
 No data exist for this channel yet, so its entire census is a
-prediction---and it carries the sharpest test of the
-hyperpolarisability in the whole atlas, plus the only readout of the
-level populations.  The analyser accepts $(E\!\parallel\!a,
+prediction---and it is the sharpest test of the hyperpolarisability in
+the whole atlas.  The analyser accepts $(E\!\parallel\!a,
 H\!\parallel\!c)$, which is the state geometry-A cross also analyses, so
 the operator is inherited rather than chosen:
 \begin{equation}
   O_{2}=F_z+\mu^z_{12}\lambda^2
-       +w_{E1}\bigl(\lambda^1+\lambda^3\bigr)
-       +\beta\lambda^1\lambda^2 .
+       +w_{E1}\,\lambda^1
+       +\beta\lambda^1\lambda^2
   \label{eq:si-O2}
 \end{equation}
-It is worth being explicit about what this is \emph{not}.  It is not a
-magnon readout: $\mu^z_{12}\lambda^2$ is the Tm CEF moment of the
-$1\!\leftrightarrow\!2$ transition, driven \emph{directly} by the
-$c$-directed field through $\mu^z_{12}=5.264$, and it exceeds the Fe
-$F_z$ contribution by $\sim\!50\times$.  Nor is it purely magnetic: the
-mirror-even electric dipole $d_x$ radiates into the same polarisation,
-contributing the second quadrature $\lambda^1$ of the same coherence and,
-because $\bra id_x\ket i\neq0$, the level populations $\lambda^3$ and
-$\lambda^8$.  What does vanish identically is $\lambda^{4\text{--}7}$
-(subalgebra closure), and $\lambda^8$ with them, so no $E_{13}$ or
-$E_{23}$ emission is possible in this channel.  Measured amplitudes at
-$T=0$: $\lambda^1=3.00$, $\lambda^2=2.78$, $\lambda^3=18.3$,
-$F_z=0.055$, $\lambda^{4\text{--}8}=0$.
+(no population generators; \cref{si:e1m1}).  It is not a magnon
+readout: $\mu^z_{12}\lambda^2$ is the Tm CEF moment of the
+$1\!\leftrightarrow\!2$ transition and exceeds the Fe $F_z$
+contribution by $\sim\!50\times$.  What vanishes identically is
+$\lambda^{4\text{--}7}$ (subalgebra closure), and $\lambda^8$ with
+them, so no $E_{13}$ or $E_{23}$ emission is possible in this channel.
 
-The consequence depends on $\beta$, which is exactly why it is
-diagnostic:
-\begin{center}\small
-\renewcommand{\arraystretch}{1.25}
-\begin{tabular}{lll}
-\toprule
-& linear moment only ($\beta=0$) & with $\beta\simeq7\mu$ from the A-cross parity\\
-\midrule
-leading & $(\qfm,\qafm)=(0.38,0.90)$, $1.00$ & $(E_{12},2E_{12})=(0.49,1.00)$, $1.00$\\
-next & $(\pm E_{12},E_{12})$, $0.91$--$0.94$ & everything else below $0.10$\\
-then & $(\qfm,E_{12})=(0.38,0.50)$, $0.61$ & ---\\
-\bottomrule
-\end{tabular}
-\end{center}
-With the $\beta$ inferred from geometry A, the second harmonic is
-$4.1\times$ the magnon--magnon feature and \emph{leads} the map.
-Measuring it therefore reads $\beta$ off directly: a map led at
-$(0.5,\,1.0)$ confirms the large hyperpolarisability inferred in
-geometry A, whereas a map led by $(\qfm,\qafm)$ with $E_{12}$ diagonals
-beneath it puts $\beta$ far below that value and would force the
-geometry-A $(0.5,1.0)$ feature back onto one of the alternative
-assignments.
+The prediction collapses to a single feature.  The linear readouts
+$\mu^z_{12}\lambda^2$ and $w_{E1}\lambda^1$ carry the directly driven
+coherence, which the $\Mnl$ subtraction removes at first order, so the
+surviving nonlinearity of the channel is its quadratic term: the map is
+led by the second harmonic $(E_{12},2E_{12})=(0.51,1.00)=1.00$, with
+everything else at or below $0.07$ (a component decomposition shows the
+$\beta\lambda^1\lambda^2$ term supplies $>\!99\%$ of the composite;
+magnon features enter only at the $10^{-2}$ level of $F_z$).  Because
+$\beta$ is already fixed by the geometry-A cross parity, the channel is
+a zero-parameter consistency test: a map led by $(\qfm,\qafm)$ or by
+$E_{12}$ diagonals would falsify the large hyperpolarisability inferred
+in geometry A, and an observed rectified pair at
+$(\pm E_{12},\omega_t\!\to\!0)$ would falsify the exclusion of the
+population generators from detection.
 
-The channel is not a single peak, however, because $\lambda^3$ is
-readable here.  A population carries no oscillation at a transition
-frequency, so it radiates near $\omega_t=0$; but it \emph{is} modulated
-along the delay axis at $E_{12}$, since that is the coherence the pump
-wrote before it decayed into population.  The result is a rectified pair
-$(\pm E_{12},\omega_t\!\to\!0)$ at $0.54$ and $0.53$ of the harmonic,
-with $(\pm0.19,\omega_t\!\to\!0)$ at $0.31$ and $0.26$ beneath.  Its
-size is a direct measure of $w_{E1}$: turning the electric readout off
-drops it to $0.09$, while the harmonic and every geometry-A cross
-amplitude are unmoved (\cref{si:e1m1}).  Because $\lambda^3$ is the same
-population coordinate whose slow transfer produces the geometry-B cross
-buildup of \cref{si:buildup}, this line is also the only place in the
-atlas where the $W_3$ channel is read out optically rather than
-inferred from a time trace.  Both families together---one measuring
-$\beta$, one measuring $w_{E1}$ and $W_3$---make this the single most
-informative measurement still missing.
-
-\subsection{The $E1/M1$ balance, and why nothing else depends on it}
+\subsection{The $E1/M1$ balance: detection-blind, drive-measured}
 \label{si:e1m1}
 
-The weight $w_{E1}$ in \cref{eq:si-O2} is the ratio of the electric to
-the magnetic emission amplitude of the $1\!\leftrightarrow\!2$
-transition.  Both are allowed---the $4c$ site has no inversion, so the
-CEF transition is $E1$-active, and $\mu^z_{12}$ is large---and our data
-do not fix the ratio.  This would be a serious ambiguity if the atlas
-depended on it.  It does not, for a structural reason: $\lambda^1$ and
+The weight $w_{E1}$ is the ratio of the electric to the magnetic
+amplitude of the $1\!\leftrightarrow\!2$ transition.  Both are
+allowed---the $4c$ site has no inversion, so the CEF transition is
+$E1$-active, and $\mu^z_{12}$ is large.  In \emph{detection} the atlas
+cannot fix the ratio, for a structural reason: $\lambda^1$ and
 $\lambda^2$ are the two quadratures of the same coherence, so their
 magnitude spectra agree to $8$--$11\%$, and adding one to the other
 rescales the resonant response without changing its shape.  Sweeping
-$w_{E1}$ over a factor of $50$ (script
+the detection weight over a factor of $50$ (script
 \texttt{scripts/p2\_operator\_fix.py}), with $\beta$ refitted at each
 step from the observed geometry-A parity as always:
 
@@ -1648,19 +1632,19 @@ A cross $(\qafm,E_{12})$ & $1.00$ & $1.00$ & $1.00$ & $1.00$ & $1.00$\\
 A cross $(E_{12},2E_{12})$ & $0.97$ & $0.97$ & $0.97$ & $0.97$ & $0.98$\\
 A cross $(-\qafm,E_{12})$ & $0.52$ & $0.51$ & $0.49$ & $0.48$ & $0.48$\\
 A cross $(E_{12},E_{12})$ & $0.33$ & $0.34$ & $0.35$ & $0.36$ & $0.37$\\
-\midrule
-B same $(E_{12},2E_{12})$ & $1.00$ & $1.00$ & $1.00$ & $0.88$ & $0.72$\\
-B same $(E_{12},{\sim}0)$ & $0.09$ & $0.25$ & $0.54$ & $0.58$ & $0.57$\\
 \bottomrule
 \end{tabular}
 \end{center}
 Every geometry-A cross amplitude moves by at most $0.04$ across the
 whole range; $\beta$ absorbs the change, which is why it is quoted as a
-ratio to $\mu$ rather than as an absolute number.  Only the geometry-B
-rectified line responds, and it responds strongly---which is what makes
-it a measurement of $w_{E1}$ rather than a nuisance.  The atlas figures
-use $w_{E1}=\mu$ and equal weight on $\lambda^1$ and $\lambda^3$, the
-symmetric default; no conclusion in this work depends on that choice.
+ratio to $\mu$ rather than as an absolute number.  What fixes $w_{E1}$
+is the \emph{drive}: the same $d_x$ matrix element that would radiate
+also writes, and in geometry B the electrically written coherence feeds
+the $(E_{12},\qafm)$ transfer peak linearly in $w_{E1}$
+(\cref{si:peaksBcross}).  Matching the measured transfer ratio returns
+$w_{E1}=0.54$, the value used throughout; the atlas figures use the
+detection weight $w_{E1}=\mu$ on $\lambda^1$, to which no conclusion is
+sensitive.
 
 % =====================================================================
 \section{The complete atlas}
@@ -1676,21 +1660,23 @@ detection operators appear, one per analyser polarization state, each
 containing both the magnetic and the electric dipole that radiate into
 it (\cref{si:whatsees}); the $\tau$-averaged signal is subtracted per
 detection time so the $\omega_\tau=0$ pump--probe row is removed, with
-$|\omega_T|<0.18$\,THz masked; blind census, crosses.  Top left:
-geometry-A cross, the $(E\!\parallel\!a,H\!\parallel\!c)$ operator
-$F_z{\equiv}0+\mu\lambda^2+w_{E1}(\lambda^1{+}\lambda^3)
+$|\omega_T|<0.18$\,THz masked; blind census, crosses.  Each panel
+states its exact drive and detection.  Top left: geometry-A cross, the
+$(E\!\parallel\!a,H\!\parallel\!c)$ operator
+$F_z{\equiv}0+\mu\lambda^2+w_{E1}\lambda^1
 +\beta\lambda^1\lambda^2$ --- the $(\qafm,E_{12})$ peak of $W^{yy}_1$
 and the $2E_{12}$ harmonic.  Top right: geometry-B cross, the
 $(E\!\parallel\!c,H\!\parallel\!a)$ operator with its Tm part
-identically zero --- $(\qfm,\qafm)$ and the $\kappa^B$-gated
-$(E_{12},\qafm)$.  Bottom left: geometry-A same-polarized, the same
+identically zero --- $(\qfm,\qafm)$ and the electrically written
+$(E_{12},\qafm)$ transfer ($d_x\lambda^1$ writing, $w_{E1}=0.54$,
+converted by the static $W^{xz}_1$; $\kappa^B=0$).  Bottom left:
+geometry-A same-polarized, the same
 $(E\!\parallel\!c,H\!\parallel\!a)$ operator, CEF composite at
-$10$\,K; both its constituents are mirror-odd, so it carries no
-population term.  Bottom right: the geometry-B same-polarized
+$10$\,K; both its constituents are mirror-odd, so no diagonal term
+exists.  Bottom right: the geometry-B same-polarized
 \emph{prediction}, analysed with the \emph{same} operator as top left
---- led by the $2E_{12}$ harmonic, with the rectified $\lambda^3$
-population pair at $\omega_t\!\to\!0$ beneath it.  Numerical censuses in
-\texttt{data/census\_atlas\_final.json}.}
+--- the $2E_{12}$ harmonic essentially alone (no population readout).
+Numerical censuses in \texttt{data/census\_atlas\_kBfree.json}.}
 \label{fig:si-atlas}
 \end{figure}
 
